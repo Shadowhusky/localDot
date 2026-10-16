@@ -85,6 +85,16 @@ export async function pinnedDriver(fixture: PinnedFixture, answer?: Answer) {
         },
         stop() {
           input.onFence();
+          // Match the production launcher's best-effort interrupt before closing RPC/stdio.
+          const turn = input.interruptTurn();
+          if (turn && rpc)
+            void rpc
+              .request("turn/interrupt", turn, {
+                signal: new AbortController().signal,
+                timeoutMs: 50,
+                validateResult: () => undefined,
+              })
+              .catch(() => {});
           rpc?.close();
           assert.ok(owner);
           return owner.stop();

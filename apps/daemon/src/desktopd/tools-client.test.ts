@@ -69,6 +69,31 @@ function setup(limit?: number) {
 }
 
 describe("DesktopdTools real routes", () => {
+  it("accepts a verified existing-file receipt after cancelling its unused request stream", async () => {
+    const id = "3de7f220-53d6-481d-b998-fb9c241fc590";
+    const file = { path: `Downloads/Uploads/${id}/data.zip`, bytes: 4, sha256: "a".repeat(64) };
+    const receipt = { ...file, path: `~/${file.path}` };
+    const cancel = vi.fn();
+    const tools = client(async (_url, init) => {
+      if (!(init?.body instanceof ReadableStream)) throw new Error("Missing upload stream");
+      // The computer already has verified bytes, so it can acknowledge without consuming
+      // the retry body. Let the outstanding read and cancellation settle before its reply.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await init.body.cancel();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(init.signal?.aborted).toBe(false);
+      return Response.json(receipt);
+    });
+    await expect(
+      tools.putUserFile(
+        file,
+        new ReadableStream<Uint8Array>({ cancel }),
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual(receipt);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it("reads capability metadata through the authenticated desktop route", async () => {
     const { tools } = setup();
     const result = await tools.capabilities();

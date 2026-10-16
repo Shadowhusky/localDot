@@ -2,6 +2,7 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { type GlyphState, StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { markdownToPlain } from "./markdown.ts";
+import type { PlanPhase } from "./plan-state.ts";
 
 export interface PlanItem {
   readonly id: string;
@@ -15,7 +16,23 @@ const STATES: Record<string, [GlyphState, string]> = {
   done: ["done", "Done"],
   skipped: ["skipped", "Skipped"],
 };
-const stateOf = (status: string): [GlyphState, string] => STATES[status] ?? ["todo", "Next"];
+const PHASE_LABEL: Record<PlanPhase, string> = {
+  working: "",
+  waiting: "Waiting for you",
+  paused: "Paused",
+  finished: "Finished",
+  stopped: "Stopped",
+  blocked: "Blocked",
+  error: "Interrupted",
+};
+function stateOf(status: string, phase: PlanPhase): [GlyphState, string] {
+  if (phase !== "working" && (status === "doing" || status === "todo")) {
+    if (phase === "waiting") return ["ask", "Waiting for you"];
+    if (phase === "paused") return ["todo", "Paused"];
+    return ["todo", "Not marked complete"];
+  }
+  return STATES[status] ?? ["todo", "Next"];
+}
 
 // The item dot is on, or else the first it has yet to start, and the one it starts after that.
 export function planFocus(plan: readonly PlanItem[]): { current?: PlanItem; next?: PlanItem } {
@@ -25,8 +42,16 @@ export function planFocus(plan: readonly PlanItem[]): { current?: PlanItem; next
   return { current: plan[at], next: plan.slice(at + 1).find((item) => item.status === "todo") };
 }
 
-function FocusLine({ item, next = false }: { item: PlanItem; next?: boolean }) {
-  const [state, word] = stateOf(item.status);
+function FocusLine({
+  item,
+  phase,
+  next = false,
+}: {
+  item: PlanItem;
+  phase: PlanPhase;
+  next?: boolean;
+}) {
+  const [state, word] = stateOf(item.status, phase);
   const text = markdownToPlain(item.text);
   return (
     <span className="plan-strip-line" data-next={next || undefined}>
@@ -44,9 +69,11 @@ function FocusLine({ item, next = false }: { item: PlanItem; next?: boolean }) {
 export function PlanStrip({
   plan,
   label = "Task plan",
+  phase = "working",
 }: {
   plan: readonly PlanItem[];
   label?: string;
+  phase?: PlanPhase;
 }) {
   const [open, setOpen] = useState(false);
   const [closedHeight, setClosedHeight] = useState(0);
@@ -85,7 +112,9 @@ export function PlanStrip({
         summary={
           <span className="plan-strip-summary">
             <span className="plan-strip-head">
-              <span className="plan-strip-title">Plan</span>
+              <span className="plan-strip-title">
+                Plan{PHASE_LABEL[phase] && ` · ${PHASE_LABEL[phase]}`}
+              </span>
               <span
                 className="plan-strip-bar"
                 aria-hidden="true"
@@ -95,17 +124,17 @@ export function PlanStrip({
                 {done} of {plan.length}
               </span>
             </span>
-            {!open && current && <FocusLine item={current} />}
-            {!open && next && <FocusLine item={next} next />}
+            {!open && current && <FocusLine item={current} phase={phase} />}
+            {!open && next && phase === "working" && <FocusLine item={next} phase={phase} next />}
           </span>
         }
       >
         <ol className="plan-list" aria-label={label}>
           {plan.map((item) => {
-            const [state, word] = stateOf(item.status);
+            const [state, word] = stateOf(item.status, phase);
             const text = markdownToPlain(item.text);
             return (
-              <li key={item.id} className="plan-item" data-state={item.status}>
+              <li key={item.id} className="plan-item" data-state={state}>
                 <StatusGlyph state={state} label={word} />
                 <span className="plan-text">{text}</span>
               </li>

@@ -14,6 +14,9 @@ import {
   ShellDone,
   ShellFailure,
   ShellRequest,
+  UserUploadId,
+  UserUploadName,
+  UserUploadReceipt,
 } from "@localdot/protocol";
 import { Agent, fetch as transportFetch } from "undici";
 import { z } from "zod";
@@ -500,6 +503,59 @@ export class DesktopdTools {
         throw new Error("file upload was not acknowledged completely");
       scope.signal.throwIfAborted();
       return result.path;
+    } finally {
+      scope.abort();
+      if (body && !body.locked) void body.cancel().catch(() => {});
+    }
+  }
+
+  async putUserFile(
+    file: { path: string; bytes: number; sha256: string },
+    source: ReadableStream<Uint8Array>,
+    signal: AbortSignal,
+  ): Promise<UserUploadReceipt> {
+    const parts = file.path.split("/");
+    if (
+      parts.length !== 4 ||
+      parts[0] !== "Downloads" ||
+      parts[1] !== "Uploads" ||
+      !UserUploadId.safeParse(parts[2]).success ||
+      !UserUploadName.safeParse(parts[3]).success
+    )
+      throw new Error("invalid user upload destination");
+    const expected = UserUploadReceipt.parse({ ...file, path: `~/${file.path}` });
+    const scope = this.#scope(30 * 60_000, signal);
+    let body: ReadableStream<Uint8Array> | undefined;
+    try {
+      body = this.#boundedStream(source, scope, file.bytes, false);
+      const query = new URLSearchParams({
+        id: parts[2] as string,
+        name: parts[3] as string,
+        bytes: String(file.bytes),
+        sha256: file.sha256,
+      });
+      const res = await this.#send(
+        `/files/user-upload?${query}`,
+        scope,
+        body,
+        "application/octet-stream",
+      );
+      const text = await textBody(res, scope.signal, 4096);
+      if (!res.ok)
+        throw new DesktopdError(
+          res.status,
+          "incoming file placement unavailable",
+          "/files/user-upload",
+        );
+      const receipt = UserUploadReceipt.parse(JSON.parse(text));
+      if (
+        receipt.path !== expected.path ||
+        receipt.bytes !== expected.bytes ||
+        receipt.sha256 !== expected.sha256
+      )
+        throw new Error("incoming file receipt mismatch");
+      scope.signal.throwIfAborted();
+      return receipt;
     } finally {
       scope.abort();
       if (body && !body.locked) void body.cancel().catch(() => {});

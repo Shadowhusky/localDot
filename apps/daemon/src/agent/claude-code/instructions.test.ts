@@ -40,7 +40,8 @@ describe("Claude Code's instructions", () => {
     );
     const bare = { memory: { user: "", memory: "" }, skills: [], today: input.today };
     // Shared rules have their own budget; bound the harness and memory framing separately.
-    expect(claudeCodeInstructions(bare).length - workingRules("batch").length).toBeLessThan(3100);
+    expect(claudeCodeInstructions(bare)).toContain("complete working files at those paths");
+    expect(claudeCodeInstructions(bare).length - workingRules("batch").length).toBeLessThan(3500);
   });
   it("say how to research, with the research tool, only for a research task", () => {
     const bare = { memory: { user: "", memory: "" }, skills: [], today: input.today };

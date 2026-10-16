@@ -17,19 +17,20 @@ import { useAskDraft } from "./agent/ask-draft.ts";
 import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { endTaskRun } from "./agent/control-api.ts";
-import { uploadFile } from "./agent/file-transfer.ts";
+import { conversationBlockReason } from "./agent/conversation-state.ts";
 import { taskStalled } from "./agent/heartbeat.ts";
 import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
 import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
 import { PermissionChip } from "./agent/PermissionChip.tsx";
 import { requestResearch, researchWait } from "./agent/research.ts";
+import { uploadFile } from "./agent/resumable-upload.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { onStepFocus, wantedStep } from "./agent/step-focus.ts";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
-import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
+import { useConversation } from "./agent/useConversation.ts";
 import { useHandBack } from "./agent/useHandBack.ts";
 import { useHandOff } from "./agent/useHandOff.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
@@ -654,12 +655,7 @@ function Theatre({ api }: { api: ApiClient }) {
     },
     [startNew, continueFrom],
   );
-  // Restored conversation history can refer to a retired desktop or browser. Only a live
-  // task selects the current computer's screen; history must never prevent its stream opening.
-  const selectedScreen =
-    session.resting || agent.model.ended || agent.interrupted
-      ? undefined
-      : (agent.model.screen ?? agent.snapshot?.screen);
+  const selectedScreen = agent.watchScreen;
   const browserScreen = useBrowserScreen(api, cell, selectedScreen);
   const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
   const hud = hudFor({
@@ -836,7 +832,10 @@ function Theatre({ api }: { api: ApiClient }) {
   const answerAsk = useCallback((request: QuestionAnswerRequest) => answer.current(request), []);
   const askCell = cell?.state === "ready" && !cell.paused ? cell.id : null;
   const uploadAsk = useMemo<AskUpload | undefined>(
-    () => (askCell ? (file, signal) => uploadFile(api, askCell, file, signal) : undefined),
+    () =>
+      askCell
+        ? (file, signal, options) => uploadFile(api, askCell, file, signal, options)
+        : undefined,
     [api, askCell],
   );
   const askReason = controls.canAnswer ? undefined : "Check the current task before answering.";
@@ -1084,17 +1083,13 @@ function Theatre({ api }: { api: ApiClient }) {
     !agent.model.pendingAsk &&
     !agent.model.pendingTakeover &&
     !agent.snapshot?.approval;
-  const conversationReason = stoppingRun
-    ? "Stopping the current task…"
-    : !session.ended &&
-        taskStatus &&
-        taskStatus !== "idle" &&
-        taskStatus !== "ended" &&
-        !recoveryWait
-      ? FINISH_FIRST
-      : conversation.busy
-        ? "Just a moment…"
-        : undefined;
+  const conversationReason = conversationBlockReason(
+    agent,
+    session.ended,
+    !!stoppingRun,
+    conversation.busy,
+    recoveryWait,
+  );
   const computer = error ? { ...containedHud, caption: error } : containedHud;
   // A task feed out of touch for a moment says nothing; one that stays out says so in the island.
   const linkLost = useHeldFor(
@@ -1769,7 +1764,9 @@ function Theatre({ api }: { api: ApiClient }) {
               boxRef={stageBox}
               onPictureDoubleClick={!phone && !yours ? fullScreen.enter : undefined}
               light={appStatus.control ? "dot" : yours ? "you" : "none"}
-              live={stageHud.live || stageHud.phase === "reconnecting"}
+              live={
+                stageHud.live || stageHud.phase === "reconnecting" || stageHud.phase === "suspended"
+              }
               frozen={!!stageHud.paused}
               curtain={
                 <Presence show={curtain.up}>

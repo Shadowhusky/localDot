@@ -1,8 +1,9 @@
+import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserControl } from "./control.ts";
 import type { BrowserGeometrySnapshot } from "./geometry.ts";
 import { BrowserInput, type BrowserInputOptions } from "./input.ts";
-import type { BrowserNative } from "./native.ts";
+import { BrowserNative } from "./native.ts";
 import { type NativeEvent, nativeRequest } from "./native-schema.ts";
 import type { BrowserDocument } from "./targets.ts";
 
@@ -329,6 +330,46 @@ describe("browser drags", () => {
     expect(peer.effects().at(-1)).toEqual({ name: "cancel", args: {} });
     expect(peer.effects().filter((e) => e.name === "up")).toEqual([]);
     await peer.control.close();
+  });
+
+  it("drains an already-sent motion when Stop arrives before its acknowledgement", async () => {
+    const peer = await setup();
+    const output = new PassThrough();
+    const fatal = vi.fn();
+    const wire = new BrowserNative({
+      scale: 2,
+      onFatal: fatal,
+      output,
+      input: new Writable({
+        write(chunk, _encoding, done) {
+          const request = JSON.parse(chunk.toString());
+          // Reproduce the real transport race, rather than a mock that ignores abort.
+          peer.abort.abort();
+          queueMicrotask(() =>
+            output.write(`${JSON.stringify({ id: request.id, ok: true, mono: 105 })}\n`),
+          );
+          done();
+        },
+      }),
+    });
+    output.write('{"ev":"ready","mono":100}\n');
+    await wire.ready;
+    peer.options.native.command = ((name, args, signal) =>
+      name === "move"
+        ? wire.command(name, args, signal)
+        : peer.nativeCommand(name, args)) as BrowserNative["command"];
+    try {
+      await expect(peer.input.inject(permit, "tab", drag(), peer.abort.signal)).rejects.toThrow(
+        "aborted",
+      );
+      expect(fatal).not.toHaveBeenCalled();
+      expect(wire.alive).toBe(true);
+      expect(peer.effects().at(-1)).toEqual({ name: "cancel", args: {} });
+      expect(peer.effects().filter((effect) => effect.name === "up")).toEqual([]);
+    } finally {
+      wire.close();
+      await peer.control.close();
+    }
   });
 
   it("is cancelled before its drop when the page moved", async () => {

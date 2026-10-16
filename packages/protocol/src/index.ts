@@ -49,5 +49,6 @@ export * from "./tools/recall.ts";
 export * from "./tools/routine.ts";
 export * from "./tools/web.ts";
 export * from "./tools.ts";
+export * from "./user-uploads.ts";
 export * from "./window-control.ts";
 export * from "./work-context.ts";

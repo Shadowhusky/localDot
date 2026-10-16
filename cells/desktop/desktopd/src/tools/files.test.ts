@@ -1,9 +1,13 @@
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -23,6 +27,7 @@ import {
   fetchFile,
   listDir,
   putFile,
+  putUserFile,
   readFile,
   writeFile,
 } from "./files.ts";
@@ -39,6 +44,35 @@ function home() {
 }
 
 describe("the files tool", () => {
+  it("leaves the next file descriptor intact after verifying an already published upload", async () => {
+    const h = home(),
+      path = "Documents/upload.zip",
+      content = Buffer.from("verified dataset"),
+      expected = {
+        bytes: content.length,
+        sha256: createHash("sha256").update(content).digest("hex"),
+      };
+    writeFileSync(join(h, path), content);
+    for (let i = 0; i < 32; i++) {
+      const receipt = await putUserFile(
+        h,
+        path,
+        new ReadableStream({ start: (controller) => controller.close() }),
+        expected,
+        new AbortController().signal,
+      );
+      expect(receipt).toEqual({ ...expected, path: `~/${path}` });
+      const next = openSync(join(h, path), "r");
+      try {
+        // Allow the previous stream's asynchronous close to run after descriptor reuse.
+        await new Promise<void>((resolve) => setTimeout(resolve, 1));
+        expect(fstatSync(next).size).toBe(content.length);
+      } finally {
+        closeSync(next);
+      }
+    }
+  });
+
   it("writes a new file and reports a create with its patch", () => {
     const h = home();
     const r = writeFile(h, "Documents/notes.md", "one\ntwo\n");

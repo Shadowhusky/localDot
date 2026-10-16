@@ -163,7 +163,8 @@ describe("the model's advertised tools and instructions", () => {
         new Date("2026-10-09T00:00:00Z"),
       );
       // Includes account reuse, original configuration recall and grounded verification.
-      expect(prompt.length).toBeLessThan(8900);
+      expect(prompt).toContain("complete working files at those paths");
+      expect(prompt.length).toBeLessThan(9400);
       expect(prompt).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
     }
   });

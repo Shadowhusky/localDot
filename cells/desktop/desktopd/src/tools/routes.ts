@@ -9,6 +9,11 @@ import {
   type ShellFailure,
   ShellRequest,
   ShellStopRequest,
+  UploadDigest,
+  USER_UPLOAD,
+  UserUploadId,
+  UserUploadName,
+  userUploadPath,
   webUrl,
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
@@ -28,6 +33,7 @@ import {
   listDir,
   MAX_TRANSFER_BYTES,
   putFile,
+  putUserFile,
   readFile,
   writeFile,
 } from "./files.ts";
@@ -89,6 +95,8 @@ async function body<T extends z.ZodType>(
 
 function failure(c: Context, error: unknown): Response {
   if (c.req.raw.signal.aborted) return c.text("request aborted", 408);
+  if ((error as NodeJS.ErrnoException)?.code === "ENOSPC")
+    return c.text("not enough computer storage", 507);
   if (error instanceof PlacementError) {
     const status =
       error.code === "request"
@@ -358,6 +366,42 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
           maxBytes,
           c.req.raw.signal,
           createOnly === "1",
+        ),
+      );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+  app.post("/files/user-upload", async (c) => {
+    const id = UserUploadId.safeParse(c.req.query("id"));
+    const name = UserUploadName.safeParse(c.req.query("name"));
+    const sha256 = UploadDigest.safeParse(c.req.query("sha256"));
+    const size = c.req.query("bytes") ?? "";
+    if (
+      !id.success ||
+      !name.success ||
+      !sha256.success ||
+      !/^\d+$/.test(size) ||
+      !Number.isSafeInteger(Number(size)) ||
+      Number(size) > USER_UPLOAD.bytes
+    )
+      return c.text("invalid incoming upload", 400);
+    const declared = c.req.header("content-length");
+    if (declared !== undefined && (!/^\d+$/.test(declared) || Number(declared) !== Number(size)))
+      return c.text("upload length mismatch", 400);
+    try {
+      return c.json(
+        await putUserFile(
+          deps.home,
+          userUploadPath(id.data, name.data),
+          c.req.raw.body ??
+            new ReadableStream({
+              start(c) {
+                c.close();
+              },
+            }),
+          { bytes: Number(size), sha256: sha256.data },
+          c.req.raw.signal,
         ),
       );
     } catch (error) {

@@ -17,7 +17,7 @@ import { keepPolicy } from "../../gateway/ring-onset.ts";
 import { CodexDriver } from "../codex/driver.ts";
 import { type McpEndpoint, openMcpEndpoint } from "../codex/mcp-endpoint.ts";
 import type { NativePauseReceipt } from "../codex/native-pause.ts";
-import { type deferred, fakeCodex, until } from "../codex/testing/fake-codex.ts";
+import { type deferred, fakeCodex } from "../codex/testing/fake-codex.ts";
 import { actPolicy } from "../policy.ts";
 import { redactor } from "../redact.ts";
 import { toolHarness } from "../testing/harness.ts";
@@ -286,63 +286,59 @@ function fixture() {
   };
 }
 
-describe("review native repeat answer ownership", () => {
-  it("preserves the accepted daemon-repeat answer in the fresh turn, without making answer itself Resume", async () => {
+describe("native repeated-input recovery ownership", () => {
+  it("returns recovery to the same native turn, which can inspect and change approach without an ask", async () => {
     const f = fixture();
     f.run();
     const first = await f.active();
-    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
+    for (let i = 0; i < 2; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
+    const blocked = await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
+    expect(JSON.stringify(blocked)).toContain("without verified progress");
+    expect(f.effects()).toHaveLength(2);
+    expect(f.session.safetyPause).toBeUndefined();
+    expect(f.session.pendingAsk).toBeUndefined();
+    expect(f.receipt()).toBeUndefined();
+    await first.c.call({ action: "screenshot" });
+    await first.c.call({ action: "key", keys: ["ARROWUP"] });
+    expect(f.effects()).toHaveLength(3);
+    expect(f.fake.launches).toHaveLength(1);
+    expect(f.h.events().filter((row) => row.type === "ask.request")).toHaveLength(0);
+  }, 8000);
+
+  it("bounds ignored recovery attempts, and preserves a follow-up across explicit Resume", async () => {
+    const f = fixture();
+    f.run();
+    const first = await f.active();
+    for (let i = 0; i < 5; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
     await f.control.settled();
     const pause = f.session.safetyPause;
-    const ask = f.session.pendingAsk;
-    assert.ok(pause && ask);
+    assert.ok(pause);
     expect(f.effects()).toHaveLength(2);
     expect(pause).toMatchObject({
       phase: "paused",
       reason: "repeated_action",
       resumeAvailable: true,
     });
-    const correction = "Do not press Down again; select the Help menu instead.";
-    expect(f.session.answer(ask, undefined, correction)).toBe(true);
+    expect(f.session.pendingAsk).toBeUndefined();
+    expect(f.h.events().filter((row) => row.type === "ask.request")).toHaveLength(0);
+    const correction = "Select the Help menu instead.";
+    f.session.post("followup", correction);
     expect(f.fake.launches).toHaveLength(1);
     expect(f.session.safetyPause?.requestId).toBe(pause.requestId);
-    expect(
-      f.h.events().some((row) => row.type === "ask.answer" && row.data.text === correction),
-    ).toBe(true);
-    await f.control.resume(pause.requestId, pause.revision);
-    const second = await f.active(2);
-    const freshPrompt = JSON.stringify(
-      second.process.requests.find((row) => row.method === "turn/start")?.params,
-    );
-    expect(freshPrompt).toContain(correction);
-    expect(f.effects()).toHaveLength(2);
-  }, 8000);
-
-  it("refuses Not now on the repeat question, which stays answerable with Resume open", async () => {
-    const f = fixture();
-    f.run();
-    const first = await f.active();
-    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
-    await f.control.settled();
-    const pause = f.session.safetyPause,
-      ask = f.session.pendingAsk;
-    assert.ok(pause && ask);
-    const request = f.h.events().find((row) => row.type === "ask.request");
-    expect(request?.data).toMatchObject({ askId: ask, declinable: false });
-    expect(f.session.decline(ask)).toBe(false);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(f.session.pendingAsk).toBe(ask);
-    expect(f.h.events().some((row) => row.type === "ask.answer")).toBe(false);
-    expect(f.session.safetyPause).toMatchObject({ phase: "paused", resumeAvailable: true });
-    const correction = "Select the Help menu instead.";
-    expect(f.session.answer(ask, undefined, correction)).toBe(true);
     await f.control.resume(pause.requestId, pause.revision);
     const second = await f.active(2);
     expect(
       JSON.stringify(second.process.requests.find((row) => row.method === "turn/start")?.params),
     ).toContain(correction);
+    expect(
+      f.h.transcripts
+        .read(f.session.id)
+        .filter((row) => row.role === "user" && row.content === correction),
+    ).toHaveLength(1);
+    expect(f.effects()).toHaveLength(2);
   }, 8000);
-  it("a regular durable follow-up while paused is included once in the fresh turn", async () => {
+
+  it("a real user Pause still requires explicit Resume and delivers its follow-up once", async () => {
     const f = fixture();
     f.run();
     await f.active();
@@ -353,10 +349,9 @@ describe("review native repeat answer ownership", () => {
     expect(f.fake.launches).toHaveLength(1);
     await f.control.resume(pause.requestId, pause.revision);
     const next = await f.active(2);
-    const prompt = JSON.stringify(
-      next.process.requests.find((row) => row.method === "turn/start")?.params,
-    );
-    expect(prompt).toContain(correction);
+    expect(
+      JSON.stringify(next.process.requests.find((row) => row.method === "turn/start")?.params),
+    ).toContain(correction);
     expect(
       f.h.transcripts
         .read(f.session.id)
@@ -364,82 +359,34 @@ describe("review native repeat answer ownership", () => {
     ).toHaveLength(1);
     expect(f.effects()).toHaveLength(0);
   }, 8000);
-  it("delivers option-only repeat answers once through the durable resumed inbox", async () => {
+
+  it("Stop while the model is recovering closes the native endpoint without another physical effect", async () => {
     const f = fixture();
     f.run();
     const first = await f.active();
     for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
-    await f.control.settled();
-    const pause = f.session.safetyPause,
-      ask = f.session.pendingAsk;
-    assert.ok(pause && ask);
-    expect(f.session.answer(ask, "A", undefined)).toBe(true);
-    expect(f.session.answer(ask, "A", undefined)).toBe(false);
-    expect(f.session.safetyPause?.requestId).toBe(pause.requestId);
-    expect(f.fake.launches).toHaveLength(1);
-    await f.control.resume(pause.requestId, pause.revision);
-    const second = await f.active(2),
-      prompt = JSON.stringify(
-        second.process.requests.find((row) => row.method === "turn/start")?.params,
-      );
-    expect(prompt).toContain("I will change the instructions");
-    expect(
-      f.h
-        .events()
-        .filter(
-          (row) =>
-            row.type === "message.user" && row.data.text === "I will change the instructions",
-        ),
-    ).toHaveLength(1);
-    expect(
-      f.h.transcripts
-        .read(f.session.id)
-        .filter((row) => row.role === "user" && row.content === "I will change the instructions"),
-    ).toHaveLength(1);
-    expect(f.effects()).toHaveLength(2);
-  }, 8000);
-  it("Stop and an obsolete question cannot journal a corrective inbox message", async () => {
-    const f = fixture();
-    f.run();
-    const first = await f.active();
-    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
-    await f.control.settled();
-    const ask = f.session.pendingAsk;
-    assert.ok(ask);
+    expect(f.session.safetyPause).toBeUndefined();
     f.session.stop();
-    expect(f.session.answer(ask, undefined, "obsolete correction")).toBe(false);
-    expect(
-      f.h
-        .events()
-        .some((row) => row.type === "message.user" && row.data.text === "obsolete correction"),
-    ).toBe(false);
+    await f.running()?.catch(() => {});
+    expect(f.endpoints[0]?.connections()).toBe(0);
     expect(f.fake.launches).toHaveLength(1);
     expect(f.effects()).toHaveLength(2);
   }, 8000);
-  it("a failed corrective journal refuses acknowledgement and keeps Resume closed", async () => {
+
+  it("a failed pause journal after exhausted recovery cannot advertise Resume", async () => {
     const f = fixture();
     f.run();
     const first = await f.active();
-    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
-    await f.control.settled();
-    const pause = f.session.safetyPause,
-      ask = f.session.pendingAsk;
-    assert.ok(pause && ask);
-    const append = f.h.eventLog.append.bind(f.h.eventLog);
-    vi.spyOn(f.h.eventLog, "append").mockImplementation((id, row) => {
-      if (row.type === "message.user") throw new Error("journal unavailable");
-      return append(id, row);
+    f.persist.mockImplementation(() => {
+      throw new Error("journal unavailable");
     });
-    expect(f.session.answer(ask, undefined, "unrecorded correction")).toBe(false);
-    await until(() => f.session.safetyPause?.phase === "uncertain");
-    expect(f.session.safetyPause?.resumeAvailable).toBe(false);
+    for (let i = 0; i < 5; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
+    await f.control.settled();
+    const pause = f.session.safetyPause;
+    assert.ok(pause);
+    expect(pause.resumeAvailable).toBe(false);
     await expect(f.control.resume(pause.requestId, pause.revision)).rejects.toThrow();
-    expect(
-      f.h
-        .events()
-        .some((row) => row.type === "message.user" && row.data.text === "unrecorded correction"),
-    ).toBe(false);
-    expect(f.fake.launches).toHaveLength(1);
+    expect(f.session.pendingAsk).toBeUndefined();
     expect(f.effects()).toHaveLength(2);
   }, 8000);
 });

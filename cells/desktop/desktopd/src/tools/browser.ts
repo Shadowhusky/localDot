@@ -240,6 +240,7 @@ export class PageBrowser {
       check: (focused?: boolean) => Promise<void>,
     ) => Promise<T>,
     parent?: AbortSignal,
+    visible = false,
   ): Promise<T> {
     parent?.throwIfAborted();
     const deadline = new AbortController();
@@ -264,7 +265,15 @@ export class PageBrowser {
       cdp = new CdpSession(page.target.webSocketDebuggerUrl, this.#WebSocketImpl);
       await cdp.ready;
       signal.throwIfAborted();
-      const check = (focused = false) => this.#samePage(page, signal, focused);
+      const check = (focused = visible) => this.#samePage(page, signal, focused);
+      await check(false);
+      if (visible && page.active === false) {
+        // The native stack identifies this browser's selected tab even when a terminal
+        // covers it. Reveal that exact page once, never an arbitrary background tab.
+        signal.throwIfAborted();
+        await cdp.send("Page.bringToFront");
+        signal.throwIfAborted();
+      }
       await check();
       const result = await fn(cdp, signal, check);
       await check();
@@ -296,33 +305,37 @@ export class PageBrowser {
   read(maxChars: number, signal?: AbortSignal): Promise<BrowserReadResult> {
     if (!Number.isInteger(maxChars) || maxChars < 1 || maxChars > 100_000)
       return Promise.reject(new RangeError("invalid page text limit"));
-    return this.#with(async (cdp, active) => {
-      const r = await cdp.send<{
-        result?: { value?: { url: string; title: string; text: string; truncated?: boolean } };
-      }>("Runtime.evaluate", { expression: readExpression(maxChars), returnByValue: true });
-      active.throwIfAborted();
-      const page = r.result?.value;
-      if (
-        !page ||
-        typeof page.url !== "string" ||
-        typeof page.title !== "string" ||
-        typeof page.text !== "string"
-      )
-        throw new NavigationError("could not read page");
-      await cdp.send("Accessibility.enable").catch(() => undefined);
-      active.throwIfAborted();
-      const ax = await cdp
-        .send<{ nodes?: AxNode[] }>("Accessibility.getFullAXTree", {}, 5000)
-        .catch(() => ({ nodes: [] as AxNode[] }));
-      active.throwIfAborted();
-      return {
-        url: page.url,
-        title: page.title,
-        text: page.text.slice(0, maxChars),
-        outline: outlineOf(Array.isArray(ax.nodes) ? ax.nodes : []),
-        truncated: page.truncated === true || page.text.length > maxChars,
-      };
-    }, signal);
+    return this.#with(
+      async (cdp, active) => {
+        const r = await cdp.send<{
+          result?: { value?: { url: string; title: string; text: string; truncated?: boolean } };
+        }>("Runtime.evaluate", { expression: readExpression(maxChars), returnByValue: true });
+        active.throwIfAborted();
+        const page = r.result?.value;
+        if (
+          !page ||
+          typeof page.url !== "string" ||
+          typeof page.title !== "string" ||
+          typeof page.text !== "string"
+        )
+          throw new NavigationError("could not read page");
+        await cdp.send("Accessibility.enable").catch(() => undefined);
+        active.throwIfAborted();
+        const ax = await cdp
+          .send<{ nodes?: AxNode[] }>("Accessibility.getFullAXTree", {}, 5000)
+          .catch(() => ({ nodes: [] as AxNode[] }));
+        active.throwIfAborted();
+        return {
+          url: page.url,
+          title: page.title,
+          text: page.text.slice(0, maxChars),
+          outline: outlineOf(Array.isArray(ax.nodes) ? ax.nodes : []),
+          truncated: page.truncated === true || page.text.length > maxChars,
+        };
+      },
+      signal,
+      true,
+    );
   }
 
   // A new document needs a new timeOrigin. A same-document navigation instead requires Chromium
@@ -353,8 +366,8 @@ export class PageBrowser {
       if (!before) throw new NavigationError("could not establish the current document");
       await check();
       active.throwIfAborted();
-      // Explicit navigation may reveal the already identified browser window. Reads
-      // never activate tabs, and an ambiguous target never reaches this command.
+      // Reveal only the already identified browser window. An ambiguous target never
+      // reaches this command, and neither reads nor navigation pick a background tab.
       await cdp.send("Page.bringToFront");
       active.throwIfAborted();
       await check(true);

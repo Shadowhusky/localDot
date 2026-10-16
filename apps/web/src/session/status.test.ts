@@ -1219,6 +1219,27 @@ it("says nothing about a lost link once the task is over", () => {
   expect(statusFor({ computer: live, task: null, link: "lost" }).label).toBe("Ready");
 });
 
+it("keeps task status when only its viewer is suspended, but still reports a lost task feed", () => {
+  const computer = hudFor({ cell, status: "known", pending: null, picture: "suspended" });
+  for (const task of [
+    null,
+    typing(),
+    view([...typed(), asked(1500)], 9500).task,
+    view([...start(), approvalRequest(1500)], 9500).task,
+    view([...typed(), ev("task.result", 1500, { summary: "Done", files: [] })], 9500).task,
+  ]) {
+    const expected = statusFor({ computer: live, task, mayControl: false });
+    const hidden = statusFor({ computer, task, mayControl: false });
+    expect(hidden.title).toBe(expected.title);
+    expect(hidden.attention).toBe(expected.attention);
+    expect(hidden.control).toBe(false);
+  }
+  expect(statusFor({ computer, task: typing(), link: "lost" })).toMatchObject({
+    label: "Reconnecting…",
+    title: "localDot — Reconnecting…",
+  });
+});
+
 it("never leaves an interrupted task silent: dot says so and asks to carry on", () => {
   const status = STATES.interrupted as Status;
   expect(status.caption).toEqual({

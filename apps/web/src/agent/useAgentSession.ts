@@ -23,6 +23,7 @@ export interface AgentSessionView {
   readonly sessionId: string | null;
   readonly model: AgentModel;
   readonly snapshot: AgentSnapshot | null;
+  readonly watchScreen?: AgentModel["screen"];
   readonly availability: "loading" | "ready" | "missing" | "error";
   readonly error: string | null;
   // Consumers must require this in addition to their action-specific and cell ownership gates.
@@ -61,7 +62,8 @@ export function useAgentSession(
     }
     let disposed = false,
       busy = false,
-      queued = false;
+      queued = false,
+      terminalConfirmed = false;
     const abort = new AbortController();
     const matches = () => {
       const current = feed.read();
@@ -78,7 +80,8 @@ export function useAgentSession(
       const epoch = feed.read().epoch;
       try {
         const snapshot = await loadAgentSnapshot(api, sessionId, cellId, abort.signal);
-        if (matches() && epoch === feed.read().epoch)
+        if (matches() && epoch === feed.read().epoch) {
+          terminalConfirmed = snapshot.status === "ended";
           // The same answer again changes nothing, so the app does not render for it.
           setView((old) =>
             old?.api === api &&
@@ -90,13 +93,14 @@ export function useAgentSession(
               ? old
               : { api, cellId, sessionId, epoch, snapshot, availability: "ready", error: null },
           );
-        else if (matches()) queued = true;
+        } else if (matches()) queued = true;
       } catch (error) {
         if (matches() && epoch === feed.read().epoch) {
           // A task at rest may have run on another computer; it has no status to give here.
           const missing =
             (error instanceof ApiError && error.status === 404) ||
             (resting.current && error instanceof AgentResponseError);
+          terminalConfirmed = missing && resting.current;
           setView((old) => ({
             api,
             cellId,
@@ -116,6 +120,7 @@ export function useAgentSession(
       }
     };
     const invalidate = () => {
+      terminalConfirmed = false;
       // The feed epoch also makes freshness false in any render before this state update.
       setView((old) =>
         old && old.api === api && old.cellId === cellId && old.sessionId === sessionId
@@ -140,7 +145,9 @@ export function useAgentSession(
       if (document.visibilityState === "hidden") return;
       void poll();
       timer = setInterval(() => {
-        if (!feed.read().model.ended && !resting.current) void poll();
+        // The end event may beat its final status response, or that response may fail.
+        // Keep reconciling until the daemon has confirmed terminal ownership too.
+        if (!terminalConfirmed) void poll();
       }, 1000);
     };
     document.addEventListener("visibilitychange", activity);
@@ -172,6 +179,17 @@ export function useAgentSession(
   );
   const snapshot = (owned ? view.snapshot : null) ?? ended;
   const matches = current.cellId === cellId && current.sessionId === sessionId;
+  const eventScreen = matches ? model.screen : undefined;
+  const polledScreen = snapshot?.screen;
+  // Status and events can arrive in either order. Watch follows the newest confirmed
+  // selection; input still requires both channels to agree below. History cannot select
+  // a retired browser when the current computer is at rest.
+  const watchScreen =
+    atRest || (matches && model.ended)
+      ? undefined
+      : eventScreen && (!polledScreen || eventScreen.revision >= polledScreen.revision)
+        ? eventScreen
+        : polledScreen;
   const ownershipAligned =
     (current.model.screen
       ? snapshot?.screen?.screen === current.model.screen.screen &&
@@ -205,6 +223,7 @@ export function useAgentSession(
     sessionId,
     model: matches ? model : EMPTY_AGENT_MODEL,
     snapshot,
+    watchScreen,
     availability: owned ? view.availability : "loading",
     error: current.streamError ?? (owned ? view.error : null),
     authorityEpoch: owned ? view.epoch : null,

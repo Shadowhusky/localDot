@@ -124,15 +124,50 @@ it("requires the selected screen event and snapshot to agree before any manual c
   await flush();
   expect(result.current.agent.fresh).toBe(false);
   expect(result.current.agent.model.screen?.cellId).toBe(NEXT_CELL);
+  expect(result.current.agent.watchScreen).toMatchObject(selected);
   current = { ...snapshot(), screen: selected };
   await advance(1000);
   expect(result.current.agent.fresh).toBe(true);
   current = { ...snapshot(), screen: { ...selected, revision: 2 } };
   await advance(1000);
   expect(result.current.agent.fresh).toBe(false);
+  expect(result.current.agent.watchScreen).toMatchObject({ ...selected, revision: 2 });
   send(ev(1, "screen.switch", { ...selected, revision: 2, by: "daemon" }));
   await flush();
   expect(result.current.agent.fresh).toBe(true);
+});
+
+it("shows the working browser when status arrives before its switch event, without granting input early", async () => {
+  const desktop = {
+    screen: "desktop",
+    cellId: CELL,
+    revision: 1,
+    geometry: { w: 1280, h: 800, scale: 1 },
+  };
+  const browser = { ...desktop, screen: "browser", cellId: NEXT_CELL, revision: 2 };
+  let current = { ...snapshot(), screen: desktop };
+  const f = server(() => json(current));
+  const { result } = hook(f.api);
+  await flush();
+  open();
+  send(ev(0, "screen.switch", { ...desktop, by: "agent" }));
+  await flush();
+  expect(result.current.agent.watchScreen).toMatchObject(desktop);
+  current = { ...snapshot(), screen: browser };
+  await advance(1000);
+  expect(result.current.agent.watchScreen).toMatchObject(browser);
+  expect(result.current.agent.fresh).toBe(false);
+  send(ev(1, "screen.switch", { ...browser, by: "agent" }));
+  await flush();
+  expect(result.current.agent.fresh).toBe(true);
+  // A newer desktop selection is visible immediately even if polling still says browser.
+  send(ev(2, "screen.switch", { ...desktop, revision: 3, by: "agent" }));
+  await flush();
+  expect(result.current.agent.watchScreen).toMatchObject({ ...desktop, revision: 3 });
+  expect(result.current.agent.fresh).toBe(false);
+  send(ev(3, "session.end", { reason: "done" }));
+  await flush();
+  expect(result.current.agent.watchScreen).toBeUndefined();
 });
 beforeEach(() => {
   vi.useFakeTimers();
@@ -206,6 +241,49 @@ it("does not count malformed replacement replay as current readiness", async () 
   await flush();
   expect(result.current.agent.fresh).toBe(false);
   expect(result.current.agent.error).not.toBeNull();
+});
+
+it("automatically replays a missing plan/result/end event instead of staying fenced", async () => {
+  let status = "running";
+  const { api } = server(() => json(snapshot(SESSION, CELL, status)));
+  const { result } = hook(api);
+  await flush();
+  open();
+  await flush();
+  send(ev(0, "plan.set", { items: [{ id: "p1", text: "Check data", status: "doing" }] }));
+  send(ev(2, "session.end", { reason: "done" })); // Missing result at seq 2.
+  await advance(500);
+  expect(FakeWebSocket.instances).toHaveLength(2);
+  expect(socket().url).toContain("fromSeq=1");
+  act(() => socket().onopen?.());
+  send(ev(0, "plan.set", { items: [{ id: "p1", text: "Check data", status: "doing" }] }));
+  expect(result.current.agent.fresh).toBe(false);
+  status = "ended";
+  send(ev(1, "task.result", { summary: "Data checked", files: [] }));
+  send(ev(2, "session.end", { reason: "done" }));
+  await advance(100);
+  expect(result.current.live.ended).toBe(true);
+  expect(result.current.agent.model.completion).toBe("complete");
+  expect(result.current.agent.error).toBeNull();
+  expect(result.current.agent.snapshot?.status).toBe("ended");
+});
+
+it("retries terminal status after the final event even when the first status read fails", async () => {
+  let fail = false;
+  const { api } = server(() => (fail ? json({}, 503) : json(snapshot(SESSION, CELL, "ended"))));
+  const { result } = hook(api);
+  await flush();
+  open();
+  await flush();
+  fail = true;
+  send(ev(0, "session.end", { reason: "done" }));
+  await flush();
+  expect(result.current.agent.availability).toBe("error");
+  fail = false;
+  await advance(1000);
+  expect(result.current.agent.availability).toBe("ready");
+  expect(result.current.agent.snapshot?.status).toBe("ended");
+  expect(result.current.agent.readFresh).toBe(true);
 });
 
 it("owns one socket, publishes deltas on the existing flush, and retains results for idle follow-ups", async () => {

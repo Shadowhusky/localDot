@@ -25,6 +25,7 @@ const STREAM_ERROR = "Activity could not be verified. Reconnect to load it again
 const GAP_ERROR = "Some activity is missing. Reconnect to load it again.";
 const RELEVANT = new Set<LocalDotEvent["type"]>([
   "agent.state",
+  "task.result",
   "screen.switch",
   "ask.request",
   "ask.answer",
@@ -667,9 +668,14 @@ export function createAgentFeed(now: () => number = () => performance.now()): Ag
     },
     connection(connection) {
       if (value.connection === connection) return;
+      // An invalid frame fences its transport. A replacement transport replays from the
+      // last accepted sequence; any known hole still has to be filled before readiness.
+      if (connection === "live") invalidPayload = false;
       value = {
         ...value,
         connection,
+        streamError:
+          connection === "live" ? (missingThrough >= 0 ? GAP_ERROR : null) : value.streamError,
         replayed: connection === "ended" && value.model.ended ? value.replayed : false,
       };
       invalidate();

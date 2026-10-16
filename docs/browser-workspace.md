@@ -12,7 +12,9 @@ The isolated computer has a **Desktop** and a separate **Web browser**. dot uses
 for anything online: opening a public web page switches the screen to it. The desktop's own
 Chromium is for local files and pages served on the desktop itself, such as a site dot is
 building on localhost. The label above the live stage identifies the screen receiving the
-current actions. A browser connection error does not redirect its input to the desktop or open a temporary
+current actions. Watch follows the latest confirmed screen selection, whichever arrives first
+from the task events or live status. Renewing control on the same browser keeps its picture
+visible while input waits for fresh status. A browser connection error does not redirect its input to the desktop or open a temporary
 browser. Retrying uses the same saved browser profile, so a connection failure does not ask
 you to sign in again.
 
@@ -29,6 +31,9 @@ screen; it does not navigate to the task's website. dot opens the task URL befor
 blank-page blocker. Public URLs use the isolated web browser; localhost previews use the
 Chromium window on the desktop. Reads and actions target the visible tab, and refuse ambiguous
 or changed tab ownership instead of silently choosing a background tab.
+An agent page read brings the identified desktop browser window forward if another app covers
+it, and checks focus before returning its content. Passive account/page inventory does not
+move windows. Stop and user control cancel the reveal along with the read.
 
 The status above the stage follows the selected screen's stream. A hidden desktop stream does
 not make a live web browser say **Reconnecting**. Computer lifecycle problems and Stop still

@@ -111,6 +111,31 @@ fields.forEach((field, i) => field.addEventListener('input', () => { if (field.v
 fields.forEach((field, i) => field.addEventListener('keydown', event => { if (event.ctrlKey && event.key === 'a') { event.preventDefault(); field.value = 'A'; fields[i+1]?.focus(); } }));
 </script>`;
 
+const GRAPHICS_PAGE = `<!doctype html><title>Testing graphics</title><body><script>
+const results = ['webgl', 'webgl2'].map(kind => {
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
+  document.body.append(canvas);
+  const gl = canvas.getContext(kind);
+  if (!gl) return kind + ': unavailable';
+  gl.clearColor(0, 1, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  const pixel = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+  return kind + ': ' + (pixel.join(',') === '0,255,0,255' ? 'rendered' : 'failed');
+});
+document.title = results.join('; '); document.body.append(document.title);
+</script></body>`;
+
+// Authentication and challenge pages repeatedly replace cross-site frames. These are local,
+// synthetic pages: no real sign-in, CAPTCHA or protected account is involved in this test.
+const FRAME_CHURN_PAGE = `<!doctype html><title>Replacing frames</title><body><script>
+let count = 0;
+const timer = setInterval(() => {
+  const previous = document.querySelector('iframe'); if (previous) previous.remove();
+  if (++count > 20) { clearInterval(timer); document.title = 'Frames settled'; return; }
+  const frame = document.createElement('iframe');
+  frame.src = 'http://frame.localdot.test/child'; document.body.append(frame);
+}, 80);
+</script></body>`;
+
 const gateScript = (cert: string, key: string) => `
 import http.server, ssl, urllib.parse
 open("/tmp/test-cert.pem", "w").write(${JSON.stringify(cert)})
@@ -133,7 +158,7 @@ class Gate(http.server.BaseHTTPRequestHandler):
         self.handle_one_request()
     def do_GET(self):
         path = urllib.parse.urlsplit(self.path).path
-        content = code_page if path == "/device" else large_page if path == "/large-focus" else js_page if path == "/javascript" else page
+        content = ${JSON.stringify(GRAPHICS_PAGE)}.encode() if path == "/graphics" else ${JSON.stringify(FRAME_CHURN_PAGE)}.encode() if path == "/frame-churn" else b'<html><title>Child</title><body>Child</body></html>' if path == "/child" else code_page if path == "/device" else large_page if path == "/large-focus" else js_page if path == "/javascript" else page
         self.send_response(200)
         if path == "/source.zip":
             self.send_header("content-disposition", 'attachment; filename="source.zip"')
@@ -802,6 +827,18 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
     expect(await title()).toMatch(/^range 0 /);
   });
 
+  it("renders WebGL 1 and WebGL 2 pixels with the production sandbox and software graphics", async () => {
+    await client.navigate(permit, tabId, "http://drag.localdot.test/graphics", owner());
+    expect(await title()).toBe("webgl: rendered; webgl2: rendered");
+  });
+
+  it("keeps browser control after cross-site sign-in frames detach during initialization", async () => {
+    await client.navigate(permit, tabId, "http://drag.localdot.test/frame-churn", owner());
+    await sleep(2500);
+    expect(await title()).toBe("Frames settled");
+    expect(await client.observe(permit, tabId, owner())).toHaveProperty("frame");
+  });
+
   it("reads a sign-in popup after opening it from the page", async () => {
     await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
     await title();
@@ -822,6 +859,9 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       if (!popup) await sleep(250);
     }
     expect(popup).not.toBe("");
+    // Match the real HTTP classification consumed by ScreenController. Previously its
+    // unit fixture used "unavailable", hiding that a background tab actually says "refused".
+    await expect(client.clock(permit, tabId, owner())).rejects.toMatchObject({ code: "refused" });
     await expect
       .poll(
         async () => {

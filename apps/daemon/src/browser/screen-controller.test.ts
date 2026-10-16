@@ -398,27 +398,34 @@ describe("session screen coordinator", () => {
     expect(f.deps.browser.stop).toHaveBeenCalledOnce();
   });
 
-  it("selects the unique native foreground instead of registry order", async () => {
-    const f = fixture();
-    const second = randomUUID();
-    f.client.tabs.mockResolvedValue({
-      tabs: [
-        { id: f.tabId, ready: true },
-        { id: second, ready: true },
-      ],
-    });
-    f.client.clock.mockImplementation(async (_permit, tabId, scope) => {
-      scope.check();
-      if (tabId !== second) throw new BrowserClientError("unavailable");
-      return { mono: 50 };
-    });
-    await f.controller.switchTo("browser", f.scope);
-    const lease = f.controller.lease(f.scope);
-    expect(f.controller.browserAccess(lease).tabId).toBe(second);
-    expect(f.client.clock.mock.calls.map(([, tabId]) => tabId)).toEqual([f.tabId, second, second]);
-    lease.finish();
-    await f.controller.close();
-  });
+  it.each(["unavailable", "refused"] as const)(
+    "selects the unique native foreground after a background tab answers %s",
+    async (code) => {
+      const f = fixture();
+      const second = randomUUID();
+      f.client.tabs.mockResolvedValue({
+        tabs: [
+          { id: f.tabId, ready: true },
+          { id: second, ready: true },
+        ],
+      });
+      f.client.clock.mockImplementation(async (_permit, tabId, scope) => {
+        scope.check();
+        if (tabId !== second) throw new BrowserClientError(code);
+        return { mono: 50 };
+      });
+      await f.controller.switchTo("browser", f.scope);
+      const lease = f.controller.lease(f.scope);
+      expect(f.controller.browserAccess(lease).tabId).toBe(second);
+      expect(f.client.clock.mock.calls.map(([, tabId]) => tabId)).toEqual([
+        f.tabId,
+        second,
+        second,
+      ]);
+      lease.finish();
+      await f.controller.close();
+    },
+  );
 
   it("refreshes a read onto a popup while keeping previously admitted input pinned", async () => {
     const f = fixture();
@@ -433,7 +440,7 @@ describe("session screen coordinator", () => {
     });
     f.client.clock.mockImplementation(async (_permit, id, scope) => {
       scope.check();
-      if (id !== popup) throw new BrowserClientError("unavailable");
+      if (id !== popup) throw new BrowserClientError("refused");
       return { mono: 50 };
     });
     const read = f.controller.lease(f.scope);
@@ -446,6 +453,19 @@ describe("session screen coordinator", () => {
     const next = f.controller.lease(f.scope);
     expect(f.controller.browserAccess(next).tabId).toBe(popup);
     next.finish();
+    await f.controller.close();
+  });
+
+  it("waits for a newly opened sign-in popup to finish attaching", async () => {
+    const f = fixture();
+    const popup = randomUUID();
+    f.client.tabs.mockResolvedValueOnce({ tabs: [{ id: popup, ready: false }] });
+    f.client.tabs.mockResolvedValue({ tabs: [{ id: popup, ready: true }] });
+    await f.controller.switchTo("browser", f.scope);
+    const lease = f.controller.lease(f.scope);
+    expect(f.controller.browserAccess(lease).tabId).toBe(popup);
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    lease.finish();
     await f.controller.close();
   });
 

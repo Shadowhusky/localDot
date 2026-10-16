@@ -162,6 +162,7 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
         "/files/edit",
         "/files/list",
         "/files/put",
+        "/files/user-upload",
         "/downloads/place",
         "/browser/read",
         "/browser/navigate",

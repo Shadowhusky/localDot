@@ -235,6 +235,53 @@ function setup(options: { settings?: AgentSettings; keys?: KeydRecord[] } = {}) 
 }
 
 describe("serialized agent lifecycle", () => {
+  it("waits for a completed caller to retire before opening a new conversation", async () => {
+    const h = setup();
+    const session = await h.runner.start(h.cellId, "Finish the file");
+    await h.ready();
+    session.append("task.result", { summary: "File verified.", files: [], outcome: "complete" });
+    let released = false;
+    const release = h.runner.release(undefined, session.id).then(() => {
+      released = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(released).toBe(false);
+    expect(session.stopped).toBe(false);
+    expect(h.closed).toHaveLength(0);
+    h.exit(0, 0);
+    await release;
+    expect(h.live.get(h.cellId)).toBeUndefined();
+    expect(h.log.read(session.id).find((e) => e.type === "session.end")?.data).toEqual({
+      reason: "done",
+    });
+    expect(h.containments).toEqual([]);
+    await h.runner.start(h.cellId, "New conversation task");
+    await h.ready(2);
+  });
+
+  it("does not release work just because it sent final-looking prose", async () => {
+    const h = setup();
+    const session = await h.runner.start(h.cellId, "Finish the file");
+    await h.ready();
+    session.append("message.assistant", { messageId: ulid(), text: "Done." });
+    await expect(h.runner.release(undefined, session.id)).rejects.toMatchObject({ status: 409 });
+    expect(session.stopped).toBe(false);
+  });
+
+  it("cancels a conversation wait without stopping or releasing its still-retiring task", async () => {
+    const h = setup();
+    const session = await h.runner.start(h.cellId, "Finish the file");
+    await h.ready();
+    session.append("task.result", { summary: "File verified.", files: [], outcome: "complete" });
+    const abort = new AbortController();
+    const release = h.runner.release(abort.signal, session.id);
+    const rejected = expect(release).rejects.toThrow();
+    abort.abort();
+    await rejected;
+    expect(session.stopped).toBe(false);
+    expect(h.live.get(h.cellId)).toBe(session.id);
+  });
+
   it.each([false, true])(
     "refuses task admission during an idle desktop mutation (late=%s)",
     async (late) => {
@@ -642,9 +689,9 @@ it.each(["the Pause itself", "a repeated action", "an approval", "a question"] a
       spentUSD: 5,
       needUSD: 1,
     });
-    // The third identical input trips the repeat guard, which asks for its own Pause.
+    // Ignoring both recovery results exhausts the repeat guard and closes model admission.
     if (wait === "a repeated action")
-      for (let i = 0; i < 3; i++)
+      for (let i = 0; i < 5; i++)
         session.admitNativeEffect(
           { verb: "key", combo: ["Ctrl", "c"] },
           { target: null, window: 1, point: null },

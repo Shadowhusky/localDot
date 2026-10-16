@@ -707,11 +707,18 @@ describe("Codex authority, takeover and retirement", () => {
       run = f.run(),
       first = await f.fake.nextLaunch(1);
     await first.waitFor("turn/start");
-    const old = f.context(),
-      waiter = f.session.takeover("login", "Enter it yourself");
+    const old = f.context();
+    let interruptedBeforeToolCancellation = false;
+    old.signal.addEventListener("abort", () => {
+      interruptedBeforeToolCancellation = first.requests.some(
+        (request) => request.method === "turn/interrupt",
+      );
+    });
+    const waiter = f.session.takeover("login", "Enter it yourself");
     void waiter.catch(() => {});
     // No timer or microtask may run before the model transport and tool epoch are fenced.
     expect(first.stopped).toBe(true);
+    expect(interruptedBeforeToolCancellation).toBe(true);
     expect(old.signal.aborted).toBe(true);
     expect(f.session.generation).toBeUndefined();
     expect(f.endpoints[0]?.closed).toBe(true);

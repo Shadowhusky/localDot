@@ -1,4 +1,5 @@
 import { bytes } from "../copy/format.ts";
+import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
@@ -9,8 +10,9 @@ import type { UploadRow } from "./useUploads.ts";
 const STATUS: Record<UploadRow["phase"], string> = {
   pending: "Waiting",
   uploading: "Uploading…",
+  placing: "Saving to computer…",
   complete: "Uploaded to Downloads",
-  uncertain: "Unconfirmed",
+  uncertain: "Paused",
   refused: "Not uploaded",
 };
 
@@ -18,9 +20,11 @@ const STATUS: Record<UploadRow["phase"], string> = {
 export function AttachmentChips({
   rows,
   onRemove,
+  onRetry,
 }: {
   rows: readonly UploadRow[];
   onRemove(id: number): void;
+  onRetry?(id: number): void;
 }) {
   // Each reason once: the chips already say which files it applies to.
   const reasons = [...new Set(rows.flatMap((row) => (row.explanation ? [row.explanation] : [])))];
@@ -32,7 +36,7 @@ export function AttachmentChips({
             {row.preview && (
               <img className="file-chip-thumb" src={row.preview} alt="" decoding="async" />
             )}
-            {row.phase === "uploading" || row.phase === "pending" ? (
+            {row.phase === "uploading" || row.phase === "placing" || row.phase === "pending" ? (
               <Spinner size={12} className="file-chip-icon" />
             ) : row.preview && row.phase === "complete" ? null : (
               <Icon
@@ -50,7 +54,22 @@ export function AttachmentChips({
                 <VisuallyHidden>{STATUS.complete}</VisuallyHidden>
               </>
             ) : (
-              <span className="file-chip-meta">{STATUS[row.phase]}</span>
+              <span className="file-chip-meta num">
+                {row.phase === "uploading" && row.bytes > 0
+                  ? `${Math.floor(((row.uploaded ?? 0) / row.bytes) * 100)}% · ${bytes(row.bytes)}`
+                  : STATUS[row.phase]}
+              </span>
+            )}
+            {(row.phase === "uncertain" || row.phase === "refused") && onRetry && (
+              <Button
+                variant="quiet"
+                size="sm"
+                className="file-chip-retry"
+                onClick={() => onRetry(row.id)}
+                aria-label={`Retry ${row.name}`}
+              >
+                Retry
+              </Button>
             )}
             <IconButton
               className="file-chip-remove"

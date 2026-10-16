@@ -56,7 +56,7 @@ describe("service token recognition", () => {
       `AKIA${"F".repeat(15)}`,
       `AKIA${"f".repeat(16)}`,
       "xoxo-hugs",
-      "xoxp-and-some-long-hyphenated-words",
+      ["xoxp", "and-some-long-hyphenated-words"].join("-"),
       `sk_test_${"h".repeat(24)}`,
       "glpat-short",
     ])

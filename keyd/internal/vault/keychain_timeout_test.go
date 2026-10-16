@@ -49,6 +49,9 @@ func TestKeychainSharesItsDeadlineAcrossCommands(t *testing.T) {
 			// Every individual command finishes well inside the deadline. A
 			// fresh deadline per chunk would let the whole operation run too long.
 			script := strings.Replace(fakeSecurity, "store=", "sleep 0.09\nstore=", 1)
+			// The initial Put already created the store. A mkdir child surviving a
+			// timed-out shell could recreate it while TempDir cleanup removes it.
+			script = strings.Replace(script, "mkdir -p \"$store\"\n", "", 1)
 			if err := os.WriteFile(k.Path, []byte(script), 0o700); err != nil {
 				t.Fatal(err)
 			}

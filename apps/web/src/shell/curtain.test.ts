@@ -17,7 +17,7 @@ describe("the curtain", () => {
       "failed",
     ] as const)
       expect(curtainFor(phase), phase).toBe(true);
-    for (const phase of ["live", "reconnecting", "frozen"] as const)
+    for (const phase of ["live", "reconnecting", "suspended", "frozen"] as const)
       expect(curtainFor(phase), phase).toBe(false);
   });
 

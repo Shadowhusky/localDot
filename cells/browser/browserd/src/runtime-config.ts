@@ -206,6 +206,12 @@ export function browserProcessSpecs(
       "/usr/lib/chromium/chromium",
       [
         "--ozone-platform=x11",
+        // This Xvfb computer has no GPU device. Use the image's Mesa renderer explicitly:
+        // Chromium no longer supplies automatic software WebGL fallback. Keep its GPU sandbox
+        // and site isolation; do not opt into unsafe SwiftShader or disable GPU security.
+        "--use-gl=angle",
+        "--use-angle=gl",
+        "--ignore-gpu-blocklist",
         "--window-size=1280,800",
         `--force-device-scale-factor=${scale}`,
         "--start-maximized",
@@ -230,7 +236,7 @@ export function browserProcessSpecs(
         "--proxy-bypass-list=<-loopback>",
         "about:blank",
       ],
-      { ...common, ACCESSIBILITY_ENABLED: "1" },
+      { ...common, ACCESSIBILITY_ENABLED: "1", LIBGL_ALWAYS_SOFTWARE: "1" },
       "cdp",
     ),
   });

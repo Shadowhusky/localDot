@@ -1164,6 +1164,10 @@
                 "secret": {
                   "type": "boolean"
                 },
+                "loginOrigin": {
+                  "type": "string",
+                  "format": "uri"
+                },
                 "editable": {
                   "type": "boolean"
                 },
@@ -2736,6 +2740,10 @@
                 },
                 "secret": {
                   "type": "boolean"
+                },
+                "loginOrigin": {
+                  "type": "string",
+                  "format": "uri"
                 },
                 "editable": {
                   "type": "boolean"
@@ -4663,7 +4671,8 @@
               "enum": [
                 "main",
                 "fast",
-                "local"
+                "local",
+                "subagent"
               ]
             },
             "route": {
@@ -4752,7 +4761,8 @@
               "enum": [
                 "main",
                 "fast",
-                "local"
+                "local",
+                "subagent"
               ]
             },
             "attempt": {

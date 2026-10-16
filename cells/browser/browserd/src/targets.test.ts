@@ -205,6 +205,21 @@ describe("private browser target ownership", () => {
     peer.targets.close();
   });
 
+  it("closing a page with an unacknowledged reload preserves another healthy tab", async () => {
+    const peer = await started();
+    peer.attach("survivor", "survivor-session");
+    await settle();
+    peer.intercept((command) => command.method === "Page.reload");
+    const pending = expect(peer.targets.reload(peer.tabId)).rejects.toThrow();
+    peer.event("Target.targetDestroyed", { targetId: "page-1" });
+    await pending;
+    expect(peer.targets.closed).toBe(false);
+    expect(peer.fatal).not.toHaveBeenCalled();
+    expect(peer.targets.tabs()).toHaveLength(1);
+    expect(peer.targets.tabs()[0]?.ready).toBe(true);
+    peer.targets.close();
+  });
+
   it("reload times out without treating an acknowledgement as a loaded page", async () => {
     vi.useFakeTimers();
     const peer = await started();
@@ -514,6 +529,39 @@ describe("private browser target ownership", () => {
     expect(fixture.fatal).not.toHaveBeenCalled();
     fixture.targets.close();
   });
+
+  it.each(["reply", "timeout"] as const)(
+    "keeps the browser alive after a frame closes during initialization (%s)",
+    async (ending) => {
+      vi.useFakeTimers();
+      const fixture = await started();
+      let held: WireCommand | undefined;
+      fixture.intercept((command) => {
+        if (command.sessionId !== "closing-frame") return false;
+        held = command;
+        return true;
+      });
+      fixture.attach("frame-1", "closing-frame", "session-1", "iframe");
+      expect(held).toBeDefined();
+      fixture.event(
+        "Target.detachedFromTarget",
+        { sessionId: "closing-frame", targetId: "frame-1" },
+        "session-1",
+      );
+      if (ending === "reply") fixture.reply(held!, {});
+      else await vi.advanceTimersByTimeAsync(6000);
+      fixture.event("Inspector.detached", { reason: "target_closed" }, "closing-frame");
+      fixture.event("DOM.documentUpdated", {}, "closing-frame");
+      await settle();
+      expect(fixture.targets.closed).toBe(false);
+      expect(fixture.fatal).not.toHaveBeenCalled();
+      expect(fixture.targets.documents(fixture.tabId)).toHaveLength(1);
+      fixture.attach("replacement-frame", "replacement-session", "session-1", "iframe");
+      await settle();
+      expect(fixture.targets.documents(fixture.tabId)).toHaveLength(2);
+      fixture.targets.close();
+    },
+  );
 
   it("does not let a reused target or session ID revive an old document", async () => {
     const fixture = await started();

@@ -30,6 +30,7 @@ describe("review: selected physical browser visibility", () => {
     cleanup();
     closeStreams();
     restore();
+    vi.restoreAllMocks();
     window.history.replaceState(null, "", "/");
   });
 
@@ -224,6 +225,49 @@ describe("review: selected physical browser visibility", () => {
       await waitFor(() =>
         expect(screen.getByTestId("hud-status").textContent).toBe("Reconnecting…"),
       );
+      // Backgrounding releases the viewer, not the task. Even a relay with no viewers
+      // must leave the finished task's title intact and keep listening for new work.
+      act(() => {
+        vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+        vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+        document.dispatchEvent(new Event("visibilitychange"));
+        parentStatus.onmessage?.({
+          data: JSON.stringify({
+            ...parent,
+            stream: { connection: "none", viewers: 0, lastUpstreamAt: null },
+          }),
+        });
+      });
+      await waitFor(() => expect(document.title).toBe("localDot — Done"));
+      expect(document.querySelector("iframe.desktop-frame")).toBeNull();
+      act(() => {
+        feed.onmessage?.({
+          data: JSON.stringify({
+            v: 1,
+            id: ulid(),
+            seq: 5,
+            t: 5,
+            agent: "main",
+            type: "agent.state",
+            data: { state: "thinking" },
+          }),
+        });
+      });
+      await waitFor(() => expect(document.title).toBe("localDot — Thinking…"));
+      act(() => {
+        feed.onmessage?.({
+          data: JSON.stringify({
+            v: 1,
+            id: ulid(),
+            seq: 6,
+            t: 6,
+            agent: "main",
+            type: "ask.request",
+            data: { askId: ulid(), question: "Which format?", options: [], allowText: true },
+          }),
+        });
+      });
+      await waitFor(() => expect(document.title).toBe("• Needs your answer · localDot"));
     });
   }
 });

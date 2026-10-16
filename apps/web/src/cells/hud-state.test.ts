@@ -67,6 +67,28 @@ describe("hudFor", () => {
     }
   });
 
+  it("distinguishes a deliberately suspended viewer from a failed connection", () => {
+    for (const connection of ["none", "connecting", "live", "stalled", "disconnected"] as const) {
+      const view = known(cell("ready", connection));
+      const suspended = hudFor({ ...view, picture: "suspended" });
+      expect(suspended).toMatchObject({ phase: "suspended", label: "Ready", live: false });
+      expect(withScreenHud(hudFor(known(cell("ready", "live"))), suspended).phase).toBe(
+        "suspended",
+      );
+      expect(hudFor({ ...view, picture: "held" }).phase).toBe("reconnecting");
+    }
+    for (const view of [
+      known(cell("stopped")),
+      known(cell("failed")),
+      known(cell("starting", "none", RESTART_NOTE)),
+      known({ ...cell("ready"), paused: true }),
+      known({ ...cell("ready"), fenced: { revision: 1 } }),
+      { ...known(cell("ready")), status: "unknown" as const },
+    ]) {
+      expect(hudFor({ ...view, picture: "suspended" })).toEqual(hudFor(view));
+    }
+  });
+
   it("offers to start when there is no computer or it is stopped", () => {
     expect(hudFor(known(null))).toMatchObject({
       label: "No computer",

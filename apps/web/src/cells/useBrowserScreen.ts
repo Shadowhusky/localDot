@@ -5,6 +5,31 @@ import { openSocket } from "../lib/socket.ts";
 import { parseCell } from "./parse.ts";
 import type { CellSummary } from "./types.ts";
 
+interface BrowserOwner {
+  api: ApiClient;
+  parentId: string | undefined;
+  createdAt: string | undefined;
+  scale: number | undefined;
+  available: boolean;
+  id: string | undefined;
+  revision: number | undefined;
+}
+
+// A control revision changes input authority, not the physical browser being watched.
+// Keep its verified picture while renewing status, without carrying input readiness.
+function sameBrowser(a: BrowserOwner, b: BrowserOwner): boolean {
+  return (
+    a.api === b.api &&
+    a.parentId === b.parentId &&
+    a.createdAt === b.createdAt &&
+    a.scale === b.scale &&
+    a.available &&
+    b.available &&
+    !!a.id &&
+    a.id === b.id
+  );
+}
+
 // A browser has its own status feed. A ready desktop is never evidence of a ready browser. While
 // that feed reconnects, the last browser it verified stays on screen but is stale: input waits for
 // a fresh status, the picture does not.
@@ -43,7 +68,7 @@ export function useBrowserScreen(
     const hold = (error: string | null) => {
       if (closed) return;
       setView((last) => {
-        const cell = last?.owner === owner ? last.cell : null;
+        const cell = last && sameBrowser(last.owner, owner) ? last.cell : null;
         return { owner, cell, stale: !!cell, reconnects, error };
       });
     };
@@ -81,7 +106,7 @@ export function useBrowserScreen(
       socket.close();
     };
   }, [api, available, createdAt, id, owner, parentId, scale]);
-  return view?.owner === owner && available && id
-    ? view
-    : { cell: null, stale: false, reconnects: 0, error: null };
+  if (view?.owner === owner && available && id) return view;
+  if (view?.cell && sameBrowser(view.owner, owner)) return { ...view, owner, stale: true };
+  return { cell: null, stale: false, reconnects: 0, error: null };
 }

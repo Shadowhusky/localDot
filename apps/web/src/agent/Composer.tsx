@@ -397,7 +397,7 @@ export function Composer(props: ComposerProps) {
   const uploads = useUploads({
     api: props.api,
     cellId: props.cell?.id ?? null,
-    ready: readyCell(props) && !takeover,
+    ready: readyCell(props),
     enabled: permitted && !sending && !uncertain,
   });
   // Pasted pictures and long texts get names of their own; attaching answers whether it could.
@@ -748,7 +748,7 @@ export function Composer(props: ComposerProps) {
     const now = current.current;
     const attached = uploads.forMessage();
     if (!attached) {
-      setProblem("Finish or remove unconfirmed uploads before sending.");
+      setProblem("Wait for your files to finish uploading, or retry a paused upload.");
       return;
     }
     const sent = withAttachments(
@@ -932,7 +932,7 @@ export function Composer(props: ComposerProps) {
     ? "Discard the key or move it to Keys first."
     : sending || uncertain
       ? "Wait until your message is sent."
-      : (reason ?? (takeover ? "Add files once you hand back." : undefined));
+      : reason;
   attach.current = (files) => {
     if (attachReason || !files.length) return false;
     uploads.select(files);
@@ -1036,7 +1036,11 @@ export function Composer(props: ComposerProps) {
           )}
         </Collapse>
         <Collapse open={rows.length > 0} className="composer-files">
-          <AttachmentChips rows={shownRows.current} onRemove={uploads.remove} />
+          <AttachmentChips
+            rows={shownRows.current}
+            onRemove={uploads.remove}
+            onRetry={uploads.retry}
+          />
         </Collapse>
         {pill && (
           <Collapse open={researchLine} className="composer-files">

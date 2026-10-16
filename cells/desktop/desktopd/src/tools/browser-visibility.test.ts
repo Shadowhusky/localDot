@@ -52,6 +52,74 @@ describe("desktop browser visible page binding", () => {
     expect(peer.sent).not.toContain("Page.bringToFront");
   });
 
+  it("reveals the identified browser before reading when another app covers it", async () => {
+    let focused = false;
+    const peer = connection((method) => {
+      if (method === "Page.bringToFront") focused = true;
+      return method === "Runtime.evaluate"
+        ? { result: { value: { ...pages[1], text: "Visible content" } } }
+        : {};
+    });
+    const browser = new PageBrowser({
+      ...peer,
+      fetchImpl: fakeTargets(pages),
+      window: async () => ({ ...windowFor("Visible"), active: focused }),
+    });
+    // Passive inventory must not move the user's windows.
+    expect(await browser.page()).toEqual({ url: pages[1]?.url });
+    expect(peer.sent).toEqual([]);
+    expect(await browser.read(500)).toMatchObject({ text: "Visible content" });
+    expect(peer.sent.filter((method) => method === "Page.bringToFront")).toHaveLength(1);
+    expect(peer.sent.indexOf("Page.bringToFront")).toBeLessThan(
+      peer.sent.indexOf("Runtime.evaluate"),
+    );
+    expect(peer.connected).toEqual(["ws://127.0.0.1:9222/devtools/page/t1"]);
+  });
+
+  it("does not read hidden content when the window cannot be revealed", async () => {
+    const peer = connection(() => ({}));
+    const browser = new PageBrowser({
+      ...peer,
+      fetchImpl: fakeTargets(pages),
+      window: async () => ({ ...windowFor("Visible"), active: false }),
+    });
+    await expect(browser.read(500)).rejects.toThrow(/did not receive focus/);
+    expect(peer.sent).toEqual(["Page.bringToFront"]);
+  });
+
+  it("stops revealing and reading as soon as control is taken", async () => {
+    const abort = new AbortController();
+    const peer = connection((method) => {
+      if (method === "Page.bringToFront") abort.abort(new Error("control taken"));
+      return {};
+    });
+    const browser = new PageBrowser({
+      ...peer,
+      fetchImpl: fakeTargets(pages),
+      window: async () => ({ ...windowFor("Visible"), active: false }),
+    });
+    await expect(browser.read(500, abort.signal)).rejects.toThrow("control taken");
+    expect(peer.sent).toEqual(["Page.bringToFront"]);
+  });
+
+  it("does not return a page hidden by another window during a read", async () => {
+    let focused = true;
+    const peer = connection((method) => {
+      if (method === "Runtime.evaluate") {
+        focused = false;
+        return { result: { value: { ...pages[1], text: "Hidden content" } } };
+      }
+      return {};
+    });
+    const browser = new PageBrowser({
+      ...peer,
+      fetchImpl: fakeTargets(pages),
+      window: async () => ({ ...windowFor("Visible"), active: focused }),
+    });
+    await expect(browser.read(500)).rejects.toThrow(/did not receive focus/);
+    expect(peer.sent).not.toContain("Page.bringToFront");
+  });
+
   it.each(["no native window", "ambiguous titles", "no native provider"])(
     "refuses %s without opening a background tab or reporting no browser",
     async (scenario) => {

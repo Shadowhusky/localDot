@@ -673,7 +673,25 @@ export class AgentRunner {
     );
     if (live.some((rt) => rt.selection.kind === "none" && rt.session.controlHeld))
       throw new AgentError(409, "Hand back the computer first.");
-    const waiting = live.filter((rt) => rt.selection.kind !== "none");
+    // The final result is durable before Docker/native retirement finishes. Allow a New
+    // conversation request in that interval to wait briefly for retirement instead of
+    // telling the user to stop work that has already delivered its result.
+    await Promise.all(
+      live.map(async (rt) => {
+        const s = rt.session;
+        if (
+          rt.completion &&
+          s.status === "running" &&
+          !s.controlHeld &&
+          !s.pendingAsk &&
+          !s.pendingApproval &&
+          !s.safetyPause &&
+          !rt.pause
+        )
+          await s.waitForIdle(10_000, signal);
+      }),
+    );
+    const waiting = live.filter((rt) => !rt.session.stopped && rt.selection.kind !== "none");
     if (
       waiting.some(
         (rt) =>

@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { type ManualInput, ULID_PATTERN, ulid } from "@localdot/protocol";
 import type {
   BrowserActionPermit,
@@ -824,27 +825,36 @@ export class ScreenController {
     };
     try {
       if (!owner.permit) throw new ScreenControlError();
-      const listing = await owner.client.tabs(scope);
-      scope.check();
-      if (!listing.tabs.length || listing.tabs.some((tab) => !tab.ready))
-        throw new ScreenControlError();
-      const ordered = [...listing.tabs].sort(
-        (a, b) => Number(b.id === owner.tabId) - Number(a.id === owner.tabId),
-      );
-      for (const tab of ordered) {
-        try {
-          // The admitted clock request first resolves BrowserGeometry: unique root
-          // URL across all tabs, native active window, and two matching surfaces.
-          // It neither activates a tab nor reads page content or secret fields.
-          await owner.client.clock(owner.permit, tab.id, scope);
-          scope.check();
-          return tab.id;
-        } catch (error) {
-          scope.check();
-          if (!(error instanceof BrowserClientError) || error.code !== "unavailable") throw error;
+      for (;;) {
+        const listing = await owner.client.tabs(scope);
+        scope.check();
+        if (!listing.tabs.length) throw new ScreenControlError();
+        let settling = listing.tabs.some((tab) => !tab.ready);
+        const ordered = [...listing.tabs]
+          .filter((tab) => tab.ready)
+          .sort((a, b) => Number(b.id === owner.tabId) - Number(a.id === owner.tabId));
+        for (const tab of ordered) {
+          try {
+            // The admitted clock request first resolves BrowserGeometry: unique root
+            // URL across all tabs, native active window, and two matching surfaces.
+            // It neither activates a tab nor reads page content or secret fields.
+            await owner.client.clock(owner.permit, tab.id, scope);
+            scope.check();
+            return tab.id;
+          } catch (error) {
+            scope.check();
+            if (!(error instanceof BrowserClientError)) throw error;
+            // A background tab fails geometry admission with HTTP 409 (refused), not
+            // 503 (unavailable). Continue to the visible popup. Only this read-only
+            // probe is retried; input keeps its original tab and is never replayed.
+            if (error.code === "refused") settling = true;
+            else if (error.code !== "unavailable") throw error;
+          }
         }
+        if (!settling) throw new ScreenControlError();
+        await sleep(150, undefined, { signal });
+        scope.check();
       }
-      throw new ScreenControlError();
     } finally {
       clearTimeout(deadline);
     }

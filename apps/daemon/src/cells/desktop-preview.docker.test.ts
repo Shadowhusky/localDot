@@ -63,13 +63,22 @@ describe.skipIf(!DOCKER_TESTS)("visible local HTTPS development previews", () =>
     expect(result.status, result.out + (result.status ? dockerLogs(name) : "")).toBe(0);
     expect(result.out).toContain("PASS visible interaction and screenshot");
     expect(result.out).toContain(
+      "PASS browser read reveals the working window on the actual desktop",
+    );
+    expect(result.out).toContain(
       "PASS public redirect, stopped server, and genuine unsafe-port diagnostics",
     );
-    if (process.env.LOCALDOT_PREVIEW_SCREENSHOT)
+    if (process.env.LOCALDOT_PREVIEW_SCREENSHOT) {
       docker(
         "cp",
         `${name}:/tmp/local-preview-verified.png`,
         process.env.LOCALDOT_PREVIEW_SCREENSHOT,
       );
+      docker(
+        "cp",
+        `${name}:/tmp/local-preview-revealed.webp`,
+        `${process.env.LOCALDOT_PREVIEW_SCREENSHOT}.webp`,
+      );
+    }
   });
 });

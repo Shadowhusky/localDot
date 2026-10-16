@@ -66,7 +66,15 @@ export function scriptedModel(turns: Turn[]) {
   const model = new MockLanguageModelV4({
     doStream: async (options) => {
       prompts.push(options.prompt);
-      return { stream: simulateReadableStream({ chunks: next() as never[] }) };
+      return {
+        stream: simulateReadableStream({
+          chunks: next() as never[],
+          // These are scripted model turns, not latency tests. Keep their async streaming
+          // contract without scheduling a real timer for every chunk on busy CI runners.
+          initialDelayInMs: null,
+          chunkDelayInMs: null,
+        }),
+      };
     },
     // generateText (the summaries): the turn's text deltas as one text part.
     doGenerate: async (options) => {

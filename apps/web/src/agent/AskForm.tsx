@@ -37,6 +37,7 @@ import { CopyButton } from "./CopyButton.tsx";
 import { FileTransferFailure } from "./file-transfer.ts";
 import { KeyFound } from "./KeyFound.tsx";
 import { markdownToPlain } from "./markdown.ts";
+import type { UploadOptions } from "./resumable-upload.ts";
 import { hiddenWarning, plainReveal, revealText } from "./reveal-text.ts";
 import "../shell/decision.css";
 
@@ -47,7 +48,11 @@ const KEY_TAKEN = "That looked like a key, so it was taken out.";
 // Where the question is answered: under dot's message in the thread, in the island over the
 // computer, or in a phone's sheet.
 export type AskLayout = "thread" | "island" | "sheet";
-export type AskUpload = (file: File, signal: AbortSignal) => Promise<string>;
+export type AskUpload = (
+  file: File,
+  signal: AbortSignal,
+  options?: UploadOptions,
+) => Promise<string>;
 
 export interface AskFormProps {
   draft: AskDraft;
@@ -569,17 +574,31 @@ function FileDrop({
   );
   const [over, setOver] = useState(false);
   const flight = useRef<AbortController | null>(null);
+  const selected = useRef<{ file: File; id: string } | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
   useEffect(() => () => flight.current?.abort(), []);
   const unavailable = reason ?? (upload ? undefined : "Turn on your computer first");
   const take = async (file: File | undefined) => {
     if (!file || !upload || unavailable) return;
     flight.current?.abort();
+    if (selected.current?.file !== file) selected.current = { file, id: crypto.randomUUID() };
     const abort = new AbortController();
     flight.current = abort;
     setState({ phase: "uploading", name: file.name });
+    setProgress(null);
     onChange("");
     try {
-      const path = await upload(file, abort.signal);
+      const path = await upload(file, abort.signal, {
+        id: selected.current.id,
+        progress: ({ offset, phase }) => {
+          if (!abort.signal.aborted)
+            setProgress(
+              phase === "placing"
+                ? "Saving to computer…"
+                : `${Math.floor((offset / Math.max(file.size, 1)) * 100)}% uploaded`,
+            );
+        },
+      });
       if (abort.signal.aborted) return;
       setState({ phase: "done", name: file.name });
       onChange(path);
@@ -589,9 +608,9 @@ function FileDrop({
         phase: "failed",
         name: file.name,
         note:
-          error instanceof FileTransferFailure && error.uncertain
-            ? "It may have arrived. Check Downloads before choosing it again."
-            : "It couldn't be added. Files up to 100 MB with a plain name work.",
+          error instanceof FileTransferFailure
+            ? error.message
+            : "Upload paused. Retry to continue.",
       });
     }
   };
@@ -620,7 +639,7 @@ function FileDrop({
         <span className="ask-file-name">{named ? state.name : "Drop a file here"}</span>
         <span className="ask-file-meta">
           {state.phase === "uploading"
-            ? "Adding it to your computer…"
+            ? (progress ?? "Adding it to your computer…")
             : state.phase === "done"
               ? "On your computer, in Downloads"
               : state.phase === "failed"
@@ -628,6 +647,15 @@ function FileDrop({
                 : "or choose one"}
         </span>
       </span>
+      {state.phase === "failed" && selected.current && (
+        <Button
+          size="sm"
+          onClick={() => void take(selected.current?.file)}
+          disabledReason={unavailable}
+        >
+          Retry
+        </Button>
+      )}
       <ChooseFileButton
         size="sm"
         busy={state.phase === "uploading"}

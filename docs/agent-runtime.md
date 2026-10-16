@@ -61,6 +61,26 @@ Connector status records local observations, not permanent authorization. A read
 
 Repeated-failure detection is advisory. It does not grant a retry, automatically execute one, override an approval, or impose a new global hard stop. The existing action limit, stop fences and per-operation ownership remain responsible for execution control.
 
+### Repeated native input recovery
+
+The 16 October Figma task exposed a separate native-input guard: two post-scroll captures failed,
+so the guard treated their effects as unknown and then paused on the next identical scroll. Later
+screenshots showed different canvas contents, but never reached that guard. The daemon itself
+generated the vague “What should I change?” question alongside a separate Resume control.
+
+The native guard now compares private, daemon-owned screen fingerprints at dispatch, including
+successful later observations. A new frame ID with identical pixels is not progress. Missing
+capture evidence alone never authorizes another possible side effect. The third unchanged input
+is still blocked before dispatch, but returns a typed recovery result to API, Codex and Claude
+Code, with the latest available screenshot and instructions to inspect and change approach.
+It creates no question or takeover. Other authorized tools and changed inputs remain available.
+
+If the model ignores two such recovery results without verified visual progress, the existing
+atomic Pause machinery contains it and publishes a concrete explanation. It does not manufacture
+a user decision. Explicit Resume, Stop, spending limits and permission checks remain authoritative.
+The bounded counter is not semantic task-progress detection: animation can change screen pixels,
+and broader task budgets and failure tracking still matter.
+
 ## Validation and maintenance
 
 Regression coverage exercises actual dispatch, connector and desktop-client routes, not just prompt strings:
@@ -246,6 +266,21 @@ long-evidence nonterminal wait, read again, and emitted one `task.result` with o
 `complete`. The task had no failed tool calls. This validates the bounded continuation path,
 not a complete real multiplayer game. The temporary activation heartbeat remains disabled;
 no further automatic restart is needed.
+
+### Task state and plan synchronization
+
+The plan is a checklist, not an independent task lifecycle. Activity and expanded chat
+steps derive its live, waiting, paused, finished or interrupted presentation from the
+same task model. Unfinished checklist entries stop animating when a task finishes;
+their recorded statuses remain intact rather than inventing completed work. Replay
+uses the state at the selected time.
+
+Daemon-owned questions, approvals, safety pauses and control holds take precedence
+over buffered model progress notifications. Final text alone does not release a task.
+A conversation change after a recorded result can wait up to ten seconds for normal
+caller retirement; it never stops active work. Missing stream events trigger replay
+from the last accepted sequence with backoff, and terminal snapshot reconciliation
+continues after a failed request instead of freezing the last running status.
 
 ### Cleanup of task-created files
 

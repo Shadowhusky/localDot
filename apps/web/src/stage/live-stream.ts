@@ -13,9 +13,9 @@ export interface StreamTarget {
   parentId?: string;
 }
 
-// What the stage holds of a stream: nothing yet, its live picture, or its last picture kept while
-// the stream reconnects.
-export type StreamPicture = "none" | "live" | "held";
+// A held picture means a connection needs recovery. Suspended means this viewer deliberately
+// released its stream while out of sight; the computer and its task keep running.
+export type StreamPicture = "none" | "live" | "held" | "suspended";
 
 const POLL_MS = 250;
 export const STALE_MS = 10_000;
@@ -198,7 +198,8 @@ export class LiveStream {
     this.#awaiting = false;
     this.#away = true;
     this.#mintAt = 0;
-    this.#show(this.#hadPicture ? "held" : "none");
+    this.#troubleSince = null;
+    this.#show("suspended");
   }
 
   get picture(): StreamPicture {
@@ -232,6 +233,8 @@ export class LiveStream {
 
   // The stage presented frames of this stream: `count` so far from its current tap.
   presented(count = this.#presentedCount): void {
+    // A queued worker report can arrive after the stream has been released.
+    if (this.#closed || this.#away || document.visibilityState === "hidden") return;
     this.#presentedCount = count;
     this.#hadPicture = true;
     this.#presentedAt = Date.now();

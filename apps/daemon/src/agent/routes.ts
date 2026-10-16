@@ -83,6 +83,8 @@ import { type AgentSession, ControlHeldError, SessionStoppedError } from "./sess
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
 import type { SkillInfo } from "./skills.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
+import { userUploadRoutes } from "./user-upload-routes.ts";
+import type { UserUploads } from "./user-uploads.ts";
 
 export interface UploadAccess {
   tools: Pick<DesktopdTools, "putFile">;
@@ -91,6 +93,7 @@ export interface UploadAccess {
   release(): void;
 }
 export interface AgentRoutesDeps {
+  uploads?: { store: UserUploads; hasCell(id: string): boolean };
   runner: Pick<AgentRunner, "start" | "get" | "raiseBudget"> &
     Partial<
       Pick<
@@ -283,6 +286,7 @@ function fail(error: unknown): Response {
 
 // Auth remains the application's existing /api guard; no route introduces another credential.
 export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
+  if (deps.uploads) userUploadRoutes(app, deps.uploads.store, deps.uploads.hasCell);
   if (deps.quarantine) quarantineRoutes(app, deps.quarantine);
   const route = (handler: (c: Context) => Response | Promise<Response>) => async (c: Context) => {
     try {

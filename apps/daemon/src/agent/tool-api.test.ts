@@ -18,6 +18,34 @@ afterEach(() => {
   for (const h of harnesses.splice(0)) h.close();
 });
 
+it("keeps a pending question authoritative over delayed model progress", async () => {
+  const h = toolHarness();
+  const asking = h.session.ask("Which dataset?", [], true, 0);
+  const ask = h.session.pendingAsk;
+  for (const state of ["acting", "thinking", "observing"]) {
+    const response = await h.app.request("/v1/events", {
+      method: "POST",
+      headers: h.auth,
+      body: JSON.stringify({ events: [{ type: "agent.state", data: { state } }] }),
+    });
+    expect(response.status).toBe(204);
+    expect(h.session.status).toBe("waiting_user");
+    expect(h.session.pendingAsk).toBe(ask);
+    expect(
+      h
+        .events()
+        .filter((e) => e.type === "agent.state")
+        .at(-1)?.data,
+    ).toEqual({
+      state: "waiting_user",
+      reason: "question",
+    });
+  }
+  expect(h.session.answer(ask as string, undefined, "Use the attached dataset")).toBe(true);
+  await asking;
+  expect(h.session.status).toBe("running");
+});
+
 async function until(pred: () => boolean, ms = 5000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!pred()) {

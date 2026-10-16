@@ -60,8 +60,7 @@ export interface StageProps {
     onTyping?(typing: boolean): void;
     onRefused?(message: string | null): void;
   };
-  // What the live stage shows of its computer: nothing yet, its picture, or its last picture while
-  // the stream reconnects.
+  // This viewer's picture, including deliberate background suspension versus a lost stream.
   onPicture?(picture: StreamPicture): void;
 }
 
@@ -191,7 +190,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     (cell?.stream.connection === "stalled" ||
       cell?.stream.connection === "disconnected" ||
       shown === "held");
-  const paused = mode === "live" && (!!cell?.paused || reconnecting);
+  const paused = mode === "live" && (!!cell?.paused || reconnecting || shown === "suspended");
   const manualActive = Boolean(manual);
   useEffect(() => {
     canvas.current?.setView({ selection: mode === "live" ? (selection ?? null) : null });

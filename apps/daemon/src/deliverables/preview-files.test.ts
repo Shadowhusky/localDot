@@ -23,8 +23,9 @@ afterEach(() => {
   for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true });
 });
 
-// A second of CPU per page: what is too much for that is too much for the daemon's five.
-function setup(quieter = new PageQuieter({ cpu: 1 })) {
+// Ordinary preview routes use the production budget, including startup and TypeScript imports.
+// Tests of pathological pages opt into a shorter CPU budget explicitly.
+function setup(quieter = new PageQuieter()) {
   const home = mkdtempSync(join(tmpdir(), "localdot-preview-files-"));
   homes.push(home);
   const log = new EventLog(home);
@@ -217,7 +218,7 @@ describe("the preview route", () => {
   });
 
   it("turns a page away once reading it takes too long, and never holds the daemon meanwhile", async () => {
-    const { save, load, link } = setup();
+    const { save, load, link } = setup(new PageQuieter({ cpu: 1 }));
     save("attributes.html", attributes(60_000));
     save("roots.html", roots(34_000));
     save("plain.html", "<p>A plain page</p>");
@@ -245,7 +246,7 @@ describe("the preview route", () => {
   }, 15_000);
 
   it("reads a page once for HEAD and every later opening", async () => {
-    const { save, load, link } = setup();
+    const { save, load, link } = setup(new PageQuieter({ cpu: 1 }));
     save("attributes.html", attributes(60_000));
     const base = await link();
     const path = `${base}attributes.html`;

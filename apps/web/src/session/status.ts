@@ -478,6 +478,7 @@ const COMPUTER_POSE: Record<ComputerPhase, DotState> = {
   connecting: "waking",
   live: "idle",
   reconnecting: "reconnecting",
+  suspended: "idle",
   frozen: "resting",
   stopping: "sleeping",
   stopped: "sleeping",
@@ -559,8 +560,8 @@ const DOWN = new Set<ComputerPhase>([
 
 // The one place status is decided: the HUD, the caption, dot's pose and the tab title all read it.
 // A task Stop outranks everything. A frozen computer outranks any task, its Stop included; a
-// computer that is down outranks it too but leaves its Stop. A finished task keeps its verdict
-// only while the computer is live.
+// computer that is down outranks it too but leaves its Stop. Intentionally suspending this
+// viewer's screen leaves the task's status (including a finished verdict) intact.
 const LOST_CAPTION = "I've lost touch with your Mac. Reconnecting…";
 const UNCONFIRMED_CAPTION = "I couldn't confirm that I stopped. Press Stop again to be sure.";
 
@@ -575,12 +576,11 @@ export function statusFor({
   const held = computer.paused ? null : task;
   const own = DOWN.has(computer.phase) ? null : held;
   const running = own && own.phase !== "finished" ? own : null;
-  const shown = running ?? (own && computer.live ? own : null);
+  const available = computer.live || computer.phase === "suspended";
+  const shown = running ?? (own && available ? own : null);
   const halting = stop === "stopped" ? null : stop;
   const lost = link === "lost" && !!running && !halting;
-  const row: StatusRow = halting
-    ? "stopping"
-    : (shown?.row ?? (computer.phase === "live" ? "ready" : "computer"));
+  const row: StatusRow = halting ? "stopping" : (shown?.row ?? (available ? "ready" : "computer"));
   // A reconnecting stream holds its last picture still, so dot's work names why; anything that
   // waits on the user keeps its own label.
   const label =

@@ -775,7 +775,11 @@ export class BrowserInput {
       const wait = sample.t - (performance.now() - start);
       if (wait > 0) await sleep(wait, undefined, { signal: scope.signal });
       scope.check();
-      ({ mono } = await this.#options.native.command("move", { ...sample.at }, scope.signal));
+      // A sent motion is atomic and bounded by the native command timeout. Drain its
+      // acknowledgement before Stop releases the held button; aborting the transport
+      // mid-reply would retire the entire browser. No subsequent sample may run.
+      ({ mono } = await this.#options.native.command("move", { ...sample.at }));
+      scope.check();
     }
     return mono;
   }

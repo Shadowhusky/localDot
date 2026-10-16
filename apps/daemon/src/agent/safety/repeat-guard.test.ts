@@ -70,6 +70,39 @@ describe("repetition of pointer actions", () => {
 });
 
 describe("private actual native action repetition", () => {
+  it("accepts a later verified screen change after the immediate result capture was lost", () => {
+    const guard = new RepeatGuard();
+    for (const frame of ["screen:a", "screen:b", "screen:c", "screen:d"]) {
+      expect(guard.admit(key, identity, next(), frame)).toBe(true);
+      // No settle: the immediate screenshot failed, then an explicit screenshot recovered it.
+    }
+    expect(guard.recoveryExhausted).toBe(false);
+  });
+  it("blocks unchanged input, gives two recovery opportunities, then exhausts the budget", () => {
+    const guard = new RepeatGuard();
+    expect(guard.admit(key, identity, next(), "same")).toBe(true);
+    expect(guard.admit(key, identity, next(), "same")).toBe(true);
+    for (let i = 0; i < 3; i++) {
+      const call = next();
+      expect(guard.admit(key, identity, call, "same")).toBe(false);
+      expect(guard.admit(key, identity, call, "same")).toBe(false);
+      expect(guard.recoveryExhausted).toBe(i === 2);
+    }
+    expect(guard.admit(key, identity, next(), "changed")).toBe(true);
+    expect(guard.recoveryExhausted).toBe(false);
+  });
+  it("changing input without observed progress does not replenish the recovery budget", () => {
+    const guard = new RepeatGuard();
+    for (const combo of [["Down"], ["Up"], ["Left"]]) {
+      const action: GuiAction = { verb: "key", combo };
+      expect(guard.admit(action, identity, next(), "same")).toBe(true);
+      expect(guard.admit(action, identity, next(), "same")).toBe(true);
+      expect(guard.admit(action, identity, next(), "same")).toBe(false);
+    }
+    expect(guard.recoveryExhausted).toBe(true);
+    guard.reset();
+    expect(guard.recoveryExhausted).toBe(false);
+  });
   it("refuses the third identical key before its effect", () => {
     const guard = new RepeatGuard();
     let effects = 0;

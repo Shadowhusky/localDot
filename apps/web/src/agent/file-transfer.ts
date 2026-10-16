@@ -21,7 +21,7 @@ export function safeTransferName(name: string): boolean {
     if (char === "/" || char === "\\" || char === "%" || code < 32 || (code >= 127 && code <= 159))
       return false;
   }
-  return true;
+  return new TextEncoder().encode(name).byteLength <= 255;
 }
 export function disposition(name: string): string {
   return `attachment; filename*=UTF-8''${encodeURIComponent(name).replaceAll("'", "%27").replaceAll("(", "%28").replaceAll(")", "%29").replaceAll("*", "%2A")}`;
@@ -30,15 +30,17 @@ export class FileTransferFailure extends Error {
   constructor(
     readonly uncertain: boolean,
     readonly status?: number,
+    message?: string,
   ) {
     super(
-      uncertain
-        ? "The upload may have finished. Check Downloads before selecting it again."
-        : "The file transfer was refused or could not be verified.",
+      message ??
+        (uncertain
+          ? "The upload may have finished. Check Downloads before selecting it again."
+          : "The file transfer was refused or could not be verified."),
     );
   }
 }
-function scope(owner: AbortSignal) {
+export function transferScope(owner: AbortSignal) {
   const abort = new AbortController();
   const timeout = setTimeout(() => abort.abort(), FILE_LIMITS.deadlineMs);
   const signal = AbortSignal.any([owner, abort.signal]);
@@ -50,7 +52,7 @@ function scope(owner: AbortSignal) {
     },
   };
 }
-async function responseFor(work: Promise<Response>, signal: AbortSignal): Promise<Response> {
+export async function responseFor(work: Promise<Response>, signal: AbortSignal): Promise<Response> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const abort = () => reject(signal.reason);
@@ -81,7 +83,7 @@ async function read(reader: ReadableStreamDefaultReader<Uint8Array>, signal: Abo
     if (signal.aborted) abort();
   });
 }
-async function boundedBody(
+export async function boundedBody(
   response: Response,
   limit: number,
   signal: AbortSignal,
@@ -117,7 +119,7 @@ async function boundedBody(
     }
   }
 }
-function endpoint(api: ApiClient, path: string) {
+export function transferEndpoint(api: ApiClient, path: string) {
   return `${api.socketUrl("").replace(/^ws/, "http")}${path}`;
 }
 export async function uploadFile(
@@ -135,11 +137,11 @@ export async function uploadFile(
     owner.aborted
   )
     throw new FileTransferFailure(false);
-  const lifetime = scope(owner);
+  const lifetime = transferScope(owner);
   try {
     const response = await responseFor(
       api.fetch(
-        endpoint(api, `/api/cells/${cellId}/upload?name=${encodeURIComponent(file.name)}`),
+        transferEndpoint(api, `/api/cells/${cellId}/upload?name=${encodeURIComponent(file.name)}`),
         {
           method: "POST",
           headers: {
@@ -197,11 +199,11 @@ export async function downloadResult(
 ): Promise<Blob> {
   if (!ULID_PATTERN.test(sessionId) || !safeTransferName(name) || owner.aborted)
     throw new FileTransferFailure(false);
-  const lifetime = scope(owner);
+  const lifetime = transferScope(owner);
   try {
     const response = await responseFor(
       api.fetch(
-        endpoint(api, `/api/agent/sessions/${sessionId}/files/${encodeURIComponent(name)}`),
+        transferEndpoint(api, `/api/agent/sessions/${sessionId}/files/${encodeURIComponent(name)}`),
         {
           method: "GET",
           headers: { authorization: api.authorization() },

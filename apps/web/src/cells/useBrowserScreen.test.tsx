@@ -74,7 +74,7 @@ it("keeps the last browser on screen while its status reconnects, stale until a 
   expect(result.current).toMatchObject({ cell: null, stale: false });
 });
 
-it("retires a same-ID previous revision, pauses with its parent, and ignores late old messages", () => {
+it("keeps the same browser visible across control revisions, but waits for fresh status before input", () => {
   const { result, rerender } = renderHook(
     ({ selected, current }) => useBrowserScreen(api, current, selected),
     { initialProps: { selected: selection, current: parent } },
@@ -83,13 +83,25 @@ it("retires a same-ID previous revision, pauses with its parent, and ignores lat
   send(browser);
   rerender({ selected: { ...selection, revision: 3 }, current: parent });
   expect(old.closed).toBe(true);
-  expect(result.current.cell).toBeNull();
-  send(browser, old);
-  expect(result.current.cell).toBeNull();
+  expect(result.current).toMatchObject({ cell: { id: selection.cellId }, stale: true });
+  send({ ...browser, stream: { connection: "stalled", viewers: 1, lastUpstreamAt: 5 } }, old);
+  expect(result.current).toMatchObject({ cell: browser, stale: true });
   send(browser);
-  expect(result.current.cell?.id).toBe(selection.cellId);
+  expect(result.current).toMatchObject({ cell: browser, stale: false });
   rerender({ selected: selection, current: { ...parent, paused: true } });
   expect(socket().closed).toBe(true);
+  expect(result.current.cell).toBeNull();
+});
+
+it("never carries the previous browser picture over to a different computer or browser", () => {
+  const { result, rerender } = renderHook(
+    ({ selected, current }) => useBrowserScreen(api, current, selected),
+    { initialProps: { selected: selection, current: parent } },
+  );
+  send(browser);
+  rerender({ selected: { ...selection, cellId: "01JXYZ0000000000000000ABCF" }, current: parent });
+  expect(result.current.cell).toBeNull();
+  rerender({ selected: selection, current: { ...parent, createdAt: "new-computer" } });
   expect(result.current.cell).toBeNull();
 });
 

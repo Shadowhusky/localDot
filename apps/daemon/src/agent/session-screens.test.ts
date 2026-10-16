@@ -1623,7 +1623,7 @@ describe("session-owned screen authority", () => {
     expect((await h.callTool("switch_screen", { screen: "browser" })).result.ok).toBe(false);
   });
 
-  it.each(["cannot start", "has no ready tab yet"] as const)(
+  it.each(["cannot start"] as const)(
     "keeps the task and the computer running when the signed-in browser %s",
     async (failure) => {
       const f = fixture(true);
@@ -1631,7 +1631,6 @@ describe("session-owned screen authority", () => {
       const h = tools(f);
       if (failure === "cannot start")
         vi.mocked(f.deps.browser.start).mockRejectedValueOnce(new Error("browser cell stopped"));
-      else f.client.tabs.mockResolvedValueOnce({ tabs: [{ id: randomUUID(), ready: false }] });
       const refused = await h.callTool("switch_screen", { screen: "browser" });
       expect(refused.result.ok).toBe(false);
       expect(refused.result.final).toBeUndefined();
@@ -1646,6 +1645,19 @@ describe("session-owned screen authority", () => {
       expect((await h.callTool("switch_screen", { screen: "browser" })).result.ok).toBe(true);
     },
   );
+
+  it("waits for a settling browser tab before switching instead of handing the task back", async () => {
+    const f = fixture(true);
+    await f.ready();
+    const h = tools(f);
+    f.client.tabs.mockResolvedValueOnce({ tabs: [{ id: randomUUID(), ready: false }] });
+    const switched = await h.callTool("switch_screen", { screen: "browser" });
+    expect(switched.result.ok).toBe(true);
+    expect(f.client.tabs.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(f.session.stopped).toBe(false);
+    expect(f.physicalStop).not.toHaveBeenCalled();
+    expect(f.screens.selection.screen).toBe("browser");
+  });
 
   it("returns to the desktop when the signed-in browser stops answering, retiring only the browser", async () => {
     const f = fixture(true);

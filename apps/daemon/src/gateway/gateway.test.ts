@@ -896,6 +896,60 @@ describe("ActionGateway type and key", () => {
     expect((dispatch?.data.ringAt ?? 0) - (dispatch?.data.pressT ?? 0)).toBe(29_300);
   });
 
+  it.each([
+    ["Xfce4-terminal", "ax", false, 0],
+    ["Chromium", "dom", false, 35],
+    ["Xfce4-terminal", "dom", false, 35],
+    ["Xfce4-terminal", "ax", true, 35],
+  ] as const)(
+    "types native commands promptly but preserves ordinary/secret input (%s, %s, %s)",
+    async (app, source, secret, firstMs) => {
+      const s = setup({
+        focused: () => ({
+          ...search(),
+          target: { ...search().target, app, source, secret, role: "terminal", window: "Terminal" },
+        }),
+        type: () => ({
+          progress: [{ count: 12, chunk: "printf hello", pressMono: 60_000 }],
+          result: {
+            done: true,
+            count: 12,
+            firstPressMono: 60_000,
+            injector: "xtest",
+            armedMono: 59_000,
+          },
+        }),
+      });
+      const outcome = await s.gateway.run(
+        {
+          source: "manual",
+          sessionId: s.sessionId,
+          cellId: s.cellId,
+          screen: {
+            cellId: s.cellId,
+            parentCellId: s.cellId,
+            scale: 2,
+            device: s.registry.for(s.cellId)!,
+            signal: new AbortController().signal,
+            check: () => {},
+            stream: () => s.cells.get(s.cellId)!.stream,
+            subscribe: () => () => {},
+          },
+        },
+        { verb: "type", text: "printf hello" },
+      );
+      expect(outcome.ok).toBe(true);
+      expect(s.fake.calls.find((c) => c.path === "/type")?.body).toMatchObject({
+        pace:
+          firstMs === 0
+            ? { firstMs: 0, firstCount: 0, restMs: 0 }
+            : { firstMs: 35, firstCount: 60, restMs: 6 },
+        injector: "xtest",
+        window: 77,
+      });
+    },
+  );
+
   it("a Stop mid-typing ends the typing itself", async () => {
     const s = setup({
       hitTest: () => ({ target: null, window: null, ms: 2 }),

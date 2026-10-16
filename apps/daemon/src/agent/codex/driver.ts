@@ -629,12 +629,14 @@ export class CodexDriver {
       if (fenced) return;
       fenced = true;
       mapper?.close();
+      // Interrupt the native turn before canceling its pending tool transport. Otherwise
+      // the runtime can treat the canceled call as a result and start another model request.
+      for (const holder of holders) stopHolder(holder);
       if (epoch) endpoint?.retireTurn(epoch);
       epochAbort?.abort();
       lifetime.abort();
       session.retireBrain(generation);
       closeEndpoint();
-      for (const holder of holders) stopHolder(holder);
     };
     const saveAssistant = () => {
       const text = mapper?.lastAssistantText();

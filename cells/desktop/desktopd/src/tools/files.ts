@@ -1,9 +1,11 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   closeSync,
   constants,
+  createReadStream,
   fchmodSync,
   fstatSync,
+  fsyncSync,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -14,6 +16,7 @@ import {
   renameSync,
   rmSync,
   type Stats,
+  statfsSync,
   writeSync,
 } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
@@ -22,13 +25,15 @@ import {
   type FileEntry,
   type FileListResult,
   type FileReadResult,
+  USER_UPLOAD,
+  type UserUploadReceipt,
   unifiedDiff,
 } from "@localdot/protocol";
 import { PathError, resolveInHome } from "./home.ts";
 
 export class FileToolError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409 | 413,
+    readonly status: 400 | 404 | 409 | 413 | 507,
     message: string,
   ) {
     super(message);
@@ -235,6 +240,12 @@ function temporary(home: string, path: string, mode?: number, createOnly = false
           throw error;
         }
       } else renameSync(temp, real);
+      const directory = openSync(dirname(real), constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        fsyncSync(directory);
+      } finally {
+        closeSync(directory);
+      }
     },
     dispose() {
       try {
@@ -405,8 +416,19 @@ export async function putFile(
   maxBytes = MAX_TRANSFER_BYTES,
   signal?: AbortSignal,
   createOnly = false,
-): Promise<{ path: string; bytes: number }> {
-  limit(maxBytes);
+  integrity?: { bytes: number; sha256: string },
+): Promise<{ path: string; bytes: number; sha256?: string }> {
+  if (integrity) {
+    if (
+      !Number.isSafeInteger(maxBytes) ||
+      maxBytes < 0 ||
+      maxBytes > USER_UPLOAD.bytes ||
+      integrity.bytes !== maxBytes ||
+      !/^[a-f0-9]{64}$/.test(integrity.sha256) ||
+      !createOnly
+    )
+      throw new FileToolError(400, "invalid incoming file verification");
+  } else limit(maxBytes);
   signal?.throwIfAborted();
   if (mode !== undefined && (!Number.isInteger(mode) || mode < 0 || mode > 0o777))
     throw new FileToolError(400, "invalid mode");
@@ -420,6 +442,7 @@ export async function putFile(
     throw error;
   }
   let bytes = 0;
+  const hash = integrity ? createHash("sha256") : undefined;
   const abort = () => {
     void reader.cancel(signal?.reason).catch(() => undefined);
   };
@@ -432,15 +455,75 @@ export async function putFile(
       if (chunk.done) break;
       bytes += chunk.value.byteLength;
       if (bytes > maxBytes) throw new FileToolError(413, "file too large");
+      hash?.update(chunk.value);
       writeAll(temp.fd, chunk.value);
     }
     signal?.throwIfAborted();
+    const sha256 = hash?.digest("hex");
+    if (integrity && (bytes !== integrity.bytes || sha256 !== integrity.sha256))
+      throw new FileToolError(409, "incoming file verification failed");
+    fsyncSync(temp.fd);
     temp.commit();
-    return { path: displayPath(home, temp.real), bytes };
+    return { path: displayPath(home, temp.real), bytes, ...(sha256 ? { sha256 } : {}) };
   } finally {
     signal?.removeEventListener("abort", abort);
     void reader.cancel().catch(() => undefined);
     reader.releaseLock();
     temp.dispose();
   }
+}
+
+// This is exclusively the authenticated user-to-computer transfer. Agent read, outbound
+// upload and text-edit limits stay unchanged. A receipt lost after rename can be revalidated.
+export async function putUserFile(
+  home: string,
+  path: string,
+  source: ReadableStream<Uint8Array>,
+  expected: { bytes: number; sha256: string },
+  signal: AbortSignal,
+): Promise<UserUploadReceipt> {
+  const real = inHome(home, path);
+  if (lstatSync(real, { throwIfNoEntry: false })) {
+    const file = openFile(home, path);
+    const stream = createReadStream(real, { fd: file.fd, autoClose: false, signal });
+    try {
+      if (file.stat.size !== expected.bytes)
+        throw new FileToolError(409, "upload destination already exists");
+      const hash = createHash("sha256");
+      for await (const chunk of stream) hash.update(chunk);
+      const sha256 = hash.digest("hex"),
+        after = fstatSync(file.fd);
+      checked(home, path, real);
+      const current = lstatSync(real);
+      if (
+        sha256 !== expected.sha256 ||
+        !same(file.stat, current) ||
+        after.size !== file.stat.size ||
+        after.mtimeMs !== file.stat.mtimeMs ||
+        after.ctimeMs !== file.stat.ctimeMs
+      )
+        throw new FileToolError(409, "upload destination changed");
+      signal.throwIfAborted();
+      return { path: displayPath(home, real), bytes: expected.bytes, sha256 };
+    } finally {
+      // destroy/close owns this descriptor even with autoClose:false. A synchronous
+      // second close can hit a descriptor already reused by the next upload or receipt.
+      await new Promise<void>((resolve) => stream.close(() => resolve()));
+      void source.cancel().catch(() => {});
+    }
+  }
+  const disk = statfsSync(home);
+  if (disk.bavail * disk.bsize < expected.bytes + 64 * 1024 ** 2)
+    throw new FileToolError(507, "not enough computer storage");
+  const result = await putFile(
+    home,
+    path,
+    source,
+    undefined,
+    expected.bytes,
+    signal,
+    true,
+    expected,
+  );
+  return { ...result, sha256: expected.sha256 };
 }

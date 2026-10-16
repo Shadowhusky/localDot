@@ -40,6 +40,7 @@ async function fixture(options: { home?: string; maxBytes?: number } = {}) {
   if (!options.home) homes.push(home);
   const renderer = new FakeRenderer();
   let clock = 0;
+  const now = () => Date.parse("2026-10-09T14:05:00Z") + clock;
   const store = new ExportStore(home, {
     ...DEFAULT_EXPORT_LIMITS,
     ...(options.maxBytes ? { maxBytes: options.maxBytes } : {}),
@@ -47,7 +48,7 @@ async function fixture(options: { home?: string; maxBytes?: number } = {}) {
   const jobs = new ExportJobs({
     store,
     renderer,
-    now: () => Date.parse("2026-10-09T14:05:00Z") + clock,
+    now,
     clock: () => clock,
   });
   const states: ExportsState[] = [];
@@ -59,6 +60,7 @@ async function fixture(options: { home?: string; maxBytes?: number } = {}) {
     jobs,
     renderer,
     states,
+    now,
     tick(ms: number) {
       clock += ms;
     },
@@ -303,7 +305,8 @@ describe("ExportJobs", () => {
     const home = first.home;
     const renderer = new FakeRenderer();
     renderer.able = { ...ABLE, maxPixels: { mp4: 1280 * 800, webm: 1280 * 800 } };
-    const jobs = new ExportJobs({ store: new ExportStore(home), renderer });
+    // Restart on the same fixture clock: wall time must not expire this synthetic video.
+    const jobs = new ExportJobs({ store: new ExportStore(home), renderer, now: first.now });
     await jobs.check();
     expect(() => jobs.retry(job.id)).toThrow(/can't make video that large/);
     expect(phase(jobs, job.id)).toBe("failed");

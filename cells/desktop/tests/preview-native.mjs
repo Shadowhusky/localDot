@@ -92,6 +92,7 @@ await until(
 );
 const browser = spawn("/usr/local/bin/localdot-chromium", ["about:blank"], { stdio: "ignore" });
 let ws;
+let cover;
 try {
   await until(async () =>
     (await (await fetch("http://127.0.0.1:9222/json/list")).json()).some((t) => t.type === "page"),
@@ -149,6 +150,53 @@ try {
       clickCount: 1,
     });
   assert.match((await api("/browser/read", { maxChars: 2000 })).body.text, /Clicked successfully/);
+  const observe = async () => {
+    const result = await api("/observe", {});
+    assert.equal(result.status, 200);
+    return result.body;
+  };
+  const window = (await observe()).windows.find((w) => w.active && /chromium/i.test(w.cls));
+  assert.ok(window, "the preview browser must be the native foreground window");
+  cover = spawn(
+    "python3",
+    [
+      "-c",
+      `
+from Xlib import X, display, protocol
+d = display.Display(":1")
+root = d.screen().root
+w = root.create_window(0, 0, 1200, 750, 0, X.CopyFromParent, X.InputOutput, X.CopyFromParent,
+                      background_pixel=0x334455, event_mask=X.ExposureMask)
+w.set_wm_name("Visibility fixture")
+w.set_wm_class("visibility-fixture", "VisibilityFixture")
+w.map()
+d.sync()
+root.send_event(protocol.event.ClientMessage(window=w, client_type=d.intern_atom("_NET_ACTIVE_WINDOW"),
+                data=(32, [2, X.CurrentTime, 0, 0, 0])), event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+d.flush()
+while True: d.next_event()
+  `,
+    ],
+    { stdio: "ignore" },
+  );
+  await until(async () =>
+    (await observe()).windows.some((w) => w.active && w.cls === "VisibilityFixture"),
+  );
+  // Passive inventory leaves the covering window alone.
+  const inventory = await fetch("http://127.0.0.1:7700/browser/page", {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(inventory.status, 200);
+  assert.ok((await observe()).windows.some((w) => w.active && w.cls === "VisibilityFixture"));
+  const revealed = await api("/browser/read", { maxChars: 2000 });
+  assert.equal(revealed.status, 200, JSON.stringify(revealed));
+  assert.match(revealed.body.text, /Clicked successfully/);
+  const visible = await observe();
+  assert.ok(visible.windows.some((w) => w.id === window.id && w.active));
+  writeFileSync("/tmp/local-preview-revealed.webp", Buffer.from(visible.image, "base64"));
+  console.log("PASS browser read reveals the working window on the actual desktop");
+  cover.kill("SIGTERM");
+  cover = undefined;
   const png = await cdp("Page.captureScreenshot", { format: "png" });
   writeFileSync("/tmp/local-preview-verified.png", Buffer.from(png.data, "base64"));
   console.log("PASS visible interaction and screenshot");
@@ -179,6 +227,7 @@ try {
   assert.equal(unsafe.body.code, "unsafe_port");
   console.log("PASS public redirect, stopped server, and genuine unsafe-port diagnostics");
 } finally {
+  cover?.kill("SIGTERM");
   ws?.close();
   browser.kill("SIGTERM");
   server.closeAllConnections();

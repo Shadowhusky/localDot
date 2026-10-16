@@ -32,6 +32,8 @@ export type ComputerPhase =
   | "connecting"
   | "live"
   | "reconnecting"
+  // Only this viewer's screen is suspended, not the computer or task.
+  | "suspended"
   | "frozen"
   | "stopping"
   | "stopped"
@@ -168,6 +170,13 @@ export function hudFor({
       "resume",
     );
   }
+  if (picture === "suspended")
+    return hud(
+      "suspended",
+      "Ready",
+      "Your computer is running. The screen resumes when you return.",
+      "stop",
+    );
   // A stage that has shown the computer keeps its picture through a reconnect.
   const connection = cell.stream.connection;
   if (connection === "stalled" || connection === "disconnected" || picture === "held")
@@ -185,7 +194,10 @@ export function hudFor({
 export function withScreenHud(parent: HudState, screen?: HudState): HudState {
   if (
     !screen ||
-    (parent.phase !== "live" && parent.phase !== "connecting" && parent.phase !== "reconnecting")
+    (parent.phase !== "live" &&
+      parent.phase !== "connecting" &&
+      parent.phase !== "reconnecting" &&
+      parent.phase !== "suspended")
   )
     return parent;
   return { ...screen, action: parent.action };

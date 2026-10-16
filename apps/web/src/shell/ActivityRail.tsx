@@ -26,6 +26,7 @@ import {
 import { ChangeRow, type UndoStatus } from "../agent/ChangeRow.tsx";
 import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/model.ts";
 import { PlanStrip } from "../agent/PlanStrip.tsx";
+import { planPhase } from "../agent/plan-state.ts";
 import { ResearchSources } from "../agent/ResearchSources.tsx";
 import { onStepFocus, takeStep, wantedStep } from "../agent/step-focus.ts";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
@@ -393,7 +394,11 @@ export function ActivityRail({
       </div>
       {plan.length > 0 && (
         <div className="activity-plan">
-          <PlanStrip plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
+          <PlanStrip
+            plan={plan}
+            phase={planPhase(model)}
+            label={replay ? "Plan at replay time" : "Task plan"}
+          />
         </div>
       )}
       <div className="activity-body">

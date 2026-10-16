@@ -230,8 +230,14 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
           (e.data.pause as { phase?: string }).phase === "resuming",
       ),
     ).toBe(true);
-    // One card per identical key call. The third is approved, then stops before its dispatch.
+    // Careful mode still authorizes each call. The third input is blocked, but the model gets
+    // recovery guidance with no question or pause. Ignoring that guidance twice exhausts recovery.
     for (let n = 0; n < 3; n++) await approveCurrent(page, f);
+    await expect.poll(async () => (await f.state(owner))[0]?.provider.length).toBe(12);
+    const recovering = (await f.state(owner))[0];
+    expect(recovering?.pause).toBeNull();
+    expect(recovering?.events.filter((e) => e.type === "ask.request")).toHaveLength(1); // table choice only
+    for (let n = 0; n < 2; n++) await approveCurrent(page, f);
     await expect
       .poll(async () => (await f.state(owner))[0]?.pause?.reason, { timeout: 30000 })
       .toBe("repeated_action");
@@ -239,7 +245,7 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
       .poll(async () => (await f.state(owner))[0]?.pause?.phase, { timeout: 30000 })
       .toBe("paused");
     const repeated = (await f.state(owner))[0];
-    expect(repeated?.provider).toHaveLength(11);
+    expect(repeated?.provider).toHaveLength(13);
     const nativeKeys = repeated?.events.filter(
       (e) =>
         e.type === "action.dispatch" &&
@@ -248,7 +254,8 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
     expect(nativeKeys).toHaveLength(2);
     expect(repeated?.provider.every((p) => !p.manualSentinelPresent)).toBe(true);
     await showPane(page, "Conversation");
-    await expect(page.getByText(/I repeated the same action twice/).first()).toBeVisible();
+    await expect(page.getByText(/I paused because I kept retrying/).first()).toBeVisible();
+    await expect(page.getByText(/What should I change before continuing/)).toHaveCount(0);
     await page.screenshot({ path: info.outputPath("safety-repeated-paused.png"), fullPage: true });
     const stop = page.waitForResponse(
       (r) =>

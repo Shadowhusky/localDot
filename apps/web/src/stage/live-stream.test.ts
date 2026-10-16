@@ -348,7 +348,10 @@ it("releases hidden decoding and transports, then obtains a fresh stream on retu
     visibility = "hidden";
     document.dispatchEvent(new Event("visibilitychange"));
     expect(clients()).toHaveLength(0);
-    expect(stream.picture).toBe("held");
+    expect(stream.picture).toBe("suspended");
+    // Worker messages already queued before hide must not turn suspension into a live stream.
+    stream.presented();
+    expect(stream.picture).toBe("suspended");
     const requests = minted();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(minted()).toBe(requests);
@@ -359,6 +362,15 @@ it("releases hidden decoding and transports, then obtains a fresh stream on retu
     expect(minted()).toBe(requests + 1);
     expect(clients()).toHaveLength(1);
     expect(clients()[0]).not.toBe(frame);
+    // Returning clears suspension; a real failure to recover still reports a lost picture.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(stream.picture).toBe("held");
+    const fresh = clients()[0];
+    if (!fresh) throw new Error("no resumed stream client");
+    playInClient(fresh, "after-hide");
+    await vi.advanceTimersByTimeAsync(250);
+    stream.presented();
+    expect(stream.picture).toBe("live");
   } finally {
     visibility = "visible";
     restore();

@@ -102,6 +102,27 @@ describe("guarded Chromium request broker", () => {
     broker.close();
   });
 
+  it("retires only a known session and ignores its late replies without delivering private data", async () => {
+    const { broker, receive, fatal } = setup();
+    const pending = expect(broker.send("Page.enable", {}, { sessionId: "owned" })).rejects.toThrow(
+      "closed",
+    );
+    broker.retireSession("owned");
+    await pending;
+    receive({ id: 1, sessionId: "owned", result: { private: "retired-canary" } });
+    receive({ method: "Inspector.detached", params: {}, sessionId: "owned" });
+    expect(broker.closed).toBe(false);
+    expect(fatal).not.toHaveBeenCalled();
+    await expect(broker.send("Page.enable", {}, { sessionId: "owned" })).rejects.toThrow("closed");
+    broker.attachSession("owned");
+    const replacement = broker.send("Page.enable", {}, { sessionId: "owned" });
+    receive({ id: 2, sessionId: "owned", result: {} });
+    await expect(replacement).resolves.toEqual({});
+    broker.retireSession("never-owned");
+    receive({ method: "Inspector.detached", params: {}, sessionId: "never-owned" });
+    expect(broker.closed).toBe(true);
+  });
+
   it("fences every pending command after an uncertain timeout", async () => {
     vi.useFakeTimers();
     const { broker, receive, fatal, close } = setup();

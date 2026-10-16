@@ -74,8 +74,9 @@ describe("Codex developer instructions", () => {
     expect(text).toContain("browser_upload");
     expect(text).toContain(workingRules("batch"));
     expect(text).toContain(ENVIRONMENT_CONTEXT);
-    // Source-context recall and evidence-based verification are shared by all providers.
-    expect(text.length).toBeLessThan(9000);
+    // Includes shared file-transfer semantics; data stays on disk, not in model context.
+    expect(text).toContain("complete working files at those paths");
+    expect(text.length).toBeLessThan(9500);
     expect(text).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
   });
   it("adds the research rules and tool only in research mode", () => {

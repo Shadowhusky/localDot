@@ -17,6 +17,7 @@ import {
   type GuiAction,
   HELD_BUTTON_MS,
   type NativeActionIdentity,
+  REPEATED_INPUT,
 } from "../../gateway/gateway.ts";
 import { authorizePrepared, runsUnasked } from "../safety/authorize.ts";
 import { decideAutonomy } from "../safety/autonomy.ts";
@@ -258,6 +259,7 @@ export interface InputRun {
   needsUser?: true;
   // The element it was to act on is not there as listed.
   gone?: true;
+  recovery?: ToolResult["recovery"];
 }
 
 const NEEDS_USER = "this step needs the user's approval or control";
@@ -305,7 +307,8 @@ export async function runInput(
     ...selected,
     ...(hold ? { signal: hold.signal } : {}),
     source: "agent",
-    beforeEffect: (action, identity) => session.admitNativeEffect(action, identity, ctx.step),
+    beforeEffect: (action, identity, frame) =>
+      session.admitNativeEffect(action, identity, ctx.step, frame),
     afterEffect: (action, identity, changed) =>
       session.settleNativeEffect(action, identity, changed),
     holdInput: (release) => session.holdInput(release),
@@ -452,6 +455,15 @@ export async function runInput(
   return {
     ok: outcome.ok,
     notes,
+    ...(outcome.error === REPEATED_INPUT
+      ? {
+          recovery: {
+            kind: "repeated_failure" as const,
+            surface: "runtime" as const,
+            retry: "after_change" as const,
+          },
+        }
+      : {}),
     ...(outcome.frameId ? { frameId: outcome.frameId } : {}),
     ...(outcome.cancelled === "stale" ? { stale: true as const } : {}),
   };
@@ -477,6 +489,7 @@ export async function inputResult(
   }
   return {
     ok: run.ok,
+    ...(run.recovery ? { recovery: run.recovery } : {}),
     ...(run.stale ? { cancelled: "stale" as const } : {}),
     content: content.length ? content : [text(run.ok ? "Done." : "Failed.")],
   };
@@ -509,6 +522,7 @@ async function batch(deps: ToolDeps, ctx: ToolCallContext, a: ComputerAction): P
   if (!steps?.length) return { ok: false, content: [text("batch needs steps")] };
   const notes: ToolResult["content"] = [];
   let frameId: string | undefined;
+  let recovery: ToolResult["recovery"];
   for (const [i, step] of steps.entries()) {
     const which = `step ${i + 1} of ${steps.length} (${ordinal(step)})`;
     if (i > 0) nextStep(ctx);
@@ -531,6 +545,7 @@ async function batch(deps: ToolDeps, ctx: ToolCallContext, a: ComputerAction): P
       return finish(false, "unrun");
     }
     if (!run.ok) {
+      recovery = run.recovery;
       notes.push(text(`Stopped at ${which}.${doneBefore(i)}`), ...run.notes);
       return finish(false, run.stale ? "stale" : undefined);
     }
@@ -544,7 +559,12 @@ async function batch(deps: ToolDeps, ctx: ToolCallContext, a: ComputerAction): P
     if (!frameId) frameId = (await deps.gateway.observe(screenContext(ctx))).frameId;
     ctx.check();
     const stale = stop === "stale" ? { stale: true as const } : {};
-    return inputResult(deps, ctx, { ok, notes, frameId, ...stale }, a.basedOn);
+    return inputResult(
+      deps,
+      ctx,
+      { ok, notes, frameId, ...stale, ...(recovery ? { recovery } : {}) },
+      a.basedOn,
+    );
   }
 }
 

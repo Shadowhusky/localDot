@@ -8,7 +8,7 @@ import type { Status } from "../session/status.ts";
 // nothing is known yet.
 export type IslandShape = "hidden" | "ready" | "task" | "control" | "computer";
 
-const ON = new Set<Status["computer"]>(["live", "connecting", "reconnecting"]);
+const ON = new Set<Status["computer"]>(["live", "connecting", "reconnecting", "suspended"]);
 
 export function islandShape(status: Status, curtain: boolean): IslandShape {
   if (curtain || status.computer === "checking") return "hidden";

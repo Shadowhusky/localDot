@@ -240,6 +240,8 @@ export function useLiveSession(
     // Same-session history survives API replacement; transport readiness never does.
     agentFeed.connection("connecting");
     let socket: SocketHandle | undefined;
+    let repairTimer: ReturnType<typeof setTimeout> | undefined;
+    let repairDelay = 500;
     let closed = false;
     let disposed = false;
     let syncing = false;
@@ -313,7 +315,26 @@ export function useLiveSession(
             if (disposed) return;
             const known = agentFeed.read().model.messages;
             const event = agentFeed.accept(data);
-            if (!event) return;
+            if (!event) {
+              // A missing event used to fence the feed forever while its socket stayed
+              // open. Replay from the last accepted sequence, with bounded backoff.
+              if (agentFeed.read().streamError && !repairTimer) {
+                repairTimer = setTimeout(() => {
+                  repairTimer = undefined;
+                  if (disposed || closed || !agentFeed.read().streamError) return;
+                  socket?.close();
+                  agentFeed.connection("lost");
+                  live();
+                }, repairDelay);
+                repairDelay = Math.min(5000, repairDelay * 2);
+              }
+              return;
+            }
+            if (!agentFeed.read().streamError) {
+              clearTimeout(repairTimer);
+              repairTimer = undefined;
+              repairDelay = 500;
+            }
             const lines =
               event.type === "message.delta"
                 ? saidLines(modelRef.current, event.data.messageId)
@@ -330,6 +351,7 @@ export function useLiveSession(
     };
     const end = () => {
       closed = true;
+      clearTimeout(repairTimer);
       over.current.add(sessionId);
       agentFeed.connection("ended");
       socket?.close();
@@ -358,6 +380,7 @@ export function useLiveSession(
     return () => {
       disposed = true;
       reading.abort();
+      clearTimeout(repairTimer);
       document.removeEventListener("visibilitychange", activity);
       clearInterval(clockTimer);
       clearInterval(flush);

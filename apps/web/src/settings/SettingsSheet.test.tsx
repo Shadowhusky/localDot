@@ -9,6 +9,7 @@ import { knownFixture } from "./testing.ts";
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -65,11 +66,85 @@ function onPhone() {
   }));
 }
 
+// jsdom has no layout. Give the section scroller distinct positions so a misplaced navigation
+// cannot pass just because every element reports zero.
+function sectionLayout() {
+  const tops: Record<string, number> = { dot: 0, models: 600, autonomy: 1200, keys: 1800 };
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const scroller = this.closest<HTMLElement>(".ui-sheet-body");
+    const top = this.dataset.section
+      ? 80 + (tops[this.dataset.section] ?? 0) - (scroller?.scrollTop ?? 0)
+      : 80;
+    return {
+      top,
+      bottom: top + 100,
+      left: 0,
+      right: 600,
+      width: 600,
+      height: 100,
+      x: 0,
+      y: top,
+      toJSON() {},
+    };
+  });
+  const resized = new Set<() => void>();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private callback: () => void) {}
+      observe(element: HTMLElement) {
+        if (element.id === "settings-sheet-body") resized.add(this.callback);
+      }
+      disconnect() {
+        resized.delete(this.callback);
+      }
+    },
+  );
+  return {
+    tops,
+    resize: () =>
+      act(() => {
+        for (const callback of resized) callback();
+      }),
+  };
+}
+const settingsScroll = () => {
+  const element = sheet().querySelector<HTMLElement>(".ui-sheet-body");
+  if (!element) throw new Error("Settings scroll container missing");
+  return element;
+};
+const currentSection = () =>
+  screen.getByRole("navigation", { name: "Settings sections" }).querySelector("[aria-current=true]")
+    ?.textContent;
+
 describe("settings inspector", () => {
-  it("opens over a dimmed page on the main provider, and on the autonomy choices when asked", () => {
-    const view = render(<SettingsSheet {...props()} />);
+  it("opens at the top and stays there as settings load", () => {
+    const layout = sectionLayout();
+    const p = { ...props(), persona: { value: "coder" as const, onChange: vi.fn() } };
+    const view = render(<SettingsSheet {...p} loading sectionRequest={1} />);
+    const title = screen.getByRole("heading", { name: "Your dot" });
+    expect(settingsScroll().scrollTop).toBe(0);
+    expect(document.activeElement).toBe(title);
+    expect(currentSection()).toBe("Your dot");
+    view.rerender(<SettingsSheet {...p} sectionRequest={1} />);
+    layout.resize();
+    expect(settingsScroll().scrollTop).toBe(0);
+    expect(document.activeElement).toBe(title);
+    expect(currentSection()).toBe("Your dot");
+  });
+  it("opens over a dimmed page on the requested model or autonomy choices without focus scrolling", () => {
+    sectionLayout();
+    const focused = vi.spyOn(HTMLElement.prototype, "focus");
+    const model = props();
+    const view = render(<SettingsSheet {...model} section="models" loading />);
+    expect(settingsScroll().scrollTop).toBe(600);
+    view.rerender(<SettingsSheet {...model} section="models" />);
     const main = screen.getByRole("region", { name: "Main model" });
     expect(document.activeElement).toBe(within(main).getByRole("combobox", { name: "Provider" }));
+    expect(focused).toHaveBeenLastCalledWith({ preventScroll: true });
+    expect(settingsScroll().scrollTop).toBe(600);
     expect(sheet().getAttribute("aria-modal")).toBe("true");
     view.unmount();
     const p = { ...props(), autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
@@ -82,6 +157,97 @@ describe("settings inspector", () => {
     later.rerender(<SettingsSheet {...p} section="autonomy" sectionRequest={1} dirty />);
     expect(document.activeElement).toBe(careful);
     expect(p.onAutonomy).not.toHaveBeenCalled();
+  });
+  it("keeps a sidebar choice when an earlier requested section finishes loading", () => {
+    const layout = sectionLayout();
+    const p = { ...props(), keysPanel: keysPanel() };
+    const view = render(<SettingsSheet {...p} section="models" sectionRequest={1} loading />);
+    const keys = within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole(
+      "button",
+      { name: "Keys" },
+    );
+    keys.focus();
+    fireEvent.click(keys);
+    expect(settingsScroll().scrollTop).toBe(1800);
+    layout.tops.keys = 2000;
+    view.rerender(<SettingsSheet {...p} section="models" sectionRequest={1} />);
+    layout.resize();
+    expect(currentSection()).toBe("Keys");
+    expect(document.activeElement).toBe(keys);
+    expect(settingsScroll().scrollTop).toBe(2000);
+  });
+  it("leaves manual scrolling and focus alone when loading finishes or content resizes", () => {
+    const layout = sectionLayout();
+    const p = { ...props(), autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
+    const view = render(<SettingsSheet {...p} section="autonomy" loading />);
+    const focused = document.activeElement;
+    fireEvent.wheel(settingsScroll());
+    settingsScroll().scrollTop = 75;
+    view.rerender(<SettingsSheet {...p} section="autonomy" />);
+    layout.resize();
+    expect(settingsScroll().scrollTop).toBe(75);
+    expect(document.activeElement).toBe(focused);
+  });
+  it("resets to the top when reopened during its closing transition", () => {
+    sectionLayout();
+    Object.defineProperty(HTMLElement.prototype, "getAnimations", {
+      configurable: true,
+      value: () => [
+        {
+          effect: { getComputedTiming: () => ({ endTime: 1000 }) },
+          finished: new Promise(() => {}),
+        },
+      ],
+    });
+    try {
+      const p = {
+        ...props(),
+        keysPanel: keysPanel(),
+        persona: { value: "coder" as const, onChange: vi.fn() },
+      };
+      const view = render(<SettingsSheet {...p} section="keys" sectionRequest={1} />);
+      expect(settingsScroll().scrollTop).toBe(1800);
+      view.rerender(<SettingsSheet {...p} open={false} sectionRequest={2} />);
+      view.rerender(<SettingsSheet {...p} sectionRequest={3} />);
+      expect(settingsScroll().scrollTop).toBe(0);
+      expect(currentSection()).toBe("Your dot");
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your dot" }));
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "getAnimations");
+    }
+  });
+  it("returns focus to the opener after focusing the first section", () => {
+    const button = document.createElement("button");
+    document.body.append(button);
+    button.focus();
+    try {
+      const p = props();
+      const view = render(<SettingsSheet {...p} />);
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Models" }));
+      view.rerender(<SettingsSheet {...p} open={false} />);
+      expect(document.activeElement).toBe(button);
+    } finally {
+      button.remove();
+    }
+  });
+  it("honors a repeated request for the same section after browsing elsewhere", () => {
+    sectionLayout();
+    const p = { ...props(), keysPanel: keysPanel() };
+    const view = render(<SettingsSheet {...p} section="models" sectionRequest={1} />);
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole("button", {
+        name: "Keys",
+      }),
+    );
+    expect(settingsScroll().scrollTop).toBe(1800);
+    view.rerender(<SettingsSheet {...p} section="models" sectionRequest={2} />);
+    expect(currentSection()).toBe("Models");
+    expect(settingsScroll().scrollTop).toBe(600);
+    expect(document.activeElement).toBe(
+      within(screen.getByRole("region", { name: "Main model" })).getByRole("combobox", {
+        name: "Provider",
+      }),
+    );
   });
   it("opens on what dot knows when asked", () => {
     const knowledge = {

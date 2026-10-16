@@ -175,7 +175,11 @@ export interface ActionContext {
   redact?(value: string): string;
   authorizeAgent?(request: NativeActionRequest): Promise<NativeActionPermit | undefined>;
   // Private daemon callback at the last synchronous boundary before physical input.
-  beforeEffect?(action: GuiAction, identity: NativeActionIdentity): boolean;
+  beforeEffect?(
+    action: GuiAction,
+    identity: NativeActionIdentity,
+    frame?: string,
+  ): boolean | "recover";
   // The outcome of the input beforeEffect admitted, once it settled: whether the screen changed.
   afterEffect?(action: GuiAction, identity: NativeActionIdentity, changed: boolean): void;
   // Private daemon callback: input state outlives this action (a button left down, a cursor placed
@@ -234,6 +238,9 @@ class Cancelled extends Error {
     this.name = "Cancelled";
   }
 }
+
+export const REPEATED_INPUT =
+  "Not performed: this input was already sent twice without verified progress. Inspect the current screen and the previous result; a missing screenshot does not mean the input failed. Change the target or approach, or use another appropriate tool. Do not replay a possible side effect. Continue the task without asking the user to debug the repetition; ask only for specific missing information or a decision only they can make.";
 
 // Only a viewer's stream can hold dispatch: with nobody attached, a `disconnected` left behind by a
 // closed tab is not a stall.
@@ -1043,11 +1050,23 @@ export class ActionGateway {
     if (identity.target)
       this.#append(ctx, "action.target", { target: clipTarget(identity.target) });
     await this.#waitForStream(ctx);
-    const pace = {
-      firstMs: typingPaceMs(speed, 0),
-      firstCount: 60,
-      restMs: typingPaceMs(speed, 60),
-    };
+    // Commands need no human-reading animation. Use the desktop's observed application class,
+    // never an agent label/window title (a web page can call itself "Terminal"). Keep native
+    // per-key delivery and cancellation; this does not paste through a shared clipboard.
+    const terminal =
+      (!ctx.screen || ctx.screen.cellId === ctx.screen.parentCellId) &&
+      !masked &&
+      identity.target?.source === "ax" &&
+      /^(xfce4-terminal|gnome-terminal(?:-server)?|org\.gnome\.Terminal|xterm|uxterm|konsole|kitty|alacritty)$/iu.test(
+        identity.target.app ?? "",
+      );
+    const pace = terminal
+      ? { firstMs: 0, firstCount: 0, restMs: 0 }
+      : {
+          firstMs: typingPaceMs(speed, 0),
+          firstCount: 60,
+          restMs: typingPaceMs(speed, 60),
+        };
     let first = true;
     // Stop reaches the request itself: desktopd stops typing at the next key, however long the text.
     const typing = {
@@ -1287,7 +1306,15 @@ export class ActionGateway {
         "stale",
         "the approved action or target changed; look again before acting",
       );
-    if (ctx.beforeEffect?.(action, identity) !== true)
+    const observed = this.#lastFrame.get(ctx.cellId);
+    const owned = observed?.sessionId === ctx.sessionId ? observed : undefined;
+    const admission = ctx.beforeEffect?.(
+      action,
+      identity,
+      owned ? `${ctx.cellId}:${owned.digest}` : undefined,
+    );
+    if (admission === "recover") throw new Cancelled("preflight", REPEATED_INPUT, owned?.frameId);
+    if (admission !== true)
       throw new Cancelled(
         "user",
         "this input was paused before dispatch; wait for explicit Resume",

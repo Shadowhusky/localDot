@@ -3,6 +3,7 @@ import { type CdpTransport, MAX_CDP_MESSAGE_BYTES } from "./pipe.ts";
 
 export const MAX_CDP_PENDING = 32;
 export const CDP_REQUEST_TIMEOUT_MS = 5000;
+const MAX_RETIRED_SESSIONS = 4096;
 
 const events = new Set([
   "Target.attachedToTarget",
@@ -62,6 +63,7 @@ function record(value: unknown): value is Record<string, unknown> {
 export class GuardedCdp {
   readonly #pending = new Map<number, PendingRequest>();
   readonly #listeners = new Map<string, Set<EventListener>>();
+  readonly #retiredSessions = new Set<string>();
   readonly #unsubscribe: (() => void)[] = [];
   #nextId = 1;
   #closed = false;
@@ -90,6 +92,8 @@ export class GuardedCdp {
       if (this.#pending.size >= MAX_CDP_PENDING) throw new CdpRequestError("busy");
       const command = guardCdpCommand(method, params, this.capabilities, options.sessionId);
       if (this.#closed) throw new CdpRequestError("closed");
+      if (command.sessionId && this.#retiredSessions.has(command.sessionId))
+        throw new CdpRequestError("closed");
       if (options.signal?.aborted) throw new CdpRequestError("cancelled");
       if (this.#pending.size >= MAX_CDP_PENDING) throw new CdpRequestError("busy");
       if (!Number.isSafeInteger(this.#nextId)) {
@@ -156,6 +160,27 @@ export class GuardedCdp {
     return this.#fail(new CdpRequestError("closed"), true);
   }
 
+  // Closing a popup/OOPIF races its pending replies and final inspector events. Revoke only
+  // that owned session. A reply can no longer deliver a result, and late events cannot poison
+  // the other tabs. Unknown sessions still fail closed; this is not a general ignore-errors path.
+  retireSession(sessionId: string): void {
+    if (this.#closed || !this.capabilities.ownsSession(sessionId)) return;
+    this.#retiredSessions.add(sessionId);
+    if (this.#retiredSessions.size > MAX_RETIRED_SESSIONS)
+      this.#retiredSessions.delete(this.#retiredSessions.values().next().value as string);
+    for (const [id, request] of this.#pending) {
+      if (request.sessionId !== sessionId) continue;
+      this.#pending.delete(id);
+      request.cleanup();
+      request.reject(new CdpRequestError("closed"));
+    }
+  }
+
+  attachSession(sessionId: string): void {
+    if (!this.#closed && this.capabilities.ownsSession(sessionId))
+      this.#retiredSessions.delete(sessionId);
+  }
+
   #receive(message: string): void {
     if (this.#closed) return;
     if (Buffer.byteLength(message, "utf8") > MAX_CDP_MESSAGE_BYTES) {
@@ -209,6 +234,8 @@ export class GuardedCdp {
       else request.resolve(Object.freeze(envelope.result as Record<string, unknown>));
       return;
     }
+    if (typeof envelope.sessionId === "string" && this.#retiredSessions.has(envelope.sessionId))
+      return;
     if (typeof envelope.method !== "string" || !events.has(envelope.method)) return;
     const pageEvent = /^(Page|DOM|Inspector)\./u.test(envelope.method);
     const browserEvent = envelope.method.startsWith("Browser.");
@@ -256,6 +283,7 @@ export class GuardedCdp {
     }
     this.#pending.clear();
     this.#listeners.clear();
+    this.#retiredSessions.clear();
     try {
       if (retire && this.transport.retire?.()) return true;
     } catch {}

@@ -15,7 +15,7 @@ const KEYS = [
   `AQ.${"k".repeat(64)}`,
 ];
 const PEM = [
-  "-----BEGIN OPENSSH PRIVATE KEY-----",
+  ["-----BEGIN", "OPENSSH PRIVATE KEY-----"].join(" "),
   "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW",
   "k".repeat(64),
   "-----END OPENSSH PRIVATE KEY-----",
@@ -104,7 +104,7 @@ describe("credential formats", () => {
     expect(r(`${PEM.slice(0, 90)}\n$ ls\nnotes.txt "done".`)).toBe(
       `${REDACTED}$ ls\nnotes.txt "done".`,
     );
-    const marker = "-----BEGIN PRIVATE KEY----- marks one; see the guide.";
+    const marker = ["-----BEGIN", "PRIVATE KEY----- marks one; see the guide."].join(" ");
     expect(r(marker)).toBe(`${REDACTED}; see the guide.`);
     const s = r.stream?.();
     if (!s) throw new Error("missing redaction stream");

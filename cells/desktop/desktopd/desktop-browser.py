@@ -273,6 +273,7 @@ class Profiles:
             require(len(state["groups"]) < 32)
             profile = os.path.join(self.root, "profile-" + state["generation"])
             args = [*command, "--start-maximized", "--force-renderer-accessibility",
+                    "--use-gl=angle", "--use-angle=gl", "--ignore-gpu-blocklist",
                     "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222",
                     # Only this disposable, container-local development browser tolerates
                     # local TLS certificates. Chromium limits this to IsLocalhost URLs;
@@ -296,6 +297,7 @@ class Profiles:
                     require(os.read(gate_read, 1) == b"G")
                     os.close(gate_read)
                     env = {k: v for k, v in os.environ.items() if not k.startswith("LOCALDOT_DESKTOPD_") and k not in ("PASSWORD", "CUSTOM_USER")}
+                    env["LIBGL_ALWAYS_SOFTWARE"] = "1"
                     os.execve(command[0], args, env)
                 except BaseException:
                     os._exit(126)

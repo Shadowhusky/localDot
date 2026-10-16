@@ -1176,20 +1176,32 @@ describe("repeat safety at actual native dispatch", () => {
     ]);
     expect(f.session.safetyPause).toBeUndefined();
   });
-  it("a third identical call that changed nothing pauses after exactly two physical effects, whatever call id the model sends", async () => {
+  it("returns recovery on the third input, and pauses only after both recovery instructions are ignored", async () => {
     const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
     expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
     const out = await f.call("computer", repeatedKey);
     expect(f.effects()).toHaveLength(2);
-    expect(out.body).toMatchObject({ ok: false, pause: true });
+    expect(out.body).toMatchObject({
+      ok: false,
+      recovery: { kind: "repeated_failure", retry: "after_change" },
+    });
+    expect(out.body.pause).toBeUndefined();
+    expect(f.session.safetyPause).toBeUndefined();
+    expect(f.session.pendingAsk).toBeUndefined();
+    expect(f.events().filter((e) => e.type === "ask.request")).toHaveLength(0);
+    expect(JSON.stringify(out.body.content)).toContain("Continue the task without asking");
+    expect((await f.call("computer", repeatedKey)).body.pause).toBeUndefined();
+    expect((await f.call("computer", repeatedKey)).body.pause).toBe(true);
+    expect(f.effects()).toHaveLength(2);
     await controller.settled();
     expect(f.session.safetyPause).toMatchObject({
       reason: "repeated_action",
       phase: "paused",
       resumeAvailable: true,
     });
+    expect(f.session.pendingAsk).toBeUndefined();
   });
   it("a repeated key is one admission and one physical input", async () => {
     const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
@@ -1203,7 +1215,7 @@ describe("repeat safety at actual native dispatch", () => {
     const third = await f.call("computer", { ...repeatedKey, repeat: 5 });
     expect({ effects: f.effects().length, pause: third.body.pause }).toEqual({
       effects: 2,
-      pause: true,
+      pause: undefined,
     });
     await controller.settled();
   });
@@ -1232,18 +1244,19 @@ describe("repeat safety at actual native dispatch", () => {
     await threeKeys(f);
     expect(f.effects()).toHaveLength(2);
     await controller.settled();
-    expect(f.session.safetyPause?.reason).toBe("repeated_action");
+    expect(f.session.safetyPause).toBeUndefined();
   });
-  it("third click still pauses when model labels, call IDs and frame IDs change", async () => {
+  it("third click is still blocked when model labels, call IDs and frame IDs change", async () => {
     const f = setup();
     const controller = repeatController(f);
     expect((await approvedClick(f, "first label")).body.ok).toBe(true);
     expect((await approvedClick(f, "different label")).body.ok).toBe(true);
     const third = await approvedClick(f, "another invented label");
     expect(f.effects()).toHaveLength(2);
-    expect(third.body).toMatchObject({ ok: false, pause: true });
+    expect(third.body).toMatchObject({ ok: false, recovery: { kind: "repeated_failure" } });
+    expect(third.body.pause).toBeUndefined();
     await controller.settled();
-    expect(f.session.safetyPause?.reason).toBe("repeated_action");
+    expect(f.session.safetyPause).toBeUndefined();
   });
   it("a different actual native window resets the consecutive input identity", async () => {
     const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
@@ -1266,21 +1279,22 @@ describe("repeat safety at actual native dispatch", () => {
     expect({ effects: f.effects().length, ok: third.body.ok, pause: third.body.pause }).toEqual({
       effects: 2,
       ok: false,
-      pause: true,
+      pause: undefined,
     });
     await controller.settled();
   });
-  it("answering the daemon repeat question cannot Resume and explicit Resume resets the streak", async () => {
+  it("explicit Resume still owns the exhausted recovery boundary; a follow-up cannot resume it", async () => {
     const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     await threeKeys(f);
+    await f.call("computer", repeatedKey);
+    await f.call("computer", repeatedKey);
     await controller.settled();
-    const pause = f.session.safetyPause,
-      ask = f.session.pendingAsk;
+    const pause = f.session.safetyPause;
     expect(pause?.reason).toBe("repeated_action");
-    expect(typeof ask).toBe("string");
-    if (!pause || !ask) throw new Error("repeat control owner missing");
-    expect(f.session.answer(ask, "A", undefined)).toBe(true);
+    expect(f.session.pendingAsk).toBeUndefined();
+    if (!pause) throw new Error("repeat control owner missing");
+    f.session.post("followup", "Inspect the menu instead.");
     expect(f.session.safetyPause?.requestId).toBe(pause.requestId);
     const blocked = await f.call("computer", repeatedKey);
     expect(blocked.body.pause).toBe(true);
@@ -1289,5 +1303,65 @@ describe("repeat safety at actual native dispatch", () => {
     expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
     expect(f.effects()).toHaveLength(3);
     expect(f.session.safetyPause).toBeUndefined();
+  });
+  it("can inspect and use a different input after recovery without a human answer", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
+    repeatController(f);
+    await threeKeys(f);
+    expect((await f.call("computer", { action: "screenshot" })).body.ok).toBe(true);
+    expect((await f.call("computer", { action: "key", keys: ["ARROWUP"] })).body.ok).toBe(true);
+    expect(f.effects()).toHaveLength(3);
+    expect(f.session.safetyPause).toBeUndefined();
+    expect(f.session.pendingAsk).toBeUndefined();
+  });
+  it("a blocked batch returns recovery and never runs its remaining inputs", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
+    repeatController(f);
+    await f.call("computer", repeatedKey);
+    await f.call("computer", repeatedKey);
+    const out = await f.call("computer", {
+      action: "batch",
+      steps: [repeatedKey, { action: "key", keys: ["ARROWUP"] }],
+    });
+    expect(out.body).toMatchObject({ ok: false, recovery: { kind: "repeated_failure" } });
+    expect(out.body.pause).toBeUndefined();
+    expect(f.effects()).toHaveLength(2);
+    expect(f.session.pendingAsk).toBeUndefined();
+  });
+  it("recovers later screenshots after lost post-scroll captures instead of falsely pausing", async () => {
+    const f = setup(BALANCED_AUTONOMY);
+    repeatController(f);
+    screenChanges(f);
+    const observe = f.gateway.observe.bind(f.gateway);
+    let captureLost = false;
+    f.fake.script.settle = () => {
+      captureLost = true;
+      return {
+        changed: [{ x: 0, y: 0, w: 1280, h: 800 }],
+        lastChangeMono: 50_100,
+        quiet: true,
+        noVisibleChange: false,
+      };
+    };
+    vi.spyOn(f.gateway, "observe").mockImplementation(async (ctx) => {
+      if (captureLost) {
+        captureLost = false;
+        throw new Error("transient screenshot failure");
+      }
+      return observe(ctx);
+    });
+    for (let n = 0; n < 4; n++) {
+      expect((await f.call("computer", { action: "screenshot" })).body.ok).toBe(true);
+      const out = await f.call("computer", {
+        action: "scroll",
+        point: { x: 795, y: 280 },
+        dy: -30,
+      });
+      expect(out.body.ok).toBe(true);
+      expect(JSON.stringify(out.body.content)).toContain("screen could not be read");
+    }
+    expect(f.effects()).toHaveLength(4);
+    expect(f.session.safetyPause).toBeUndefined();
+    expect(f.session.pendingAsk).toBeUndefined();
   });
 });

@@ -1409,6 +1409,19 @@
   flex-shrink: 0;
   color: var(--color-fg-3);
 }
+.file-chip-retry {
+  flex: none;
+  font: inherit;
+  color: var(--color-fg-1);
+  background: transparent;
+  border: 0;
+  padding: var(--spacing) calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.file-chip-retry:hover {
+  background: var(--color-raised);
+}
 
 .file-chips-note {
   margin-top: calc(var(--spacing) * 1.5);

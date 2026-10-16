@@ -102,6 +102,7 @@ import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
 import type { RoutineToolPort } from "./tools/routine.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { type TransferLease, Transfers } from "./transfers.ts";
+import { UserUploads } from "./user-uploads.ts";
 import { WebCell } from "./web/cell.ts";
 export interface AgentWiringDeps {
   fences?: import("./safety/fences.ts").ComputerFences;
@@ -736,7 +737,11 @@ export function createAgent(d: AgentWiringDeps) {
       session,
     );
   };
-  const upload = (cellId: string, requestSignal: AbortSignal): UploadAccess | undefined => {
+  const upload = (
+    cellId: string,
+    requestSignal: AbortSignal,
+    userOwned = false,
+  ): (UploadAccess & { tools: DesktopdTools }) | undefined => {
     const sessionId = d.live.get(cellId),
       session = sessionId ? runner.get(sessionId) : undefined;
     const cell = d.cells.get(cellId),
@@ -757,6 +762,7 @@ export function createAgent(d: AgentWiringDeps) {
       )
         throw new AgentError(409, "the computer changed during the upload");
       if (
+        !userOwned &&
         session &&
         (session.stopped ||
           session.controlHeld ||
@@ -768,7 +774,7 @@ export function createAgent(d: AgentWiringDeps) {
         );
     };
     check();
-    const generation = session?.generation;
+    const generation = !userOwned ? session?.generation : undefined;
     const toolLease = session && generation ? session.admit(generation, requestSignal) : undefined;
     let transfer: TransferLease;
     try {
@@ -776,7 +782,7 @@ export function createAgent(d: AgentWiringDeps) {
         cellId,
         [
           requestSignal,
-          ...(toolLease ? [toolLease.signal] : session ? [session.abort.signal] : []),
+          ...(toolLease ? [toolLease.signal] : !userOwned && session ? [session.abort.signal] : []),
         ],
         () => {
           check();
@@ -939,6 +945,25 @@ export function createAgent(d: AgentWiringDeps) {
       !d.cells.get(session.cellId)?.paused &&
       !d.killSwitch.isBusy(session.cellId),
     desktop: upload,
+    uploads: {
+      hasCell: (id) => {
+        const cell = d.cells.get(id);
+        return !!cell && !cell.fenced && !closing;
+      },
+      store: new UserUploads(d.home, async (cellId, file, source) => {
+        // User-owned data transfer is independent of model turns and browser focus. The
+        // computer lifecycle still owns the lease, so update/reset/shutdown drain it safely.
+        const access = upload(cellId, new AbortController().signal, true);
+        if (!access) throw new AgentError(409, "Computer unavailable for file placement");
+        try {
+          const receipt = await access.tools.putUserFile(file, source, access.signal);
+          access.check();
+          return receipt;
+        } finally {
+          access.release();
+        }
+      }),
+    },
     manual,
     desktopPage: async (cellId, signal) => {
       const cell = d.cells.get(cellId);

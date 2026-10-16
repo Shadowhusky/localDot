@@ -1,20 +1,21 @@
+import { USER_UPLOAD } from "@localdot/protocol";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
-import { FILE_LIMITS, FileTransferFailure, safeTransferName, uploadFile } from "./file-transfer.ts";
+import { FileTransferFailure, safeTransferName } from "./file-transfer.ts";
+import { discardUpload, uploadFile } from "./resumable-upload.ts";
 export interface UploadRow {
   readonly id: number;
   readonly name: string;
   readonly bytes: number;
-  readonly phase: "pending" | "uploading" | "complete" | "refused" | "uncertain";
+  readonly phase: "pending" | "uploading" | "placing" | "complete" | "refused" | "uncertain";
+  readonly uploaded?: number;
   readonly path?: string;
   readonly explanation?: string;
-  // A picture's own pixels, for its chip; let go with the chip.
   readonly preview?: string;
 }
-const PREVIEW_BYTES = 25 * 1024 * 1024;
 const previewOf = (file: File) =>
   file.type.startsWith("image/") &&
-  file.size <= PREVIEW_BYTES &&
+  file.size <= 25 * 1024 ** 2 &&
   typeof URL.createObjectURL === "function"
     ? URL.createObjectURL(file)
     : undefined;
@@ -29,12 +30,12 @@ export function useUploads(props: Owner) {
     [problem, setProblem] = useState<string | null>(null),
     [notice, setNotice] = useState<string | null>(null);
   const list = useRef<UploadRow[]>([]),
-    sources = useRef(new Map<number, File>()),
+    sources = useRef(new Map<number, { file: File; uploadId: string }>()),
     current = useRef(props),
     mounted = useRef(true),
-    epoch = useRef(0),
     nextId = useRef(0),
-    active = useRef<{ id: number; abort: AbortController } | null>(null);
+    active = useRef<{ id: number; abort: AbortController } | null>(null),
+    pumpRef = useRef<() => void>(() => {});
   const update = useCallback((next: UploadRow[]) => {
     const kept = new Set(next.map((row) => row.preview));
     for (const row of list.current)
@@ -42,135 +43,125 @@ export function useUploads(props: Owner) {
     list.current = next;
     if (mounted.current) setRows(next);
   }, []);
-  const interrupted = useCallback(() => {
-    epoch.current++;
+  const pause = useCallback(() => {
     active.current?.abort.abort();
     active.current = null;
-    sources.current.clear();
     update(
       list.current.map((row) =>
-        row.phase === "uploading"
+        ["uploading", "placing", "pending"].includes(row.phase)
           ? {
               ...row,
               phase: "uncertain",
-              explanation:
-                "The upload may have finished. Check Downloads before selecting it again.",
+              explanation: "Upload paused. Your progress is saved; retry to continue.",
             }
-          : row.phase === "pending"
-            ? { ...row, phase: "refused", explanation: "Upload cancelled before it started." }
-            : row,
+          : row,
       ),
     );
+  }, [update]);
+  const resume = useCallback(() => {
+    update(
+      list.current.map((row) =>
+        row.phase === "uncertain" && sources.current.has(row.id)
+          ? { ...row, phase: "pending", explanation: undefined }
+          : row,
+      ),
+    );
+    pumpRef.current();
   }, [update]);
   const { api, cellId, ready, enabled } = props;
   useLayoutEffect(() => {
     const old = current.current;
     current.current = { api, cellId, ready, enabled };
-    if (old.api !== api || old.cellId !== cellId || (old.ready && !ready)) {
+    if (old.api !== api || old.cellId !== cellId) {
       const removed = list.current.length > 0;
-      interrupted();
+      pause();
+      sources.current.clear();
       update([]);
       if (removed)
-        setNotice(
-          "Your computer was interrupted, so the files you added were removed. Add them again.",
-        );
-    } else if (old.enabled && !enabled) interrupted();
-  }, [api, cellId, ready, enabled, interrupted, update]);
+        setNotice("Switched computers. Files already uploaded stay on the previous computer.");
+    } else if (old.ready && !ready) pause();
+    else if (!old.ready && ready) resume();
+    // Losing task freshness, opening settings, or sending a different message is not
+    // cancellation of a user-owned file transfer.
+  }, [api, cellId, ready, enabled, pause, resume, update]);
   useEffect(() => {
     mounted.current = true;
-    const retire = () => interrupted();
-    const hidden = () => {
-      if (document.visibilityState === "hidden") retire();
+    const visible = () => {
+      if (document.visibilityState === "visible") resume();
     };
-    window.addEventListener("pagehide", retire);
-    window.addEventListener("offline", retire);
-    document.addEventListener("visibilitychange", hidden);
+    window.addEventListener("offline", pause);
+    window.addEventListener("online", resume);
+    window.addEventListener("pagehide", pause);
+    window.addEventListener("pageshow", resume);
+    document.addEventListener("visibilitychange", visible);
     return () => {
       mounted.current = false;
-      for (const row of list.current) if (row.preview) URL.revokeObjectURL(row.preview);
-      epoch.current++;
       active.current?.abort.abort();
       active.current = null;
+      for (const row of list.current) if (row.preview) URL.revokeObjectURL(row.preview);
       sources.current.clear();
-      window.removeEventListener("pagehide", retire);
-      window.removeEventListener("offline", retire);
-      document.removeEventListener("visibilitychange", hidden);
+      window.removeEventListener("offline", pause);
+      window.removeEventListener("online", resume);
+      window.removeEventListener("pagehide", pause);
+      window.removeEventListener("pageshow", resume);
+      document.removeEventListener("visibilitychange", visible);
     };
-  }, [interrupted]);
+  }, [pause, resume]);
   const pump = async () => {
-    if (active.current) return;
-    const owner = current.current,
-      version = epoch.current;
-    if (!mounted.current || !owner.ready || !owner.enabled || !owner.cellId || !navigator.onLine)
+    const owner = current.current;
+    if (active.current || !mounted.current || !owner.ready || !owner.cellId || !navigator.onLine)
       return;
     const row = list.current.find((item) => item.phase === "pending");
-    if (!row) return;
-    const file = sources.current.get(row.id);
-    if (!file) return;
-    const abort = new AbortController(),
-      record = { id: row.id, abort };
+    const source = row && sources.current.get(row.id);
+    if (!row || !source) return;
+    const record = { id: row.id, abort: new AbortController() };
     active.current = record;
-    update(
-      list.current.map((item) => (item.id === row.id ? { ...item, phase: "uploading" } : item)),
-    );
     const owns = () =>
       mounted.current &&
-      epoch.current === version &&
       current.current.api === owner.api &&
       current.current.cellId === owner.cellId &&
-      current.current.ready &&
-      current.current.enabled &&
       active.current === record;
+    const change = (patch: Partial<UploadRow>) => {
+      if (owns())
+        update(list.current.map((item) => (item.id === row.id ? { ...item, ...patch } : item)));
+    };
+    change({ phase: "uploading", explanation: undefined });
     try {
-      const path = await uploadFile(owner.api, owner.cellId, file, abort.signal);
-      if (owns())
-        update(
-          list.current.map((item) =>
-            item.id === row.id ? { ...item, phase: "complete", path } : item,
-          ),
-        );
+      const path = await uploadFile(owner.api, owner.cellId, source.file, record.abort.signal, {
+        id: source.uploadId,
+        progress: ({ offset, phase }) => change({ uploaded: offset, phase }),
+      });
+      change({ phase: "complete", path, uploaded: row.bytes });
+      if (owns()) sources.current.delete(row.id);
     } catch (error) {
-      const failure = error instanceof FileTransferFailure ? error : new FileTransferFailure(true);
-      if (owns())
-        update(
-          list.current.map((item) =>
-            item.id === row.id
-              ? {
-                  ...item,
-                  phase: failure.uncertain ? "uncertain" : "refused",
-                  explanation: failure.message,
-                }
-              : item,
-          ),
-        );
+      const failure =
+        error instanceof FileTransferFailure
+          ? error
+          : new FileTransferFailure(true, undefined, "Upload paused. Retry to continue.");
+      change({ phase: failure.uncertain ? "uncertain" : "refused", explanation: failure.message });
     } finally {
-      sources.current.delete(row.id);
       if (active.current === record) {
         active.current = null;
-        abort.abort();
-        if (mounted.current && epoch.current === version) void pump();
+        record.abort.abort();
+        void pump();
       }
     }
   };
+  pumpRef.current = () => {
+    void pump();
+  };
   const select = (files: FileList | readonly File[]) => {
     const owner = current.current;
-    if (
-      !owner.ready ||
-      !owner.enabled ||
-      !owner.cellId ||
-      !navigator.onLine ||
-      document.visibilityState === "hidden"
-    ) {
+    if (!owner.ready || !owner.enabled || !owner.cellId || !navigator.onLine) {
       setProblem("Reconnect and check the computer before adding files.");
       return;
     }
-    if (!files.length || files.length + list.current.length > FILE_LIMITS.count) {
+    if (!files.length || files.length + list.current.length > USER_UPLOAD.count) {
       setProblem("Choose at most 16 attachments in this draft.");
       return;
     }
     let bytes = list.current.reduce((total, row) => total + row.bytes, 0);
     const chosen: File[] = [];
-    const names = new Set(list.current.map((row) => row.name));
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (
@@ -178,25 +169,21 @@ export function useUploads(props: Owner) {
         !safeTransferName(file.name) ||
         !Number.isSafeInteger(file.size) ||
         file.size < 0 ||
-        file.size > FILE_LIMITS.bytes ||
-        names.has(file.name)
+        file.size > USER_UPLOAD.bytes
       ) {
-        setProblem(
-          "Choose files with distinct visible names, each at most 100 MiB. Hidden, unsafe or key-shaped names are refused.",
-        );
+        setProblem("Choose files with safe, visible names, each at most 10 GiB.");
         return;
       }
       bytes += file.size;
-      if (bytes > FILE_LIMITS.bytes) {
-        setProblem("Attachments in one draft must total at most 100 MiB.");
+      if (bytes > USER_UPLOAD.totalBytes) {
+        setProblem("Attachments in one draft must total at most 20 GiB.");
         return;
       }
-      names.add(file.name);
       chosen.push(file);
     }
     const added = chosen.map((file) => {
       const id = ++nextId.current;
-      sources.current.set(id, file);
+      sources.current.set(id, { file, uploadId: crypto.randomUUID() });
       const preview = previewOf(file);
       return {
         id,
@@ -212,14 +199,26 @@ export function useUploads(props: Owner) {
     void pump();
   };
   const remove = (id: number) => {
-    if (active.current?.id === id) interrupted();
-    const row = list.current.find((item) => item.id === id);
-    if (row?.phase === "uncertain" || row?.phase === "uploading")
-      setProblem(
-        "The removed upload may remain in Downloads. Check it before selecting the same file again.",
-      );
+    if (active.current?.id === id) {
+      active.current.abort.abort();
+      active.current = null;
+    }
+    const source = sources.current.get(id),
+      owner = current.current;
+    if (source && owner.cellId) void discardUpload(owner.api, owner.cellId, source.uploadId);
     sources.current.delete(id);
     update(list.current.filter((item) => item.id !== id));
+    void pump();
+  };
+  const retry = (id: number) => {
+    if (!sources.current.has(id)) return;
+    update(
+      list.current.map((row) =>
+        row.id === id && ["uncertain", "refused"].includes(row.phase)
+          ? { ...row, phase: "pending", explanation: undefined }
+          : row,
+      ),
+    );
     void pump();
   };
   return {
@@ -228,7 +227,8 @@ export function useUploads(props: Owner) {
     notice,
     select,
     remove,
-    cancel: interrupted,
+    retry,
+    cancel: pause,
     forMessage: () => {
       if (!list.current.length) return [];
       if (

@@ -56,6 +56,15 @@ vi.mock("./file-transfer.ts", async (importOriginal) => {
       transfer.trustNames ? `~/Downloads/${args[2].name}` : actual.uploadFile(...args),
   };
 });
+// Composer tests exercise message ownership with a small transport fixture. The resumable
+// protocol, actual disk writes, retries and receipts are covered by resumable-upload.integration.test.ts.
+vi.mock("./resumable-upload.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./resumable-upload.ts")>()),
+  uploadFile: async (...args: Parameters<typeof import("./file-transfer.ts").uploadFile>) => {
+    const legacy = await import("./file-transfer.ts");
+    return legacy.uploadFile(...args);
+  },
+}));
 
 const cellId = "01JXYZ0000000000000000CE11";
 const sessionId = "01JXYZ0000000000000000SESS";
@@ -599,7 +608,7 @@ describe("explicit composer attachments", () => {
       dataTransfer: { files: [two], types: ["Files"] },
     });
     f.submit();
-    expect(calls.map((c) => c.body)).toEqual([one]);
+    await waitFor(() => expect(calls.map((c) => c.body)).toEqual([one]));
     await act(async () =>
       first.resolve(Response.json({ path: "~/Downloads/one.txt" }, { status: 201 })),
     );
@@ -627,12 +636,12 @@ describe("explicit composer attachments", () => {
     const f = setup(undefined, { api });
     f.input("Read the file");
     f.attach(new File(["x"], "one.txt"));
-    await screen.findByText("Unconfirmed");
+    await screen.findByText("Paused");
     f.submit();
     expect(calls).toEqual([`/api/cells/${cellId}/upload`]);
     expect(f.field.value).toBe("Read the file");
     expect(screen.queryByLabelText("Message delivery")).toBeNull();
-    expect(screen.getByText(/Finish or remove unconfirmed uploads/)).toBeTruthy();
+    expect(screen.getByText(/retry a paused upload/)).toBeTruthy();
   });
   it("refuses to cite a confirmed attachment whose name looks like a key", async () => {
     transfer.trustNames = true;
@@ -730,13 +739,11 @@ describe("the composer's controls", () => {
       screen.getByRole("button", { name: "Queue message" }).getAttribute("aria-keyshortcuts"),
     ).toBe("Enter");
   });
-  it("sends during a takeover with no files, and says when files can be added", async () => {
+  it("allows user-owned attachments as well as messages while the user has control", async () => {
     const f = setup(undefined, {
       agent: { ...agent, model: { ...agent.model, pendingTakeover: otherSession } },
     });
-    expect(reasonOf(screen.getByRole("button", { name: "Attach files" }))).toContain(
-      "Add files once you hand back.",
-    );
+    expect(reasonOf(screen.getByRole("button", { name: "Attach files" }))).toBe("");
     f.input("Use the second sheet");
     f.submit();
     await act(async () => {});
@@ -915,7 +922,7 @@ describe("the composer's controls", () => {
     await screen.findByText("Uploaded to Downloads");
     f.update({ cell: { ...cell, id: "01JXYZ00000000000000000CE2" } });
     const notice = screen.getByText(
-      "Your computer was interrupted, so the files you added were removed. Add them again.",
+      "Switched computers. Files already uploaded stay on the previous computer.",
     );
     expect(notice.closest("[role]")?.getAttribute("role")).toBe("status");
     expect(screen.queryByRole("alert")).toBeNull();
@@ -1125,6 +1132,7 @@ describe("a message on its way", () => {
     expect(end.show).toHaveBeenCalledOnce();
     expect(end.needs).not.toHaveBeenCalled();
     await screen.findByText(/Not sure dot got that/);
+    await waitFor(() => expect(end.needs).toHaveBeenLastCalledWith(expect.any(Function)));
     const reach = end.needs.mock.lastCall?.[0] as () => void;
     act(() => reach());
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Send again" }));

@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
+import { USER_UPLOAD } from "@localdot/protocol";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { FILE_LIMITS } from "./file-transfer.ts";
+import { FileTransferFailure } from "./file-transfer.ts";
 import { useUploads } from "./useUploads.ts";
 
+const transfer = vi.hoisted(() => ({ uploadFile: vi.fn(), discardUpload: vi.fn(async () => {}) }));
+vi.mock("./resumable-upload.ts", () => transfer);
 const CELL = "01JXYZ0000000000000000CE11",
   OTHER = "01JXYZ00000000000000000002";
+beforeEach(() => {
+  transfer.uploadFile.mockReset();
+  transfer.discardUpload.mockClear();
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -16,8 +23,8 @@ const file = (name: string, size = 1) => {
   Object.defineProperty(f, "size", { value: size });
   return f;
 };
-const setup = (fetchImpl: typeof fetch) => {
-  const api = createApi("fixture", { origin: "http://127.0.0.1:4747", fetchImpl });
+const setup = () => {
+  const api = createApi("fixture", { origin: "http://127.0.0.1:4747", fetchImpl: vi.fn() });
   let props = { api, cellId: CELL, ready: true, enabled: true };
   const view = renderHook((p) => useUploads(p), { initialProps: props });
   return {
@@ -28,128 +35,112 @@ const setup = (fetchImpl: typeof fetch) => {
     },
   };
 };
-describe("serial uploads owned by the ready computer", () => {
-  it("serializes synchronous selections and exposes no message paths until every upload is confirmed", async () => {
-    const first = Promise.withResolvers<Response>();
-    const fetchImpl = vi.fn<typeof fetch>(async (url) =>
-      String(url).includes("one.txt")
-        ? first.promise
-        : Response.json({ path: "~/Downloads/two.txt" }, { status: 201 }),
+describe("user-owned resumable attachment queue", () => {
+  it("serializes selections and only attaches verified complete files", async () => {
+    const first = Promise.withResolvers<string>();
+    transfer.uploadFile.mockImplementation(async (_api, _cell, f) =>
+      f.name === "one.zip" ? first.promise : `~/Downloads/${f.name}`,
     );
-    const f = setup(fetchImpl);
+    const f = setup();
     act(() => {
-      f.result.current.select([file("one.txt")]);
+      f.result.current.select([file("one.zip", 200 * 1024 ** 2)]);
       f.result.current.select([file("two.txt")]);
     });
-    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(transfer.uploadFile).toHaveBeenCalledOnce();
     expect(f.result.current.forMessage()).toBeNull();
     expect(f.result.current.rows.map((r) => r.phase)).toEqual(["uploading", "pending"]);
-    await act(async () =>
-      first.resolve(Response.json({ path: "~/Downloads/one.txt" }, { status: 201 })),
-    );
+    await act(async () => first.resolve("~/Downloads/one.zip"));
     await waitFor(() =>
       expect(f.result.current.rows.map((r) => r.phase)).toEqual(["complete", "complete"]),
     );
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(f.result.current.forMessage()?.map((row) => row.path)).toEqual([
-      "~/Downloads/one.txt",
+    expect(f.result.current.forMessage()?.map((r) => r.path)).toEqual([
+      "~/Downloads/one.zip",
       "~/Downloads/two.txt",
     ]);
   });
-  it("checks aggregate bytes and duplicate names before any admission", () => {
-    const fetchImpl = vi.fn<typeof fetch>();
-    const f = setup(fetchImpl);
-    act(() => f.result.current.select([file("one.bin", FILE_LIMITS.bytes), file("two.bin", 1)]));
-    expect(f.result.current.rows).toEqual([]);
-    expect(fetchImpl).not.toHaveBeenCalled();
-    act(() => f.result.current.select([file("same.txt"), file("same.txt")]));
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(f.result.current.rows).toEqual([]);
+  it("does not cancel when hidden or task freshness disables the composer", async () => {
+    const pending = Promise.withResolvers<string>();
+    transfer.uploadFile.mockReturnValue(pending.promise);
+    const f = setup();
+    act(() => f.result.current.select([file("large.zip")]));
+    const signal = transfer.uploadFile.mock.calls[0]?.[3] as AbortSignal;
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    f.update({ enabled: false });
+    expect(signal.aborted).toBe(false);
+    await act(async () => pending.resolve("~/Downloads/large.zip"));
+    expect(f.result.current.rows[0]?.phase).toBe("complete");
   });
-  it("marks admitted cancellation uncertain, refuses unstarted queued work and never retries automatically", async () => {
-    const late = Promise.withResolvers<Response>();
-    let signal: AbortSignal | null | undefined;
-    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
-      signal = init?.signal;
-      return late.promise;
-    });
-    const f = setup(fetchImpl);
-    act(() => f.result.current.select([file("one.txt"), file("two.txt")]));
-    act(() => f.result.current.cancel());
-    expect(signal?.aborted).toBe(true);
-    expect(f.result.current.rows.map((r) => r.phase)).toEqual(["uncertain", "refused"]);
-    expect(f.result.current.forMessage()).toBeNull();
-    await act(async () =>
-      late.resolve(Response.json({ path: "~/Downloads/one.txt" }, { status: 201 })),
-    );
-    expect(f.result.current.rows[0]?.phase).toBe("uncertain");
-    expect(fetchImpl).toHaveBeenCalledOnce();
-  });
-  it("retires late metadata after another computer or API takes ownership", async () => {
-    const late = Promise.withResolvers<Response>();
-    const fetchImpl = vi.fn<typeof fetch>(async () => late.promise);
-    const f = setup(fetchImpl);
-    act(() => f.result.current.select([file("one.txt")]));
-    f.update({ cellId: OTHER });
-    expect(f.result.current.rows).toEqual([]);
-    await act(async () =>
-      late.resolve(Response.json({ path: "~/Downloads/one.txt" }, { status: 201 })),
-    );
-    expect(f.result.current.rows).toEqual([]);
-    expect(f.result.current.forMessage()).toEqual([]);
-  });
-  it("aborts on pagehide and does not restore or cite the upload on return", async () => {
-    const late = Promise.withResolvers<Response>();
-    const fetchImpl = vi.fn<typeof fetch>(async () => late.promise);
-    const f = setup(fetchImpl);
-    act(() => f.result.current.select([file("one.txt")]));
+  it("resumes the same File and upload ID after offline or page suspension", async () => {
+    const late = Promise.withResolvers<string>();
+    transfer.uploadFile.mockReturnValueOnce(late.promise).mockResolvedValue("~/Downloads/data.zip");
+    const f = setup(),
+      data = file("data.zip");
+    act(() => f.result.current.select([data]));
+    const original = transfer.uploadFile.mock.calls[0];
     act(() => window.dispatchEvent(new PageTransitionEvent("pagehide")));
+    expect(original?.[3].aborted).toBe(true);
     expect(f.result.current.rows[0]?.phase).toBe("uncertain");
-    await act(async () =>
-      late.resolve(Response.json({ path: "~/Downloads/one.txt" }, { status: 201 })),
-    );
-    expect(f.result.current.forMessage()).toBeNull();
-    expect(fetchImpl).toHaveBeenCalledOnce();
+    await act(async () => window.dispatchEvent(new PageTransitionEvent("pageshow")));
+    expect(transfer.uploadFile.mock.calls[1]?.[2]).toBe(data);
+    expect(transfer.uploadFile.mock.calls[1]?.[4].id).toBe(original?.[4].id);
+    expect(f.result.current.rows[0]?.phase).toBe("complete");
+    await act(async () => late.resolve("~/wrong-late-reply"));
+    expect(f.result.current.rows[0]?.path).toBe("~/Downloads/data.zip");
   });
-  it("drops confirmed draft attachments when Stop removes readiness, so a message cites none", async () => {
-    const f = setup(async () => Response.json({ path: "~/Downloads/one.txt" }, { status: 201 }));
-    act(() => f.result.current.select([file("one.txt")]));
+  it("keeps the source for explicit Retry after interrupted network attempts", async () => {
+    transfer.uploadFile
+      .mockRejectedValueOnce(new FileTransferFailure(true, undefined, "Paused"))
+      .mockResolvedValue("~/Downloads/a.zip");
+    const f = setup();
+    act(() => f.result.current.select([file("a.zip")]));
+    await waitFor(() => expect(f.result.current.rows[0]?.phase).toBe("uncertain"));
+    act(() => f.result.current.retry(f.result.current.rows[0]?.id ?? 0));
+    await waitFor(() => expect(f.result.current.rows[0]?.phase).toBe("complete"));
+    expect(transfer.uploadFile.mock.calls[1]?.[4].id).toBe(
+      transfer.uploadFile.mock.calls[0]?.[4].id,
+    );
+  });
+  it("cancelling one upload does not cancel the next queued file", async () => {
+    transfer.uploadFile
+      .mockReturnValueOnce(new Promise(() => {}))
+      .mockResolvedValue("~/Downloads/b.zip");
+    const f = setup();
+    act(() => f.result.current.select([file("a.zip"), file("b.zip")]));
+    act(() => f.result.current.remove(f.result.current.rows[0]?.id ?? 0));
+    await waitFor(() => expect(f.result.current.rows[0]?.phase).toBe("complete"));
+    expect(f.result.current.rows[0]?.name).toBe("b.zip");
+    expect(transfer.discardUpload).toHaveBeenCalledOnce();
+  });
+  it("retires stale receipts on a computer switch but retains confirmed files across temporary readiness loss", async () => {
+    transfer.uploadFile.mockResolvedValue("~/Downloads/one.zip");
+    const f = setup();
+    act(() => f.result.current.select([file("one.zip")]));
     await waitFor(() => expect(f.result.current.rows[0]?.phase).toBe("complete"));
     f.update({ ready: false });
+    expect(f.result.current.forMessage()).toBeNull();
+    f.update({ ready: true });
+    expect(f.result.current.forMessage()).toHaveLength(1);
+    f.update({ cellId: OTHER });
     expect(f.result.current.rows).toEqual([]);
     expect(f.result.current.forMessage()).toEqual([]);
   });
-  it("refuses key-shaped file metadata without retaining the name in observable rows", () => {
-    const fetchImpl = vi.fn<typeof fetch>();
-    const f = setup(fetchImpl);
-    const name = `sk-proj-${"z".repeat(80)}`;
-    act(() => f.result.current.select([file(name)]));
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(JSON.stringify(f.result.current.rows)).not.toContain(name);
-    expect(f.result.current.problem).not.toContain(name);
-  });
-});
-describe("removed attachments notice", () => {
-  const REMOVED =
-    "Your computer was interrupted, so the files you added were removed. Add them again.";
-  it("says nothing when a computer starts, stops or changes with no attachments", () => {
-    const f = setup(vi.fn<typeof fetch>());
-    f.update({ cellId: null as unknown as string, ready: false });
-    f.update({ cellId: CELL, ready: true });
-    f.update({ ready: false });
-    f.update({ cellId: OTHER, ready: true });
-    expect(f.result.current.notice).toBeNull();
-    expect(f.result.current.problem).toBeNull();
-  });
-  it("tells the user to add files again only when attachments were removed", async () => {
-    const f = setup(async () => Response.json({ path: "~/Downloads/one.txt" }, { status: 201 }));
-    act(() => f.result.current.select([file("one.txt")]));
-    await waitFor(() => expect(f.result.current.rows[0]?.phase).toBe("complete"));
-    f.update({ cellId: OTHER });
-    expect(f.result.current.rows).toEqual([]);
-    expect(f.result.current.notice).toBe(REMOVED);
-    expect(f.result.current.problem).toBeNull();
-    act(() => f.result.current.select([file("two.txt")]));
-    expect(f.result.current.notice).toBeNull();
+  it("accepts same-named files safely but enforces per-file, draft and name limits", () => {
+    transfer.uploadFile.mockReturnValue(new Promise(() => {}));
+    const f = setup();
+    act(() => f.result.current.select([file("large.zip", USER_UPLOAD.bytes + 1)]));
+    expect(transfer.uploadFile).not.toHaveBeenCalled();
+    act(() =>
+      f.result.current.select([
+        file("a", USER_UPLOAD.bytes),
+        file("b", USER_UPLOAD.bytes),
+        file("c"),
+      ]),
+    );
+    expect(transfer.uploadFile).not.toHaveBeenCalled();
+    act(() => f.result.current.select([file(`sk-proj-${"z".repeat(80)}`)]));
+    expect(transfer.uploadFile).not.toHaveBeenCalled();
+    act(() => f.result.current.select([file("same.zip"), file("same.zip")]));
+    expect(f.result.current.rows).toHaveLength(2);
   });
 });

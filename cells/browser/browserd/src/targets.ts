@@ -770,6 +770,7 @@ export class BrowserTargets {
     target.sessionId = sessionId;
     target.parentSessionId = parentSessionId;
     this.#sessions.set(sessionId, target);
+    this.#broker.attachSession(sessionId);
     if (parent) this.#invalidate(parent);
     if (this.#closed || !this.#current(target)) return;
     if (this.#queue.length >= MAX_BROWSER_TARGETS) throw new BrowserTargetError("busy");
@@ -783,7 +784,11 @@ export class BrowserTargets {
       if (!target || !this.#current(target)) continue;
       this.#workers += 1;
       void this.#initialize(target)
-        .catch(() => this.#fail("unready"))
+        .catch(() => {
+          // A sign-in frame may disappear while its initialization is in flight.
+          // Removal already revoked that session; healthy tabs remain usable.
+          if (this.#current(target)) this.#fail("unready");
+        })
         .finally(() => {
           this.#workers -= 1;
           this.#pump();
@@ -875,12 +880,18 @@ export class BrowserTargets {
     }
     const affected = this.#affected(target);
     for (const member of removed) affected.add(member);
+    // Retire requests before revocation aborts chooser/reload work. Its cancellation must
+    // not turn a target that Chromium has already closed into a whole-connection failure.
+    for (const member of removed)
+      if (member.sessionId) this.#broker.retireSession(member.sessionId);
     this.#revoke(affected);
     for (const member of removed) {
       this.#reloads.get(member)?.();
       member.ready = false;
       member.nodes.clear();
-      if (member.sessionId) this.#sessions.delete(member.sessionId);
+      if (member.sessionId) {
+        this.#sessions.delete(member.sessionId);
+      }
       this.#targets.delete(member.targetId);
     }
     for (let index = this.#queue.length - 1; index >= 0; index -= 1) {
