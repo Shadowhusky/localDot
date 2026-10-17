@@ -12,7 +12,7 @@ export const BROWSER_PROCESS_TERM_MS = 1000;
 export const BROWSER_PROCESS_STOP_MS = 5000;
 
 export class BrowserProcessError extends Error {
-  constructor(readonly reason: "closed" | "start" | "shutdown") {
+  constructor(readonly reason: "closed" | "start" | "shutdown" | "busy") {
     super(`Browser runtime unavailable: ${reason}`);
   }
 }
@@ -125,6 +125,7 @@ export class BrowserProcesses {
   readonly #handles = new Map<BrowserProcessName, BrowserProcessHandle | undefined>();
   readonly #abort = new AbortController();
   readonly #driver: BrowserProcessDriver;
+  readonly #owners = new Map<BrowserProcessName, { retiring: boolean }>();
   #closed = false;
   #stopping?: Promise<void>;
 
@@ -141,13 +142,23 @@ export class BrowserProcesses {
   }
 
   async start(name: BrowserProcessName): Promise<BrowserProcessChannels> {
+    return this.#start(name, this.#specs[name]);
+  }
+
+  async #start(
+    name: BrowserProcessName,
+    spec: BrowserProcessSpec,
+  ): Promise<BrowserProcessChannels> {
     if (this.#closed) throw new BrowserProcessError("closed");
     if (!Object.hasOwn(this.#specs, name) || this.#handles.has(name))
       throw new BrowserProcessError("start");
     this.#handles.set(name, undefined);
+    const owner = { retiring: false };
+    this.#owners.set(name, owner);
     try {
-      const handle = this.#driver(this.#specs[name], () => {
-        void this.stop().catch(() => {});
+      const handle = this.#driver(spec, () => {
+        // A late pipe/exit callback from the retired browser cannot kill its successor.
+        if (!owner.retiring && this.#owners.get(name) === owner) void this.stop().catch(() => {});
       });
       this.#handles.set(name, handle);
       void handle.started.catch(() => {});
@@ -163,6 +174,44 @@ export class BrowserProcesses {
       if (this.#handles.get(name) === undefined) this.#handles.delete(name);
       void this.stop().catch(() => {});
       throw new BrowserProcessError("start");
+    }
+  }
+
+  async replaceChromium(
+    spec: BrowserProcessSpec,
+    retire: () => boolean | Promise<boolean>,
+    keepOpen = false,
+  ): Promise<BrowserProcessChannels> {
+    const owner = this.#owners.get("chromium");
+    const handle = this.#handles.get("chromium");
+    if (this.#closed || !owner || !handle || owner.retiring)
+      throw new BrowserProcessError("closed");
+    owner.retiring = true;
+    try {
+      const graceful = await retire();
+      if (!graceful) handle.signal("SIGTERM");
+      const start = performance.now();
+      while (!handle.closed || handle.exists()) {
+        if (this.#closed) throw new BrowserProcessError("closed");
+        // Never reuse a locked profile or report success after an unconfirmed exit.
+        if (performance.now() - start >= BROWSER_PROCESS_STOP_MS) {
+          // A user's beforeunload/download dialog may refuse Quit. Keep their
+          // disconnected browser available instead of forcing away that dialog.
+          if (keepOpen && !handle.closed && handle.exists()) throw new BrowserProcessError("busy");
+          throw new BrowserProcessError("shutdown");
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      }
+      if (this.#closed) throw new BrowserProcessError("closed");
+      this.#handles.delete("chromium");
+      return await this.#start("chromium", spec);
+    } catch (error) {
+      if (error instanceof BrowserProcessError && error.reason === "busy" && !this.#closed) {
+        owner.retiring = false;
+        throw error;
+      }
+      void this.stop().catch(() => {});
+      throw new BrowserProcessError("shutdown");
     }
   }
 

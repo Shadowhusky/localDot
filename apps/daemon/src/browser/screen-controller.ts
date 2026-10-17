@@ -44,13 +44,14 @@ type Client = Pick<
   | "lookup"
   | "read"
 > &
-  Partial<Pick<BrowserClient, "manual" | "uploadChooser" | "upload">>;
+  Partial<Pick<BrowserClient, "manual" | "uploadChooser" | "upload" | "signIn">>;
 interface BrowserOwner {
   readonly endpoint: ReadyBrowser;
   readonly client: Client;
   revision: number;
   permit?: BrowserActionPermit;
   manualPermit?: BrowserManualPermit;
+  userPermit?: BrowserManualPermit;
   tabId?: string;
   revoking?: Promise<void>;
 }
@@ -85,6 +86,8 @@ export class ScreenControlError extends Error {
     this.name = "ScreenControlError";
   }
 }
+class SignInStillHeldError extends ScreenControlError {}
+
 export class ScreenUnavailableError extends Error {
   constructor(screen: ScreenName, starting = false) {
     super(
@@ -319,6 +322,18 @@ export class ScreenController {
       selection,
       signal,
       check,
+      signIn: async (start: boolean) => {
+        check();
+        const health = await owner.client.health({ signal, check });
+        check();
+        if (!health.signIn || !owner.client.signIn) return { available: false as const };
+        if (!start) return { available: true as const, ...health.signIn };
+        await this.#retireDownloads();
+        check();
+        const result = await owner.client.signIn(permit, "signin", { signal, check });
+        check();
+        return { available: true as const, ...result };
+      },
       input: (input: ManualInput, cancel?: AbortSignal) => {
         check();
         return send(permit, input, {
@@ -635,7 +650,36 @@ export class ScreenController {
           if (screen === "browser") {
             const owner = await this.#prepare(operationScope);
             guard();
+            // A fresh physical user receipt owns profile restoration. Reconnect before
+            // granting the agent anything, attaching recording, or inspecting the page.
+            const health = await owner.client.health(this.#browserScope(owner, operationScope));
+            guard();
+            if (health.signIn?.mode === "signin" || health.signIn?.changing) {
+              if (!owner.userPermit || !owner.client.signIn) throw new ScreenControlError();
+              try {
+                await owner.client.signIn(
+                  owner.userPermit,
+                  "standard",
+                  this.#browserScope(owner, operationScope),
+                );
+              } catch (error) {
+                guard();
+                const current = await owner.client.health(
+                  this.#browserScope(owner, operationScope),
+                );
+                if (
+                  handback &&
+                  current.holder === "user" &&
+                  current.signIn?.mode === "signin" &&
+                  !current.signIn.changing
+                )
+                  throw new SignInStillHeldError();
+                throw error;
+              }
+              guard();
+            }
             owner.manualPermit = undefined;
+            owner.userPermit = undefined;
             const request = {
               ...this.#identity(owner),
               revision: this.#nextRevision(owner),
@@ -713,6 +757,7 @@ export class ScreenController {
           this.#ownerGeneration = scope.generation;
           return result;
         } catch (error) {
+          if (error instanceof SignInStillHeldError) throw error;
           if (epoch !== this.#epoch || (this.#held && !handback) || this.#closed) {
             await this.#revoke().catch(() => this.#retireBrowser());
           } else if (screen === "browser" && !published) {
@@ -910,6 +955,7 @@ export class ScreenController {
     owner.permit = undefined;
     owner.tabId = undefined;
     owner.manualPermit = undefined;
+    owner.userPermit = undefined;
     const request = {
       ...this.#identity(owner),
       revision: this.#nextRevision(owner),
@@ -920,6 +966,10 @@ export class ScreenController {
     const pending = this.#safe(async () => {
       await downloadsRetired;
       await owner.client.control(request, scope);
+      if (this.#browser === owner && owner.revision === request.revision) {
+        const { holder: _, ...permit } = request;
+        owner.userPermit = Object.freeze(permit);
+      }
       if (
         this.#browser === owner &&
         owner.revision === request.revision &&
@@ -930,7 +980,12 @@ export class ScreenController {
       ) {
         const { holder: _, ...permit } = request;
         owner.manualPermit = Object.freeze(permit);
-        if (this.#selection.screen === "browser") {
+        const health = await owner.client.health(scope);
+        if (
+          this.#selection.screen === "browser" &&
+          health.signIn?.mode !== "signin" &&
+          !health.signIn?.changing
+        ) {
           await this.#startDownloads(
             owner,
             {

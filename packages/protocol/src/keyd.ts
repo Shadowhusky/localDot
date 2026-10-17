@@ -77,10 +77,39 @@ export const Sealed = z.strictObject({
 });
 export type Sealed = z.infer<typeof Sealed>;
 
-export const SealedSecret = z.strictObject({ binding: SecretBinding, sealed: Sealed });
+// User-authored discovery data. These descriptions never grant access or change a binding.
+export const KeyMetadata = z
+  .strictObject({
+    label: z.string().trim().max(80).optional(),
+    service: z.string().trim().max(80).optional(),
+    description: z.string().trim().max(600).optional(),
+  })
+  .refine(
+    (m) => Object.values(m).every((s) => !s || !/[\p{Cc}\p{Cf}]/u.test(s)),
+    "Use plain text without control characters",
+  );
+export type KeyMetadata = z.infer<typeof KeyMetadata>;
+export const KeyUsage = z.object({
+  hosts: z.array(z.string()),
+  baseURL: z.string().optional(),
+  header: z.string(),
+  format: z.enum(HTTP_FORMATS),
+  methods: z.array(z.string()).nullish(),
+  paths: z.array(z.string()).nullish(),
+});
+export type KeyUsage = z.infer<typeof KeyUsage>;
+export const CredentialRequest = z.object({ binding: SecretBinding, metadata: KeyMetadata });
+export type CredentialRequest = z.infer<typeof CredentialRequest>;
+export const SealedSecret = z.strictObject({
+  binding: SecretBinding,
+  sealed: Sealed,
+  metadata: KeyMetadata.optional(),
+});
 export type SealedSecret = z.infer<typeof SealedSecret>;
 
 export const KeydRecord = z.object({
+  metadata: KeyMetadata.optional(),
+  usage: KeyUsage.optional(),
   id: z.string(),
   kind: z.enum(["llm", "http"]),
   provider: z.string().optional(),

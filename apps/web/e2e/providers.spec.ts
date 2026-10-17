@@ -119,7 +119,7 @@ for (const run of runs) {
       await expect(keys.getByLabel("Base URL", { exact: true })).toHaveValue(
         "https://api.minimax.io/v1",
       );
-      await keys.getByLabel("Label (optional)", { exact: true }).fill("token-plan");
+      await keys.getByLabel("Key ID (optional)", { exact: true }).fill("token-plan");
       await keys.getByLabel("Key", { exact: true }).fill("fixture-token-plan-value");
       await press(keys.getByRole("button", { name: "Save key" }));
       await expect(keys.getByText("Saved token-plan.")).toBeVisible();

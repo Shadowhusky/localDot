@@ -2,6 +2,7 @@ import {
   type AskFieldKind,
   type AskFieldValue,
   askValueProblem,
+  type CredentialRequest,
   type QuestionAnswerRequest,
 } from "@localdot/protocol";
 import type { AgentQuestion } from "./model.ts";
@@ -9,6 +10,7 @@ import type { AgentQuestion } from "./model.ts";
 // One field of a question as every surface draws it. A plain question (lettered options and/or
 // free text) becomes one field of its own, so the thread, the island and the sheet share controls.
 export interface AskField {
+  readonly credential?: CredentialRequest;
   readonly id: string;
   readonly kind: AskFieldKind;
   readonly label: string;
@@ -50,6 +52,7 @@ export function askFields(question: AgentQuestion): readonly AskField[] {
   if (question.fields?.length)
     return question.fields.map((field) => ({
       id: field.id,
+      ...(field.credential ? { credential: field.credential } : {}),
       kind: field.kind,
       label: field.label,
       ...(field.hint ? { hint: field.hint } : {}),
@@ -93,6 +96,8 @@ export function fieldValue(
 ): AskFieldValue | undefined {
   const value = draft.values[field.id];
   switch (field.kind) {
+    case "api_key":
+      return value === true ? true : undefined;
     case "qr":
       return true;
     case "confirm":
@@ -180,7 +185,11 @@ export function composerReply(
   text: string,
   attached = false,
 ): ComposerReply {
-  if (question.fields?.some((field) => field.kind === "secret" || field.kind === "code"))
+  if (
+    question.fields?.some(
+      (field) => field.kind === "secret" || field.kind === "code" || field.kind === "api_key",
+    )
+  )
     return {
       kind: "hold",
       reason: "Type it in dot's question above. Messages aren't kept secret.",

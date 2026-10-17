@@ -56,3 +56,16 @@ export const BrowserControlReply = schema.strictObject({
   selectionsCleared: schema.boolean(),
 });
 export type BrowserControlReply = schema.infer<typeof BrowserControlReply>;
+
+// A user-owned browser can temporarily run without a debugging transport. This is
+// distinct from ordinary takeover, which only revokes the agent's input permit.
+export const BrowserSignInMode = schema.enum(["standard", "signin"]);
+export type BrowserSignInMode = schema.infer<typeof BrowserSignInMode>;
+export const BrowserSignInState = schema.strictObject({
+  mode: BrowserSignInMode,
+  changing: schema.boolean(),
+});
+export const BrowserSignInRequest = schema.strictObject({
+  permit: BrowserManualPermit,
+  mode: BrowserSignInMode,
+});

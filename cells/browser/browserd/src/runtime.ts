@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
+import type {
+  BrowserManualPermit,
+  BrowserSignInMode,
+} from "../../../../packages/protocol/src/browser-control.ts";
 import { WorkWindow } from "../../../desktop/desktopd/src/work-window.ts";
 import { BrowserAccounts } from "./accounts.ts";
 import { BrowserCapture } from "./capture.ts";
@@ -14,7 +18,12 @@ import { BrowserNavigation } from "./navigation-owner.ts";
 import { BrowserObservation } from "./observation.ts";
 import { pipeTransport } from "./pipe.ts";
 import { BrowserPreparationError, prepareBrowserRuntime } from "./prepare.ts";
-import { type BrowserProcessDriver, BrowserProcesses } from "./processes.ts";
+import {
+  type BrowserProcessChannels,
+  type BrowserProcessDriver,
+  BrowserProcessError,
+  BrowserProcesses,
+} from "./processes.ts";
 import {
   type BrowserReadinessProbe,
   BrowserReadinessRetirementError,
@@ -25,6 +34,7 @@ import {
   BROWSER_DOWNLOAD_DIR,
   BROWSER_UPLOAD_DIR,
   type BrowserRuntimeConfig,
+  browserSignInSpec,
 } from "./runtime-config.ts";
 import { BrowserSecrets } from "./secrets.ts";
 import { BrowserTargets } from "./targets.ts";
@@ -37,6 +47,11 @@ export class BrowserRuntimeError extends Error {
   constructor(readonly reason: "closed" | "startup" | "shutdown") {
     super(`Browser runtime refused: ${reason}`);
   }
+}
+
+function required<T>(value: T | undefined): T {
+  if (value === undefined) throw new BrowserRuntimeError("closed");
+  return value;
 }
 
 export interface BrowserRuntimeDependencies {
@@ -87,6 +102,11 @@ export class BrowserRuntime {
   #native?: BrowserNative;
   #capture?: BrowserCapture;
   #targets?: BrowserTargets;
+  #secrets?: BrowserSecrets;
+  #browserGeneration = 0;
+  #signInMode: BrowserSignInMode = "standard";
+  #signInChanging = false;
+  #accounts?: BrowserAccounts;
   #control?: BrowserControl;
   #downloads?: BrowserDownloadService;
   #uploads?: BrowserUploadService;
@@ -246,86 +266,8 @@ export class BrowserRuntime {
       await this.#step(() => this.#processes.start("streamProxy"));
       await this.#wait("stream", probe);
       const chromium = await this.#step(() => this.#processes.start("chromium"));
-      if (!chromium.input || !chromium.output) throw new BrowserRuntimeError("startup");
-      this.#targets = new BrowserTargets(pipeTransport(chromium.input, chromium.output), {
-        downloadDir: BROWSER_DOWNLOAD_DIR,
-        uploadDir: BROWSER_UPLOAD_DIR,
-        onFatal: fatal,
-        downloads: {
-          owns: (guid) => this.#downloads?.owns(guid) ?? false,
-          begin: (params) => {
-            if (!this.#downloads) {
-              fatal();
-              return;
-            }
-            this.#downloads.begin(params);
-          },
-          progress: (params) => {
-            if (!this.#downloads) {
-              fatal();
-              return;
-            }
-            this.#downloads.progress(params);
-          },
-        },
-      });
-      const targets = this.#targets;
-      await this.#step(() => targets.start());
-      await this.#until(async () => targets.tabs().some((candidate) => candidate.ready));
-      const tab = targets.tabs().find((candidate) => candidate.ready);
-      if (!tab) throw new BrowserRuntimeError("startup");
-      await this.#step(() => targets.maximize(tab.id, this.#lifetime.signal));
-      await this.#step(() => targets.activate(tab.id, this.#lifetime.signal));
-      const document = targets.documents(tab.id).find((candidate) => !candidate.frame);
-      if (!document) throw new BrowserRuntimeError("startup");
-      await this.#step(() =>
-        targets.command(document, "Page.bringToFront", {}, this.#lifetime.signal),
-      );
-      const secrets = new BrowserSecrets(targets, native);
-      this.#control = new BrowserControl({
-        browserCellId: this.#config.browserCellId,
-        parentCellId: this.#config.parentCellId,
-        instance: this.instance,
-        clearSelections: (signal) => {
-          targets.clearFileChooser();
-          return secrets.clearSelections(signal);
-        },
-        secretPages: (signal) => secrets.secretPages(signal),
-        reload: (page, signal) => secrets.reload(page, signal),
-      });
-      this.#downloads = new BrowserDownloadService({
-        config: this.#config,
-        instance: this.instance,
-        control: this.#control,
-        targets,
-        fence: fatal,
-      });
-      this.#uploads = new BrowserUploadService({
-        config: this.#config,
-        instance: this.instance,
-        control: this.#control,
-        targets,
-      });
-      const geometry = new BrowserGeometry(targets, native, this.#config.scale);
-      this.#input = new BrowserInput({
-        control: this.#control,
-        targets,
-        geometry,
-        secrets,
-        native,
-        scale: this.#config.scale,
-        onFatal: fatal,
-      });
-      this.#observation = new BrowserObservation({
-        control: this.#control,
-        targets,
-        geometry,
-        secrets,
-        native,
-        capture,
-        scale: this.#config.scale,
-      });
-      this.#navigation = new BrowserNavigation(this.#control, targets);
+      await this.#attachBrowser(chromium);
+      const runtime = this;
       this.#http = new BrowserHttp({
         workWindow: new WorkWindow({
           ...process.env,
@@ -335,14 +277,32 @@ export class BrowserRuntime {
         }),
         config: this.#config,
         instance: this.instance,
-        control: this.#control,
-        targets,
-        input: this.#input,
-        observation: this.#observation,
-        navigation: this.#navigation,
-        downloads: this.#downloads,
-        uploads: this.#uploads,
-        accounts: new BrowserAccounts(targets),
+        control: required(this.#control),
+        get targets() {
+          return required(runtime.#targets);
+        },
+        get input() {
+          return required(runtime.#input);
+        },
+        get observation() {
+          return required(runtime.#observation);
+        },
+        get navigation() {
+          return runtime.#navigation;
+        },
+        get downloads() {
+          return runtime.#downloads;
+        },
+        get uploads() {
+          return runtime.#uploads;
+        },
+        get accounts() {
+          return runtime.#accounts;
+        },
+        signIn: {
+          state: () => ({ mode: this.#signInMode, changing: this.#signInChanging }),
+          set: (permit, mode, signal) => this.#signIn(permit, mode, signal),
+        },
         ready: () => this.ready,
         fence: () => {
           void this.stop().catch(() => {});
@@ -366,6 +326,204 @@ export class BrowserRuntime {
       throw new BrowserRuntimeError("startup");
     } finally {
       clearTimeout(deadline);
+    }
+  }
+
+  async #attachBrowser(chromium: BrowserProcessChannels, restoring = false): Promise<void> {
+    const generation = ++this.#browserGeneration;
+    const fatal = () => {
+      if (generation === this.#browserGeneration) void this.stop().catch(() => {});
+    };
+    const native = required(this.#native);
+    const capture = required(this.#capture);
+    if (!chromium.input || !chromium.output) throw new BrowserRuntimeError("startup");
+    this.#targets = new BrowserTargets(pipeTransport(chromium.input, chromium.output), {
+      downloadDir: BROWSER_DOWNLOAD_DIR,
+      uploadDir: BROWSER_UPLOAD_DIR,
+      onFatal: fatal,
+      downloads: {
+        owns: (guid) =>
+          generation === this.#browserGeneration && (this.#downloads?.owns(guid) ?? false),
+        begin: (params) => {
+          if (generation !== this.#browserGeneration) return;
+          if (!this.#downloads) {
+            fatal();
+            return;
+          }
+          this.#downloads.begin(params);
+        },
+        progress: (params) => {
+          if (generation !== this.#browserGeneration) return;
+          if (!this.#downloads) {
+            fatal();
+            return;
+          }
+          this.#downloads.progress(params);
+        },
+      },
+    });
+    const targets = this.#targets;
+    await this.#step(() => targets.start());
+    await this.#until(async () => targets.tabs().some((candidate) => candidate.ready));
+    const tab = targets.tabs().find((candidate) => candidate.ready);
+    if (!tab) throw new BrowserRuntimeError("startup");
+    if (!restoring) {
+      await this.#step(() => targets.maximize(tab.id, this.#lifetime.signal));
+      await this.#step(() => targets.activate(tab.id, this.#lifetime.signal));
+      const document = targets.documents(tab.id).find((candidate) => !candidate.frame);
+      if (!document) throw new BrowserRuntimeError("startup");
+      await this.#step(() =>
+        targets.command(document, "Page.bringToFront", {}, this.#lifetime.signal),
+      );
+    }
+    const secrets = new BrowserSecrets(targets, native);
+    this.#secrets = secrets;
+    this.#control ??= new BrowserControl({
+      browserCellId: this.#config.browserCellId,
+      parentCellId: this.#config.parentCellId,
+      instance: this.instance,
+      clearSelections: (signal) => {
+        if (this.#signInMode !== "standard" || this.#signInChanging)
+          throw new BrowserRuntimeError("closed");
+        required(this.#targets).clearFileChooser();
+        return required(this.#secrets).clearSelections(signal);
+      },
+      secretPages: (signal) => required(this.#secrets).secretPages(signal),
+      reload: (page, signal) => required(this.#secrets).reload(page, signal),
+    });
+    this.#downloads = new BrowserDownloadService({
+      config: this.#config,
+      instance: this.instance,
+      control: this.#control,
+      targets,
+      fence: fatal,
+    });
+    this.#uploads = new BrowserUploadService({
+      config: this.#config,
+      instance: this.instance,
+      control: this.#control,
+      targets,
+    });
+    const geometry = new BrowserGeometry(targets, native, this.#config.scale);
+    this.#input = new BrowserInput({
+      control: this.#control,
+      targets,
+      geometry,
+      secrets,
+      native,
+      scale: this.#config.scale,
+      onFatal: () => {
+        void this.stop().catch(() => {});
+      },
+    });
+    this.#observation = new BrowserObservation({
+      control: this.#control,
+      targets,
+      geometry,
+      secrets,
+      native,
+      capture,
+      scale: this.#config.scale,
+    });
+    this.#navigation = new BrowserNavigation(this.#control, targets);
+    this.#accounts = new BrowserAccounts(required(this.#targets));
+  }
+
+  async #signIn(permit: BrowserManualPermit, mode: BrowserSignInMode, signal: AbortSignal) {
+    this.#check();
+    if (this.#signInChanging) throw new BrowserRuntimeError("closed");
+    const lease = required(this.#control).admitManual(permit);
+    try {
+      signal.throwIfAborted();
+      lease.check();
+      if (mode === this.#signInMode) return { mode, changing: false };
+      this.#signInChanging = true;
+      // From this point finish the physical transition even if the HTTP caller leaves.
+      // A new control request still cannot grant agent access while changing/signing in.
+      const task = this.#replaceBrowser(mode);
+      this.#pending.add(task);
+      try {
+        await task;
+      } finally {
+        this.#pending.delete(task);
+      }
+      lease.check();
+      signal.throwIfAborted();
+      return { mode: this.#signInMode, changing: false };
+    } finally {
+      lease.finish();
+    }
+  }
+
+  async #replaceBrowser(mode: BrowserSignInMode): Promise<void> {
+    const downloads = this.#downloads;
+    const uploads = this.#uploads;
+    const draining = Promise.all([
+      this.#observation?.close(),
+      this.#navigation?.close(),
+      downloads?.close(),
+      uploads?.close(),
+    ]);
+    void draining.catch(() => {});
+    try {
+      const channels = await this.#processes.replaceChromium(
+        browserSignInSpec(this.#config, mode === "signin"),
+        async () => {
+          this.#browserGeneration++;
+          if (this.#signInMode === "standard") return this.#targets?.retire() ?? false;
+          // SIGTERM can lose Chromium's current session even though it flushes cookies.
+          // Use its normal Quit command so the final tabs are saved, without reattaching CDP.
+          const { windows } = await required(this.#native).command(
+            "windows",
+            {},
+            this.#lifetime.signal,
+          );
+          const window = windows.find((candidate) => candidate.active) ?? windows[0];
+          if (!window) throw new BrowserRuntimeError("closed");
+          await required(this.#native).command(
+            "activate",
+            { window: window.id },
+            this.#lifetime.signal,
+          );
+          await required(this.#native).command(
+            "userKeys",
+            { combo: ["Alt_L", "f"] },
+            this.#lifetime.signal,
+          );
+          await sleep(100, undefined, { signal: this.#lifetime.signal });
+          await required(this.#native).command("userKeys", { combo: ["x"] }, this.#lifetime.signal);
+          return true;
+        },
+        this.#signInMode === "signin",
+      );
+      downloads?.writersExited();
+      uploads?.readersExited();
+      await draining;
+      this.#check();
+      if (mode === "standard") {
+        await this.#input?.close();
+        await this.#attachBrowser(channels, true);
+      } else {
+        // A spawned process is not yet a usable window. Keep native input fenced
+        // until the replacement window is present; no page inspection is involved.
+        await this.#until(async () => {
+          const { windows } = await required(this.#native).command(
+            "windows",
+            {},
+            this.#lifetime.signal,
+          );
+          return windows.some((window) => window.active);
+        });
+      }
+      // In sign-in mode the old input owner serves native manual input only. Its
+      // closed targets cannot observe anything; all managed HTTP routes are fenced.
+      this.#signInMode = mode;
+    } catch (error) {
+      if (error instanceof BrowserProcessError && error.reason === "busy") throw error;
+      void this.stop().catch(() => {});
+      throw new BrowserRuntimeError("startup");
+    } finally {
+      this.#signInChanging = false;
     }
   }
 

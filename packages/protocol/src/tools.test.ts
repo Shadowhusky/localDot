@@ -31,6 +31,8 @@ describe("the v1 tool table", () => {
   it("names exactly the tools, including M7 screen switching and approved browser upload", () => {
     expect([...TOOL_NAMES]).toEqual([
       "work_context",
+      "credentials",
+      "api_request",
       "computer",
       "shell",
       "files",

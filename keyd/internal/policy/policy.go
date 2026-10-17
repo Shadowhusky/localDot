@@ -31,6 +31,8 @@ const (
 	// Judge is the daemon's own listener for the purpose check: it reaches only the hosts its web
 	// API keys are bound to.
 	Judge Role = "judge"
+	// Service is an agent API call with one credential, limited to its bound HTTPS hosts.
+	Service Role = "service"
 	// Connector is one of the user's apps: a program in its own cell, or the daemon reaching a remote
 	// server for it. It reaches the web like a desktop, with only its own keys swapped in.
 	Connector Role = "connector"
@@ -51,7 +53,7 @@ func ForRole(r Role) (Policy, error) {
 		return Policy{Role: r, Gateway: true}, nil
 	case Desktop, Browser, Connector:
 		return Policy{Role: r, Web: true}, nil
-	case Judge:
+	case Judge, Service:
 		return Policy{Role: r, Bound: true}, nil
 	}
 	return Policy{}, fmt.Errorf("policy: unknown role %q", r)

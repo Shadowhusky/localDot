@@ -349,6 +349,25 @@ export function toolRisk(
       return {
         operation: input.op === "read" || input.op === "list" ? "files_read" : "files_write",
       };
+    case "api_request": {
+      const method = String(input.method ?? "GET");
+      return {
+        operation: "connector",
+        connector: {
+          app: "Service API",
+          tool: method,
+          exposed: "api_request",
+          host: new URL(String(input.url)).hostname,
+          actionClass:
+            method === "DELETE"
+              ? "delete"
+              : ["GET", "HEAD", "OPTIONS"].includes(method)
+                ? "reading"
+                : "send",
+        },
+      };
+    }
+    case "credentials":
     case "work_context":
     case "browser_read":
       return { operation: "files_read" };

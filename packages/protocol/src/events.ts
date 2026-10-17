@@ -4,6 +4,7 @@ import { MAX_OUTPUT_VERSION, ReviseLink } from "./deliverables.ts";
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
+import { CredentialRequest } from "./keyd.ts";
 import { TaintSource } from "./purpose.ts";
 import { ResearchBudget, ResearchBudgetData, ResearchSourceData } from "./research.ts";
 import {
@@ -346,6 +347,7 @@ export const MessageAssistant = event(
   z.object({ messageId: MessageId, text: z.string().max(20_000) }),
 );
 export const AskRequestField = z.object({
+  credential: CredentialRequest.optional(),
   id: AskFieldId,
   kind: AskFieldKind,
   label: z.string().min(1).max(200),

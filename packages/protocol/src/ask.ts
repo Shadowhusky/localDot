@@ -7,6 +7,7 @@ export const ASK_FIELD_KINDS = [
   "text",
   "longtext",
   "secret",
+  "api_key",
   "code",
   "choice",
   "multichoice",
@@ -87,6 +88,8 @@ export function askValueProblem(
   value: string | true | readonly string[] | undefined,
 ): string | undefined {
   switch (field.kind) {
+    case "api_key":
+      return value === true ? undefined : "Save the key to continue";
     case "confirm":
       return value === true ? undefined : "Confirm to continue";
     case "qr":

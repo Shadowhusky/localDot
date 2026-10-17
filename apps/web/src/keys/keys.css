@@ -340,3 +340,28 @@
     animation: none;
   }
 }
+
+.keys-description,
+.private-key-request {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.keys-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: calc(var(--spacing) * 2);
+  flex-wrap: wrap;
+}
+.private-key-request {
+  padding: calc(var(--spacing) * 4);
+  gap: calc(var(--spacing) * 3);
+}
+.private-key-title {
+  font-weight: 600;
+}
+.private-key-destination {
+  color: var(--color-fg-2);
+}
+.private-key-request p {
+  margin: 0;
+}

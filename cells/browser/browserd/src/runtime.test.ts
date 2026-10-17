@@ -8,6 +8,7 @@ import {
   type BrowserProcessName,
   browserProcessSpecs,
   browserRuntimeConfig,
+  browserSignInSpec,
 } from "./runtime-config.ts";
 
 const config = browserRuntimeConfig({
@@ -55,7 +56,8 @@ function setup(options: FixtureOptions = {}) {
     const name = order.find(
       (candidate) =>
         specs[candidate].executable === spec.executable &&
-        JSON.stringify(specs[candidate].args) === JSON.stringify(spec.args),
+        (candidate === "chromium" ||
+          JSON.stringify(specs[candidate].args) === JSON.stringify(spec.args)),
     );
     if (!name) throw new Error("unowned process spec");
     started.push(name);
@@ -76,13 +78,49 @@ function setup(options: FixtureOptions = {}) {
         if (name === "xhelper") {
           const message = JSON.parse(chunk.toString());
           commands.push(`native:${message.cmd}`);
-          queueMicrotask(() =>
-            output.write(`${JSON.stringify({ id: message.id, ok: true, mono: 100 })}\n`),
-          );
+          queueMicrotask(() => {
+            if (message.cmd === "userKeys" && message.combo[0] === "x") {
+              const browser = owners.get("chromium");
+              if (!browser) throw new Error("missing browser");
+              browser.alive = false;
+              browser.failure();
+            }
+            output.write(
+              `${JSON.stringify({
+                id: message.id,
+                ok: true,
+                ...(["ping", "arm"].includes(message.cmd) ? { mono: 100 } : {}),
+                ...(message.cmd === "windows"
+                  ? {
+                      windows: [
+                        {
+                          id: 7,
+                          pid: 100,
+                          cls: "chromium",
+                          title: "synthetic",
+                          frame: [0, 0, 2560, 1600],
+                          x: 0,
+                          y: 0,
+                          w: 2560,
+                          h: 1600,
+                          active: true,
+                        },
+                      ],
+                    }
+                  : {}),
+                ...(message.cmd === "activate" ? { active: 7, changed: true, waitedMs: 0 } : {}),
+                ...(message.cmd === "userKeys" ? { keycodes: message.combo.map(() => 38) } : {}),
+              })}\n`,
+            );
+          });
         }
         if (name === "chromium") {
           const message = JSON.parse(chunk.toString().slice(0, -1));
           commands.push(message.method);
+          if (message.method === "Browser.close") {
+            owner.alive = false;
+            failure();
+          }
           queueMicrotask(() => {
             if (message.method === "Target.setDiscoverTargets")
               emit({ method: "Target.targetCreated", params: { targetInfo: info } });
@@ -218,6 +256,7 @@ describe("assembled browser runtime", () => {
         instance: fixture.runtime.instance,
         ready: true,
         holder: "user",
+        signIn: { mode: "standard", changing: false },
         width: 1280,
         height: 800,
       },
@@ -385,4 +424,87 @@ describe("assembled browser runtime", () => {
     expect(fixture.started).toEqual(["display"]);
     expect(vi.getTimerCount()).toBe(0);
   });
+});
+
+async function browserRequest(server: Server, path: string, body: unknown, method = "POST") {
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("no server");
+  const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+    method,
+    headers: { authorization: `Bearer ${config.serviceToken}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+it("disconnects automation for manual sign-in and restores only Chromium with the same profile", async () => {
+  const f = setup();
+  const service = await f.runtime.start();
+  const identity = {
+    browserCellId: config.browserCellId,
+    parentCellId: config.parentCellId,
+    instance: f.runtime.instance,
+  };
+  const permit = { ...identity, requestId: "01J00000000000000000000003", revision: 1 };
+  expect((await browserRequest(service.server, "/signin", { permit, mode: "signin" })).status).toBe(
+    409,
+  );
+  expect(
+    (await browserRequest(service.server, "/control", { ...permit, holder: "user" }, "PUT")).status,
+  ).toBe(200);
+  const prior = f.owners.get("chromium");
+  if (!prior) throw new Error("missing browser");
+  expect(await browserRequest(service.server, "/signin", { permit, mode: "signin" })).toEqual({
+    status: 200,
+    body: { mode: "signin", changing: false },
+  });
+  prior.failure(); // queued CDP/exit notification belongs to the old process.
+  expect((await health(service.server)).body).toMatchObject({
+    ready: true,
+    signIn: { mode: "signin", changing: false },
+  });
+  expect(f.runtime.retirement()).toBeUndefined();
+  expect(f.started.filter((name) => name === "chromium")).toHaveLength(2);
+  expect(f.signalled.filter((name) => name !== "chromium")).toEqual([]);
+  expect((await browserRequest(service.server, "/observe", {})).status).toBe(409);
+  const agent = {
+    ...permit,
+    revision: 2,
+    holder: "agent",
+    owner: { sessionId: permit.requestId, generation: 1 },
+  };
+  expect((await browserRequest(service.server, "/control", agent, "PUT")).status).toBe(409);
+  const next = { ...permit, revision: 3 };
+  expect(
+    (await browserRequest(service.server, "/control", { ...next, holder: "user" }, "PUT")).status,
+  ).toBe(200);
+  expect(
+    (await browserRequest(service.server, "/signin", { permit: next, mode: "standard" })).status,
+  ).toBe(200);
+  expect((await health(service.server)).body.signIn).toEqual({ mode: "standard", changing: false });
+  expect(f.started.filter((name) => name === "chromium")).toHaveLength(3);
+  expect(f.runtime.ready).toBe(true);
+  await f.runtime.close();
+});
+
+it("keeps isolation and graphics flags but no debugging transport in sign-in mode", () => {
+  const manual = browserSignInSpec(config, true);
+  const managed = browserSignInSpec(config, false);
+  expect(manual.channel).toBe("none");
+  expect(
+    manual.args.some((arg) =>
+      /remote-debugging|enable-automation|user-agent|no-sandbox|disable-web-security/.test(arg),
+    ),
+  ).toBe(false);
+  for (const flag of [
+    "--user-data-dir=/profile/chromium",
+    "--restore-last-session",
+    "--use-angle=gl",
+    "--proxy-bypass-list=<-loopback>",
+  ]) {
+    expect(manual.args).toContain(flag);
+    expect(managed.args).toContain(flag);
+  }
+  expect(managed.channel).toBe("cdp");
+  expect(managed.args).toContain("--remote-debugging-pipe");
 });

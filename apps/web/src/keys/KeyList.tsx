@@ -26,6 +26,7 @@ export interface KeyListProps {
   remove(id: string): Promise<void>;
   // Opens the form that stores a key's value again under its name.
   reenter?(key: KeyRecord): void;
+  edit?(key: KeyRecord): void;
 }
 
 interface Row {
@@ -58,6 +59,7 @@ export function KeyList({
   fresh,
   remove,
   reenter,
+  edit,
 }: KeyListProps) {
   const [armed, setArmed] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -134,6 +136,8 @@ export function KeyList({
               pending === k.id ? "Removing…" : armed === k.id ? "Confirm remove" : "Remove";
             const count = uses?.[k.id] ?? 0;
             const facts = [
+              k.metadata?.service,
+              k.metadata?.label ? k.id : undefined,
               ...(k.kind === "http" ? [(k.hosts ?? []).join(", ")] : describeKey(k).split(" · ")),
               k.reenter || k.rebound ? undefined : added(k.createdAt),
               count > 0 ? `Used ${count}× this task` : undefined,
@@ -157,7 +161,7 @@ export function KeyList({
                 <GroupRow
                   className="keys-row-inner"
                   leading={<Monogram>{initial(k)}</Monogram>}
-                  label={<MiddleTruncate text={k.id} />}
+                  label={<MiddleTruncate text={k.metadata?.label || k.id} />}
                   detail={
                     // Each fact wraps whole, so no line starts or ends with a separator.
                     <span className="keys-row-meta">
@@ -217,6 +221,20 @@ export function KeyList({
                     </Button>
                   }
                 >
+                  {k.metadata?.description && (
+                    <p className="keys-description">{k.metadata.description}</p>
+                  )}
+                  {edit && (
+                    <Button
+                      size="sm"
+                      variant="quiet"
+                      disabledReason={unavailable ?? (busy ? "Saving a key" : undefined)}
+                      onClick={() => edit(k)}
+                      aria-label={`Edit details for ${k.id}`}
+                    >
+                      Edit details
+                    </Button>
+                  )}
                   {changed && (
                     <p className="keys-row-fix keys-row-why">
                       Where this key is sent was changed outside localDot. Remove it, then add it

@@ -55,7 +55,7 @@ export interface ToolDeps {
         | "browserRead"
         | "browserNavigate"
       > &
-        Partial<Pick<DesktopdTools, "elements" | "capabilities">>)
+        Partial<Pick<DesktopdTools, "elements" | "capabilities" | "putFile">>)
     | undefined;
   launcher(
     cellId: string,
@@ -90,6 +90,7 @@ export interface ToolDeps {
   connectors?: Pick<ConnectorHub, "access" | "check" | "call" | "observation">;
   // The web tools' own way out, through keyd, without the screen or the user's sign-ins.
   web?: WebAccess;
+  credentials?: Pick<import("../../keyd/service-keys.ts").ServiceKeys, "list" | "request">;
 }
 
 export interface ToolCallContext {

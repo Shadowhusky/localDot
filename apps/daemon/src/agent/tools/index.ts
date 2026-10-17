@@ -29,6 +29,7 @@ import { browserActTool } from "./browser-act.ts";
 import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool } from "./computer.ts";
 import { connectorFacts, connectorTool } from "./connector.ts";
+import { apiRequestTool, credentialsTool } from "./credentials.ts";
 import { append, fail, intentOf, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
@@ -61,6 +62,8 @@ const outOfTime = (): DispatchOutcome => ({
 
 const STEP_KIND: Record<ToolName, string> = {
   work_context: "think",
+  credentials: "ask",
+  api_request: "app",
   computer: "gui",
   shell: "shell",
   files: "file",
@@ -459,6 +462,12 @@ async function dispatchAdmitted(
         break;
       case "update_plan":
         result = updatePlanTool(ctx, input);
+        break;
+      case "credentials":
+        result = await credentialsTool(t, ctx, input);
+        break;
+      case "api_request":
+        result = await apiRequestTool(t, ctx, input);
         break;
       case "ask_user":
         result = await askUserTool(t, ctx, input);

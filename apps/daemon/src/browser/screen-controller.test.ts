@@ -235,7 +235,8 @@ describe("screen-owned download lifecycle", () => {
     }
   });
 });
-function fixture(downloads?: ScreenControllerDeps["downloads"]) {
+function fixture(downloads?: ScreenControllerDeps["downloads"], signInSupported = false) {
+  let signInMode: "standard" | "signin" = "standard";
   const sessionId = ulid(),
     parentCellId = ulid(),
     tabId = randomUUID();
@@ -251,6 +252,12 @@ function fixture(downloads?: ScreenControllerDeps["downloads"]) {
   let holder: "user" | "agent" = "user";
   const controlBarrier = vi.fn(async (_request: BrowserControlRequest) => {});
   const client = {
+    signIn: vi.fn(async (_permit: unknown, mode: "standard" | "signin", scope: BrowserScope) => {
+      scope.check();
+      expect(holder).toBe("user");
+      signInMode = mode;
+      return { mode, changing: false };
+    }),
     manual: vi.fn(async (_permit: unknown, _input: unknown, scope: BrowserScope) => {
       scope.check();
       return {
@@ -287,6 +294,7 @@ function fixture(downloads?: ScreenControllerDeps["downloads"]) {
         width: 1280 as const,
         height: 800 as const,
         holder,
+        ...(signInSupported ? { signIn: { mode: signInMode, changing: false } } : {}),
       };
     }),
     tabs: vi.fn(async (scope: BrowserScope) => {
@@ -1189,4 +1197,57 @@ describe("a page opened for the user", () => {
     );
     await f.controller.close();
   });
+});
+
+it("keeps sign-in user-owned and restores the connection before granting agent control", async () => {
+  const f = fixture(undefined, true);
+  await f.controller.switchTo("browser", f.scope);
+  expect(() => f.controller.manualAccess(f.scope)).toThrow();
+  await f.controller.takeOver();
+  const access = f.controller.manualAccess(f.scope);
+  expect(await access.signIn(false)).toEqual({
+    available: true,
+    mode: "standard",
+    changing: false,
+  });
+  expect(await access.signIn(true)).toEqual({ available: true, mode: "signin", changing: false });
+  access.finish();
+  expect(f.holder()).toBe("user");
+  f.controlBarrier.mockImplementation(async (request) => {
+    if (request.holder === "agent") expect(f.client.signIn.mock.calls.at(-1)?.[1]).toBe("standard");
+  });
+  await f.controller.handback(f.scope);
+  expect(f.holder()).toBe("agent");
+  expect(f.client.signIn.mock.calls.map((call) => call[1])).toEqual(["signin", "standard"]);
+  await f.controller.close();
+});
+
+it("reports an older browser's capability without trying to restart it", async () => {
+  const f = fixture();
+  await f.controller.switchTo("browser", f.scope);
+  await f.controller.takeOver();
+  const access = f.controller.manualAccess(f.scope);
+  expect(await access.signIn(true)).toEqual({ available: false });
+  access.finish();
+  expect(f.client.signIn).not.toHaveBeenCalled();
+  await f.controller.close();
+});
+
+it("keeps the user's browser and control when sign-in mode cannot yet quit", async () => {
+  const f = fixture(undefined, true);
+  await f.controller.switchTo("browser", f.scope);
+  await f.controller.takeOver();
+  const access = f.controller.manualAccess(f.scope);
+  await access.signIn(true);
+  access.finish();
+  f.client.signIn.mockRejectedValueOnce(new BrowserClientError("refused"));
+  await expect(f.controller.handback(f.scope)).rejects.toThrow();
+  expect(f.controller.selection.screen).toBe("browser");
+  expect(f.holder()).toBe("user");
+  expect(f.deps.contain).not.toHaveBeenCalled();
+  expect(f.deps.browser.stop).not.toHaveBeenCalled();
+  const held = f.controller.manualAccess(f.scope);
+  expect(await held.signIn(false)).toMatchObject({ available: true, mode: "signin" });
+  held.finish();
+  await f.controller.close();
 });

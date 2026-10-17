@@ -1,8 +1,10 @@
 import {
+  API_REQUEST_DESCRIPTION,
   BrowserAction,
   ComputerAction,
   ComputerStep,
   type ConnectorToolSpec,
+  CREDENTIALS_DESCRIPTION,
   DoneModelInput,
   FOLLOW_UP_TOOL_DESCRIPTION,
   MAX_BATCH_STEPS,
@@ -56,6 +58,8 @@ export const COMPUTER_DESCRIPTION =
 
 export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   work_context: WORK_CONTEXT_DESCRIPTION,
+  credentials: CREDENTIALS_DESCRIPTION,
+  api_request: API_REQUEST_DESCRIPTION,
   computer: `${COMPUTER_DESCRIPTION} Actions in this turn still use its initial full-frame basis. If the screen changed, localDot cancels this turn before any retry.`,
   shell:
     "Run one bash command in the virtual computer's terminal, as its user, in their home. Returns the " +

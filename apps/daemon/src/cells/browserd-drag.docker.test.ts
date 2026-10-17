@@ -159,6 +159,10 @@ class Gate(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlsplit(self.path).path
         content = ${JSON.stringify(GRAPHICS_PAGE)}.encode() if path == "/graphics" else ${JSON.stringify(FRAME_CHURN_PAGE)}.encode() if path == "/frame-churn" else b'<html><title>Child</title><body>Child</body></html>' if path == "/child" else code_page if path == "/device" else large_page if path == "/large-focus" else js_page if path == "/javascript" else page
+        if path == "/signin-session":
+            content = b"<!doctype html><title>Sign-in fixture</title><button autofocus onclick=\\"document.cookie='fixture_session=ok;max-age=3600;path=/';localStorage.setItem('fixture_mode',navigator.webdriver?'controlled':'manual');location.href='/signin-saved'\\">Sign in</button>"
+        if path == "/signin-saved":
+            content = b"<!doctype html><title>Checking saved state</title><script>document.title = document.cookie.includes('fixture_session=ok') ? 'Session restored: ' + localStorage.getItem('fixture_mode') : 'Session missing';</script><p>Signed in with synthetic fixture data.</p>"
         self.send_response(200)
         if path == "/source.zip":
             self.send_header("content-disposition", 'attachment; filename="source.zip"')
@@ -839,6 +843,52 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
     expect(await client.observe(permit, tabId, owner())).toHaveProperty("frame");
   });
 
+  it("disconnects automation for real native sign-in and keeps the saved session after handback", async () => {
+    if (!names) throw new Error("missing fixture");
+    await client.navigate(permit, tabId, "http://drag.localdot.test/signin-session", owner());
+    expect(await title()).toBe("Sign-in fixture");
+    const { owner: agentOwner, ...identity } = permit;
+    const manual = { ...identity, requestId: ulid(), revision: permit.revision + 1 };
+    await client.control({ ...manual, holder: "user" }, owner());
+    expect(await client.signIn(manual, "signin", owner())).toEqual({
+      mode: "signin",
+      changing: false,
+    });
+    const processes = docker("top", names.browser, "-eo", "pid,comm,args");
+    const chromium = processes
+      .split("\n")
+      .filter((line) => /\s+chromium\s+/.test(line) && !line.includes("--type="));
+    expect(chromium).toHaveLength(1);
+    expect(chromium[0]).not.toMatch(/remote-debugging|enable-automation|no-sandbox/);
+    expect(chromium[0]).toContain("--user-data-dir=/profile/chromium");
+    await expect(client.observe(permit, tabId, owner())).rejects.toMatchObject({ code: "refused" });
+    // Address bar and Enter are sent through the user-only native input channel.
+    await sleep(1500);
+    await client.manual(manual, { kind: "key", combo: ["Control", "l"] }, owner());
+    await client.manual(
+      manual,
+      { kind: "text", text: "http://drag.localdot.test/signin-session" },
+      owner(),
+    );
+    await client.manual(manual, { kind: "key", combo: ["Enter"] }, owner());
+    await sleep(1500);
+    await client.manual(manual, { kind: "key", combo: ["Enter"] }, owner());
+    await sleep(1000);
+    expect(await client.signIn(manual, "standard", owner())).toEqual({
+      mode: "standard",
+      changing: false,
+    });
+    permit = { ...identity, owner: agentOwner, requestId: ulid(), revision: manual.revision + 1 };
+    await client.control({ ...permit, holder: "agent" }, owner());
+    const resumed = (await client.tabs(owner())).tabs.find((tab) => tab.ready);
+    if (!resumed) throw new Error("missing restored tab");
+    tabId = resumed.id;
+    // The resumed page proves both cookie and local storage survived the native login.
+    // Its saved webdriver observation was made before automation reconnected.
+    await expect.poll(title, { timeout: 15000 }).toBe("Session restored: manual");
+    expect((await client.observe(permit, tabId, owner())).frame.image.length).toBeGreaterThan(1000);
+    expect((await client.health(owner())).signIn).toEqual({ mode: "standard", changing: false });
+  }, 60000);
   it("reads a sign-in popup after opening it from the page", async () => {
     await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
     await title();

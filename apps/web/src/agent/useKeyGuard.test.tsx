@@ -190,7 +190,7 @@ describe("key guard at the composer and sealed form boundary", () => {
     expect(f.guard.notice).toBeNull();
     expect(f.calls).toEqual([]);
     absent(f); // DOM.value is the sole allowed remaining plaintext owner, not attributes/markup.
-    fireEvent.change(screen.getByLabelText("Label (optional)"), { target: { value: "provider" } });
+    fireEvent.change(screen.getByLabelText("Key ID (optional)"), { target: { value: "provider" } });
     fireEvent.submit(screen.getByRole("form", { name: "Add a key" }));
     expect(f.keyField.value).toBe("");
     await screen.findByText("Saved provider.");
@@ -215,7 +215,7 @@ describe("key guard at the composer and sealed form boundary", () => {
     });
     fireEvent.input(f.task, { target: { value: keys[0] } });
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
-    fireEvent.change(screen.getByLabelText("Label (optional)"), { target: { value: "provider" } });
+    fireEvent.change(screen.getByLabelText("Key ID (optional)"), { target: { value: "provider" } });
     fireEvent.submit(screen.getByRole("form", { name: "Add a key" }));
     await screen.findByRole("alert");
     expect(f.keyField.value).toBe("");
@@ -410,7 +410,7 @@ describe("key guard at the composer and sealed form boundary", () => {
       expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe("");
     }
     view.rerender(<KeyForm active save={save} intakeRef={intake} />);
-    fireEvent.change(screen.getByLabelText("Label (optional)"), { target: { value: "provider" } });
+    fireEvent.change(screen.getByLabelText("Key ID (optional)"), { target: { value: "provider" } });
     fireEvent.change(screen.getByLabelText("Key"), { target: { value: keys[0] } });
     fireEvent.submit(screen.getByRole("form"));
     source.value = keys[0] ?? "";

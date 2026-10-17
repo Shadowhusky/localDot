@@ -8,6 +8,7 @@ export * from "./computer-operation.ts";
 export * from "./computer-reset.ts";
 export * from "./connectors.ts";
 export * from "./conversation.ts";
+export * from "./credentials.ts";
 export * from "./deliverables.ts";
 export * from "./desktopd.ts";
 export * from "./desktopd-tools.ts";

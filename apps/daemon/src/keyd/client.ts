@@ -20,6 +20,7 @@ import {
   KeydSecrets,
   KeydStatus,
   KeydVault,
+  type KeyMetadata,
   ModelAdmissionSnapshot,
   ModelAdmissionWrite,
   type Sealed,
@@ -73,7 +74,7 @@ export function privateSocketProblem(socketPath: string): string | undefined {
   }
 }
 
-export type CellRole = "brain" | "desktop" | "browser" | "judge" | "connector";
+export type CellRole = "brain" | "desktop" | "browser" | "judge" | "connector" | "service";
 
 export interface OpenCellRequest {
   cellId: string;
@@ -148,9 +149,18 @@ export class KeydClient {
 
   // The binding goes to keyd exactly as the UI sealed it: keyd rebuilds the AAD from these fields,
   // so the daemon must not change, add or drop a single value.
-  putSecret(binding: SecretBinding, sealed: Sealed): Promise<KeydRecord> {
+  putSecret(binding: SecretBinding, sealed: Sealed, metadata?: KeyMetadata): Promise<KeydRecord> {
     const { id, ...fields } = binding;
-    return this.#json("PUT", `/v1/secrets/${segment(id)}`, { ...fields, sealed }, KeydRecord);
+    return this.#json(
+      "PUT",
+      `/v1/secrets/${segment(id)}`,
+      { ...fields, sealed, ...(metadata ? { metadata } : {}) },
+      KeydRecord,
+    );
+  }
+
+  putMetadata(id: string, metadata: KeyMetadata): Promise<KeydRecord> {
+    return this.#json("PUT", `/v1/secrets/${segment(id)}/metadata`, metadata, KeydRecord);
   }
 
   async deleteSecret(id: string): Promise<boolean> {

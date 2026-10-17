@@ -1493,3 +1493,84 @@ it("cannot cancel a message after steering has delivered it", async () => {
   expect((await f.send("POST", `${path}/cancel`)).status).toBe(409);
   expect((await f.session.inbox(0, 0)).items).toHaveLength(1);
 });
+
+describe("private saved-key answer verification", () => {
+  const binding = {
+    id: "catalog",
+    kind: "http" as const,
+    hosts: ["api.example.test"],
+    header: "X-API-Key",
+    format: "raw" as const,
+  };
+  const record = { ...binding, createdAt: at, updatedAt: at };
+  it.each(["missing", "wrong destination", "revoked", "raw value"])(
+    "rejects %s instead of unblocking the task",
+    async (kind) => {
+      const f = await setup();
+      const asking = f.session.askFields(
+        {
+          question: "Catalog access",
+          fields: [
+            {
+              id: "key",
+              kind: "api_key",
+              label: "API key",
+              credential: { binding, metadata: { label: "Catalog" } },
+            },
+          ],
+        },
+        0,
+      );
+      vi.mocked(f.deps.keyd.secrets).mockResolvedValue(
+        kind === "missing"
+          ? []
+          : kind === "wrong destination"
+            ? [{ ...record, hosts: ["other.example.test"] }]
+            : kind === "revoked"
+              ? [{ ...record, reenter: true }]
+              : [record],
+      );
+      const askId = f.session.pendingAsk;
+      expect(
+        (
+          await f.send("POST", endpoint("answer"), {
+            askId,
+            fields: { key: kind === "raw value" ? "private-value" : true },
+          })
+        ).status,
+      ).toBe(409);
+      expect(f.session.pendingAsk).toBe(askId);
+      expect(JSON.stringify(f.events)).not.toContain("private-value");
+      f.session.stop();
+      await asking;
+    },
+  );
+  it("verifies the saved binding and records only provided=true", async () => {
+    const f = await setup();
+    const asking = f.session.askFields(
+      {
+        question: "Catalog access",
+        fields: [
+          {
+            id: "key",
+            kind: "api_key",
+            label: "API key",
+            credential: { binding, metadata: { label: "Catalog" } },
+          },
+        ],
+      },
+      0,
+    );
+    vi.mocked(f.deps.keyd.secrets).mockResolvedValue([record]);
+    expect(
+      (
+        await f.send("POST", endpoint("answer"), {
+          askId: f.session.pendingAsk,
+          fields: { key: true },
+        })
+      ).status,
+    ).toBe(204);
+    expect(await asking).toMatchObject({ by: "user", fields: { key: { provided: true } } });
+    expect(f.session.pendingAsk).toBeUndefined();
+  });
+});

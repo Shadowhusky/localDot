@@ -1,3 +1,4 @@
+import type { KeyMetadata } from "@localdot/protocol";
 import {
   type Ref,
   useCallback,
@@ -21,13 +22,14 @@ import {
   savedLine,
 } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
+import { KeyMetadataEditor } from "./KeyMetadataEditor.tsx";
 import { type KeydHealth, type KeyRecord, keyHome, vaultLocked } from "./keys-api.ts";
 import { Protection } from "./Protection.tsx";
 import type { KeysController } from "./useKeys.ts";
 import "./keys.css";
 
 export const keysDescription = (health: KeydHealth | null) =>
-  `Your keys stay ${keyHome(health)}. Apps on your computer get stand-in keys and never see the real ones.`;
+  `dot can find and use your saved keys when a task needs them, including custom services. It sees their names and descriptions; the secret values stay ${keyHome(health)}. Service API charges follow the provider’s limits.`;
 
 const HELD = "Keys are held until the audit log works again";
 const LOCKED = "Saved keys are locked until you unlock them on the computer running localDot";
@@ -61,6 +63,7 @@ export function KeysPanel({
   reveal,
 }: KeysPanelProps) {
   const phone = useMediaQuery(PHONE);
+  const [editing, setEditing] = useState<KeyRecord | null>(null);
   const [fresh, setFresh] = useState<{ id: string; at: number } | null>(null);
   const [adding, setAdding] = useState(!!preset);
   const [reentering, setReentering] = useState<string | null>(reenter?.id ?? null);
@@ -151,10 +154,14 @@ export function KeysPanel({
     [],
   );
   const save = useCallback(
-    async (binding: Parameters<KeysController["save"]>[0], value: string) => {
+    async (
+      binding: Parameters<KeysController["save"]>[0],
+      value: string,
+      metadata?: KeyMetadata,
+    ) => {
       const generation = owner.current.generation,
         request = owner.current.preset?.requestId;
-      const result = await keys.save(binding, value);
+      const result = await keys.save(binding, value, ...(metadata ? [metadata] : []));
       setFresh({ id: binding.id, at: ++saves.current });
       if (owner.current.active && owner.current.generation === generation)
         setSaved({ id: binding.id, line: savedLine(binding.id, result.restart) });
@@ -172,8 +179,12 @@ export function KeysPanel({
   );
   // Stored again, the key leaves its form and lights up in the list.
   const saveAgain = useCallback(
-    async (binding: Parameters<KeysController["save"]>[0], value: string) => {
-      const result = await save(binding, value);
+    async (
+      binding: Parameters<KeysController["save"]>[0],
+      value: string,
+      metadata?: KeyMetadata,
+    ) => {
+      const result = await save(binding, value, ...(metadata ? [metadata] : []));
       setReentering((now) => (now === binding.id ? null : now));
       return result;
     },
@@ -234,6 +245,7 @@ export function KeysPanel({
                   fresh={fresh}
                   remove={keys.remove}
                   reenter={startReentry}
+                  edit={keys.updateMetadata ? setEditing : undefined}
                 />
               </div>
             )}
@@ -242,6 +254,14 @@ export function KeysPanel({
           </>
         )}
       </section>
+      {editing && keys.updateMetadata && (
+        <KeyMetadataEditor
+          key={editing.id}
+          record={editing}
+          save={keys.updateMetadata}
+          close={() => setEditing(null)}
+        />
+      )}
       {again ? (
         <section ref={form} className="keys-section" aria-labelledby="keys-reenter">
           <GroupHead id="keys-reenter" title={`Re-enter ${again.id}`} />

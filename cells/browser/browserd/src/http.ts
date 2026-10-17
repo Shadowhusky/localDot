@@ -8,6 +8,9 @@ import {
   BrowserControlRequest,
   BrowserManualPermit,
   BrowserManualReply,
+  type BrowserSignInMode,
+  BrowserSignInRequest,
+  type BrowserSignInState,
 } from "../../../../packages/protocol/src/browser-control.ts";
 import {
   BrowserDownloadAck,
@@ -68,6 +71,7 @@ const routes = new Set([
   "POST /type",
   "POST /secret",
   "POST /manual",
+  "POST /signin",
   "POST /observe",
   "POST /navigate",
   "POST /lookup",
@@ -99,6 +103,14 @@ export interface BrowserHttpOptions {
   readonly downloads?: Pick<BrowserDownloadService, "arm" | "list" | "read" | "acknowledge">;
   readonly uploads?: Pick<BrowserUploadService, "chooser" | "upload">;
   readonly accounts?: Pick<BrowserAccounts, "domains" | "signOut">;
+  readonly signIn?: {
+    state(): schema.infer<typeof BrowserSignInState>;
+    set(
+      permit: schema.infer<typeof BrowserManualPermit>,
+      mode: BrowserSignInMode,
+      signal: AbortSignal,
+    ): Promise<schema.infer<typeof BrowserSignInState>>;
+  };
   ready(): boolean;
   fence(): void;
   stop(): Promise<void>;
@@ -259,7 +271,7 @@ export class BrowserHttp {
     );
     if (this.#identity.browserCellId === this.#identity.parentCellId)
       throw new HttpRefusal(400, "request");
-    this.#options = Object.freeze({ ...options });
+    this.#options = Object.freeze(options);
     this.#token = Buffer.from(`Bearer ${options.config.serviceToken}`);
     this.server = createServer(
       {
@@ -346,6 +358,21 @@ export class BrowserHttp {
         throw new HttpRefusal(401, "authentication");
       if (!routes.has(route)) throw new HttpRefusal(404, "request");
       if (header(request, "origin") !== undefined) throw new HttpRefusal(400, "request");
+      const signIn = this.#options.signIn?.state();
+      if (signIn?.changing && !["GET /health", "POST /stop", "PUT /control"].includes(route))
+        throw new HttpRefusal(409, "busy");
+      if (
+        signIn?.mode === "signin" &&
+        ![
+          "GET /health",
+          "POST /stop",
+          "PUT /control",
+          "POST /manual",
+          "POST /signin",
+          "POST /work-window",
+        ].includes(route)
+      )
+        throw new HttpRefusal(409, "refused");
       if (route.startsWith("GET ")) {
         if (header(request, "transfer-encoding") || Number(header(request, "content-length") ?? 0))
           throw new HttpRefusal(400, "request");
@@ -357,6 +384,7 @@ export class BrowserHttp {
               !this.#options.retirement() &&
               this.#options.ready(),
             holder: this.#options.control.holder,
+            ...(this.#options.signIn ? { signIn: this.#options.signIn.state() } : {}),
             width: 1280,
             height: 800,
           });
@@ -406,6 +434,20 @@ export class BrowserHttp {
         return;
       }
       const body = await jsonBody(request, disconnected.signal);
+      const modeNow = this.#options.signIn?.state();
+      if (modeNow?.changing && !["POST /stop", "PUT /control"].includes(route))
+        throw new HttpRefusal(409, "busy");
+      if (
+        modeNow?.mode === "signin" &&
+        ![
+          "POST /stop",
+          "PUT /control",
+          "POST /manual",
+          "POST /signin",
+          "POST /work-window",
+        ].includes(route)
+      )
+        throw new HttpRefusal(409, "refused");
       if (route === "POST /work-window") {
         this.#available(signal);
         const update = WorkWindowUpdate.safeParse(body);
@@ -513,6 +555,18 @@ export class BrowserHttp {
           // Chunked EOF comes only after the reader's final digest/identity/authority checks.
           response.end();
         }
+        return;
+      }
+      if (route === "POST /signin") {
+        const parsed = BrowserSignInRequest.safeParse(body);
+        if (!parsed.success) throw new HttpRefusal(400, "request");
+        if (!this.#options.signIn) throw new HttpRefusal(503, "unavailable");
+        if (this.#active) throw new HttpRefusal(409, "busy");
+        this.#active = true;
+        ownsSlot = true;
+        const reply = await this.#options.signIn.set(parsed.data.permit, parsed.data.mode, signal);
+        this.#available(signal);
+        send(response, 200, reply);
         return;
       }
       if (route === "POST /manual") {

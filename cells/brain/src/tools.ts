@@ -1,12 +1,16 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import type { ToolSchema } from "@deepseek-ai/dsh-llm";
 import {
+  API_REQUEST_DESCRIPTION,
+  ApiRequestInput,
   AskUserInput,
   BrowserActInput,
   BrowserNavigateInput,
   BrowserReadInput,
   BrowserUploadInput,
   type ConnectorToolSpec,
+  CREDENTIALS_DESCRIPTION,
+  CredentialsInput,
   DoneInput,
   DoneModelInput,
   FilesInput,
@@ -91,6 +95,8 @@ export function toolSet(
       ]),
     ),
     ...(computer ? { computer } : {}),
+    credentials: tool({ description: CREDENTIALS_DESCRIPTION, inputSchema: CredentialsInput }),
+    api_request: tool({ description: API_REQUEST_DESCRIPTION, inputSchema: ApiRequestInput }),
     work_context: tool({ description: WORK_CONTEXT_DESCRIPTION, inputSchema: WorkContextInput }),
     shell: tool({
       description:

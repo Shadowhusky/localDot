@@ -35,6 +35,7 @@ import {
   type RecentTask,
   ResearchChange,
   ResumeSafetyRequest,
+  sameCredential,
   scanKeyLike,
   type TakeComputerReply,
   type TakeControlReply,
@@ -51,6 +52,10 @@ import {
   signInSite,
   signInUrl,
 } from "../../../../packages/protocol/src/accounts.ts";
+import {
+  UserBrowserSignInReply,
+  UserBrowserSignInRequest,
+} from "../../../../packages/protocol/src/browser-sign-in.ts";
 import type { BrowserScope } from "../browser/client.ts";
 import { type QuarantineRoutesDeps, quarantineRoutes } from "../browser/quarantine-routes.ts";
 import { DesktopdError } from "../desktopd/client.ts";
@@ -811,6 +816,17 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const s = active(c.req.param("id") ?? "");
       const parsed = await json(c.req.raw, QuestionAnswerRequest);
       check(c.req.raw.signal);
+      if (parsed.fields && s.pendingAsk === parsed.askId) {
+        for (const field of s.requestedCredentials(parsed.askId)) {
+          if (field.kind !== "api_key") continue;
+          if (parsed.fields[field.id] !== true || !field.credential)
+            return c.text("Save this key before continuing", 409);
+          const keys = await deps.keyd.secrets();
+          if (!keys.some((key) => sameCredential(key, field.credential!.binding)))
+            return c.text("The requested key has not been saved", 409);
+          check(c.req.raw.signal);
+        }
+      }
       const ok = parsed.declined
         ? s.decline(parsed.askId)
         : parsed.fields
@@ -891,6 +907,25 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         parsed.declined === true,
       );
       return ok ? c.body(null, 204) : c.text("the screen is not handed over", 409);
+    }),
+  );
+  app.post(
+    "/api/agent/sessions/:id/takeover/sign-in",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const parsed = await json(c.req.raw, UserBrowserSignInRequest);
+      const lease = s.admitManual(parsed.requestId, c.req.raw.signal);
+      let access: ReturnType<NonNullable<typeof s.screens>["manualAccess"]> | undefined;
+      try {
+        if (!s.screens) throw new RouteError(503, "browser sign-in is unavailable");
+        access = s.screens.manualAccess({ signal: lease.signal, check: lease.check });
+        const result = await access.signIn(parsed.action === "start");
+        lease.check();
+        return c.json(UserBrowserSignInReply.parse(result));
+      } finally {
+        access?.finish();
+        lease.finish();
+      }
     }),
   );
   app.post(

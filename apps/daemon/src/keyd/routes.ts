@@ -1,6 +1,8 @@
 import {
+  KeyMetadata,
   SECRET_ID_PATTERN,
   SealedSecret,
+  scanKeyLike,
   surrogateEnvClash,
   surrogateEnvName,
 } from "@localdot/protocol";
@@ -70,7 +72,9 @@ export function keyRoutes(app: Hono, { keyd, monitor, afterChange }: KeyRoutesDe
         "send a sealed key: { binding, sealed } and nothing else",
       );
     }
-    const { binding, sealed } = parsed.data;
+    const { binding, sealed, metadata } = parsed.data;
+    if (metadata && hasKey(metadata))
+      return refuse(c, 400, "bad-metadata", "Do not put a secret in the key description");
     return withKeyd(c, () =>
       mutate(async () => {
         const clash = surrogateEnvClash(
@@ -81,10 +85,20 @@ export function keyRoutes(app: Hono, { keyd, monitor, afterChange }: KeyRoutesDe
           const message = `${binding.id} and ${clash} would share ${surrogateEnvName(binding.id)} in your computer: pick another name`;
           return refuse(c, 409, "name-taken", message);
         }
-        const key = await keyd.putSecret(binding, sealed);
+        const key = await keyd.putSecret(binding, sealed, ...(metadata ? [metadata] : []));
         const { restart } = await notifyChange(key.id);
         return c.json({ key, restart });
       }),
+    );
+  });
+
+  app.put("/api/keys/:id/metadata", limit, async (c) => {
+    const id = c.req.param("id");
+    const metadata = KeyMetadata.safeParse(await c.req.json().catch(() => null));
+    if (!SECRET_ID_PATTERN.test(id) || !metadata.success || hasKey(metadata.data))
+      return refuse(c, 400, "bad-metadata", "Use a short description without secret values");
+    return withKeyd(c, () =>
+      mutate(async () => c.json({ key: await keyd.putMetadata(id, metadata.data) })),
     );
   });
 
@@ -137,4 +151,9 @@ function refuse(
   message: string,
 ): Response {
   return c.json({ error, message }, status);
+}
+
+function hasKey(metadata: Record<string, string | undefined>): boolean {
+  const scan = scanKeyLike(Object.values(metadata).join(" "));
+  return scan.overflow || scan.matches.length > 0;
 }

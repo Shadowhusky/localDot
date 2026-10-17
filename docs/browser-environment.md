@@ -84,3 +84,40 @@ Ordinary fields and masked input retain their existing pace. This does not use t
   reads and the actual HTTP refusal classification alongside native input and private sign-in flows.
 - `cells/desktop/tests/test_desktop_profiles.py` verifies launch flags and profile preservation.
 - Run `pnpm check:codex-release` before activating changed daemon code.
+
+
+## Interactive sign-in without an automation connection
+
+Google can refuse sign-in before a password is submitted. Its public guidance includes
+software-controlled browsers among reasons for rejection; the error does not identify
+which signal triggered a particular decision. Retrying credentials or handing over the
+same CDP-connected browser does not establish that the problem changed.
+
+The user can now choose **Sign in without agent control** while holding the web browser.
+This gracefully closes only Chromium, waits for its complete process group to exit, and
+reopens the same isolated profile without a remote-debugging pipe/port or accessibility
+forcing. The browser's sandbox, network gate, native display and visible stream remain.
+No user-agent spoofing, webdriver overrides, CAPTCHA bypass or host-cookie copying is used.
+Agent reads, recording and input stay fenced. Native input remains available to the user.
+Hand back restores managed Chromium before giving the agent a new grant; normal private
+field cleanup and fresh observation still apply. Repeated start requests are idempotent.
+Downloads are not collected while sign-in mode is active. An unsupported browser image
+advertises no capability; the daemon does not try the new endpoint blindly.
+
+A process that has not fully exited cannot be replaced on the same profile. A stale exit
+callback cannot terminate the replacement browser. Failed or interrupted mode changes
+must be inspected through health, not automatically retried. Sign-in mode is not a
+claim that Google accepts the browser: provider policy, browser support, account and
+network reputation can still prevent access. It cannot replace a supported OAuth flow
+for an API and OAuth API access cannot be claimed as a website session.
+
+References consulted (2026-10-17):
+- [Google: sign in with a supported browser](https://support.google.com/accounts/answer/7675428?hl=en)
+- [Browser Use: authentication and persistent profiles](https://docs.browser-use.com/open-source/customize/browser/authentication)
+- [Browserbase: persistent contexts](https://docs.browserbase.com/platform/browser/core-features/contexts)
+- [Playwright: reuse authenticated state](https://playwright.dev/docs/auth)
+
+These projects emphasize preserving an authenticated profile or state and using an
+interactive login when needed. They do not provide a general guarantee of Google
+acceptance. localDot applies this pattern to its own isolated profile rather than
+borrowing the user's personal host browser profile.

@@ -64,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/cells/{id}", s.closeCell)
 	mux.HandleFunc("POST /v1/cells/{id}/revoke", s.revoke)
 	mux.HandleFunc("POST /v1/cells/{id}/surrogates", s.mint)
+	mux.HandleFunc("PUT /v1/secrets/{id}/metadata", s.putMetadata)
 	mux.HandleFunc("GET /v1/cells/{id}/asks", s.listAsks)
 	mux.HandleFunc("POST /v1/cells/{id}/asks/{ask}", s.answerAsk)
 	mux.HandleFunc("PUT /v1/cells/{id}/task", s.beginTask)
@@ -186,8 +187,9 @@ func (s *Server) hairpin() any {
 // outside keyd after the value was stored, so the user removes the key and adds it again.
 type listedSecret struct {
 	vault.Record
-	Reenter bool `json:"reenter,omitempty"`
-	Rebound bool `json:"rebound,omitempty"`
+	Reenter bool          `json:"reenter,omitempty"`
+	Rebound bool          `json:"rebound,omitempty"`
+	Usage   *serviceUsage `json:"usage,omitempty"`
 }
 
 func (s *Server) listSecrets(w http.ResponseWriter, _ *http.Request) {
@@ -195,7 +197,7 @@ func (s *Server) listSecrets(w http.ResponseWriter, _ *http.Request) {
 	listed := make([]listedSecret, len(records))
 	for i, rec := range records {
 		attention := s.Vault.Attention(rec.ID)
-		listed[i] = listedSecret{Record: rec, Reenter: attention == vault.Reenter, Rebound: attention == vault.Rebound}
+		listed[i] = describeSecret(rec, attention)
 	}
 	reply(w, http.StatusOK, map[string]any{"secrets": listed})
 }
@@ -211,15 +213,16 @@ func (s *Server) needing(attention vault.Attention) int {
 }
 
 type putSecretBody struct {
-	Kind     vault.Kind   `json:"kind"`
-	Provider string       `json:"provider,omitempty"`
-	BaseURL  string       `json:"baseURL,omitempty"`
-	Hosts    []string     `json:"hosts,omitempty"`
-	Header   string       `json:"header,omitempty"`
-	Format   string       `json:"format,omitempty"`
-	Methods  []string     `json:"methods,omitempty"`
-	Paths    []string     `json:"paths,omitempty"`
-	Sealed   vault.Sealed `json:"sealed"`
+	Kind     vault.Kind      `json:"kind"`
+	Provider string          `json:"provider,omitempty"`
+	BaseURL  string          `json:"baseURL,omitempty"`
+	Hosts    []string        `json:"hosts,omitempty"`
+	Header   string          `json:"header,omitempty"`
+	Format   string          `json:"format,omitempty"`
+	Methods  []string        `json:"methods,omitempty"`
+	Paths    []string        `json:"paths,omitempty"`
+	Sealed   vault.Sealed    `json:"sealed"`
+	Metadata *vault.Metadata `json:"metadata,omitempty"`
 }
 
 // putSecret stores a secret sealed for exactly this record, binding included. Replacing a secret
@@ -232,9 +235,13 @@ func (s *Server) putSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec := vault.Record{ID: id, Kind: body.Kind, Provider: body.Provider, BaseURL: body.BaseURL, Hosts: body.Hosts,
-		Header: body.Header, Format: body.Format, Methods: body.Methods, Paths: body.Paths}
+		Header: body.Header, Format: body.Format, Methods: body.Methods, Paths: body.Paths, Metadata: body.Metadata}
 	if !vault.Writable(id) {
 		fail(w, http.StatusBadRequest, "bad-request", fmt.Sprintf("secret id %q is not allowed", id))
+		return
+	}
+	if err := rec.Metadata.Validate(); err != nil {
+		fail(w, http.StatusBadRequest, "bad-metadata", "invalid key description")
 		return
 	}
 	b, err := keys.FromRecord(rec)

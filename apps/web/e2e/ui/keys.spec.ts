@@ -60,7 +60,7 @@ test("keys, held while the audit log fails", async ({ page, ui }) => {
 test("keys, a problem shown as the key field takes focus", async ({ page, ui }) => {
   const sheet = await keys(page, ui);
   await addKey(sheet).click();
-  await sheet.getByRole("radio", { name: "Web API" }).click();
+  await sheet.getByRole("radio", { name: "Custom service" }).click();
   await sheet.getByLabel("Hosts", { exact: true }).fill("https://api.weather.example/v1");
   const key = sheet.getByLabel("Key", { exact: true });
   await key.scrollIntoViewIfNeeded();
@@ -75,7 +75,7 @@ test("the Web API fields pair up when wide and stack with even gaps on a phone",
 }) => {
   const sheet = await keys(page, ui);
   await addKey(sheet).click();
-  await sheet.getByRole("radio", { name: "Web API" }).click();
+  await sheet.getByRole("radio", { name: "Custom service" }).click();
   // Each field from its label's top to the bottom of what it shows: an empty message line counts
   // as space between fields, which is what must stay even.
   const field = async (label: string) => {
@@ -95,7 +95,7 @@ test("the Web API fields pair up when wide and stack with even gaps on a phone",
   const hosts = await field("Hosts");
   const header = await field("Header");
   const format = await field("Sent as");
-  const label = await field("Label (optional)");
+  const label = await field("Service (optional)");
   if (header.top === format.top) return;
   const gaps = [
     header.top - hosts.bottom,

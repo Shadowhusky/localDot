@@ -85,7 +85,7 @@ for (const pending of ["wait", "shell"] as const)
       await page.getByTestId("keys-button").click();
       const keys = page.getByRole("dialog", { name: "Keys", exact: true });
       await expect(keys.getByRole("button", { name: "Save key", exact: true })).toBeEnabled();
-      await keys.getByLabel("Label (optional)", { exact: true }).fill("fixture");
+      await keys.getByLabel("Key ID (optional)", { exact: true }).fill("fixture");
       await search(page, keys.getByRole("combobox", { name: "Provider" }), "openai-compatible");
       await keys.getByLabel("Base URL", { exact: true }).fill("https://provider.example.test/v1");
       await keys.getByLabel("Key", { exact: true }).fill(CANARY);

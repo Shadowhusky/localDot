@@ -238,10 +238,10 @@ describe("missing-input handoff", () => {
       "Never request API keys/client secrets as text or read their values from environment/files",
     );
     expect(HUMAN_INPUT_GUIDANCE).toContain(
-      "Private secret delivery works only with a supported browser field; it cannot write configuration files",
+      "If a key is missing, use credentials/request: the private key form saves it to the specified service",
     );
     expect(HUMAN_INPUT_GUIDANCE).toContain(
-      "explain the exact manual configuration step and ask for confirm when configured",
+      "explain the exact manual step and ask for confirm when configured",
     );
     expect(HUMAN_INPUT_GUIDANCE).toContain("Wait and resume the blocked work");
     expect(HUMAN_INPUT_GUIDANCE).toContain(

@@ -1,6 +1,7 @@
 import { request } from "node:http";
 import { ULID_PATTERN } from "@localdot/protocol";
 import { z } from "zod";
+import { BrowserSignInState } from "../../../../packages/protocol/src/browser-control.ts";
 import { BrowserLifecycleError } from "./browser-ledger.ts";
 import type { BrowserCellRecord } from "./types.ts";
 
@@ -10,6 +11,7 @@ const healthSchema = z.strictObject({
   instance: z.string().uuid(),
   ready: z.boolean(),
   holder: z.enum(["user", "agent"]),
+  signIn: BrowserSignInState.optional(),
   width: z.literal(1280),
   height: z.literal(800),
 });

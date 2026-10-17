@@ -1,4 +1,4 @@
-import type { SecretBinding } from "@localdot/protocol";
+import type { KeyMetadata, SecretBinding } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import {
@@ -20,7 +20,12 @@ export interface KeysController {
   metadataReady?: boolean;
   // A save or a removal is in flight; another change is refused until it settles.
   busy: boolean;
-  save(binding: SecretBinding, value: string): Promise<{ restart: boolean; key?: KeyRecord }>;
+  updateMetadata?(id: string, metadata: KeyMetadata): Promise<void>;
+  save(
+    binding: SecretBinding,
+    value: string,
+    metadata?: KeyMetadata,
+  ): Promise<{ restart: boolean; key?: KeyRecord }>;
   remove(id: string): Promise<void>;
 }
 
@@ -143,9 +148,11 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
   }, []);
 
   const save = useCallback(
-    (binding: SecretBinding, value: string) =>
+    (binding: SecretBinding, value: string, metadata?: KeyMetadata) =>
       change(async () => {
-        const { restart, key } = await saveKey(api, binding, value);
+        const { restart, key } = metadata
+          ? await saveKey(api, binding, value, undefined, metadata)
+          : await saveKey(api, binding, value);
         setVersion((v) => v + 1);
         return { restart, key };
       }),
@@ -161,5 +168,13 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
     [api, change],
   );
 
-  return { health, keys, loadError, metadataReady, busy, save, remove };
+  const updateMetadata = useCallback(
+    (id: string, metadata: KeyMetadata) =>
+      change(async () => {
+        await api.put(`/api/keys/${encodeURIComponent(id)}/metadata`, metadata);
+        setVersion((v) => v + 1);
+      }),
+    [api, change],
+  );
+  return { health, keys, loadError, metadataReady, busy, save, remove, updateMetadata };
 }

@@ -454,6 +454,14 @@ func (m *Manager) bindings(p policy.Policy, secrets []string) ([]keys.Binding, e
 		if !ok {
 			return nil, badRequest("no secret %s", id)
 		}
+		if p.Role == policy.Service {
+			b, err := keys.ServiceBinding(rec)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, b)
+			continue
+		}
 		if rec.Kind == vault.KindLLM && !p.Gateway {
 			return nil, badRequest("a %s cell cannot use the LLM gateway, so it cannot hold %s", p.Role, id)
 		}

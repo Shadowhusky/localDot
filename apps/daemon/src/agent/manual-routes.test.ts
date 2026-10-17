@@ -196,3 +196,20 @@ it("cancels an actual desktop typing stream on caller abort and keeps the daemon
   expect(JSON.stringify(f.log.read(f.id))).not.toContain("synthetic-secret");
   expect(f.session.controlHeld).toBe(true);
 });
+
+it("sign-in mode requires the current manual takeover and never accepts a stale request", async () => {
+  const f = await setup();
+  const signIn = vi.fn(async () => ({ available: true, mode: "signin", changing: false }));
+  const finish = vi.fn();
+  const manualAccess = vi.fn(() => ({ signIn, finish }));
+  vi.spyOn(f.session, "screens", "get").mockReturnValue({ manualAccess } as unknown as NonNullable<
+    typeof f.session.screens
+  >);
+  const stale = await f.send({ requestId: ulid(), action: "start" }, {}, "takeover/sign-in");
+  expect(stale.status).toBe(409);
+  expect(manualAccess).not.toHaveBeenCalled();
+  const result = await f.send({ requestId: f.requestId, action: "start" }, {}, "takeover/sign-in");
+  expect(result.status).toBe(200);
+  expect(signIn).toHaveBeenCalledWith(true);
+  expect(finish).toHaveBeenCalledOnce();
+});

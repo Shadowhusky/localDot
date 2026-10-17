@@ -86,7 +86,7 @@ function Live(props: Omit<KeysSheetProps, "keys">) {
   return <KeysSheet {...props} keys={keys} />;
 }
 
-const LABEL = "Label (optional)";
+const LABEL = "Key ID (optional)";
 const field = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
 const provider = () => screen.getByRole("combobox", { name: "Provider" });
 const type = (name: string, value: string) => fireEvent.change(field(name), { target: { value } });
@@ -146,7 +146,7 @@ describe("a key to enter again", () => {
     expect(form.textContent).toContain("Sent only to api.weather.example, as before.");
     expect(within(form).queryByLabelText(LABEL)).toBeNull();
     expect(within(form).queryByLabelText("Hosts")).toBeNull();
-    expect(within(form).queryByRole("radio", { name: "Web API" })).toBeNull();
+    expect(within(form).queryByRole("radio", { name: "Custom service" })).toBeNull();
     type("Key", " sk-forecast-again ");
     fireEvent.click(saveButton());
     await waitFor(() => expect(save).toHaveBeenCalled());
@@ -422,12 +422,12 @@ describe("Keys", () => {
       "sk-ant-api03-test",
     );
     rerender(<KeyForm active save={save} taken={[]} />);
-    fireEvent.click(screen.getByRole("radio", { name: "Web API" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Custom service" }));
     type("Hosts", "api.weather.example, weather.example");
     expect(field(LABEL).placeholder).toBe("weather");
     type(LABEL, "anthropic");
     rerender(<KeyForm active save={save} taken={["anthropic"]} />);
-    expect(screen.getByText("Saving replaces the key with this label.")).toBeTruthy();
+    expect(screen.getByText("Saving replaces the key with this ID.")).toBeTruthy();
   });
 
   it("shows what to fix in the other fields as the key field takes focus", () => {
@@ -674,7 +674,7 @@ describe("Keys", () => {
     let settle: (v: { restart: boolean }) => void = () => {};
     const save = vi.fn(() => new Promise<{ restart: boolean }>((r) => (settle = r)));
     render(<KeysSheet open keys={controller({ save })} onClose={() => {}} />);
-    fireEvent.click(screen.getByRole("radio", { name: "Web API" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Custom service" }));
     type(LABEL, "weather");
     type("Hosts", "api.weather.example");
     type("Key", "  sk-weather-123456 ");
@@ -757,7 +757,7 @@ describe("Keys", () => {
     fireEvent.click(saveButton());
     expect(field("Key").value).toBe("");
     expect(screen.getByText(PLAN_REFUSAL)).toBeTruthy();
-    fireEvent.click(screen.getByRole("radio", { name: "Web API" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Custom service" }));
     expect(screen.queryByText("sk-ant-api")).toBeNull();
     type(LABEL, "claude");
     type("Hosts", "api.anthropic.com");
@@ -1048,7 +1048,7 @@ describe("Keys", () => {
     plain("Base URL");
     plain("Key");
     expect(field("Base URL").getAttribute("inputmode")).toBe("url");
-    fireEvent.click(screen.getByRole("radio", { name: "Web API" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Custom service" }));
     plain("Hosts");
     plain("Header");
   });

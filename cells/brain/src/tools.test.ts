@@ -19,6 +19,8 @@ describe("the model's advertised tools and instructions", () => {
       [
         "computer",
         "work_context",
+        "credentials",
+        "api_request",
         "shell",
         "files",
         "browser_read",

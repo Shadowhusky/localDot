@@ -381,6 +381,7 @@ describe("Agent", () => {
       await t.run();
       const tools = (t.main.model.doStreamCalls[0]?.tools ?? []).map((tool) => tool.name);
       expect(tools.sort()).toEqual([
+        "api_request",
         "ask_user",
         "browser_act",
         "browser_navigate",
@@ -388,6 +389,7 @@ describe("Agent", () => {
         "browser_upload",
         "computer",
         "create_goal",
+        "credentials",
         "done",
         "files",
         "find",

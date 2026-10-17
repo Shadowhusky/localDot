@@ -467,3 +467,54 @@ describe("Node process-group boundary", () => {
     await expect(handle.started).rejects.toThrow(/^Browser runtime unavailable: start$/u);
   });
 });
+
+describe("sign-in browser replacement", () => {
+  it("reaps only Chromium and ignores late exits from its retired generation", async () => {
+    const f = fixture();
+    await f.runtime.start("display");
+    await f.runtime.start("chromium");
+    const previous = f.groups[1];
+    if (!previous) throw new Error("missing fixture process");
+    const manual = { ...browserProcessSpecs(config).chromium, channel: "none" as const };
+    await f.runtime.replaceChromium(manual, () => {
+      previous.finish();
+      return true;
+    });
+    expect(f.groups).toHaveLength(3);
+    expect(f.groups[0]?.signals).toEqual([]);
+    previous.failure();
+    expect(f.runtime.closed).toBe(false);
+    expect(f.fence).not.toHaveBeenCalled();
+    f.groups[2]?.failure();
+    expect(f.runtime.closed).toBe(true);
+    await f.runtime.stop();
+  });
+  it("never opens a second writer when the old process group cannot exit", async () => {
+    vi.useFakeTimers();
+    const f = fixture({ ignoreTerm: true });
+    await f.runtime.start("chromium");
+    const outcome = f.runtime
+      .replaceChromium(browserProcessSpecs(config).chromium, () => false)
+      .catch(() => "refused");
+    await vi.advanceTimersByTimeAsync(BROWSER_PROCESS_STOP_MS + 40);
+    expect(await outcome).toBe("refused");
+    expect(f.groups).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(BROWSER_PROCESS_STOP_MS + 40);
+    await f.runtime.stop();
+  });
+});
+
+it("keeps a manual browser alive when a page refuses the normal Quit command", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  await f.runtime.start("chromium");
+  const outcome = f.runtime
+    .replaceChromium(browserProcessSpecs(config).chromium, () => true, true)
+    .catch((error) => error.reason);
+  await vi.advanceTimersByTimeAsync(BROWSER_PROCESS_STOP_MS + 20);
+  expect(await outcome).toBe("busy");
+  expect(f.runtime.closed).toBe(false);
+  expect(f.groups).toHaveLength(1);
+  expect(f.groups[0]?.signals).toEqual([]);
+  await f.runtime.stop();
+});

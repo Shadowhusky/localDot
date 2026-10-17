@@ -308,7 +308,7 @@ for (const width of [1280, 390])
     await expect(keySheet.getByRole("combobox", { name: "Provider" })).toHaveText(
       "OpenAI-compatible",
     );
-    await keySheet.getByLabel("Label (optional)", { exact: true }).fill("fixture-gateway");
+    await keySheet.getByLabel("Key ID (optional)", { exact: true }).fill("fixture-gateway");
     await keySheet.getByLabel("Base URL", { exact: true }).fill("https://example.test/v1");
     await keySheet.getByLabel("Key", { exact: true }).fill(SECRET);
     await keySheet.getByRole("button", { name: "Save key", exact: true }).click();

@@ -56,7 +56,7 @@ test("approval card, atomic Pause, matching Resume and in-dialog Stop remain hon
     await page.goto(f.url);
     await page.getByTestId("keys-button").click();
     const keys = page.getByRole("dialog", { name: "Keys", exact: true });
-    await keys.getByLabel("Label (optional)", { exact: true }).fill("fixture");
+    await keys.getByLabel("Key ID (optional)", { exact: true }).fill("fixture");
     await search(page, keys.getByRole("combobox", { name: "Provider" }), "openai-compatible");
     await keys.getByLabel("Base URL", { exact: true }).fill("https://provider.example.test/v1");
     await keys.getByLabel("Key", { exact: true }).fill("task15-local-canary-never-real");

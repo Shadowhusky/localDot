@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ASK_FIELD_ID, AskFieldKind, MAX_ASK_FIELDS } from "./ask.ts";
+import { ApiRequestInput, CredentialsInput } from "./credentials.ts";
 import { DesktopUploadPath } from "./desktop-uploads.ts";
 import { FileListResult, FileReadResult } from "./desktopd-tools.ts";
 import { LearnedExperience } from "./experience.ts";
@@ -17,6 +18,8 @@ import { ToolRecovery, WorkContextInput } from "./work-context.ts";
 // daemon's tool API runs, including M7's isolated browser screen.
 export const TOOL_NAMES = [
   "work_context",
+  "credentials",
+  "api_request",
   "computer",
   "shell",
   "files",
@@ -278,7 +281,7 @@ export type UpdatePlanInput = z.infer<typeof UpdatePlanInput>;
 // The id's pattern is checked below, not declared: some providers refuse `pattern` in a schema.
 export const AskField = z.object({
   id: z.string().min(1).max(32),
-  kind: AskFieldKind,
+  kind: AskFieldKind.exclude(["api_key"]),
   label: z.string().min(1).max(200),
   hint: z.string().min(1).max(300).optional(),
   // choice and multichoice.
@@ -436,6 +439,8 @@ export const TOOL_INPUTS = {
   find: FindInput,
   switch_screen: SwitchScreenInput,
   update_plan: UpdatePlanInput,
+  credentials: CredentialsInput,
+  api_request: ApiRequestInput,
   ask_user: AskUserInput,
   request_takeover: RequestTakeoverInput,
   remember: RememberInput,

@@ -634,6 +634,12 @@ export class AgentSession {
       /* The private state has already changed. */
     }
   }
+  requestedCredentials(askId: string) {
+    if (this.#ask?.askId !== askId) return [];
+    return (this.#ask.fields ?? [])
+      .filter((field) => field.kind === "api_key")
+      .map((field) => structuredClone(field));
+  }
   get pendingAsk(): string | undefined {
     return this.#ask?.askId;
   }
@@ -1306,7 +1312,8 @@ export class AgentSession {
       if ((field.kind === "secret" || field.kind === "code") && typeof answer === "string") {
         secrets.push([field.id, answer]);
         record[field.id] = { provided: true };
-      } else record[field.id] = typeof answer === "string" ? redact(answer.trim()) : answer;
+      } else if (field.kind === "api_key") record[field.id] = { provided: true };
+      else record[field.id] = typeof answer === "string" ? redact(answer.trim()) : answer;
     }
     return ask.finish({ fields: record, secrets: new SecretAnswers(secrets), by: "user" });
   }

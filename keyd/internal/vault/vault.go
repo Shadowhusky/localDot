@@ -36,11 +36,16 @@ type Record struct {
 	Format    string    `json:"format,omitempty"`
 	Methods   []string  `json:"methods,omitempty"`
 	Paths     []string  `json:"paths,omitempty"`
+	Metadata  *Metadata `json:"metadata,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func (r Record) clone() Record {
+	if r.Metadata != nil {
+		m := *r.Metadata
+		r.Metadata = &m
+	}
 	r.Hosts = slices.Clone(r.Hosts)
 	r.Methods = slices.Clone(r.Methods)
 	r.Paths = slices.Clone(r.Paths)
@@ -206,6 +211,9 @@ func (v *Vault) Put(rec Record, value []byte) error {
 	if !validKind(rec.Kind) {
 		return fmt.Errorf("secret kind %q: want llm or http", rec.Kind)
 	}
+	if err := rec.Metadata.Validate(); err != nil {
+		return err
+	}
 	if err := ValidValue(value); err != nil {
 		return err
 	}
@@ -219,6 +227,10 @@ func (v *Vault) Put(rec Record, value []byte) error {
 	var prev []byte
 	if had {
 		rec.CreatedAt = old.CreatedAt
+		// Re-entering the same key preserves its public description.
+		if rec.Metadata == nil && bindingOf(rec) == bindingOf(old) {
+			rec.Metadata = old.clone().Metadata
+		}
 		prev = v.cache[rec.ID]
 	}
 	v.mu.Unlock()

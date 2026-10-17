@@ -122,7 +122,7 @@ for (const run of runs) {
       const keys = nestedKeys(page);
       await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveText("Anthropic");
       await expect(keys.getByText("Starts with sk-ant-api")).toBeVisible();
-      await keys.getByLabel("Label (optional)", { exact: true }).fill("anthropic");
+      await keys.getByLabel("Key ID (optional)", { exact: true }).fill("anthropic");
       const field = keys.getByLabel("Key", { exact: true });
       await field.focus();
       await page.keyboard.insertText(PLAN_TOKEN);
@@ -133,7 +133,7 @@ for (const run of runs) {
       await expect(field).toHaveAttribute("aria-invalid", "true");
       await expect(field).toHaveAccessibleDescription(`${SENTENCE} Starts with sk-ant-api`);
 
-      await keys.getByLabel("Label (optional)", { exact: true }).fill("claudewrapped");
+      await keys.getByLabel("Key ID (optional)", { exact: true }).fill("claudewrapped");
       await expect(error).toHaveCount(0);
       await field.focus();
       await page.keyboard.insertText(`export CLAUDE_CODE_OAUTH_TOKEN=${PLAN_TOKEN}`);

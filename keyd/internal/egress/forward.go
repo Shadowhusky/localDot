@@ -280,10 +280,13 @@ func (c *Cell) boundTo(d keys.Dest) []vault.Record {
 	var out []vault.Record
 	for _, rec := range c.deps.Vault.Records() {
 		b, err := keys.FromRecord(rec)
+		if c.cfg.Policy.Role == policy.Service {
+			b, err = keys.ServiceBinding(rec)
+		}
 		if err != nil {
 			continue
 		}
-		if (rec.Kind == vault.KindHTTP && slices.Contains(b.Hosts, d.Host)) || (d.Scheme == "gateway" && b.Route == d.Route) {
+		if ((rec.Kind == vault.KindHTTP || c.cfg.Policy.Role == policy.Service) && slices.Contains(b.Hosts, d.Host)) || (d.Scheme == "gateway" && b.Route == d.Route) {
 			out = append(out, rec)
 		}
 	}

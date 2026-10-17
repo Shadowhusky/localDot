@@ -2256,3 +2256,14 @@
 .thread-foot .thread-toolbar {
   flex: none;
 }
+
+.thread-browser-signin {
+  margin-block: calc(var(--spacing) * 3);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.thread-browser-signin p {
+  margin-top: var(--spacing);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}

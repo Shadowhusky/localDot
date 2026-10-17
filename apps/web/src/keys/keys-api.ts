@@ -3,6 +3,7 @@ import {
   type HairpinGuard,
   KeydRecord,
   type KeydVault,
+  KeyMetadata,
   SECRET_ID_PATTERN,
   type Sealed,
   SecretBinding,
@@ -49,6 +50,7 @@ export const vaultLocked = (health: KeydHealth | null) =>
   health?.online === true && (health.vault?.state === "locked" || health.vault?.state === "setup");
 
 export interface KeyRecord {
+  metadata?: KeyMetadata;
   id: string;
   kind: "llm" | "http";
   provider?: string;
@@ -90,6 +92,7 @@ export async function saveKey(
   binding: SecretBinding,
   value: string,
   seal: Seal = sealSecret,
+  metadata?: KeyMetadata,
 ): Promise<{ key: KeyRecord; restart: boolean }> {
   // Snapshot the allowed fields before any await. The form may change while
   // sealing, and TypeScript alone cannot keep extra runtime fields off the wire.
@@ -98,12 +101,17 @@ export async function saveKey(
   const problem = valueProblem(value);
   if (problem) throw new KeyProblem(problem);
   const bound = checked.data;
+  const details = metadata ? KeyMetadata.parse(metadata) : undefined;
   const send = async () => {
     const health = await loadHealth(api);
     if (!health.online || !health.sealKey)
       throw new KeyProblem("Key protection is off, so the key wasn't saved.");
     const sealed = await seal(health.sealKey, bound, value);
-    const raw = await api.post<unknown>("/api/keys", { binding: bound, sealed });
+    const raw = await api.post<unknown>("/api/keys", {
+      binding: bound,
+      sealed,
+      ...(details ? { metadata: details } : {}),
+    });
     const parsed = z
       .object({
         restart: z.boolean(),

@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
+import type { KeysController } from "../keys/useKeys.ts";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
 import { CodeField } from "../ui/CodeField.tsx";
@@ -37,6 +38,7 @@ import { CopyButton } from "./CopyButton.tsx";
 import { FileTransferFailure } from "./file-transfer.ts";
 import { KeyFound } from "./KeyFound.tsx";
 import { markdownToPlain } from "./markdown.ts";
+import { PrivateKeyRequest } from "./PrivateKeyRequest.tsx";
 import type { UploadOptions } from "./resumable-upload.ts";
 import { hiddenWarning, plainReveal, revealText } from "./reveal-text.ts";
 import "../shell/decision.css";
@@ -64,6 +66,7 @@ export interface AskFormProps {
   upload?: AskUpload;
   // Takes a key pasted into a field into Keys.
   receiveKey?: KeyIntake["receive"];
+  saveKey?: KeysController["save"];
 }
 
 const TYPED = new Set<AskField["kind"]>([
@@ -87,7 +90,12 @@ const TEXT_INPUT: Partial<Record<AskField["kind"], Partial<TextFieldProps>>> = {
 
 // dot's question answered in place: its fields, then Not now and dot's own verb. The same draft
 // backs every surface, so what is typed in one shows in the others.
-export function AskForm({ draft, layout, answer, reason, upload, receiveKey }: AskFormProps) {
+export function AskForm(props: AskFormProps) {
+  if (props.draft.fields.length === 1 && props.draft.fields[0]?.kind === "api_key")
+    return <PrivateKeyRequest key={props.draft.question.askId} {...props} />;
+  return <StandardAskForm {...props} />;
+}
+function StandardAskForm({ draft, layout, answer, reason, upload, receiveKey }: AskFormProps) {
   const state = useAskState(draft);
   const titleId = `ask-${draft.question.askId}`;
   const composing = useRef(false);

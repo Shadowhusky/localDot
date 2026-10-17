@@ -242,3 +242,24 @@ export function browserProcessSpecs(
     ),
   });
 }
+
+// Both modes own the same isolated profile. Never open it with two processes or
+// import a host browser's cookies. Sign-in mode has no CDP pipe or listening port.
+export function browserSignInSpec(
+  config: BrowserRuntimeConfig,
+  manual: boolean,
+): BrowserProcessSpec {
+  const normal = browserProcessSpecs(config).chromium;
+  const args = normal.args.filter(
+    (arg) =>
+      arg !== "about:blank" &&
+      (!manual || (arg !== "--remote-debugging-pipe" && arg !== "--force-renderer-accessibility")),
+  );
+  const { ACCESSIBILITY_ENABLED: _, ...env } = normal.env;
+  return Object.freeze({
+    ...normal,
+    args: Object.freeze([...args, "--restore-last-session"]),
+    env: manual ? Object.freeze(env) : normal.env,
+    channel: manual ? "none" : "cdp",
+  });
+}

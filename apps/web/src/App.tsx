@@ -15,6 +15,7 @@ import { flushSync } from "react-dom";
 import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
 import { useAskDraft } from "./agent/ask-draft.ts";
 import { composerReply } from "./agent/ask-form.ts";
+import { BrowserSignIn } from "./agent/BrowserSignIn.tsx";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { endTaskRun } from "./agent/control-api.ts";
 import { conversationBlockReason } from "./agent/conversation-state.ts";
@@ -1435,12 +1436,13 @@ function Theatre({ api }: { api: ApiClient }) {
           draft={askDraft}
           layout="thread"
           answer={answerAsk}
+          saveKey={keys.save}
           reason={askReason}
           upload={uploadAsk}
           receiveKey={receiveKey}
         />
       ) : undefined,
-    [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey],
+    [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey, keys.save],
   );
   const openSession = useOpenSession({
     known: session.known,
@@ -1507,6 +1509,7 @@ function Theatre({ api }: { api: ApiClient }) {
         draft={askDraft}
         layout={layout}
         answer={answerAsk}
+        saveKey={keys.save}
         reason={askReason}
         upload={uploadAsk}
         receiveKey={receiveKey}
@@ -2185,6 +2188,16 @@ function Theatre({ api }: { api: ApiClient }) {
                         </p>
                       </div>
                     )}
+                    {yours &&
+                      agent.sessionId &&
+                      takeover &&
+                      selectedScreen?.screen === "browser" && (
+                        <BrowserSignIn
+                          api={api}
+                          sessionId={agent.sessionId}
+                          requestId={takeover.requestId}
+                        />
+                      )}
                     <TaskRecovery
                       agent={agent}
                       controls={controls}

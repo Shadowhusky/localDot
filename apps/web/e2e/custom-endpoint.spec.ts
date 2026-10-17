@@ -92,7 +92,7 @@ for (const run of runs) {
       await expect(base).toHaveAccessibleDescription(
         "Use https, ending in /v1 (added if missing). Local servers go through LM Studio or Ollama.",
       );
-      await keys.getByLabel("Label (optional)", { exact: true }).fill(MODEL.key);
+      await keys.getByLabel("Key ID (optional)", { exact: true }).fill(MODEL.key);
       await base.fill("https://127.0.0.1:8080/anthropic");
       await keys.getByLabel("Key", { exact: true }).fill("fixture-anthropic-compatible-value");
       await press(keys.getByRole("button", { name: "Save key" }));

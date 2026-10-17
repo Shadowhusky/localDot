@@ -29,6 +29,9 @@ import {
   BrowserControlRequest,
   BrowserManualPermit,
   type BrowserManualReply,
+  type BrowserSignInMode,
+  BrowserSignInRequest,
+  BrowserSignInState,
 } from "../../../../packages/protocol/src/browser-control.ts";
 import {
   BrowserDownloadBinding,
@@ -54,6 +57,7 @@ const identity = z.strictObject({
 const health = identity.extend({
   ready: z.literal(true),
   holder: z.enum(["user", "agent"]),
+  signIn: BrowserSignInState.optional(),
   width: z.literal(1280),
   height: z.literal(800),
 });
@@ -249,6 +253,12 @@ export class BrowserClient {
     this.#checkScope(scope);
     this.#identity(value);
     return value;
+  }
+
+  async signIn(permit: BrowserManualPermit, mode: BrowserSignInMode, scope: BrowserScope) {
+    const request = parse(BrowserSignInRequest, { permit, mode });
+    this.#identity(request.permit);
+    return this.#json("POST", "/signin", request, scope, 30000, BrowserSignInState, 4096);
   }
 
   tabs(scope: BrowserScope): Promise<z.infer<typeof tabs>> {

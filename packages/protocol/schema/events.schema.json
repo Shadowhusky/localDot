@@ -3913,6 +3913,145 @@
               "items": {
                 "type": "object",
                 "properties": {
+                  "credential": {
+                    "type": "object",
+                    "properties": {
+                      "binding": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "const": "llm"
+                              },
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "anthropic",
+                                  "openai",
+                                  "google",
+                                  "xai",
+                                  "mistral",
+                                  "deepseek",
+                                  "groq",
+                                  "openrouter",
+                                  "openai-compatible",
+                                  "azure",
+                                  "anthropic-compatible"
+                                ]
+                              },
+                              "baseURL": {
+                                "type": "string",
+                                "maxLength": 2048,
+                                "pattern": "^[\\x20-\\x7e]*$"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "provider"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "const": "http"
+                              },
+                              "hosts": {
+                                "minItems": 1,
+                                "maxItems": 16,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 253,
+                                  "pattern": "^[\\x20-\\x7e]*$"
+                                }
+                              },
+                              "header": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[\\x20-\\x7e]*$"
+                              },
+                              "format": {
+                                "type": "string",
+                                "enum": [
+                                  "bearer",
+                                  "raw",
+                                  "basic-user",
+                                  "basic-password"
+                                ]
+                              },
+                              "methods": {
+                                "maxItems": 16,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 16,
+                                  "pattern": "^[\\x20-\\x7e]*$"
+                                }
+                              },
+                              "paths": {
+                                "maxItems": 16,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[\\x20-\\x7e]*$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "hosts",
+                              "header",
+                              "format"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "maxLength": 80
+                          },
+                          "service": {
+                            "type": "string",
+                            "maxLength": 80
+                          },
+                          "description": {
+                            "type": "string",
+                            "maxLength": 600
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "binding",
+                      "metadata"
+                    ],
+                    "additionalProperties": false
+                  },
                   "id": {
                     "type": "string",
                     "pattern": "^[a-z][a-z0-9_]{0,31}$"
@@ -3923,6 +4062,7 @@
                       "text",
                       "longtext",
                       "secret",
+                      "api_key",
                       "code",
                       "choice",
                       "multichoice",

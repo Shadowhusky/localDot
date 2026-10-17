@@ -216,7 +216,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await background(page);
       await reread;
       const name = `copied-${engine}`;
-      await keys.getByLabel("Label (optional)", { exact: true }).fill(name);
+      await keys.getByLabel("Key ID (optional)", { exact: true }).fill(name);
       await keys.getByLabel("Key", { exact: true }).fill(`AIza${"k".repeat(35)}`);
       await keys.getByRole("button", { name: "Save key" }).tap();
       await expect(keys.getByText(`Saved ${name}.`)).toBeVisible();

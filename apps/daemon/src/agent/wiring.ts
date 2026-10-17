@@ -56,6 +56,7 @@ import type { LiveSessions } from "../gateway/live.ts";
 import type { KeydClient } from "../keyd/client.ts";
 import { JudgeCell } from "../keyd/judge-cell.ts";
 import type { KeydMonitor } from "../keyd/monitor.ts";
+import { ServiceKeys } from "../keyd/service-keys.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
@@ -285,6 +286,7 @@ export function createAgent(d: AgentWiringDeps) {
     release: (port: number) => brains.releasePort(port),
   };
   const remoteLinks = new RemoteLinks({ keyd: d.keyd, ports: connectorPorts });
+  const serviceKeys = new ServiceKeys({ keyd: d.keyd, ports: connectorPorts });
   const webCell = new WebCell({ keyd: d.keyd, ports: connectorPorts });
   const connectorCells = new ConnectorCells({
     docker: d.docker,
@@ -465,6 +467,7 @@ export function createAgent(d: AgentWiringDeps) {
       ...(d.routines ? { routines: d.routines } : {}),
       connectors,
       web: webCell,
+      credentials: serviceKeys,
     },
   };
   // A native harness's first look at the task computer: one full screenshot of the selected screen.
@@ -1151,6 +1154,7 @@ export function createAgent(d: AgentWiringDeps) {
           runner.close(),
           judgeCell.close(),
           webCell.close(),
+          serviceKeys.close(),
           connectors.close(),
           ...activeClients.map((tools) => tools.close()),
           ...retiring,

@@ -1,4 +1,9 @@
-import { CLAUDE_PLAN_REFUSAL, claudePlanToken, type SecretBinding } from "@localdot/protocol";
+import {
+  CLAUDE_PLAN_REFUSAL,
+  claudePlanToken,
+  type KeyMetadata,
+  type SecretBinding,
+} from "@localdot/protocol";
 import {
   type FormEvent,
   type Ref,
@@ -47,7 +52,11 @@ export interface KeyFormProps {
   busy?: boolean;
   // The labels already saved, so one made up for a new key is new.
   taken?: readonly string[];
-  save(binding: SecretBinding, value: string): Promise<{ restart: boolean }>;
+  save(
+    binding: SecretBinding,
+    value: string,
+    metadata?: KeyMetadata,
+  ): Promise<{ restart: boolean }>;
   intakeRef?: Ref<KeyIntake>;
   fieldRef?: Ref<KeyField>;
   preset?: KeyFormPreset;
@@ -78,8 +87,8 @@ export interface KeyField {
 type Problem = { field: DraftField | "form"; message: string };
 
 const KINDS = [
-  { value: "llm", label: "Model provider" },
-  { value: "http", label: "Web API" },
+  { value: "llm", label: "Model & service" },
+  { value: "http", label: "Custom service" },
 ];
 
 const PROVIDER_PICKS = PROVIDER_GROUPS.map((group) => ({
@@ -120,6 +129,7 @@ export function KeyForm({
   reenter,
 }: KeyFormProps) {
   const statusId = useId();
+  const [metadata, setMetadata] = useState<KeyMetadata>({});
   // Side by side, Header and Sent as each keep a line for an error, so the pair stays level.
   const paired = !useMediaQuery(PHONE);
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT);
@@ -379,11 +389,17 @@ export function KeyForm({
       lifetime.current === capturedLifetime;
     setSaving(true);
     try {
-      const { restart } = await save(check.binding, value);
+      const details = reenter?.metadata ?? metadata;
+      const { restart } = await save(
+        check.binding,
+        value,
+        ...(Object.values(details).some(Boolean) ? [details] : []),
+      );
       if (!current()) return;
       const id = check.binding.id;
       setDraft((d) => ({ ...d, id: "", baseURL: "", hosts: "" }));
       setTried(false);
+      setMetadata({});
       setSaved(savedLine(id, restart));
     } catch (err) {
       if (!current()) return;
@@ -420,6 +436,15 @@ export function KeyForm({
         </p>
       ) : (
         <>
+          <Field label="Name" description="A clear label helps dot choose the right key.">
+            <TextField
+              value={metadata.label ?? ""}
+              readOnly={readOnly}
+              maxLength={80}
+              placeholder="e.g. Studio production"
+              onChange={(e) => setMetadata({ ...metadata, label: e.target.value })}
+            />
+          </Field>
           <SegmentedControl
             aria-label="Kind of key"
             items={KINDS}
@@ -493,11 +518,35 @@ export function KeyForm({
             </>
           )}
           <Field
-            label="Label (optional)"
+            label="Service (optional)"
+            description="Any service or provider, including one not listed above."
+          >
+            <TextField
+              value={metadata.service ?? ""}
+              readOnly={readOnly}
+              maxLength={80}
+              placeholder="e.g. My company API"
+              onChange={(e) => setMetadata({ ...metadata, service: e.target.value })}
+            />
+          </Field>
+          <Field
+            label="Use for (optional)"
+            description="Tell dot what this key can do. Describe its purpose or account; never paste secrets here."
+          >
+            <TextField
+              value={metadata.description ?? ""}
+              readOnly={readOnly}
+              maxLength={600}
+              placeholder="e.g. Search our catalog and read product details"
+              onChange={(e) => setMetadata({ ...metadata, description: e.target.value })}
+            />
+          </Field>
+          <Field
+            label="Key ID (optional)"
             description={
               typed && taken.includes(typed)
-                ? "Saving replaces the key with this label."
-                : "Shown in your keys and in Settings."
+                ? "Saving replaces the key with this ID."
+                : "A short name for tools and scripts. Leave blank to create one."
             }
             error={errorFor("id")}
           >
