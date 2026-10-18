@@ -36,7 +36,7 @@ export function voiceRoutes(app: Hono, deps: VoiceRoutesDeps): void {
       const wav = new Uint8Array(await c.req.arrayBuffer());
       if (!speechWav(wav)) return c.text("expected 16 kHz mono 16-bit WAV", 400);
       try {
-        return c.json({ text: await speech.transcribe(wav, language) });
+        return c.json({ text: await speech.transcribe(wav, language, c.req.raw.signal) });
       } catch (error) {
         if (error instanceof SpeechBusyError) return c.text(error.message, 409);
         console.error("speech could not be turned into text");

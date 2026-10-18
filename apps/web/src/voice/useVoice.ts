@@ -101,14 +101,17 @@ export function useVoice(opts: VoiceOptions): Voice {
     };
     document.addEventListener("keydown", key, true);
     document.addEventListener("visibilitychange", hidden);
+    const leave = () => turns.send({ type: "cancel" });
+    window.addEventListener("pagehide", leave);
     return () => {
       document.removeEventListener("keydown", key, true);
       document.removeEventListener("visibilitychange", hidden);
+      window.removeEventListener("pagehide", leave);
     };
   }, [active, turns, notice, downloading, downloadDismissed]);
   useHoldShortcut(turns, opts.enabled, opts.field);
   return {
-    enabled: opts.enabled,
+    enabled: opts.enabled && !(route.kind === "none" && route.why === "checking"),
     state,
     notice: downloading && !downloadDismissed ? "Getting speech ready on this device…" : notice,
     route,

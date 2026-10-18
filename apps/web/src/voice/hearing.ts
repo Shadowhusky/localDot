@@ -1,8 +1,7 @@
 import type { ApiClient } from "../lib/api.ts";
-import { type Capture, openCapture, VoiceError, type VoiceFailure } from "./capture.ts";
-import { modelLanguage } from "./language.ts";
+import { VoiceError, type VoiceFailure } from "./capture.ts";
+import { computerHearing } from "./computer-hearing.ts";
 import { speechRecognition, type VoiceRoute } from "./support.ts";
-import { SPEECH_RATE, wavFile } from "./wav.ts";
 
 // One turn of listening: the waveform's level, then the words, or nothing kept.
 export interface Hearing {
@@ -19,10 +18,7 @@ export interface HearingEvents {
   failed(failure: VoiceFailure): void;
 }
 
-// A recording shorter than this has no words in it.
-const SHORTEST_S = 0.3;
 const FINISH_MS = 4000;
-const TRANSCRIBE_MS = 40_000;
 
 export function startHearing(
   route: Extract<VoiceRoute, { kind: "device" | "mac" | "online" }>,
@@ -30,7 +26,7 @@ export function startHearing(
   events: HearingEvents,
 ): Promise<Hearing> {
   return route.kind === "mac"
-    ? computerHearing(opts.api, opts.language, opts.signal)
+    ? computerHearing(opts.api, opts.language, events, opts.signal)
     : browserHearing(opts.language, route.kind === "device", events, opts.signal);
 }
 
@@ -212,59 +208,5 @@ async function browserHearing(
       return completion.promise;
     },
     abort: cancel,
-  };
-}
-
-async function computerHearing(
-  api: ApiClient,
-  language: string,
-  signal?: AbortSignal,
-): Promise<Hearing> {
-  const controller = new AbortController();
-  const cancelled = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-  const capture: Capture = await openCapture(true, cancelled);
-  let completion: Promise<string> | null = null;
-  const transcribe = async () => {
-    try {
-      const samples = await capture.audio();
-      cancelled.throwIfAborted();
-      if (samples.length < SPEECH_RATE * SHORTEST_S) return "";
-      const response = await api.fetch(
-        `${api.socketUrl("").replace(/^ws/, "http")}/api/voice/transcribe?lang=${modelLanguage(language)}`,
-        {
-          method: "POST",
-          headers: { authorization: api.authorization(), "content-type": "audio/wav" },
-          body: wavFile(samples),
-          signal: AbortSignal.any([cancelled, AbortSignal.timeout(TRANSCRIBE_MS)]),
-          credentials: "same-origin",
-          cache: "no-store",
-        },
-      );
-      if (response.status === 401) api.rejectUnauthorized?.();
-      if (!response.ok)
-        throw new VoiceError(
-          response.status === 409
-            ? "busy"
-            : response.status === 404 || response.status === 422
-              ? "unavailable"
-              : "failed",
-        );
-      const reply: unknown = await response.json().catch(() => null);
-      cancelled.throwIfAborted();
-      const words = (reply as { text?: unknown } | null)?.text;
-      return typeof words === "string" ? words : "";
-    } catch (error) {
-      throw error instanceof VoiceError ? error : new VoiceError("failed");
-    } finally {
-      capture.close();
-    }
-  };
-  return {
-    level: () => capture.level(),
-    finish: () => (completion ??= transcribe()),
-    abort() {
-      controller.abort();
-      capture.close();
-    },
   };
 }

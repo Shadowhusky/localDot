@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../lib/api.ts";
-import { browserSpeech, macSpeech, voiceRoute } from "./support.ts";
+import { browserSpeech, macSpeech, useVoiceSupport, voiceRoute } from "./support.ts";
 import { routeBlocked, routeLabel } from "./words.ts";
 
 const brands = (...names: string[]) =>
@@ -11,15 +13,17 @@ const brands = (...names: string[]) =>
   });
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(navigator, "userAgentData");
 });
 
 describe("where speech becomes text", () => {
-  it("prefers this device, then the user's computer, and goes online only when allowed", () => {
+  it("prefers an installed local engine, then this device, and goes online only when allowed", () => {
     expect(voiceRoute({ browser: "local", mac: "all" }, false, "en-US")).toEqual({
-      kind: "device",
+      kind: "mac",
     });
+    expect(voiceRoute({ browser: "local", mac: null }, false, "en-US")).toEqual({ kind: "device" });
     expect(voiceRoute({ browser: "online", mac: "all" }, true, "ja-JP")).toEqual({ kind: "mac" });
     expect(voiceRoute({ browser: "online", mac: "en" }, false, "ja-JP")).toEqual({
       kind: "none",
@@ -96,4 +100,28 @@ it("explains insecure remote links before attempting to open the microphone", ()
     why: "insecure",
   });
   vi.unstubAllGlobals();
+});
+
+it("refreshes a newly available local engine on return to the app", async () => {
+  let available = false;
+  const api = {
+    get: vi.fn(async () => ({ onMac: { available, englishOnly: false } })),
+  } as unknown as ApiClient;
+  const view = renderHook(() => useVoiceSupport(api, "en-US"));
+  await waitFor(() => expect(view.result.current.support?.mac).toBeNull());
+  available = true;
+  act(() => window.dispatchEvent(new Event("focus")));
+  await waitFor(() => expect(view.result.current.support?.mac).toBe("all"));
+});
+
+it("does not reuse a previous server's speech capability", async () => {
+  const first = { get: async () => ({ onMac: { available: true } }) } as unknown as ApiClient;
+  const second = { get: async () => ({ onMac: { available: false } }) } as unknown as ApiClient;
+  const view = renderHook(({ api }) => useVoiceSupport(api, "en-US"), {
+    initialProps: { api: first },
+  });
+  await waitFor(() => expect(view.result.current.support?.mac).toBe("all"));
+  view.rerender({ api: second });
+  expect(view.result.current.support).toBeNull();
+  await waitFor(() => expect(view.result.current.support?.mac).toBeNull());
 });

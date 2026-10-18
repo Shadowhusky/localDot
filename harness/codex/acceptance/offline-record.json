@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "1f75ffba6ef35a7b2fdd27900e55ea1e038ab489851a57d66b47ae8ed0379803",
+  "inputSha256": "4ef59e1950102a5f9d434352fcc54e6bbc9bd588172edf326677b71a7fa19610",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "3348d08c5379a766a87d120001f4d7b0a8983c8fa3ae6d03e4ada1344f1f5374",
@@ -832,9 +832,9 @@
     "apps/daemon/src/upgrade-router.test.ts": "441aa686a969f9495da4bdb6eecc40c728ab709e3b6fd8b9303bc09361170d17",
     "apps/daemon/src/upgrade-router.ts": "9f9efc82fe3907989d54ae2c7528a7c8f9151198277a88bf211fd05f05eeb45e",
     "apps/daemon/src/voice/routes.test.ts": "fd7b3db1a082e8089c0945f786b356e576672959efbe92de0076f9fa7efe2e79",
-    "apps/daemon/src/voice/routes.ts": "022ade30d0fbaca25f848d688c09983b22925291f03eb623c44f3fa5a07f9285",
-    "apps/daemon/src/voice/speech.test.ts": "def1df0a232580d50eb884bd780b190abcf9c5b2cfa404e74c24340433bc30ac",
-    "apps/daemon/src/voice/speech.ts": "8e30f15f13a3587d5268a97c831536b16a9b45b2314555d69281d0f4286101aa",
+    "apps/daemon/src/voice/routes.ts": "059ec5a068c3d5f62b67578c06b8d1206a6ea6383b525cef1cb8b7ff69b30736",
+    "apps/daemon/src/voice/speech.test.ts": "7cd3c0fd606ef3b3d4b53230b6891baffb662d5797fcec85a0050ba94697ded8",
+    "apps/daemon/src/voice/speech.ts": "9cda2515bcc46ca1f51911c2ae11b56a83ba7be47ad8540ff5ec6cd055b5c714",
     "harness/codex/package.json": "3d55143f3938df8274c9188764b2e0fb26a2ffe64c03d6a07d9ce5183452caf9",
     "harness/codex/releases/0.154.0.json": "e9a8a9bfc949017e5e403cb4953ab08fd07982e7ac8757a879c82b95a4f3e6a2",
     "harness/codex/schema/contract-0.154.0.json": "e4b07d9100e186c1d83d5c6189509730310f15cc0ab74dfd974589b95f7cbb3e",
@@ -1071,7 +1071,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "7baf58e938d646a3902479b55416601a6063335824149d3587567768ed15201a",
+  "reportSha256": "10862dbe1b7ef256637004e3e2062c3a104642afec4f56dcfc71160859a1651d",
   "exit": {
     "code": 0,
     "signal": null

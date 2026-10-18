@@ -7,7 +7,7 @@ import type { SpeechRecognitionLike, SpeechResultLike } from "./support.ts";
 const mic = vi.hoisted(() => ({
   refuse: undefined as Error | undefined,
   closed: 0,
-  audio: new Float32Array(16_000),
+  audio: new Float32Array(16_000).fill(0.05),
 }));
 vi.mock("./capture.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./capture.ts")>()),
@@ -16,6 +16,7 @@ vi.mock("./capture.ts", async (importOriginal) => ({
     return {
       level: () => 0.3,
       audio: async () => mic.audio,
+      snapshot: async () => mic.audio,
       close: () => {
         mic.closed += 1;
       },
@@ -176,7 +177,7 @@ describe("hearing on the computer", () => {
     mic.audio = new Float32Array(100);
     const quiet = await startHearing({ kind: "mac" }, { api: api(), language: "en-US" }, events());
     await expect(quiet.finish()).resolves.toBe("");
-    mic.audio = new Float32Array(16_000);
+    mic.audio = new Float32Array(16_000).fill(0.05);
     const busy = await startHearing(
       { kind: "mac" },
       { api: api(async () => new Response("busy", { status: 409 })), language: "en-US" },
@@ -365,4 +366,101 @@ it("cancels an in-flight computer transcription and releases its capture", async
   await expect(words).rejects.toMatchObject({ failure: "failed" });
   expect(request?.aborted).toBe(true);
   expect(mic.closed).toBeGreaterThan(0);
+});
+
+it("streams local words without overlapping requests, then flushes the final audio", async () => {
+  vi.useFakeTimers();
+  mic.audio = new Float32Array(16_000).fill(0.05);
+  const seen = events();
+  const requests: ReturnType<typeof Promise.withResolvers<Response>>[] = [];
+  const hearing = await startHearing(
+    { kind: "mac" },
+    {
+      api: api(async () => {
+        const reply = Promise.withResolvers<Response>();
+        requests.push(reply);
+        return reply.promise;
+      }),
+      language: "en-US",
+    },
+    seen,
+  );
+  await vi.advanceTimersByTimeAsync(4000);
+  expect(requests).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(12_000);
+  expect(requests).toHaveLength(1);
+  requests[0]?.resolve(Response.json({ text: "first words" }));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(seen.words).toEqual(["first words"]);
+  mic.audio = new Float32Array(32_000).fill(0.05);
+  await vi.advanceTimersByTimeAsync(4000);
+  expect(requests).toHaveLength(2);
+  mic.audio = new Float32Array(48_000).fill(0.05);
+  const final = hearing.finish();
+  requests[1]?.resolve(Response.json({ text: "first words and" }));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(seen.words).toEqual(["first words"]);
+  expect(requests).toHaveLength(3);
+  requests[2]?.resolve(Response.json({ text: "first words and the ending" }));
+  await expect(final).resolves.toBe("first words and the ending");
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(requests).toHaveLength(3);
+});
+
+it("drops local previews arriving after cancellation and can start another recording", async () => {
+  vi.useFakeTimers();
+  const pending = Promise.withResolvers<Response>();
+  const seen = events();
+  mic.audio = new Float32Array(16_000).fill(0.05);
+  const hearing = await startHearing(
+    { kind: "mac" },
+    { api: api(() => pending.promise), language: "en-US" },
+    seen,
+  );
+  await vi.advanceTimersByTimeAsync(4000);
+  hearing.abort();
+  pending.resolve(Response.json({ text: "cancelled words" }));
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(seen.words).toEqual([]);
+  const next = await startHearing(
+    { kind: "mac" },
+    {
+      api: api(async () => Response.json({ text: "next recording" })),
+      language: "en-US",
+    },
+    events(),
+  );
+  await expect(next.finish()).resolves.toBe("next recording");
+});
+
+it("does not invent words for a silent microphone", async () => {
+  mic.audio = new Float32Array(16_000);
+  const fetch = vi.fn(async () => Response.json({ text: "hallucinated words" }));
+  const hearing = await startHearing(
+    { kind: "mac" },
+    { api: api(fetch), language: "en-US" },
+    events(),
+  );
+  await expect(hearing.finish()).resolves.toBe("");
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("reports stalled capture instead of leaving a flat recording running", async () => {
+  vi.useFakeTimers();
+  mic.audio = new Float32Array(16_000).fill(0.05);
+  const seen = events();
+  const hearing = await startHearing(
+    { kind: "mac" },
+    {
+      api: api(async () => Response.json({ text: "before the microphone stopped" })),
+      language: "en-US",
+    },
+    seen,
+  );
+  await vi.advanceTimersByTimeAsync(4000);
+  expect(seen.words).toEqual(["before the microphone stopped"]);
+  await vi.advanceTimersByTimeAsync(4000);
+  expect(seen.failures).toEqual(["no-mic"]);
+  hearing.abort();
+  expect(vi.getTimerCount()).toBe(0);
 });

@@ -21,6 +21,8 @@ export interface SpeechLookup {
 const BINARIES = ["whisper-cli", "whisper-cpp"];
 const BIN_DIRS = ["/opt/homebrew/bin", "/usr/local/bin"];
 const MODEL_DIRS = (home: string) => [
+  "/opt/homebrew/share/whisper.cpp",
+  "/usr/local/share/whisper.cpp",
   "/opt/homebrew/share/whisper-cpp",
   "/usr/local/share/whisper-cpp",
   join(home, ".cache", "whisper.cpp"),
@@ -79,7 +81,7 @@ function modelFile(lookup: SpeechLookup): string | null {
 export type ExecFile = (
   file: string,
   args: readonly string[],
-  options: { timeout: number; env: NodeJS.ProcessEnv; maxBuffer: number },
+  options: { timeout: number; env: NodeJS.ProcessEnv; maxBuffer: number; signal?: AbortSignal },
   callback: (error: Error | null, stdout: string) => void,
 ) => void;
 
@@ -94,7 +96,7 @@ export interface Transcriber {
   readonly englishOnly: boolean;
   // A 16 kHz mono WAV in, its words out. The audio lives in a private temporary folder only while
   // the model reads it.
-  transcribe(wav: Uint8Array, language: string | null): Promise<string>;
+  transcribe(wav: Uint8Array, language: string | null, signal?: AbortSignal): Promise<string>;
 }
 
 const TIMEOUT_MS = 30_000;
@@ -109,11 +111,14 @@ export function speechTranscriber(
   let busy = false;
   return {
     englishOnly: model.englishOnly,
-    async transcribe(wav, language) {
+    async transcribe(wav, language, signal) {
+      signal?.throwIfAborted();
       if (busy) throw new SpeechBusyError();
       busy = true;
-      const dir = await mkdtemp(join(opts.tmp ?? tmpdir(), "localdot-voice-"));
+      let dir: string | undefined;
       try {
+        dir = await mkdtemp(join(opts.tmp ?? tmpdir(), "localdot-voice-"));
+        signal?.throwIfAborted();
         const file = join(dir, "speech.wav");
         await writeFile(file, wav, { mode: 0o600 });
         const args = ["-m", model.model, "-f", file, "-l", language ?? "auto", "-nt", "-np"];
@@ -124,6 +129,7 @@ export function speechTranscriber(
             {
               timeout: TIMEOUT_MS,
               maxBuffer: 256 * 1024,
+              signal,
               env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME },
             },
             (error, stdout) => (error ? reject(error) : resolve(String(stdout))),
@@ -132,7 +138,7 @@ export function speechTranscriber(
         return spokenText(out);
       } finally {
         busy = false;
-        await rm(dir, { recursive: true, force: true });
+        if (dir) await rm(dir, { recursive: true, force: true });
       }
     },
   };

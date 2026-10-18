@@ -12,8 +12,8 @@ export interface VoiceSupport {
   readonly mac: "all" | "en" | null;
 }
 
-// Where speech becomes text, in the order of who hears it: this device, the user's own computer,
-// then (only when the user allows it) the browser's online service.
+// An installed local engine owns capture consistently across clients; otherwise use browser
+// on-device recognition, then its online service only when the user has enabled it.
 export type VoiceRoute =
   | { readonly kind: "device" | "mac" | "online" }
   | {
@@ -28,9 +28,9 @@ export function voiceRoute(
 ): VoiceRoute {
   if (globalThis.isSecureContext === false) return { kind: "none", why: "insecure" };
   if (!support) return { kind: "none", why: "checking" };
-  if (support.browser === "local") return { kind: "device" };
   if (support.mac === "all" || (support.mac === "en" && modelLanguage(language) === "en"))
     return { kind: "mac" };
+  if (support.browser === "local") return { kind: "device" };
   if (online && support.browser !== "none") return { kind: "online" };
   if (support.browser === "download") return { kind: "none", why: "download" };
   return { kind: "none", why: support.browser === "online" ? "online-off" : "unsupported" };
@@ -107,7 +107,7 @@ export async function macSpeech(api: ApiClient): Promise<VoiceSupport["mac"]> {
   }
 }
 
-const checked = new Map<string, Promise<VoiceSupport>>();
+let checked = new WeakMap<ApiClient, Map<string, Promise<VoiceSupport>>>();
 // A download changes what the browser can do: every user of the answer asks again.
 let round = 0;
 let downloading = false;
@@ -124,13 +124,18 @@ const subscribe = (listener: () => void) => {
 };
 
 function check(api: ApiClient, language: string): Promise<VoiceSupport> {
-  let found = checked.get(language);
+  let languages = checked.get(api);
+  if (!languages) {
+    languages = new Map();
+    checked.set(api, languages);
+  }
+  let found = languages.get(language);
   if (!found) {
     found = Promise.all([browserSpeech(language), macSpeech(api)]).then(([browser, mac]) => ({
       browser,
       mac,
     }));
-    checked.set(language, found);
+    languages.set(language, found);
   }
   return found;
 }
@@ -147,27 +152,45 @@ export async function downloadSpeech(language: string) {
     // Asked again below: the browser says how far it got.
   } finally {
     downloading = false;
-    checked.delete(language);
+    checked = new WeakMap();
     changed();
   }
 }
 
-// What this browser and computer can do for a language, asked once per page and language.
+// Recheck after returning to the page: a speech model may have been installed while it was open.
 export function useVoiceSupport(api: ApiClient, language: string) {
-  const [support, setSupport] = useState<{ language: string; value: VoiceSupport } | null>(null);
+  const [support, setSupport] = useState<{
+    api: ApiClient;
+    language: string;
+    value: VoiceSupport;
+  } | null>(null);
   const asked = useSyncExternalStore(subscribe, () => round);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new round asks again
   useEffect(() => {
     let live = true;
-    void check(api, language).then((value) => {
-      if (live) setSupport({ language, value });
-    });
+    let request = 0;
+    const load = () => {
+      const own = ++request;
+      void check(api, language).then((value) => {
+        if (live && own === request) setSupport({ api, language, value });
+      });
+    };
+    const refresh = () => {
+      if (document.hidden) return;
+      checked.delete(api);
+      load();
+    };
+    load();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
     return () => {
       live = false;
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
     };
   }, [api, language, asked]);
   return {
-    support: support?.language === language ? support.value : null,
+    support: support?.api === api && support.language === language ? support.value : null,
     downloading,
     download: () => downloadSpeech(language),
   };

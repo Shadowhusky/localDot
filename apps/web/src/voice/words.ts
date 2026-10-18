@@ -57,7 +57,7 @@ export function failureLine(failure: VoiceFailure): string {
     case "denied":
       return "Allow the microphone to talk to dot.";
     case "no-mic":
-      return "No microphone found.";
+      return "The microphone isn’t receiving audio. Try again.";
     case "no-speech":
       return "Didn't catch that. Try again.";
     case "unavailable":
