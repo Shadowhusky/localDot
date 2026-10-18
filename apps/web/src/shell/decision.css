@@ -238,7 +238,7 @@
   right: 0;
   bottom: var(--_keyboard, 0px);
   left: 0;
-  z-index: var(--layer-island);
+  z-index: calc(var(--layer-island) + 2);
   display: flex;
   flex-direction: column;
   height: calc(var(--_full-height) * 0.55);

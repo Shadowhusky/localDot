@@ -16,6 +16,15 @@ test("long key requests scroll to every control and expand by drag or button", a
   await sheet.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((a) => a.finished.catch(() => {})));
   });
+  // The fixed mascot lives above the stage but must remain behind the question surface.
+  expect(
+    await sheet.evaluate((e) => {
+      const mascot = document.querySelector(".presence");
+      return (
+        !mascot || Number(getComputedStyle(e).zIndex) > Number(getComputedStyle(mascot).zIndex)
+      );
+    }),
+  ).toBe(true);
   const before = await sheet.boundingBox();
   if (!before) throw new Error("Missing sheet");
   expect(await scroller.evaluate((e) => e.scrollHeight > e.clientHeight)).toBe(true);
