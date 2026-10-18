@@ -25,6 +25,7 @@ import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { ExportPreview } from "./ExportPreview.tsx";
 import type { ExportContext } from "./export-context.ts";
 import {
   type Calibration,
@@ -33,6 +34,7 @@ import {
   storedCalibration,
   waitText,
 } from "./export-estimate.ts";
+import type { ExportPlan } from "./export-plan.ts";
 import {
   bandLineAt,
   EXPORT_FRAME_RATES,
@@ -111,6 +113,7 @@ function optionsText(options: ExportOptions, env: ExportEnvironment): string {
 }
 
 interface Outcome extends ExportEstimate {
+  plan: ExportPlan;
   durationS: number;
   // Before this browser's own calibration, which the finished export corrects.
   fitted: ExportEstimate;
@@ -133,6 +136,7 @@ function outcomeOf(
     const plan = planExport(request, context.model, context.activity, context.gaps);
     return {
       ...estimateExport(plan, request, calibration),
+      plan,
       durationS: plan.durationS,
       fitted: estimateExport(plan, request),
     };
@@ -279,6 +283,7 @@ export function ExportSheet({
   const held = useRef<TrimEdge>("from");
   if (hold) held.current = hold.edge;
   const cap = maxFrameRate(env, choices.speed);
+  const previewRequest = exportRequest(context.sessionId, chosen, choices, env);
 
   const presetRow = (preset: PresetChoice, label: string) => {
     const result = outcomes[preset];
@@ -305,10 +310,13 @@ export function ExportSheet({
       <div className="export-views">
         <div className="export-options" inert={working} data-shown={working ? undefined : ""}>
           <div className="export-recording">
-            <div
-              className="export-preview"
-              data-dot={options.dot}
-              data-held={hold ? "" : undefined}
+            <ExportPreview
+              key={JSON.stringify(previewRequest)}
+              context={context}
+              request={previewRequest}
+              plan={current?.plan ?? null}
+              active={open && !working && !hold}
+              held={!!hold}
             >
               <div className="export-preview-picture">
                 <ReplayImage
@@ -340,7 +348,7 @@ export function ExportSheet({
                   <span className="export-preview-said">{said}</span>
                 </span>
               </span>
-            </div>
+            </ExportPreview>
             <Trim
               api={api}
               sessionId={context.sessionId}

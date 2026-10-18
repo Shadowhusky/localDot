@@ -565,7 +565,8 @@ function layOut(panel: HTMLElement) {
       y: 0,
     }) as DOMRect;
   film.getBoundingClientRect = () => box(100, 600);
-  const [from, to] = screen.getAllByRole("slider");
+  const from = screen.getByRole("slider", { name: "Start" });
+  const to = screen.getByRole("slider", { name: "End" });
   if (!from || !to) throw new Error("no handles");
   return { from, to };
 }

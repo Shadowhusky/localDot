@@ -73,7 +73,7 @@
 
 .export-preview-picture {
   position: relative;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: var(--preview-picture-ratio);
   overflow: hidden;
   background-color: var(--color-well);
 }
@@ -734,4 +734,50 @@
   align-content: center;
   justify-items: center;
   gap: calc(var(--spacing) * 4);
+}
+
+/* Playback stays next to the trim, with a thumb large enough to seek on a phone. */
+.export-preview-surface {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.export-preview-surface[data-visible] {
+  visibility: visible;
+}
+.export-preview-surface canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.export-preview-controls {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
+}
+
+.export-preview-clock {
+  flex: none;
+  color: var(--color-fg-2);
+  font-size: var(--text-footnote);
+  white-space: nowrap;
+}
+
+.export-preview-seek {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  margin: 0;
+  accent-color: var(--color-fg-1);
+  cursor: pointer;
+}
+
+.export-preview-note {
+  margin: 0;
+  color: var(--color-fg-2);
+  font-size: var(--text-footnote);
 }

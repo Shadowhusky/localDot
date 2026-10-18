@@ -1,4 +1,4 @@
-import { cameraFor, observeAt, sceneAt } from "@localdot/stage";
+import { observeAt, sceneAt } from "@localdot/stage";
 import {
   canEncodeVideo,
   Mp4OutputFormat,
@@ -14,14 +14,13 @@ import {
 import { Rectangle } from "pixi.js";
 import { recordedPresence } from "../dot/dot-feed.ts";
 import { ObserveBackdrop } from "../replay/backdrop.ts";
-import { replayGeometry, replayView } from "../replay/recording-source.ts";
-import { PixiPresenter } from "../stage/pixi-presenter.ts";
-import { burnInText, ExportBurnIn } from "./burn-in.ts";
-import { dotLayout, dotSeed, pictureHeight } from "./dot-band.ts";
-import { ExportDot, loadDotPlates } from "./export-dot.ts";
+import { replayView } from "../replay/recording-source.ts";
+import type { PixiPresenter } from "../stage/pixi-presenter.ts";
+import { burnInText } from "./burn-in.ts";
 import { frameLook, pickFrames } from "./export-frames.ts";
 import { type ExportPlan, type ExportRequest, planExport } from "./export-plan.ts";
 import type { ExportIn, ExportOut, ExportSourceSample } from "./export-protocol.ts";
+import { createExportScene } from "./export-scene.ts";
 import { ExportVideo } from "./export-video.ts";
 
 const scope = self as unknown as {
@@ -70,6 +69,7 @@ interface Held {
 
 async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void> {
   let presenter: PixiPresenter | undefined;
+  let composition: Awaited<ReturnType<typeof createExportScene>> | undefined;
   let video: ExportVideo | undefined;
   let backdrop: ObserveBackdrop | undefined;
   let samples: AsyncGenerator<VideoSample | null, void, unknown> | undefined;
@@ -86,54 +86,18 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
     const plan = planExport(request, start.model, start.activity, start.gaps);
     if (request.sessionId !== start.source.sessionId) throw new Error("Mismatched export source.");
     const { w: width, h: height } = request.size;
-    // Under the picture, dot's band takes the video's foot and the picture the rest.
-    const pictureH = pictureHeight(request);
     const canvas = new OffscreenCanvas(width, height);
-    presenter = await PixiPresenter.create(canvas, {
-      width,
-      height,
-      dpr: width / 1280,
+    composition = await createExportScene({
+      canvas,
+      request,
+      source: start.source,
+      model: start.model,
       theme: start.theme,
-      warn() {},
+      firstMs: plan.sessionMsAt(0),
+      signal: cancellation.signal,
     });
-    cancelled();
-    presenter.overlays.setViewport(width, pictureH);
-    const screen = replayGeometry(start.model, start.source);
-    presenter.setScreen(screen);
-    presenter.setCamera(
-      cameraFor({
-        stageW: width,
-        stageH: pictureH,
-        desktopW: screen?.w ?? 1280,
-        desktopH: screen?.h ?? 800,
-        zoom: 1,
-      }),
-    );
-    const burnIn = new ExportBurnIn(
-      start.theme,
-      width,
-      pictureH,
-      request.dot === "over" ? "head" : "foot",
-    );
-    presenter.screen.addChild(burnIn);
-    let dot: ExportDot | null = null;
-    if (request.dot) {
-      const plates = await loadDotPlates(
-        dotLayout(request.size, request.dot).frame.size,
-        cancellation.signal,
-      );
-      cancelled();
-      dot = new ExportDot({
-        theme: start.theme,
-        size: request.size,
-        placement: request.dot,
-        plates,
-        seed: dotSeed(request.sessionId),
-        t: 0,
-        first: recordedPresence(start.model, plan.sessionMsAt(0)),
-      });
-      presenter.app.stage.addChild(dot);
-    }
+    presenter = composition.presenter;
+    const dot = composition.dot;
     backdrop = new ObserveBackdrop(start.source);
     if (start.source.video) video = await ExportVideo.open(start.source, cancellation.signal);
     cancelled();
@@ -213,9 +177,7 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
               if (still) presenter.present(still, { backdrop: true });
               else presenter.clearVideo();
             }
-            presenter.draw(scene);
-            burnIn.draw(caption, gap);
-            presenter.render();
+            composition.draw(scene, caption, gap);
             if (hashes) {
               const { pixels } = presenter.app.renderer.extract.pixels({
                 target: presenter.app.stage,
@@ -276,8 +238,7 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
     await samples?.return(undefined).catch(() => {});
     video?.close();
     backdrop?.close();
-    presenter?.clearVideo();
-    presenter?.app.destroy(true, { children: true, texture: true, textureSource: true });
+    composition?.close();
     output = undefined;
     scope.close();
   }

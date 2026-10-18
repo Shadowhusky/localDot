@@ -61,6 +61,13 @@ whole session, this step, or a selection marked with I and O); and the speed (1�
 speed from ¼× to 16×). More options sets resolution, frame rate, quality, MP4 or WebM, captions,
 idle skipping, and dot's pointer. Only sizes and formats the computer can encode are offered.
 
+Use **Play preview** below the picture to watch the selected range before saving. The preview
+uses the export speed, idle skipping, captions, pointer overlays and dot placement. Drag its
+playback slider to inspect a moment without changing the trim. It stops at the trimmed end;
+Play starts over when it has finished. Editing the range or output settings resets the preview,
+and closing the sheet releases its decoder. Preview uses the shared export renderer at up to
+960 pixels wide; the saved file uses the selected resolution and encoding quality.
+
 An export captures the selected Desktop or Browser track when you open the sheet. Its label names
 that screen; browser exports add `-browser` to the suggested filename. The selected track's privacy
 gaps and the committed recording snapshot remain fixed for that export.
