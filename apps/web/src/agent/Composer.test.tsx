@@ -103,6 +103,8 @@ function setup(
   const api = createApi("fixture", {
     origin: "http://127.0.0.1:4790",
     fetchImpl: async (url, init) => {
+      if (new URL(String(url)).pathname === "/api/voice")
+        return Response.json({ onMac: { available: false } });
       requests.push({ path: new URL(String(url)).pathname, body: JSON.parse(String(init?.body)) });
       return response();
     },
@@ -540,6 +542,8 @@ describe("composer delivery ownership and draft handling", () => {
       api: createApi("fixture", {
         origin: "http://127.0.0.1:4790",
         fetchImpl: async (url, init) => {
+          if (new URL(String(url)).pathname === "/api/voice")
+            return Response.json({ onMac: { available: false } });
           f.requests.push({
             path: new URL(String(url)).pathname,
             body: JSON.parse(String(init?.body)),
@@ -592,6 +596,8 @@ describe("explicit composer attachments", () => {
     const api = createApi("fixture", {
       origin: "http://127.0.0.1:4790",
       fetchImpl: async (url, init) => {
+        if (new URL(String(url)).pathname === "/api/voice")
+          return Response.json({ onMac: { available: false } });
         const target = new URL(String(url));
         calls.push({ path: target.pathname, body: init?.body });
         if (target.pathname.endsWith("/upload"))
@@ -629,6 +635,8 @@ describe("explicit composer attachments", () => {
     const api = createApi("fixture", {
       origin: "http://127.0.0.1:4790",
       fetchImpl: async (url) => {
+        if (new URL(String(url)).pathname === "/api/voice")
+          return Response.json({ onMac: { available: false } });
         calls.push(new URL(String(url)).pathname);
         return Response.json({ path: "~/Downloads/other.txt" }, { status: 201 });
       },
@@ -664,6 +672,8 @@ describe("explicit composer attachments", () => {
     const api = createApi("fixture", {
       origin: "http://127.0.0.1:4790",
       fetchImpl: async (url, init) => {
+        if (new URL(String(url)).pathname === "/api/voice")
+          return Response.json({ onMac: { available: false } });
         if (new URL(String(url)).pathname.endsWith("/upload"))
           return Response.json({ path: "~/Downloads/one.txt" }, { status: 201 });
         delivered.push(String(init?.body));
@@ -1246,6 +1256,8 @@ describe("answering dot from the composer", () => {
     const api = createApi("fixture", {
       origin: "http://127.0.0.1:4790",
       fetchImpl: async (url, init) => {
+        if (new URL(String(url)).pathname === "/api/voice")
+          return Response.json({ onMac: { available: false } });
         const target = new URL(String(url));
         calls.push({ path: target.pathname, body: init?.body });
         return target.pathname.endsWith("/upload")

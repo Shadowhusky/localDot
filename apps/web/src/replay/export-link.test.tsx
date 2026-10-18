@@ -85,7 +85,7 @@ function recorded(durationMs: number, host?: "ready") {
 // Where the trim tool's handles stand.
 const handles = (sheet: HTMLElement) =>
   within(sheet)
-    .getAllByRole("slider")
+    .getAllByRole("slider", { name: /^(Start|End)$/ })
     .map((handle) => handle.getAttribute("aria-valuetext"));
 
 it("opens Export on a result's part of the recording, kept inside it, and forgets the request", async () => {

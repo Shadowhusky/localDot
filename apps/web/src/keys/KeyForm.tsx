@@ -7,6 +7,7 @@ import {
 import {
   type FormEvent,
   type Ref,
+  useCallback,
   useEffect,
   useId,
   useImperativeHandle,
@@ -140,6 +141,12 @@ export function KeyForm({
   const [problem, setProblem] = useState<Problem | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const valueRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  // Ref detachment precedes passive effect cleanup. Clear the old DOM owner at detachment,
+  // including when switching between the single-line and general-key fields.
+  const valueNode = useCallback((node: HTMLInputElement | HTMLTextAreaElement | null) => {
+    if (valueRef.current && valueRef.current !== node) valueRef.current.value = "";
+    valueRef.current = node;
+  }, []);
   const savingRef = useRef(false);
   const intakeBlocked = useRef(false);
   const intakeAllowed = useRef(false);
@@ -594,9 +601,7 @@ export function KeyForm({
           user's synced password manager, autocomplete="off" or not. */}
         {general ? (
           <TextArea
-            ref={(node) => {
-              valueRef.current = node;
-            }}
+            ref={valueNode}
             {...PLAIN}
             className="keys-secret"
             maxRows={6}
@@ -611,9 +616,7 @@ export function KeyForm({
           />
         ) : (
           <TextField
-            ref={(node) => {
-              valueRef.current = node;
-            }}
+            ref={valueNode}
             {...PLAIN}
             className="keys-secret"
             readOnly={saving || busy}
