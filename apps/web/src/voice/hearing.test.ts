@@ -74,7 +74,11 @@ beforeEach(() => {
   mic.closed = 0;
   vi.stubGlobal("webkitSpeechRecognition", FakeRecognition);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  for (const recognition of made) recognition.onend?.();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("hearing in the browser", () => {
   it("listens on this device only for the device route, and hands over what it heard", async () => {
@@ -126,7 +130,8 @@ describe("hearing in the browser", () => {
     made[0]?.onerror?.({ error: "aborted" });
     made[0]?.onend?.();
     expect(seen.failures).toEqual(["no-speech"]);
-    expect(seen.ends).toBe(1);
+    expect(seen.ends).toBe(0);
+    expect(made[0]?.aborted).toBe(1);
   });
 
   it("maps the engine's errors", () => {
@@ -202,7 +207,8 @@ it("animates detected speech and result activity, then settles during silence an
   const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
   try {
     const opening = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, events());
-    const recognition = made[0]!;
+    const recognition = made[0];
+    if (!recognition) throw new Error("Expected a speech session");
     recognition.onstart?.();
     const hearing = await opening;
     expect(hearing.level()).toBe(0);
@@ -223,4 +229,140 @@ it("animates detected speech and result activity, then settles during silence an
   } finally {
     clock.mockRestore();
   }
+});
+
+describe("successive speech sessions", () => {
+  it("releases every finished recognizer before the next recording and ignores old callbacks", async () => {
+    for (const phrase of ["first message", "second message", "third message"]) {
+      const seen = events();
+      const opening = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, seen);
+      const recognition = made.at(-1);
+      if (!recognition) throw new Error("Expected a speech session");
+      recognition.onstart?.();
+      const hearing = await opening;
+      recognition.say(phrase);
+      const staleResult = recognition.onresult;
+      const final = hearing.finish();
+      expect(hearing.finish()).toBe(final);
+      recognition.onend?.();
+      await expect(final).resolves.toBe(phrase);
+      expect(recognition.aborted).toBe(1);
+      expect(recognition.onresult).toBeNull();
+      expect(recognition.onend).toBeNull();
+      staleResult?.({ results: [{ isFinal: true, 0: { transcript: "late words" } }] });
+      expect(seen.words).toEqual([phrase]);
+      expect(hearing.level()).toBe(0);
+    }
+  });
+
+  it("cancels during startup immediately so a fresh recording can acquire the microphone", async () => {
+    const signal = new AbortController();
+    const first = startHearing(
+      { kind: "online" },
+      { api: api(), language: "en-US", signal: signal.signal },
+      events(),
+    );
+    const abandoned = made[0];
+    if (!abandoned) throw new Error("Expected a speech session");
+    const lateStart = abandoned.onstart;
+    const rejected = expect(first).rejects.toMatchObject({ failure: "failed" });
+    signal.abort();
+    await rejected;
+    expect(abandoned.aborted).toBe(1);
+    expect(abandoned.onstart).toBeNull();
+    lateStart?.();
+    const seen = events();
+    const next = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, seen);
+    made[1]?.onstart?.();
+    const hearing = await next;
+    made[1]?.say("fresh words");
+    expect(seen.words).toEqual(["fresh words"]);
+    hearing.abort();
+  });
+
+  it("releases a service that never sends its final end event", async () => {
+    vi.useFakeTimers();
+    const seen = events();
+    const opening = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, seen);
+    made[0]?.onstart?.();
+    const hearing = await opening;
+    made[0]?.say("keep these words");
+    const words = hearing.finish();
+    await vi.advanceTimersByTimeAsync(4000);
+    await expect(words).resolves.toBe("keep these words");
+    expect(made[0]?.aborted).toBe(1);
+    expect(made[0]?.onend).toBeNull();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(made).toHaveLength(1);
+    expect(seen.failures).toEqual([]);
+  });
+
+  it("recovers one silently stalled microphone with a fresh recognizer", async () => {
+    vi.useFakeTimers();
+    const seen = events();
+    const opening = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, seen);
+    made[0]?.onstart?.();
+    const hearing = await opening;
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(made).toHaveLength(2);
+    expect(made[0]?.aborted).toBe(1);
+    made[1]?.onstart?.();
+    made[1]?.say("I can be heard again");
+    expect(seen.words).toEqual(["I can be heard again"]);
+    const words = hearing.finish();
+    made[1]?.onend?.();
+    await expect(words).resolves.toBe("I can be heard again");
+    expect(seen.failures).toEqual([]);
+  });
+
+  it("bounds silent retries and releases the microphone after failure", async () => {
+    vi.useFakeTimers();
+    const seen = events();
+    const opening = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, seen);
+    made[0]?.onstart?.();
+    await opening;
+    await vi.advanceTimersByTimeAsync(12_000);
+    made[1]?.onstart?.();
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(seen.failures).toEqual(["no-speech"]);
+    expect(made[1]?.aborted).toBe(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(made).toHaveLength(2);
+  });
+
+  it("cancels a pending final result without retaining a finish timer", async () => {
+    vi.useFakeTimers();
+    const opening = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, events());
+    made[0]?.onstart?.();
+    const hearing = await opening;
+    const words = hearing.finish();
+    hearing.abort();
+    await expect(words).resolves.toBe("");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(made[0]?.aborted).toBe(1);
+  });
+});
+
+it("cancels an in-flight computer transcription and releases its capture", async () => {
+  let request: AbortSignal | undefined;
+  const hearing = await startHearing(
+    { kind: "mac" },
+    {
+      api: api((async (_url, init) => {
+        request = init?.signal as AbortSignal;
+        return new Promise((_resolve, reject) =>
+          request?.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }),
+        );
+      }) as typeof fetch),
+      language: "en-US",
+    },
+    events(),
+  );
+  const words = hearing.finish();
+  expect(hearing.finish()).toBe(words);
+  await vi.waitFor(() => expect(request).toBeDefined());
+  hearing.abort();
+  await expect(words).rejects.toMatchObject({ failure: "failed" });
+  expect(request?.aborted).toBe(true);
+  expect(mic.closed).toBeGreaterThan(0);
 });

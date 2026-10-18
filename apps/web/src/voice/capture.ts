@@ -34,7 +34,8 @@ export interface Capture {
   close(): void;
 }
 
-export async function openCapture(record: boolean): Promise<Capture> {
+export async function openCapture(record: boolean, signal?: AbortSignal): Promise<Capture> {
+  if (signal?.aborted) throw new VoiceError("failed");
   if (!navigator.mediaDevices?.getUserMedia) throw new VoiceError("no-mic");
   let stream: MediaStream;
   try {
@@ -44,50 +45,64 @@ export async function openCapture(record: boolean): Promise<Capture> {
   } catch (error) {
     throw new VoiceError(captureFailure(error));
   }
-  const context = new AudioContext();
-  void context.resume().catch(() => {});
-  const analyser = context.createAnalyser();
-  analyser.fftSize = 1024;
-  context.createMediaStreamSource(stream).connect(analyser);
-  const frame = new Float32Array(analyser.fftSize);
-  const recorder = record ? new MediaRecorder(stream) : null;
-  const chunks: Blob[] = [];
-  recorder?.addEventListener("dataavailable", (event) => {
-    if (event.data.size) chunks.push(event.data);
-  });
-  recorder?.start();
-  let closed = false;
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    if (recorder?.state === "recording") recorder.stop();
+  if (signal?.aborted) {
     for (const track of stream.getTracks()) track.stop();
-    void context.close().catch(() => {});
-  };
-  return {
-    level() {
-      if (closed || context.state !== "running") return -1;
-      analyser.getFloatTimeDomainData(frame);
-      return loudness(frame);
-    },
-    async audio() {
-      if (!recorder) throw new VoiceError("failed");
-      if (recorder.state === "recording") {
-        const stopped = new Promise((resolve) =>
-          recorder.addEventListener("stop", resolve, { once: true }),
+    throw new VoiceError("failed");
+  }
+  let openedContext: AudioContext | undefined;
+  try {
+    const context = new AudioContext();
+    openedContext = context;
+    void context.resume().catch(() => {});
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    context.createMediaStreamSource(stream).connect(analyser);
+    const frame = new Float32Array(analyser.fftSize);
+    const recorder = record ? new MediaRecorder(stream) : null;
+    const chunks: Blob[] = [];
+    recorder?.addEventListener("dataavailable", (event) => {
+      if (event.data.size) chunks.push(event.data);
+    });
+    recorder?.start();
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      signal?.removeEventListener("abort", close);
+      if (recorder?.state === "recording") recorder.stop();
+      for (const track of stream.getTracks()) track.stop();
+      void context.close().catch(() => {});
+    };
+    signal?.addEventListener("abort", close, { once: true });
+    return {
+      level() {
+        if (closed || context.state !== "running") return -1;
+        analyser.getFloatTimeDomainData(frame);
+        return loudness(frame);
+      },
+      async audio() {
+        if (!recorder) throw new VoiceError("failed");
+        if (recorder.state === "recording") {
+          const stopped = new Promise((resolve) =>
+            recorder.addEventListener("stop", resolve, { once: true }),
+          );
+          recorder.stop();
+          await stopped;
+        }
+        close();
+        const recorded = new Blob(chunks, { type: recorder.mimeType });
+        if (!recorded.size) return new Float32Array();
+        // Decoding into a 16 kHz context resamples on the way, without a running audio graph.
+        const decoded = await new OfflineAudioContext(1, 1, SPEECH_RATE).decodeAudioData(
+          await recorded.arrayBuffer(),
         );
-        recorder.stop();
-        await stopped;
-      }
-      close();
-      const recorded = new Blob(chunks, { type: recorder.mimeType });
-      if (!recorded.size) return new Float32Array();
-      // Decoding into a 16 kHz context resamples on the way, without a running audio graph.
-      const decoded = await new OfflineAudioContext(1, 1, SPEECH_RATE).decodeAudioData(
-        await recorded.arrayBuffer(),
-      );
-      return decoded.getChannelData(0);
-    },
-    close,
-  };
+        return decoded.getChannelData(0);
+      },
+      close,
+    };
+  } catch (error) {
+    for (const track of stream.getTracks()) track.stop();
+    void openedContext?.close().catch(() => {});
+    throw error instanceof VoiceError ? error : new VoiceError(captureFailure(error));
+  }
 }

@@ -531,7 +531,7 @@ export function Composer(props: ComposerProps) {
     field,
     owner: `${props.cell?.id}:${props.agent.sessionId}`,
     enabled: !props.keysOpen && !props.controlBlocked && !sending && !uncertain,
-    live: props.layout !== "pill",
+    live: true,
     changed: (input, caret) => {
       revision.current += 1;
       if (caret !== undefined) {
@@ -544,6 +544,12 @@ export function Composer(props: ComposerProps) {
         announce("composer", "Your words are in the message.");
       }
       measure(input);
+      if (caret === undefined)
+        requestAnimationFrame(() => {
+          // Follow incoming words inside the bounded field without focusing it or moving the
+          // page/keyboard. The resize scheduled above runs first.
+          if (input.isConnected && input.readOnly) input.scrollTop = input.scrollHeight;
+        });
       if (problemShown.current !== null) setProblem(null);
     },
   });

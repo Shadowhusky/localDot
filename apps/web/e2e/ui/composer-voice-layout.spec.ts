@@ -11,6 +11,7 @@ for (const width of [320, 390, 1440]) {
         configurable: true,
         value: { brands: [{ brand: "Google Chrome" }] },
       });
+      let active: Recognition | null = null;
       class Recognition {
         static async available() {
           return "available";
@@ -21,23 +22,35 @@ for (const width of [320, 390, 1440]) {
         constructor() {
           window.addEventListener("test-speech-start", () => this.onspeechstart?.());
           window.addEventListener("test-speech-end", () => this.onspeechend?.());
+          window.addEventListener("test-speech-words", (event) => {
+            if (active === this)
+              this.onresult?.({
+                results: [[{ transcript: (event as CustomEvent<string>).detail }]],
+              });
+          });
         }
         onresult: ((event: { results: { transcript: string }[][] }) => void) | null = null;
         onend: (() => void) | null = null;
         start() {
+          // Model the exclusive audio service: a finished recognizer must release it before
+          // another session can hear. Each emitted phrase goes through the real app adapter.
+          if (active && active !== this) return;
+          active = this;
           queueMicrotask(() => this.onstart?.());
         }
         stop() {
           window.addEventListener(
             "finish-test-speech",
-            () => {
-              this.onresult?.({ results: [[{ transcript: "Check the finished video" }]] });
+            (event) => {
+              const text = (event as CustomEvent<string>).detail || "Check the finished video";
+              this.onresult?.({ results: [[{ transcript: text }]] });
               this.onend?.();
             },
             { once: true },
           );
         }
         abort() {
+          if (active === this) active = null;
           this.onend?.();
         }
       }
@@ -115,6 +128,16 @@ for (const width of [320, 390, 1440]) {
     await page.screenshot({ path: test.info().outputPath("recording.png") });
     await page.evaluate(() => window.dispatchEvent(new Event("test-speech-end")));
     await expect.poll(newestBar).toBeLessThanOrEqual(4);
+    await page.evaluate(() =>
+      window.dispatchEvent(new CustomEvent("test-speech-words", { detail: "Check" })),
+    );
+    await expect(card.getByRole("textbox")).toHaveValue("Check");
+    await page.evaluate(() =>
+      window.dispatchEvent(
+        new CustomEvent("test-speech-words", { detail: "Check the finished video" }),
+      ),
+    );
+    await expect(card.getByRole("textbox")).toHaveValue("Check the finished video");
     await stop.click();
     await expect(card.getByText("Transcribing…", { exact: true })).toBeVisible();
     await expect(card.locator(".voice-spinner")).toBeVisible();
@@ -134,8 +157,45 @@ for (const width of [320, 390, 1440]) {
     // A second recording can be discarded without damaging that draft.
     await mic.click();
     await expect(stop).toBeVisible();
+    await page.evaluate(() =>
+      window.dispatchEvent(new CustomEvent("test-speech-words", { detail: "discard these words" })),
+    );
+    await expect(card.getByRole("textbox")).toHaveValue(
+      "Check the finished video discard these words",
+    );
+    await page.evaluate(() =>
+      window.dispatchEvent(
+        new CustomEvent("test-speech-words", {
+          detail: "Long dictation keeps the newest words visible. ".repeat(30),
+        }),
+      ),
+    );
+    await expect
+      .poll(() =>
+        card.getByRole("textbox").evaluate((node) => {
+          const field = node as HTMLTextAreaElement;
+          return (
+            field.scrollHeight > field.clientHeight &&
+            field.scrollHeight - field.clientHeight - field.scrollTop <= 2
+          );
+        }),
+      )
+      .toBe(true);
     await cancel.click();
     await expect(mic).toBeVisible();
     await expect(card.getByRole("textbox")).toHaveValue("Check the finished video");
+    await mic.click();
+    await expect(stop).toBeVisible();
+    await page.evaluate(() =>
+      window.dispatchEvent(new CustomEvent("test-speech-words", { detail: "and" })),
+    );
+    await expect(card.getByRole("textbox")).toHaveValue("Check the finished video and");
+    await page.screenshot({ path: test.info().outputPath("live-transcript.png") });
+    await stop.click();
+    await page.evaluate(() =>
+      window.dispatchEvent(new CustomEvent("finish-test-speech", { detail: "and its sound" })),
+    );
+    await expect(mic).toBeVisible();
+    await expect(card.getByRole("textbox")).toHaveValue("Check the finished video and its sound");
   });
 }

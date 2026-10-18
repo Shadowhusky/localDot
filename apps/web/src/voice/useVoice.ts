@@ -55,15 +55,20 @@ export function useVoice(opts: VoiceOptions): Voice {
       new VoiceTurns({
         field: () => latest.current.opts.field(),
         route: () => latest.current.route,
-        hear: (chosen, events) =>
+        hear: (chosen, events, signal) =>
           startHearing(
             chosen,
-            { api: latest.current.opts.api, language: latest.current.language },
+            { api: latest.current.opts.api, language: latest.current.language, signal },
             events,
           ),
         live: () => latest.current.opts.live,
         changed: (input, caret) => latest.current.opts.changed(input, caret),
-        view: setState,
+        view: (next) => {
+          // Interrupt read-aloud BEFORE starting recognition in the same gesture. Cancelling
+          // playback in a later effect can take Safari's audio session away from the new mic.
+          setListening(next.phase !== "idle");
+          setState(next);
+        },
         notice: setNotice,
         download: () => void latest.current.download(),
         now: () => performance.now(),
@@ -77,10 +82,6 @@ export function useVoice(opts: VoiceOptions): Voice {
     return () => window.clearTimeout(timer);
   }, [notice]);
   const active = state.phase !== "idle";
-  useEffect(() => {
-    setListening(active);
-    return () => setListening(false);
-  }, [active]);
   useEffect(() => {
     if (!opts.enabled) turns.send({ type: "cancel" });
   }, [opts.enabled, turns]);

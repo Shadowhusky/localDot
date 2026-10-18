@@ -18,11 +18,13 @@ const engine = vi.hoisted(() => ({
   refuse: undefined as Error | undefined,
   finish: undefined as ((words: string) => void) | undefined,
   aborted: 0,
+  listeningAtStart: false,
 }));
 vi.mock("../voice/hearing.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../voice/hearing.ts")>()),
   startHearing: (_route: unknown, _opts: unknown, events: HearingEvents) => {
     engine.events = events;
+    engine.listeningAtStart = isListening();
     return new Promise((resolve, reject) => {
       engine.open = () =>
         engine.refuse
@@ -70,6 +72,7 @@ beforeEach(() => {
   engine.refuse = undefined;
   engine.finish = undefined;
   engine.aborted = 0;
+  engine.listeningAtStart = false;
   vi.stubGlobal(
     "webkitSpeechRecognition",
     Object.assign(class {}, { available: async () => "available" }),
@@ -134,6 +137,7 @@ describe("talking to dot from the composer", () => {
     const f = await setup();
     fireEvent.input(f.field, { target: { value: "Please" } });
     fireEvent.click(f.mic);
+    expect(engine.listeningAtStart).toBe(true);
     await f.opened();
     expect(f.mic.getAttribute("aria-label")).toBe("Stop recording");
     expect(isListening()).toBe(true);
@@ -333,3 +337,44 @@ describe("talking to dot from the composer", () => {
     expect(engine.open).toBeUndefined();
   });
 });
+
+it.each([undefined, "pill"] as const)(
+  "streams successive recordings in %s layout",
+  async (layout) => {
+    const f = await setup({ layout });
+    fireEvent.click(f.mic);
+    await f.opened();
+    act(() => engine.events?.partial("first"));
+    expect(f.field.value).toBe("first");
+    act(() => engine.events?.partial("first message"));
+    expect(f.field.value).toBe("first message");
+    fireEvent.click(f.mic);
+    await act(async () => engine.finish?.("first message complete"));
+
+    fireEvent.click(f.mic);
+    await f.opened();
+    act(() => engine.events?.partial("cancel these words"));
+    expect(f.field.value).toContain("cancel these words");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel recording" }));
+    expect(f.field.value).toBe("first message complete");
+
+    fireEvent.click(f.mic);
+    await f.opened();
+    act(() => engine.events?.partial("then"));
+    expect(f.field.value).toBe("first message complete then");
+    fireEvent.click(screen.getByRole("button", { name: "Send voice message" }));
+    await act(async () => engine.finish?.("then send this"));
+    expect(f.requests).toEqual([
+      { kind: "followup", text: "first message complete then send this" },
+    ]);
+    expect(f.field.value).toBe("");
+
+    fireEvent.click(f.mic);
+    await f.opened();
+    act(() => engine.events?.partial("next recording"));
+    expect(f.field.value).toBe("next recording");
+    fireEvent.click(f.mic);
+    await act(async () => engine.finish?.("next recording works"));
+    expect(f.field.value).toBe("next recording works");
+  },
+);

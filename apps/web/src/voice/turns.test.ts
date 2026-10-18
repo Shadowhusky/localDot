@@ -13,6 +13,7 @@ function setup(
   input.value = opts.value ?? "";
   document.body.append(input);
   let events: HearingEvents | undefined;
+  let signal: AbortSignal | undefined;
   let finish: (words: string) => void = () => {};
   let fail: (error: Error) => void = () => {};
   let opened: () => void = () => {};
@@ -37,8 +38,9 @@ function setup(
     field: () => input,
     route: () => opts.route ?? { kind: "device" },
     live: () => opts.live ?? true,
-    hear: (_route, given) => {
+    hear: (_route, given, abort) => {
       events = given;
+      signal = abort;
       return new Promise((resolve, reject) => {
         opened = () => (opts.refuse ? reject(new VoiceError(opts.refuse)) : resolve(hearing));
       });
@@ -63,6 +65,7 @@ function setup(
     download,
     at,
     events: () => events as HearingEvents,
+    signal: () => signal,
     open: async () => {
       opened();
       await Promise.resolve();
@@ -222,6 +225,7 @@ describe("voice turns", () => {
     const voice = setup();
     voice.turns.send({ type: "press", at: 0 });
     voice.turns.send({ type: "cancel" });
+    expect(voice.signal()?.aborted).toBe(true);
     await voice.open();
     expect(voice.hearing.aborted).toBe(1);
     expect(voice.turns.state.phase).toBe("idle");

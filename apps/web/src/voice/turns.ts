@@ -11,9 +11,9 @@ export interface VoiceHost {
   hear(
     route: Extract<VoiceRoute, { kind: "device" | "mac" | "online" }>,
     events: HearingEvents,
+    signal: AbortSignal,
   ): Promise<Hearing>;
-  // Words show in the message as they come; where the message is hidden while the user talks (a
-  // phone's one-line field), only the final words land, so the toolbar doesn't grow meanwhile.
+  // Whether this host displays partial words while listening; final words always land.
   live(): boolean;
   // The field's text changed under the composer; with a caret, the words are final and in place.
   changed(input: HTMLTextAreaElement, caret?: number): void;
@@ -30,6 +30,7 @@ export interface VoiceHost {
 export class VoiceTurns {
   state: VoiceState = IDLE;
   #hearing: Hearing | null = null;
+  #opening: AbortController | null = null;
   #turn = 0;
   #draft: Draft | null = null;
   #written: string | null = null;
@@ -99,18 +100,23 @@ export class VoiceTurns {
       };
     }
     this.#written = null;
+    this.#opening = new AbortController();
     this.host
-      .hear(route, {
-        partial: (text) => {
-          if (turn === this.#turn && this.host.live()) this.#write(text);
+      .hear(
+        route,
+        {
+          partial: (text) => {
+            if (turn === this.#turn && this.host.live()) this.#write(text);
+          },
+          ended: () => {
+            if (turn === this.#turn) this.send({ type: "stop" });
+          },
+          failed: (failure) => {
+            if (turn === this.#turn) this.#fail(failure);
+          },
         },
-        ended: () => {
-          if (turn === this.#turn) this.send({ type: "stop" });
-        },
-        failed: (failure) => {
-          if (turn === this.#turn) this.#fail(failure);
-        },
-      })
+        this.#opening.signal,
+      )
       .then(
         (hearing) => {
           if (turn !== this.#turn) {
@@ -140,6 +146,8 @@ export class VoiceTurns {
       (words) => {
         if (turn !== this.#turn) return;
         this.#hearing = null;
+        this.#opening = null;
+        this.#turn++;
         const written = words.trim() ? this.#write(words, true) : false;
         if (!words.trim()) {
           this.#restore();
@@ -167,6 +175,8 @@ export class VoiceTurns {
   #drop() {
     this.#complete(false);
     this.#turn++;
+    this.#opening?.abort();
+    this.#opening = null;
     this.#hearing?.abort();
     this.#hearing = null;
     this.#restore();
