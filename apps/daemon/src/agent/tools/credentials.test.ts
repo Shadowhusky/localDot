@@ -76,3 +76,31 @@ it("handles a declined credential request without claiming success", async () =>
   h.session.decline(await asked(h));
   expect((await work).result.ok).toBe(false);
 });
+
+it("saves a general key through private input without inventing a provider or promising API access", async () => {
+  const h = fixture();
+  const work = h.call({
+    action: "request",
+    key_id: "project-license",
+    kind: "secret",
+    label: "Project license",
+    description: "License for the project build",
+  });
+  const id = await asked(h);
+  expect(h.session.requestedCredentials(id)[0]?.credential?.binding).toEqual({
+    id: "project-license",
+    kind: "secret",
+  });
+  expect(h.session.answerFields(id, { key: "synthetic-private-value" }, (s) => s)).toBe(false);
+  h.saved.push({ id: "project-license", kind: "secret", createdAt: "", updatedAt: "" });
+  expect(h.session.answerFields(id, { key: true }, (s) => s)).toBe(true);
+  const result = await work;
+  expect(result.result.ok).toBe(true);
+  expect(JSON.stringify(result)).not.toContain("synthetic-private-value");
+  expect(h.tools.credentials?.request).not.toHaveBeenCalled();
+  expect(h.session.pendingAsk).toBeUndefined();
+  expect(
+    (await h.call({ action: "request", kind: "secret", key_id: "project-license" })).result.ok,
+  ).toBe(true);
+  expect((await h.call({ ...request, key_id: "project-license" })).result.ok).toBe(false);
+});

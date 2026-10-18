@@ -55,6 +55,7 @@ type Binding struct {
 	Hosts    []string
 	Route    string
 	Upstream *url.URL
+	General  bool
 	Local    bool
 	Ops      []Op
 	Header   string
@@ -202,6 +203,11 @@ var (
 
 func FromRecord(rec vault.Record) (Binding, error) {
 	switch rec.Kind {
+	case vault.KindSecret:
+		if rec.Provider != "" || rec.BaseURL != "" || len(rec.Hosts) > 0 || rec.Header != "" || rec.Format != "" || len(rec.Methods) > 0 || len(rec.Paths) > 0 {
+			return Binding{}, errors.New("keys: a general secret takes no provider or HTTP binding")
+		}
+		return Binding{SecretID: rec.ID, General: true}, nil
 	case vault.KindLLM:
 		return llmBinding(rec)
 	case vault.KindHTTP:
@@ -319,6 +325,9 @@ func printable(s string) bool {
 
 // ValidValueFor adds the binding's own limits to vault.ValidValue.
 func ValidValueFor(b Binding, value []byte) error {
+	if b.General {
+		return vault.ValidGeneralValue(value)
+	}
 	if err := vault.ValidValue(value); err != nil {
 		return err
 	}

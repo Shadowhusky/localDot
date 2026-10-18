@@ -1,6 +1,7 @@
 import {
   CLAUDE_PLAN_REFUSAL,
   claudePlanToken,
+  GeneralSecretValue,
   type HTTP_FORMATS,
   JEV_HOST,
   JEV_SECRET_ID,
@@ -15,7 +16,7 @@ export type Provider = (typeof LLM_PROVIDERS)[number];
 export type HttpFormat = (typeof HTTP_FORMATS)[number];
 
 export interface KeyDraft {
-  kind: "llm" | "http";
+  kind: "llm" | "http" | "secret";
   id: string;
   provider: Provider;
   baseURL: string;
@@ -116,6 +117,7 @@ export function bindingOf(d: KeyDraft): DraftCheck {
   }
   if (RESERVED_SECRET_IDS.includes(id))
     return fail("id", `"${id}" is built in; pick another name.`);
+  if (d.kind === "secret") return { ok: true, binding: { id, kind: "secret" } };
   if (d.kind === "llm") {
     if (!needsBaseURL(d.provider))
       return { ok: true, binding: { id, kind: "llm", provider: d.provider } };
@@ -173,7 +175,14 @@ export function suggestedId(d: KeyDraft, taken: readonly string[]): string {
       .split(/[/:?#]/)[0]
       ?.split(".")
       .filter((label) => label && label !== "api" && label !== "www") ?? [];
-  const named = d.kind === "llm" ? d.provider : host.length > 1 ? (host[0] ?? "") : "";
+  const named =
+    d.kind === "secret"
+      ? "general-key"
+      : d.kind === "llm"
+        ? d.provider
+        : host.length > 1
+          ? (host[0] ?? "")
+          : "";
   const base =
     named
       .replace(/[^a-z0-9_-]+/g, "-")
@@ -189,7 +198,11 @@ export const valueHint = (d: KeyDraft) =>
 
 // keyd stores 8 to 8,192 printable ASCII characters with no space at either end; a paste's stray
 // spaces are trimmed first.
-export function valueProblem(value: string): string | undefined {
+export function valueProblem(value: string, kind: KeyDraft["kind"] = "http"): string | undefined {
+  if (kind === "secret")
+    return GeneralSecretValue.safeParse(value).success
+      ? undefined
+      : "Enter 1–8,192 UTF-8 bytes without NUL. Multiline values are supported.";
   if (claudePlanToken(value)) return CLAUDE_PLAN_REFUSAL;
   if (value.length < 8 || value.length > 8192 || !PRINTABLE_ASCII.test(value)) {
     return "A key is 8 to 8,192 characters of printable ASCII.";
@@ -228,12 +241,13 @@ function fail(field: DraftField, message: string): DraftCheck {
 
 // How a stored key reads in the list.
 export function describeKey(k: {
-  kind: "llm" | "http";
+  kind: "llm" | "http" | "secret";
   provider?: string;
   baseURL?: string;
   hosts?: string[] | null;
   header?: string;
 }): string {
+  if (k.kind === "secret") return "General key";
   if (k.kind === "llm") {
     const name =
       k.provider && Object.hasOwn(PROVIDER_NAMES, k.provider)
@@ -252,7 +266,7 @@ export function describeKey(k: {
 // so every model and task that uses the key keeps using it.
 export function bindingOfRecord(k: {
   id: string;
-  kind: "llm" | "http";
+  kind: "llm" | "http" | "secret";
   provider?: string;
   baseURL?: string;
   hosts?: string[] | null;
@@ -262,33 +276,36 @@ export function bindingOfRecord(k: {
   paths?: string[] | null;
 }): SecretBinding | undefined {
   const parsed = SecretBinding.safeParse(
-    k.kind === "llm"
-      ? {
-          id: k.id,
-          kind: "llm",
-          provider: k.provider,
-          ...(k.baseURL ? { baseURL: k.baseURL } : {}),
-        }
-      : {
-          id: k.id,
-          kind: "http",
-          hosts: k.hosts ?? [],
-          header: k.header,
-          format: k.format,
-          ...(k.methods?.length ? { methods: k.methods } : {}),
-          ...(k.paths?.length ? { paths: k.paths } : {}),
-        },
+    k.kind === "secret"
+      ? { id: k.id, kind: "secret" }
+      : k.kind === "llm"
+        ? {
+            id: k.id,
+            kind: "llm",
+            provider: k.provider,
+            ...(k.baseURL ? { baseURL: k.baseURL } : {}),
+          }
+        : {
+            id: k.id,
+            kind: "http",
+            hosts: k.hosts ?? [],
+            header: k.header,
+            format: k.format,
+            ...(k.methods?.length ? { methods: k.methods } : {}),
+            ...(k.paths?.length ? { paths: k.paths } : {}),
+          },
   );
   return parsed.success ? parsed.data : undefined;
 }
 
 // Where a stored key is sent, in a few words.
 export function destinationOf(k: {
-  kind: "llm" | "http";
+  kind: "llm" | "http" | "secret";
   provider?: string;
   baseURL?: string;
   hosts?: string[] | null;
 }): string {
+  if (k.kind === "secret") return "general key storage";
   if (k.kind === "http") return (k.hosts ?? []).join(", ");
   try {
     if (k.baseURL) return new URL(k.baseURL).host;

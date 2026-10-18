@@ -2,7 +2,9 @@
 name: video-editing
 description: Edit video with ffmpeg - inspect, trim, cut and join, crop or pad for each platform, speed up, add music or voice, normalise loudness, add titles, and export MP4 or GIF.
 ---
-# Video editing with ffmpeg
+# Footage editing with FFmpeg
+
+First load `media-production` for planning and tool selection. Use these recipes for footage operations; for complex motion, 3D, generative imagery or a project in another editor, research and load the appropriate workflow instead. Check installed codecs and dependencies with `work_context` and a small probe.
 
 ffmpeg and ffprobe are installed. Keep the originals; write every step to a new file in a working
 folder such as `~/Videos/edit/`.
@@ -45,4 +47,4 @@ Contact sheet of the footage (one frame every 5 s):
 
 ## Check before handing over
 ffprobe the export (duration, size, both streams present), pull 3–4 stills across it to look at,
-and play a few seconds where cuts happen. Say the final length, resolution and file size.
+and play a few seconds where cuts happen. Say the final length, resolution and file size. Deliver the encoded file with `done.files`; a desktop preview alone is not delivery.

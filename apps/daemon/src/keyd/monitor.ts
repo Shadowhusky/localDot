@@ -5,6 +5,7 @@ export interface KeydHealth {
   online: boolean;
   bootId?: string;
   sealKey?: string;
+  generalSecrets?: boolean;
   // keyd swaps no secret while its audit log cannot be written (Part 4a, P4a-R17).
   audit?: { ok: boolean; error?: string };
   // Whether keyd knows the public address it denies (hairpin NAT); a keyd that does not say is
@@ -61,6 +62,7 @@ export class KeydMonitor {
         online: true,
         bootId: s.bootId,
         sealKey: s.sealKey,
+        ...(s.generalSecrets !== undefined ? { generalSecrets: s.generalSecrets } : {}),
         audit: s.audit,
         hairpin: s.hairpin ?? { state: "unknown", addresses: 0 },
         reenter: s.reenter ?? 0,

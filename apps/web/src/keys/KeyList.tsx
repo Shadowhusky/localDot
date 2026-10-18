@@ -4,8 +4,9 @@ import { EmptyState } from "../ui/EmptyState.tsx";
 import { afterMotion } from "../ui/finished.ts";
 import { Group, GroupRow, Monogram } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { MiddleTruncate } from "../ui/MiddleTruncate.tsx";
-import { matches, REDUCED_MOTION } from "../ui/media.ts";
+import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import { describeKey, PROVIDER_NAMES, type Provider } from "./binding.ts";
 import { type KeyRecord, problemText } from "./keys-api.ts";
@@ -61,6 +62,7 @@ export function KeyList({
   reenter,
   edit,
 }: KeyListProps) {
+  const phone = useMediaQuery(PHONE);
   const [armed, setArmed] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
@@ -118,7 +120,7 @@ export function KeyList({
     return (
       <Group>
         <EmptyState icon="key-round" title="No keys yet">
-          Add one to use a model or a web API.
+          Save a model key, an API key or a general secret.
         </EmptyState>
       </Group>
     );
@@ -146,6 +148,35 @@ export function KeyList({
             // Changed outside localDot: removing and adding the key again is the only fix.
             const changed = k.rebound && !leaving;
             const lit = fresh?.id === k.id && !leaving;
+            const removeKey = async () => {
+              if (locked || pendingRef.current) return;
+              if (armed !== k.id || performance.now() >= expires.current) {
+                expires.current = performance.now() + ARMED_MS;
+                setArmed(k.id);
+                return;
+              }
+              setArmed(null);
+              pendingRef.current = true;
+              setPending(k.id);
+              const index = keys.findIndex((key) => key.id === k.id);
+              try {
+                await remove(k.id);
+                setProblem(null);
+                setGone((now) => [...now, { key: k, index }]);
+              } catch (err) {
+                setProblem(problemText(err));
+              } finally {
+                pendingRef.current = false;
+                setPending(null);
+              }
+            };
+            const removeReason =
+              unavailable ??
+              (pending === k.id
+                ? "Removing key"
+                : busy
+                  ? "Wait for the other key change to finish"
+                  : undefined);
             return (
               <li
                 key={k.id}
@@ -180,60 +211,53 @@ export function KeyList({
                     </span>
                   }
                   trailing={
-                    <Button
-                      size="sm"
-                      variant={armed === k.id ? "destructive" : "quiet"}
-                      busy={pending === k.id}
-                      disabledReason={
-                        pending === k.id
-                          ? undefined
-                          : (unavailable ??
-                            (busy ? "Wait for the other key change to finish" : undefined))
-                      }
-                      aria-label={`${label} ${k.id}`}
-                      onClick={async () => {
-                        if (locked || pendingRef.current) return;
-                        if (armed !== k.id || performance.now() >= expires.current) {
-                          expires.current = performance.now() + ARMED_MS;
-                          setArmed(k.id);
-                          return;
-                        }
-                        setArmed(null);
-                        pendingRef.current = true;
-                        setPending(k.id);
-                        const index = keys.findIndex((key) => key.id === k.id);
-                        try {
-                          await remove(k.id);
-                          setProblem(null);
-                          setGone((now) => [...now, { key: k, index }]);
-                        } catch (err) {
-                          setProblem(problemText(err));
-                        } finally {
-                          pendingRef.current = false;
-                          setPending(null);
-                        }
-                      }}
-                    >
-                      {/* As wide as its longest label, so arming it moves nothing in the row. */}
-                      <span className="keys-remove-label" data-longest="Confirm remove">
-                        <span>{label}</span>
-                      </span>
-                    </Button>
+                    <span className="keys-row-actions">
+                      {edit && (
+                        <IconButton
+                          size={phone ? 44 : 36}
+                          icon="compose"
+                          label={`Edit details for ${k.id}`}
+                          disabledReason={unavailable ?? (busy ? "Saving a key" : undefined)}
+                          onClick={() => edit(k)}
+                        />
+                      )}
+                      {phone ? (
+                        <IconButton
+                          size={44}
+                          icon={armed === k.id ? "check" : "trash"}
+                          label={`${label} ${k.id}`}
+                          disabledReason={removeReason}
+                          onClick={removeKey}
+                          className="keys-remove-icon"
+                          data-confirm={armed === k.id ? "" : undefined}
+                        />
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant={armed === k.id ? "destructive" : "quiet"}
+                          busy={pending === k.id}
+                          disabledReason={
+                            pending === k.id
+                              ? undefined
+                              : (unavailable ??
+                                (busy ? "Wait for the other key change to finish" : undefined))
+                          }
+                          aria-label={`${label} ${k.id}`}
+                          onClick={async () => {
+                            await removeKey();
+                          }}
+                        >
+                          {/* As wide as its longest label, so arming it moves nothing in the row. */}
+                          <span className="keys-remove-label" data-longest="Confirm remove">
+                            <span>{label}</span>
+                          </span>
+                        </Button>
+                      )}
+                    </span>
                   }
                 >
                   {k.metadata?.description && (
                     <p className="keys-description">{k.metadata.description}</p>
-                  )}
-                  {edit && (
-                    <Button
-                      size="sm"
-                      variant="quiet"
-                      disabledReason={unavailable ?? (busy ? "Saving a key" : undefined)}
-                      onClick={() => edit(k)}
-                      aria-label={`Edit details for ${k.id}`}
-                    >
-                      Edit details
-                    </Button>
                   )}
                   {changed && (
                     <p className="keys-row-fix keys-row-why">

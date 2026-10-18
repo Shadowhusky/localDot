@@ -1,4 +1,5 @@
-import type { FilesInput, ToolResult } from "@localdot/protocol";
+import { readFileSync } from "node:fs";
+import { type FilesInput, PERSONAS, type ToolResult } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import { driveHarness, type HarnessHost, type HarnessStep } from "./harness.ts";
 import { skillChange } from "./harness-skills.ts";
@@ -199,3 +200,41 @@ describe("the skill catalog", () => {
     expect(contexts[0]).not.toContain("Unaddressable");
   });
 });
+
+it.each([
+  ["coder", "webapp-testing"],
+  ["design", "interface-quality"],
+] as const)(
+  "loads the actual %s skill pack on demand through the native harness",
+  async (persona, selected) => {
+    const root = new URL("../../../skills/", import.meta.url);
+    const names = PERSONAS[persona].skills;
+    const files = Object.fromEntries(
+      names.map((name) => [
+        `/config/.skills/${name}/SKILL.md`,
+        readFileSync(new URL(`${name}/SKILL.md`, root), "utf8"),
+      ]),
+    );
+    const disk = computer(files);
+    const { contexts, outputs } = await run(
+      {
+        installed: names.map((name) => installed(name, name)),
+        read: disk.read,
+      },
+      [load("load", selected)],
+    );
+    expect(outputs.get("load")?.ok).toBe(true);
+    const body = files[`/config/.skills/${selected}/SKILL.md`]
+      ?.replace(/^---[\s\S]*?\n---\n/, "")
+      .trim();
+    if (!body) throw new Error("Missing skill body");
+    const loaded = outputs
+      .get("load")
+      ?.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("\n");
+    expect(loaded).toContain(body);
+    expect(disk.calls).toEqual([`read /config/.skills/${selected}/SKILL.md`]);
+    expect(contexts[0]).toContain("skill-discovery");
+    expect(contexts[0]).not.toContain(files[`/config/.skills/${selected}/SKILL.md`]);
+  },
+);

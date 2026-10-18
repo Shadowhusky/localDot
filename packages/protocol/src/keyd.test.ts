@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  GeneralSecretValue,
   KeydEvent,
   KeydOpened,
   KeydRecord,
@@ -65,7 +66,7 @@ describe("SecretBinding", () => {
     }
   });
 
-  it("accepts the two kinds keyd stores", () => {
+  it("accepts provider and service bindings", () => {
     expect(SecretBinding.parse({ id: "anthropic", kind: "llm", provider: "anthropic" }).kind).toBe(
       "llm",
     );
@@ -259,4 +260,22 @@ describe("keys to enter again", () => {
     expect(KeydRecord.parse(record).reenter).toBeUndefined();
     expect(KeydRecord.parse({ ...record, rebound: true }).rebound).toBe(true);
   });
+});
+
+it("accepts UTF-8 multiline general keys without accepting an HTTP binding or plaintext in the envelope", () => {
+  for (const value of ["x", "  license\n密钥\n", "x".repeat(8192)])
+    expect(GeneralSecretValue.parse(value)).toBe(value);
+  for (const value of ["", "nul\0value", "\ud800", "密".repeat(3000)])
+    expect(GeneralSecretValue.safeParse(value).success).toBe(false);
+  const binding = { id: "license", kind: "secret" };
+  expect(SecretBinding.parse(binding)).toEqual(binding);
+  expect(
+    SealedSecret.safeParse({ binding, sealed: { ...sealed, ct: "a".repeat(23) } }).success,
+  ).toBe(true);
+  for (const extra of [
+    { hosts: ["api.example.test"] },
+    { provider: "openai" },
+    { value: "private" },
+  ])
+    expect(SecretBinding.safeParse({ ...binding, ...extra }).success).toBe(false);
 });

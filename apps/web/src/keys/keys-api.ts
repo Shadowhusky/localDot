@@ -17,6 +17,7 @@ export interface KeydHealth {
   online: boolean;
   bootId?: string;
   sealKey?: string;
+  generalSecrets?: boolean;
   audit?: { ok: boolean; error?: string };
   hairpin?: HairpinGuard;
   // How many keys need entering again.
@@ -52,7 +53,7 @@ export const vaultLocked = (health: KeydHealth | null) =>
 export interface KeyRecord {
   metadata?: KeyMetadata;
   id: string;
-  kind: "llm" | "http";
+  kind: "llm" | "http" | "secret";
   provider?: string;
   baseURL?: string;
   hosts?: string[] | null;
@@ -98,7 +99,7 @@ export async function saveKey(
   // sealing, and TypeScript alone cannot keep extra runtime fields off the wire.
   const checked = SecretBinding.safeParse(binding);
   if (!checked.success) throw new KeyProblem("Check the key's name and where it can be used.");
-  const problem = valueProblem(value);
+  const problem = valueProblem(value, checked.data.kind);
   if (problem) throw new KeyProblem(problem);
   const bound = checked.data;
   const details = metadata ? KeyMetadata.parse(metadata) : undefined;
@@ -106,6 +107,8 @@ export async function saveKey(
     const health = await loadHealth(api);
     if (!health.online || !health.sealKey)
       throw new KeyProblem("Key protection is off, so the key wasn't saved.");
+    if (bound.kind === "secret" && !health.generalSecrets)
+      throw new KeyProblem("Update localDot key protection to save general keys.");
     const sealed = await seal(health.sealKey, bound, value);
     const raw = await api.post<unknown>("/api/keys", {
       binding: bound,

@@ -21,22 +21,25 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-function fixture() {
+function fixture(request: CredentialRequest = credential) {
   const draft = new AskDraft({
     askId: "01JXYZ00000000000000000001",
     question: "Add catalog access?",
     options: [],
     allowText: false,
-    fields: [{ id: "key", kind: "api_key", label: "API key", credential }],
+    fields: [{ id: "key", kind: "api_key", label: "API key", credential: request }],
   });
   const answer = vi.fn(async (_request: QuestionAnswerRequest) => true);
   const save = vi.fn<KeysController["save"]>(async () => ({
     restart: false,
-    key: { ...credential.binding, metadata: credential.metadata, createdAt: "", updatedAt: "" },
+    key: { ...request.binding, metadata: request.metadata, createdAt: "", updatedAt: "" },
   }));
   const props = { draft, layout: "thread" as const, answer, saveKey: save };
   const view = render(<AskForm {...props} />);
-  const input = () => screen.getByRole("textbox", { name: "API key" }) as HTMLInputElement;
+  const input = () =>
+    screen.getByRole("textbox", {
+      name: request.binding.kind === "secret" ? "Key or secret" : "API key",
+    }) as HTMLInputElement | HTMLTextAreaElement;
   const submit = async () =>
     act(async () => {
       fireEvent.submit(screen.getByRole("form", { name: "Save a service key" }));
@@ -124,4 +127,24 @@ it("declines without saving or exposing an entered value", async () => {
   expect(f.save).not.toHaveBeenCalled();
   expect(f.input().value).toBe("");
   expect(f.answer).toHaveBeenCalledWith({ askId: f.draft.question.askId, declined: true });
+});
+
+it("preserves multiline general keys only in the private save, sending the agent a saved marker", async () => {
+  const request: CredentialRequest = {
+    binding: { id: "license", kind: "secret" },
+    metadata: { label: "Build license" },
+  };
+  const f = fixture(request);
+  const value = "  synthetic-license\n第二行\n";
+  const input = f.input();
+  expect(input.tagName).toBe("TEXTAREA");
+  fireEvent.change(input, { target: { value } });
+  expect(JSON.stringify(f.draft.state())).not.toContain("synthetic-license");
+  await f.submit();
+  expect(f.save).toHaveBeenCalledExactlyOnceWith(request.binding, value, request.metadata);
+  expect(input.value).toBe("");
+  expect(f.answer).toHaveBeenCalledExactlyOnceWith({
+    askId: f.draft.question.askId,
+    fields: { key: true },
+  });
 });

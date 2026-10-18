@@ -56,8 +56,26 @@ export const HttpBinding = z.strictObject({
   paths: z.array(printable(1024).min(1)).max(16).optional(),
 });
 
+// General secrets have no HTTP destination. Keeping them is separate from permission to use them.
+export const GeneralBinding = z.strictObject({ id: SecretId, kind: z.literal("secret") });
+export const GeneralSecretValue = z
+  .string()
+  .min(1)
+  .max(8192)
+  .refine(
+    (value) =>
+      !value.includes("\0") &&
+      value.isWellFormed() &&
+      new TextEncoder().encode(value).length <= 8192,
+    "Use 1–8,192 UTF-8 bytes without NUL",
+  );
+
 // What the UI seals a key for, and what the daemon relays unchanged: the AAD is built from it.
-export const SecretBinding = z.discriminatedUnion("kind", [LlmBinding, HttpBinding]);
+export const SecretBinding = z.discriminatedUnion("kind", [
+  LlmBinding,
+  HttpBinding,
+  GeneralBinding,
+]);
 export type SecretBinding = z.infer<typeof SecretBinding>;
 
 const base64url = (min: number, max: number) =>
@@ -68,12 +86,12 @@ const base64url = (min: number, max: number) =>
     .regex(/^[A-Za-z0-9_-]+$/, "base64url without padding");
 
 // v1: ECDH P-256 ephemeral key (uncompressed, 65 bytes), a 12-byte nonce, AES-256-GCM output of
-// an 8-8192 byte value plus its 16-byte tag.
+// a 1-8192 byte value plus its 16-byte tag.
 export const Sealed = z.strictObject({
   v: z.literal(1),
   epk: base64url(87, 87),
   nonce: base64url(16, 16),
-  ct: base64url(32, 10_944),
+  ct: base64url(23, 10_944),
 });
 export type Sealed = z.infer<typeof Sealed>;
 
@@ -111,7 +129,7 @@ export const KeydRecord = z.object({
   metadata: KeyMetadata.optional(),
   usage: KeyUsage.optional(),
   id: z.string(),
-  kind: z.enum(["llm", "http"]),
+  kind: z.enum(["llm", "http", "secret"]),
   provider: z.string().optional(),
   baseURL: z.string().optional(),
   hosts: z.array(z.string()).nullish(),
@@ -175,6 +193,7 @@ export const KeydStatus = z.object({
   vault: KeydVault.nullish(),
   // keyd takes a desktop gate's capture token; one from before capture refuses it.
   capture: z.boolean().optional(),
+  generalSecrets: z.boolean().optional(),
 });
 export type KeydStatus = z.infer<typeof KeydStatus>;
 

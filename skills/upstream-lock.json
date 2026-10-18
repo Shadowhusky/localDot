@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "reviewedAt": "2026-10-18",
+  "sources": [
+    {
+      "name": "frontend-design",
+      "repository": "https://github.com/anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "directory": "skills/frontend-design",
+      "license": "Apache-2.0",
+      "files": {
+        "LICENSE.txt": {
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "upstreamSha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        "SKILL.md": {
+          "sha256": "0a0332cc63fa0b42f78ebcd481f83219a774c4206a9298f67d4cb234bed0da42",
+          "upstreamSha256": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3"
+        },
+        "UPSTREAM.md": {
+          "sha256": "95721cbb9887df16b0c08c38bf24923e76cfebccd91846e4352bfa09202e190b",
+          "upstreamSha256": null
+        }
+      }
+    },
+    {
+      "name": "webapp-testing",
+      "repository": "https://github.com/anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "directory": "skills/webapp-testing",
+      "license": "Apache-2.0",
+      "files": {
+        "LICENSE.txt": {
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "upstreamSha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+        },
+        "SKILL.md": {
+          "sha256": "d4e6240c5794f919ecb7f0cedf46d58341db613fd3873cdd5710b534a8207ab5",
+          "upstreamSha256": "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2"
+        },
+        "UPSTREAM.md": {
+          "sha256": "41d2892da2e36ad83550225196a6a7f612ce3d195e11b17c5c2875fcc9f2bb4a",
+          "upstreamSha256": null
+        },
+        "examples/console_logging.py": {
+          "sha256": "ea46877289acb82da7e7ce59d0bc37c8977cd57e2a006d0c88d7a1c625bf95da",
+          "upstreamSha256": "ea46877289acb82da7e7ce59d0bc37c8977cd57e2a006d0c88d7a1c625bf95da"
+        },
+        "examples/element_discovery.py": {
+          "sha256": "d63c89604a22f8845d724e95dda45db49b1bf57c25ce0a83afbb7b8da3d402f0",
+          "upstreamSha256": "d63c89604a22f8845d724e95dda45db49b1bf57c25ce0a83afbb7b8da3d402f0"
+        },
+        "examples/static_html_automation.py": {
+          "sha256": "9d533aafb875ee3ab8b8ebf8f5b9003ac8d999da3d09b285cce252e623140064",
+          "upstreamSha256": "9d533aafb875ee3ab8b8ebf8f5b9003ac8d999da3d09b285cce252e623140064"
+        },
+        "scripts/with_server.py": {
+          "sha256": "408a8a29bffae74584e062ab1ede0385619c1e3fc117911d9a2f04bcf20eeda2",
+          "upstreamSha256": "b0dcf4918935b795f4eda9821579b9902119235ff4447f687a30286e7d0925fd"
+        }
+      }
+    },
+    {
+      "name": "mcp-builder",
+      "repository": "https://github.com/anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "directory": "skills/mcp-builder",
+      "license": "Apache-2.0",
+      "files": {
+        "LICENSE.txt": {
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "upstreamSha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+        },
+        "SKILL.md": {
+          "sha256": "e55db6d79ba2453677983686149cf1f19fa57690497372b5b1d8f8d3cc5281b1",
+          "upstreamSha256": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295"
+        },
+        "UPSTREAM.md": {
+          "sha256": "0d8df7acf1f5b8636a2e1951da3050e0aed304aa539816b6f90bc37c0716ccc7",
+          "upstreamSha256": null
+        },
+        "reference/evaluation.md": {
+          "sha256": "8c99479f8a2d22a636c38e274537aac3610879e26f34e0709825077c4576f427",
+          "upstreamSha256": "8c99479f8a2d22a636c38e274537aac3610879e26f34e0709825077c4576f427"
+        },
+        "reference/mcp_best_practices.md": {
+          "sha256": "80fb4369a349447cf18ecdd7494fe7938b6065377e9f08c077cec411093a3007",
+          "upstreamSha256": "80fb4369a349447cf18ecdd7494fe7938b6065377e9f08c077cec411093a3007"
+        },
+        "reference/node_mcp_server.md": {
+          "sha256": "c3ba35a4f599dd53be9c6555ae72c19a7bf412cd5426576c2c08d42755482c66",
+          "upstreamSha256": "c3ba35a4f599dd53be9c6555ae72c19a7bf412cd5426576c2c08d42755482c66"
+        },
+        "reference/python_mcp_server.md": {
+          "sha256": "2da52f77e675191014ca2e146a4b95aa04d0ca7dd7e2b100322df15ade685e80",
+          "upstreamSha256": "2da52f77e675191014ca2e146a4b95aa04d0ca7dd7e2b100322df15ade685e80"
+        },
+        "scripts/connections.py": {
+          "sha256": "9403668a2041568772082a8b334122c1f88daf0541fb393af4522d0094a47a6e",
+          "upstreamSha256": "9403668a2041568772082a8b334122c1f88daf0541fb393af4522d0094a47a6e"
+        },
+        "scripts/evaluation.py": {
+          "sha256": "49ed1d17cdce5da101b210197740713f49b935c29d4f339542a14b132658e6f7",
+          "upstreamSha256": "49ed1d17cdce5da101b210197740713f49b935c29d4f339542a14b132658e6f7"
+        },
+        "scripts/example_evaluation.xml": {
+          "sha256": "9272b348ddcc4b06ba562367ccd0770e018158c0068ac5116d5e34aaeff8777a",
+          "upstreamSha256": "9272b348ddcc4b06ba562367ccd0770e018158c0068ac5116d5e34aaeff8777a"
+        },
+        "scripts/requirements.txt": {
+          "sha256": "d5d7558b2368ecea9dfeed7d1fbc71ee9e0750bebd1282faa527d528a344c3c7",
+          "upstreamSha256": "d5d7558b2368ecea9dfeed7d1fbc71ee9e0750bebd1282faa527d528a344c3c7"
+        }
+      }
+    }
+  ]
+}

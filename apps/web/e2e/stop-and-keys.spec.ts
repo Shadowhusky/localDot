@@ -33,7 +33,7 @@ test("a key's use shows in the steps; Stop freezes the computer and Resume thaws
   // stand-in: postman-echo answers anything.
   await page.getByTestId("keys-button").click();
   const sheet = page.getByRole("dialog", { name: "Keys" });
-  await sheet.getByRole("radio", { name: "Custom service" }).click();
+  await sheet.getByRole("radio", { name: "Custom API" }).click();
   await sheet.getByLabel("Key ID (optional)", { exact: true }).fill("echo");
   await sheet.getByLabel("Hosts", { exact: true }).fill("postman-echo.com");
   await sheet.getByLabel("Key", { exact: true }).fill(`e2e-${Date.now()}-echo-value`);

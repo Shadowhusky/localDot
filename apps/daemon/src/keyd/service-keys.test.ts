@@ -138,3 +138,19 @@ it("shutdown aborts a service call, drains its cleanup and refuses new calls", a
   expect(f.ports.release).toHaveBeenCalledOnce();
   await expect(f.call()).rejects.toThrow("busy");
 });
+
+it("lists general keys by purpose but never opens an API connection for one", async () => {
+  const f = fixture();
+  const record: KeydRecord = {
+    id: "license",
+    kind: "secret",
+    metadata: { label: "Build license", description: "Project build" },
+    createdAt: "",
+    updatedAt: "",
+  };
+  f.keyd.secrets.mockResolvedValue([record]);
+  expect(await f.service.list("build")).toEqual([record]);
+  await expect(f.call({ key_id: "license" })).rejects.toThrow("no API binding");
+  expect(f.keyd.openCell).not.toHaveBeenCalled();
+  expect(f.fetch).not.toHaveBeenCalled();
+});

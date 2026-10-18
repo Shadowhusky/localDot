@@ -63,6 +63,10 @@ export class ServiceKeys {
       const record = (await this.list()).find((key) => key.id === input.key_id);
       if (!record || record.reenter || record.rebound)
         throw new Error("The selected key is missing or needs attention in Keys.");
+      if (record.kind === "secret")
+        throw new Error(
+          "This general key has no API binding. Choose a saved model or service key for an API request.",
+        );
       if (!record.usage)
         throw new Error("Update the localDot key layer to use saved keys with service APIs.");
       const usage = record.usage;

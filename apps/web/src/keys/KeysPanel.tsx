@@ -29,7 +29,7 @@ import type { KeysController } from "./useKeys.ts";
 import "./keys.css";
 
 export const keysDescription = (health: KeydHealth | null) =>
-  `dot can find and use your saved keys when a task needs them, including custom services. It sees their names and descriptions; the secret values stay ${keyHome(health)}. Service API charges follow the provider’s limits.`;
+  `dot finds keys by name and purpose. Provider and custom API keys can be used when a task needs them; general keys are encrypted storage. The values stay ${keyHome(health)}. Service API charges follow the provider’s limits.`;
 
 const HELD = "Keys are held until the audit log works again";
 const LOCKED = "Saved keys are locked until you unlock them on the computer running localDot";
@@ -73,6 +73,8 @@ export function KeysPanel({
   const saves = useRef(0);
   const owner = useRef({ active, preset, onSaved, generation: 0 });
   const form = useRef<HTMLElement>(null);
+  const editor = useRef<HTMLElement>(null);
+  const editToReveal = useRef(false);
   const intake = useRef<KeyIntake>(null);
   const revealing = useRef(reveal);
   revealing.current = reveal;
@@ -123,6 +125,11 @@ export function KeysPanel({
     if (!toReveal.current || !form.current) return;
     toReveal.current = false;
     revealing.current?.(form.current);
+  });
+  useLayoutEffect(() => {
+    if (!editToReveal.current || !editor.current) return;
+    editToReveal.current = false;
+    revealing.current?.(editor.current);
   });
   useLayoutEffect(
     () => () => {
@@ -245,7 +252,18 @@ export function KeysPanel({
                   fresh={fresh}
                   remove={keys.remove}
                   reenter={startReentry}
-                  edit={keys.updateMetadata ? setEditing : undefined}
+                  edit={
+                    keys.updateMetadata
+                      ? (key) => {
+                          if (editing?.id === key.id && editor.current) {
+                            revealing.current?.(editor.current);
+                            return;
+                          }
+                          editToReveal.current = true;
+                          setEditing(key);
+                        }
+                      : undefined
+                  }
                 />
               </div>
             )}
@@ -255,12 +273,18 @@ export function KeysPanel({
         )}
       </section>
       {editing && keys.updateMetadata && (
-        <KeyMetadataEditor
-          key={editing.id}
-          record={editing}
-          save={keys.updateMetadata}
-          close={() => setEditing(null)}
-        />
+        <section
+          ref={editor}
+          className="keys-section"
+          aria-label={`Edit ${editing.metadata?.label || editing.id}`}
+        >
+          <KeyMetadataEditor
+            key={editing.id}
+            record={editing}
+            save={keys.updateMetadata}
+            close={() => setEditing(null)}
+          />
+        </section>
       )}
       {again ? (
         <section ref={form} className="keys-section" aria-labelledby="keys-reenter">

@@ -454,6 +454,9 @@ func (m *Manager) bindings(p policy.Policy, secrets []string) ([]keys.Binding, e
 		if !ok {
 			return nil, badRequest("no secret %s", id)
 		}
+		if rec.Kind == vault.KindSecret {
+			return nil, badRequest("general secrets cannot be minted into cells")
+		}
 		if p.Role == policy.Service {
 			b, err := keys.ServiceBinding(rec)
 			if err != nil {

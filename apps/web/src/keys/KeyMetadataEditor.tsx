@@ -37,8 +37,8 @@ export function KeyMetadataEditor({
         }}
       >
         <p>
-          Help dot choose when to use <strong>{record.id}</strong>. Its secret and destination stay
-          the same.
+          Help dot choose when to use <strong>{record.id}</strong>. Its value and permitted uses
+          stay the same.
         </p>
         {(
           [

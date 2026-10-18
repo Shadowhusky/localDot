@@ -1,28 +1,16 @@
 ---
 name: visual-design
-description: Design graphics, logos, social posts, banners, posters and UI mockups as editable SVG or HTML/CSS, and export them at the exact sizes and formats needed.
+description: Create and refine brand assets, posters, covers, illustrations, layouts and visual systems from real references. Use for static design, creative direction, typography, asset reuse and polished editable exports.
 ---
+
 # Visual design
 
-## Start from the brief
-Audience, platform, size, text, brand colours and fonts. Common sizes: Instagram post 1080×1080,
-story 1080×1920, X/LinkedIn image 1200×675, YouTube thumbnail 1280×720, OG image 1200×630,
-A4 print 2480×3508 at 300 dpi.
+Establish audience, purpose, placement, size and the content hierarchy from the brief. Inspect supplied assets and references before inventing replacements; keep existing mascot identities, brand colors and wordmarks consistent. For interface design load `frontend-design` and `interface-quality`. For generated imagery or video load `media-production`.
 
-## System
-- Palette: 1 brand colour, 1 accent, neutrals; check text contrast ≥ 4.5:1.
-- Type: one family, two or three sizes on a clear scale (e.g. 64/32/20); fonts installed: Inter,
-  JetBrains Mono, Noto (CJK, emoji) - `fc-list : family | sort -u`.
-- Grid and margins (8 px steps); align everything; leave space.
+Choose a visual direction suited to the subject. Define a small token set for color, type scale, spacing and alignment; preserve an established system when editing. Use real copy and assets early. Avoid arbitrary font/palette defaults and decorative complexity that competes with the message.
 
-## Build editable sources
-- Vector art and logos: write SVG by hand or generate it in code; keep text as `<text>` with the
-  font named. Render: `convert -background none -density 300 art.svg -resize 1080x1080 art.png`.
-- Layouts with real text (posters, posts, mockups): HTML + CSS at the exact size, then screenshot:
-  `chromium --headless --hide-scrollbars --window-size=1080,1080 --screenshot=post.png post.html`.
-- Photo edits: ImageMagick (see image-basics) or GIMP for hands-on retouching.
-- Look at a real picture for reference first when the user names a style, brand or character.
+Explore a small number of materially different compositions when direction is open, then refine one. Build editable sources in the appropriate design app or file format. Raster generation, SVG, layout tools and HTML each serve different purposes; choose through evidence, not habit. Verify font licensing and available glyphs, especially mixed Chinese/English text.
 
-## Deliver
-PNG for graphics with text, JPEG for photos, SVG for logos and icons, PDF for print. Hand over the
-source file too. Look at the export at 100% and at phone size before calling it done.
+Inspect the design at its actual viewing size and aspect ratio. Check line breaks, optical alignment, padding, contrast, cropping and character consistency. Preview phone covers with platform controls/safe areas in mind. Keep the headline natural and specific to the user’s product rather than inventing a slogan unrelated to the brief.
+
+Show the finished artifact, iterate against concrete defects and deliver it with `done.files`. Include requested language/aspect variants and editable source. Do not substitute opening a file on the virtual desktop for sending the file.

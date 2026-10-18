@@ -276,3 +276,21 @@ describe("keyHome", () => {
     expect(keyHome(null)).toBe("on the computer running localDot");
   });
 });
+
+it("seals general values unchanged and refuses old keyd without sending them", async () => {
+  const general = { id: "license", kind: "secret" as const };
+  const value = " private\n密钥\n";
+  const first = fakeApi([online("K")]);
+  await expect(saveKey(first.api, general, value, fakeSeal)).rejects.toThrow(
+    "Update localDot key protection",
+  );
+  expect(first.sent).toHaveLength(1);
+  const modern = fakeApi([
+    () => ({ ...online("K")(), generalSecrets: true }),
+    () => ({ key: { ...general, createdAt: "t", updatedAt: "t" }, restart: false }),
+  ]);
+  const seal = vi.fn(fakeSeal);
+  await saveKey(modern.api, general, value, seal);
+  expect(seal).toHaveBeenCalledWith("K", general, value);
+  expect(JSON.stringify(modern.sent)).not.toContain(value);
+});

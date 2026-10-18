@@ -1,4 +1,13 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PERSONA_SKILLS, PERSONAS } from "@localdot/protocol";
@@ -110,5 +119,35 @@ describe("the built-in skills", () => {
         expect(found.get(name)?.description.length).toBeGreaterThan(40);
       }
     expect([...found.keys()].sort()).toEqual([...PERSONA_SKILLS].sort());
+  });
+});
+
+describe("reviewed upstream skill bundles", () => {
+  it("ships the reviewed files, references and licenses through the same copier used by the agent", () => {
+    const repo = new URL("../../../../skills/", import.meta.url);
+    const lock = JSON.parse(readFileSync(new URL("upstream-lock.json", repo), "utf8")) as {
+      sources: {
+        name: string;
+        revision: string;
+        license: string;
+        files: Record<string, { sha256: string }>;
+      }[];
+    };
+    const found = listSkills(repo.pathname, ownedTemp(join(tmpdir(), "ld-skill-lock-")));
+    for (const source of lock.sources) {
+      expect(source.revision).toMatch(/^[a-f0-9]{40}$/);
+      const skill = found.find((item) => item.name === source.name);
+      if (!skill) throw new Error(`Missing installed skill: ${source.name}`);
+      const files = skillFiles(skill);
+      expect(files.map((f) => f.rel).sort()).toEqual(Object.keys(source.files).sort());
+      expect(files.find((f) => f.rel === "LICENSE.txt")?.bytes.toString()).toContain(
+        "Apache License",
+      );
+      for (const file of files)
+        expect(
+          createHash("sha256").update(file.bytes).digest("hex"),
+          `${source.name}/${file.rel}`,
+        ).toBe(source.files[file.rel]?.sha256);
+    }
   });
 });

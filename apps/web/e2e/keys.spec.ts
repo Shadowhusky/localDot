@@ -75,7 +75,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   await page.getByTestId("keys-button").click();
   await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");
 
-  await sheet.getByRole("radio", { name: "Custom service" }).click();
+  await sheet.getByRole("radio", { name: "Custom API" }).click();
   await sheet.getByLabel("Key ID (optional)", { exact: true }).fill("weather");
   await sheet.getByLabel("Hosts", { exact: true }).fill("api.weather.example");
   await sheet.getByLabel("Key", { exact: true }).fill(VALUE);
@@ -127,7 +127,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   // A base URL with non-ASCII text goes as the URL parser writes it, so the binding Chrome seals
   // is byte for byte the one keyd rebuilds.
   await sheet.getByRole("button", { name: /^Add (a )?key$/ }).click();
-  await sheet.getByRole("radio", { name: "Model & service" }).click();
+  await sheet.getByRole("radio", { name: "Provider" }).click();
   await search(page, sheet.getByRole("combobox", { name: "Provider" }), "openai-compatible");
   await sheet.getByLabel("Key ID (optional)", { exact: true }).fill("books");
   await sheet.getByLabel("Base URL").fill("https://bücher.example/openai/v1");
@@ -201,7 +201,7 @@ test("describe and edit a custom key without re-entering its value", async ({ pa
   const sheet = nestedKeys(page);
   if (await sheet.getByRole("button", { name: /^Add (a )?key$/ }).isVisible())
     await sheet.getByRole("button", { name: /^Add (a )?key$/ }).click();
-  await sheet.getByRole("radio", { name: "Custom service" }).click();
+  await sheet.getByRole("radio", { name: "Custom API" }).click();
   await sheet.getByLabel("Name", { exact: true }).fill("Research catalog");
   await sheet.getByLabel("Service (optional)", { exact: true }).fill("Example API");
   await sheet

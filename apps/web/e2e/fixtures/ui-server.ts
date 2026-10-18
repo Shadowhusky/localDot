@@ -1926,6 +1926,7 @@ routes.get("/api/keyd", (c) =>
         online: true,
         bootId: "qa",
         sealKey,
+        generalSecrets: true,
         audit: keydMode === "audit" ? { ok: false, error: "audit log unwritable" } : { ok: true },
         hairpin:
           keydMode === "guard"

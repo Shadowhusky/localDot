@@ -146,7 +146,7 @@ describe("a key to enter again", () => {
     expect(form.textContent).toContain("Sent only to api.weather.example, as before.");
     expect(within(form).queryByLabelText(LABEL)).toBeNull();
     expect(within(form).queryByLabelText("Hosts")).toBeNull();
-    expect(within(form).queryByRole("radio", { name: "Custom service" })).toBeNull();
+    expect(within(form).queryByRole("radio", { name: "Custom API" })).toBeNull();
     type("Key", " sk-forecast-again ");
     fireEvent.click(saveButton());
     await waitFor(() => expect(save).toHaveBeenCalled());
@@ -422,7 +422,7 @@ describe("Keys", () => {
       "sk-ant-api03-test",
     );
     rerender(<KeyForm active save={save} taken={[]} />);
-    fireEvent.click(screen.getByRole("radio", { name: "Custom service" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Custom API" }));
     type("Hosts", "api.weather.example, weather.example");
     expect(field(LABEL).placeholder).toBe("weather");
     type(LABEL, "anthropic");
@@ -674,7 +674,7 @@ describe("Keys", () => {
     let settle: (v: { restart: boolean }) => void = () => {};
     const save = vi.fn(() => new Promise<{ restart: boolean }>((r) => (settle = r)));
     render(<KeysSheet open keys={controller({ save })} onClose={() => {}} />);
-    fireEvent.click(screen.getByRole("radio", { name: "Custom service" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Custom API" }));
     type(LABEL, "weather");
     type("Hosts", "api.weather.example");
     type("Key", "  sk-weather-123456 ");
@@ -757,7 +757,7 @@ describe("Keys", () => {
     fireEvent.click(saveButton());
     expect(field("Key").value).toBe("");
     expect(screen.getByText(PLAN_REFUSAL)).toBeTruthy();
-    fireEvent.click(screen.getByRole("radio", { name: "Custom service" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Custom API" }));
     expect(screen.queryByText("sk-ant-api")).toBeNull();
     type(LABEL, "claude");
     type("Hosts", "api.anthropic.com");
@@ -1048,7 +1048,7 @@ describe("Keys", () => {
     plain("Base URL");
     plain("Key");
     expect(field("Base URL").getAttribute("inputmode")).toBe("url");
-    fireEvent.click(screen.getByRole("radio", { name: "Custom service" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Custom API" }));
     plain("Hosts");
     plain("Header");
   });
@@ -1061,5 +1061,61 @@ describe("Keys", () => {
     const confirm = screen.getByRole("button", { name: "Confirm remove weather" });
     expect(confirm.textContent).toBe("Confirm remove");
     expect(confirm.closest("li")?.hasAttribute("data-armed")).toBe(true);
+  });
+});
+
+describe("editing and general keys", () => {
+  it("reveals the editor only when requested, including repeated Edit clicks", () => {
+    const reveal = vi.fn();
+    const keys = controller({ keys: [weather, anthropic], updateMetadata: vi.fn() });
+    const ui = render(<KeysPanel active keys={keys} reveal={reveal} />);
+    const edit = screen.getByRole("button", { name: "Edit details for weather" });
+    expect(edit.closest(".ui-group-row-line")).toBeTruthy();
+    fireEvent.click(edit);
+    const form = screen.getByRole("form", { name: "Details for weather" });
+    expect(reveal).toHaveBeenLastCalledWith(form.closest("section"));
+    const calls = reveal.mock.calls.length;
+    ui.rerender(<KeysPanel active keys={{ ...keys }} reveal={reveal} />);
+    expect(reveal).toHaveBeenCalledTimes(calls);
+    fireEvent.click(edit);
+    expect(reveal).toHaveBeenCalledTimes(calls + 1);
+    fireEvent.click(screen.getByRole("button", { name: "Edit details for anthropic" }));
+    expect(reveal).toHaveBeenLastCalledWith(
+      screen.getByRole("form", { name: "Details for anthropic" }).closest("section"),
+    );
+  });
+
+  it("saves arbitrary multiline values unchanged without provider, host or header", async () => {
+    const save = vi.fn(async () => ({ restart: false }));
+    render(<KeyForm active save={save} />);
+    fireEvent.click(screen.getByRole("radio", { name: "General key" }));
+    expect(screen.queryByLabelText("Provider")).toBeNull();
+    expect(screen.queryByLabelText("Hosts")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Build license" } });
+    const value = "  private multiline value\n第二行\n";
+    const input = screen.getByLabelText("Key", { exact: true }) as HTMLTextAreaElement;
+    expect(input.tagName).toBe("TEXTAREA");
+    fireEvent.change(input, { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith({ id: "general-key", kind: "secret" }, value, {
+        label: "Build license",
+      }),
+    );
+    expect(input.value).toBe("");
+    expect(document.body.textContent).not.toContain(value);
+  });
+
+  it("clears a general secret on hiding, switching kinds, or closing the form", () => {
+    const ui = render(<KeyForm active save={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: "General key" }));
+    const input = screen.getByLabelText("Key", { exact: true }) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "private\nvalue" } });
+    vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    fireEvent(document, new Event("visibilitychange"));
+    expect(input.value).toBe("");
+    fireEvent.change(input, { target: { value: "another\nvalue" } });
+    ui.rerender(<KeyForm active={false} save={vi.fn()} />);
+    expect(input.value).toBe("");
   });
 });

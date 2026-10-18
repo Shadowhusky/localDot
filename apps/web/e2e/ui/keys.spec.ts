@@ -60,7 +60,7 @@ test("keys, held while the audit log fails", async ({ page, ui }) => {
 test("keys, a problem shown as the key field takes focus", async ({ page, ui }) => {
   const sheet = await keys(page, ui);
   await addKey(sheet).click();
-  await sheet.getByRole("radio", { name: "Custom service" }).click();
+  await sheet.getByRole("radio", { name: "Custom API" }).click();
   await sheet.getByLabel("Hosts", { exact: true }).fill("https://api.weather.example/v1");
   const key = sheet.getByLabel("Key", { exact: true });
   await key.scrollIntoViewIfNeeded();
@@ -75,7 +75,7 @@ test("the Web API fields pair up when wide and stack with even gaps on a phone",
 }) => {
   const sheet = await keys(page, ui);
   await addKey(sheet).click();
-  await sheet.getByRole("radio", { name: "Custom service" }).click();
+  await sheet.getByRole("radio", { name: "Custom API" }).click();
   // Each field from its label's top to the bottom of what it shows: an empty message line counts
   // as space between fields, which is what must stay even.
   const field = async (label: string) => {
@@ -152,4 +152,50 @@ test("the first key folds its form into the list and says it was saved", async (
     "Saved anthropic.",
   );
   expect(await page.content()).not.toContain(value);
+});
+
+test("Edit stays in its key row and reveals the editor without moving the app", async ({
+  page,
+  ui,
+}, testInfo) => {
+  const sheet = await keys(page, ui);
+  const row = sheet.locator(".keys-row[data-id='weather']");
+  const line = row.locator(".ui-group-row-line");
+  const edit = row.getByRole("button", { name: "Edit details for weather" });
+  const remove = row.getByRole("button", { name: "Remove weather", exact: true });
+  const lineBox = await line.boundingBox();
+  const editBox = await edit.boundingBox();
+  const removeBox = await remove.boundingBox();
+  if (!lineBox || !editBox || !removeBox) throw new Error("Missing row actions");
+  expect(editBox.y).toBeGreaterThanOrEqual(lineBox.y);
+  expect(editBox.y + editBox.height).toBeLessThanOrEqual(lineBox.y + lineBox.height + 1);
+  expect(editBox.x + editBox.width).toBeLessThanOrEqual(removeBox.x);
+  await ui.settle();
+  await page.screenshot({ path: testInfo.outputPath("keys-inline.png"), animations: "disabled" });
+  const pageOffset = await page.evaluate(() => window.scrollY);
+  await edit.click();
+  const form = sheet.getByRole("form", { name: "Details for weather" });
+  await expect(form.getByLabel("Name", { exact: true })).toBeInViewport();
+  await expect(form.getByRole("button", { name: "Save details" })).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBe(pageOffset);
+  expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("keys-edit.png") });
+});
+
+test("General key form fits the sheet and needs no service binding", async ({
+  page,
+  ui,
+}, testInfo) => {
+  const sheet = await keys(page, ui);
+  await addKey(sheet).click();
+  await sheet.getByRole("radio", { name: "General key" }).click();
+  await expect(sheet.getByLabel("Hosts", { exact: true })).toHaveCount(0);
+  await expect(sheet.getByLabel("Provider", { exact: true })).toHaveCount(0);
+  const kind = sheet.getByRole("radiogroup", { name: "Kind of key" });
+  const controls = await kind
+    .getByRole("radio")
+    .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().y));
+  expect(new Set(controls).size).toBe(1);
+  expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("keys-general.png") });
 });

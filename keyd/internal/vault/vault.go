@@ -15,13 +15,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 type Kind string
 
 const (
-	KindLLM  Kind = "llm"
-	KindHTTP Kind = "http"
+	KindLLM    Kind = "llm"
+	KindHTTP   Kind = "http"
+	KindSecret Kind = "secret"
 )
 
 // Record describes a secret and where it may be used. keys.FromRecord validates the binding
@@ -53,7 +55,7 @@ func (r Record) clone() Record {
 }
 
 func validKind(k Kind) bool {
-	return k == KindLLM || k == KindHTTP
+	return k == KindLLM || k == KindHTTP || k == KindSecret
 }
 
 const (
@@ -94,6 +96,14 @@ func ValidValue(value []byte) error {
 	}
 	if value[0] == ' ' || value[len(value)-1] == ' ' {
 		return errors.New("secret value must not start or end with a space")
+	}
+	return nil
+}
+
+// ValidGeneralValue preserves UTF-8, whitespace and line breaks for application secrets.
+func ValidGeneralValue(value []byte) error {
+	if len(value) == 0 || len(value) > maxValueLen || !utf8.Valid(value) || strings.ContainsRune(string(value), 0) {
+		return errors.New("secret value must be 1-8192 UTF-8 bytes without NUL")
 	}
 	return nil
 }
@@ -209,12 +219,16 @@ func (v *Vault) Put(rec Record, value []byte) error {
 		return fmt.Errorf("secret id %q: want 1-64 of a-z 0-9 _ - starting with a letter or digit, not a reserved name", rec.ID)
 	}
 	if !validKind(rec.Kind) {
-		return fmt.Errorf("secret kind %q: want llm or http", rec.Kind)
+		return fmt.Errorf("secret kind %q: want llm, http or secret", rec.Kind)
 	}
 	if err := rec.Metadata.Validate(); err != nil {
 		return err
 	}
-	if err := ValidValue(value); err != nil {
+	validate := ValidValue
+	if rec.Kind == KindSecret {
+		validate = ValidGeneralValue
+	}
+	if err := validate(value); err != nil {
 		return err
 	}
 	rec = rec.clone()

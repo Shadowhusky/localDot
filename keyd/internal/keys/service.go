@@ -1,11 +1,17 @@
 package keys
 
-import "github.com/shadowhusky/localdot/keyd/internal/vault"
+import (
+	"errors"
+	"github.com/shadowhusky/localdot/keyd/internal/vault"
+)
 
 // ServiceBinding permits a user's saved key at its existing HTTPS destination. Only the daemon's
 // service role uses this view; brain gateway routes and their token budgets stay unchanged.
 // Provider APIs may charge for non-chat operations: their quotas are enforced by the provider.
 func ServiceBinding(rec vault.Record) (Binding, error) {
+	if rec.Kind == vault.KindSecret {
+		return Binding{}, errors.New("general secrets are not HTTP credentials")
+	}
 	b, err := FromRecord(rec)
 	if err != nil {
 		return Binding{}, err

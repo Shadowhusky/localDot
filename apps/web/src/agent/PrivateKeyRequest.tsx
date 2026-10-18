@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { problemText } from "../keys/keys-api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
+import { TextArea } from "../ui/TextArea.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import type { AskFormProps } from "./AskForm.tsx";
 import { useAskState } from "./ask-draft.ts";
@@ -10,7 +11,7 @@ import { useAskState } from "./ask-draft.ts";
 export function PrivateKeyRequest({ draft, answer, saveKey, reason }: AskFormProps) {
   const field = draft.fields[0],
     request = field?.credential;
-  const input = useRef<HTMLInputElement>(null),
+  const input = useRef<HTMLInputElement | HTMLTextAreaElement>(null),
     alive = useRef(true),
     locked = useRef(false);
   const [saving, setSaving] = useState(false),
@@ -52,11 +53,15 @@ export function PrivateKeyRequest({ draft, answer, saveKey, reason }: AskFormPro
         locked.current = true;
         setSaving(true);
         setError("");
-        let value = input.current?.value.trim() ?? "";
+        let value = input.current?.value ?? "";
+        if (binding.kind !== "secret") value = value.trim();
         if (input.current) input.current.value = "";
         try {
           if (!saved) {
-            if (!value) throw new Error("Enter an API key.");
+            if (!value)
+              throw new Error(
+                binding.kind === "secret" ? "Enter a key or secret." : "Enter an API key.",
+              );
             const result = await saveKey(binding, value, request.metadata);
             value = "";
             if (!alive.current) return;
@@ -78,26 +83,45 @@ export function PrivateKeyRequest({ draft, answer, saveKey, reason }: AskFormPro
       <p className="private-key-destination">
         {binding.kind === "llm"
           ? `${request.metadata.service || binding.provider}${binding.baseURL ? ` · ${binding.baseURL}` : ""}`
-          : binding.hosts.join(", ")}
+          : binding.kind === "http"
+            ? binding.hosts.join(", ")
+            : "General key"}
       </p>
       {request.metadata.description && <p>{request.metadata.description}</p>}
       <p>
-        dot can use this key for the service above when needed. It is saved privately in Keys; its
-        value never enters the conversation.
+        {binding.kind === "secret"
+          ? "Saved encrypted in Keys. dot can find its name and purpose, but cannot read its value or send it to a service."
+          : "dot can use this key for the service above when needed. It is saved privately in Keys; its value never enters the conversation."}
       </p>
       {!saved && (
-        <Field label="API key">
-          <TextField
-            ref={input}
-            className="keys-secret"
-            type="text"
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            maxLength={8192}
-            readOnly={saving || !!reason}
-            aria-label="API key"
-          />
+        <Field label={binding.kind === "secret" ? "Key or secret" : "API key"}>
+          {binding.kind === "secret" ? (
+            <TextArea
+              ref={(node) => {
+                input.current = node;
+              }}
+              className="keys-secret"
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={8192}
+              readOnly={saving || !!reason}
+            />
+          ) : (
+            <TextField
+              ref={(node) => {
+                input.current = node;
+              }}
+              className="keys-secret"
+              type="text"
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={8192}
+              readOnly={saving || !!reason}
+              aria-label="API key"
+            />
+          )}
         </Field>
       )}
       {(error || state.failed) && <p role="alert">{error || state.failed}</p>}

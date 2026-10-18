@@ -1,5 +1,11 @@
 import { clsx } from "clsx";
-import { type ComponentProps, type CSSProperties, useLayoutEffect, useRef } from "react";
+import {
+  type ComponentProps,
+  type CSSProperties,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import { useFieldControl } from "./Field.tsx";
 import { observeTextAreaSize, resizeTextArea } from "./textarea-size.ts";
 
@@ -19,11 +25,16 @@ export function TextArea({
   className,
   readOnly,
   style,
+  ref,
   ...props
 }: TextAreaProps) {
   const control = useFieldControl(props);
   const unavailable = Boolean(control.disabledReason);
   const own = useRef<HTMLTextAreaElement>(null);
+  useImperativeHandle(ref, () => {
+    if (!own.current) throw new Error("Textarea is not mounted");
+    return own.current;
+  }, []);
 
   useLayoutEffect(() => {
     const area = own.current;

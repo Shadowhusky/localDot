@@ -288,7 +288,8 @@
 
 /* The key shows as dots in a text field: a password field would be offered to the browser's
    password manager. */
-.keys-secret .ui-input {
+.keys-secret .ui-input,
+.ui-text-area.keys-secret {
   -webkit-text-security: disc;
 }
 
@@ -341,6 +342,12 @@
   }
 }
 
+.keys-general-note {
+  margin: 0;
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
 .keys-description,
 .private-key-request {
   overflow-wrap: anywhere;
@@ -364,4 +371,16 @@
 }
 .private-key-request p {
   margin: 0;
+}
+
+.keys-row-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: var(--spacing);
+  white-space: nowrap;
+}
+
+.keys-remove-icon[data-confirm] {
+  color: var(--color-danger-fg);
 }

@@ -22,6 +22,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select } from "../ui/Select.tsx";
+import { TextArea } from "../ui/TextArea.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import {
   baseURLHint,
@@ -87,8 +88,9 @@ export interface KeyField {
 type Problem = { field: DraftField | "form"; message: string };
 
 const KINDS = [
-  { value: "llm", label: "Model & service" },
-  { value: "http", label: "Custom service" },
+  { value: "llm", label: "Provider" },
+  { value: "http", label: "Custom API" },
+  { value: "secret", label: "General key" },
 ];
 
 const PROVIDER_PICKS = PROVIDER_GROUPS.map((group) => ({
@@ -137,7 +139,7 @@ export function KeyForm({
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const valueRef = useRef<HTMLInputElement>(null);
+  const valueRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const savingRef = useRef(false);
   const intakeBlocked = useRef(false);
   const intakeAllowed = useRef(false);
@@ -149,6 +151,7 @@ export function KeyForm({
   holding.current = onHolding;
   const locked = Boolean(unavailable) || busy;
   const report = () => holding.current?.(!!valueRef.current?.value);
+  const general = (reenter?.kind ?? draft.kind) === "secret";
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -252,9 +255,8 @@ export function KeyForm({
     [],
   );
   useEffect(() => {
-    const input = valueRef.current;
     const clear = () => {
-      if (input) input.value = "";
+      if (valueRef.current) valueRef.current.value = "";
       intakeBlocked.current = true;
       lifetime.current++;
       holding.current?.(false);
@@ -290,6 +292,10 @@ export function KeyForm({
   const urlHint = draft.kind === "llm" ? baseURLHint(draft.provider) : undefined;
   const shown: Problem | null = problem ?? (tried && !check.ok ? check : null);
   const set = (patch: Partial<KeyDraft>) => {
+    if (patch.kind && patch.kind !== draft.kind && valueRef.current) {
+      valueRef.current.value = "";
+      report();
+    }
     revision.current++;
     setDraft((d) => ({ ...d, ...patch }));
     setProblem(null);
@@ -318,7 +324,7 @@ export function KeyForm({
       return;
     }
     try {
-      const value = text.trim();
+      const value = general ? text : text.trim();
       if (
         !value ||
         !target.isConnected ||
@@ -329,7 +335,7 @@ export function KeyForm({
       )
         return;
       setSaved(null);
-      if (claudePlanToken(value)) {
+      if (!general && claudePlanToken(value)) {
         target.value = "";
         setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
         return;
@@ -354,12 +360,12 @@ export function KeyForm({
     }
     setTried(true);
     setSaved(null);
-    const value = input.value.trim();
+    const value = general ? input.value : input.value.trim();
     // Clear before any callback, including one that throws synchronously.
     input.value = "";
     report();
     // Refused for itself first: fixing another field would not make a plan token usable.
-    if (claudePlanToken(value)) {
+    if (!general && claudePlanToken(value)) {
       setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
       return;
     }
@@ -372,7 +378,7 @@ export function KeyForm({
       });
       return;
     }
-    const bad = valueProblem(value);
+    const bad = valueProblem(value, check.binding.kind);
     if (bad) {
       setProblem({ field: "value", message: bad });
       return;
@@ -430,8 +436,14 @@ export function KeyForm({
         <p className="keys-reenter-note">
           <Icon name="lock" size={14} />
           <span>
-            Sent only to <span className="keys-reenter-to">{destinationOf(reenter)}</span>, as
-            before. Its name and everything that uses it stay the same.
+            {general ? (
+              "Stored as a general key"
+            ) : (
+              <>
+                Sent only to <span className="keys-reenter-to">{destinationOf(reenter)}</span>
+              </>
+            )}
+            , as before. Its name and everything that uses it stay the same.
           </span>
         </p>
       ) : (
@@ -479,7 +491,7 @@ export function KeyForm({
                 </Field>
               )}
             </>
-          ) : (
+          ) : draft.kind === "http" ? (
             <>
               <Field
                 label="Hosts"
@@ -516,10 +528,15 @@ export function KeyForm({
                 </Field>
               </div>
             </>
+          ) : (
+            <p className="keys-general-note">
+              Save any key or configuration value, including a license, database credential or
+              multiline private key. No provider, website or authentication format is required.
+            </p>
           )}
           <Field
             label="Service (optional)"
-            description="Any service or provider, including one not listed above."
+            description="An app, project or service that uses this key. It can be anything."
           >
             <TextField
               value={metadata.service ?? ""}
@@ -575,37 +592,58 @@ export function KeyForm({
       >
         {/* A text field drawn as dots: Chrome offers to save a password field's value to the
           user's synced password manager, autocomplete="off" or not. */}
-        <TextField
-          ref={valueRef}
-          {...PLAIN}
-          className="keys-secret"
-          readOnly={saving || busy}
-          enterKeyHint="done"
-          data-1p-ignore="true"
-          data-lpignore="true"
-          suffix={
-            clipboardReadable() ? (
-              <IconButton
-                icon="clipboard-paste"
-                label="Paste key"
-                size={24}
-                disabledReason={unavailable}
-                onClick={() => void paste()}
-              />
-            ) : undefined
-          }
-          onFocus={() => {
-            // Problems with the label or where the key goes show before the key is pasted.
-            if (!check.ok && check.field !== "value") setTried(true);
-          }}
-          onChange={(e) => {
-            if (claudePlanToken(e.currentTarget.value)) {
-              e.currentTarget.value = "";
-              setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
-            } else if (problem?.field === "value") setProblem(null);
-            report();
-          }}
-        />
+        {general ? (
+          <TextArea
+            ref={(node) => {
+              valueRef.current = node;
+            }}
+            {...PLAIN}
+            className="keys-secret"
+            maxRows={6}
+            maxLength={8192}
+            readOnly={saving || busy}
+            data-1p-ignore="true"
+            data-lpignore="true"
+            onChange={() => {
+              setProblem(null);
+              report();
+            }}
+          />
+        ) : (
+          <TextField
+            ref={(node) => {
+              valueRef.current = node;
+            }}
+            {...PLAIN}
+            className="keys-secret"
+            readOnly={saving || busy}
+            enterKeyHint="done"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            suffix={
+              clipboardReadable() ? (
+                <IconButton
+                  icon="clipboard-paste"
+                  label="Paste key"
+                  size={24}
+                  disabledReason={unavailable}
+                  onClick={() => void paste()}
+                />
+              ) : undefined
+            }
+            onFocus={() => {
+              // Problems with the label or where the key goes show before the key is pasted.
+              if (!check.ok && check.field !== "value") setTried(true);
+            }}
+            onChange={(e) => {
+              if (claudePlanToken(e.currentTarget.value)) {
+                e.currentTarget.value = "";
+                setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
+              } else if (problem?.field === "value") setProblem(null);
+              report();
+            }}
+          />
+        )}
       </Field>
       <div className="keys-form-actions">
         <div id={statusId} className="keys-form-status">

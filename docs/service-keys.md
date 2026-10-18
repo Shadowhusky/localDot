@@ -1,6 +1,14 @@
-# Saved service keys
+# Saved keys
 
 Keys are reusable service credentials. A model-provider key can serve its provider’s non-chat APIs as well as model selection. Custom services accept a documented HTTPS host, authentication header and bearer, raw or Basic format. Labels, service names and purpose descriptions help dot choose; they do not grant permission or change a key’s destination.
+
+## General keys
+
+Settings → Keys also supports a General key: an encrypted text value with no provider, website or HTTP authorization format. It accepts 1–8,192 UTF-8 bytes, including Unicode, spaces and line breaks; NUL and malformed UTF-8 are refused. Existing API key validation is unchanged. The browser checks keyd’s `generalSecrets` capability before saving, so an older helper gives an actionable update error.
+
+General bindings use `{ id, kind: "secret" }` and cannot contain provider or HTTP routing fields. The value is sealed to keyd exactly as entered. The agent can discover its name and purpose and request it through the private save form using `kind: "secret"`. Only a verified saved marker enters the conversation. General keys currently provide storage: they cannot be minted into a cell, used by `api_request`, read into model context or passed to a program. Program delivery is a separate capability, not implied by storage.
+
+Saved-key actions share the same row. Edit reveals its metadata form within the settings scroller without changing page position. On phones, Edit and Remove are labelled icon buttons; Remove still needs a second tap to confirm.
 
 ## Discovery and use
 
