@@ -35,6 +35,7 @@ import { useMediaQuery } from "../ui/media.ts";
 import { Presence } from "../ui/Presence.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
+import { Select } from "../ui/Select.tsx";
 import { CompareView } from "./CompareView.tsx";
 import { GapCard, type GapKind } from "./GapCard.tsx";
 import { LOADING, ReplayControls } from "./ReplayControls.tsx";
@@ -60,7 +61,7 @@ import {
   TasksSearch,
   useTaskIndex,
 } from "./TasksLibrary.tsx";
-import { useReplay } from "./useReplay.ts";
+import { type ReplayScreen, useReplay } from "./useReplay.ts";
 import "./replay.css";
 
 // Below a laptop the library has no room for its preview, so a row opens its recording at once.
@@ -72,7 +73,8 @@ const NOTICE_MS = 3000;
 // The transport fades this long into playback without the pointer moving over the picture.
 const TRANSPORT_STILL_MS = 2000;
 const SCREENS = [
-  { value: "desktop", label: "Desktop" },
+  { value: "auto", label: "Auto · follow agent" },
+  { value: "desktop", label: "Computer" },
   { value: "browser", label: "Browser" },
 ] as const;
 const FILTERS = [
@@ -200,9 +202,23 @@ export function ReplayView({
 }
 
 // A phone's pushed screen: back on the left, the screen's name in the middle.
-function NavBar({ back, onBack, title }: { back: string; onBack(): void; title: string }) {
+function NavBar({
+  back,
+  onBack,
+  title,
+  screenChoice,
+}: {
+  back: string;
+  onBack(): void;
+  title: string;
+  screenChoice?: ReactNode;
+}) {
   return (
-    <nav className="replay-nav" aria-label={title}>
+    <nav
+      className="replay-nav"
+      aria-label={title}
+      data-screen-choice={screenChoice ? "" : undefined}
+    >
       <Button variant="quiet" className="replay-nav-back" onClick={onBack}>
         <span className="replay-nav-back-label">
           <Icon name="chevron-left" size={22} />
@@ -210,6 +226,7 @@ function NavBar({ back, onBack, title }: { back: string; onBack(): void; title: 
         </span>
       </Button>
       <h1 className="replay-nav-title">{title}</h1>
+      {screenChoice}
     </nav>
   );
 }
@@ -711,7 +728,27 @@ function Player({
   const title = named ? taskTitle(named) : RECORDED_TASK;
   const browser = card?.recordings?.browser;
   const twoScreens =
-    replay.screen === "browser" || (!!browser && browser.bytes > 0 && !NO_VIDEO.has(browser.state));
+    replay.screen === "browser" ||
+    replay.model.screenChanges.some((change) => change.screen === "browser") ||
+    (!!browser && browser.bytes > 0 && !NO_VIDEO.has(browser.state));
+  const screens = twoScreens && (
+    <Select
+      className="replay-screen-choice"
+      appearance="inline"
+      size="sm"
+      aria-label="Recording screen"
+      items={SCREENS}
+      value={replay.screenChoice}
+      shown={
+        replay.screenChoice === "auto"
+          ? `Auto · ${replay.screen === "browser" ? "Browser" : "Computer"}`
+          : replay.screen === "browser"
+            ? "Browser"
+            : "Computer"
+      }
+      onValueChange={(screen) => replay.setScreen(screen as ReplayScreen)}
+    />
+  );
   const steps = (
     <ActivityRail
       empty={lost ? "Steps show here once the recording loads." : undefined}
@@ -728,8 +765,15 @@ function Player({
 
   return (
     <div className="replay" data-view="player">
-      {phone && <NavBar back={backLabel} onBack={onLibrary} title={note || title} />}
-      <main ref={area} className="stage-col replay-main" aria-label="Replay">
+      {phone && (
+        <NavBar back={backLabel} onBack={onLibrary} title={note || title} screenChoice={screens} />
+      )}
+      <main
+        ref={area}
+        className="stage-col replay-main"
+        aria-label="Replay"
+        data-screen={replay.screen}
+      >
         <h1 className="ui-visually-hidden">{title}</h1>
         <StageFrame
           light={hud.control ? "dot" : "none"}
@@ -822,17 +866,7 @@ function Player({
               compact={phone}
               noVideo={!!whole}
               cardShown={!noticeOver}
-              screens={
-                twoScreens && (
-                  <SegmentedControl
-                    size={24}
-                    aria-label="Recording screen"
-                    items={SCREENS}
-                    value={replay.screen}
-                    onValueChange={(screen) => replay.setScreen(screen as "desktop" | "browser")}
-                  />
-                )
-              }
+              screens={screens}
               exportControl={
                 <ExportButton
                   ref={exportTrigger}

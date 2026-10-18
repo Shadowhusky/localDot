@@ -34,8 +34,7 @@ import { TextArea, type TextAreaProps } from "../ui/TextArea.tsx";
 import { resizeTextArea } from "../ui/textarea-size.ts";
 import "../ui/composer-layout.css";
 import { useVoice } from "../voice/useVoice.ts";
-import { VoiceStrip } from "../voice/VoiceControls.tsx";
-import { VoiceSendButton } from "../voice/VoiceSendButton.tsx";
+import { VoiceButton, VoiceStrip } from "../voice/VoiceControls.tsx";
 import { AttachmentChips } from "./Attachments.tsx";
 import { fileName, withAttachments } from "./attachments.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
@@ -247,6 +246,8 @@ const ComposerField = memo(function ComposerField({
 export function Composer(props: ComposerProps) {
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [voiceSubmitting, setVoiceSubmitting] = useState(false);
+  const voiceSubmission = useRef(false);
   // A file the message revises, from Revise on a file dot handed over.
   const [revising, setRevising] = useState<ReviseDraft | null>(null);
   const revisingNow = useRef(revising);
@@ -528,12 +529,14 @@ export function Composer(props: ComposerProps) {
   const voice = useVoice({
     api: props.api,
     field,
-    enabled: !props.keysOpen && !props.controlBlocked,
+    owner: `${props.cell?.id}:${props.agent.sessionId}`,
+    enabled: !props.keysOpen && !props.controlBlocked && !sending && !uncertain,
     live: props.layout !== "pill",
     changed: (input, caret) => {
       revision.current += 1;
       if (caret !== undefined) {
         guardOwner.current.check(input);
+        keepDraft(input.value);
         if (!touch) {
           input.focus();
           input.setSelectionRange(caret, caret);
@@ -665,9 +668,16 @@ export function Composer(props: ComposerProps) {
       if (pending.current === record) pending.current = null;
     }
   };
-  const submit = (later = true) => {
+  const submit = (later = true, voiceFinished = false) => {
     const input = field();
-    if (!input || pending.current || composing.current || replying.current || talking) return;
+    if (
+      !input ||
+      pending.current ||
+      composing.current ||
+      replying.current ||
+      (talking && !voiceFinished)
+    )
+      return;
     // Check the DOM before copying even ordinary text into delivery state or requests.
     if (!guardOwner.current.check(input)) {
       measure(input);
@@ -738,6 +748,20 @@ export function Composer(props: ComposerProps) {
       return;
     }
     deliver(text, chosen, later);
+  };
+  const sendVoice = async () => {
+    if (voiceSubmission.current) return;
+    voiceSubmission.current = true;
+    setVoiceSubmitting(true);
+    const owner = identity.current;
+    try {
+      if (await voice.finish()) {
+        if (mounted.current && identity.current === owner) submit(true, true);
+      }
+    } finally {
+      voiceSubmission.current = false;
+      if (mounted.current) setVoiceSubmitting(false);
+    }
   };
   const deliver = (
     text: string,
@@ -907,13 +931,13 @@ export function Composer(props: ComposerProps) {
     }),
     [measure, weigh],
   );
-  const taskAction = text.blank ? props.taskAction : undefined;
+  const taskAction = text.blank && !talking ? props.taskAction : undefined;
   const connect = mode === "new" && props.configured === false;
   const near = text.length > NEAR && text.length <= LIMIT;
   const unavailable = props.keysOpen || props.controlBlocked;
   const reason = blockedReason(props, online, mode);
-  const sendReason = talking
-    ? "Finish talking first."
+  const sendReason = voiceSubmitting
+    ? "Sending after transcription…"
     : sending
       ? "Sending…"
       : uncertain
@@ -925,7 +949,7 @@ export function Composer(props: ComposerProps) {
             : (reason ??
               (uploads.blocked
                 ? "Wait for your files to finish uploading."
-                : text.blank
+                : text.blank && !talking
                   ? "Write a message first."
                   : undefined));
   const attachReason = guard.notice
@@ -1091,9 +1115,8 @@ export function Composer(props: ComposerProps) {
             />
           )}
           {props.model}
-          {props.permissions}
           <div className="composer-hint">
-            <VoiceStrip voice={voice} compact>
+            <VoiceStrip voice={voice}>
               {note && <span className="composer-note">{note}</span>}
             </VoiceStrip>
           </div>
@@ -1135,18 +1158,28 @@ export function Composer(props: ComposerProps) {
               </MenuItem>
             )}
           </Menu>
-          <VoiceSendButton
-            voice={voice}
-            type={taskAction ? "button" : "submit"}
-            onClick={taskAction?.run}
+          {props.permissions}
+          <VoiceButton voice={voice} />
+          <IconButton
+            type={talking || taskAction ? "button" : "submit"}
+            onPointerDown={(event) => {
+              if (talking && event.button === 0) event.preventDefault();
+            }}
+            onClick={talking ? () => void sendVoice() : taskAction?.run}
             className="composer-send"
             variant="primary"
             size={32}
             icon={taskAction?.kind === "stop" ? "stop" : "arrow-up"}
             label={
-              taskAction?.kind === "stop" ? "Stop task" : taskAction ? "Continue task" : sendLabel
+              talking
+                ? "Send voice message"
+                : taskAction?.kind === "stop"
+                  ? "Stop task"
+                  : taskAction
+                    ? "Continue task"
+                    : sendLabel
             }
-            kbd={touch || taskAction ? undefined : ["Enter"]}
+            kbd={touch || taskAction || talking ? undefined : ["Enter"]}
             disabledReason={taskAction ? taskAction.disabledReason : sendReason}
             aria-describedby={guard.notice ? keyNotice : undefined}
           />

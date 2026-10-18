@@ -36,7 +36,7 @@ export function ReplayControls({
   // that said so (`cardShown`) has gone, so nothing in the bar moves when it does.
   noVideo?: boolean;
   cardShown?: boolean;
-  // Desktop | Browser, when the task recorded both.
+  // Auto | Computer | Browser, when the task recorded both (phones place it above the picture).
   screens?: ReactNode;
   exportControl?: ReactNode;
 }) {

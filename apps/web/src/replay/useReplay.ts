@@ -19,6 +19,7 @@ import {
   REPLAY_SPEEDS,
   type ReplaySpeed,
   type SessionModel,
+  screenAt,
   stepAt,
 } from "@localdot/stage";
 import { type RefObject, useEffect, useRef, useState } from "react";
@@ -30,10 +31,14 @@ import type { ReplaySource, ReplayStatus } from "../stage/worker-protocol.ts";
 import { compareFrames, followRule, type ReplayCommand } from "./replay-view.ts";
 import { SeekGate } from "./seek-gate.ts";
 
+export type ReplayScreen = "auto" | ScreenName;
+
 export interface ReplayState {
   sessionId: string | null;
   screen: ScreenName;
-  setScreen(screen: ScreenName): void;
+  // Auto follows recorded screen.switch events; an explicit choice stays pinned.
+  screenChoice: ReplayScreen;
+  setScreen(screen: ReplayScreen): void;
   status: ReplayStatus["state"];
   card: SessionCard | null;
   info: RecordingInfo | null;
@@ -66,6 +71,7 @@ function initialState(sessionId: string | null): ReplayValues {
   return {
     sessionId,
     screen: "desktop",
+    screenChoice: "auto",
     status: "loading",
     card: null,
     info: null,
@@ -174,18 +180,11 @@ export function useReplay(
   opts: { onGoLive(): void; onExit?(): void },
 ): ReplayState {
   const [values, setValues] = useState<ReplayValues>(() => initialState(sessionId));
-  const [choice, setChoice] = useState<{ sessionId: string | null; screen: ScreenName }>({
-    sessionId,
-    screen: "desktop",
-  });
-  const screen = choice.sessionId === sessionId ? choice.screen : "desktop";
   const [attempt, setAttempt] = useState(0);
-  const screenSeek = useRef<{
-    sessionId: string | null;
-    tMs: number;
-    speed: ReplaySpeed;
-    skipIdle: boolean;
-  } | null>(null);
+  // Metadata for both tracks is small. Keep it with the task so a screen switch never reloads
+  // its event log, clears step details, or resets the playback clock.
+  const recordings = useRef(new Map<ScreenName, RecordingInfo>());
+  const syncScreen = useRef<() => boolean>(() => false);
   const mediaOwner = useRef(0);
   const current = useRef(values);
   const options = useRef(opts);
@@ -203,6 +202,19 @@ export function useReplay(
     current.current = { ...current.current, ...patch };
     setValues(current.current);
   };
+  const playbackMap = (state: ReplayValues) => {
+    const endMs = state.model.ended?.t ?? lastEventMs.current;
+    const activity =
+      state.screenChoice === "auto"
+        ? [...recordings.current.values()].flatMap((info) => info.manifest.activity)
+        : (recordings.current.get(state.screenChoice)?.manifest.activity ?? []);
+    return buildPlaybackMap(
+      state.model.startT ?? 0,
+      endMs,
+      busySpans(state.model, activity, endMs),
+      state.skipIdle,
+    );
+  };
   // The page shows a seek as it goes to the worker, so a drag renders Replay once per frame the
   // worker draws, not once per pointer event; the scrubber's head follows the finger on its own.
   const sendSeek = (tMs: number, mode: "exact" | "preview") => {
@@ -210,34 +222,23 @@ export function useReplay(
     if (!map) return;
     pendingSeekTime.current = tMs;
     update({ tMs, playing: false, compare: null, idleNow: idleAt(map, tMs) });
-    stage.current?.replay.seek(tMs, mode);
+    if (!syncScreen.current()) stage.current?.replay.seek(tMs, mode);
   };
   const sending = useRef(sendSeek);
   sending.current = sendSeek;
   const [seeks] = useState(() => new SeekGate((tMs, mode) => sending.current(tMs, mode)));
-  const setScreen = (next: ScreenName) => {
-    if (!ScreenName.safeParse(next).success || next === screen) return;
-    screenSeek.current = {
-      sessionId,
-      tMs: current.current.tMs,
-      speed: current.current.speed,
-      skipIdle: current.current.skipIdle,
-    };
-    mediaOwner.current++;
-    pendingSeekTime.current = null;
-    seeks.reset();
-    stage.current?.replay.close();
-    update({
-      screen: next,
-      status: "loading",
-      info: null,
-      map: null,
-      playing: false,
-      compare: null,
-    });
-    setChoice({ sessionId, screen: next });
+  const setScreen = (next: ReplayScreen) => {
+    if (
+      (next !== "auto" && !ScreenName.safeParse(next).success) ||
+      next === current.current.screenChoice
+    )
+      return;
+    update({ screenChoice: next, compare: null });
+    if (current.current.map) update({ map: playbackMap(current.current) });
+    sendTransport();
   };
   const sendTransport = () => {
+    if (syncScreen.current()) return;
     const state = current.current;
     if (state.map) {
       pendingSeekTime.current = null;
@@ -262,13 +263,7 @@ export function useReplay(
   };
   const setSkipIdle = (skipIdle: boolean) => {
     const state = current.current;
-    const endMs = state.model.ended?.t ?? lastEventMs.current;
-    const map = buildPlaybackMap(
-      state.model.startT ?? 0,
-      endMs,
-      busySpans(state.model, state.info?.manifest.activity ?? [], endMs),
-      skipIdle,
-    );
+    const map = playbackMap({ ...state, skipIdle });
     update({ skipIdle, map, idleNow: idleAt(map, state.tMs) });
     sendTransport();
   };
@@ -366,18 +361,11 @@ export function useReplay(
       current.current = { ...current.current, ...patch };
       setValues(current.current);
     };
-    const restored = screenSeek.current?.sessionId === sessionId ? screenSeek.current : null;
-    const restoredTime = restored?.tMs ?? null;
-    screenSeek.current = null;
+    const metadataErrors = new Set<ScreenName>();
+    let openedScreen: ScreenName | null = null;
+    recordings.current = new Map();
     mediaOwner.current++;
-    change({
-      ...initialState(sessionId),
-      model,
-      screen,
-      tMs: restoredTime ?? 0,
-      speed: restored?.speed ?? 1,
-      skipIdle: restored?.skipIdle ?? true,
-    });
+    change({ ...initialState(sessionId), model });
     lastEventMs.current = 0;
     pendingSeekTime.current = null;
     seeks.reset();
@@ -389,6 +377,78 @@ export function useReplay(
         change({ agent, version: current.current.version + 1 });
       }, 100);
     }
+    const selectedScreen = () => {
+      const state = current.current;
+      return state.screenChoice === "auto"
+        ? (screenAt(model, state.tMs)?.screen ?? "desktop")
+        : state.screenChoice;
+    };
+    // Return true when the new source owns transport. Commands to the retired worker must not
+    // race it or overwrite the new playhead; the owner also rejects late frames/status messages.
+    function presentScreen(refresh = false): boolean {
+      if (!sessionId || !current.current.map || controller.signal.aborted) return false;
+      const screen = selectedScreen();
+      const info = recordings.current.get(screen);
+      if (!info) {
+        if (screen !== current.current.screen || metadataErrors.has(screen)) {
+          mediaOwner.current++;
+          if (openedScreen) handle?.replay.close();
+          openedScreen = null;
+          sourceKey = "";
+          change({ screen, info: null, status: metadataErrors.has(screen) ? "error" : "loading" });
+        }
+        return true;
+      }
+      const state = current.current;
+      const changed = openedScreen !== screen;
+      if (!changed && !refresh) return false;
+      const map = playbackMap(state);
+      change({ screen, info, map, idleNow: idleAt(map, state.tMs) });
+      const hasVideo =
+        info.servedBytes > 0 && !["none", "failed", "expired"].includes(info.manifest.state);
+      const source: ReplaySource = {
+        screen,
+        ...(info.manifest.width && info.manifest.height
+          ? { geometry: { w: info.manifest.width, h: info.manifest.height, scale: 1 } }
+          : {}),
+        sessionId,
+        origin: replayOrigin(api),
+        authorization: api.authorization(),
+        video: hasVideo ? { upto: info.live ? info.upto : null } : null,
+        gaps: info.manifest.gaps,
+      };
+      const key = JSON.stringify([
+        screen,
+        source.geometry,
+        source.video,
+        source.gaps,
+        info.manifest.state,
+      ]);
+      const reopen = changed || key !== sourceKey;
+      if (reopen) {
+        sourceKey = key;
+        openedScreen = screen;
+        source.owner = ++mediaOwner.current;
+        seeks.reset();
+        if (state.playing) pendingSeekTime.current = null;
+        change({
+          status: hasVideo ? "loading" : "no-video",
+          ...(changed ? { compare: null } : {}),
+        });
+        handle?.replay.open(source);
+      }
+      if (reopen || map.endMs !== openedEndMs) {
+        openedEndMs = map.endMs;
+        handle?.replay.transport({
+          playing: state.playing,
+          speed: state.speed,
+          map,
+          atPlayMs: playAt(map, state.tMs),
+        });
+      }
+      return reopen;
+    }
+    syncScreen.current = presentScreen;
     async function load(initial: boolean) {
       if (loading || !sessionId || !ULID_PATTERN.test(sessionId)) {
         if (initial) change({ status: "error" });
@@ -398,12 +458,6 @@ export function useReplay(
       try {
         const card = SessionCard.parse(
           await api.get(`/api/sessions/${sessionId}/card`, { signal: controller.signal }),
-        );
-        const info = RecordingInfo.parse(
-          await api.get(
-            `/api/sessions/${sessionId}/recording${screen === "browser" ? "?screen=browser" : ""}`,
-            { signal: controller.signal },
-          ),
         );
         await readReplayEvents(api, sessionId, model.lastSeq + 1, controller.signal, (events) => {
           if (controller.signal.aborted) return;
@@ -416,27 +470,40 @@ export function useReplay(
           handle?.pushEvents(events);
           notifyModel();
         });
-        controller.signal.throwIfAborted();
-        const state = current.current;
-        const endMs = model.ended?.t ?? lastEventMs.current;
-        const map = buildPlaybackMap(
-          model.startT ?? 0,
-          endMs,
-          busySpans(model, info.manifest.activity, endMs),
-          state.skipIdle,
+        // A missing/failed alternate track must not prevent the available screen from playing.
+        const screens = ["desktop", "browser"] as const;
+        const metadata = await Promise.allSettled(
+          screens.map(async (screen) =>
+            RecordingInfo.parse(
+              await api.get(
+                `/api/sessions/${sessionId}/recording${screen === "browser" ? "?screen=browser" : ""}`,
+                { signal: controller.signal },
+              ),
+            ),
+          ),
         );
-        const requested =
-          restoredTime ?? Number(new URLSearchParams(window.location.search).get("t") ?? 0);
+        controller.signal.throwIfAborted();
+        metadata.forEach((result, index) => {
+          const screen = screens[index] as ScreenName;
+          if (result.status === "fulfilled") {
+            recordings.current.set(screen, result.value);
+            metadataErrors.delete(screen);
+          } else metadataErrors.add(screen);
+        });
+        const state = current.current;
+        const map = playbackMap(state);
+        const requested = Number(new URLSearchParams(window.location.search).get("t") ?? 0);
         const tMs = Math.min(
-          endMs,
+          map.endMs,
           Math.max(map.startMs, initial && Number.isFinite(requested) ? requested : state.tMs),
         );
-        change({ agent, card, info, map, tMs, idleNow: idleAt(map, tMs) });
-        const liveNowMs = Math.max(endMs, Date.now() - Date.parse(card.startedAt));
+        change({ agent, card, map, tMs, idleNow: idleAt(map, tMs) });
+        const info = recordings.current.get(selectedScreen());
+        const liveNowMs = Math.max(map.endMs, Date.now() - Date.parse(card.startedAt));
         const follow = initial
           ? "stay"
           : followRule({
-              live: info.live,
+              live: info?.live ?? card.verdict === "live",
               playing: state.playing,
               tMs,
               lastMs: openedEndMs,
@@ -446,43 +513,7 @@ export function useReplay(
           options.current.onGoLive();
           return;
         }
-        const hasVideo =
-          info.servedBytes > 0 && !["none", "failed", "expired"].includes(info.manifest.state);
-        const source: ReplaySource = {
-          screen,
-          ...(info.manifest.width && info.manifest.height
-            ? { geometry: { w: info.manifest.width, h: info.manifest.height, scale: 1 } }
-            : {}),
-          sessionId,
-          origin: replayOrigin(api),
-          authorization: api.authorization(),
-          video: hasVideo ? { upto: info.live ? info.upto : null } : null,
-          gaps: info.manifest.gaps,
-        };
-        const key = JSON.stringify([
-          source.screen,
-          source.geometry,
-          source.video,
-          source.gaps,
-          info.manifest.state,
-        ]);
-        const refresh = follow === "refresh" || !state.playing || !info.live;
-        const reopen = initial || (refresh && key !== sourceKey);
-        if (reopen) {
-          sourceKey = key;
-          source.owner = ++mediaOwner.current;
-          change({ status: hasVideo ? "loading" : "no-video" });
-          handle?.replay.open(source);
-        }
-        if (reopen || (refresh && endMs !== openedEndMs)) {
-          openedEndMs = endMs;
-          handle?.replay.transport({
-            playing: state.playing,
-            speed: state.speed,
-            map,
-            atPlayMs: playAt(map, tMs),
-          });
-        }
+        presentScreen(initial || follow === "refresh" || !state.playing || !info?.live);
         lastRefresh = performance.now();
       } catch {
         if (!controller.signal.aborted) change({ status: "error" });
@@ -509,6 +540,7 @@ export function useReplay(
       )
         return;
       if (message.type === "replay-status" || message.type === "replay-time") seeks.settled();
+      if ("owner" in message && message.owner !== mediaOwner.current) return;
       if (message.type === "replay-status") change({ status: message.status.state });
       if (message.type === "replay-time") {
         if (
@@ -519,6 +551,7 @@ export function useReplay(
         pendingSeekTime.current = null;
         const state = current.current;
         change({ tMs: message.tMs, playing: message.playing, idleNow: message.idle });
+        if (presentScreen()) return;
         for (const waiter of seekWaiters.current) {
           clearTimeout(waiter.timer);
           waiter.resolve();
@@ -569,6 +602,7 @@ export function useReplay(
     }
     return () => {
       controller.abort();
+      syncScreen.current = () => false;
       clearTimeout(versionTimer);
       clearTimeout(pollTimer);
       unsubscribe?.();
@@ -580,7 +614,7 @@ export function useReplay(
       seekWaiters.current.clear();
       if (window.__localdot) delete window.__localdot.replay;
     };
-  }, [api, sessionId, stage, screen, seeks, attempt]);
+  }, [api, sessionId, stage, seeks, attempt]);
   return {
     // Until the effect resets for a newly picked session, the held values describe the previous one.
     ...(values.sessionId === sessionId ? values : initialState(sessionId)),

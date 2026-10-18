@@ -13,6 +13,7 @@ const NOTICE_MS = 4000;
 
 export interface VoiceOptions {
   api: ApiClient;
+  owner?: string;
   field(): HTMLTextAreaElement | null;
   changed(input: HTMLTextAreaElement, caret?: number): void;
   // The message can take words now.
@@ -27,6 +28,7 @@ export interface Voice {
   readonly notice: string | null;
   readonly route: VoiceRoute;
   level(): number;
+  finish(): Promise<boolean>;
   send(event: VoiceEvent): void;
   dismiss(): void;
 }
@@ -67,7 +69,8 @@ export function useVoice(opts: VoiceOptions): Voice {
         now: () => performance.now(),
       }),
   );
-  useEffect(() => () => turns.dispose(), [turns]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: changing conversations cancels the owned recording.
+  useLayoutEffect(() => () => turns.dispose(), [turns, opts.api, opts.owner]);
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), NOTICE_MS);
@@ -109,6 +112,7 @@ export function useVoice(opts: VoiceOptions): Voice {
     notice: downloading && !downloadDismissed ? "Getting speech ready on this device…" : notice,
     route,
     level: () => turns.level(),
+    finish: () => turns.finish(),
     send: (event) => {
       if (event.type === "press") setDownloadDismissed(false);
       turns.send(event);

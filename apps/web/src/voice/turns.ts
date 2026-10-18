@@ -34,6 +34,8 @@ export class VoiceTurns {
   #draft: Draft | null = null;
   #written: string | null = null;
   #limit: ReturnType<typeof setTimeout> | undefined;
+  #completion: Promise<boolean> | null = null;
+  #resolve: ((written: boolean) => void) | null = null;
 
   constructor(private readonly host: VoiceHost) {}
 
@@ -50,6 +52,24 @@ export class VoiceTurns {
     if (step.effect === "start") this.#begin();
     else if (step.effect === "finish") this.#finish();
     else if (step.effect === "abort") this.#drop();
+  }
+
+  // Stop and Send join the same final transcript; cancellation never sends late words.
+  finish(): Promise<boolean> {
+    if (this.state.phase === "idle") return Promise.resolve(false);
+    this.#completion ??= new Promise((resolve) => {
+      this.#resolve = resolve;
+    });
+    const completion = this.#completion;
+    this.send({ type: "stop" });
+    return completion;
+  }
+
+  #complete(written: boolean) {
+    const resolve = this.#resolve;
+    this.#resolve = null;
+    this.#completion = null;
+    resolve?.(written);
   }
 
   dispose() {
@@ -98,8 +118,11 @@ export class VoiceTurns {
             return;
           }
           this.#hearing = hearing;
-          this.send({ type: "started", at: this.host.now() });
-          this.#limit = setTimeout(() => this.send({ type: "stop" }), MAX_LISTEN_MS);
+          if (this.state.phase === "finishing") this.#finish();
+          else {
+            this.send({ type: "started", at: this.host.now() });
+            this.#limit = setTimeout(() => this.send({ type: "stop" }), MAX_LISTEN_MS);
+          }
         },
         (error: unknown) => {
           if (turn === this.#turn)
@@ -111,22 +134,21 @@ export class VoiceTurns {
   #finish() {
     const hearing = this.#hearing;
     const turn = this.#turn;
-    if (!hearing) {
-      this.send({ type: "done" });
-      return;
-    }
+    // A Send during microphone startup waits for the same engine to open.
+    if (!hearing) return;
     hearing.finish().then(
       (words) => {
         if (turn !== this.#turn) return;
         this.#hearing = null;
-        if (words.trim()) this.#write(words, true);
-        else {
+        const written = words.trim() ? this.#write(words, true) : false;
+        if (!words.trim()) {
           this.#restore();
           this.host.notice(failureLine("no-speech"));
         }
         this.#draft = null;
         this.#written = null;
         this.send({ type: "done" });
+        this.#complete(written);
       },
       (error: unknown) => {
         if (turn === this.#turn) this.#fail(error instanceof VoiceError ? error.failure : "failed");
@@ -143,6 +165,7 @@ export class VoiceTurns {
   }
 
   #drop() {
+    this.#complete(false);
     this.#turn++;
     this.#hearing?.abort();
     this.#hearing = null;
@@ -154,13 +177,14 @@ export class VoiceTurns {
   #write(words: string, final = false) {
     const input = this.host.field();
     const draft = this.#draft;
-    if (!input || !draft) return;
+    if (!input || !draft) return false;
     // The user changed the message meanwhile: their text wins.
-    if (input.value !== (this.#written ?? draft.value)) return;
+    if (input.value !== (this.#written ?? draft.value)) return false;
     const next = spoken(draft, words);
     input.value = next.value;
     this.#written = next.value;
     this.host.changed(input, final ? next.caret : undefined);
+    return input.value === next.value;
   }
 
   #restore() {

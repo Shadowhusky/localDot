@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalDotEvent, ulid } from "@localdot/protocol";
 import { frameOfLuma } from "@localdot/stage/testing";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test, webkit } from "@playwright/test";
 import { type SeedResult, seedSession } from "../../daemon/src/recorder/testing/seed-session.ts";
 import type { RunningDaemon } from "./daemon.ts";
 import { startReplayDaemon } from "./seed.ts";
@@ -12,6 +12,7 @@ import { skipSetup } from "./skip-setup.ts";
 let directory: string, home: string, desktop: SeedResult, browser: SeedResult;
 let daemon: RunningDaemon | undefined;
 test.describe.configure({ mode: "serial" });
+test.setTimeout(45_000);
 test.beforeAll(async () => {
   directory = mkdtempSync(join(tmpdir(), "localdot-two-screen-replay-"));
   home = join(directory, "home");
@@ -64,6 +65,19 @@ test.afterAll(async () => {
   }
 });
 
+async function chooseScreen(page: Page, name: string) {
+  const touch = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+  const trigger = page.getByRole("combobox", { name: "Recording screen" });
+  const option = page.getByRole("option", { name, exact: true });
+  if (touch) {
+    await trigger.tap();
+    await option.tap();
+  } else {
+    await trigger.click();
+    await option.click();
+  }
+  await expect(page.getByRole("listbox", { name: "Recording screen" })).toBeHidden();
+}
 async function open(page: Page) {
   if (!daemon) throw new Error("Replay fixture is unavailable.");
   await page.goto(
@@ -86,6 +100,7 @@ test("switches actual decoded recordings at the same time and retains private ga
   page,
 }) => {
   await open(page);
+  await chooseScreen(page, "Computer");
   await seek(page, 2500);
   const actualIndex = async (seed: SeedResult) => {
     const luma = (await page.evaluate(async (synth) => {
@@ -98,7 +113,7 @@ test("switches actual decoded recordings at the same time and retains private ga
   expect(await actualIndex(desktop)).toBe(
     desktop.frames.findLast((frame) => frame.tMicros <= 2500000)?.index,
   );
-  await page.getByRole("radio", { name: "Browser", exact: true }).click();
+  await chooseScreen(page, "Browser");
   await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready");
   await expect(page.getByRole("slider", { name: "Replay timeline" })).toHaveAttribute(
     "aria-valuenow",
@@ -111,7 +126,7 @@ test("switches actual decoded recordings at the same time and retains private ga
   await page.screenshot({ path: "e2e/out/two-screen-browser.png" });
   await seek(page, 4500);
   await expect(page.getByText("Nothing was recorded while you were in control.")).toBeVisible();
-  await page.getByRole("radio", { name: "Desktop", exact: true }).click();
+  await chooseScreen(page, "Computer");
   await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready");
   await expect(page.getByRole("slider", { name: "Replay timeline" })).toHaveAttribute(
     "aria-valuenow",
@@ -127,7 +142,7 @@ test("exports the chosen browser track as decodable MP4 and omits its private in
   page,
 }) => {
   await open(page);
-  await page.getByRole("radio", { name: "Browser", exact: true }).click();
+  await chooseScreen(page, "Browser");
   await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready");
   const requests: string[] = [];
   page.on("request", (request) => {
@@ -192,12 +207,82 @@ test("exports the chosen browser track as decodable MP4 and omits its private in
   expect(requests.every((url) => new URL(url).searchParams.get("screen") === "browser")).toBe(true);
 });
 
-test("offers no screen switch when the browser track is missing, and keeps the desktop", async ({
+for (const [width, engine] of [
+  [320, "chrome"],
+  [390, "chrome"],
+  [390, "webkit"],
+] as const) {
+  test(`automatically follows screens and offers manual switching on a ${width}px ${engine} phone`, async ({
+    browser,
+  }) => {
+    const owned = engine === "webkit" ? await webkit.launch({ channel: undefined }) : null;
+    const context = await (owned ?? browser).newContext({
+      viewport: { width, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    try {
+      await skipSetup(page);
+      await page.addInitScript(() =>
+        localStorage.setItem("localdot.mobile-screen-minimized", "true"),
+      );
+      await open(page);
+      const main = page.getByRole("main", { name: "Replay" });
+      const picker = page.getByRole("combobox", { name: "Recording screen" });
+      await expect(main.locator(".stage")).toBeVisible();
+      await expect(picker).toBeVisible();
+      expect((await picker.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await expect(picker).toContainText("Auto · Computer");
+      await seek(page, 2500);
+      await expect(main).toHaveAttribute("data-screen", "browser");
+      await expect(picker).toContainText("Auto · Browser");
+      await chooseScreen(page, "Computer");
+      await expect(main).toHaveAttribute("data-screen", "desktop");
+      await expect(page.getByRole("slider", { name: "Replay timeline" })).toHaveAttribute(
+        "aria-valuenow",
+        "2500",
+      );
+      await seek(page, 7000);
+      await expect(main).toHaveAttribute("data-screen", "desktop");
+      await chooseScreen(page, "Auto · follow agent");
+      await expect(main).toHaveAttribute("data-screen", "browser");
+      await seek(page, 7000);
+      await page.screenshot({ path: `e2e/out/replay-mobile-${engine}-${width}.png` });
+      await page.getByRole("button", { name: "Play replay", exact: true }).click();
+      await expect(main).toHaveAttribute("data-screen", "desktop");
+      await expect(picker).toContainText("Auto · Computer");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      await page.getByRole("button", { name: "Pause replay", exact: true }).click();
+      await chooseScreen(page, "Browser");
+      await expect(main).toHaveAttribute("data-screen", "browser");
+      await seek(page, 1000);
+      await expect(main).toHaveAttribute("data-screen", "browser");
+    } finally {
+      await context.close();
+      await owned?.close();
+    }
+  });
+}
+
+test("shows missing browser footage honestly and lets the viewer choose the computer", async ({
   page,
 }) => {
   rmSync(join(home, "sessions", desktop.sessionId, "recording-browser"), { recursive: true });
   await open(page);
   await seek(page, 3000);
-  await expect(page.getByRole("radiogroup", { name: "Recording screen" })).toHaveCount(0);
-  expect(await page.evaluate(() => window.__localdot?.replay?.status())).toBe("ready");
+  await expect(page.getByRole("main", { name: "Replay" })).toHaveAttribute(
+    "data-screen",
+    "browser",
+  );
+  await expect(page.getByRole("combobox", { name: "Recording screen" })).toBeVisible();
+  expect(await page.evaluate(() => window.__localdot?.replay?.status())).toBe("no-video");
+  await chooseScreen(page, "Computer");
+  await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready");
+  await expect(page.getByRole("main", { name: "Replay" })).toHaveAttribute(
+    "data-screen",
+    "desktop",
+  );
 });

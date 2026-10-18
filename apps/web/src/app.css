@@ -392,7 +392,7 @@
 
 /* A minimized phone screen leaves the task running and gives its space to the conversation. */
 @media (--phone) {
-  .app:not([data-focus]) .stage-col {
+  .app:not([data-focus]) .watch > .stage-col {
     --mobile-screen-height: 100dvh;
     max-height: calc(var(--mobile-screen-height) + var(--stage-top) + env(safe-area-inset-top));
     transition:
@@ -400,7 +400,7 @@
       padding-top var(--dur-default) var(--ease-standard),
       opacity var(--dur-fade) var(--ease-standard);
   }
-  .app[data-screen-minimized] .stage-col {
+  .app[data-screen-minimized] .watch > .stage-col {
     max-height: 0;
     padding-top: 0;
     overflow: clip;
@@ -424,7 +424,7 @@
   }
 }
 @media (--phone) and (prefers-reduced-motion: reduce) {
-  .app:not([data-focus]) .stage-col {
+  .app:not([data-focus]) .watch > .stage-col {
     transition: opacity var(--dur-fade) var(--ease-standard);
   }
 }

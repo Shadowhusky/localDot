@@ -30,8 +30,8 @@ export function VoiceSection({ voice }: { voice: VoiceControl }) {
   return (
     <>
       <p className="settings-lede">
-        Hold the mic in the message field{keys ? `, or ${keys},` : ""} and talk. Your words appear
-        in the message, so you can check them before you send.
+        Tap the microphone to talk. Stop keeps your words in the message; Send sends them directly.
+        Cancel discards the recording.{keys ? ` You can also hold ${keys} to dictate.` : ""}
       </p>
       <Group>
         <GroupRow

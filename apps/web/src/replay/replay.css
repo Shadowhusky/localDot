@@ -436,6 +436,11 @@
   color: var(--color-fg-2);
 }
 
+.replay-screen-choice {
+  flex: none;
+  width: auto;
+}
+
 .replay-transport-side {
   display: flex;
   flex: none;
@@ -935,6 +940,20 @@
     height: 52px;
     margin-top: env(safe-area-inset-top);
     padding: 0 calc(var(--spacing) * 2);
+  }
+
+  .replay[data-view="player"] .replay-nav[data-screen-choice] {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--spacing);
+    height: 52px;
+  }
+
+  .replay-nav .replay-screen-choice {
+    min-height: 44px;
+  }
+
+  .replay-nav .replay-screen-choice::after {
+    inset: 0;
   }
 
   .replay-nav-back {

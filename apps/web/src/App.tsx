@@ -1682,7 +1682,7 @@ function Theatre({ api }: { api: ApiClient }) {
       ref={page}
       className={appStatus.control && !replayId ? "app control" : "app"}
       data-layout={layout}
-      data-screen-minimized={mobileScreen.minimized || undefined}
+      data-screen-minimized={(!replayId && mobileScreen.minimized) || undefined}
       data-chat-hidden={!chatVisible || undefined}
       data-activity-hidden={wide || undefined}
       data-replaying={replayId ? "" : undefined}

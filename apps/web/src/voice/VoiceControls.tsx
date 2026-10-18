@@ -3,97 +3,61 @@ import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { isApple } from "../ui/Kbd.tsx";
-import { REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
-import { awayFrom } from "./machine.ts";
+import { Spinner } from "../ui/Spinner.tsx";
 import { changeVoicePrefs } from "./prefs.ts";
 import { HOLD_KEYS, type Voice } from "./useVoice.ts";
-import { routeLabel } from "./words.ts";
 
-const now = () => performance.now();
-
-// The mic in the composer: hold to talk, let go to put the words in the message, slide away to
-// cancel; a tap keeps it listening until the next tap. While it listens, a halo behind it breathes
-// with the voice.
-export function VoiceButton({ voice, size }: { voice: Voice; size: 28 | 36 }) {
-  const { state } = voice;
-  const blocked = voice.enabled ? undefined : "Not available right now";
-  const pointer = useRef<{ id: number; rect: DOMRect } | null>(null);
-  const active = state.phase !== "idle";
-  const away = (state.phase === "starting" || state.phase === "listening") && state.away;
-  const latched = (state.phase === "starting" || state.phase === "listening") && !state.held;
+// Tap to dictate; Stop keeps the words in the draft. Sending is a separate action.
+export function VoiceButton({ voice }: { voice: Voice }) {
+  const { phase } = voice.state;
+  const active = phase !== "idle";
+  const busy = phase === "starting" || phase === "finishing";
   return (
-    <span
-      className="voice-mic"
-      data-voice={active ? state.phase : undefined}
-      data-away={away || undefined}
-    >
-      <span className="voice-mic-halo" aria-hidden="true" />
+    <span className="voice-mic" data-phase={phase}>
       <IconButton
-        label={latched ? "Tap to finish" : "Hold to talk"}
-        icon={away ? "x" : "mic"}
-        size={size}
-        round={size === 36}
-        kbd={HOLD_KEYS(isApple())}
-        disabledReason={blocked}
-        aria-pressed={active && !away}
-        // A held finger may wander: the page must not take the slide for a scroll and drop the turn.
-        style={{ touchAction: "none", color: away ? "var(--color-danger-fg)" : undefined }}
+        label={
+          phase === "finishing"
+            ? "Transcribing speech"
+            : phase === "starting"
+              ? "Starting microphone"
+              : active
+                ? "Stop recording"
+                : "Start voice input"
+        }
+        icon={active ? "stop" : "mic"}
+        size={32}
+        round
+        variant={active ? "filled" : "quiet"}
+        kbd={active ? undefined : HOLD_KEYS(isApple())}
+        disabledReason={
+          !voice.enabled
+            ? "Not available right now"
+            : busy
+              ? phase === "starting"
+                ? "Starting microphone…"
+                : "Turning speech into text…"
+              : undefined
+        }
+        aria-busy={busy || undefined}
         onPointerDown={(event) => {
-          if (event.button !== 0 || blocked) return;
-          // The field keeps its focus and a phone's keyboard stays as it was.
-          event.preventDefault();
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-          pointer.current = {
-            id: event.pointerId,
-            rect: event.currentTarget.getBoundingClientRect(),
-          };
-          voice.send({ type: "press", at: now() });
+          if (event.button === 0) event.preventDefault();
         }}
-        onPointerMove={(event) => {
-          const held = pointer.current;
-          if (!held || held.id !== event.pointerId) return;
-          voice.send({
-            type: "away",
-            away: awayFrom(held.rect, event.clientX, event.clientY, away),
-          });
+        onClick={() => {
+          if (active) void voice.finish();
+          else {
+            const at = performance.now();
+            voice.send({ type: "press", at });
+            voice.send({ type: "release", at });
+          }
         }}
-        onPointerUp={(event) => {
-          if (pointer.current?.id !== event.pointerId) return;
-          pointer.current = null;
-          voice.send({ type: "release", at: now() });
-        }}
-        onPointerCancel={() => {
-          if (!pointer.current) return;
-          pointer.current = null;
-          voice.send({ type: "cancel" });
-        }}
-        onKeyDown={(event) => {
-          if ((event.key !== " " && event.key !== "Enter") || blocked) return;
-          event.preventDefault();
-          if (!event.repeat) voice.send({ type: "press", at: now() });
-        }}
-        onKeyUp={(event) => {
-          if (event.key !== " " && event.key !== "Enter") return;
-          event.preventDefault();
-          voice.send({ type: "release", at: now() });
-        }}
-        onContextMenu={(event) => event.preventDefault()}
       />
+      {busy && <Spinner className="voice-spinner" />}
     </span>
   );
 }
 
-// Where the composer's hint sits: while the user talks, the time, a live waveform and where the
-// words are made; after a turn that went wrong, one line on why. Otherwise what it held before.
-export function VoiceStrip({
-  voice,
-  children,
-  compact = false,
-}: {
-  voice: Voice;
-  children?: ReactNode;
-  compact?: boolean;
-}) {
+// The recording row keeps Cancel, Stop and Send independently reachable.
+export function VoiceStrip({ voice, children }: { voice: Voice; children?: ReactNode }) {
   const { state, notice, route } = voice;
   if (state.phase === "idle")
     return notice ? (
@@ -117,22 +81,27 @@ export function VoiceStrip({
     ) : (
       children
     );
-  const away = (state.phase === "starting" || state.phase === "listening") && state.away;
   return (
-    <div className="voice-strip" data-phase={state.phase} data-away={away || undefined}>
-      {!compact && (
-        <IconButton
-          className="voice-cancel"
-          label="Cancel"
-          icon="x"
-          size={24}
-          kbd={["Escape"]}
-          onClick={voice.dismiss}
-        />
-      )}
-      <Waveform voice={voice} since={state.phase === "listening" ? state.since : null} />
-      {!compact && (
-        <span className="voice-tail">{away ? "Let go to cancel" : routeLabel(route)}</span>
+    <div className="voice-strip" data-phase={state.phase}>
+      <IconButton
+        className="voice-cancel"
+        label="Cancel recording"
+        icon="x"
+        size={32}
+        round
+        variant="filled"
+        kbd={["Escape"]}
+        onPointerDown={(event) => {
+          if (event.button === 0) event.preventDefault();
+        }}
+        onClick={voice.dismiss}
+      />
+      {state.phase === "listening" ? (
+        <Waveform voice={voice} since={state.since} />
+      ) : (
+        <span className="voice-status" role="status">
+          {state.phase === "finishing" ? "Transcribing…" : "Starting microphone…"}
+        </span>
       )}
     </div>
   );
@@ -148,17 +117,15 @@ const clock = (ms: number) => {
 };
 
 // Bars scrolling in from the right, one per beat of the mic's level, the newest brightest. While
-// the words are written down, a light passes along them. It draws straight to the canvas and the
+// recording, it draws straight to the canvas and the
 // clock, so nothing renders per frame.
 function Waveform({ voice, since }: { voice: Voice; since: number | null }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const time = useRef<HTMLSpanElement>(null);
-  const reduced = useMediaQuery(REDUCED_MOTION);
   const level = useRef(voice.level);
   level.current = voice.level;
-  // Kept across the turn's phases, so the bars freeze in place when the user lets go.
+  // The most recent microphone levels, sampled without React renders.
   const levels = useRef<number[]>([]);
-  const finishing = voice.state.phase === "finishing";
   useEffect(() => {
     const element = canvas.current;
     const context = element?.getContext("2d");
@@ -183,7 +150,7 @@ function Waveform({ voice, since }: { voice: Voice; since: number | null }) {
     size();
     const draw = (t: number) => {
       const count = Math.max(1, Math.floor(width / PITCH));
-      if (!finishing && t - last >= SAMPLE_MS) {
+      if (t - last >= SAMPLE_MS) {
         last = t;
         const heard = level.current();
         const value = heard < 0 ? 0 : heard;
@@ -192,15 +159,12 @@ function Waveform({ voice, since }: { voice: Voice; since: number | null }) {
       }
       context.clearRect(0, 0, width, height);
       context.fillStyle = color;
-      const sweep = ((t % 1400) / 1400) * (count + 8) - 4;
       const bars = levels.current;
       bars.forEach((value, i) => {
         const slot = count - bars.length + i;
         const bar = Math.max(BAR, value * height);
         const age = (i + 1) / bars.length;
-        let alpha = 0.28 + 0.72 * age ** 0.7;
-        if (finishing)
-          alpha = reduced ? 0.45 : 0.3 + 0.7 * Math.max(0, 1 - Math.abs(slot - sweep) / 5);
+        const alpha = 0.28 + 0.72 * age ** 0.7;
         context.globalAlpha = alpha;
         context.beginPath();
         context.roundRect(slot * PITCH, (height - bar) / 2, BAR, bar, BAR / 2);
@@ -219,7 +183,7 @@ function Waveform({ voice, since }: { voice: Voice; since: number | null }) {
       resize.disconnect();
       card?.style.removeProperty("--_level");
     };
-  }, [finishing, reduced, since]);
+  }, [since]);
   return (
     <>
       <span ref={time} className="voice-time num" aria-hidden="true">

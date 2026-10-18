@@ -60,7 +60,7 @@ function liveFixture(extra: LocalDotEvent[] = []) {
           title: "Live replay",
           startedAt: new Date(Date.now() - 300_000).toISOString(),
           durationMs: events.at(-1)?.t,
-          verdict: "live",
+          verdict: events.some((event) => event.type === "session.end") ? "done" : "live",
           steps: 0,
           failedSteps: 0,
           coverFrameId: null,
@@ -70,7 +70,7 @@ function liveFixture(extra: LocalDotEvent[] = []) {
       if (address.pathname.endsWith("/recording"))
         return Response.json({
           manifest: emptyManifest("none"),
-          live: true,
+          live: !events.some((event) => event.type === "session.end"),
           upto: 0,
           servedBytes: 0,
         });
@@ -373,4 +373,161 @@ it("loads saved command details with replay and preserves them when switching sc
   } finally {
     hook.unmount();
   }
+});
+
+function switchingFixture() {
+  const extra = [
+    {
+      type: "screen.switch",
+      data: {
+        screen: "browser",
+        revision: 1,
+        geometry: { w: 1440, h: 900, scale: 1 },
+        cellId: ulid(),
+        by: "agent",
+      },
+    },
+    {
+      type: "screen.switch",
+      data: {
+        screen: "desktop",
+        revision: 2,
+        geometry: { w: 1280, h: 800, scale: 1 },
+        cellId: ulid(),
+        by: "agent",
+      },
+    },
+    { type: "session.end", data: { reason: "done" } },
+  ].map((event, i) => ({
+    ...event,
+    v: 1,
+    id: ulid(),
+    seq: i + 2,
+    t: (6000 + i * 2000) * 1000,
+    agent: "main",
+  })) as LocalDotEvent[];
+  return liveFixture(extra);
+}
+
+describe("following the recorded active screen", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    window.history.replaceState(null, "", "/");
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    window.history.replaceState(null, "", "/");
+  });
+  const ready = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+  it("follows playback switches without pausing, losing settings or reloading history", async () => {
+    const f = switchingFixture();
+    const hook = renderHook(() => useReplay(f.api, f.sessionId, f.stage, { onGoLive: vi.fn() }));
+    await ready();
+    const model = hook.result.current.model;
+    const agent = hook.result.current.agent;
+    expect(hook.result.current.screenChoice).toBe("auto");
+    expect(hook.result.current.screen).toBe("desktop");
+    act(() => {
+      hook.result.current.setSkipIdle(false);
+      hook.result.current.setSpeed(2);
+      hook.result.current.run({ kind: "mark", edge: "in" });
+      hook.result.current.run({ kind: "toggle-play" });
+    });
+    const old = f.replay.open.mock.calls.at(-1)?.[0].owner;
+    act(() => f.emit({ type: "replay-time", tMs: 5999, playing: true, idle: false }));
+    expect(hook.result.current.screen).toBe("desktop");
+    act(() => f.emit({ type: "replay-time", tMs: 6000, playing: true, idle: false }));
+    expect(hook.result.current.screen).toBe("browser");
+    expect(f.replay.transport).toHaveBeenLastCalledWith(
+      expect.objectContaining({ playing: true, speed: 2, atPlayMs: 6000 }),
+    );
+    act(() => f.emitRaw({ type: "replay-ended", owner: old }));
+    act(() => f.emitRaw({ type: "replay-time", owner: old, tMs: 0, playing: false, idle: false }));
+    expect(hook.result.current.tMs).toBe(6000);
+    expect(hook.result.current.playing).toBe(true);
+    act(() => f.emit({ type: "replay-time", tMs: 8000, playing: true, idle: false }));
+    expect(hook.result.current.screen).toBe("desktop");
+    expect(hook.result.current.speed).toBe(2);
+    expect(hook.result.current.skipIdle).toBe(false);
+    expect(hook.result.current.selection).toEqual({ fromMs: 0, toMs: 10000 });
+    expect(hook.result.current.model).toBe(model);
+    expect(hook.result.current.agent).toBe(agent);
+    expect(f.stage.current.resetSession).toHaveBeenCalledOnce();
+    expect(f.requests.filter((path) => path.includes("/events?"))).toHaveLength(1);
+    expect(f.replay.open.mock.calls.map(([source]) => source.screen)).toEqual([
+      "desktop",
+      "browser",
+      "desktop",
+    ]);
+  });
+
+  it("opens a deep link on the right screen, follows seeks both ways and honors a manual override", async () => {
+    const f = switchingFixture();
+    window.history.replaceState(null, "", `/?replay=${f.sessionId}&t=6500`);
+    const hook = renderHook(() => useReplay(f.api, f.sessionId, f.stage, { onGoLive: vi.fn() }));
+    await ready();
+    expect(f.replay.open.mock.calls.map(([source]) => source.screen)).toEqual(["browser"]);
+    expect(hook.result.current.tMs).toBe(6500);
+    act(() => hook.result.current.seek(9000, "exact"));
+    expect(hook.result.current.screen).toBe("desktop");
+    act(() => hook.result.current.seek(7000, "exact"));
+    expect(hook.result.current.screen).toBe("browser");
+    act(() => hook.result.current.setScreen("desktop"));
+    expect(hook.result.current.tMs).toBe(7000);
+    expect(hook.result.current.screenChoice).toBe("desktop");
+    expect(hook.result.current.screen).toBe("desktop");
+    act(() => hook.result.current.seek(6500, "exact"));
+    expect(hook.result.current.screen).toBe("desktop");
+    act(() => hook.result.current.setScreen("auto"));
+    expect(hook.result.current.screen).toBe("browser");
+    expect(hook.result.current.tMs).toBe(6500);
+    act(() => hook.result.current.seek(1000, "preview"));
+    expect(hook.result.current.screen).toBe("desktop");
+    act(() => hook.result.current.seek(7500, "exact"));
+    expect(hook.result.current.screen).toBe("browser");
+    expect(f.requests.filter((path) => path.includes("/events?"))).toHaveLength(1);
+  });
+
+  it("returns to the starting screen when replaying from the end", async () => {
+    const f = switchingFixture();
+    const hook = renderHook(() => useReplay(f.api, f.sessionId, f.stage, { onGoLive: vi.fn() }));
+    await ready();
+    act(() => {
+      hook.result.current.setScreen("browser");
+      hook.result.current.seek(10000, "exact");
+      hook.result.current.setScreen("auto");
+      hook.result.current.run({ kind: "toggle-play" });
+    });
+    expect(hook.result.current.tMs).toBe(0);
+    expect(hook.result.current.screen).toBe("desktop");
+    expect(hook.result.current.playing).toBe(true);
+  });
+
+  it("isolates a failed browser recording from the computer and allows switching back", async () => {
+    const f = switchingFixture();
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: (async (input, init) => {
+        if (String(input).endsWith("/recording?screen=browser"))
+          return new Response("unavailable", { status: 503 });
+        return f.api.fetch(input, init);
+      }) as typeof fetch,
+    });
+    const hook = renderHook(() => useReplay(api, f.sessionId, f.stage, { onGoLive: vi.fn() }));
+    await ready();
+    expect(hook.result.current.status).toBe("no-video");
+    act(() => hook.result.current.seek(6500, "exact"));
+    expect(hook.result.current.screen).toBe("browser");
+    expect(hook.result.current.status).toBe("error");
+    expect(f.replay.close).toHaveBeenCalledOnce();
+    act(() => hook.result.current.setScreen("desktop"));
+    expect(hook.result.current.status).toBe("no-video");
+    expect(hook.result.current.tMs).toBe(6500);
+    expect(f.replay.open.mock.calls.at(-1)?.[0].screen).toBe("desktop");
+  });
 });

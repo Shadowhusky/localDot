@@ -82,7 +82,7 @@ export function voiceStep(state: VoiceState, event: VoiceEvent): VoiceStep {
         },
       };
     case "stop":
-      return state.phase === "listening"
+      return state.phase === "listening" || state.phase === "starting"
         ? { state: { phase: "finishing" }, effect: "finish" }
         : { state };
     case "done":

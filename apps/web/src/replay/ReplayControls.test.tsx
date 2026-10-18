@@ -17,6 +17,7 @@ function replay(): ReplayState {
   return {
     sessionId: "01M4D263DDHCRM52FMG340DDF3",
     screen: "desktop",
+    screenChoice: "auto",
     status: "ready",
     card: null,
     info: { manifest: emptyManifest("none"), live: false, upto: 0, servedBytes: 0 },

@@ -226,4 +226,42 @@ describe("voice turns", () => {
     expect(voice.hearing.aborted).toBe(1);
     expect(voice.turns.state.phase).toBe("idle");
   });
+  it("waits for startup and shares one completion between Stop and Send", async () => {
+    const voice = setup();
+    voice.turns.send({ type: "press", at: 0 });
+    const first = voice.turns.finish();
+    expect(voice.turns.finish()).toBe(first);
+    expect(voice.turns.state.phase).toBe("finishing");
+    await voice.open();
+    await voice.finish("all the words");
+    expect(await first).toBe(true);
+    expect(voice.input.value).toBe("all the words");
+  });
+
+  it("settles a cancelled pending Send without waiting for a stuck speech service", async () => {
+    const voice = setup({ value: "Original" });
+    voice.turns.send({ type: "press", at: 0 });
+    await voice.open();
+    const completion = voice.turns.finish();
+    voice.turns.send({ type: "cancel" });
+    expect(await completion).toBe(false);
+    await voice.finish("too late");
+    expect(voice.input.value).toBe("Original");
+  });
+
+  it("a replaced draft or failed transcript cannot authorize automatic sending", async () => {
+    const voice = setup();
+    voice.turns.send({ type: "press", at: 0 });
+    await voice.open();
+    const completion = voice.turns.finish();
+    voice.input.value = "My newer draft";
+    await voice.finish("old speech");
+    expect(await completion).toBe(false);
+    expect(voice.input.value).toBe("My newer draft");
+    voice.turns.send({ type: "press", at: 5000 });
+    await voice.open();
+    const failed = voice.turns.finish();
+    await voice.fail(new VoiceError("network"));
+    expect(await failed).toBe(false);
+  });
 });
