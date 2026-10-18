@@ -176,7 +176,7 @@ it("offers one Turn on, on the curtain, with the island hidden under it", async 
   if (!footer) throw new Error("expected a Turn on control");
   expect(more).toEqual([]);
   expect(document.querySelector(".island")?.getAttribute("data-shape")).toBe("hidden");
-  expect(screen.queryByRole("button", { name: /^Start(?! task)/ })).toBeNull();
+  expect(document.querySelector(".island")?.hasAttribute("inert")).toBe(true);
   expect(footer.getAttribute("aria-disabled")).toBeNull();
   fireEvent.click(footer);
   expect(posts).toEqual(["/api/cells"]);
