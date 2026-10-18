@@ -62,6 +62,7 @@ export interface AgentStep {
     readonly exitCode?: number;
   };
   readonly output: readonly { readonly stream: "stdout" | "stderr"; readonly text: string }[];
+  readonly images?: readonly NonNullable<EventOf<"tool.output">["data"]["image"]>[];
   readonly outputTruncated: boolean;
   readonly terminal?: TerminalText;
 }

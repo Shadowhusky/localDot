@@ -37,6 +37,7 @@ const STATUS: Record<
     light: "you",
   },
   budget: { shape: "task", control: /^(Pause|Continue)$/, label: "Spending limit reached" },
+  "image-output": { shape: "ready", control: /^Take control$/, label: "Done" },
   done: { shape: "ready", control: /^Take control$/, label: "Done" },
   continued: { shape: "ready", control: /^Take control$/, label: "Done" },
   // The last picture holds still and the island says why.

@@ -14,6 +14,7 @@ import { webFetch } from "../web/fetch.ts";
 import { webSearch } from "../web/search.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { sourceLine } from "./research.ts";
+import { saveStepImage } from "./step-image.ts";
 import { opensInWebBrowser } from "./web-page.ts";
 
 const UNAVAILABLE = "The web can't be reached from here right now. Use the web browser instead.";
@@ -76,6 +77,15 @@ export async function webSearchTool(
         `No results. ${outcome.problems.join("; ")}. Try other words, or search in the web browser with browser_navigate.`,
       ),
     );
+  }
+  for (const picture of outcome.pictures) {
+    const alt = outcome.hits[picture.n - 1]?.title || `Image result ${picture.n}`;
+    const image = await saveStepImage(deps, ctx, picture.data, alt);
+    append(ctx, "tool.output", {
+      stream: "stdout",
+      chunk: `${picture.n}. ${ctx.redact(alt)}${image ? "" : " — Image preview could not be saved."}\n`,
+      ...(image ? { image } : {}),
+    });
   }
   append(ctx, "tool.end", { ok: true });
   append(ctx, "step.end", { status: "ok" });
@@ -157,6 +167,12 @@ export async function webFetchTool(
   ctx.check();
   ctx.session.tainted = true;
   if (got.kind === "image") {
+    const image = await saveStepImage(deps, ctx, got.data, got.url);
+    append(ctx, "tool.output", {
+      stream: "stdout",
+      chunk: image ? "" : "Image preview could not be saved.",
+      ...(image ? { image } : {}),
+    });
     append(ctx, "tool.end", { ok: true });
     append(ctx, "step.end", { status: "ok" });
     return {

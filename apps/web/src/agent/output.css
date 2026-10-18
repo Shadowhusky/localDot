@@ -177,3 +177,18 @@
 .diff-text .diff-eol {
   color: var(--color-fg-3);
 }
+
+.step-output-image {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.step-output-image img {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+.step-output-image p {
+  overflow-wrap: anywhere;
+}

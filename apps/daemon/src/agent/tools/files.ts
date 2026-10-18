@@ -4,6 +4,7 @@ import { raster } from "../../raster.ts";
 import { beginFileTracking, finishFileTracking } from "../safety/local-cleanup.ts";
 import { untrusted } from "../untrusted.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import { saveStepImage } from "./step-image.ts";
 
 const READ_MAX_BYTES = 64 * 1024;
 // What a read or a listing shows in its step: the start of what dot was given, line by line.
@@ -80,7 +81,16 @@ export async function filesTool(
               ? `${r.path} is a binary file of ${r.bytes} bytes.`
               : `${r.path}:\n${r.content}${r.truncated ? `\n(showing a bounded prefix of ${r.bytes} bytes)` : ""}`,
         );
-        step(ctx, "tool.output", { stream: "stdout", chunk: shownPart(said) });
+        const image = shown
+          ? await saveStepImage(deps, ctx, Buffer.from(shown.data, "base64"), r.path)
+          : undefined;
+        step(ctx, "tool.output", {
+          stream: "stdout",
+          chunk: shown
+            ? `${ctx.redact(r.path)} · ${r.bytes} bytes${image ? "" : "\nImage preview could not be saved."}`
+            : shownPart(said),
+          ...(image ? { image } : {}),
+        });
         result = {
           ok: true,
           fileRead: { ...r, path: ctx.redact(r.path), content: ctx.redact(r.content) },

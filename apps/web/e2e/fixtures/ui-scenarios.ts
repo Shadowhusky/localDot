@@ -66,6 +66,10 @@ export const UI_SCENARIOS = {
   ask: { about: "dot asks a question", step: "ask", stepAtBoot: true },
   takeover: { about: "dot hands control over for a sign-in", step: "takeover", stepAtBoot: true },
   budget: { about: "The task stopped at its spending limit", step: "budget", stepAtBoot: true },
+  "image-output": {
+    about: "A finished image read with a saved preview",
+    boot: { QA_PHASE: "finished", QA_STEP_IMAGE: "1" },
+  },
   done: {
     about: "The task finished with two files",
     boot: { QA_PHASE: "finished" },

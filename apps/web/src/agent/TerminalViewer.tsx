@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { type ReactNode, useMemo } from "react";
 import { Badge } from "../ui/Badge.tsx";
 import type { AgentStep } from "./model.ts";
 import { OutputCopy } from "./OutputCopy.tsx";
@@ -12,7 +12,7 @@ const STREAMS = {
 // A command that succeeded still writes warnings and notes to its error stream.
 const NOTES = { ...STREAMS.stderr, name: "Messages", copy: "Copy messages" };
 
-export function TerminalViewer({ step }: { step: AgentStep }) {
+export function TerminalViewer({ step, children }: { step: AgentStep; children?: ReactNode }) {
   const display = useMemo(() => {
     const terminal = step.terminal ?? emptyTerminal();
     return {
@@ -49,7 +49,8 @@ export function TerminalViewer({ step }: { step: AgentStep }) {
             </section>
           </section>
         ))}
-        {!streams.length && <p className="terminal-empty">No output.</p>}
+        {children}
+        {!streams.length && !children && <p className="terminal-empty">No output.</p>}
       </div>
       <div className="terminal-foot">
         {exit !== undefined && (

@@ -9,6 +9,7 @@ import { type ActivityEntry, stepDetail } from "./activity.ts";
 import { DiffViewer } from "./DiffViewer.tsx";
 import type { AgentChange } from "./model.ts";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
+import { StepImage } from "./StepImage.tsx";
 import { TerminalViewer } from "./TerminalViewer.tsx";
 
 // The observe frame is 1280×800 CSS px; target rects are device px, so they are divided by the scale.
@@ -160,7 +161,13 @@ export function ActivityDetail({
         ) : (
           <LiveFrame api={api} sessionId={sessionId} row={computer} scale={scale} />
         ))}
-      {agent && detail.output && <TerminalViewer step={agent} />}
+      {agent && detail.output && (
+        <TerminalViewer step={agent}>
+          {agent.images?.map((image) => (
+            <StepImage key={image.name} api={api} sessionId={sessionId} image={image} />
+          ))}
+        </TerminalViewer>
+      )}
       {own.map((change) => (
         <DiffViewer key={change.id} change={change} compact={own.length === 1} />
       ))}

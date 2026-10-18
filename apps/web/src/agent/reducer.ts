@@ -393,8 +393,11 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           tool: { name: e.data.tool, title: e.data.title },
           terminal: row.terminal ?? emptyTerminal(),
         };
-      else if (e.type === "tool.output") row = output(row, e.data.stream, e.data.chunk);
-      else if (row.tool)
+      else if (e.type === "tool.output") {
+        row = output(row, e.data.stream, e.data.chunk);
+        if (e.data.image && !(row.images ?? []).some((image) => image.name === e.data.image?.name))
+          row = { ...row, images: [...(row.images ?? []), e.data.image].slice(-8) };
+      } else if (row.tool)
         row = {
           ...row,
           tool: { ...row.tool, ok: e.data.ok, exitCode: e.data.exitCode },

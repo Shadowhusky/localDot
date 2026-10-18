@@ -487,3 +487,37 @@ describe("routines in a task", () => {
     ).not.toHaveProperty("origin");
   });
 });
+
+it("retains image references when rebuilding historical steps and bounds their count", () => {
+  const image = { name: `step-image-${id(44)}.jpg`, alt: "~/hero1.jpg" };
+  const events = [
+    ev(0, "step.start", { kind: "file" }, "image-read"),
+    ev(1, "tool.start", { tool: "files", title: "read hero1.jpg" }, "image-read"),
+    ev(2, "tool.output", { stream: "stdout", chunk: "hero1.jpg", image }, "image-read"),
+    ev(3, "step.end", { status: "ok" }, "image-read"),
+  ];
+  const model = reduce(events.map((e) => LocalDotEvent.parse(JSON.parse(JSON.stringify(e)))));
+  expect(model.steps.get("image-read")?.images).toEqual([image]);
+  const repeated = projectAgentEvent(
+    model,
+    ev(4, "tool.output", { stream: "stdout", chunk: "", image }, "image-read"),
+  );
+  expect(repeated.steps.get("image-read")?.images).toHaveLength(1);
+  expect(() =>
+    ev(
+      5,
+      "tool.output",
+      { stream: "stdout", chunk: "", image: { ...image, name: "../../secret.jpg" } },
+      "image-read",
+    ),
+  ).toThrow();
+  const many = Array.from({ length: 12 }, (_, i) =>
+    ev(
+      i + 5,
+      "tool.output",
+      { stream: "stdout", chunk: "", image: { ...image, name: `step-image-${id(100 + i)}.jpg` } },
+      "image-read",
+    ),
+  ).reduce(projectAgentEvent, repeated);
+  expect(many.steps.get("image-read")?.images).toHaveLength(8);
+});

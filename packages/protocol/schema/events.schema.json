@@ -2229,6 +2229,24 @@
             },
             "chunk": {
               "type": "string"
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^step-image-[0-9A-HJKMNP-TV-Z]{26}\\.jpg$"
+                },
+                "alt": {
+                  "type": "string",
+                  "maxLength": 1024
+                }
+              },
+              "required": [
+                "name",
+                "alt"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [

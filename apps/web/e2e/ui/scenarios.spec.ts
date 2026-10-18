@@ -24,6 +24,7 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   ask: hud("Needs your answer"),
   takeover: hud("You're in control"),
   budget: hud("Spending limit reached"),
+  "image-output": hud("Done"),
   done: hud("Done"),
   continued: hud("Done"),
   reconnecting: hud("Reconnecting…"),

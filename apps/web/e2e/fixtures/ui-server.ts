@@ -34,6 +34,7 @@ import {
 } from "@localdot/protocol";
 import { normalizeCatalog, providerById } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
+import sharp from "sharp";
 import {
   CHATGPT_SWITCHED_OFF,
   type CodexInstaller,
@@ -695,6 +696,12 @@ function finishTask(s: AgentSession, a: Append, done = false, markdown = false) 
   a("agent.state", { state: done ? "done" : "idle" });
 }
 
+const stepImageJpeg = env.QA_STEP_IMAGE
+  ? await sharp({ create: { width: 640, height: 400, channels: 3, background: "#88b8a0" } })
+      .jpeg()
+      .toBuffer()
+  : undefined;
+
 function seedTask(s: AgentSession, finished: boolean) {
   const a: Append = (type, data, step) => {
     skew += type === "step.end" ? 1_100_000 : 320_000;
@@ -796,6 +803,18 @@ function seedTask(s: AgentSession, finished: boolean) {
   a("tool.output", { stream: "stderr", chunk: "warning: column 'Region' is text\n" }, shell);
   a("tool.end", { ok: true, exitCode: 0 }, shell);
   a("step.end", { status: "ok" }, shell);
+  if (stepImageJpeg) {
+    const step = ulid();
+    const image = { name: `step-image-${ulid()}.jpg`, alt: "~/flower-poster/assets/hero1.jpg" };
+    const out = join(HOME, "sessions", s.id, "out");
+    mkdirSync(out, { recursive: true, mode: 0o700 });
+    writeFileSync(join(out, image.name), stepImageJpeg, { mode: 0o600 });
+    a("step.start", { kind: "file" }, step);
+    a("tool.start", { tool: "files", title: "read flower-poster/assets/hero1.jpg" }, step);
+    a("tool.output", { stream: "stdout", chunk: "hero1.jpg · 80427 bytes", image }, step);
+    a("tool.end", { ok: true }, step);
+    a("step.end", { status: "ok" }, step);
+  }
   const failed = ulid();
   a("step.start", { kind: "shell" }, failed);
   a("tool.start", { tool: "shell", title: "Validate report schema" }, failed);

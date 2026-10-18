@@ -208,7 +208,17 @@ export const ToolStart = event(
 );
 export const ToolOutput = event(
   "tool.output",
-  z.object({ stream: z.enum(["stdout", "stderr"]), chunk: z.string() }),
+  z.object({
+    stream: z.enum(["stdout", "stderr"]),
+    chunk: z.string(),
+    // Immutable, authenticated session output; never a local path or remote image URL.
+    image: z
+      .object({
+        name: z.string().regex(/^step-image-[0-9A-HJKMNP-TV-Z]{26}\.jpg$/),
+        alt: z.string().max(1024),
+      })
+      .optional(),
+  }),
 );
 export const ToolEnd = event(
   "tool.end",

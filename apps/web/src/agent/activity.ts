@@ -317,7 +317,8 @@ export function stepDetail(
     frame: !!computer && (screen || !!computer.frameId),
     output:
       !!agent &&
-      ((agent.terminal?.inputBytes ?? 0) > 0 ||
+      ((agent.images?.length ?? 0) > 0 ||
+        (agent.terminal?.inputBytes ?? 0) > 0 ||
         agent.tool?.exitCode !== undefined ||
         agent.outputTruncated),
     changes: own,

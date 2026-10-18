@@ -124,6 +124,24 @@ it("shows the model a picture it reads, as a JPEG no larger than it can use", as
   ).metadata();
   expect(meta.format).toBe("jpeg");
   expect([meta.width, meta.height]).toEqual([1568, 1045]);
+  const output = h.events().find((event) => event.type === "tool.output");
+  if (output?.type !== "tool.output") throw new Error("Missing output event");
+  expect(output.data.image?.alt).toBe("~/Downloads/shot.png");
+  expect(output.data.chunk).not.toContain("it follows");
+  if (!output.data.image) throw new Error("Missing saved image");
+  expect(h.outputs.get(output.data.image.name)).toEqual(
+    Buffer.from(picture?.type === "web_image" ? picture.data : "", "base64"),
+  );
+  // The event log stays small and keeps a durable reference, not base64 image data.
+  expect(JSON.stringify(output).length).toBeLessThan(1000);
+  h.tools.saveOutput = async () => {
+    throw new Error("Disk full");
+  };
+  const withoutPreview = ToolResult.parse(
+    (await h.call("files", { op: "read", path: "~/Downloads/shot.png" })).body,
+  );
+  expect(withoutPreview).toEqual(result);
+  expect(JSON.stringify(result)).not.toContain("step-image-");
 });
 it("shows the model no picture but a PNG, JPEG, GIF or WebP, whatever the file is called", async () => {
   const h = setup();

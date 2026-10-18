@@ -296,3 +296,45 @@ describe("research with the web tools", () => {
     expect(h.asked.every((url) => !url.includes("duckduckgo"))).toBe(true);
   });
 });
+
+// Preview persistence is not a model feature: success or failure produces identical model input.
+it.each([
+  ["web_fetch", { url: "https://upload.wikimedia.org/zelda.png" }, 1],
+  ["web_search", { query: "Zelda", kind: "images", count: 6 }, 4],
+] as const)(
+  "%s previews cost no additional model input or web requests",
+  async (tool, input, count) => {
+    const saved = harness();
+    const unavailable = harness();
+    unavailable.tools.saveOutput = async () => {
+      throw new Error("Disk full");
+    };
+    const withPreview = await saved.call(tool, input);
+    const withoutPreview = await unavailable.call(tool, input);
+    expect(withPreview.body).toEqual(withoutPreview.body);
+    expect(saved.asked).toEqual(unavailable.asked);
+    expect(new Set(saved.asked).size).toBe(saved.asked.length);
+    expect(JSON.stringify(withPreview.body)).not.toContain("step-image-");
+    const pictures = withPreview.body.content.filter((c) => c.type === "web_image");
+    expect(pictures).toHaveLength(count);
+    const events = saved.events();
+    const outputs = events.filter((e) => e.type === "tool.output" && e.data.image);
+    expect(outputs).toHaveLength(count);
+    outputs.forEach((e, i) => {
+      if (e.type !== "tool.output" || !e.data.image) throw new Error("Missing preview");
+      expect(saved.outputs.get(e.data.image.name)).toEqual(
+        Buffer.from(pictures[i]?.data ?? "", "base64"),
+      );
+      expect(JSON.stringify(e).length).toBeLessThan(2000);
+      expect(events.indexOf(e)).toBeLessThan(
+        events.findIndex((event) => event.type === "tool.end"),
+      );
+    });
+    expect(unavailable.outputs.size).toBe(0);
+    expect(
+      unavailable
+        .events()
+        .some((e) => e.type === "tool.output" && e.data.chunk.includes("could not be saved")),
+    ).toBe(true);
+  },
+);
