@@ -4024,6 +4024,24 @@
                               "format"
                             ],
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "const": "secret"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind"
+                            ],
+                            "additionalProperties": false
                           }
                         ]
                       },
