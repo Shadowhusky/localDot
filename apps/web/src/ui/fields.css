@@ -780,6 +780,16 @@
     letter-spacing: var(--text-body--letter-spacing);
   }
 
+  /* Compact tracks yield to their container while retaining readable labels and full height. */
+  .ui-segmented[data-compact] {
+    --_min: 0px;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+
+  .ui-segmented[data-compact] > .ui-segment {
+    padding-inline: calc(var(--spacing) * 2);
+  }
+
   /* A row that needs the room can draw its segments closer through --_segment-pad. */
   .ui-segmented[data-size="24"] > .ui-segment {
     padding: 0 var(--_segment-pad, calc(var(--spacing) * 2));

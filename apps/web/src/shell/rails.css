@@ -43,11 +43,20 @@
 .rail-head {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: calc(var(--spacing) * 3);
-  height: 56px;
-  padding: 0 calc(var(--spacing) * 3) 0 calc(var(--spacing) * 4);
+  gap: calc(var(--spacing) * 2);
+  min-height: 56px;
+  padding: calc(var(--spacing) * 3);
+}
+
+/* Reserve both action buttons their full hit areas. The tabs can compact to the panel's width;
+   below that, wrapping grows the header instead of clipping controls at its rounded edge. */
+.rail-head > .ui-segmented {
+  flex: 1 1 216px;
+  min-width: 0;
+  max-width: 252px;
 }
 
 /* A panel's width handle: a hairline in the gap that thickens under the pointer or while held. The
@@ -119,6 +128,7 @@
   display: flex;
   flex: none;
   gap: calc(var(--spacing) * 1);
+  margin-inline-start: auto;
 }
 
 /* Without a header the body still starts clear of the console's rounded top. */

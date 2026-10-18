@@ -34,6 +34,8 @@ export interface SegmentTrackProps {
   onReselect?(value: string): void;
   // Track height in px: 32 for a rail's header, 28 for Watch | Replay and filters, 24 inside a list.
   size?: 24 | 28 | 32;
+  // Let the segments fit a constrained container instead of reserving their usual minimum width.
+  compact?: boolean;
   // Line: tabs over a hairline, the chosen one underlined. Quiet: no track, a soft thumb.
   variant?: "line" | "quiet";
   className?: string;
@@ -103,6 +105,7 @@ export function SegmentTrack({
   onValueChange,
   onReselect,
   size = 28,
+  compact,
   variant,
   className,
   "aria-label": label,
@@ -158,6 +161,7 @@ export function SegmentTrack({
       id={parts.id}
       className={clsx("ui-segmented", className)}
       data-size={size}
+      data-compact={compact || undefined}
       data-variant={variant}
       style={{ "--_count": items.length, "--_index": Math.max(index, 0) } as CSSProperties}
     >

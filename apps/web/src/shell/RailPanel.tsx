@@ -41,6 +41,7 @@ export function RailPanel({
             <SegmentedControl
               aria-label="Show"
               size={32}
+              compact
               items={views}
               value={view}
               onValueChange={onView}
