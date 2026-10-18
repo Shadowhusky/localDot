@@ -75,6 +75,8 @@ export interface SheetDragHost {
   allowDismiss(): boolean;
   close(): void;
   reducedMotion(): boolean;
+  // A bottom-anchored resizable sheet keeps its scroll area inside the visible height.
+  presentation?: { read(): number; apply(offset: number): void; clear(): void };
 }
 
 interface Press {
@@ -101,19 +103,22 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
   const apply = (value: number) => {
     offset = value;
     const height = panel.offsetHeight || 1;
-    panel.style.translate = `0 ${value}px`;
+    if (host.presentation) host.presentation.apply(value);
+    else panel.style.translate = `0 ${value}px`;
     if (scrim) scrim.style.opacity = `${Math.min(1, Math.max(0, 1 - value / height))}`;
   };
 
   const settle = () => {
     panel.style.removeProperty("transition");
     panel.style.removeProperty("translate");
+    host.presentation?.clear();
     scrim?.style.removeProperty("transition");
     scrim?.style.removeProperty("opacity");
     offset = 0;
   };
 
   const presented = (): number => {
+    if (host.presentation) return host.presentation.read();
     const value = getComputedStyle(panel).translate;
     const y = value === "none" ? 0 : Number.parseFloat(value.split(" ")[1] ?? "0");
     return Number.isFinite(y) ? y : 0;
@@ -244,6 +249,7 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
   panel.addEventListener("touchmove", onTouchMove, { passive: false });
   return () => {
     cancelAnimationFrame(frame);
+    if (host.presentation) settle();
     panel.removeEventListener("pointerdown", onPointerDown);
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerEnd);

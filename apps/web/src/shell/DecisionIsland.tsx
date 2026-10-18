@@ -11,15 +11,19 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import { ApprovalValue } from "../agent/ApprovalValue.tsx";
 import { type DecisionScope, decisionWords, defaultScope, ONCE } from "../copy/decision.ts";
 import { clock } from "../copy/format.ts";
 import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { isApple } from "../ui/Kbd.tsx";
+import { matches, REDUCED_MOTION } from "../ui/media.ts";
 import { Presence } from "../ui/Presence.tsx";
 import { Select } from "../ui/Select.tsx";
+import { attachSheetDrag } from "../ui/sheet-drag.ts";
 import "./decision.css";
 import { useKeyboardInset } from "./layout.ts";
 
@@ -303,8 +307,7 @@ function UploadFacts({ upload }: { upload: NonNullable<ApprovalCard["upload"]> }
   );
 }
 
-// A phone's decision: a sheet over the thread at its content's height, so the stage and dot stay
-// in sight above it. It rests on the keyboard while one is up.
+// A phone's decision can grow over the stage; its full form scrolls above the keyboard.
 interface DecisionSheetProps {
   label: string;
   elapsedS: number | null;
@@ -327,13 +330,43 @@ export function DecisionSheetPresence({ show, ...sheet }: DecisionSheetProps & {
 
 export function DecisionSheet({ label, elapsedS, children }: DecisionSheetProps) {
   const keyboard = useKeyboardInset();
+  const panel = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const full = expanded || keyboard > 0;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: changing detent by button must interrupt an in-flight drag spring.
+  useEffect(() => {
+    const element = panel.current;
+    if (!element) return;
+    const height = () => Number.parseFloat(getComputedStyle(element).maxHeight);
+    return attachSheetDrag({
+      panel: element,
+      scrim: null,
+      stops: () => (keyboard ? [0] : [0, height() * 0.45]),
+      rest: (index) => flushSync(() => setExpanded(index === 0)),
+      // A swipe must never dismiss or answer an outstanding question.
+      allowDismiss: () => false,
+      close: () => {},
+      reducedMotion: () => matches(REDUCED_MOTION),
+      presentation: {
+        read: () => height() - element.getBoundingClientRect().height,
+        apply: (offset) => {
+          element.style.height = `${Math.max(120, height() - offset)}px`;
+        },
+        clear: () => element.style.removeProperty("height"),
+      },
+    });
+  }, [keyboard, expanded]);
   return (
     <div
+      ref={panel}
       className="decision-sheet"
+      data-expanded={full ? "" : undefined}
       data-keyboard={keyboard ? "" : undefined}
       style={keyboard ? ({ "--_keyboard": `${keyboard}px` } as CSSProperties) : undefined}
     >
-      <span className="decision-grabber" aria-hidden="true" />
+      <div className="decision-sheet-handle ui-sheet-handle">
+        <span className="decision-grabber" aria-hidden="true" />
+      </div>
       <div className="decision-sheet-head">
         <span className="decision-attention" aria-hidden="true" />
         <span>{label}</span>
@@ -341,7 +374,16 @@ export function DecisionSheet({ label, elapsedS, children }: DecisionSheetProps)
           {elapsedS === null ? "" : clock(elapsedS)}
         </span>
       </div>
-      {children}
+      <IconButton
+        className="decision-sheet-expand"
+        label={full ? "Collapse question" : "Expand question"}
+        icon={full ? "chevron-down" : "chevron-up"}
+        size={32}
+        aria-expanded={full}
+        onClick={() => setExpanded(!full)}
+        disabledReason={keyboard > 0 ? "Expanded while typing" : undefined}
+      />
+      <div className="decision-sheet-content">{children}</div>
     </div>
   );
 }

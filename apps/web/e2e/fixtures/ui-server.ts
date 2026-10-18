@@ -2511,6 +2511,34 @@ function ask(allowText: boolean): string | undefined {
 // Questions with typed fields (design-v2/HITL.md §3), answered through the real answer route.
 // The secret fields' targets are in the screen's pixels (2560x1600).
 const ASK_FORMS: Record<string, AskForm> = {
+  servicekey: {
+    question: "Add Cloudflare API token (Pages deploy)?",
+    fields: [
+      {
+        id: "key",
+        kind: "api_key",
+        label: "API key",
+        credential: {
+          binding: {
+            id: "pages-deploy",
+            kind: "http",
+            hosts: ["api.cloudflare.com"],
+            header: "Authorization",
+            format: "bearer",
+          },
+          metadata: {
+            label: "Cloudflare API token (Pages deploy)",
+            service: "Cloudflare",
+            description:
+              "Token used to create the project, upload the game and attach its domain. Needs Account > Cloudflare Pages: Edit, Account > Account Settings: Read, and Zone > DNS: Edit. In the dashboard: My Profile > API Tokens > Create Token > Custom token, and add those permissions for the selected account and zone. "
+                .repeat(2)
+                .slice(0, 600),
+          },
+        },
+      },
+    ],
+    submit: "Continue",
+  },
   login: {
     question: "Sign in to your mail so I can read the latest message.",
     fields: [

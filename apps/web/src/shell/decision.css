@@ -227,16 +227,12 @@
   gap: calc(var(--spacing) * 2);
 }
 
-/* A phone: the decision rises from the bottom over the thread at its content's height, with no
-   scrim, and never higher than the band, so the stage and dot stay in sight above it. With the
-   keyboard up the band has folded into the island, so only the stage stays. */
+/* The entire prompt scrolls inside its visible height, including private-key forms and actions.
+   Expanding never translates the bottom below the viewport. */
 .decision-sheet {
-  --_above: calc(
-    var(--stage-top) +
-    env(safe-area-inset-top) +
-    (100vw - 16px) /
-    1.6 +
-    var(--band-min)
+  --_full-height: max(
+    120px,
+    calc(100dvh - env(safe-area-inset-top) - 12px - var(--_keyboard, 0px))
   );
   position: fixed;
   right: 0;
@@ -245,13 +241,60 @@
   z-index: var(--layer-island);
   display: flex;
   flex-direction: column;
-  max-height: calc(100dvh - var(--_above) - var(--_keyboard, 0px));
-  padding-bottom: max(calc(var(--spacing) * 5), env(safe-area-inset-bottom));
-  transition: bottom var(--dur-default) var(--ease-spring);
+  height: calc(var(--_full-height) * 0.55);
+  max-height: var(--_full-height);
+  min-height: 0;
+  overflow: hidden;
   border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
   background-color: var(--color-overlay);
   box-shadow: var(--shadow-overlay);
   animation: decision-sheet-in var(--dur-gentle) var(--ease-spring) backwards;
+}
+.decision-sheet[data-expanded] {
+  height: var(--_full-height);
+}
+.decision-sheet-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  padding-bottom: max(calc(var(--spacing) * 5), env(safe-area-inset-bottom));
+  scroll-padding-block: calc(var(--spacing) * 4);
+}
+.decision-sheet-content > .decision {
+  max-height: none;
+}
+.decision-sheet-content .decision-body {
+  flex: none;
+  overflow: visible;
+}
+.decision-sheet-handle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  height: 24px;
+  touch-action: none;
+  cursor: ns-resize;
+}
+.decision-sheet-expand {
+  position: absolute;
+  top: 24px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-fg-2);
+}
+.decision-sheet-expand:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+}
+.decision-sheet-expand[aria-disabled="true"] {
+  visibility: hidden;
 }
 
 /* Answered, it sinks back the way it rose, still showing what it asked. Its holder has no box, so
@@ -263,10 +306,6 @@
 .ui-presence[data-leaving] .decision-sheet {
   translate: 0 100%;
   transition: translate var(--dur-sheet-exit) var(--ease-exit);
-}
-
-.decision-sheet[data-keyboard] {
-  --_above: calc(var(--stage-top) + env(safe-area-inset-top) + (100vw - 16px) / 1.6 + 8px);
 }
 
 /* Held sideways a phone has little height: the sheet keeps a readable width, and its body scrolls
@@ -288,7 +327,7 @@
   flex: none;
   width: 36px;
   height: 5px;
-  margin: calc(var(--spacing) * 1.5) auto 0;
+  margin: 0 auto;
   border-radius: var(--radius-full);
   background-color: var(--color-grabber);
 }
@@ -299,7 +338,7 @@
   align-items: center;
   gap: calc(var(--spacing) * 2);
   height: 28px;
-  margin: calc(var(--spacing) * 1) calc(var(--spacing) * 5) 0;
+  margin: 0 calc(var(--spacing) * 14) calc(var(--spacing) * 2) calc(var(--spacing) * 5);
   color: var(--color-fg-2);
   font:
     var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
