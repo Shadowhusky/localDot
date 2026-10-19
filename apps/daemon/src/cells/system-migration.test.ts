@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { DockerError, type DockerRequest } from "./docker.ts";
-import { SYSTEM_BASE, SystemMigration } from "./system-migration.ts";
+import { retireMigrationScratch, SYSTEM_BASE, SystemMigration } from "./system-migration.ts";
 import { SystemBaseMissing } from "./system-migration-plan.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -150,6 +150,17 @@ it("commits the update's backup and new system with no stream password or deskto
     "localdot/updated-system",
   ]);
   expect(commits.at(-1)?.image).toBe(result);
+  expect(
+    request.mock.calls.filter(([r]) => r.method === "DELETE" && r.path.startsWith("/images/")),
+  ).toEqual([
+    [
+      {
+        method: "DELETE",
+        path: `/images/${encodeURIComponent(commits[0]?.image ?? "missing")}`,
+        query: { force: "false", noprune: "true" },
+      },
+    ],
+  ]);
   for (const { repo, image } of commits) {
     const env = images.get(image) ?? [];
     expect(env, repo).toEqual(expect.arrayContaining(["LOCALDOT_DESKTOPD_TOKEN=", "PASSWORD="]));
@@ -158,4 +169,103 @@ it("commits the update's backup and new system with no stream password or deskto
   expect(images.get(result)).toEqual(
     expect.arrayContaining(["PATH=/usr/bin", "LANG=C.UTF-8", "PUID=1000"]),
   );
+});
+
+function scratch() {
+  const source = {
+    Id: "owned",
+    Image: system,
+    State: { Running: false, Paused: false },
+    Config: { Labels: { "localdot.cell": "cell", "localdot.role": "desktop" } },
+  };
+  const request = vi.fn(
+    async (req: DockerRequest): Promise<unknown> => (req.method === "GET" ? source : undefined),
+  );
+  const attempt = {
+    cell: "cell",
+    sourceId: "owned",
+    sourceImage: system,
+    protectedImages: [base, target, system],
+    images: [`sha256:${"d".repeat(64)}`, `sha256:${"e".repeat(64)}`],
+  };
+  return { source, request, attempt };
+}
+it("retires failed candidate then checkpoint by exact ID without pruning ancestors", async () => {
+  const f = scratch();
+  await retireMigrationScratch({ request: f.request } as never, f.attempt);
+  expect(f.request.mock.calls.map(([r]) => r.method)).toEqual(["GET", "DELETE", "GET", "DELETE"]);
+  expect(f.request.mock.calls.filter(([r]) => r.method === "DELETE").map(([r]) => r)).toEqual(
+    f.attempt.images.map((id) => ({
+      method: "DELETE",
+      path: `/images/${encodeURIComponent(id)}`,
+      query: { force: "false", noprune: "true" },
+    })),
+  );
+});
+it.each([
+  "running",
+  "paused",
+  "replaced",
+  "wrong-cell",
+  "wrong-role",
+  "different-image",
+  "missing-state",
+])("retains scratch when the original is %s", async (kind) => {
+  const f = scratch();
+  if (kind === "running") f.source.State.Running = true;
+  if (kind === "paused") f.source.State.Paused = true;
+  if (kind === "replaced") f.source.Id = "other";
+  if (kind === "wrong-cell") f.source.Config.Labels["localdot.cell"] = "other";
+  if (kind === "wrong-role") f.source.Config.Labels["localdot.role"] = "gate";
+  if (kind === "different-image") f.source.Image = target;
+  if (kind === "missing-state") delete (f.source as { State?: unknown }).State;
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await retireMigrationScratch({ request: f.request } as never, f.attempt);
+    expect(f.request.mock.calls.some(([r]) => r.method === "DELETE")).toBe(false);
+  } finally {
+    log.mockRestore();
+  }
+});
+it("preserves delivered, base and source images even if Docker deduplicates a commit", async () => {
+  const f = scratch();
+  f.attempt.images = [base, target, system, "invalid"];
+  await retireMigrationScratch({ request: f.request } as never, f.attempt);
+  expect(f.request).not.toHaveBeenCalled();
+});
+it.each(["source-outage", "reference-conflict"])(
+  "keeps recovery data on %s without failing the update",
+  async (kind) => {
+    const f = scratch();
+    f.request.mockImplementation(async (req) => {
+      if (kind === "source-outage" || req.method === "DELETE")
+        throw new DockerError(409, "test", req.path);
+      return f.source;
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(
+        retireMigrationScratch({ request: f.request } as never, f.attempt),
+      ).resolves.toBeUndefined();
+      if (kind === "source-outage")
+        expect(f.request.mock.calls.every(([r]) => r.method === "GET")).toBe(true);
+      else
+        expect(
+          f.request.mock.calls
+            .filter(([r]) => r.method === "DELETE")
+            .every(([r]) => r.query?.force === "false"),
+        ).toBe(true);
+    } finally {
+      log.mockRestore();
+    }
+  },
+);
+it("rechecks the original before each image removal", async () => {
+  const f = scratch();
+  f.request.mockImplementation(async (req) => {
+    if (req.method === "DELETE") f.source.State.Running = true;
+    return f.source;
+  });
+  await retireMigrationScratch({ request: f.request } as never, f.attempt);
+  expect(f.request.mock.calls.filter(([r]) => r.method === "DELETE")).toHaveLength(1);
 });

@@ -99,11 +99,11 @@ export class SystemMigration {
         path: `/images/${encodeURIComponent(id)}/tag`,
         query: { repo: "localdot/system-base", tag: id.slice("sha256:".length) },
       });
-    return { sourceId, base, image };
+    return { sourceId, sourceImage: source.Image, base, image };
   }
 
   async prepare(record: CellRecord, target: string): Promise<string> {
-    const { sourceId, base, image } = await this.#inspect(record, target, true);
+    const { sourceId, sourceImage, base, image } = await this.#inspect(record, target, true);
     const docker = this.docker;
     const operation = randomUUID();
     const helpers: string[] = [];
@@ -120,6 +120,8 @@ export class SystemMigration {
       body: { Env: BLANK_CREDENTIALS },
     });
     imageId.parse(checkpoint.Id);
+    let candidate: string | undefined;
+    let delivered = false;
     try {
       const original = await scan(base);
       const fresh = await scan(target);
@@ -216,7 +218,9 @@ export class SystemMigration {
         },
       });
       const result = imageId.parse(committed.Id);
+      candidate = result;
       verifyMigration(saved.manifest, after, (await scan(result)).manifest, plan);
+      delivered = true;
       return result;
     } finally {
       for (const id of helpers.reverse()) {
@@ -224,6 +228,19 @@ export class SystemMigration {
           .request({ method: "DELETE", path: route(id), query: { force: "true", v: "true" } })
           .catch(() => console.error("Computer update helper cleanup needs retry"));
       }
+      // Only this attempt's temporary images are eligible. Never scan or prune saved systems.
+      await retireMigrationScratch(docker, {
+        cell: record.id,
+        sourceId,
+        sourceImage,
+        protectedImages: [
+          base,
+          target,
+          sourceImage,
+          ...(delivered && candidate ? [candidate] : []),
+        ],
+        images: [...(!delivered && candidate ? [candidate] : []), checkpoint.Id],
+      });
     }
     async function helper(
       image: string,
@@ -368,4 +385,46 @@ export async function verifyMigratedImage(
     expected.Os !== "linux"
   )
     throw failure();
+}
+
+/** Best-effort retirement after helpers stop. The unchanged, stopped original remains the
+ * recovery authority. A failed check or Docker conflict keeps the scratch image for recovery.
+ * Never force removal or prune ancestors: saved systems can share these layers.
+ */
+export async function retireMigrationScratch(
+  docker: Docker,
+  attempt: {
+    cell: string;
+    sourceId: string;
+    sourceImage: string;
+    protectedImages: string[];
+    images: string[];
+  },
+): Promise<void> {
+  for (const id of new Set(attempt.images)) {
+    if (!imageId.safeParse(id).success || attempt.protectedImages.includes(id)) continue;
+    try {
+      const source = await docker.request<Container>({
+        method: "GET",
+        path: `${route(attempt.sourceId)}/json`,
+      });
+      if (
+        source.Id !== attempt.sourceId ||
+        source.Image !== attempt.sourceImage ||
+        source.State.Running !== false ||
+        source.State.Paused !== false ||
+        source.Config.Labels?.["localdot.cell"] !== attempt.cell ||
+        source.Config.Labels?.["localdot.role"] !== "desktop"
+      )
+        return;
+      await docker.request({
+        method: "DELETE",
+        path: `/images/${encodeURIComponent(id)}`,
+        query: { force: "false", noprune: "true" },
+      });
+    } catch {
+      // A remaining helper, alias, child or inaccessible source must retain the image.
+      console.error("Computer update scratch image retained; cleanup could not be confirmed");
+    }
+  }
 }

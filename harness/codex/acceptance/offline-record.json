@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "5333c9c693bdc1b3d5e016236b0c2041b87810659324fc8efbe5f7bea85199fc",
+  "inputSha256": "009a4356806da8065f38adacb62baa344bf88051891bfa874c00c407223d6847",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "3348d08c5379a766a87d120001f4d7b0a8983c8fa3ae6d03e4ada1344f1f5374",
@@ -461,8 +461,8 @@
     "apps/daemon/src/cells/stream-tuning.ts": "5515977b94dd568a34d8817fa12f0bc7c4437f60351be02eb9c440b6273dbe44",
     "apps/daemon/src/cells/system-migration-plan.test.ts": "994bb90f7b50b83c2ec15283c455bec01ae83f59d4198846179f845143da4450",
     "apps/daemon/src/cells/system-migration-plan.ts": "130e83d603200673a9dea32e64ff1ed99090603ee4aa63571bc89c592bcf9f87",
-    "apps/daemon/src/cells/system-migration.test.ts": "79d085f3ac8738bfa450ffe19f42fd6fec605aefd72698eb34e5629b4d603014",
-    "apps/daemon/src/cells/system-migration.ts": "d8bdcf1bad1223b41ffb62f3ffb2afaa5b7a49f870e10e80b8d6dd72817224dc",
+    "apps/daemon/src/cells/system-migration.test.ts": "e2ce2feaa5997a53a9550d40f44fe958c3555337e214924fa01b163c6c6a36e0",
+    "apps/daemon/src/cells/system-migration.ts": "2a908ddd552087d62c0ea8b942c63a25d6830daca8022c391c4c9c2071e99533",
     "apps/daemon/src/cells/system-state-labels.test.ts": "f0e676e3640f3eac4f5584fc5b056490dd510c34070b6b4ad874edc5d752c523",
     "apps/daemon/src/cells/system-state.docker.test.ts": "bfba95e60cf2216b0807439ac47e93f2e5b4aa7ba239aaed04d93c8a9db7607c",
     "apps/daemon/src/cells/system-state.test.ts": "7d3132f7d8a4a136dbc3a0eb0c800dd06333c7bd4a0f4b83c2f41e6ed1fea05b",
@@ -1072,7 +1072,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "a7f6e3de978aba04c772e2bdce0d392309f2301e4cadac22735fc0fe4585cc9d",
+  "reportSha256": "d2407fac2acefe0a4a9776dbe16cefb647450448421c09ddc8d307cf88f980ec",
   "exit": {
     "code": 0,
     "signal": null

@@ -581,3 +581,19 @@ retain underlying blocks, so removing images need not immediately free the same 
 of host disk space. Recovery checkpoint retirement is a separate, explicit operation.
 See [Docker image removal](https://docs.docker.com/reference/cli/docker/image/rm/) for
 alias and shared-image behavior.
+
+### Computer-update scratch storage
+
+A computer update commits a temporary checkpoint before migrating the stopped root filesystem.
+After preparation, localDot retires that attempt's checkpoint and any candidate that failed
+verification. It rechecks the original container's exact identity, image, ownership and stopped
+state before each removal. The delivered candidate, original image and migration bases remain
+protected. Removal is non-forced with ancestor pruning disabled; a remaining reference or failed
+check retains the image without failing the update. Historical recovery snapshots and host Docker
+recovery disks are not swept by this operation.
+
+Developer release builds also leave expanded payloads and isolated npm caches beside their
+immutable package archives. These are development artifacts, not installed-user data. Once a
+release is verified, obsolete expanded payloads and caches may be removed while retaining its
+archive, receipts, bootstrap files and all signing material. Keep current verification candidates
+until publication is complete.
