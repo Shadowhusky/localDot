@@ -73,9 +73,16 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
     let dismissed = false;
     const fit = () => {
       frame = 0;
-      if (view.scale !== 1) return;
+      // Background tabs and keyboard transitions can briefly report an empty viewport.
+      // Never save that transient geometry as the next resting layout.
+      if (document.hidden || view.scale !== 1 || !Number.isFinite(view.height) || view.height <= 0)
+        return;
       const focused = document.activeElement?.matches(".composer-field");
       if (focused && focusedHeight === undefined) focusedHeight = restingHeight;
+      // OS keyboard controls can reopen it without pointerdown or focusin. A stale
+      // dismissal flag must not let that resize shrink the entire app.
+      if (focused && dismissed && (focusedHeight ?? restingHeight) - view.height > 1)
+        dismissed = false;
       // Lock on focus, before the first keyboard frame, and keep the lock through
       // dismissal. The 120px detection threshold must never resize the background.
       if (focused && !composing && !dismissed && focusedHeight !== undefined) {
@@ -88,7 +95,7 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
       }
       const covered = (focusedHeight ?? restingHeight) - view.height;
       if (covered > KEYBOARD_PX) sawKeyboard = true;
-      if (composing && (!focused || sawKeyboard) && covered <= 1 && view.offsetTop <= 1) {
+      if (composing && (!focused || sawKeyboard) && covered <= 1) {
         composing = false;
         focusedHeight = undefined;
         sawKeyboard = false;
@@ -99,8 +106,19 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
       const height = `${composing ? (focusedHeight ?? restingHeight) : view.height}px`;
       // A fixed shell follows the visual viewport's origin while the toolbar
       // follows its bottom. Merely shrinking the app lets Safari pan it away.
-      const top = `${composing || keyboardUp() ? view.offsetTop : 0}px`;
-      const bottom = `${view.offsetTop + view.height}px`;
+      // WebKit can leave offsetTop at the previous keyboard pan after restoring height.
+      // Clamp it to real occluded space, and never apply a stale pan to a resting shell.
+      const layoutHeight = Math.max(
+        window.innerHeight,
+        focusedHeight ?? restingHeight,
+        view.height,
+      );
+      const offset = Math.min(
+        Math.max(0, view.offsetTop || 0),
+        Math.max(0, layoutHeight - view.height),
+      );
+      const top = `${composing || keyboardUp() ? offset : 0}px`;
+      const bottom = `${offset + view.height}px`;
       if (element.style.getPropertyValue("--_composer-bottom") !== bottom)
         element.style.setProperty("--_composer-bottom", bottom);
       if (element.style.getPropertyValue("--_visible-h") !== height)
@@ -130,11 +148,13 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
     document.addEventListener("pointerdown", pointer, true);
     document.addEventListener("focusin", focus);
     document.addEventListener("focusout", schedule);
+    document.addEventListener("visibilitychange", schedule);
     return () => {
       stop();
       document.removeEventListener("pointerdown", pointer, true);
       document.removeEventListener("focusin", focus);
       document.removeEventListener("focusout", schedule);
+      document.removeEventListener("visibilitychange", schedule);
       element.removeAttribute("data-composer-keyboard");
       element.style.removeProperty("--_composer-bottom");
       element.style.removeProperty("--_composer-rest-height");

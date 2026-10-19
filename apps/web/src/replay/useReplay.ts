@@ -28,6 +28,7 @@ import { projectAgentEvent } from "../agent/reducer.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import type { StageHandle } from "../stage/Stage.tsx";
 import type { ReplaySource, ReplayStatus } from "../stage/worker-protocol.ts";
+import { WorkHistory } from "../work/work-view.ts";
 import { compareFrames, followRule, type ReplayCommand } from "./replay-view.ts";
 import { SeekGate } from "./seek-gate.ts";
 
@@ -44,6 +45,7 @@ export interface ReplayState {
   info: RecordingInfo | null;
   model: SessionModel;
   agent: AgentModel;
+  work: WorkHistory;
   version: number;
   tMs: number;
   playing: boolean;
@@ -77,6 +79,7 @@ function initialState(sessionId: string | null): ReplayValues {
     info: null,
     model: emptyModel(),
     agent: emptyAgentModel(),
+    work: new WorkHistory(),
     version: 0,
     tMs: 0,
     playing: false,
@@ -356,6 +359,7 @@ export function useReplay(
     let lastRefresh = 0;
     const model = emptyModel();
     let agent = emptyAgentModel();
+    const work = new WorkHistory();
     const change = (patch: Partial<ReplayValues>) => {
       if (controller.signal.aborted) return;
       current.current = { ...current.current, ...patch };
@@ -365,7 +369,7 @@ export function useReplay(
     let openedScreen: ScreenName | null = null;
     recordings.current = new Map();
     mediaOwner.current++;
-    change({ ...initialState(sessionId), model });
+    change({ ...initialState(sessionId), model, work });
     lastEventMs.current = 0;
     pendingSeekTime.current = null;
     seeks.reset();
@@ -462,7 +466,10 @@ export function useReplay(
         await readReplayEvents(api, sessionId, model.lastSeq + 1, controller.signal, (events) => {
           if (controller.signal.aborted) return;
           foldEvents(model, events);
-          for (const event of events) agent = projectAgentEvent(agent, event);
+          for (const event of events) {
+            agent = projectAgentEvent(agent, event);
+            work.add(event, agent);
+          }
           lastEventMs.current = Math.max(
             lastEventMs.current,
             sessionMsOf(events.at(-1) as LocalDotEvent),

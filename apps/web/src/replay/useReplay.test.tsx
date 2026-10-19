@@ -531,3 +531,41 @@ describe("following the recorded active screen", () => {
     expect(f.replay.open.mock.calls.at(-1)?.[0].screen).toBe("desktop");
   });
 });
+
+describe("recorded background work", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+  it("reuses the history transport and projects output only at its recorded time", async () => {
+    const step = ulid();
+    const make = (seq: number, type: string, data: unknown) =>
+      ({
+        v: 1,
+        id: ulid(),
+        seq,
+        t: seq * 3_000_000,
+        agent: "main",
+        step,
+        type,
+        data,
+      }) as LocalDotEvent;
+    const f = liveFixture([
+      make(2, "tool.start", { tool: "shell", title: "Build project" }),
+      make(3, "tool.output", { stream: "stdout", chunk: "Compiled" }),
+      make(4, "tool.output", { stream: "stdout", chunk: " and tested" }),
+    ]);
+    const hook = renderHook(() => useReplay(f.api, f.sessionId, f.stage, { onGoLive: vi.fn() }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(hook.result.current.work.at(9000)?.text).toBe("Compiled");
+    expect(hook.result.current.work.at(12000)?.text).toBe("Compiled and tested");
+    expect(hook.result.current.work.at(0)).toBeNull();
+    expect(f.requests.filter((path) => path.includes("/events"))).toHaveLength(1);
+    expect(f.requests.some((path) => path.includes("/files/") || path.includes("/history"))).toBe(
+      false,
+    );
+  });
+});

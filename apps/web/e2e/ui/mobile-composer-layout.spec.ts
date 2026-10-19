@@ -14,7 +14,7 @@ for (const width of [320, 390, 430]) {
     for (const control of [
       card.locator(".composer-model"),
       card.locator(".composer-send"),
-      card.getByRole("button", { name: "Attach files" }),
+      ...(width > 320 ? [card.getByRole("button", { name: "Attach files" })] : []),
     ]) {
       const rect = await control.boundingBox();
       expect(
@@ -23,6 +23,20 @@ for (const width of [320, 390, 430]) {
       expect(
         rect && row && rect.x >= row.x - 1 && rect.x + rect.width <= row.x + row.width + 1,
       ).toBe(true);
+    }
+    // The compact 320px layout deliberately places Attach beside the text field
+    // to retain full touch targets. Check that placement rather than the old row layout.
+    if (width === 320) {
+      const attach = card.getByRole("button", { name: "Attach files" });
+      const rect = await attach.boundingBox();
+      const field = await box.boundingBox();
+      expect(
+        rect &&
+          field &&
+          rect.y >= field.y - 1 &&
+          rect.y + rect.height <= field.y + field.height + 1,
+      ).toBe(true);
+      await expect(attach).toBeVisible();
     }
     await page.screenshot({ path: test.info().outputPath(`composer-${width}.png`) });
     await card.locator(".composer-model").click();
@@ -232,4 +246,66 @@ test("tapping an already focused composer relocks the next keyboard transition",
   await expect(app).toHaveAttribute("data-composer-keyboard", "");
   await resize(832);
   await expect.poll(async () => (await app.boundingBox())?.height).toBe(844);
+});
+
+test("keyboard recovery tolerates a stale pan and reopening without another focus event", async ({
+  page,
+  ui,
+}) => {
+  await ui.open("running");
+  const app = page.locator(".app");
+  await expect(app).not.toHaveAttribute("data-entering");
+  const field = (await composer(page)).getByRole("textbox", { name: "Message", exact: true });
+  await field.fill("Keep this draft visible");
+  const viewport = async (height: number, offsetTop: number) => {
+    await page.evaluate(
+      ({ height, offsetTop }) => {
+        const view = window.visualViewport;
+        if (!view) throw new Error("Visual viewport required");
+        Object.defineProperty(view, "height", { configurable: true, value: height });
+        Object.defineProperty(view, "offsetTop", { configurable: true, value: offsetTop });
+        view.dispatchEvent(new Event("resize"));
+      },
+      { height, offsetTop },
+    );
+  };
+  await viewport(534, 240);
+  await expect(app).toHaveAttribute("data-composer-keyboard", "");
+  // Focus locks synchronously; wait until the first keyboard geometry has actually landed.
+  await expect
+    .poll(() => app.evaluate((e) => e.style.getPropertyValue("--_composer-bottom")))
+    .toBe("774px");
+  // WebKit can retain the old pan after the keyboard has gone away.
+  await viewport(844, 240);
+  await expect(app).not.toHaveAttribute("data-composer-keyboard");
+  await expect
+    .poll(() => app.evaluate((e) => e.style.getPropertyValue("--_visible-top")))
+    .toBe("0px");
+  // The textarea can stay focused while the OS dismisses/reopens the keyboard.
+  for (const height of [832, 784, 534]) {
+    await viewport(height, 0);
+    await expect(app).toHaveAttribute("data-composer-keyboard", "");
+    await expect.poll(async () => (await app.boundingBox())?.height).toBe(844);
+  }
+  await expect
+    .poll(async () => {
+      const rect = await page.locator(".thread-toolbar").boundingBox();
+      return Math.round((rect?.y ?? 0) + (rect?.height ?? 0));
+    })
+    .toBe(534);
+  await expect(field).toHaveValue("Keep this draft visible");
+  // Ignore transient unusable geometry while the tab is suspended, then recover on pageshow.
+  await viewport(0, 844);
+  await expect
+    .poll(() => app.evaluate((e) => e.style.getPropertyValue("--_composer-bottom")))
+    .toBe("534px");
+  await page.evaluate(() => {
+    const view = window.visualViewport;
+    if (!view) throw new Error("Visual viewport required");
+    Object.defineProperty(view, "height", { configurable: true, value: 844 });
+    Object.defineProperty(view, "offsetTop", { configurable: true, value: 240 });
+    window.dispatchEvent(new Event("pageshow"));
+  });
+  await expect(app).not.toHaveAttribute("data-composer-keyboard");
+  await expect(field).toBeVisible();
 });

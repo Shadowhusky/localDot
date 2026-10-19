@@ -958,3 +958,91 @@
 .stream-menu-note {
   padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
 }
+
+/* Event-driven work view, layered over the still-mounted screen. */
+.work-view {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: inherit;
+  overflow: hidden;
+}
+.work-surface {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--color-well);
+  color: var(--color-fg-1);
+  pointer-events: auto;
+}
+.work-heading {
+  flex: none;
+  min-width: 0;
+  padding: calc(var(--spacing) * 4) calc(var(--spacing) * 5) calc(var(--spacing) * 2);
+}
+.work-heading span,
+.work-note {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+.work-heading h2 {
+  margin: var(--spacing) 0 0;
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-content {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  padding: 0 calc(var(--spacing) * 5) calc(var(--spacing) * 16);
+  overscroll-behavior: contain;
+  /* Query the available scroll viewport, not the browser window or image contents. */
+  container-type: size;
+}
+.work-content pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--text-callout) / var(--text-body--line-height) var(--font-mono);
+}
+.work-controls {
+  position: absolute;
+  bottom: calc(var(--spacing) * 3);
+  left: calc(var(--spacing) * 3);
+  display: flex;
+  align-items: center;
+  max-width: calc(100% - var(--spacing) * 20);
+  gap: var(--spacing);
+  background: var(--color-raised);
+  border-radius: var(--radius-md);
+  pointer-events: auto;
+}
+.work-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 100cqh;
+  object-fit: contain;
+  margin-bottom: calc(var(--spacing) * 3);
+}
+.work-view[data-replay] .work-controls {
+  top: calc(var(--spacing) * 2);
+  bottom: auto;
+}
+.work-view[data-replay] .work-heading {
+  padding-top: calc(var(--spacing) * 14);
+}
+.work-view[data-replay] .work-content {
+  padding-bottom: calc(var(--spacing) * 22);
+}
+
+/* The transport still reports missing video; a video-gap card must not cover real work output. */
+.stage:has(.work-view[data-work]) .replay-gap-card {
+  display: none;
+}

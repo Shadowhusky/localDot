@@ -15,12 +15,28 @@ export function useMobileScreen(phone: boolean) {
     const host = ref.current;
     const frame = host?.querySelector<HTMLElement>(".stage-frame");
     if (!phone || !host || !frame) return;
-    const measure = () =>
-      host.style.setProperty("--mobile-screen-height", `${frame.offsetHeight}px`);
+    const measure = () => {
+      const height = `${frame.offsetHeight}px`;
+      if (host.style.getPropertyValue("--mobile-screen-height") !== height)
+        host.style.setProperty("--mobile-screen-height", height);
+    };
     measure();
-    const observer = new ResizeObserver(measure);
+    // Changing an ancestor's max-height inside ResizeObserver resizes the sibling conversation
+    // in the same delivery cycle. WebKit reports a loop on full-screen exit. Coalesce that write
+    // into the next frame; keep the first measurement synchronous for the initial layout.
+    let pending: number | undefined;
+    const observer = new ResizeObserver(() => {
+      if (pending !== undefined) return;
+      pending = requestAnimationFrame(() => {
+        pending = undefined;
+        measure();
+      });
+    });
     observer.observe(frame);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (pending !== undefined) cancelAnimationFrame(pending);
+    };
   }, [phone]);
   return {
     ref,

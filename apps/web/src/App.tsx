@@ -179,6 +179,8 @@ import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
 import { showToast, Toaster } from "./ui/Toast.tsx";
+import { WorkView } from "./work/WorkView.tsx";
+import { workCard } from "./work/work-view.ts";
 import "./app.css";
 import { speechLanguage } from "./voice/language.ts";
 import { useListening } from "./voice/listening.ts";
@@ -602,6 +604,7 @@ function Theatre({ api }: { api: ApiClient }) {
     return () => controller.abort();
   }, [api, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
+  const currentWork = useMemo(() => workCard(agent.model), [agent.model]);
   // Browsing history never changes who owns the physical computer.
   const [viewedConversation, setViewedConversation] = useState<{
     id: string;
@@ -1958,6 +1961,27 @@ function Theatre({ api }: { api: ApiClient }) {
                         onRefused: setPasteRefused,
                       }
                     : undefined
+                }
+              />
+              <WorkView
+                key={agent.sessionId ?? "empty"}
+                api={api}
+                sessionId={agent.sessionId ?? ""}
+                candidate={currentWork}
+                enabled={
+                  !!agent.sessionId &&
+                  !replayId &&
+                  !takeover &&
+                  !agent.snapshot?.holder &&
+                  !agent.snapshot?.manualControl &&
+                  !decision &&
+                  !approval &&
+                  !question &&
+                  !curtain.up &&
+                  !mobileScreen.minimized &&
+                  !agent.model.safetyPaused?.paused &&
+                  !agent.model.budget &&
+                  !agent.model.retrying
                 }
               />
               {!yours && !full && !focus && stageHud.live && (

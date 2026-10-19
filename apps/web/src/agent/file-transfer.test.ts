@@ -261,3 +261,20 @@ describe("bounded authenticated user file transfers", () => {
     expect(onUnauthorized).toHaveBeenCalledOnce();
   });
 });
+
+it("allows a smaller preview limit and stops a chunked response at that limit", async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(new Uint8Array(32));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const { api } = fixture(async () => new Response(body, { headers: headers() }));
+  await expect(
+    downloadResult(api, SESSION, "report.txt", new AbortController().signal, 16),
+  ).rejects.toBeInstanceOf(FileTransferFailure);
+  expect(cancelled).toBe(true);
+});

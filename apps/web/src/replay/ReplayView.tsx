@@ -36,6 +36,7 @@ import { Presence } from "../ui/Presence.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select } from "../ui/Select.tsx";
+import { WorkView } from "../work/WorkView.tsx";
 import { CompareView } from "./CompareView.tsx";
 import { GapCard, type GapKind } from "./GapCard.tsx";
 import { LOADING, ReplayControls } from "./ReplayControls.tsx";
@@ -816,6 +817,21 @@ function Player({
             cell={null}
             reconnects={0}
             listed={[]}
+          />
+          <WorkView
+            key={sessionId}
+            api={api}
+            sessionId={sessionId}
+            candidate={replay.work.at(replay.tMs)}
+            replay
+            enabled={
+              visible &&
+              !opening &&
+              !lost &&
+              !replay.compare &&
+              !exportOpen &&
+              replay.screenChoice === "auto"
+            }
           />
           <Presence show={opening}>
             <DotLoader className="replay-opening" label="Opening this recording" />

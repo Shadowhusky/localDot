@@ -687,29 +687,57 @@ export function Conversation({
       else if (tasks?.more && !tasks.reading) tasks.older();
     } else if (edge === "newer" && now.hasNewer) now.newer();
   }, []);
+  const edgeNodes = useRef<{ older: HTMLElement | null; newer: HTMLElement | null }>({
+    older: null,
+    newer: null,
+  });
   const edges = useMemo(() => {
     const watch = (edge: "older" | "newer") => (element: HTMLElement | null) => {
+      edgeNodes.current[edge] = element;
       if (!element) return;
-      if (!observer.current && typeof IntersectionObserver !== "undefined" && scroller.current)
-        observer.current = new IntersectionObserver(
-          (entries) => {
-            for (const entry of entries) {
-              const end = (entry.target as HTMLElement).dataset.edge as "older" | "newer";
-              reached.current[end] = entry.isIntersecting;
-              if (entry.isIntersecting) moveAt(end);
-            }
-          },
-          { root: scroller.current, rootMargin: "240px 0px" },
-        );
       element.dataset.edge = edge;
       observer.current?.observe(element);
       return () => {
         reached.current[edge] = false;
+        edgeNodes.current[edge] = null;
         observer.current?.unobserve(element);
       };
     };
     return { older: watch("older"), newer: watch("newer") };
+  }, []);
+  // Child refs attach before the scroll root. Connect after all refs exist, and reconnect
+  // after effect cleanup instead of retaining a disconnected observer.
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined" || !scroller.current) return;
+    const watching = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const edge = (entry.target as HTMLElement).dataset.edge as "older" | "newer";
+          reached.current[edge] = entry.isIntersecting;
+          if (entry.isIntersecting) moveAt(edge);
+        }
+      },
+      { root: scroller.current, rootMargin: "240px 0px" },
+    );
+    observer.current = watching;
+    for (const node of Object.values(edgeNodes.current)) if (node) watching.observe(node);
+    return () => {
+      watching.disconnect();
+      observer.current = null;
+      reached.current = { older: false, newer: false };
+    };
   }, [moveAt]);
+  // At the bottom, replacing a page can leave the later marker intersecting throughout.
+  // IntersectionObserver does not notify again for that. Re-measure after page progress;
+  // continue only if the marker is STILL near the viewport after scroll anchoring settles.
+  const lastPageKey = rows.at(-1)?.item.key;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: page boundaries trigger a fresh geometry observation.
+  useEffect(() => {
+    const node = edgeNodes.current.newer;
+    if (!node) return;
+    observer.current?.unobserve(node);
+    observer.current?.observe(node);
+  }, [page.start, lastPageKey]);
   const reading = (stop = true) => {
     if (stop) follow.interrupt();
     setHolding(null);
@@ -718,7 +746,6 @@ export function Conversation({
     if (reached.current.older) moveAt("older");
     else if (reached.current.newer) moveAt("newer");
   };
-  useEffect(() => () => observer.current?.disconnect(), []);
   // An earlier task read in while the reader waits at the top comes into the page at once.
   const total = items.length;
   // biome-ignore lint/correctness/useExhaustiveDependencies: a longer thread is the trigger.

@@ -3020,6 +3020,54 @@ routes.post("/__qa/research", (c) => {
   if (!session) return c.text("no session", 409);
   return reply(readSources(session, Number(c.req.query("n") ?? 1)));
 });
+// Real protocol events for the work display; no background processes or model calls.
+let workStep: string | undefined;
+routes.post("/__qa/work", (c) => {
+  if (!session) return c.text("no session", 409);
+  const kind = c.req.query("kind") ?? "shell";
+  if (kind === "image" && !stepImageJpeg) return c.text("image fixture required", 400);
+  if (kind === "output" && workStep) {
+    session.append(
+      "tool.output",
+      { stream: "stdout", chunk: c.req.query("text") ?? "More output\n" },
+      workStep,
+    );
+  } else {
+    workStep = ulid();
+    session.append(
+      "step.start",
+      { kind: kind === "browser" ? "browser" : kind === "files" ? "file" : "shell" },
+      workStep,
+    );
+    session.append(
+      "tool.start",
+      {
+        tool: kind === "browser" ? "browser_read" : kind === "image" ? "files" : kind,
+        title: kind === "files" ? "Update report.csv" : "Check the project",
+      },
+      workStep,
+    );
+    if (kind === "image" && stepImageJpeg) {
+      const image = { name: `step-image-${ulid()}.jpg`, alt: "Saved work preview" };
+      const out = join(HOME, "sessions", session.id, "out");
+      mkdirSync(out, { recursive: true, mode: 0o700 });
+      writeFileSync(join(out, image.name), stepImageJpeg, { mode: 0o600 });
+      session.append("tool.output", { stream: "stdout", chunk: "Read image", image }, workStep);
+    } else if (kind === "files")
+      session.append(
+        "file.change",
+        { path: "report.csv", op: "modify", patch: "-total,20\n+total,24" },
+        workStep,
+      );
+    else if (kind !== "browser")
+      session.append(
+        "tool.output",
+        { stream: "stdout", chunk: "Checking the project…\n" },
+        workStep,
+      );
+  }
+  return c.json({ ok: true });
+});
 routes.post("/__qa/steps", (c) => {
   if (!session) return c.text("no session", 409);
   for (let n = Number(c.req.query("n") ?? 1); n > 0; n--)

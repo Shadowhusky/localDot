@@ -196,8 +196,15 @@ export async function downloadResult(
   sessionId: string,
   name: string,
   owner: AbortSignal,
+  byteLimit = FILE_LIMITS.bytes,
 ): Promise<Blob> {
-  if (!ULID_PATTERN.test(sessionId) || !safeTransferName(name) || owner.aborted)
+  if (
+    !Number.isSafeInteger(byteLimit) ||
+    byteLimit <= 0 ||
+    !ULID_PATTERN.test(sessionId) ||
+    !safeTransferName(name) ||
+    owner.aborted
+  )
     throw new FileTransferFailure(false);
   const lifetime = transferScope(owner);
   try {
@@ -225,7 +232,11 @@ export async function downloadResult(
       void response.body?.cancel().catch(() => {});
       throw new FileTransferFailure(false, response.status);
     }
-    const parts = await boundedBody(response, FILE_LIMITS.bytes, lifetime.signal);
+    const parts = await boundedBody(
+      response,
+      Math.min(FILE_LIMITS.bytes, byteLimit),
+      lifetime.signal,
+    );
     return new Blob(parts, { type: "application/octet-stream" });
   } catch (error) {
     if (error instanceof FileTransferFailure) throw error;
