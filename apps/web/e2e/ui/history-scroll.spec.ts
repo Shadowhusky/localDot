@@ -12,17 +12,20 @@ test("earlier Activity and work steps remain reachable without paging or moving 
   await expect(work).toContainText("steps");
   await work.getByRole("button", { expanded: false }).click();
   const history = work.getByRole("region", { name: "Work history" });
-  await expect.poll(() => history.locator("li").count()).toBeGreaterThan(140);
+  await expect
+    .poll(async () => Number(await history.locator("[data-last]").getAttribute("data-index")))
+    .toBeGreaterThan(140);
   await history.dispatchEvent("wheel", { deltaY: -500 });
   await history.evaluate((node) => {
     node.scrollTop = 0;
     node.dispatchEvent(new Event("scroll"));
   });
   await expect.poll(() => history.evaluate((node) => node.scrollTop)).toBe(0);
-  const oldest = await history.locator("li").first().textContent();
+  await expect(history.locator('[data-index="0"]')).toBeVisible();
+  const oldest = await history.locator('[data-index="0"]').textContent();
   await page.request.post(`${fixture.origin}/__qa/steps?n=3`);
-  await expect.poll(() => history.locator("li").count()).toBeGreaterThan(143);
-  expect(await history.locator("li").first().textContent()).toBe(oldest);
+  await expect(work).toContainText("149 steps");
+  expect(await history.locator('[data-index="0"]').textContent()).toBe(oldest);
   expect(await history.evaluate((node) => node.scrollTop)).toBeLessThan(2);
   expect(await history.evaluate((node) => node.clientHeight)).toBeLessThanOrEqual(280);
   await work.getByRole("button", { expanded: true }).click();
@@ -31,14 +34,16 @@ test("earlier Activity and work steps remain reachable without paging or moving 
   else
     await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
   const rail = page.locator(".activity-rail");
-  await expect.poll(() => rail.locator(".activity-row").count()).toBe(103);
+  // Virtualized rows stay bounded; the last logical row records the loaded window.
+  await expect(rail.locator(".activity-window-row[data-last]")).toBeVisible();
   const scroller = rail.locator('[role="tabpanel"]:not([aria-hidden]) .activity-scroll');
   await scroller.dispatchEvent("wheel", { deltaY: -500 });
   await scroller.evaluate((node) => {
     node.scrollTop = 0;
     node.dispatchEvent(new Event("scroll"));
   });
-  await expect.poll(() => rail.locator(".activity-row").count()).toBeGreaterThan(143);
+  await expect(rail.getByRole("button", { name: "Earlier steps" })).toHaveCount(0);
+  await expect(rail.locator('.activity-window-row[data-index="0"]')).toBeVisible();
   await scroller.evaluate((node) => {
     node.scrollTop = 0;
     node.dispatchEvent(new Event("scroll"));

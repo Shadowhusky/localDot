@@ -38,3 +38,13 @@
     background-color: var(--color-void);
   }
 }
+
+@layer utilities {
+  @media (width < 700px) and (height < 650px) {
+    /* The island still shows the current action; this duplicate line cannot
+       displace the collapse control or composer in a short viewport. */
+    .thread-live .thread-work-now {
+      display: none;
+    }
+  }
+}

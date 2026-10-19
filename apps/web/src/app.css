@@ -429,10 +429,10 @@
   }
 }
 
-/* On short phones, opening the detailed work list needs more than a sliver
-   above the composer. Its own heading already supplies the current narration. */
+/* Short phones reserve room for the work disclosure before it opens. Waiting
+   until expansion can leave the trigger hidden behind the composer. */
 @media (width < 700px) and (height < 650px) {
-  .app:has(.thread-live .thread-work-steps[data-open]) .stage-band {
+  .app:has(.thread-live .thread-work) .stage-band {
     display: none;
   }
 }
