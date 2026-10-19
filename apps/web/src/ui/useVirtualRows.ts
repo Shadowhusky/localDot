@@ -50,6 +50,9 @@ export function useVirtualRows(
     getItemKey,
     estimateSize,
     overscan: 6,
+    // Measuring rows can synchronously resize their scrollport. Defer the
+    // virtualizer's writes out of ResizeObserver delivery, especially on WebKit.
+    useAnimationFrameWithResizeObserver: true,
     scrollMargin: margin,
     enabled: enabled && !!scroll,
     initialOffset: () => scroll?.scrollTop ?? 0,
