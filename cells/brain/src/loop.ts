@@ -389,6 +389,7 @@ export class Agent {
       }),
     );
     return driveHarness({
+      onSubagent: (data) => sink.push({ type: "subagent.state", data }),
       sessionId: boot.sessionId,
       task: boot.task,
       signal,

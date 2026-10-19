@@ -774,8 +774,12 @@
   white-space: pre;
 }
 
+.thread-work {
+  --work-history-room: 280px;
+}
+
 .thread-work-scroll {
-  max-height: min(280px, 32dvh);
+  max-height: min(280px, 32dvh, var(--work-history-room));
   padding-inline: calc(var(--spacing) * 2);
   overscroll-behavior: contain;
   scrollbar-width: thin;

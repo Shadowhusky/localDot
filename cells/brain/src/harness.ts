@@ -31,7 +31,7 @@ import * as AgentControls from "@deepseek-ai/dsh-tool-subagent-control";
 import * as AgentList from "@deepseek-ai/dsh-tool-subagent-control/list-agents";
 import * as TodoTool from "@deepseek-ai/dsh-tool-todo";
 import ToolRuntime from "@deepseek-ai/dsh-tools";
-import type { ToolResult } from "@localdot/protocol";
+import type { EventOf, ToolResult } from "@localdot/protocol";
 import { desktopSkillProvider, type SkillComputer, skillChange } from "./harness-skills.ts";
 import { type HarnessJournal, HarnessStorage } from "./harness-storage.ts";
 
@@ -66,6 +66,7 @@ export interface HarnessHost {
     ): Promise<ToolResult>;
   };
   journal?: HarnessJournal;
+  onSubagent?(state: EventOf<"subagent.state">["data"]): void;
   beforeNativeCall?(id: string, signal: AbortSignal): Promise<string | undefined>;
   request(signal: AbortSignal, request: HarnessRequest): Promise<HarnessStep | undefined>;
   execute(
@@ -216,11 +217,49 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
         throw error;
       }
     });
+    // An idle child may still be flushing its final result or tearing down its
+    // activation. Keep ownership until upstream publishes the paired terminal
+    // event, after delivering the parent's settlement notice. Agent.status alone
+    // can retire the parent in that durability gap and lose its continuation.
+    const unsettledChildren = new Set<string>();
+    const childLabels = new Map<string, string>();
+    ctx.on("subagent/start", (info) => {
+      unsettledChildren.add(info.runId);
+      const child = ctx.agents.get(info.id);
+      const identity =
+        child && ctx.sessionProjections.snapshot(child.session, ["subagent"]).values.subagent;
+      const label = (identity?.label || "Delegated task").slice(0, 200);
+      childLabels.set(info.runId, label);
+      host.onSubagent?.({ id: info.id, runId: info.runId, label, state: "running" });
+    });
+    ctx.on("subagent/end", (info) => {
+      unsettledChildren.delete(info.runId);
+      const label = childLabels.get(info.runId) || "Delegated task";
+      childLabels.delete(info.runId);
+      const summary = info.lastAssistantMessage
+        ?.filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+        .slice(0, 5000);
+      host.onSubagent?.({
+        id: info.id,
+        runId: info.runId,
+        label,
+        state:
+          info.stopReason === "completed"
+            ? "completed"
+            : info.stopReason === "aborted"
+              ? "interrupted"
+              : "failed",
+        ...(summary ? { summary } : {}),
+      });
+    });
     const hasPendingWork = () =>
       !!host.delegation &&
-      (ctx.jobs
-        .list(SessionId(host.sessionId))
-        .some((job) => job.status === "running" || job.status === "stopping") ||
+      (unsettledChildren.size > 0 ||
+        ctx.jobs
+          .list(SessionId(host.sessionId))
+          .some((job) => job.status === "running" || job.status === "stopping") ||
         ctx.agents
           .list()
           .some((agent) => agent.id !== host.sessionId && agent.status === "running"));

@@ -1,4 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import "../ui/work-layout.css";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { count } from "../copy/format.ts";
 import type { TaskRow } from "../session/status.ts";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
@@ -72,6 +73,40 @@ export function LiveWorkLine({
   onOpenStep?(key: string): void;
 }) {
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const node = root.current;
+    const body = node?.closest<HTMLElement>(".thread-body");
+    if (!open || !node || !body) return;
+    const live = !!node.closest(".thread-live");
+    const viewport = live ? body : body.querySelector<HTMLElement>(".thread-scroll");
+    const toolbar = live ? body.querySelector<HTMLElement>(".thread-toolbar") : null;
+    const trigger = node.querySelector<HTMLElement>(".ui-disclosure-trigger");
+    const narration = node.querySelector<HTMLElement>(".thread-work-now");
+    let frame = 0;
+    const measure = () => {
+      const available =
+        (viewport?.clientHeight ?? 0) -
+        (toolbar?.offsetHeight ?? 0) -
+        (trigger?.offsetHeight ?? 0) -
+        (narration?.offsetHeight ?? 0) -
+        24;
+      node.style.setProperty("--work-history-room", `${Math.max(0, available)}px`);
+    };
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+    for (const element of [viewport, toolbar, trigger, narration])
+      if (element) observer?.observe(element);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      node.style.removeProperty("--work-history-room");
+    };
+  }, [open]);
   const running = live?.phase === "running";
   const waiting = live?.phase === "waiting";
   const lastEnd = steps.reduce<number | null>(
@@ -110,7 +145,7 @@ export function LiveWorkLine({
     .filter(Boolean)
     .join(" · ");
   return (
-    <div className="thread-work" data-running={running || undefined}>
+    <div ref={root} className="thread-work" data-running={running || undefined}>
       <Collapse open={running} className="thread-work-now">
         <p className="thread-work-line">
           {lines.map((line) => (

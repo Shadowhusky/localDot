@@ -458,6 +458,17 @@ export const TaskResult = event(
       .max(32),
   }),
 );
+// Runtime-owned child lifecycle, never a claim that the user's whole task is done.
+export const SubagentState = event(
+  "subagent.state",
+  z.object({
+    id: z.string().min(1).max(128),
+    runId: z.string().min(1).max(128),
+    label: z.string().max(200),
+    state: z.enum(["running", "completed", "interrupted", "failed"]),
+    summary: z.string().max(5000).optional(),
+  }),
+);
 // A subagent's calls, and the summaries of its history, use the main model's binding.
 export const ModelRole = z.enum(["main", "fast", "local", "subagent"]);
 export const ModelUsage = event(
@@ -566,6 +577,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   TakeoverRequest,
   TakeoverEnd,
   TaskResult,
+  SubagentState,
   ModelUsage,
   ModelRetry,
   ModelSpend,

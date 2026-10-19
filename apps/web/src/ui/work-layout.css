@@ -1,0 +1,40 @@
+@layer utilities {
+  /* One compact menu, also when Work is pinned. The closed face stays small;
+   its touch target remains 44px high and all three modes live in the menu. */
+  .work-controls .ui-select-trigger {
+    min-width: 0;
+    width: auto;
+    padding-inline: calc(var(--spacing) * 2);
+    height: 32px;
+  }
+  .work-controls .ui-select-trigger::after {
+    inset: 0;
+  }
+  @media (width < 700px) {
+    .work-controls {
+      left: calc(var(--spacing) * 2);
+      bottom: calc(var(--spacing) * 2);
+      background: transparent;
+    }
+    .work-controls .ui-select-trigger {
+      height: 44px;
+      padding-inline: calc(var(--spacing) * 2);
+      font-size: var(--text-footnote);
+      border-radius: var(--radius-full);
+      background: color-mix(in srgb, var(--color-raised) 88%, transparent);
+    }
+    .work-follow {
+      display: none;
+    }
+  }
+}
+
+@layer utilities {
+  /* The disclosure remains a usable collapse control while its own history scrolls. */
+  .thread-work-steps[data-open] > .ui-disclosure-trigger {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: var(--color-void);
+  }
+}

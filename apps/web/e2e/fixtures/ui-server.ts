@@ -3068,6 +3068,30 @@ routes.post("/__qa/work", (c) => {
   }
   return c.json({ ok: true });
 });
+routes.post("/__qa/agents", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("subagent.state", {
+    id: "research-child",
+    runId: "research-run",
+    label: "Research official sources",
+    state: "running",
+  });
+  session.append("subagent.state", {
+    id: "review-child",
+    runId: "review-run",
+    label: "Review implementation",
+    state: "running",
+  });
+  session.append("subagent.state", {
+    id: "review-child",
+    runId: "review-run",
+    label: "Review implementation",
+    state: "completed",
+    summary:
+      "Verified against https://example.test/reference. No model request is needed to display this result.",
+  });
+  return c.json({ ok: true });
+});
 routes.post("/__qa/steps", (c) => {
   if (!session) return c.text("no session", 409);
   for (let n = Number(c.req.query("n") ?? 1); n > 0; n--)

@@ -134,7 +134,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     const idle = [...done.slice(0, -1), ev("agent.state", 1700, { state: "idle" })];
     expect(view(idle, 9500).status.label).toBe("Done");
     const noResult = [...typed(), ev("agent.state", 1700, { state: "idle", reason: "gave up" })];
-    expect(view(noResult, 9500).task).toMatchObject({ row: "ready", label: "Ready" });
+    expect(view(noResult, 9500).task).toMatchObject({ row: "failed", label: "Couldn’t finish" });
   });
 
   it("shows unfinished work honestly while idle and after retirement, live and in replay", () => {
@@ -215,7 +215,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ev("agent.state", 2200, { state: "thinking" }),
       ev("agent.state", 2700, { state: "idle", reason: "gave up" }),
     ];
-    expect(view(events, 2800).task).toMatchObject({ row: "ready", label: "Ready" });
+    expect(view(events, 2800).task).toMatchObject({ row: "failed", label: "Couldn’t finish" });
     expect(
       view([...events, ev("session.end", 3000, { reason: "stopped" })], 4000).task,
     ).toMatchObject({

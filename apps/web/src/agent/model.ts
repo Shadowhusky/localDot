@@ -14,6 +14,7 @@ import type { TerminalText } from "./terminal-text.ts";
 export const AGENT_LIMITS = Object.freeze({
   messages: 512,
   steps: 256,
+  subagents: 128,
   plan: 200,
   changes: 128,
   questions: 64,
@@ -159,6 +160,10 @@ export interface ApprovalOutcome {
   readonly rule?: RuleChange;
   readonly ruleRemoved?: boolean;
 }
+export type AgentChild = EventOf<"subagent.state">["data"] & {
+  readonly startedAt: number;
+  readonly endedAt?: number;
+};
 export interface AgentModel {
   readonly screen?: ScreenSelectionSnapshot;
   readonly lastSeq: number;
@@ -172,6 +177,7 @@ export interface AgentModel {
   } | null;
   readonly messages: ReadonlyMap<string, AgentMessage>;
   readonly steps: ReadonlyMap<string, AgentStep>;
+  readonly subagents: ReadonlyMap<string, AgentChild>;
   readonly plan: readonly EventOf<"plan.set">["data"]["items"][number][];
   readonly questions: ReadonlyMap<string, AgentQuestion>;
   readonly takeovers: ReadonlyMap<string, AgentTakeover>;
@@ -219,6 +225,7 @@ export function emptyAgentModel(): AgentModel {
     lastHeartbeat: null,
     messages: new Map(),
     steps: new Map(),
+    subagents: new Map(),
     plan: [],
     questions: new Map(),
     takeovers: new Map(),

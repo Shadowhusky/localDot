@@ -28,13 +28,20 @@ export function useVirtualRows(
       );
     measure();
     if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    });
     observer.observe(port);
     observer.observe(element);
     // Content preceding the list (for example exported videos) can change its offset.
     if (element.parentElement !== port && element.parentElement)
       observer.observe(element.parentElement);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [list, enabled]);
   const getItemKey = useCallback((index: number) => keys[index] ?? index, [keys]);
   const virtual = useVirtualizer({

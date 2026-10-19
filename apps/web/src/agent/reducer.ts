@@ -26,6 +26,7 @@ const GAP_ERROR = "Some activity is missing. Reconnect to load it again.";
 const RELEVANT = new Set<LocalDotEvent["type"]>([
   "agent.state",
   "task.result",
+  "subagent.state",
   "screen.switch",
   "ask.request",
   "ask.answer",
@@ -99,6 +100,16 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
   let next: AgentModel = { ...model, lastSeq: event.seq };
   const e = event;
   switch (e.type) {
+    case "subagent.state": {
+      const previous = model.subagents.get(e.data.runId);
+      const child = {
+        ...e.data,
+        startedAt: previous?.startedAt ?? e.t,
+        ...(e.data.state === "running" ? {} : { endedAt: e.t }),
+      };
+      next = { ...next, subagents: put(model.subagents, e.data.runId, child, L.subagents) };
+      break;
+    }
     case "screen.switch": {
       const { screen, cellId, geometry, revision } = e.data;
       next = { ...next, screen: { screen, cellId, geometry, revision } };
@@ -119,7 +130,18 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       };
       break;
     case "session.end":
-      next = { ...next, ended: { ...e.data }, pendingAsk: null, pendingTakeover: null };
+      next = {
+        ...next,
+        ended: { ...e.data },
+        pendingAsk: null,
+        pendingTakeover: null,
+        subagents: new Map(
+          [...model.subagents].map(([id, child]) => [
+            id,
+            child.state === "running" ? { ...child, state: "interrupted", endedAt: e.t } : child,
+          ]),
+        ),
+      };
       break;
     case "approval.request": {
       const { kind: _kind, target: _target, preview, ...card } = e.data;

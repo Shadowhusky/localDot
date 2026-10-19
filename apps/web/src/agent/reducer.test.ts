@@ -521,3 +521,26 @@ it("retains image references when rebuilding historical steps and bounds their c
   ).reduce(projectAgentEvent, repeated);
   expect(many.steps.get("image-read")?.images).toHaveLength(8);
 });
+
+it("retains interleaved child results, separates resumed runs, and interrupts unsettled children on session end", () => {
+  const child = { id: "child-a", runId: "run-1", label: "Research" };
+  const events = [
+    ev(0, "subagent.state", { ...child, state: "running" }),
+    ev(1, "subagent.state", { ...child, id: "child-b", runId: "run-2", state: "running" }),
+    ev(2, "subagent.state", {
+      ...child,
+      state: "completed",
+      summary: "Verified https://example.test",
+    }),
+    ev(3, "subagent.state", { ...child, runId: "run-3", state: "running" }),
+    ev(4, "session.end", { reason: "error" }),
+  ];
+  const model = reduce(events);
+  expect([...model.subagents.values()].map((c) => c.state)).toEqual([
+    "completed",
+    "interrupted",
+    "interrupted",
+  ]);
+  expect(model.subagents.get("run-1")?.summary).toContain("Verified");
+  expect(events.reduce(projectAgentEvent, model)).toBe(model);
+});

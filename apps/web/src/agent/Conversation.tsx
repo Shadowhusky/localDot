@@ -839,7 +839,7 @@ export function Conversation({
       frame = requestAnimationFrame(placeDock);
     };
     dockHost.addEventListener("focusout", left);
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(placeDock);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(left);
     if (body.current) observer?.observe(body.current);
     const shown = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(footShown);
     shown?.observe(dockHost);
@@ -974,6 +974,15 @@ export function Conversation({
         className="thread-scroll"
         inert={covered}
         fade="both"
+        onClickCapture={(event) => {
+          const target =
+            event.target instanceof Element
+              ? event.target.closest<HTMLButtonElement>(
+                  ".thread-work-steps > .ui-disclosure-trigger",
+                )
+              : null;
+          if (target) follow.anchorTo(target, REVEAL_MARGIN);
+        }}
         onScroll={() => {
           seeEnd();
           if (dockHost.parentElement === end.current) footShown();

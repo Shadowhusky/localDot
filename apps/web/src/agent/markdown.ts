@@ -102,6 +102,35 @@ export function safeMarkdownLink(raw: string): string | null {
     return null;
   }
 }
+// GFM-style URL autolinks, bounded by the same token and URL limits as explicit
+// links. Code is consumed before this runs; raw HTML never becomes markup.
+function automaticLink(
+  text: string,
+  previous: string,
+): { text: string; href: string; length: number } | null {
+  const angle = text.startsWith("<");
+  if (!angle && previous && !/[\s(*_~]/u.test(previous)) return null;
+  const source = angle ? text.slice(1) : text;
+  if (!/^(https?:\/\/|www\.)/i.test(source)) return null;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: exclude control characters from URL candidates.
+  const match = /^[^\s<>"'`\u0000-\u001f\u007f-\u009f，。！？；、]+/u.exec(source);
+  if (!match) return null;
+  let label = match[0];
+  if (angle) {
+    if (text[label.length + 1] !== ">") return null;
+  } else {
+    label = label.replace(/[?!.,:;*_~]+$/, "");
+    // A closing parenthesis belongs to the URL only if it balances one inside it.
+    while (
+      label.endsWith(")") &&
+      (label.match(/\)/g)?.length ?? 0) > (label.match(/\(/g)?.length ?? 0)
+    )
+      label = label.slice(0, -1);
+  }
+  const href = safeMarkdownLink(/^www\./i.test(label) ? `https://${label}` : label);
+  return href ? { text: label, href, length: label.length + (angle ? 2 : 0) } : null;
+}
+
 export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolean } {
   let remaining = MARKDOWN_LIMITS.nodes;
   const input = raw.slice(0, MARKDOWN_LIMITS.chars).toWellFormed();
@@ -171,6 +200,14 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
           i += end + marker.length;
           continue;
         }
+      }
+      const automatic = automaticLink(rest, text[i - 1] ?? "");
+      if (automatic) {
+        flush();
+        result.push({ kind: "link", text: automatic.text, href: automatic.href });
+        remaining--;
+        i += automatic.length;
+        continue;
       }
       if (rest[0] === "\\" && /[\\`*_[\]!]/.test(rest[1] ?? "")) {
         plain += rest[1];

@@ -22,10 +22,16 @@ test("background work is readable, pinnable, bounded and yields to the actual br
   await output.evaluate((e) => {
     e.scrollTop = e.scrollHeight;
   });
-  await expect(work.getByRole("button", { name: "Follow work" })).toBeVisible();
+  await expect(work.getByRole("combobox", { name: "Display view" })).toContainText("Work");
+  if ((page.viewportSize()?.width ?? 0) < 700) {
+    const box = await work.locator(".work-controls").boundingBox();
+    expect(box?.width).toBeLessThan(100);
+    expect(box?.height).toBe(44);
+  }
   await page.request.post(`${fixture.origin}/__qa/work?kind=browser`);
   await expect(output).toBeVisible();
-  await work.getByRole("button", { name: "Follow work" }).click();
+  await work.getByRole("combobox", { name: "Display view" }).click();
+  await page.getByRole("option", { name: "Auto", exact: true }).click();
   await expect(output).toHaveCount(0);
   expect(await original?.evaluate((e) => e.isConnected)).toBe(true);
   await page.request.post(`${fixture.origin}/__qa/work?kind=files`);

@@ -58,16 +58,18 @@ describe("bounded explicit Markdown display", () => {
     expect(screen.getByRole("link", { name: "finance handbook" })).toBeTruthy();
     expect(container.querySelector(".md-host")?.textContent).toBe("handbook.example.test");
   });
-  it("allows only explicit http/https navigation with opener and referrer protections", () => {
+  it("allows explicit and automatic http/https links with opener and referrer protections", () => {
     render(
-      <SafeMarkdown text="[Read reference](https://example.test/reference)\n\nhttps://example.test/plain" />,
+      <SafeMarkdown
+        text={"[Read reference](https://example.test/reference)\n\nhttps://example.test/plain"}
+      />,
     );
     const link = screen.getByRole("link", { name: "Read reference" });
     expect(link.getAttribute("href")).toBe("https://example.test/reference");
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
     expect(link.getAttribute("referrerpolicy")).toBe("no-referrer");
-    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getAllByRole("link")).toHaveLength(2);
   });
   it("keeps malformed and deeply nested input bounded without dropping the remaining text", () => {
     const parsed = parseMarkdown("[".repeat(20_000));
@@ -278,6 +280,52 @@ describe("dot's Markdown as one plain line", () => {
     expect(markdownToPlain("one\rtwo")).toBe("one\rtwo");
     expect(markdownToPlain("**Pay** \u202eit [here](https://x.test/\u202e)")).toBe(
       "Pay \u202eit here",
+    );
+  });
+});
+
+describe("automatic response links", () => {
+  it("links plain and angle URLs across paragraphs, lists, emphasis and tables", () => {
+    render(
+      <SafeMarkdown
+        text={
+          "Open https://example.test/game. Then <https://example.test/guide>.\n\n- **https://example.test/help**\n\n| Site |\n| --- |\n| www.example.test/docs |"
+        }
+      />,
+    );
+    expect(screen.getAllByRole("link").map((a) => a.getAttribute("href"))).toEqual([
+      "https://example.test/game",
+      "https://example.test/guide",
+      "https://example.test/help",
+      "https://www.example.test/docs",
+    ]);
+  });
+  it("keeps balanced URL parentheses and leaves sentence punctuation outside links", () => {
+    render(
+      <SafeMarkdown
+        text={"(https://example.test/wiki/Test_(game)). https://example.test/a_b?q=one&v=two。完成"}
+      />,
+    );
+    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual([
+      "https://example.test/wiki/Test_(game)",
+      "https://example.test/a_b?q=one&v=two",
+    ]);
+  });
+  it("keeps code, credentials, unsafe schemes and HTML attributes literal", () => {
+    const { container } = render(
+      <SafeMarkdown
+        text={
+          '`https://example.test/code`\n\n```sh\ncurl https://example.test/command\n```\n\nhttps://user:pass@example.test javascript:alert(1) file:///tmp/test <a href="https://example.test/attr">raw</a>'
+        }
+      />,
+    );
+    expect(container.querySelectorAll("a")).toHaveLength(0);
+  });
+  it("updates a streaming URL without leaving stale targets", () => {
+    const { rerender } = render(<SafeMarkdown text="Visit https://example.test/a" />);
+    rerender(<SafeMarkdown text="Visit https://example.test/another?q=two." />);
+    expect(screen.getByRole("link").getAttribute("href")).toBe(
+      "https://example.test/another?q=two",
     );
   });
 });

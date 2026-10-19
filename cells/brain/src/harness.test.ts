@@ -835,55 +835,70 @@ it("does not let a goal restart work after the host reaches its run limit", asyn
   expect(turns).toBe(2);
 });
 
-it("waits without nudging or abandoning a child and consumes its completion wakeup", async () => {
-  let turn = 0;
-  const stopping = vi.fn(async () => false);
-  let completed = false;
-  await driveHarness(
-    host({
-      stopping,
-      delegation: {
-        tools: [],
-        execute: async () => result,
-        request: async function* () {
-          await new Promise((resolve) => setTimeout(resolve, 60));
-          yield { type: "block-start", index: 0, blockType: "text" };
-          yield {
-            type: "block-end",
-            index: 0,
-            block: { type: "text", text: "CHILD_RESEARCH_VERIFIED" },
-          };
-          yield { type: "finish", reason: { kind: "stop" } };
+it.each([0, 100])(
+  "waits for child settlement with %dms durable writes before consuming its result",
+  async (writeDelay) => {
+    let turn = 0;
+    const stopping = vi.fn(async () => false);
+    let completed = false;
+    const onSubagent = vi.fn();
+    await driveHarness(
+      host({
+        stopping,
+        onSubagent,
+        journal: {
+          records: [],
+          append: async (sessionId) => {
+            if (sessionId !== "test-session" && writeDelay)
+              await new Promise((resolve) => setTimeout(resolve, writeDelay));
+          },
         },
-      },
-      request: async (_signal, request) => {
-        turn++;
-        if (turn === 1)
-          return {
-            text: "",
-            calls: [
-              {
-                id: "child",
-                name: "start_agent",
-                input: { description: "Research", prompt: "Inspect source" },
-              },
-            ],
-          };
-        if (turn === 2) return { text: "Waiting for delegated research", calls: [] };
-        expect(JSON.stringify(request.context)).toContain("CHILD_RESEARCH_VERIFIED");
-        completed = true;
-        return step("done");
-      },
-      execute: async (id, _signal, native) => ({
-        result: native ?? result,
-        conclude: id.startsWith("done"),
+        delegation: {
+          tools: [],
+          execute: async () => result,
+          request: async function* () {
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            yield { type: "block-start", index: 0, blockType: "text" };
+            yield {
+              type: "block-end",
+              index: 0,
+              block: { type: "text", text: "CHILD_RESEARCH_VERIFIED" },
+            };
+            yield { type: "finish", reason: { kind: "stop" } };
+          },
+        },
+        request: async (_signal, request) => {
+          turn++;
+          if (turn === 1)
+            return {
+              text: "",
+              calls: [
+                {
+                  id: "child",
+                  name: "start_agent",
+                  input: { description: "Research", prompt: "Inspect source" },
+                },
+              ],
+            };
+          if (turn === 2) return { text: "Waiting for delegated research", calls: [] };
+          expect(JSON.stringify(request.context)).toContain("CHILD_RESEARCH_VERIFIED");
+          completed = true;
+          return step("done");
+        },
+        execute: async (id, _signal, native) => ({
+          result: native ?? result,
+          conclude: id.startsWith("done"),
+        }),
       }),
-    }),
-  );
-  expect(completed).toBe(true);
-  expect(turn).toBe(3);
-  expect(stopping).toHaveBeenCalledTimes(1);
-});
+    );
+    expect(completed).toBe(true);
+    expect(onSubagent.mock.calls.map(([event]) => event.state)).toEqual(["running", "completed"]);
+    expect(onSubagent.mock.calls[0]?.[0].label).toBe("Research");
+    expect(onSubagent.mock.calls[1]?.[0].summary).toBe("CHILD_RESEARCH_VERIFIED");
+    expect(turn).toBe(3);
+    expect(stopping).toHaveBeenCalledTimes(1);
+  },
+);
 
 it("does not read skill folders after ordinary commands or a skill's own scripts", async () => {
   let turn = 0;

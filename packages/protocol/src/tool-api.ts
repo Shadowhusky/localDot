@@ -8,6 +8,7 @@ import {
   MessageDelta,
   ModelRetry,
   ModelUsage,
+  SubagentState,
   ThoughtDelta,
 } from "./events.ts";
 import { ULID_PATTERN } from "./ids.ts";
@@ -196,6 +197,7 @@ export const BrainEvent = z.discriminatedUnion("type", [
   ThoughtDelta.pick({ type: true, data: true }),
   MessageDelta.pick({ type: true, data: true }),
   MessageAssistant.pick({ type: true, data: true }),
+  SubagentState.pick({ type: true, data: true }),
   ModelUsage.pick({ type: true, data: true }),
   ModelRetry.pick({ type: true, data: true }),
 ]);

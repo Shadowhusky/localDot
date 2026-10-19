@@ -395,6 +395,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
         );
   if (blocked && (state === "done" || state === "idle")) return unfinished();
   if (state === "done") return finished("done", "Done", "Done.");
+  if (state === "idle" && reason === "gave up") return unfinished();
   if (state === "idle" && reason === STALL.actionLimit)
     return waiting("limit", "Reached your action limit", "I stopped at the action limit you set.");
   if (state === "idle")

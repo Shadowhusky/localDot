@@ -218,9 +218,15 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     ref,
     pinned,
     onScroll,
-    anchorTo(element: HTMLElement) {
+    anchorTo(element: HTMLElement, margin?: number) {
       const t = tracking.current;
       if (!t.element) return;
+      cancelAnimationFrame(t.frame);
+      t.jumping = false;
+      if (margin !== undefined) {
+        const delta = topOf(element, t.element) - margin;
+        if (delta < 0) t.element.scrollTop += delta;
+      }
       if (t.glide) cancelAnimationFrame(t.glide.frame);
       t.glide = null;
       setPin(false);

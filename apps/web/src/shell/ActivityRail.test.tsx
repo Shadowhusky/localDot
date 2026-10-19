@@ -319,7 +319,7 @@ describe("ActivityRail", () => {
       <ActivityRail rows={[]} sessionId="tabs" scale={1} api={api} agent={base} />,
     );
     const names = () => screen.getAllByRole("tab").map((tab) => tab.textContent);
-    expect(names()).toEqual(["Steps 2"]);
+    expect(names()).toEqual(["Steps 2", "Agents"]);
     const full = {
       ...base,
       changes: [
@@ -333,7 +333,7 @@ describe("ActivityRail", () => {
       },
     };
     view.rerender(<ActivityRail rows={[]} sessionId="tabs" scale={1} api={api} agent={full} />);
-    expect(names()).toEqual(["Steps 2", "Files 2", "Sources 1"]);
+    expect(names()).toEqual(["Steps 2", "Files 2", "Sources 1", "Agents"]);
     expect(screen.getByRole("tab", { name: "Steps 2" }).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(screen.getByRole("tab", { name: "Files 2" }));
     const files = screen.getByRole("tabpanel", { name: "Files 2" });

@@ -1,3 +1,4 @@
+import "../ui/work-layout.css";
 import { useEffect, useRef, useState } from "react";
 import { downloadResult } from "../agent/file-transfer.ts";
 import type { ApiClient } from "../lib/api.ts";
@@ -129,6 +130,7 @@ function WorkSurfaceView({ api, candidate, enabled, sessionId, replay = false }:
       <div className="work-controls">
         <Select
           size="sm"
+          appearance="inline"
           aria-label="Display view"
           value={mode}
           items={MODES}
@@ -138,7 +140,7 @@ function WorkSurfaceView({ api, candidate, enabled, sessionId, replay = false }:
           }}
         />
         {mode === "work" && (
-          <Button size="sm" variant="quiet" onClick={() => setMode("auto")}>
+          <Button className="work-follow" size="sm" variant="quiet" onClick={() => setMode("auto")}>
             Follow work
           </Button>
         )}

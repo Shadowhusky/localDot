@@ -28,6 +28,7 @@ import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/mod
 import { PlanStrip } from "../agent/PlanStrip.tsx";
 import { planPhase } from "../agent/plan-state.ts";
 import { ResearchSources } from "../agent/ResearchSources.tsx";
+import { SubagentList } from "../agent/SubagentList.tsx";
 import { onStepFocus, takeStep, wantedStep } from "../agent/step-focus.ts";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
 import { reducedMotion, useFollowScroll } from "../agent/useFollowScroll.ts";
@@ -98,7 +99,7 @@ const EMPTY = emptyAgentModel();
 // dot is still at the task, so the user can still change how far it reads.
 const WORKING = new Set(["thinking", "acting", "observing", "waiting_user", "paused"]);
 
-type RailTab = "steps" | "files" | "sources";
+type RailTab = "steps" | "files" | "sources" | "agents";
 // Seen indicators are transient; the selected tab is saved separately per task.
 const seenFiles = new Map<string, number>();
 
@@ -183,7 +184,8 @@ export function ActivityRail({
   // A tab stays while it is chosen, so a download's last word is not whisked away with it.
   const tab: RailTab =
     (wanted === "files" && (files > 0 || localPick === "files")) ||
-    (wanted === "sources" && research)
+    (wanted === "sources" && research) ||
+    wanted === "agents"
       ? wanted
       : "steps";
   const choose = (next: string) => {
@@ -200,6 +202,7 @@ export function ActivityRail({
       ? [{ value: "files", label: "Files", count: files || undefined, fresh }]
       : []),
     ...(research ? [{ value: "sources", label: "Sources", count: research.sources.length }] : []),
+    { value: "agents", label: "Agents", count: model.subagents.size || undefined },
   ];
   const tabKey = tabs.map((item) => item.value).join(",");
   const tabValues = useMemo(() => tabKey.split(","), [tabKey]);
@@ -579,6 +582,9 @@ export function ActivityRail({
               </ScrollArea>
             </TabPanel>
           )}
+          <TabPanel tabsId={`${domId}-tabs`} value="agents" selected={tab} swipe={phone}>
+            <SubagentList agents={model.subagents} />
+          </TabPanel>
         </SwipePanels>
         {!replay && started && onSteps && (
           <button

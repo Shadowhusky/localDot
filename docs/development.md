@@ -597,3 +597,17 @@ immutable package archives. These are development artifacts, not installed-user 
 release is verified, obsolete expanded payloads and caches may be removed while retaining its
 archive, receipts, bootstrap files and all signing material. Keep current verification candidates
 until publication is complete.
+
+### Delegated agent progress
+
+The DeepSeek harness emits bounded `subagent.state` events from upstream's paired start/end
+lifecycle. The parent remains alive until every child has finished persisting its result and
+delivering its settlement notification; a child's temporary idle state is not completion. The
+Activity → Agents tab projects these events from the existing session stream, with virtualized
+rows and lazily expanded results. It adds no model requests or polling. Existing recordings
+without lifecycle events cannot reconstruct their child-agent history.
+
+The delayed-journal regression in `cells/brain/src/harness.test.ts` covers the settlement gap.
+`apps/web/e2e/ui/subagents.spec.ts` checks live and restored rows; the work-history and work-view
+UI tests cover mobile collapse controls and the compact Auto/Work/Screen menu. SafeMarkdown
+recognizes bounded HTTP(S) and www links, while keeping code literal and rejecting unsafe URLs.
