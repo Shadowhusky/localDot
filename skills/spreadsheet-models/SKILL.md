@@ -2,6 +2,9 @@
 name: spreadsheet-models
 description: Build spreadsheet models and trackers as XLSX or ODS with live formulas, an assumptions sheet, scenarios, formatting and charts, then recalculate and check them headless.
 ---
+
+Before delivery use [model review](references/model-review.md) to recalculate, check assumptions and inspect the actual workbook.
+
 # Spreadsheet models
 
 Write the workbook with openpyxl, then let LibreOffice calculate it.

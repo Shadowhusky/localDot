@@ -94,3 +94,63 @@ it("shows a fresh start going on, then why it didn't finish", () => {
   expect(screen.getByText("Starting fresh didn't finish. Try again.")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Start fresh" })).toBeTruthy();
 });
+
+it("never calls a live, suspended or reconnecting viewer an off computer during an exit", () => {
+  for (const phase of ["live", "suspended", "reconnecting", "frozen"] as const) {
+    const view = render(
+      <Curtain
+        phase={phase}
+        first={false}
+        waking={false}
+        caption=""
+        onAction={() => {}}
+        showDot={false}
+      />,
+    );
+    expect(screen.queryByText("Your computer is off")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+    view.unmount();
+  }
+});
+
+it("offers explicit retry while slow restoration stays under the loading curtain", () => {
+  const reload = vi.fn();
+  render(
+    <Curtain
+      phase="checking"
+      first={false}
+      waking={false}
+      caption=""
+      onAction={() => {}}
+      showDot={false}
+      onReload={reload}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(reload).toHaveBeenCalledOnce();
+  expect(screen.queryByText("Your computer is off")).toBeNull();
+});
+
+it("shows Docker prerequisite rather than starting or destructive recovery controls", () => {
+  const retry = vi.fn(),
+    reset = vi.fn();
+  render(
+    <Curtain
+      phase="unavailable"
+      runtimeProblem="docker"
+      onRuntimeRetry={retry}
+      first={false}
+      waking={true}
+      caption=""
+      onAction={reset}
+      showDot={false}
+      freshStart={{ busy: true, run: reset }}
+      replace={{ enabled: true, busy: false, run: reset }}
+    />,
+  );
+  expect(screen.getByRole("heading").textContent).toBe("Docker isn't available");
+  expect(screen.queryByRole("button", { name: /Start fresh|Replace computer|Turn on/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  expect(retry).toHaveBeenCalledOnce();
+  expect(reset).not.toHaveBeenCalled();
+});

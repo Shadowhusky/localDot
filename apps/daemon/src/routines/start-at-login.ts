@@ -161,3 +161,95 @@ export async function shellStartAtLoginPort(
     return unavailableStartAtLogin;
   }
 }
+
+/** Development LaunchAgents have no installer receipt. Support only the two known jobs, after
+ * verifying that their files belong to this user and actually launch this source daemon/home.
+ * Changing disabled state affects the next login; it never stops the current task. */
+export async function sourceStartAtLoginPort(
+  home: string,
+  env: NodeJS.ProcessEnv,
+  node: string,
+  cwd: string,
+  execute = promisify(execFile),
+): Promise<StartAtLoginPort> {
+  if (process.platform !== "darwin" || env.XPC_SERVICE_NAME !== "dev.localdot.daemon" || !env.HOME)
+    return unavailableStartAtLogin;
+  const uid = process.getuid?.();
+  if (uid === undefined) return unavailableStartAtLogin;
+  const labels = ["dev.localdot.daemon", "dev.localdot.keyd"];
+  const verify = async () => {
+    for (const label of labels) {
+      const file = join(env.HOME ?? "", "Library/LaunchAgents", `${label}.plist`);
+      const stat = await lstat(file);
+      if (
+        !stat.isFile() ||
+        stat.isSymbolicLink() ||
+        stat.uid !== uid ||
+        stat.mode & 0o022 ||
+        stat.size > 16384
+      )
+        throw new Error("Invalid login job");
+      const { stdout } = await execute("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], {
+        timeout: 5000,
+        maxBuffer: 16384,
+      });
+      const job = JSON.parse(stdout);
+      if (
+        job.Label !== label ||
+        job.RunAtLoad !== true ||
+        job.KeepAlive !== true ||
+        !Array.isArray(job.ProgramArguments)
+      )
+        throw new Error("Invalid login job");
+      if (label === labels[0]) {
+        if (job.ProgramArguments[0] !== node || job.WorkingDirectory !== cwd)
+          throw new Error("Different source installation");
+      } else {
+        const at = job.ProgramArguments.indexOf("-home");
+        if (at < 0 || job.ProgramArguments[at + 1] !== home)
+          throw new Error("Different key service");
+      }
+    }
+  };
+  try {
+    await verify();
+  } catch {
+    return unavailableStartAtLogin;
+  }
+  const status = async (): Promise<StartAtLoginState> => {
+    try {
+      await verify();
+      const { stdout } = await execute("/bin/launchctl", ["print-disabled", `gui/${uid}`], {
+        timeout: 5000,
+        maxBuffer: 65536,
+      });
+      if (!/disabled services\s*=\s*\{/.test(stdout)) throw new Error("Unrecognized launchd reply");
+      return labels.some(
+        (label) =>
+          stdout.includes(`"${label}" => true`) || stdout.includes(`"${label}" => disabled`),
+      )
+        ? "off"
+        : "on";
+    } catch {
+      throw new StartAtLoginError(UNREADABLE);
+    }
+  };
+  return {
+    status,
+    async set(enabled) {
+      try {
+        await verify();
+        for (const label of labels)
+          await execute("/bin/launchctl", [enabled ? "enable" : "disable", `gui/${uid}/${label}`], {
+            timeout: 5000,
+            maxBuffer: 4096,
+          });
+        const actual = await status();
+        if (actual !== (enabled ? "on" : "off")) throw new Error("Unconfirmed login state");
+        return actual;
+      } catch {
+        throw new StartAtLoginError(CHANGE_FAILED);
+      }
+    },
+  };
+}

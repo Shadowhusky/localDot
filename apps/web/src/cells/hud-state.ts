@@ -10,6 +10,7 @@ export type CellStatus = "listing" | "unknown" | "known";
 export type Pending = "list" | "create" | "start" | "stop" | "resume";
 
 export interface CellView {
+  runtimeProblem?: "docker" | "recovering" | "failed" | null;
   cell: CellSummary | null;
   status: CellStatus;
   pending: Pending | null;
@@ -19,6 +20,8 @@ export interface CellView {
   // This page has had a picture from the computer since it last came up: a stream that drops or
   // reconnects after that is a reconnect under the last picture, never the computer starting.
   streamed?: boolean;
+  // The displayed stage requires its own painted frame, not another viewer's relay health.
+  viewer?: boolean;
 }
 
 export type HudActionKind = "start" | "stop" | "retry" | "resume";
@@ -62,11 +65,13 @@ export const NEEDS_FRESH_START =
   "The update couldn't be finished. Start fresh to use your computer again.";
 
 export function hudFor({
+  runtimeProblem,
   cell,
   status,
   pending,
   picture = "none",
   streamed = false,
+  viewer = false,
 }: CellView): HudState {
   const idle = pending === null;
   const hud = (
@@ -84,9 +89,28 @@ export function hudFor({
     ...(cell?.paused ? { paused: true as const } : {}),
   });
 
+  if (runtimeProblem)
+    return hud(
+      "unavailable",
+      "Unavailable",
+      runtimeProblem === "docker"
+        ? "Docker is not available. Open Docker on this Mac; localDot will reconnect when it is ready."
+        : runtimeProblem === "recovering"
+          ? "Docker is ready. Recovering your computer connection."
+          : "Startup recovery needs attention. Restart localDot to retry; your files are retained.",
+      "retry",
+    );
   if (status === "listing")
     return hud("checking", "Checking…", "Looking for your computer.", "start", false);
   if (status === "unknown") {
+    if (
+      viewer &&
+      cell?.state === "ready" &&
+      !cell.fenced &&
+      !cell.replacementPending &&
+      (picture === "live" || picture === "held" || picture === "suspended")
+    )
+      return hud("reconnecting", "Reconnecting…", "Checking the computer connection.", "retry");
     return hud(
       "unavailable",
       "Unavailable",
@@ -177,6 +201,8 @@ export function hudFor({
       "Your computer is running. The screen resumes when you return.",
       "stop",
     );
+  if (viewer && picture === "none")
+    return hud("connecting", "Connecting…", "Waiting for this screen's first picture.", "stop");
   // A stage that has shown the computer keeps its picture through a reconnect.
   const connection = cell.stream.connection;
   if (connection === "stalled" || connection === "disconnected" || picture === "held")
@@ -195,6 +221,7 @@ export function withScreenHud(parent: HudState, screen?: HudState): HudState {
   if (
     !screen ||
     (parent.phase !== "live" &&
+      !(parent.phase === "unavailable" && screen.phase === "reconnecting") &&
       parent.phase !== "connecting" &&
       parent.phase !== "reconnecting" &&
       parent.phase !== "suspended")

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { runOpenLink } from "../../../daemon/src/open-link.ts";
+import { startDockerDesktop } from "../../../daemon/src/platform/docker-start.ts";
 import type { ConsoleIO, RuntimeContext } from "../runtime.ts";
 import { applyPreparedOnLaunch } from "./background-update.ts";
 import { privateDirectory } from "./copy-inventory.ts";
@@ -73,6 +74,7 @@ export async function runUp(
       const deadline = Date.now() + (options.dockerWaitMs ?? 600_000);
       const socket = initial.configuration.settings.dockerSocket;
       let up = await ready(socket, signal);
+      if (!up) await startDockerDesktop(socket);
       while (!up && Date.now() < deadline) {
         await pause(10_000, signal);
         up = await ready(socket, signal);

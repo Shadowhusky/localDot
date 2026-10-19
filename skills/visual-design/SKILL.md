@@ -3,6 +3,9 @@ name: visual-design
 description: Create and refine brand assets, posters, covers, illustrations, layouts and visual systems from real references. Use for static design, creative direction, typography, asset reuse and polished editable exports.
 ---
 
+For substantial design work, use [art direction and critique](references/critique.md) to build a representative draft, inspect actual pixels and refine the largest defects.
+
+
 # Visual design
 
 Establish audience, purpose, placement, size and the content hierarchy from the brief. Inspect supplied assets and references before inventing replacements; keep existing mascot identities, brand colors and wordmarks consistent. For interface design load `frontend-design` and `interface-quality`. For generated imagery or video load `media-production`.

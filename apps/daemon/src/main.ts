@@ -67,6 +67,7 @@ import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts
 import { describeStartupError, runDaemonStartup } from "./main-startup.ts";
 import { createNotify } from "./notify/wiring.ts";
 import { localdotHome, secureHome } from "./paths.ts";
+import { startDockerDesktop } from "./platform/docker-start.ts";
 import { parsePort } from "./port.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
 import { ScreenRecordings } from "./recorder/screen-recordings.ts";
@@ -76,11 +77,16 @@ import { RoutineLauncher } from "./routines/launch.ts";
 import { ExpiredRuns, routinePolicy } from "./routines/policy.ts";
 import { agentRunnerPort } from "./routines/runner-port.ts";
 import { RoutineScheduler } from "./routines/scheduler.ts";
-import { shellStartAtLoginPort, startAtLoginPort } from "./routines/start-at-login.ts";
+import {
+  shellStartAtLoginPort,
+  sourceStartAtLoginPort,
+  startAtLoginPort,
+} from "./routines/start-at-login.ts";
 import { stopAll } from "./routines/stop-all.ts";
 import { fileStopAllAudit } from "./routines/stop-all-audit.ts";
 import { RoutineStore, type StoredRoutine } from "./routines/store.ts";
 import { routineToolPort } from "./routines/tool-port.ts";
+import { RuntimeStartup } from "./runtime-startup.ts";
 import { recallHits } from "./search/recall-hits.ts";
 import { SearchFeed } from "./search/search-feed.ts";
 import { SearchIndex } from "./search/search-index.ts";
@@ -147,6 +153,19 @@ const runtimeAdmission = new RuntimeUpdateAdmission(home);
 const runtimeImages = serviceIdentity ? RuntimeImages.parse(imagesFromEnv()) : undefined;
 const fences = new ComputerFences(home, (id) => resetHolds.oldHeld(id), readNativeBoot());
 const docker = new DockerClient(findDockerSocket().path);
+const runtimeStartup = new RuntimeStartup(() => docker.checkReady(3000));
+const startupAbort = new AbortController();
+shutdown.push({
+  name: "runtime startup",
+  stop: async () => {
+    startupAbort.abort();
+  },
+});
+const loginPort = serviceIdentity
+  ? startAtLoginPort({ home, identity: serviceIdentity, node: process.execPath, env: process.env })
+  : process.env.LOCALDOT_INSTALL_PREFIX
+    ? await shellStartAtLoginPort(home, process.env.LOCALDOT_INSTALL_PREFIX, process.env)
+    : await sourceStartAtLoginPort(home, process.env, process.execPath, process.cwd());
 const relay = gateRelaySource(docker, home);
 const keyd = new KeydClient(keydSocketPath(home));
 serviceReadiness = serviceIdentity
@@ -492,7 +511,17 @@ const startup = () =>
       resetAvailable = true;
     },
   });
-void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup())
+const readyStartup = () =>
+  runtimeStartup.run(startup, {
+    signal: startupAbort.signal,
+    launch: async () => {
+      const enabled =
+        process.env.LOCALDOT_AUTO_START_DOCKER === "1" ||
+        (await loginPort.status().catch(() => "unavailable")) === "on";
+      if (enabled) await startDockerDesktop(docker.socketPath);
+    },
+  });
+void (serviceReadiness ? serviceReadiness.runStartup(readyStartup) : readyStartup())
   .catch((error) => console.error(describeStartupError(error)))
   // Routines start once computers are reconciled, even when an unrelated startup step failed.
   .finally(() => {
@@ -606,6 +635,7 @@ const app = createApp({
     replacement,
     reset,
     checkRuntime: () => docker.checkReady(),
+    runtimeStatus: () => runtimeStartup.snapshot(),
     update: (id, signal) =>
       updateComputer({ cells: orchestrator, live, runner: agent.runner }, id, signal),
   },
@@ -642,14 +672,7 @@ const app = createApp({
     redact: (text) => running.routes.redactUserText(text),
     zone,
     now: Date.now,
-    startAtLogin: serviceIdentity
-      ? startAtLoginPort({
-          home,
-          identity: serviceIdentity,
-          node: process.execPath,
-          env: process.env,
-        })
-      : await shellStartAtLoginPort(home, process.env.LOCALDOT_INSTALL_PREFIX, process.env),
+    startAtLogin: loginPort,
     stopAll: (by) =>
       stopAll(
         {

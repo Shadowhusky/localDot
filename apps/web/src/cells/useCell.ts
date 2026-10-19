@@ -50,6 +50,7 @@ export function useCell(api: ApiClient): CellController {
   const cellId = cell?.id ?? null;
   const streamed = useStreamed(cell);
   const selectedId = useRef<string | null>(null);
+  const revision = useRef(0);
   // Read by callbacks that must see the latest value, not the one of their render.
   const pendingRef = useRef<Pending | null>("list");
   const stateRef = useRef<CellState | null>(null);
@@ -69,6 +70,7 @@ export function useCell(api: ApiClient): CellController {
   }, []);
 
   const show = useCallback((next: CellSummary | null) => {
+    revision.current++;
     stateRef.current = next?.state ?? null;
     pausedRef.current = !!next?.paused;
     const arrived = Date.now();
@@ -95,16 +97,16 @@ export function useCell(api: ApiClient): CellController {
 
   // Lists the cells and adopts the answer; when no answer comes, the computer's state is unknown.
   const relist = useCallback(async () => {
+    const at = revision.current;
     try {
       const cells = parseCells(await api.get<unknown>(CELLS));
-      if (mounted.current) adopt(cells);
+      if (mounted.current && at === revision.current) adopt(cells);
     } catch (err) {
-      if (!mounted.current) return;
+      if (!mounted.current || at !== revision.current) return;
       setError(describeRequestError(err));
-      show(null);
       setStatus("unknown");
     }
-  }, [api, adopt, show]);
+  }, [api, adopt]);
 
   useEffect(() => {
     wait("list");
@@ -123,10 +125,11 @@ export function useCell(api: ApiClient): CellController {
     const probe = async () => {
       if (probing) return;
       probing = true;
+      const at = revision.current;
       try {
         await api.get("/api/whoami");
         const cells = parseCells(await api.get<unknown>(CELLS));
-        if (!closed) adopt(cells);
+        if (!closed && selectedId.current === cellId && at === revision.current) adopt(cells);
       } catch {
         // A 401 is handled by the api; without an answer, the socket keeps retrying.
       } finally {
@@ -147,6 +150,7 @@ export function useCell(api: ApiClient): CellController {
             setStatus("unknown");
             return;
           }
+          setStatus("known");
           // A refused request's message lasts until the state it was about moves on.
           if (next.state !== stateRef.current || !!next.paused !== pausedRef.current)
             setError(null);

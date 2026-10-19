@@ -386,3 +386,29 @@ it("revokes tickets while paused and issues a fresh ticket after resume", async 
   const resumed = (await (await mint(app, cell.id)).json()) as { ticket: string };
   expect(resumed.ticket).not.toBe(ticket);
 });
+
+it("reports runtime availability without exposing diagnostic secrets or allowing creation while down", async () => {
+  const cells = new FakeOrchestrator(),
+    tickets = new TicketRegistry();
+  const app = createApp({
+    token: TOKEN,
+    port: PORT,
+    eventLog,
+    cells: {
+      cells,
+      tickets,
+      runtimeStatus: async () => ({ docker: "unavailable", startup: "waiting" }),
+      checkRuntime: async () => {
+        throw new DockerError(0, "not available", "/info");
+      },
+    },
+  });
+  expect((await app.request(url("/api/runtime"))).status).toBe(401);
+  expect(await (await app.request(url("/api/runtime"), { headers: bearer })).json()).toEqual({
+    docker: "unavailable",
+    startup: "waiting",
+  });
+  const response = await app.request(url("/api/cells"), { method: "POST", headers: bearer });
+  expect(response.status).toBe(502);
+  expect(cells.list()).toHaveLength(0);
+});

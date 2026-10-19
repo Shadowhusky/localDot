@@ -24,24 +24,24 @@ const STATUS: Record<
   "slow-keys": { shape: "ready", control: /^Take control$/, label: "Ready" },
   conversations: { shape: "ready", control: /^Take control$/, label: "Done" },
   "chatgpt-plan": { shape: "ready", control: /^Take control$/, label: "Ready" },
-  running: { shape: "task", control: /^Pause$/, label: "Select the Net total cell", light: "dot" },
+  running: { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
   // dot keeps the computer while it waits on an OK or an answer, so the rim keeps its light.
-  approval: { shape: "task", control: /^Pause$/, label: "Needs your OK", light: "dot" },
-  ask: { shape: "task", control: /^Pause$/, label: "Needs your answer", light: "dot" },
+  approval: { shape: "task", control: /^Stop$/, label: "Needs your OK", light: "dot" },
+  ask: { shape: "task", control: /^Stop$/, label: "Needs your answer", light: "dot" },
   // dot's hand-off puts the computer in your hands at once.
   takeover: {
     shape: "control",
-    control: /^Pause$/,
+    control: /^Stop$/,
     phoneControl: /^Stop$/,
     label: "You're in control",
     light: "you",
   },
-  budget: { shape: "task", control: /^(Pause|Continue)$/, label: "Spending limit reached" },
+  budget: { shape: "task", control: /^(Stop|Continue)$/, label: "Spending limit reached" },
   "image-output": { shape: "ready", control: /^Take control$/, label: "Done" },
   done: { shape: "ready", control: /^Take control$/, label: "Done" },
   continued: { shape: "ready", control: /^Take control$/, label: "Done" },
   // The last picture holds still and the island says why.
-  reconnecting: { shape: "task", control: /^Pause$/, label: "Reconnecting…", light: "dot" },
+  reconnecting: { shape: "task", control: /^Stop$/, label: "Reconnecting…", light: "dot" },
   paused: { shape: "computer", control: /^Resume$/, label: "Paused" },
   failed: { shape: "hidden", label: "Failed", curtain: "Start again" },
   // A computer that can't carry the task outranks it.

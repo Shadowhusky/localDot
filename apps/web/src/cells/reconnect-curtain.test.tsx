@@ -83,3 +83,45 @@ it("waits under the curtain for the first picture of a computer it found already
   const h = await setup(summary("ready", "none"));
   expect(h.result.current.curtain).toMatchObject({ up: true, phase: "connecting" });
 });
+
+it("does not let a delayed stopped list overwrite the newer ready socket snapshot", async () => {
+  let finish: (response: Response) => void = () => {};
+  let lists = 0;
+  const api = createApi("fixture", {
+    origin: "https://owned.invalid",
+    fetchImpl: vi.fn(async (url) => {
+      if (String(url).endsWith("/api/whoami")) return Response.json({});
+      if (++lists === 1) return Response.json([summary("ready", "live")]);
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    }),
+  });
+  const h = renderHook(() => useCell(api));
+  await waitFor(() => expect(h.result.current.cell?.state).toBe("ready"));
+  act(() => sockets.values[0]?.handlers.onRefused?.());
+  await waitFor(() => expect(lists).toBe(2));
+  act(() => sockets.values[0]?.handlers.onMessage(JSON.stringify(summary("ready", "live"))));
+  await act(async () => finish(Response.json([summary("stopped", "none")])));
+  expect(h.result.current.cell?.state).toBe("ready");
+});
+
+it("retains the last verified screen on a failed refresh and recovers status from the socket", async () => {
+  let fail = false;
+  const api = createApi("fixture", {
+    origin: "https://owned.invalid",
+    fetchImpl: vi.fn(async () => {
+      if (fail) throw new Error("offline");
+      return Response.json([summary("ready", "live")]);
+    }),
+  });
+  const h = renderHook(() => useCell(api));
+  await waitFor(() => expect(h.result.current.pending).toBeNull());
+  fail = true;
+  act(() => h.result.current.retry());
+  await waitFor(() => expect(h.result.current.status).toBe("unknown"));
+  expect(h.result.current.cell?.state).toBe("ready");
+  expect(hudFor({ ...h.result.current, viewer: true, picture: "held" }).phase).toBe("reconnecting");
+  act(() => sockets.values[0]?.handlers.onMessage(JSON.stringify(summary("ready", "live"))));
+  expect(h.result.current.status).toBe("known");
+});

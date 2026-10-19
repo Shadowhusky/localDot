@@ -1,0 +1,7 @@
+# Make a representative draft before the full render
+
+Inspect footage, audio, aspect ratio, requested duration and delivery platform. Make a compact sequence with shot/scene purpose, timing, transitions, captions and audio. Research only the missing production capability. Choose footage editing, motion composition, 3D or generated shots based on the brief; HTML is an option for motion graphics, not a substitute for all media.
+
+For motion-first or branded compositions inspect the official HyperFrames skills (heygen-com/hyperframes); for an existing React composition inspect Remotion's official skills. Read the selected entry point and only relevant runtime/audio/export guides. Check license, installed dependencies and available providers first. Install a pinned useful bundle in the computer's skill directory, not a whole catalog or an unreviewed remote script. Preserve originals and reusable project files.
+
+Prove one representative scene at reduced size/duration, including the hardest transition and audio/caption handling. Inspect several frames and actually play the draft with sound. Check cadence, readability, edge crops, silent gaps, clipping and audio balance before the expensive render. Fix concrete defects, render once at target settings, then verify duration, codec, dimensions, first/last frames and playback of the delivered file. Bound render workers and memory to the computer's resources. Do not claim export complete while a render subprocess is still running. Deliver the video and useful editable project via done.files.

@@ -2,6 +2,9 @@
 name: coding-workflow
 description: Work in a code repository like a careful engineer - get the code, read its conventions, branch, change, run its tests and linters, commit, and open a pull request with git and gh.
 ---
+
+For substantial features and integrations, use [the delivery loop](references/delivery-loop.md): prove the risky boundary, build a vertical slice, then review the real result.
+
 # Working in a repository
 
 git, gh, Node 24 (with npm and npx) and Python 3 are installed; VSCodium is the editor.

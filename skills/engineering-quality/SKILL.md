@@ -10,7 +10,7 @@ Read the relevant code, project instructions, lockfile, tests and CI. Confirm th
 Choose only the references needed:
 - [API, storage and reliability](references/backend.md) for services, schemas, jobs, auth and upgrades.
 - [Validation and delivery](references/verification.md) for regression tests, performance and review.
-- For React/Next.js optimization, inspect the current Vercel skill sources from `skill-discovery`; do not impose React conventions on another stack.
+- For React/Next.js optimization, load the bundled `vercel-react-best-practices` and only relevant rule files; do not impose React conventions on another stack.
 
 State the invariant the change must restore. Follow the data and control flow across frontend, API, service and storage boundaries instead of fixing only the visible symptom. For asynchronous work, account for cancellation, stale responses, retries, duplicate events and restart recovery. Add a test that fails for the original failure and checks the observable result.
 

@@ -108,7 +108,8 @@ it("pauses painting while the document is hidden and catches up when visible", a
   fireEvent(document, new Event("visibilitychange"));
   view.rerender(<WorkView {...props} candidate={{ ...card, text: "While hidden" }} />);
   await tick(1000);
-  expect(screen.queryByLabelText("Work display")).toBeNull();
+  expect(screen.getByLabelText("Work output").textContent).toContain("First output");
+  expect(screen.queryByText("While hidden")).toBeNull();
   vi.spyOn(document, "hidden", "get").mockReturnValue(false);
   fireEvent(document, new Event("visibilitychange"));
   await tick(700);
@@ -137,4 +138,17 @@ it("does not starve the work view when quick background steps keep replacing eac
     await tick(100);
   }
   expect(screen.getByLabelText("Work output").textContent).toContain("Output");
+});
+
+it("restores work before lifting the curtain without waiting for a live-step timer", async () => {
+  const view = render(<WorkView {...props} candidate={null} enabled={false} restoring />);
+  // The complete candidate and curtain release may arrive in one render.
+  view.rerender(<WorkView {...props} candidate={card} restoring={false} />);
+  expect(screen.getByText("First output")).toBeTruthy();
+  // Subsequent live switches still settle, preserving the bounded paint rate.
+  view.rerender(<WorkView {...props} candidate={{ ...card, key: "two", text: "Next" }} />);
+  expect(screen.queryByText("Next")).toBeNull();
+  await tick(700);
+  expect(screen.getByText("Next")).toBeTruthy();
+  expect(fetchImpl).not.toHaveBeenCalled();
 });

@@ -33,9 +33,16 @@ export function findDockerSocket(
   if (probes.exists(path)) return { path, source };
   // With Docker Desktop's "Allow the default Docker socket to be used" off, /var/run/docker.sock is
   // missing and only the CLI's context knows where the engine listens.
-  for (const found of otherSockets(env, probes, platform)) {
+  const alternatives = otherSockets(env, probes, platform);
+  // A selected CLI context remains authoritative while Desktop is stopped. Otherwise a login
+  // before Docker creates its socket permanently binds this daemon to the wrong engine path.
+  const selected = alternatives.find((found) => found.source.startsWith("the docker context "));
+  if (selected)
+    return { ...selected, path: dockerSocketPath({ DOCKER_HOST: `unix://${selected.path}` }) };
+  for (const found of alternatives) {
     if (found.path !== path && probes.exists(found.path)) return found;
   }
+  if (platform === "darwin") return alternatives[0] ?? { path, source };
   return { path, source };
 }
 

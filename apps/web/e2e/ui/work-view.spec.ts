@@ -135,3 +135,100 @@ test("replay shows recorded work at the end and removes it when seeking before t
   await page.keyboard.press("Home");
   await expect(work).toHaveCount(0);
 });
+
+test("refresh waits for slow history and reveals the restored work without a desktop flash", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("running");
+  await page.request.post(`${fixture.origin}/__qa/work`);
+  await expect(page.getByLabel("Work output")).toContainText("Checking the project");
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/sessions/*/history", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.addInitScript(() => {
+    const samples: string[] = [];
+    (window as unknown as { restorationSamples: string[] }).restorationSamples = samples;
+    const sample = () => {
+      const watch = document.querySelector(".watch");
+      if (watch && !watch.hasAttribute("hidden") && !watch.querySelector(".curtain")) {
+        samples.push(watch.querySelector(".work-content")?.textContent ?? "SCREEN");
+      }
+      if (samples.length < 120) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await page.reload();
+  await expect(page.locator(".curtain")).toBeVisible();
+  // The old two-second escape hatch used to reveal the wrong screen here.
+  await page.waitForTimeout(2500);
+  await expect(page.locator(".curtain")).toBeVisible();
+  release();
+  await expect(page.locator(".curtain")).toHaveCount(0);
+  await expect(page.getByLabel("Work output")).toContainText("Checking the project");
+  const samples = await page.evaluate(
+    () => (window as unknown as { restorationSamples: string[] }).restorationSamples,
+  );
+  expect(samples.length).toBeGreaterThan(0);
+  expect(
+    samples.every((text) => text.includes("Checking the project")),
+    JSON.stringify(samples),
+  ).toBe(true);
+});
+
+test("returning to the app retains work and never announces an off computer", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("running");
+  await ui.picture();
+  await page.request.post(`${fixture.origin}/__qa/work`);
+  await expect(page.getByLabel("Work output")).toContainText("Checking the project");
+  const canvas = await page.locator(".watch .stage canvas").first().elementHandle();
+  for (let turn = 0; turn < 3; turn++) {
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => "hidden",
+      });
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect(page.getByLabel("Work output")).toContainText("Checking the project");
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => "visible",
+      });
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    await expect(page.getByText("Your computer is off", { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel("Work output")).toContainText("Checking the project");
+    expect(await canvas?.evaluate((element) => element.isConnected)).toBe(true);
+  }
+});
+
+test("missing Docker shows a prerequisite and follows recovery instead of a starting spinner", async ({
+  page,
+  ui,
+}) => {
+  let runtime = { docker: "unavailable", startup: "waiting" };
+  await page.route("**/api/runtime", (route) => route.fulfill({ json: runtime }));
+  await ui.open("starting");
+  await expect(page.getByRole("heading", { name: "Docker isn't available" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Starting your computer" })).toHaveCount(0);
+  runtime = { docker: "ready", startup: "recovering" };
+  await page.getByRole("button", { name: "Check again" }).click();
+  await expect(page.getByRole("heading", { name: "Restoring your computer" })).toBeVisible();
+  runtime = { docker: "ready", startup: "ready" };
+  await page.getByRole("button", { name: "Check again" }).click();
+  await ui.step("ready");
+  await expect(page.locator(".curtain")).toHaveCount(0);
+});

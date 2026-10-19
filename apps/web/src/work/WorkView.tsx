@@ -22,6 +22,8 @@ interface WorkViewProps {
   enabled: boolean;
   sessionId: string;
   replay?: boolean;
+  // Restore the latest projection under the curtain, without the live-step debounce.
+  restoring?: boolean;
 }
 // A presentation failure must never unmount the computer stream or its controls.
 export function WorkView(props: WorkViewProps) {
@@ -31,7 +33,14 @@ export function WorkView(props: WorkViewProps) {
     </ErrorBoundary>
   );
 }
-function WorkSurfaceView({ api, candidate, enabled, sessionId, replay = false }: WorkViewProps) {
+function WorkSurfaceView({
+  api,
+  candidate,
+  enabled,
+  sessionId,
+  replay = false,
+  restoring = false,
+}: WorkViewProps) {
   const previews = useRef(new Map<string, { url?: string; failed?: boolean }>());
   useEffect(() => {
     const cache = previews.current;
@@ -41,7 +50,11 @@ function WorkSurfaceView({ api, candidate, enabled, sessionId, replay = false }:
     };
   }, []);
   const [mode, setMode] = useState("auto");
-  const [shown, setShown] = useState<WorkCard | null>(null);
+  const [shown, setShown] = useState<WorkCard | null>(restoring ? candidate : null);
+  const [wasRestoring, setWasRestoring] = useState(restoring);
+  // The final history batch can arrive in the same render that lowers the curtain.
+  if ((restoring || wasRestoring) && shown !== candidate) setShown(candidate);
+  if (wasRestoring !== restoring) setWasRestoring(restoring);
   const [pinned, setPinned] = useState<WorkCard | null>(null);
   const latest = useRef(candidate);
   latest.current = candidate;
@@ -77,7 +90,8 @@ function WorkSurfaceView({ api, candidate, enabled, sessionId, replay = false }:
             ? shown
             : null
         : null;
-  if (!enabled || !visible) return null;
+  // Keep the last DOM picture while hidden; only painting and network work pause.
+  if (!enabled) return null;
   const pin = () => {
     if (!replay && mode === "auto" && card) {
       setPinned(card);
@@ -117,6 +131,7 @@ function WorkSurfaceView({ api, candidate, enabled, sessionId, replay = false }:
                   sessionId={sessionId}
                   image={card.image}
                   cache={previews.current}
+                  visible={visible}
                 />
               )}
               <pre>{card.text || "Waiting for output…"}</pre>
@@ -156,11 +171,13 @@ function WorkImage({
   sessionId,
   image,
   cache,
+  visible,
 }: {
   api: ApiClient;
   sessionId: string;
   image: NonNullable<WorkCard["image"]>;
   cache: Map<string, { url?: string; failed?: boolean }>;
+  visible: boolean;
 }) {
   const [state, setState] = useState<{ key: string; url?: string; failed?: boolean }>();
   const key = `${sessionId}/${image.name}`;
@@ -174,6 +191,7 @@ function WorkImage({
       setState({ key, ...cached });
       return;
     }
+    if (!visible) return;
     let disposed = false;
     const remember = (entry: { url?: string; failed?: boolean }) => {
       cache.set(key, entry);
@@ -204,7 +222,7 @@ function WorkImage({
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [api, sessionId, image.name, key, cache]);
+  }, [api, sessionId, image.name, key, cache, visible]);
   return state?.key === key && state.url ? (
     <img
       className="work-image"

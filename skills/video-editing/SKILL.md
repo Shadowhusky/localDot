@@ -2,6 +2,9 @@
 name: video-editing
 description: Edit video with ffmpeg - inspect, trim, cut and join, crop or pad for each platform, speed up, add music or voice, normalise loudness, add titles, and export MP4 or GIF.
 ---
+
+For substantial video work, use [the production loop](references/production-loop.md) to select tools, draft a representative scene and verify playback before delivery.
+
 # Footage editing with FFmpeg
 
 First load `media-production` for planning and tool selection. Use these recipes for footage operations; for complex motion, 3D, generative imagery or a project in another editor, research and load the appropriate workflow instead. Check installed codecs and dependencies with `work_context` and a small probe.

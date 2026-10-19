@@ -73,11 +73,11 @@ describe("findDockerSocket", () => {
     }
   });
 
-  it("keeps the daemon's socket when no other exists, so the doctor reports it unreachable", () => {
+  it("keeps the selected context while its socket is absent", () => {
     const gone: DockerContext = { name: "desktop-linux", host: "unix:///Users/me/gone.sock" };
     expect(findDockerSocket({ HOME }, machine([], gone))).toEqual({
-      path: "/var/run/docker.sock",
-      source: "the default socket",
+      path: "/Users/me/gone.sock",
+      source: "the docker context desktop-linux",
     });
   });
 
@@ -94,7 +94,7 @@ describe("findDockerSocket", () => {
       source: "Docker Desktop's user socket",
     });
     expect(findDockerSocket(env, machine(["/run/user/1000/docker.sock"]), "darwin").path).toBe(
-      "/var/run/docker.sock",
+      "/home/ana/.docker/run/docker.sock",
     );
   });
 });

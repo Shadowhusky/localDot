@@ -480,3 +480,26 @@ it("keeps steps and files bound to the conversation when its computer disappears
     "report.txt",
   );
 });
+
+it("keeps ownership unknown after a failed first live check instead of restoring an obsolete task", async () => {
+  let failed = true;
+  const api = createApi("fixture", {
+    origin: "http://127.0.0.1:4747",
+    fetchImpl: vi.fn(async (input) => {
+      if (String(input).endsWith("/live")) {
+        if (failed) throw new Error("offline");
+        return Response.json({ sessionId: NEXT });
+      }
+      return new Response("", { status: 404 });
+    }),
+  });
+  const h = renderHook(() => useLiveSession(api, ready, { current: null }, SESSION));
+  await wait(100);
+  expect(h.result.current.known).toBe(false);
+  expect(h.result.current.sessionId).toBeNull();
+  failed = false;
+  await wait(1100);
+  expect(h.result.current.known).toBe(true);
+  expect(h.result.current.sessionId).toBe(NEXT);
+  expect(h.result.current.resting).toBe(false);
+});

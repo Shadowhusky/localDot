@@ -357,3 +357,14 @@ describe("selected screen HUD", () => {
     expect(withScreenHud(parent, browser)).toBe(parent);
   });
 });
+
+it("requires this viewer's first painted frame, but holds it through reconnection", () => {
+  const view = { ...known(cell("ready", "live")), viewer: true, streamed: true };
+  expect(hudFor({ ...view, picture: "none" }).phase).toBe("connecting");
+  for (const picture of ["held", "suspended", "live"] as const) {
+    expect(hudFor({ ...view, picture }).phase).toBe(
+      picture === "held" ? "reconnecting" : picture === "suspended" ? "suspended" : "live",
+    );
+  }
+  expect(hudFor({ ...view, cell: cell("stopped"), picture: "held" }).phase).toBe("stopped");
+});

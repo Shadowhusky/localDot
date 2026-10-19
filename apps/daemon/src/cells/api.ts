@@ -23,11 +23,15 @@ export interface CellApiDeps {
   reset?: ReturnType<typeof createComputerResetController>;
   update?(id: string, signal: AbortSignal): Promise<void>;
   checkRuntime?(): Promise<void>;
+  runtimeStatus?(): Promise<{
+    docker: "ready" | "unavailable";
+    startup: "waiting" | "recovering" | "ready" | "failed";
+  }>;
 }
 
 export function cellRoutes(
   app: Hono,
-  { cells, tickets, replacement, reset, update, checkRuntime }: CellApiDeps,
+  { cells, tickets, replacement, reset, update, checkRuntime, runtimeStatus }: CellApiDeps,
 ): void {
   // A stream ticket lives only while its cell is ready (P2-R2): stopping, failing or removing the
   // cell revokes it, so no stream path stays open for a computer that is off.
@@ -35,6 +39,8 @@ export function cellRoutes(
     if (cell.state !== "ready" || cell.paused || cell.fenced || cell.replacementPending)
       tickets.revoke(cell.id);
   });
+
+  if (runtimeStatus) app.get("/api/runtime", async (c) => c.json(await runtimeStatus()));
 
   app.get("/api/cells", (c) => c.json(cells.list()));
   app.get("/api/cells/:id/reset/:request", (c) =>
@@ -118,7 +124,10 @@ export function cellRoutes(
     const scale =
       body.scale === undefined || body.scale === 2 ? 2 : body.scale === 1 ? 1 : undefined;
     if (scale === undefined) return c.text("scale must be 1 or 2", 400);
-    return withDocker(c, async () => c.json(await cells.create({ scale }), 202));
+    return withDocker(c, async () => {
+      await checkRuntime?.();
+      return c.json(await cells.create({ scale }), 202);
+    });
   });
 
   app.get("/api/cells/:id", (c) =>
@@ -131,6 +140,7 @@ export function cellRoutes(
   app.post("/api/cells/:id/start", (c) =>
     withCell(c, (id) =>
       withDocker(c, async () => {
+        await checkRuntime?.();
         await cells.start(id);
         return c.body(null, 202);
       }),
@@ -151,6 +161,7 @@ export function cellRoutes(
     withCell(c, (id) =>
       withDocker(c, async () => {
         if (!update) return c.text("updates unavailable", 503);
+        await checkRuntime?.();
         await update(id, c.req.raw.signal);
         const cell = cells.get(id);
         return cell ? c.json(cell, 202) : c.text("unknown cell", 404);

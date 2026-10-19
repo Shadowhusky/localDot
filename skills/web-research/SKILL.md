@@ -2,6 +2,9 @@
 name: web-research
 description: Answer a question from the web reliably - plan the searches, read primary sources, cross-check facts, note dates and cite every claim.
 ---
+
+For investigations, use [the evidence loop](references/evidence-loop.md) to track sources, resolve contradictions and stop research when the question is answered.
+
 # Research on the web
 
 ## Plan

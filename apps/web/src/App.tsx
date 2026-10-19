@@ -47,6 +47,7 @@ import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
 import { useComputerUpdate, useUpdateNotice } from "./cells/useComputerUpdate.ts";
 import { useFreshStart } from "./cells/useFreshStart.ts";
+import { useRuntime } from "./cells/useRuntime.ts";
 import { presetOf } from "./copy/autonomy.ts";
 import { decisionWords } from "./copy/decision.ts";
 import { dotFeed } from "./dot/dot-feed.ts";
@@ -197,8 +198,8 @@ export interface AppProps {
 type Rejected = "stored" | "link" | "code" | "unconfirmed" | null;
 
 const RETRY_CHECK_MS = 2000;
-// The island waits at most this long on opening for the task's history.
-const OPENING_MAX_MS = 2000;
+// Slow restoration offers recovery; elapsed time never means the history is ready.
+const OPENING_NOTICE_MS = 10_000;
 // How long the task's feed may be out of touch before the island says it is reconnecting.
 const LINK_LOST_MS = 1500;
 const FROM_WATCH = { fromWatch: true };
@@ -437,6 +438,7 @@ function Theatre({ api }: { api: ApiClient }) {
     selectReady,
     selectRecovery,
   } = useCell(api);
+  const runtime = useRuntime(api);
   const computerUpdate = useComputerUpdate(api, cell);
   const freshStart = useFreshStart(api, cell, selectReady);
   const keys = useKeys(api);
@@ -664,6 +666,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const browserScreen = useBrowserScreen(api, cell, selectedScreen);
   const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
   const hud = hudFor({
+    runtimeProblem: runtime.problem,
     cell,
     status,
     pending,
@@ -998,23 +1001,22 @@ function Theatre({ api }: { api: ApiClient }) {
   // The displayed screen owns video visibility. Parent lifecycle controls still
   // use the desktop HUD, even when only the separate browser has a live viewer.
   const stageHud = hudFor({
+    runtimeProblem: runtime.problem,
     cell: stageCell,
-    status,
+    status: selectedScreen?.screen === "browser" && !stageCell ? "listing" : status,
     pending,
     picture,
-    streamed: physicalStageCell === cell && streamed,
+    viewer: true,
   });
   const containedHud =
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
       ? stageHud
-      : withScreenHud(
-          hud,
-          selectedScreen?.screen === "browser" && physicalStageCell ? stageHud : undefined,
-        );
+      : withScreenHud(hud, stageHud);
   // Which conversation and task the thread shows is not known yet.
   const threadPending =
     status === "listing" ||
     !conversation.known ||
+    !session.known ||
     (status === "known" && conversation.sessions.length > 0 && !session.sessionId);
   // On opening, the page waits on everything it shows that could still change its mind: the
   // computer, setup, the conversation and its task's history. Meanwhile only dot wakes on the
@@ -1023,14 +1025,17 @@ function Theatre({ api }: { api: ApiClient }) {
   const [opened, setOpened] = useState(false);
   const opening =
     !opened &&
-    (status === "listing" ||
+    (!runtime.checked ||
+      status === "listing" ||
       setupDone === undefined ||
       threadPending ||
-      (!!session.sessionId && agent.history === false));
+      (!!session.sessionId &&
+        (agent.history !== true || (!session.resting && agent.availability === "loading"))));
   if (!opened && !opening) setOpened(true);
+  const [openingSlow, setOpeningSlow] = useState(false);
   useEffect(() => {
     if (opened) return;
-    const timer = setTimeout(() => setOpened(true), OPENING_MAX_MS);
+    const timer = setTimeout(() => setOpeningSlow(true), OPENING_NOTICE_MS);
     return () => clearTimeout(timer);
   }, [opened]);
   const facts = taskFacts(agent.model);
@@ -1778,11 +1783,14 @@ function Theatre({ api }: { api: ApiClient }) {
                 <Presence show={curtain.up}>
                   <Curtain
                     phase={curtain.phase}
+                    runtimeProblem={runtime.problem}
+                    onRuntimeRetry={runtime.check}
                     first={!cell && listed.length === 0}
                     waking={pending === "start" || pending === "create"}
                     updating={!!cell?.updating}
                     caption={computer.caption}
                     notice={error ?? stoppedOff(controls.stopStatus)}
+                    onReload={opening && openingSlow ? () => window.location.reload() : undefined}
                     action={computerAction}
                     onAction={() => computerAction && onComputer[computerAction.kind]()}
                     replace={
@@ -1968,6 +1976,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 api={api}
                 sessionId={agent.sessionId ?? ""}
                 candidate={currentWork}
+                restoring={opening || curtain.up}
                 enabled={
                   !!agent.sessionId &&
                   !replayId &&

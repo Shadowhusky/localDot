@@ -141,7 +141,7 @@ describe("reviewed upstream skill bundles", () => {
       const files = skillFiles(skill);
       expect(files.map((f) => f.rel).sort()).toEqual(Object.keys(source.files).sort());
       expect(files.find((f) => f.rel === "LICENSE.txt")?.bytes.toString()).toContain(
-        "Apache License",
+        source.license === "MIT" ? "MIT License" : "Apache License",
       );
       for (const file of files)
         expect(
@@ -150,4 +150,26 @@ describe("reviewed upstream skill bundles", () => {
         ).toBe(source.files[file.rel]?.sha256);
     }
   });
+});
+
+it("keeps each dot's catalog small and all advertised local references deliverable", () => {
+  const root = new URL("../../../../skills/", import.meta.url).pathname;
+  const all = listSkills(root, ownedTemp(join(tmpdir(), "ld-skill-budget-")));
+  for (const persona of Object.values(PERSONAS)) {
+    const selected = skillsFor(persona.id, all);
+    const metadata = selected.map(({ name, description }) => `${name}: ${description}`).join("\n");
+    // Bodies/resources are not part of startup context. Guard growth independently of models.
+    expect(Buffer.byteLength(metadata)).toBeLessThan(4000);
+    expect(Buffer.byteLength(persona.guidance)).toBeLessThan(1200);
+    let bytes = 0;
+    for (const skill of selected) {
+      const files = skillFiles(skill);
+      const names = new Set(files.map((file) => file.rel));
+      bytes += files.reduce((sum, file) => sum + file.bytes.length, 0);
+      const body = files.find((file) => file.rel === "SKILL.md")?.bytes.toString() ?? "";
+      for (const match of body.matchAll(/\]\((references\/[^)]+)\)/g))
+        expect(names.has(match[1] ?? ""), `${skill.name}/${match[1]}`).toBe(true);
+    }
+    expect(bytes).toBeLessThan(512 * 1024);
+  }
 });

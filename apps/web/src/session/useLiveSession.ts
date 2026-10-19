@@ -180,7 +180,9 @@ export function useLiveSession(
           !over.current.has(reply.sessionId)
             ? reply.sessionId
             : null;
-        if (!cancelled && asked === choices.current)
+        if (!cancelled && asked === choices.current) {
+          if (first) setAnswered(cellId);
+          first = false;
           setShown((now) => {
             if (found)
               return now?.live && now.cellId === cellId && now.sessionId === found
@@ -190,13 +192,12 @@ export function useLiveSession(
             over.current.add(now.sessionId);
             return { ...now, live: false };
           });
+        }
       } catch {
       } finally {
         polling = false;
         misses++;
         if (!cancelled) {
-          if (first) setAnswered(cellId);
-          first = false;
           if (!document.hidden)
             timer = setTimeout(poll, again ? 0 : misses < QUICK_POLLS ? POLL_MS : IDLE_POLL_MS);
         }

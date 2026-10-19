@@ -204,6 +204,12 @@ describe("the skill catalog", () => {
 it.each([
   ["coder", "webapp-testing"],
   ["design", "interface-quality"],
+  ["coder", "vercel-react-best-practices"],
+  ["design", "vercel-composition-patterns"],
+  ["video", "video-editing"],
+  ["finance", "spreadsheet-models"],
+  ["research", "web-research"],
+  ["everyday", "skill-discovery"],
 ] as const)(
   "loads the actual %s skill pack on demand through the native harness",
   async (persona, selected) => {

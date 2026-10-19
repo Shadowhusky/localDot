@@ -4,7 +4,12 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StartAtLoginError, shellStartAtLoginPort, startAtLoginPort } from "./start-at-login.ts";
+import {
+  StartAtLoginError,
+  shellStartAtLoginPort,
+  sourceStartAtLoginPort,
+  startAtLoginPort,
+} from "./start-at-login.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -160,3 +165,63 @@ it("supports public packages and invokes only their installed startup command", 
   const wrong = await shellStartAtLoginPort("/other-home", prefix, {}, execute as never);
   expect(await wrong.status()).toBe("unavailable");
 });
+
+it.skipIf(process.platform !== "darwin")(
+  "verifies source jobs and reads actual launchd enablement, including macOS disabled words",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "ld-source-login-"));
+    roots.push(root);
+    mkdirSync(join(root, "Library/LaunchAgents"), { recursive: true });
+    for (const name of ["daemon", "keyd"])
+      writeFileSync(join(root, `Library/LaunchAgents/dev.localdot.${name}.plist`), "fixture", {
+        mode: 0o600,
+      });
+    let disabled = true;
+    const execute = vi.fn(async (command: string, args: readonly string[]) => {
+      if (command.endsWith("plutil")) {
+        const daemon = args.at(-1)?.endsWith("daemon.plist");
+        return {
+          stdout: JSON.stringify({
+            Label: `dev.localdot.${daemon ? "daemon" : "keyd"}`,
+            RunAtLoad: true,
+            KeepAlive: true,
+            WorkingDirectory: "/source/daemon",
+            ProgramArguments: daemon
+              ? ["/runtime/node", "src/main.ts"]
+              : ["/keyd", "-home", "/private/app"],
+          }),
+          stderr: "",
+        };
+      }
+      if (args[0] === "enable") disabled = false;
+      if (args[0] === "disable") disabled = true;
+      return {
+        stdout: `disabled services = { "dev.localdot.daemon" => ${disabled ? "disabled" : "enabled"} }`,
+        stderr: "",
+      };
+    });
+    const port = await sourceStartAtLoginPort(
+      "/private/app",
+      { HOME: root, XPC_SERVICE_NAME: "dev.localdot.daemon" },
+      "/runtime/node",
+      "/source/daemon",
+      execute as never,
+    );
+    expect(await port.status()).toBe("off");
+    expect(await port.set(true)).toBe("on");
+    expect(await port.set(false)).toBe("off");
+    expect(
+      execute.mock.calls.some(([, args]) =>
+        args.some((v) => ["bootout", "kickstart", "bootstrap"].includes(v)),
+      ),
+    ).toBe(false);
+    const foreign = await sourceStartAtLoginPort(
+      "/private/app",
+      { HOME: root, XPC_SERVICE_NAME: "dev.localdot.daemon" },
+      "/other/node",
+      "/source/daemon",
+      execute as never,
+    );
+    expect(await foreign.status()).toBe("unavailable");
+  },
+);

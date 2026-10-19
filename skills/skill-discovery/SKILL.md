@@ -7,7 +7,7 @@ description: Find, evaluate, install and load specialist agent skills and tools 
 
 Read the user’s objective and constraints, then `work_context`. You work inside localDot’s virtual computer; the remote user receives files through `done.files`. Existing skills, installed tools, saved-key metadata and connectors are different capabilities: a guide is not proof that its tool or account is available.
 
-For a familiar small task, use the available workflow directly. For substantial or unfamiliar work:
+For a familiar small task, use the available workflow directly. A familiar substantial task should load its relevant installed workflow and review references first; do not repeat online research or installation when the known toolchain fits. Search for missing capabilities, a poor result, or uncertain current APIs. For unfamiliar work:
 
 1. Make a short plan with research, creation, verification and delivery. Search current official documentation and relevant skill repositories before committing to a toolchain. Read [the source catalog](references/sources.md) for useful starting points; search beyond it when the task needs something else.
 2. Compare two plausible approaches by task fit, editable output, quality, dependencies, available accounts and runtime cost. Prefer the existing project toolchain when it fits. Choose and state the reason briefly; do not ask the user to choose ordinary implementation details.

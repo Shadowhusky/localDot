@@ -20,6 +20,8 @@ type ComputerAction = HudAction & { kind: HudActionKind };
 
 export interface CurtainProps {
   phase: ComputerPhase;
+  runtimeProblem?: "docker" | "recovering" | "failed" | null;
+  onRuntimeRetry?(): void;
   // No computer has existed yet, so the first task is still ahead.
   first: boolean;
   // A Turn on is on its way.
@@ -41,6 +43,7 @@ export interface CurtainProps {
   // The computer came up: the progress fills before the curtain lifts.
   ready?: boolean;
   showDot: boolean;
+  onReload?(): void;
 }
 
 export interface ReplaceAction {
@@ -72,6 +75,8 @@ const STEP_WORDS: Partial<Record<ComputerOperationStep, string>> = {
 // porcelain action. Content fits the available space, keeping recovery actions within reach.
 export function Curtain({
   phase,
+  runtimeProblem,
+  onRuntimeRetry,
   first,
   waking,
   updating = false,
@@ -84,23 +89,41 @@ export function Curtain({
   operation,
   ready = false,
   showDot,
+  onReload,
 }: CurtainProps) {
   const phone = useMediaQuery(PHONE);
-  const fresh = phase === "checking" ? undefined : freshStart;
-  const recovering = !fresh && phase === "unavailable" && !!replace;
-  const copy = fresh
-    ? freshStartCopy(fresh)
-    : recovering
-      ? {
-          title: "Your computer needs a fresh start",
-          sub:
-            replace.note ??
-            "An earlier step couldn't be confirmed. Recovery preserves your installed apps, settings and files.",
-          progress: false,
-          button: { label: "Replace computer" },
-        }
-      : curtainCopy(phase, { first, waking, updating, caption, notice, action });
-  const enabled = recovering ? replace.enabled : action?.enabled;
+  const fresh = phase === "checking" || runtimeProblem ? undefined : freshStart;
+  const recovering = !runtimeProblem && !fresh && phase === "unavailable" && !!replace;
+  const copy: Copy | null = runtimeProblem
+    ? {
+        title:
+          runtimeProblem === "docker"
+            ? "Docker isn't available"
+            : runtimeProblem === "recovering"
+              ? "Restoring your computer"
+              : "Startup needs attention",
+        sub:
+          runtimeProblem === "docker"
+            ? "Open Docker on the Mac running localDot. We'll reconnect when it's ready. Your files are kept."
+            : runtimeProblem === "recovering"
+              ? "Docker is ready. Checking your existing computer and connections."
+              : "Restart localDot to retry recovery. Your files are retained.",
+        progress: false,
+        button: { label: "Check again" },
+      }
+    : fresh
+      ? freshStartCopy(fresh)
+      : recovering
+        ? {
+            title: "Your computer needs a fresh start",
+            sub:
+              replace.note ??
+              "An earlier step couldn't be confirmed. Recovery preserves your installed apps, settings and files.",
+            progress: false,
+            button: { label: "Replace computer" },
+          }
+        : curtainCopy(phase, { first, waking, updating, caption, notice, action });
+  const enabled = runtimeProblem ? true : recovering ? replace.enabled : action?.enabled;
   // A fresh start is its own long job, beside the old computer's stop and the new one's start.
   const timing = useTiming(!!copy?.progress, fresh ? null : operation, copy?.kind ?? "start");
   const now = useSecondTicks(timing?.since ?? 0, !!timing && !ready);
@@ -112,9 +135,9 @@ export function Curtain({
       data-dot={showDot ? "" : undefined}
       aria-label={copy ? copy.title : "Your computer"}
     >
-      <div className="curtain-col" data-checking={!copy || undefined}>
+      <div className="curtain-col" data-checking={(!copy && !onReload) || undefined}>
         {showDot && <PresenceSlot name="hero" className="curtain-hero" />}
-        {!copy && <VisuallyHidden role="status">Starting localDot</VisuallyHidden>}
+        {!copy && <VisuallyHidden role="status">Loading current state</VisuallyHidden>}
         {copy ? (
           <h2 className="curtain-title">{copy.title}</h2>
         ) : (
@@ -122,21 +145,26 @@ export function Curtain({
             {"\u00a0"}
           </div>
         )}
-        <p className="curtain-sub" aria-hidden={!copy || undefined}>
+        <p className="curtain-sub" aria-hidden={(!copy && !onReload) || undefined}>
           {copy?.clock && timing && (
             <>
               <span className="num">{clock((now - timing.since) / 1000)}</span>
               {" · "}
             </>
           )}
-          {(copy?.steps && step && STEP_WORDS[step]) || copy?.sub || "\u00a0"}
+          {(copy?.steps && step && STEP_WORDS[step]) ||
+            copy?.sub ||
+            (onReload
+              ? "Still loading your current task. Check your connection or try again."
+              : "\u00a0")}
         </p>
         <div
           className="curtain-act"
           data-progress={copy?.progress || undefined}
-          aria-hidden={!copy || undefined}
+          aria-hidden={(!copy && !onReload) || undefined}
         >
           <CurtainProgress timing={timing && { ...timing, step }} now={now} done={ready} />
+          {!copy && onReload && <Button onClick={onReload}>Try again</Button>}
           {fresh ? (
             <FreshStartButton
               variant="primary"
@@ -148,7 +176,7 @@ export function Curtain({
               run={fresh.run}
             />
           ) : (
-            (action || recovering) &&
+            (action || recovering || runtimeProblem) &&
             copy?.button && (
               <Button
                 variant="primary"
@@ -159,7 +187,15 @@ export function Curtain({
                 disabledReason={enabled ? undefined : "Wait a moment"}
                 aria-hidden={copy?.progress || undefined}
                 tabIndex={copy?.progress ? -1 : undefined}
-                onClick={copy.progress ? undefined : recovering ? replace.run : onAction}
+                onClick={
+                  runtimeProblem
+                    ? onRuntimeRetry
+                    : copy.progress
+                      ? undefined
+                      : recovering
+                        ? replace.run
+                        : onAction
+                }
               >
                 {copy.button.label}
               </Button>
@@ -280,6 +316,9 @@ function curtainCopy(
       progress: false,
       button: action?.enabled ? { label: "Try again" } : undefined,
     };
+  // Presence can retain this component during a transition. Only confirmed absence/off
+  // states may claim the computer is off; live/reconnecting/suspended never do.
+  if (phase !== "stopped" && phase !== "none") return null;
   return {
     title: "Your computer is off",
     sub:
