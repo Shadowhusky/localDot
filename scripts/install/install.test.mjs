@@ -391,6 +391,95 @@ describe.concurrent("which machines it installs on", { timeout: 60_000 }, () => 
   });
 });
 
+describe.concurrent("Docker credential helper discovery", { timeout: 60_000 }, () => {
+  it.each([false, true])(
+    "keeps helpers available for pulls when the CLI is already on PATH: %s",
+    async (existingCLI) => {
+      const host = await makeHost({ os: "macos" });
+      const desktop = join(host.root, "Desktop.app/Contents/Resources/bin");
+      script(
+        join(desktop, "docker"),
+        'case "$1" in info) echo 29.0.0 ;; pull) exec docker-credential-localdot-test probe ;; esac',
+      );
+      script(join(desktop, "docker-credential-localdot-test"), "echo helper-found");
+      if (existingCLI) {
+        script(
+          join(host.stubs, "docker"),
+          'case "$1" in info) echo 29.0.0 ;; pull) exec docker-credential-localdot-test probe ;; esac',
+        );
+      } else rmSync(join(host.stubs, "docker"));
+      const result = await runBash(
+        [
+          "-c",
+          `source "$1"
+OS=macos WSL="" PREREQUISITES=no PACKAGE_CHANNEL=testing
+NODE_DIR="$HOME/node"
+docker_desktop_bins() { printf '%s\\n' "$TEST_DESKTOP"; }
+prepare_prerequisites
+check_prerequisites
+first_path=$PATH
+find_docker
+[ "$first_path" = "$PATH" ]
+command -v docker
+docker pull example.test/image
+PATH=$(service_path) docker pull example.test/image
+`,
+          "test",
+          installer,
+        ],
+        { ...host.env, TEST_DESKTOP: desktop },
+      );
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain(join(existingCLI ? host.stubs : desktop, "docker"));
+      expect(result.stdout.match(/helper-found/g)).toHaveLength(2);
+    },
+  );
+
+  it("does not replace a credential helper already selected on PATH", async () => {
+    const host = await makeHost({ os: "macos" });
+    const desktop = join(host.root, "Desktop.app/Contents/Resources/bin");
+    script(join(desktop, "docker"), "exit 0");
+    script(join(desktop, "docker-credential-desktop"), "echo fallback");
+    script(join(host.stubs, "docker-credential-desktop"), "echo selected");
+    const result = await runBash(
+      [
+        "-c",
+        `source "$1"
+OS=macos
+docker_desktop_bins() { printf '%s\\n' "$TEST_DESKTOP"; }
+find_docker
+docker-credential-desktop
+`,
+        "test",
+        installer,
+      ],
+      { ...host.env, TEST_DESKTOP: desktop },
+    );
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe("selected");
+  });
+
+  it("leaves Linux PATH unchanged", async () => {
+    const host = await makeHost();
+    const result = await runBash(
+      [
+        "-c",
+        `source "$1"
+OS=linux
+before=$PATH
+find_docker
+[ "$before" = "$PATH" ]
+[ -z "$(docker_desktop_bins)" ]
+`,
+        "test",
+        installer,
+      ],
+      host.env,
+    );
+    expect(result.code, result.stderr).toBe(0);
+  });
+});
+
 describe.concurrent("prerequisites", { timeout: 60_000 }, () => {
   it("lists everything missing at once, with this machine's commands, before downloading", async () => {
     const host = await makeHost();

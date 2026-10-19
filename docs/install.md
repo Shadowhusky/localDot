@@ -55,6 +55,12 @@ one setup choice before installing them:
 | Native Ubuntu/Debian | Required tools and Docker Engine from Docker's signed APT repository | Approve `sudo`; sign out of all sessions or restart once after receiving Docker access, then rerun setup |
 | Other Linux distributions | Check prerequisites and give installation instructions | Install [Docker Engine](https://docs.docker.com/engine/install/) 28+, curl, tar and gzip using your distribution's instructions |
 
+On macOS, setup adds Docker Desktop's bundled tools to its own process and background-service
+paths, including the credential helpers used for image downloads. It keeps your selected Docker
+CLI, context and credential configuration. If an older installer reports
+`docker-credential-desktop: executable file not found`, rerun the command above to get the fixed
+installer; you do not need to remove saved Docker credentials or reset Docker.
+
 Docker Desktop's terms are presented by Docker itself; localDot does not accept them for you.
 Existing engines and container data are preserved. An old or conflicting installation is
 reported with a repair path, rather than replaced automatically. Downloads can be retried by

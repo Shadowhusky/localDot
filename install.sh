@@ -228,12 +228,29 @@ package_hint() {
   fi
 }
 
-# Docker Desktop's command may be missing from the PATH of a non-login shell on a Mac.
+# Docker discovers credential helpers by PATH, not relative to its own executable.
+# The CLI may already be a symlink in Homebrew or /usr/local/bin while its helpers
+# exist only inside Desktop. Append Desktop's tools without replacing a selected CLI.
+docker_desktop_bins() {
+  [ "$OS" = macos ] || return 0
+  local directory
+  for directory in /Applications/Docker.app/Contents/Resources/bin "$HOME/Applications/Docker.app/Contents/Resources/bin"; do
+    [ ! -x "$directory/docker" ] || printf '%s\n' "$directory"
+  done
+}
+
 find_docker() {
+  local directory candidate
+  while IFS= read -r directory; do
+    case ":$PATH:" in
+    *":$directory:"*) ;;
+    *) PATH="$PATH:$directory" ;;
+    esac
+  done < <(docker_desktop_bins)
+  export PATH
   command -v docker >/dev/null 2>&1 && return 0
   [ "$OS" = macos ] || return 1
-  local candidate
-  for candidate in "$HOME/.docker/bin/docker" /usr/local/bin/docker /Applications/Docker.app/Contents/Resources/bin/docker; do
+  for candidate in "$HOME/.docker/bin/docker" /usr/local/bin/docker; do
     if [ -x "$candidate" ]; then
       PATH="${candidate%/*}:$PATH"
       export PATH
@@ -481,6 +498,8 @@ prepare_prerequisites() {
 }
 
 check_prerequisites() {
+  # Persist discovery in this shell; docker_problem below runs in a subshell.
+  find_docker || true
   local problems="" missing="" tool problem
   [ -n "${PACKAGE_CHANNEL:-}" ] || git --version >/dev/null 2>&1 || missing="git"
   for tool in curl tar gzip df; do
@@ -1190,7 +1209,13 @@ service_path() {
   case "$docker_dir" in
   *[!A-Za-z0-9._/@+,:~-]*) docker_dir="" ;;
   esac
-  say "$NODE_DIR/bin${docker_dir:+:$docker_dir}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  local result="$NODE_DIR/bin${docker_dir:+:$docker_dir}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" directory
+  while IFS= read -r directory; do
+    # Match the existing service-environment path constraints.
+    case "$directory" in *[!A-Za-z0-9._/@+,:~-]*) continue ;; esac
+    case ":$result:" in *":$directory:"*) ;; *) result="$result:$directory" ;; esac
+  done < <(docker_desktop_bins)
+  say "$result"
 }
 
 daemon_environment() {
