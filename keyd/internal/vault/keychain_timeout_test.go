@@ -142,8 +142,32 @@ func TestKeychainDoesNotWaitForAnInheritedPipe(t *testing.T) {
 			}
 		}
 	})
-	started := time.Now()
-	if _, err := k.Get("weather", testBinding); err == nil || time.Since(started) > 500*time.Millisecond {
-		t.Fatalf("security's inherited pipe kept the read alive: %v", err)
+	finished := make(chan error, 1)
+	go func() {
+		_, err := k.Get("weather", testBinding)
+		finished <- err
+	}()
+	// Measure pipe retirement after the fixture starts, not macOS process launch time.
+	// The child still owns stdout for five seconds; waiting for it must fail this check.
+	ready := time.After(3 * time.Second)
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if data, err := os.ReadFile(dir + "/child.pid"); err == nil && len(data) > 0 {
+			break
+		}
+		select {
+		case <-ready:
+			t.Fatal("inherited-pipe fixture did not start")
+		case <-tick.C:
+		}
+	}
+	select {
+	case err := <-finished:
+		if err == nil || strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("inherited pipe was not retired after helper exit: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("security's inherited pipe kept the read alive after helper exit")
 	}
 }

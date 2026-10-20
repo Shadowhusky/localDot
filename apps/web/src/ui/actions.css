@@ -700,7 +700,7 @@
       var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height)
       var(--font-ui);
     text-wrap: balance;
-    pointer-events: none;
+    pointer-events: auto;
     transform-origin: 50% 100%;
     transition:
       opacity var(--dur-fade) var(--ease-enter),
@@ -726,6 +726,7 @@
   }
 
   .ui-tooltip[data-closing] {
+    pointer-events: none;
     opacity: 0;
     transition: opacity var(--dur-exit) var(--ease-exit);
   }
