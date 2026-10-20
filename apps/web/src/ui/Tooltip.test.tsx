@@ -47,44 +47,9 @@ describe("Tooltip", () => {
     expect(popup()?.textContent).toBe("Copies a link to this replay");
     fireEvent.pointerLeave(copy, { pointerType: "mouse" });
     expect(popup()).toBeNull();
-    expect(document.querySelector(".ui-tooltip")).toBeNull();
     wait(400);
     expect(document.querySelector(".ui-tooltip")).toBeNull();
   });
-
-  it.each([200, 20])(
-    "keeps the gap and tooltip hoverable, and closes outside without a timer (top %s)",
-    (top) => {
-      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
-        new DOMRect(100, top, 40, 20),
-      );
-      vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(120);
-      vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(40);
-      render(<Pair />);
-      fireEvent.pointerEnter(screen.getByRole("button", { name: "Copy link" }), {
-        pointerType: "mouse",
-      });
-      wait(500);
-      const gapY = top >= 64 ? top - 4 : top + 24;
-      const tipY = top >= 64 ? top - 28 : top + 48;
-      const move = (x: number, y: number) =>
-        fireEvent(
-          document,
-          new MouseEvent("pointermove", { clientX: x, clientY: y, bubbles: true }),
-        );
-      move(120, gapY);
-      expect(popup()).not.toBeNull();
-      wait(1500);
-      expect(popup()).not.toBeNull();
-      move(120, tipY);
-      expect(popup()).not.toBeNull();
-      move(120, gapY);
-      expect(popup()).not.toBeNull();
-      // The neighbouring area at the same height is not part of the safe corridor.
-      move(300, gapY);
-      expect(document.querySelector(".ui-tooltip")).toBeNull();
-    },
-  );
 
   it("does not open when the pointer passes through quickly", () => {
     render(<Pair />);

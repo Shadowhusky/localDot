@@ -28,23 +28,6 @@ const EXIT = 220;
 // A tooltip opened by a tap has no hover to end it.
 const HOLD = 3000;
 
-type Rect = Pick<DOMRect, "left" | "right" | "top" | "bottom">;
-// Only the trigger, tooltip and the narrow trapezoid between their facing edges keep hover.
-// No invisible element intercepts clicks on neighbouring controls.
-function inHoverArea(x: number, y: number, anchor: Rect, tip: Rect): boolean {
-  if (anchor.right <= anchor.left || tip.right <= tip.left || tip.bottom <= tip.top) return false;
-  const inside = (r: Rect) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-  if (inside(anchor) || inside(tip)) return true;
-  const [upper, lower] = tip.bottom <= anchor.top ? [tip, anchor] : [anchor, tip];
-  const gap = lower.top - upper.bottom;
-  if (gap <= 0 || y < upper.bottom || y > lower.top) return false;
-  const fraction = (y - upper.bottom) / gap;
-  return (
-    x >= upper.left + (lower.left - upper.left) * fraction &&
-    x <= upper.right + (lower.right - upper.right) * fraction
-  );
-}
-
 type Side = "top" | "bottom";
 type Phase = "closed" | "open" | "closing";
 interface View {
@@ -73,8 +56,6 @@ function createControl(setView: (update: (view: View) => View) => void) {
   const control = {
     trigger: undefined as HTMLElement | undefined,
     held: false,
-    pointer: false,
-    bounds: undefined as { anchor: Rect; tip: Rect } | undefined,
     // Safari takes focus off a button that is clicked; that blur must not close what the click opened.
     pressing: false,
     isShown: () => shown === control.hide,
@@ -99,22 +80,21 @@ function createControl(setView: (update: (view: View) => View) => void) {
       const top = control.trigger?.getBoundingClientRect().top ?? ROOM_ABOVE;
       setView(() => ({ phase: "open", side: top < ROOM_ABOVE ? "bottom" : "top", instant }));
     },
-    open(trigger: HTMLElement, delay: number, held = false, pointer = false) {
+    open(trigger: HTMLElement, delay: number, held = false) {
       control.trigger = trigger;
       control.held = held;
-      control.pointer = pointer;
       window.clearTimeout(timer);
       const warm = shown !== undefined || performance.now() < warmUntil;
       if (warm || delay === 0) control.reveal(warm);
       else timer = window.setTimeout(() => control.reveal(false), delay);
     },
-    close(immediate = false) {
+    close() {
       window.clearTimeout(timer);
       if (shown !== control.hide) return;
       shown = undefined;
-      fading = immediate ? undefined : control.hide;
+      fading = control.hide;
       warmUntil = performance.now() + WARM;
-      setView((view) => (immediate ? CLOSED : { ...view, phase: "closing", instant: false }));
+      setView((view) => ({ ...view, phase: "closing", instant: false }));
     },
   };
   return control;
@@ -139,17 +119,6 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
 
   useEffect(() => control.hide, [control]);
 
-  const leavePointer = (event: { pointerType: string; clientX: number; clientY: number }) => {
-    if (event.pointerType === "touch") return;
-    const bounds = control.bounds;
-    if (
-      !control.isShown() ||
-      !bounds ||
-      !inHoverArea(event.clientX, event.clientY, bounds.anchor, bounds.tip)
-    )
-      control.close(true);
-  };
-
   useEffect(() => {
     if (view.phase !== "closing") return;
     const done = window.setTimeout(
@@ -162,11 +131,7 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
   useEffect(() => {
     if (view.phase !== "open") return;
     const away = (event: Event) => {
-      if (
-        !control.trigger?.contains(event.target as Node) &&
-        !popup.current?.contains(event.target as Node)
-      )
-        control.close();
+      if (!control.trigger?.contains(event.target as Node)) control.close();
     };
     // The topmost layer while open, so Escape closes the tooltip and nothing under it. Escape on a
     // focused trigger is handled, and kept from the page, by the trigger itself.
@@ -175,7 +140,7 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
       panel: () => null,
       trap: false,
       modal: false,
-      escape: () => control.close(),
+      escape: control.close,
     });
     // Only a scroll that can move the trigger closes it: a rail streaming lines beside it does not.
     const scrolled = (event: Event) => {
@@ -183,34 +148,16 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
       if (!(target instanceof Node) || (control.trigger && target.contains(control.trigger)))
         control.hide();
     };
-    const moved = (event: globalThis.PointerEvent) => {
-      const bounds = control.bounds;
-      if (
-        control.pointer &&
-        event.pointerType !== "touch" &&
-        (!bounds || !inHoverArea(event.clientX, event.clientY, bounds.anchor, bounds.tip))
-      )
-        control.close(true);
-    };
-    const exited = (event: globalThis.PointerEvent) => {
-      if (control.pointer && event.relatedTarget === null) control.close(true);
-    };
-    const hold = control.held ? window.setTimeout(() => control.close(), HOLD) : 0;
+    const hold = control.held ? window.setTimeout(control.close, HOLD) : 0;
     window.addEventListener("scroll", scrolled, { capture: true, passive: true });
     window.addEventListener("resize", control.hide);
     document.addEventListener("pointerdown", away, true);
-    document.addEventListener("pointermove", moved, { passive: true });
-    document.addEventListener("pointerout", exited);
-    window.addEventListener("blur", control.hide);
     return () => {
       remove();
       window.clearTimeout(hold);
       window.removeEventListener("scroll", scrolled, { capture: true });
       window.removeEventListener("resize", control.hide);
       document.removeEventListener("pointerdown", away, true);
-      document.removeEventListener("pointermove", moved);
-      document.removeEventListener("pointerout", exited);
-      window.removeEventListener("blur", control.hide);
     };
   }, [view.phase, control]);
 
@@ -224,15 +171,6 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
     const top = view.side === "top" ? anchor.top - GAP - height : anchor.bottom + GAP;
     const centre = anchor.left + anchor.width / 2;
     const left = Math.min(Math.max(centre - width / 2, EDGE), window.innerWidth - EDGE - width);
-    control.bounds = {
-      anchor,
-      tip: {
-        left: Math.round(left),
-        right: Math.round(left) + width,
-        top: Math.round(top),
-        bottom: Math.round(top) + height,
-      },
-    };
     element.style.top = `${Math.round(top)}px`;
     element.style.left = `${Math.round(left)}px`;
     element.style.transformOrigin = `${Math.round(centre - left)}px ${view.side === "top" ? "100%" : "0"}`;
@@ -244,11 +182,10 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
     "aria-keyshortcuts": kbd ? formatKeys(kbd).aria : undefined,
     handlers: {
       onPointerEnter(event: PointerEvent<HTMLElement>) {
-        if (!empty && event.pointerType !== "touch")
-          control.open(event.currentTarget, DELAY, false, true);
+        if (!empty && event.pointerType !== "touch") control.open(event.currentTarget, DELAY);
       },
       onPointerLeave(event: PointerEvent<HTMLElement>) {
-        leavePointer(event);
+        if (event.pointerType !== "touch") control.close();
       },
       onPointerDown(event: PointerEvent<HTMLElement>) {
         control.press();
@@ -283,7 +220,6 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
         createPortal(
           <div
             ref={popup}
-            onPointerLeave={leavePointer}
             className="ui-tooltip"
             aria-hidden="true"
             data-side={view.side}

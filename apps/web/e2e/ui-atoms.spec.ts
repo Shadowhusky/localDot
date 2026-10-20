@@ -211,40 +211,6 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await context.close();
     });
 
-    test("tooltip crossing gap stays open and leaving dismisses immediately", async () => {
-      const { context, page, seen } = await open(browser, DESKTOP, "reduce");
-      const trigger = page
-        .getByRole("toolbar", { name: "Task controls" })
-        .getByRole("button", { name: "Stop", exact: true });
-      await trigger.hover();
-      const tip = tooltip(page);
-      await expect(tip).toContainText("Stop");
-      await expect(tip).toHaveCSS("opacity", "1");
-      const a = await trigger.boundingBox();
-      const b = await tip.boundingBox();
-      if (!a || !b) throw new Error("Tooltip geometry missing");
-      const x = a.x + a.width / 2;
-      const gapY = b.y < a.y ? (b.y + b.height + a.y) / 2 : (a.y + a.height + b.y) / 2;
-      await page.mouse.move(x, gapY);
-      await page.waitForTimeout(350);
-      await expect(tip).toHaveCount(1);
-      // There is no transparent overlay to intercept a click in the gap.
-      expect(
-        await page.evaluate(
-          ({ x, y }) => document.elementFromPoint(x, y)?.closest(".ui-tooltip") === null,
-          { x, y: gapY },
-        ),
-      ).toBe(true);
-      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
-      await expect(tip).toHaveCount(1);
-      await page.mouse.move(x, gapY);
-      await expect(tip).toHaveCount(1);
-      await page.mouse.move(a.x + a.width + b.width + 20, gapY);
-      await expect(page.locator(".ui-tooltip")).toHaveCount(0, { timeout: 100 });
-      expect(await seen()).toEqual({ violations: [], styles: 0 });
-      await context.close();
-    });
-
     test("with touch, every control gives a finger at least 44 px", async () => {
       const { context, page, seen } = await open(browser, PHONE);
       const short = await page.evaluate(() => {
