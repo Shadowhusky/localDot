@@ -1,3 +1,6 @@
+import { StepImage } from "./StepImage.tsx";
+import { useStepPreviewEnvironment } from "./StepPreview.tsx";
+import { TerminalViewer } from "./TerminalViewer.tsx";
 import "../ui/work-layout.css";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { count } from "../copy/format.ts";
@@ -214,6 +217,8 @@ function WorkHistory({
   onOpenStep?(key: string): void;
 }) {
   const id = useId();
+  const preview = useStepPreviewEnvironment();
+  const [opened, setOpened] = useState<string | null>(null);
   const follow = useFollowScroll(String(startMs), true, { glide: false });
   const list = useRef<HTMLOListElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -256,6 +261,12 @@ function WorkHistory({
           if (!item) return null;
           const { step, group } = item;
           const open = !!group && expanded.has(group.key);
+          const output = step?.output;
+          const canPreview =
+            !!onOpenStep &&
+            !!preview &&
+            !!output &&
+            (!!output.output.length || !!output.images?.length);
           return (
             <li
               key={item.key}
@@ -270,9 +281,31 @@ function WorkHistory({
                 <ActivityRow
                   id={`${id}-${step.key}`}
                   view={step.meta === step.title ? { ...step, meta: "" } : step}
+                  open={opened === step.key}
+                  onToggle={
+                    canPreview
+                      ? (trigger) => {
+                          follow.anchorTo(trigger);
+                          setOpened((was) => (was === step.key ? null : step.key));
+                        }
+                      : undefined
+                  }
                   onSelect={onOpenStep && (() => onOpenStep(step.key))}
                   selectLabel="Show in Activity"
-                />
+                >
+                  {canPreview && output && preview && (
+                    <TerminalViewer step={output}>
+                      {output.images?.map((image) => (
+                        <StepImage
+                          key={image.name}
+                          api={preview.api}
+                          sessionId={preview.sessionId}
+                          image={image}
+                        />
+                      ))}
+                    </TerminalViewer>
+                  )}
+                </ActivityRow>
               ) : (
                 group && (
                   <GroupHeading

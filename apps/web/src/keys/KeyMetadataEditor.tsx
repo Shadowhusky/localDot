@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Field } from "../ui/Field.tsx";
+import { TextArea } from "../ui/TextArea.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { type KeyRecord, problemText } from "./keys-api.ts";
 export function KeyMetadataEditor({
@@ -48,12 +49,22 @@ export function KeyMetadataEditor({
           ] as const
         ).map(([key, label, max]) => (
           <Field key={key} label={label}>
-            <TextField
-              value={metadata[key] ?? ""}
-              maxLength={max}
-              readOnly={busy}
-              onChange={(e) => set({ ...metadata, [key]: e.target.value })}
-            />
+            {key === "description" ? (
+              <TextArea
+                maxRows={5}
+                value={metadata[key] ?? ""}
+                maxLength={max}
+                readOnly={busy}
+                onChange={(e) => set({ ...metadata, [key]: e.target.value })}
+              />
+            ) : (
+              <TextField
+                value={metadata[key] ?? ""}
+                maxLength={max}
+                readOnly={busy}
+                onChange={(e) => set({ ...metadata, [key]: e.target.value })}
+              />
+            )}
           </Field>
         ))}
         {error && <p role="alert">{error}</p>}

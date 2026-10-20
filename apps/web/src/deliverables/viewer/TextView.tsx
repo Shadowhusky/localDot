@@ -1,6 +1,5 @@
 import { type TextFileReply, type TextFormat, textFormat } from "@localdot/protocol";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { SafeMarkdown } from "../../agent/SafeMarkdown.tsx";
 import { count } from "../../copy/format.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { Button } from "../../ui/Button.tsx";
@@ -9,6 +8,7 @@ import { Switch } from "../../ui/Switch.tsx";
 import { loadText } from "../api.ts";
 import { CodeLines } from "./CodeLines.tsx";
 import { JsonTree } from "./JsonTree.tsx";
+import { MarkdownView } from "./MarkdownView.tsx";
 import { ViewerBar, ViewerLoading, ViewerMessage } from "./states.tsx";
 
 type Loaded = TextFileReply | "failed" | null;
@@ -119,16 +119,7 @@ function TextBody({
     ? `${reply.from === "end" ? "Last" : "First"} ${count(lines.length, "line", "lines")}`
     : undefined;
   if (format === "markdown")
-    return (
-      <>
-        <ViewerBar note={note} />
-        <div className="viewer-stage viewer-doc">
-          <div className="viewer-doc-page">
-            <SafeMarkdown text={joined} shortened="Showing the start of this file." />
-          </div>
-        </div>
-      </>
-    );
+    return <MarkdownView key={name} name={name} text={joined} note={note} />;
   return (
     <>
       <ViewerBar note={note}>

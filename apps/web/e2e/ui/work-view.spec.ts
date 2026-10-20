@@ -43,6 +43,20 @@ test("background work is readable, pinnable, bounded and yields to the actual br
   await page.screenshot({ path: test.info().outputPath("work-files.png") });
   await page.getByRole("button", { name: "Full screen", exact: true }).click();
   await expect(output).toContainText("report.csv");
+  await expect(work.getByRole("combobox", { name: "Display view" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Stream settings", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "Stream settings" });
+  await expect(menu.getByRole("group", { name: "Display view" })).toBeVisible();
+  await expect(menu.getByRole("group", { name: "Stream quality" })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("fullscreen-settings.png") });
+  await menu.getByRole("menuitemradio", { name: "Screen Watch the computer", exact: true }).click();
+  await expect(output).toHaveCount(0);
+  await page.getByRole("button", { name: "Stream settings", exact: true }).click();
+  await menu
+    .getByRole("group", { name: "Display view" })
+    .getByRole("menuitemradio", { name: /^Auto/ })
+    .click();
+  await expect(output).toContainText("report.csv");
   await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
   await expect(output).toContainText("report.csv");
 
@@ -131,7 +145,35 @@ test("replay shows recorded work at the end and removes it when seeking before t
   await page.goto(`${fixture.origin}/?replay=${fixture.sessionId}&t=999999`);
   const work = page.locator(".replay").getByLabel("Work output");
   await expect(work).toContainText("report.csv");
-  await page.getByRole("slider", { name: "Replay timeline" }).focus();
+  const picker = page.getByRole("combobox", { name: "Recording view" });
+  await expect(picker).toHaveCount(1);
+  await expect(picker).toContainText("Work");
+  await expect(page.locator(".replay .work-controls")).toHaveCount(0);
+  const timeline = page.getByRole("slider", { name: "Replay timeline" });
+  const time = await timeline.getAttribute("aria-valuenow");
+  const canvas = await page.locator(".replay .stage canvas").first().elementHandle();
+  await picker.click();
+  const options = page.getByRole("listbox", { name: "Recording view" });
+  await expect(options.getByRole("option")).toHaveCount(2);
+  await options.getByRole("option", { name: "Screen Show the active screen", exact: true }).click();
+  await expect(work).toHaveCount(0);
+  await expect(timeline).toHaveAttribute("aria-valuenow", time ?? "");
+  await picker.click();
+  await page
+    .getByRole("option", { name: "Work Follow work and screen changes", exact: true })
+    .click();
+  await expect(work).toContainText("report.csv");
+  await expect(timeline).toHaveAttribute("aria-valuenow", time ?? "");
+  expect(await canvas?.evaluate((element) => element.isConnected)).toBe(true);
+  await picker.click();
+  await ui.settle();
+  await expect(page.locator(".ui-picker").filter({ has: options })).toHaveCSS("opacity", "1");
+  await page.screenshot({
+    path: test.info().outputPath("recording-view-menu.png"),
+    animations: "disabled",
+  });
+  await page.keyboard.press("Escape");
+  await timeline.focus();
   await page.keyboard.press("Home");
   await expect(work).toHaveCount(0);
 });
@@ -231,4 +273,35 @@ test("missing Docker shows a prerequisite and follows recovery instead of a star
   await page.getByRole("button", { name: "Check again" }).click();
   await ui.step("ready");
   await expect(page.locator(".curtain")).toHaveCount(0);
+});
+
+test("fullscreen settings stay reachable on landscape phones", async ({ page, ui }) => {
+  test.skip((page.viewportSize()?.width ?? 0) > 700, "Phone rotation");
+  await ui.open("running");
+  await ui.picture();
+  await ui.settle();
+  // Phones enter focus automatically when rotated, without requesting native fullscreen.
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect(page.locator(".app")).toHaveAttribute("data-focus", "");
+  await page.getByRole("button", { name: "Stream settings", exact: true }).tap();
+  const menu = page.getByRole("menu", { name: "Stream settings" });
+  const bounds = await menu.boundingBox();
+  expect(bounds?.y).toBeGreaterThanOrEqual(0);
+  expect(bounds && bounds.y + bounds.height).toBeLessThanOrEqual(390);
+  const quality = menu.getByRole("menuitemradio", {
+    name: "Smooth Keep motion fluid",
+    exact: true,
+  });
+  await quality.scrollIntoViewIfNeeded();
+  await quality.tap();
+  await expect(menu).toHaveCount(0);
+  await page.getByRole("button", { name: "Stream settings", exact: true }).tap();
+  await expect(
+    menu.getByRole("menuitemradio", { name: "Smooth Keep motion fluid", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(menu).toHaveCSS("opacity", "1");
+  await page.screenshot({
+    path: test.info().outputPath("fullscreen-landscape-settings.png"),
+    animations: "disabled",
+  });
 });

@@ -2,6 +2,7 @@ import { type ReactNode, useMemo } from "react";
 import { Badge } from "../ui/Badge.tsx";
 import type { AgentStep } from "./model.ts";
 import { OutputCopy } from "./OutputCopy.tsx";
+import { StepFileResources, StepPreviewButton } from "./StepPreview.tsx";
 import { emptyTerminal, terminalDisplayed } from "./terminal-text.ts";
 import "./output.css";
 
@@ -38,17 +39,26 @@ export function TerminalViewer({ step, children }: { step: AgentStep; children?:
         {streams.map((stream) => (
           <section
             key={stream}
-            className="terminal-stream"
+            className="terminal-stream step-preview-resource"
             data-stream={stream}
             data-failed={failed || undefined}
             aria-label={named(stream).name}
           >
+            <StepPreviewButton
+              label={`Preview ${named(stream).name.toLowerCase()}`}
+              resource={{ kind: "text", name: named(stream).name, text: display[stream].text }}
+            />
             <h4 className="terminal-stream-name">{named(stream).name}</h4>
             <section className="terminal-text" aria-label={named(stream).region}>
               <pre>{display[stream].text}</pre>
             </section>
           </section>
         ))}
+        <StepFileResources
+          text={[step.tool?.title, display.stdout.text, display.stderr.text]
+            .filter(Boolean)
+            .join("\n")}
+        />
         {children}
         {!streams.length && !children && <p className="terminal-empty">No output.</p>}
       </div>

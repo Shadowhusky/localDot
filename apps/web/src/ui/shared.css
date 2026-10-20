@@ -1,0 +1,121 @@
+.shared-app {
+  height: 100dvh;
+  overflow: auto;
+  display: grid;
+  grid-template: auto minmax(16rem, 1fr) / minmax(0, 1fr) minmax(20rem, 26rem);
+  gap: calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 3);
+}
+.shared-app > header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+.shared-app > header > span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.shared-screen {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-transport);
+  background: var(--color-well);
+}
+.shared-screen > .stage {
+  height: 100%;
+}
+.shared-screen-status {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  pointer-events: none;
+  font-size: var(--text-callout);
+}
+.shared-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  gap: calc(var(--spacing) * 3);
+}
+.shared-messages {
+  flex: 1;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  min-height: 0;
+  padding: calc(var(--spacing) * 2);
+}
+.shared-messages article {
+  margin-block: calc(var(--spacing) * 4);
+}
+.shared-messages article > strong {
+  color: var(--color-fg-2);
+  font-size: var(--text-callout);
+}
+.shared-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--spacing) * 2);
+  align-items: center;
+}
+.shared-actions > span,
+.shared-actions > .ui-select {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.shared-composer {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+}
+.shared-composer .ui-text-area {
+  resize: vertical;
+  width: 100%;
+  min-height: 72px;
+  max-height: 180px;
+  border-radius: var(--radius-group);
+  padding: calc(var(--spacing) * 3);
+  color: inherit;
+  background: var(--color-well);
+  border: 1px solid var(--color-hairline);
+  font: inherit;
+}
+.shared-progress {
+  max-height: 180px;
+  overflow: auto;
+  padding: calc(var(--spacing) * 2);
+  overflow-wrap: anywhere;
+}
+.shared-settings,
+.shared-recordings {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 4);
+  overflow-wrap: anywhere;
+}
+.shared-replay-head {
+  position: absolute;
+  inset: 12px 12px auto;
+  display: flex;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+}
+@media (max-width: 700px) {
+  .shared-app {
+    grid-template: auto minmax(160px, 32dvh) minmax(250px, 1fr) / minmax(0, 1fr);
+  }
+}
+
+.shared-screen-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--color-well);
+  padding: calc(var(--spacing) * 6);
+  text-align: center;
+}

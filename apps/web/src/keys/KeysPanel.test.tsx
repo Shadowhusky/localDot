@@ -534,7 +534,7 @@ describe("Keys", () => {
     );
     const row = screen.getByText("weather").closest("li");
     expect(row?.querySelector(".ui-group-row-text")?.textContent).toMatch(
-      /^weatherweatherapi\.weather\.example, Added .*3.*, Used 2× this task$/,
+      /^weatherweatherapi\.weather\.example · Added .*3.* · Used 2× this task$/,
     );
     expect(row?.hasAttribute("data-fresh")).toBe(true);
     expect(screen.getByText("anthropic").closest("li")?.textContent).toContain("Anthropic");
@@ -878,7 +878,7 @@ describe("Keys", () => {
   it("deletes a key on the second press only", async () => {
     const remove = vi.fn(async () => {});
     render(<KeysSheet open keys={controller({ keys: [weather], remove })} onClose={() => {}} />);
-    expect(screen.getByText("api.weather.example")).toBeTruthy();
+    expect(screen.getByText(/api\.weather\.example/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     expect(remove).not.toHaveBeenCalled();
     await act(async () => {
@@ -1056,10 +1056,10 @@ describe("Keys", () => {
   it("names each remove button with its visible label", () => {
     render(<KeyList active keys={[weather]} remove={async () => {}} />);
     const remove = screen.getByRole("button", { name: "Remove weather" });
-    expect(remove.textContent).toBe("Remove");
+    expect(remove.getAttribute("aria-label")).toBe("Remove weather");
     fireEvent.click(remove);
     const confirm = screen.getByRole("button", { name: "Confirm remove weather" });
-    expect(confirm.textContent).toBe("Confirm remove");
+    expect(confirm.getAttribute("aria-label")).toBe("Confirm remove weather");
     expect(confirm.closest("li")?.hasAttribute("data-armed")).toBe(true);
   });
 });
@@ -1118,4 +1118,16 @@ describe("editing and general keys", () => {
     ui.rerender(<KeyForm active={false} save={vi.fn()} />);
     expect(input.value).toBe("");
   });
+});
+
+it("keeps long key usage descriptions in the editor without expanding the saved list", () => {
+  const description = "Scoped deployment token for the application. ".repeat(10);
+  const keys = controller({
+    updateMetadata: vi.fn(),
+    keys: [{ ...weather, metadata: { label: "Weather service", description } }],
+  });
+  render(<KeysPanel active keys={keys} />);
+  expect(screen.queryByText(description, { exact: true })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Edit details for weather" }));
+  expect((screen.getByLabelText("Use for") as HTMLTextAreaElement).value).toBe(description);
 });

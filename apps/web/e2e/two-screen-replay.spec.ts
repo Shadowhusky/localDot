@@ -67,8 +67,8 @@ test.afterAll(async () => {
 
 async function chooseScreen(page: Page, name: string) {
   const touch = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
-  const trigger = page.getByRole("combobox", { name: "Recording screen" });
-  const option = page.getByRole("option", { name, exact: true });
+  const trigger = page.getByRole("combobox", { name: "Recording view" });
+  const option = page.getByRole("option", { name: new RegExp(`^${name}(?: |$)`) });
   if (touch) {
     await trigger.tap();
     await option.tap();
@@ -76,7 +76,7 @@ async function chooseScreen(page: Page, name: string) {
     await trigger.click();
     await option.click();
   }
-  await expect(page.getByRole("listbox", { name: "Recording screen" })).toBeHidden();
+  await expect(page.getByRole("listbox", { name: "Recording view" })).toBeHidden();
 }
 async function open(page: Page) {
   if (!daemon) throw new Error("Replay fixture is unavailable.");
@@ -229,14 +229,14 @@ for (const [width, engine] of [
       );
       await open(page);
       const main = page.getByRole("main", { name: "Replay" });
-      const picker = page.getByRole("combobox", { name: "Recording screen" });
+      const picker = page.getByRole("combobox", { name: "Recording view" });
       await expect(main.locator(".stage")).toBeVisible();
       await expect(picker).toBeVisible();
       expect((await picker.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-      await expect(picker).toContainText("Auto · Computer");
+      await expect(picker).toContainText("Work");
       await seek(page, 2500);
       await expect(main).toHaveAttribute("data-screen", "browser");
-      await expect(picker).toContainText("Auto · Browser");
+      await expect(picker).toContainText("Work");
       await chooseScreen(page, "Computer");
       await expect(main).toHaveAttribute("data-screen", "desktop");
       await expect(page.getByRole("slider", { name: "Replay timeline" })).toHaveAttribute(
@@ -245,13 +245,14 @@ for (const [width, engine] of [
       );
       await seek(page, 7000);
       await expect(main).toHaveAttribute("data-screen", "desktop");
-      await chooseScreen(page, "Auto · follow agent");
+      await chooseScreen(page, "Screen");
+      await expect(picker).toContainText("Screen");
       await expect(main).toHaveAttribute("data-screen", "browser");
       await seek(page, 7000);
       await page.screenshot({ path: `e2e/out/replay-mobile-${engine}-${width}.png` });
       await page.getByRole("button", { name: "Play replay", exact: true }).click();
       await expect(main).toHaveAttribute("data-screen", "desktop");
-      await expect(picker).toContainText("Auto · Computer");
+      await expect(picker).toContainText("Screen");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
@@ -260,6 +261,10 @@ for (const [width, engine] of [
       await expect(main).toHaveAttribute("data-screen", "browser");
       await seek(page, 1000);
       await expect(main).toHaveAttribute("data-screen", "browser");
+      await chooseScreen(page, "Work");
+      await expect(main).toHaveAttribute("data-screen", "desktop");
+      await expect(picker).toContainText("Work");
+      await expect(page.locator(".replay .work-controls")).toHaveCount(0);
     } finally {
       await context.close();
       await owned?.close();
@@ -277,7 +282,7 @@ test("shows missing browser footage honestly and lets the viewer choose the comp
     "data-screen",
     "browser",
   );
-  await expect(page.getByRole("combobox", { name: "Recording screen" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Recording view" })).toBeVisible();
   expect(await page.evaluate(() => window.__localdot?.replay?.status())).toBe("no-video");
   await chooseScreen(page, "Computer");
   await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready");

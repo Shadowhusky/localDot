@@ -14,6 +14,7 @@ import {
 } from "./keys-api.ts";
 
 export interface KeysController {
+  revision?: number;
   health: KeydHealth | null;
   keys: KeyRecord[];
   loadError: string | null;
@@ -176,5 +177,15 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
       }),
     [api, change],
   );
-  return { health, keys, loadError, metadataReady, busy, save, remove, updateMetadata };
+  return {
+    health,
+    keys,
+    loadError,
+    metadataReady,
+    busy,
+    save,
+    remove,
+    updateMetadata,
+    revision: version,
+  };
 }

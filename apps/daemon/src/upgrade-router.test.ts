@@ -1,9 +1,11 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import type { Server } from "node:http";
 import { connect, createServer } from "node:net";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WS_TOKEN_PREFIX } from "./guard.ts";
+import { RemoteLinks } from "./remote/links.ts";
 import { attachUpgradeRouter, refuse, type UpgradeRoute } from "./upgrade-router.ts";
 
 const TOKEN = "u".repeat(43);
@@ -158,4 +160,61 @@ describe("upgrade router", () => {
     expect(await upgrade(port, "http://[/x")).toBe("HTTP/1.1 400 Bad Request");
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
   });
+});
+
+it("disconnects an already-open guest socket immediately on revocation, preserving the owner's socket", async () => {
+  const home = mkdtempSync("/tmp/localdot-guest-ws-");
+  const links = new RemoteLinks(home);
+  const issued = links.create({
+    label: "Guest",
+    expiresInHours: null,
+    maxTasks: 1,
+    model: { provider: "openai", model: "gpt-6.1-sol" },
+  });
+  const port = await freePort();
+  const server = serve({ fetch: new Hono().fetch, hostname: "127.0.0.1", port });
+  const sockets: import("node:stream").Duplex[] = [];
+  attachUpgradeRouter(
+    server as Server,
+    { port, token: TOKEN, guests: { links, authenticate: (token) => links.authenticate(token) } },
+    [
+      {
+        pattern: /^\/api\/cells\/([0-9A-Z]{26})\/status$/,
+        params: ["id"],
+        auth: "token",
+        open({ socket }) {
+          sockets.push(socket);
+          socket.write(
+            "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+          );
+        },
+      },
+    ],
+  );
+  await new Promise((resolve) => server.once("listening", resolve));
+  const open = (token: string) =>
+    new Promise<import("node:net").Socket>((resolve) => {
+      const socket = connect(port, "127.0.0.1");
+      socket.once("data", () => resolve(socket));
+      socket.write(
+        `GET /api/cells/01JXYZ0000000000000000CE11/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Protocol: localdot.v1, ${WS_TOKEN_PREFIX}${token}\r\n\r\n`,
+      );
+    });
+  const guest = await open(issued.token),
+    owner = await open(TOKEN);
+  try {
+    const closed = new Promise((resolve) => guest.once("close", resolve));
+    links.revoke(issued.grant.id);
+    await closed;
+    expect(guest.destroyed).toBe(true);
+    expect(owner.destroyed).toBe(false);
+    expect(sockets[1]?.destroyed).toBe(false);
+  } finally {
+    guest.destroy();
+    owner.destroy();
+    for (const socket of sockets) socket.destroy();
+    server.close();
+    links.close();
+    rmSync(home, { recursive: true, force: true });
+  }
 });

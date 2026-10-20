@@ -39,7 +39,14 @@ export function tokenSocketServer(options: { maxPayload?: number } = {}): WebSoc
 
 export function attachUpgradeRouter(
   server: Server,
-  opts: { port: number; token: string },
+  opts: {
+    port: number;
+    token: string;
+    guests?: {
+      authenticate(token: string | undefined): import("./remote/links.ts").RemoteGrant | undefined;
+      links: import("./remote/links.ts").RemoteLinks;
+    };
+  },
   routes: UpgradeRoute[],
 ): void {
   const base = `http://127.0.0.1:${opts.port}`;
@@ -68,8 +75,15 @@ export function attachUpgradeRouter(
           "sec-websocket-protocol": req.headers["sec-websocket-protocol"],
         });
         if (!tokensMatch(opts.token, given)) {
-          refuse(socket, "403 Forbidden");
-          return;
+          const grant = opts.guests?.authenticate(given);
+          if (!grant || !opts.guests?.links.permits(grant, "GET", url.pathname)) {
+            refuse(socket, "403 Forbidden");
+            return;
+          }
+          const unsubscribe = opts.guests.links.onRevoke((id) => {
+            if (id === grant.id) socket.destroy();
+          });
+          socket.once("close", unsubscribe);
         }
       }
       const params = Object.fromEntries(route.params.map((name, i) => [name, match[i + 1] ?? ""]));

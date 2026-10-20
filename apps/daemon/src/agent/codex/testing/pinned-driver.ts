@@ -38,6 +38,7 @@ export async function pinnedDriver(fixture: PinnedFixture, answer?: Answer) {
       "Inert offline task",
       log,
     );
+    const firstCall = Promise.withResolvers<void>();
     const calls: {
       tool: string;
       input: unknown;
@@ -209,6 +210,7 @@ export async function pinnedDriver(fixture: PinnedFixture, answer?: Answer) {
             assert.ok(calls.length < 128);
             const record = { tool, input, context, completed: false, resultFrameId: ulid() };
             calls.push(record);
+            firstCall.resolve();
             return session.runAtomic(context.generation, context.signal, async () => {
               const lease = session.admit(context.generation, context.signal);
               try {
@@ -254,6 +256,7 @@ export async function pinnedDriver(fixture: PinnedFixture, answer?: Answer) {
       session,
       driver,
       calls,
+      firstCall: firstCall.promise,
       decisions,
       notes,
       endpoints,

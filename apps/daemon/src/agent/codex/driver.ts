@@ -1109,6 +1109,7 @@ export class CodexDriver {
         {
           threadId: mainThread,
           ...(options?.reasoningEffort ? { effort: options.reasoningEffort } : {}),
+          ...(options?.speed ? { serviceTier: options.speed === "fast" ? "fast" : "default" } : {}),
           input: [
             { type: "text", text },
             { type: "image", url: `data:image/png;base64,${image.toString("base64")}` },

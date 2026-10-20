@@ -55,7 +55,7 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
   const model = b.client === "anthropic" ? keepsThinking(baseModel(b, fetch)) : baseModel(b, fetch);
   if (!b.options) return model;
   const provider = b.provider ?? b.client;
-  const problem = modelOptionsProblem(provider, b.model, b.options, b.maxOutputTokens);
+  const problem = modelOptionsProblem(provider, b.model, b.options, b.maxOutputTokens, b.controls);
   if (problem) throw new Error(problem);
   const namespace = ["openai-compatible", "lmstudio", "ollama"].includes(b.client)
     ? b.route
@@ -76,10 +76,15 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
             : Math.min(b.options.thinkingBudget, Math.max(1024, total - 1024));
         if (budget !== undefined && budget >= total)
           throw new Error("Output limit is too small for the selected thinking budget.");
-        const options = modelProviderOptions(provider, b.model, {
-          ...b.options,
-          thinkingBudget: budget,
-        });
+        const options = modelProviderOptions(
+          provider,
+          b.model,
+          {
+            ...b.options,
+            thinkingBudget: budget,
+          },
+          b.controls,
+        );
         return {
           ...params,
           maxOutputTokens:

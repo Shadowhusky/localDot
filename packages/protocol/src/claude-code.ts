@@ -34,7 +34,18 @@ export const ClaudeCodeStatus = z
     reason: line(300).optional(),
     command: line(200).optional(),
     models: z
-      .array(z.strictObject({ id: z.string().regex(CLAUDE_CODE_MODEL), name: line(128).min(1) }))
+      .array(
+        z.strictObject({
+          id: z.string().regex(CLAUDE_CODE_MODEL),
+          name: line(128).min(1),
+          resolvedModel: z.string().regex(CLAUDE_CODE_MODEL).optional(),
+          efforts: z
+            .array(z.enum(["low", "medium", "high", "xhigh", "max"]))
+            .max(5)
+            .optional(),
+          fast: z.boolean().optional(),
+        }),
+      )
       .max(32)
       .refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length),
     checkedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),

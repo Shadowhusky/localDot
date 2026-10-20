@@ -16,7 +16,7 @@ import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { preparePinnedFixture } from "../../../../../harness/codex/src/testing/pinned-fixture.ts";
 import { SafetyController } from "../safety/controller.ts";
-import { SessionStoppedError } from "../session.ts";
+import { abortable, SessionStoppedError } from "../session.ts";
 import { CODEX_CRASHED, CODEX_DONE } from "./driver.ts";
 import { type Answer, fakeAuthJson, startOpenAiMock } from "./testing/openai-mock.ts";
 import { PINNED_PNG, pinnedDriver } from "./testing/pinned-driver.ts";
@@ -81,6 +81,12 @@ async function until(signal: AbortSignal, predicate: () => boolean) {
     assert.ok(Date.now() < deadline, "Owned pinned probe did not reach its asserted boundary.");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+// Cold connection setup includes the pin's WebSocket-to-HTTP fallback. Wait for the actual
+// tool boundary before testing controls; the fixture's existing 60-second deadline still applies.
+async function firstTool(h: Awaited<ReturnType<typeof pinnedDriver>>, signal: AbortSignal) {
+  await abortable(h.firstCall, signal);
+  expect(h.calls).toHaveLength(1);
 }
 function groupGone(pid: number | undefined) {
   assert.ok(pid);
@@ -412,7 +418,7 @@ describe(`actual pinned Codex ${CODEX_VERSION} offline acceptance`, { timeout: 6
     const run = h.run();
     // The pin can serialize Promise.all tool calls and can choose either call first. Hold the
     // first arriving action; retirement must prevent the other action regardless of queue order.
-    await until(fixture.signal, () => h.calls.length === 1);
+    await firstTool(h, fixture.signal);
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(h.calls).toHaveLength(1);
     const first = h.calls[0];
@@ -457,7 +463,7 @@ describe(`actual pinned Codex ${CODEX_VERSION} offline acceptance`, { timeout: 6
     });
     h.beforeReply(() => held);
     const run = h.run();
-    await until(fixture.signal, () => h.calls.length === 1);
+    await firstTool(h, fixture.signal);
     expect(h.endpoints[0]?.connections()).toBeGreaterThan(0);
     h.session.stop();
     expect(await run).toBe(CODEX_DONE);
@@ -489,7 +495,7 @@ describe(`actual pinned Codex ${CODEX_VERSION} offline acceptance`, { timeout: 6
     const run = h.run().finally(() => {
       settled = true;
     });
-    await until(fixture.signal, () => h.calls.length === 1);
+    await firstTool(h, fixture.signal);
     const waiter = h.session.takeover("login", "Inert fixture hand-back");
     void waiter.catch(() => {});
     expect(h.session.generation).toBeUndefined();
@@ -565,7 +571,7 @@ describe(`actual pinned Codex ${CODEX_VERSION} offline acceptance`, { timeout: 6
       },
     });
     const run = h.run();
-    await until(fixture.signal, () => h.calls.length === 1);
+    await firstTool(h, fixture.signal);
     const first = h.calls[0];
     assert.ok(first);
     const pause = control.request(ulid());
@@ -643,7 +649,7 @@ describe(`actual pinned Codex ${CODEX_VERSION} offline acceptance`, { timeout: 6
       },
     });
     const run = h.run();
-    await until(fixture.signal, () => h.calls.length === 1);
+    await firstTool(h, fixture.signal);
     const pause = control.request(ulid());
     const endpoint = h.endpoints[0];
     assert.ok(endpoint);
@@ -671,8 +677,16 @@ describe(`actual pinned Codex ${CODEX_VERSION} offline acceptance`, { timeout: 6
     );
     cleanup.push(() => h.close());
     h.mock.refreshFails = true;
-    h.beforeReply(() => h.mock.expireAccess());
+    const expired = Promise.withResolvers<void>();
+    h.beforeReply(() => {
+      h.mock.expireAccess();
+      expired.resolve();
+    });
     const run = h.run();
+    // Bound auth-failure handling from the injected expiry. The pin may spend the initial
+    // connection retrying WebSocket before this HTTP-only fixture reaches its first tool.
+    // Startup remains bounded by the fixture signal and the suite's whole-test deadline.
+    await abortable(expired.promise, fixture.signal);
     await until(fixture.signal, () => h.session.status === "paused");
     expect(h.signedOut).toEqual([1]);
     expect(h.calls.map((call) => call.tool)).toEqual(["computer"]);
@@ -784,7 +798,7 @@ describe(`actual pinned Codex ${CODEX_VERSION} offline acceptance`, { timeout: 6
     });
     h.beforeReply(() => held);
     const run = h.run();
-    await until(fixture.signal, () => h.calls.length === 1);
+    await firstTool(h, fixture.signal);
     expect(h.endpoints[0]?.connections()).toBeGreaterThan(0);
     assert.ok(fixture.processes[0]?.stdin);
     fixture.processes[0].stdin.end();

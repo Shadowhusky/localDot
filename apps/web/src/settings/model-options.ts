@@ -9,6 +9,8 @@ export interface ModelOption {
   readonly id: string;
   readonly name: string;
   readonly choice: RoleChoice;
+  readonly accountModel?: SubscriptionModel;
+  readonly controls?: import("@localdot/protocol").ModelControls;
 }
 export interface ModelGroup {
   readonly label: string;
@@ -88,7 +90,17 @@ export function modelGroups(
     const label = custom ? endpoint(choice) : providerName(choice.provider);
     groups.set(label, [
       ...(groups.get(label) ?? []),
-      { id, name: names.name(choice.provider, choice.model), choice },
+      {
+        id,
+        name: names.name(choice.provider, choice.model),
+        choice,
+        controls: index?.providers
+          .find((p) => p.id === choice.provider)
+          ?.models.find((m) => m.id === choice.model)?.controls,
+        accountModel: plans[choice.provider as keyof typeof plans]?.models.find(
+          (model) => model.id === choice.model,
+        ),
+      },
     ]);
   }
   return [...groups].map(([label, options]) => ({ label, options }));

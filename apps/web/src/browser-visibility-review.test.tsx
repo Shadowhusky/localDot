@@ -8,7 +8,7 @@ import type { CellSummary } from "./cells/types.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
 import { closeStreams } from "./stage/live-stream.ts";
-import { fakeChromium } from "./testing/fake-chromium.ts";
+import { fakeChromium, presentFrame } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 
 const json = (value: unknown) =>
@@ -59,6 +59,7 @@ describe("review: selected physical browser visibility", () => {
       };
       const fetchImpl = (async (input: RequestInfo | URL) => {
         const path = new URL(String(input)).pathname;
+        if (path === "/api/runtime") return json({ docker: "available", startup: "ready" });
         if (path === "/api/cells") return json([parent]);
         if (path === `/api/cells/${parentId}/live`) return json({ sessionId });
         if (path === `/api/agent/sessions/${sessionId}`)
@@ -144,8 +145,11 @@ describe("review: selected physical browser visibility", () => {
           document.querySelector(`iframe[src*="/cells/${browserId}/browser/"]`),
         ).not.toBeNull(),
       );
+      await presentFrame(`iframe[src*="/cells/${browserId}/browser/"]`);
       expect(container.querySelector(".stage > canvas")).not.toBeNull();
-      expect(container.querySelector(".stage")?.classList.contains("lit")).toBe(true);
+      await waitFor(() =>
+        expect(container.querySelector(".stage")?.classList.contains("lit")).toBe(true),
+      );
       // The task stays attached to the browser while idle. Its completed verdict must
       // follow that live screen, even after the unused desktop relay loses all viewers.
       act(() => {
@@ -213,6 +217,7 @@ describe("review: selected physical browser visibility", () => {
           }),
         });
       });
+      await presentFrame(`iframe[src*="/cells/${parentId}/desktop/"]`);
       await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Done"));
       act(() =>
         parentStatus.onmessage?.({

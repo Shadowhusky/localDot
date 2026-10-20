@@ -9,6 +9,21 @@ import {
 import { PROVIDERS } from "./registry.ts";
 
 describe("model controls", () => {
+  it("separates speed from effort and does not leak direct API tiers to gateways", () => {
+    expect(modelControls("claude-code", "sonnet").efforts).toContain("xhigh");
+    expect(modelControls("claude-code", "opus").efforts).toContain("max");
+    expect(modelControls("openai", "gpt-6-astra").speeds).toEqual(["standard", "fast"]);
+    for (const provider of [
+      "deepseek",
+      "azure",
+      "openai-compatible",
+      "openai-responses-compatible",
+      "openrouter",
+    ])
+      expect(modelOptionsProblem(provider, "gpt-6-astra", { speed: "fast" })).toBeTruthy();
+    expect(modelOptionsProblem("anthropic", "claude-opus-4-7", { speed: "fast" })).toBeTruthy();
+    expect(sameModelOptions({ speed: "standard" }, { speed: "fast" })).toBe(false);
+  });
   it.each(PROVIDERS.map((p) => p.id))(
     "%s preserves provider defaults and rejects invented controls",
     (provider) => {

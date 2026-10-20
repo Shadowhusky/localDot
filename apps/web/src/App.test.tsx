@@ -10,7 +10,7 @@ import { GREETINGS } from "./dot/tips.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { ONBOARDING_KEY } from "./onboarding/wizard.ts";
 import { providerFixture } from "./settings/testing.ts";
-import { fakeChromium } from "./testing/fake-chromium.ts";
+import { FakeWorker, fakeChromium, playInClient } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 import { setListening } from "./voice/listening.ts";
 
@@ -71,12 +71,16 @@ const DOCKER_DOWN_CAPTION =
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const keyReply = (path: string): Response | undefined => {
+  if (path === `/api/cells/${CELL_ID}/live`) return new Response(null, { status: 204 });
+  if (path === `/api/cells/${CELL_ID}/stream-ticket`)
+    return json({ ticket: "T".repeat(22), path: `/cells/${CELL_ID}/desktop/${"T".repeat(22)}/` });
   if (path === "/api/voice") return json({ onMac: { available: false } });
   if (path === `/api/cells/${CELL_ID}/quarantine`) return json({ items: [] });
   if (path === "/api/session-index") return json({ sessions: [], next: null });
   if (path === "/api/conversation") return json({ sessions: [], more: false });
   if (path === "/api/app-update") return new Response("unavailable", { status: 404 });
   if (path === "/api/agent/settings") return json({});
+  if (path === "/api/runtime") return json({ docker: "available", startup: "ready" });
   if (path === "/api/agent/providers") return json(providerFixture());
   if (path === "/api/keyd")
     return json({
@@ -100,9 +104,9 @@ const computerButton = () =>
 const settingsShutDown = () => {
   const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
   fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
-  return within(screen.getByRole("dialog", { name: "Settings" })).getByRole("button", {
-    name: "Shut down",
-  });
+  const sheet = screen.getByRole("dialog", { name: "Settings" });
+  fireEvent.click(within(sheet).getByRole("button", { name: "Your computer" }));
+  return within(sheet).getByRole("button", { name: "Shut down" });
 };
 const noCells = async (input: RequestInfo | URL) =>
   keyReply(new URL(String(input)).pathname) ?? json([]);
@@ -442,6 +446,11 @@ describe("App token states", () => {
     await screen.findAllByRole("button", { name: "Turn on" });
     const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
     fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole("button", {
+        name: "What dot knows",
+      }),
+    );
     const knows = await screen.findByRole("region", { name: "What dot knows" });
     fireEvent.click(within(knows).getByRole("radio", { name: "Notes" }));
     fireEvent.click(await within(knows).findByRole("button", { name: /^Show the file/ }));
@@ -449,6 +458,7 @@ describe("App token states", () => {
     const index = screen.getByRole("navigation", { name: "Settings sections" });
     fireEvent.click(within(index).getByRole("button", { name: "Keys" }));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.click(within(index).getByRole("button", { name: "What dot knows" }));
     expect(screen.getByRole("region", { name: "What dot knows" }).textContent).toContain(
       "Prefers short replies.",
     );
@@ -517,7 +527,10 @@ describe("App token states", () => {
     expect(within(keys()).getByRole("combobox", { name: "Provider" }).textContent).toBe("OpenAI");
     expect(calls.some((call) => call.method === "POST")).toBe(false);
     fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
-    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(within(keys()).getByLabelText("Key"));
+    fireEvent.input(within(keys()).getByLabelText("Key"), { target: { value: "" } });
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull());
     fireEvent.click(screen.getByTestId("keys-button"));
     expect((within(keys()).getByLabelText("Key") as HTMLInputElement).value).toBe("");
@@ -601,8 +614,8 @@ describe("App token states", () => {
     expect(first?.url).toBe(`ws://${window.location.host}/api/cells/${CELL_ID}/status`);
     expect(first?.protocols).toEqual(["localdot.v1", `localdot.token.${TOKEN}`]);
     act(() => first?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }));
-    expect(screen.getByTestId("hud-status").textContent).toBe("Ready");
-    expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(true);
+    expect(screen.getByTestId("hud-status").textContent).toBe("Connecting…");
+    expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(false);
     watching.unmount();
     expect(first?.closed).toBe(true);
 
@@ -632,14 +645,9 @@ describe("App token states", () => {
       return json([summary("ready", "live")]);
     }) as typeof fetch;
     render(<App fetchImpl={fetchImpl} />);
-    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Ready"));
-    expect(document.querySelector(".island")?.getAttribute("data-shape")).toBe("ready");
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    fireEvent.click(
-      within(screen.getByRole("dialog", { name: "Settings" })).getByRole("button", {
-        name: "Shut down",
-      }),
-    );
+    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Connecting…"));
+    expect(document.querySelector(".island")?.getAttribute("data-shape")).toBe("hidden");
+    fireEvent.click(settingsShutDown());
     await waitFor(() => expect(calls).toContain(`POST /api/cells/${CELL_ID}/stop`));
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("stopped")) }),
@@ -682,7 +690,7 @@ describe("App token states", () => {
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }),
     );
-    expect(screen.getByTestId("hud-status").textContent).toBe("Ready");
+    expect(screen.getByTestId("hud-status").textContent).toBe("Connecting…");
     expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
   });
 
@@ -743,7 +751,7 @@ describe("App token states", () => {
 
   it("goes back to No computer and closes the status socket when the cell is removed", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
-    render(<App fetchImpl={(async () => json([summary("stopped")])) as typeof fetch} />);
+    render(<App fetchImpl={daemon(() => json([summary("stopped")])).fetchImpl} />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("removed")) }),
@@ -759,16 +767,39 @@ describe("App token states", () => {
 });
 
 describe("App HUD", () => {
+  let restore: () => void;
   beforeEach(() => {
+    restore = fakeChromium();
     window.localStorage.clear();
     window.history.replaceState(null, "", "/");
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", AppSocket);
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => restore());
   afterEach(cleanup);
 
+  const present = async () => {
+    await waitFor(() => expect(document.querySelector("iframe.desktop-frame")).not.toBeNull());
+    playInClient(
+      [...document.querySelectorAll("iframe.desktop-frame")].at(-1) as HTMLIFrameElement,
+      "hud-track",
+    );
+    const worker = () => FakeWorker.instances.at(-1);
+    await waitFor(() =>
+      expect(worker()?.sent.some((row) => row.message.type === "frames")).toBe(true),
+    );
+    act(() =>
+      worker()?.onmessage?.({
+        data: {
+          type: "stats",
+          sourceId: worker()?.sent.findLast((row) => row.message.type === "frames")?.message
+            .sourceId,
+          stats: { presented: 1, fps: 30, lastFrameAt: 1, width: 1280, height: 720 },
+        },
+      }),
+    );
+  };
   const status = () => screen.getByTestId("hud-status").textContent;
   const button = () => computerButton();
   // The curtain speaks while it is up; the band under the stage otherwise.
@@ -786,7 +817,7 @@ describe("App HUD", () => {
     });
     render(<App fetchImpl={d.fetchImpl} />);
     await waitFor(() => expect(status()).toBe("Unavailable"));
-    expect(caption()).toContain("localDot isn't answering.");
+    await waitFor(() => expect(caption()).toContain("localDot isn't answering."));
     expect(screen.queryByText("No computer")).toBeNull();
     up = true;
     screen.getByRole("button", { name: "Try again" }).click();
@@ -902,6 +933,7 @@ describe("App HUD", () => {
     expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(false);
     expect(document.body.textContent).not.toContain("Offline");
     pushState(summary("ready", "live"));
+    await present();
     expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(true);
   });
 
@@ -914,6 +946,7 @@ describe("App HUD", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     expect(document.querySelector(".narration-line")).toBeNull();
     pushState(summary("ready", "live"));
+    await present();
     await waitFor(() =>
       expect(Object.values(GREETINGS).flat()).toContain(
         document.querySelector(".narration-line")?.textContent?.replace(/^dot: /, ""),
@@ -927,6 +960,7 @@ describe("App HUD", () => {
       JSON.stringify({ step: "welcome", dismissed: true }),
     );
     render(<App fetchImpl={daemon(() => json([summary("ready", "live")])).fetchImpl} />);
+    await present();
     const line = () =>
       document.querySelector(".narration-line")?.textContent?.replace(/^dot: /, "");
     await waitFor(() => expect(Object.values(GREETINGS).flat()).toContain(line()));
@@ -938,6 +972,7 @@ describe("App HUD", () => {
 
   it("keeps the stage lit while the stream reconnects, and says so in the island", async () => {
     render(<App fetchImpl={daemon(() => json([summary("ready", "live")])).fetchImpl} />);
+    await present();
     await waitFor(() => expect(status()).toBe("Ready"));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     pushState(summary("ready", "stalled"));
@@ -947,13 +982,14 @@ describe("App HUD", () => {
     expect(status()).toBe("Ready");
   });
 
-  it("keeps the last picture lit when a fresh relay connects as the page comes back", async () => {
+  it("keeps a proven live picture ready while relay status catches up", async () => {
     render(<App fetchImpl={daemon(() => json([summary("ready", "live")])).fetchImpl} />);
+    await present();
     await waitFor(() => expect(status()).toBe("Ready"));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     for (const connection of ["none", "connecting"] as const) {
       pushState(summary("ready", connection));
-      expect(status(), connection).toBe("Reconnecting…");
+      expect(status(), connection).toBe("Ready");
       expect(document.querySelector(".stage")?.classList.contains("lit"), connection).toBe(true);
     }
   });

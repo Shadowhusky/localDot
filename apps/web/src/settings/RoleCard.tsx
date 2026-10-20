@@ -87,6 +87,9 @@ export function RoleCard({
   const tier = providers
     .find((row) => row.id === value?.provider)
     ?.models.find((model) => model.id === value?.model)?.tier;
+  const discovered = providers
+    .find((p) => p.id === value?.provider)
+    ?.models.find((m) => m.id === value?.model)?.controls;
   const on = role === "main" || !!value;
   const typed =
     !!provider &&
@@ -100,7 +103,7 @@ export function RoleCard({
           typed && "Type the model ID as the server names it.",
           (!SCREEN_TIERS.has(tier ?? "") || isOpenRouterRouterId(value.provider, value.model)) &&
             modelNote(value, providers),
-          value.model && optionsNote(value),
+          value.model && optionsNote(value, false, discovered),
           provider && !provider.notOffered && !provider.local && keyNote(provider),
           manualPrice &&
             !subscription(value.provider) &&
@@ -120,6 +123,12 @@ export function RoleCard({
       {value?.model && (
         <ModelOptionsFields
           choice={value}
+          discovered={discovered}
+          accountModel={
+            subscription(value.provider)
+              ? subscriptionModels?.find((model) => model.id === value.model)
+              : undefined
+          }
           onChange={onChange}
           outputLimit={
             providers.find((p) => p.id === value.provider)?.models.find((m) => m.id === value.model)

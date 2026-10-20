@@ -192,7 +192,7 @@ export function cellRoutes(
         return c.text("the computer is fenced or awaiting replacement confirmation", 409);
       if (cell.paused) return c.text("the computer is paused: resume it first", 409);
       // The registry hands back the cell's live ticket, so a second viewer shares the same path.
-      const ticket = tickets.issue(id);
+      const ticket = tickets.issue(id, c.get("remoteGrant")?.id, c.get("remoteValid"));
       return c.json({ ticket, path: `/cells/${id}/desktop/${ticket}/` });
     }),
   );

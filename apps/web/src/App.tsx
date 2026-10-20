@@ -74,7 +74,13 @@ import {
   linkArrived,
   takeInstallLink,
 } from "./lib/install-link.ts";
-import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
+import {
+  forgetToken,
+  keepToken,
+  rememberSharedToken,
+  sharedToken,
+  storedToken,
+} from "./lib/token.ts";
 import { listenForSessionLinks } from "./notify/session-link.ts";
 import { useAttention } from "./notify/useAttention.ts";
 import { useAttentionToasts } from "./notify/useAttentionToasts.ts";
@@ -183,6 +189,7 @@ import { showToast, Toaster } from "./ui/Toast.tsx";
 import { WorkView } from "./work/WorkView.tsx";
 import { workCard } from "./work/work-view.ts";
 import "./app.css";
+import { SharedApp } from "./remote/SharedApp.tsx";
 import { speechLanguage } from "./voice/language.ts";
 import { useListening } from "./voice/listening.ts";
 import { useVoicePrefs } from "./voice/prefs.ts";
@@ -222,6 +229,7 @@ const SLOW_LINE = "This is taking longer than usual. Stop me if it looks stuck."
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
+  const [shared, setShared] = useState(() => sharedToken(storedToken()));
   const [candidate, setCandidate] = useState<InstallLink | null>(null);
   const [rejected, setRejected] = useState<Rejected>(null);
   // A link in the address is read in an effect, after the first paint; until then that paint is the
@@ -258,9 +266,11 @@ export function App({ fetchImpl }: AppProps) {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const current = () => !cancelled && linkOwner.current === candidate;
-    const accept = (accepted: string) => {
+    const accept = (accepted: string, shared = false) => {
       if (!current()) return;
       keepToken(accepted);
+      rememberSharedToken(accepted, shared);
+      setShared(shared);
       tokenOwner.current = accepted;
       setToken(accepted);
       setRejected(null);
@@ -277,8 +287,10 @@ export function App({ fetchImpl }: AppProps) {
       void exchange.current.promise
         .then(async (accepted) => {
           if (!current()) return;
-          await createApi(accepted, { fetchImpl }).get("/api/whoami");
-          accept(accepted);
+          const identity = await createApi(accepted, { fetchImpl }).get<{ shared?: boolean }>(
+            "/api/whoami",
+          );
+          accept(accepted, identity.shared === true);
         })
         .catch((error: unknown) => {
           if (!current()) return;
@@ -293,10 +305,10 @@ export function App({ fetchImpl }: AppProps) {
     }
     const check = () => {
       createApi(candidate.value, { fetchImpl })
-        .get("/api/whoami")
+        .get<{ shared?: boolean }>("/api/whoami")
         .then(
-          () => {
-            accept(candidate.value);
+          (identity) => {
+            accept(candidate.value, identity.shared === true);
           },
           (err: unknown) => {
             if (!current()) return;
@@ -335,7 +347,7 @@ export function App({ fetchImpl }: AppProps) {
     [token, fetchImpl],
   );
 
-  if (api) return <Theatre key={token} api={api} />;
+  if (api) return shared ? <SharedApp key={token} api={api} /> : <Theatre key={token} api={api} />;
   if (candidate || arriving) return <SignIn state="checking" />;
   return <SignIn state={SIGN_IN[rejected ?? "none"]} />;
 }
@@ -443,6 +455,10 @@ function Theatre({ api }: { api: ApiClient }) {
   const freshStart = useFreshStart(api, cell, selectReady);
   const keys = useKeys(api);
   const settings = useSettings(api);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a saved-key revision invalidates the independently cached provider metadata
+  useEffect(() => {
+    if (keys.metadataReady) void settings.checkModels();
+  }, [keys.revision, keys.metadataReady, settings.checkModels]);
   // Every dot on screen wears what the user's dot wears, with this localDot's accessory.
   const persona = settings.saved?.persona;
   const accessory = settings.saved?.accessory;
@@ -607,6 +623,11 @@ function Theatre({ api }: { api: ApiClient }) {
   }, [api, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
   const currentWork = useMemo(() => workCard(agent.model), [agent.model]);
+  const [displayChoice, setDisplayChoice] = useState({ session: "", value: "auto" });
+  const displayControl = {
+    value: displayChoice.session === agent.sessionId ? displayChoice.value : "auto",
+    change: (value: string) => setDisplayChoice({ session: agent.sessionId ?? "", value }),
+  };
   // Browsing history never changes who owns the physical computer.
   const [viewedConversation, setViewedConversation] = useState<{
     id: string;
@@ -1025,13 +1046,14 @@ function Theatre({ api }: { api: ApiClient }) {
   const [opened, setOpened] = useState(false);
   const opening =
     !opened &&
+    status !== "unknown" &&
     (!runtime.checked ||
       status === "listing" ||
       setupDone === undefined ||
       threadPending ||
       (!!session.sessionId &&
         (agent.history !== true || (!session.resting && agent.availability === "loading"))));
-  if (!opened && !opening) setOpened(true);
+  if (!opened && !opening && status !== "unknown") setOpened(true);
   const [openingSlow, setOpeningSlow] = useState(false);
   useEffect(() => {
     if (opened) return;
@@ -1893,7 +1915,7 @@ function Theatre({ api }: { api: ApiClient }) {
                           onFullScreen={fullScreen.toggle}
                         />
                       )}
-                      <StreamMenu stream={streamChoice} />
+                      <StreamMenu stream={streamChoice} display={displayControl} />
                     </div>
                   )}
                   {yours && !phone && !full && (
@@ -1909,6 +1931,7 @@ function Theatre({ api }: { api: ApiClient }) {
               side={
                 focus && (
                   <FocusControls
+                    display={displayControl}
                     stream={streamChoice}
                     take={takeState}
                     pause={shape === "task" ? pause : null}
@@ -1976,6 +1999,8 @@ function Theatre({ api }: { api: ApiClient }) {
                 api={api}
                 sessionId={agent.sessionId ?? ""}
                 candidate={currentWork}
+                display={displayControl}
+                hideControls={full || focus}
                 restoring={opening || curtain.up}
                 enabled={
                   !!agent.sessionId &&

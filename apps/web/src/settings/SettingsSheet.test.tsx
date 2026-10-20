@@ -120,134 +120,54 @@ const currentSection = () =>
     ?.textContent;
 
 describe("settings inspector", () => {
-  it("opens at the top and stays there as settings load", () => {
+  it("shows only the selected page, retaining visited forms without layout shifts", () => {
     const layout = sectionLayout();
-    const p = { ...props(), persona: { value: "coder" as const, onChange: vi.fn() } };
+    const p = {
+      ...props(),
+      keysPanel: keysPanel(),
+      persona: { value: "coder" as const, onChange: vi.fn() },
+    };
     const view = render(<SettingsSheet {...p} loading sectionRequest={1} />);
-    const title = screen.getByRole("heading", { name: "Your dot" });
     expect(settingsScroll().scrollTop).toBe(0);
-    expect(document.activeElement).toBe(title);
     expect(currentSection()).toBe("Your dot");
+    expect(screen.queryByRole("region", { name: "Models" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    expect(currentSection()).toBe("Models");
     view.rerender(<SettingsSheet {...p} sectionRequest={1} />);
-    layout.resize();
-    expect(settingsScroll().scrollTop).toBe(0);
-    expect(document.activeElement).toBe(title);
-    expect(currentSection()).toBe("Your dot");
-  });
-  it("opens over a dimmed page on the requested model or autonomy choices without focus scrolling", () => {
-    sectionLayout();
-    const focused = vi.spyOn(HTMLElement.prototype, "focus");
-    const model = props();
-    const view = render(<SettingsSheet {...model} section="models" loading />);
-    expect(settingsScroll().scrollTop).toBe(600);
-    view.rerender(<SettingsSheet {...model} section="models" />);
-    const main = screen.getByRole("region", { name: "Main model" });
-    expect(document.activeElement).toBe(within(main).getByRole("combobox", { name: "Provider" }));
-    expect(focused).toHaveBeenLastCalledWith({ preventScroll: true });
-    expect(settingsScroll().scrollTop).toBe(600);
-    expect(sheet().getAttribute("aria-modal")).toBe("true");
-    view.unmount();
-    const p = { ...props(), autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
-    const later = render(<SettingsSheet {...p} section="autonomy" sectionRequest={1} loading />);
-    later.rerender(<SettingsSheet {...p} section="autonomy" sectionRequest={1} />);
-    const preset = screen.getByRole("radiogroup", { name: "Start from" });
-    expect(document.activeElement).toBe(within(preset).getByRole("radio", { name: "Balanced" }));
-    const careful = within(preset).getByRole("radio", { name: "Careful" });
-    careful.focus();
-    later.rerender(<SettingsSheet {...p} section="autonomy" sectionRequest={1} dirty />);
-    expect(document.activeElement).toBe(careful);
-    expect(p.onAutonomy).not.toHaveBeenCalled();
-  });
-  it("keeps a sidebar choice when an earlier requested section finishes loading", () => {
-    const layout = sectionLayout();
-    const p = { ...props(), keysPanel: keysPanel() };
-    const view = render(<SettingsSheet {...p} section="models" sectionRequest={1} loading />);
-    const keys = within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole(
-      "button",
-      { name: "Keys" },
-    );
-    keys.focus();
-    fireEvent.click(keys);
-    expect(settingsScroll().scrollTop).toBe(1800);
-    layout.tops.keys = 2000;
-    view.rerender(<SettingsSheet {...p} section="models" sectionRequest={1} />);
-    layout.resize();
-    expect(currentSection()).toBe("Keys");
-    expect(document.activeElement).toBe(keys);
-    expect(settingsScroll().scrollTop).toBe(2000);
-  });
-  it("leaves manual scrolling and focus alone when loading finishes or content resizes", () => {
-    const layout = sectionLayout();
-    const p = { ...props(), autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
-    const view = render(<SettingsSheet {...p} section="autonomy" loading />);
-    const focused = document.activeElement;
-    fireEvent.wheel(settingsScroll());
     settingsScroll().scrollTop = 75;
-    view.rerender(<SettingsSheet {...p} section="autonomy" />);
     layout.resize();
     expect(settingsScroll().scrollTop).toBe(75);
-    expect(document.activeElement).toBe(focused);
-  });
-  it("resets to the top when reopened during its closing transition", () => {
-    sectionLayout();
-    Object.defineProperty(HTMLElement.prototype, "getAnimations", {
-      configurable: true,
-      value: () => [
-        {
-          effect: { getComputedTiming: () => ({ endTime: 1000 }) },
-          finished: new Promise(() => {}),
-        },
-      ],
+    expect(screen.queryByRole("region", { name: "Your dot" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Keys" }));
+    fireEvent.change(within(screen.getByRole("region", { name: "Keys" })).getByLabelText("Key"), {
+      target: { value: "fake-private-value" },
     });
-    try {
-      const p = {
-        ...props(),
-        keysPanel: keysPanel(),
-        persona: { value: "coder" as const, onChange: vi.fn() },
-      };
-      const view = render(<SettingsSheet {...p} section="keys" sectionRequest={1} />);
-      expect(settingsScroll().scrollTop).toBe(1800);
-      view.rerender(<SettingsSheet {...p} open={false} sectionRequest={2} />);
-      view.rerender(<SettingsSheet {...p} sectionRequest={3} />);
-      expect(settingsScroll().scrollTop).toBe(0);
-      expect(currentSection()).toBe("Your dot");
-      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your dot" }));
-    } finally {
-      Reflect.deleteProperty(HTMLElement.prototype, "getAnimations");
-    }
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    expect(settingsScroll().scrollTop).toBe(0);
+    expect(screen.queryByRole("region", { name: "Keys" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Keys" }));
+    expect(
+      (
+        within(screen.getByRole("region", { name: "Keys" })).getByLabelText(
+          "Key",
+        ) as HTMLInputElement
+      ).value,
+    ).toBe("fake-private-value");
   });
-  it("returns focus to the opener after focusing the first section", () => {
+  it("honors repeated explicit requests and returns focus to the opener", () => {
     const button = document.createElement("button");
     document.body.append(button);
     button.focus();
-    try {
-      const p = props();
-      const view = render(<SettingsSheet {...p} />);
-      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Models" }));
-      view.rerender(<SettingsSheet {...p} open={false} />);
-      expect(document.activeElement).toBe(button);
-    } finally {
-      button.remove();
-    }
-  });
-  it("honors a repeated request for the same section after browsing elsewhere", () => {
-    sectionLayout();
     const p = { ...props(), keysPanel: keysPanel() };
     const view = render(<SettingsSheet {...p} section="models" sectionRequest={1} />);
-    fireEvent.click(
-      within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole("button", {
-        name: "Keys",
-      }),
-    );
-    expect(settingsScroll().scrollTop).toBe(1800);
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Models" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keys" }));
     view.rerender(<SettingsSheet {...p} section="models" sectionRequest={2} />);
     expect(currentSection()).toBe("Models");
-    expect(settingsScroll().scrollTop).toBe(600);
-    expect(document.activeElement).toBe(
-      within(screen.getByRole("region", { name: "Main model" })).getByRole("combobox", {
-        name: "Provider",
-      }),
-    );
+    expect(settingsScroll().scrollTop).toBe(0);
+    view.rerender(<SettingsSheet {...p} open={false} />);
+    expect(document.activeElement).toBe(button);
+    button.remove();
   });
   it("opens on what dot knows when asked", () => {
     const knowledge = {
@@ -388,22 +308,22 @@ describe("settings inspector", () => {
     expect(p.onClose).not.toHaveBeenCalled();
     expect(p.onChange).not.toHaveBeenCalled();
   });
-  it("asks before Escape or the close button discards edits that can't be saved", () => {
-    const p = { ...props(), dirty: true, save: { enabled: false, run: vi.fn() } };
-    render(<SettingsSheet {...p} />);
-    for (const dismiss of [
-      () => fireEvent.keyDown(sheet(), { key: "Escape" }),
-      () => fireEvent.click(screen.getByRole("button", { name: "Close settings" })),
-    ]) {
-      dismiss();
-      expect(asking()).toBe(true);
-      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep editing" }));
-      fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-    }
-    expect(p.onClose).not.toHaveBeenCalled();
+  it("reveals invalid fields on close or Escape without a discard prompt", () => {
+    const p = {
+      ...props(),
+      keysPanel: keysPanel(),
+      dirty: true,
+      validation: ["Choose a main provider and model."],
+      save: { enabled: false, run: vi.fn() },
+    };
+    render(<SettingsSheet {...p} section="keys" />);
     fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
-    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
-    expect(p.onClose).toHaveBeenCalledOnce();
+    expect(asking()).toBe(false);
+    expect(currentSection()).toBe("Models");
+    expect(screen.getByRole("alert").textContent).toContain("Choose a main provider and model.");
+    fireEvent.keyDown(sheet(), { key: "Escape" });
+    expect(p.onClose).not.toHaveBeenCalled();
+    expect(asking()).toBe(false);
   });
   it("asks before Revert drops unsaved changes", () => {
     const p = {
@@ -491,8 +411,7 @@ describe("settings inspector", () => {
         }}
       />,
     );
-    const keys = screen.getByRole("region", { name: "Keys" });
-    expect(within(keys).queryByRole("form", { name: "Add a key" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Keys" })).toBeNull();
     const add = within(screen.getByRole("region", { name: "Main model" })).getByRole("button", {
       name: "Add key",
     });
@@ -584,15 +503,16 @@ describe("settings inspector", () => {
       Reflect.deleteProperty(HTMLElement.prototype, "getAnimations");
     }
   });
-  it("asks before closing with a key typed, even with no settings changed", () => {
+  it("reveals a typed key on close without a discard prompt", () => {
     const p = props();
-    render(<SettingsSheet {...p} keysPanel={keysPanel()} />);
+    render(<SettingsSheet {...p} keysPanel={keysPanel()} section="keys" />);
     const keys = screen.getByRole("region", { name: "Keys" });
     fireEvent.change(within(keys).getByLabelText("Key"), {
       target: { value: "fake-private-value" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
-    expect(asking()).toBe(true);
+    expect(asking()).toBe(false);
+    expect(screen.getByRole("alert").textContent).toContain("Save or cancel the key");
     expect(p.onClose).not.toHaveBeenCalled();
   });
   it("shows the ChatGPT plan without prices, a spending limit or the optional roles", () => {
@@ -630,9 +550,11 @@ describe("settings inspector", () => {
         spending={spending}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Spending" }));
     const section = screen.getByRole("region", { name: "Spending" });
     expect(within(section).getByText(/Your plan's own limits apply/)).toBeTruthy();
     expect(within(section).queryByRole("textbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
     const main = screen.getByRole("region", { name: "Main model" });
     expect(within(main).getByText(/Uses your plan's limits\./)).toBeTruthy();
     expect(
@@ -645,6 +567,7 @@ describe("settings inspector", () => {
         spending={spending}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Spending" }));
     const paid = screen.getByRole("region", { name: "Spending" });
     const limit = within(paid).getByRole("switch", { name: "Spending limit" });
     expect((limit as HTMLInputElement).checked).toBe(false);
@@ -665,6 +588,7 @@ describe("settings inspector", () => {
         }}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Autonomy" }));
     const steps = screen.getByRole("switch", { name: "After a number of steps" });
     expect((steps as HTMLInputElement).checked).toBe(false);
     expect(screen.queryByRole("textbox", { name: "Steps" })).toBeNull();
@@ -681,6 +605,7 @@ describe("settings inspector", () => {
     const view = render(
       <SettingsSheet {...props()} autonomy={saved} savedAutonomy={saved} onAutonomy={onAutonomy} />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Autonomy" }));
     fireEvent.click(screen.getByRole("button", { name: "Choose for each kind of action" }));
     const send = screen.getByRole("radiogroup", { name: "Send as you" });
     fireEvent.click(within(send).getByRole("radio", { name: "Just do it" }));
@@ -694,6 +619,7 @@ describe("settings inspector", () => {
         onAutonomy={onAutonomy}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Autonomy" }));
     fireEvent.click(screen.getByRole("button", { name: "Choose for each kind of action" }));
     expect(screen.getAllByRole("img", { name: "Changed" })).toHaveLength(1);
     expect(screen.getByText("Passwords, codes and card details")).toBeTruthy();
@@ -708,6 +634,7 @@ describe("settings inspector", () => {
         stopNote={note}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Your computer" }));
     fireEvent.click(within(sheet()).getByRole("button", { name: "Shut down" }));
     expect(shutDown).toHaveBeenCalledOnce();
     expect(within(sheet()).queryByText(note.line)).toBeNull();
@@ -742,6 +669,7 @@ describe("settings inspector", () => {
     const run = vi.fn();
     const update = { available: true, busy: false, error: null, run };
     const view = render(<SettingsSheet {...props()} update={update} />);
+    fireEvent.click(screen.getByRole("button", { name: "Your computer" }));
     expect(within(sheet()).getByText("New version ready")).toBeTruthy();
     fireEvent.click(within(sheet()).getByRole("button", { name: "Update" }));
     expect(run).toHaveBeenCalledOnce();
@@ -777,10 +705,12 @@ describe("settings inspector", () => {
         }}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Your computer" }));
     const button = within(sheet()).getByRole("button", { name: "Update" });
     expect(button.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(button);
     expect(run).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Your computer" }));
     expect(within(sheet()).getByText("New version ready")).toBeTruthy();
   });
 
@@ -789,6 +719,7 @@ describe("settings inspector", () => {
     const run = vi.fn();
     const freshStart = { available: true, busy: false, error: null, run };
     const view = render(<SettingsSheet {...props()} freshStart={freshStart} />);
+    fireEvent.click(screen.getByRole("button", { name: "Your computer" }));
     expect(
       within(sheet()).getByText("Erases your computer's files. Your sign\u2011ins stay."),
     ).toBeTruthy();
@@ -829,6 +760,7 @@ describe("settings inspector", () => {
     const change = vi.fn();
     const stream = { value: "auto" as const, saved: true, change };
     const view = render(<SettingsSheet {...props()} stream={stream} />);
+    fireEvent.click(screen.getByRole("button", { name: "Your computer" }));
     const choice = within(sheet()).getByRole("radiogroup", { name: "Stream quality" });
     expect(within(sheet()).getByRole("button", { name: "Your computer" })).toBeTruthy();
     expect(
@@ -867,7 +799,7 @@ describe("Settings Done", () => {
     expect(asking()).toBe(false);
     expect(p.onClose).not.toHaveBeenCalled();
     expect(p.save.run).not.toHaveBeenCalled();
-    expect(screen.getByText("Choose a main provider and model.")).toBeTruthy();
+    expect(screen.getAllByText("Choose a main provider and model.").length).toBeGreaterThan(0);
   });
   it("waits for a busy save and closes only after changes are saved", () => {
     onPhone();

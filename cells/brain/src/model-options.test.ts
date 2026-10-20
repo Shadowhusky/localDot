@@ -40,6 +40,20 @@ const cases: [string, string, ModelOptions, Record<string, unknown>][] = [
   [
     "openai",
     "gpt-6-astra",
+    { speed: "fast", reasoningEffort: "max" },
+    { service_tier: "priority", reasoning: { effort: "max" } },
+  ],
+  ["openai", "gpt-6.1-sol", { speed: "standard" }, { service_tier: "default" }],
+  [
+    "anthropic",
+    "claude-opus-5-5",
+    { speed: "fast", reasoningEffort: "xhigh" },
+    { speed: "fast", output_config: { effort: "xhigh" } },
+  ],
+  ["anthropic", "claude-opus-4-8", { speed: "standard" }, { speed: "standard" }],
+  [
+    "openai",
+    "gpt-6-astra",
     { reasoningEffort: "high", verbosity: "low" },
     { reasoning: { effort: "high" }, text: { verbosity: "low" }, store: false },
   ],

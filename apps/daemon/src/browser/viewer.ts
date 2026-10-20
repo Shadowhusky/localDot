@@ -22,7 +22,7 @@ export function browserViewerApi(app: Hono, deps: BrowserViewerDeps): void {
     const cell = deps.cells.forParent(parentId);
     if (!cell || cell.state !== "ready" || cell.paused || cell.fenced || cell.replacementPending)
       return c.text("the browser is unavailable", 409);
-    const ticket = deps.tickets.issue(cell.id);
+    const ticket = deps.tickets.issue(cell.id, c.get("remoteGrant")?.id, c.get("remoteValid"));
     return c.json({ ticket, cellId: cell.id, path: `/cells/${cell.id}/browser/${ticket}/` });
   });
 }

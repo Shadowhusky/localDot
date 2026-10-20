@@ -105,7 +105,13 @@ function titles(scope: ParentNode = document.body): string[] {
 
 it("keeps every row title in the wide sheet short enough for one line", () => {
   render(<SettingsSheet {...everything()} />);
-  const shown = titles();
+  const shown = [...titles()];
+  for (const button of within(
+    screen.getByRole("navigation", { name: "Settings sections" }),
+  ).getAllByRole("button")) {
+    fireEvent.click(button);
+    shown.push(...titles());
+  }
   expect(shown).toEqual(expect.arrayContaining(["Start fresh", "Open at login"]));
   expect(shown.filter((title) => title.length > MAX_TITLE)).toEqual([]);
 });

@@ -124,3 +124,22 @@ it("refreshes a silent OPEN socket on app return and rejects its late events", (
   window.dispatchEvent(new Event("online"));
   expect(FakeWebSocket.instances).toHaveLength(2);
 });
+
+it("keeps a healthy connection on window focus, but still reconnects on a following visibility return", () => {
+  FakeWebSocket.instances = [];
+  const handle = openSocket({
+    url: "ws://localhost/status",
+    protocols: [],
+    handlers: { onMessage() {} },
+    WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+  });
+  const first = FakeWebSocket.instances[0];
+  first?.open();
+  window.dispatchEvent(new Event("focus"));
+  expect(first?.closed).toBe(false);
+  expect(FakeWebSocket.instances).toHaveLength(1);
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(first?.closed).toBe(true);
+  expect(FakeWebSocket.instances).toHaveLength(2);
+  handle.close();
+});

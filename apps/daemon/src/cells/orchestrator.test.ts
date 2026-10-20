@@ -1517,3 +1517,10 @@ it("updates a paused computer by thawing and stopping before swapping", async ()
   expect(changes[0]?.state).toBe("stopping");
   expect(changes.findIndex((c) => c.state === "starting")).toBeGreaterThan(0);
 });
+
+it("does not report a saved computer as off before Docker reconciliation has checked it", async () => {
+  const { orchestrator, store } = await setup();
+  const record = sampleRecord();
+  store.save(record);
+  expect(orchestrator.list().find((cell) => cell.id === record.id)?.state).toBe("starting");
+});

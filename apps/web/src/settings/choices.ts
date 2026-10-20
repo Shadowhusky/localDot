@@ -8,8 +8,13 @@ export type PickerKey = Pick<KeyRecord, "id" | "kind" | "provider" | "baseURL">;
 export interface SubscriptionModel {
   id: string;
   name: string;
+  resolvedModel?: string;
+  efforts?: readonly import("@localdot/protocol").ReasoningEffort[];
+  fast?: boolean;
 }
 export interface PickerModel extends Capability {
+  controls?: import("@localdot/protocol").ModelControls;
+  controlsCheckedAt?: string;
   id: string;
   name: string;
   contextTokens: number;

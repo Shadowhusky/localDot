@@ -902,6 +902,27 @@ describe("reset task retirement", () => {
 });
 
 describe("ChatGPT provider selection", () => {
+  it("uses live account efforts for a new model and refuses unknown efforts without metadata", async () => {
+    const f = setup();
+    f.setSettings({
+      main: { provider: "chatgpt", model: "gpt-future", options: { reasoningEffort: "max" } },
+    });
+    await expect(f.runner.start(f.cellId, "fixture task")).rejects.toThrow("reasoning effort");
+    f.setStatus({
+      available: true,
+      state: "signed_in",
+      codexVersion: "0.154.0",
+      models: [{ id: "gpt-future", name: "Future", isDefault: false, efforts: ["low", "max"] }],
+    });
+    const session = await f.runner.start(f.cellId, "fixture task");
+    expect(f.runner.selectionOf(session.id)).toMatchObject({
+      model: "gpt-future",
+      options: { reasoningEffort: "max" },
+    });
+    session.stop();
+    await f.live.settled(session.id);
+  });
+
   it("accepts a valid main selection", () => {
     expect(() =>
       checkChatgptChoice("main", { provider: "chatgpt", model: "gpt-6-astra" }),

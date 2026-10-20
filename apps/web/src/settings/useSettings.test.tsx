@@ -80,6 +80,21 @@ describe("explicit configuration save ownership", () => {
     expect(f.state.settings).toEqual(initial());
   });
 
+  it("restores a Responses provider binding backed by an OpenAI-compatible key", async () => {
+    const main = {
+      provider: "openai-responses-compatible",
+      model: "gateway-model",
+      key: "gateway",
+      plan: true as const,
+    };
+    const f = server({ main });
+    const { result } = await opened(f);
+    act(() => result.current.change("main", { provider: "ollama", model: "" }));
+    act(() => result.current.change("main", { provider: main.provider, model: "" }));
+    expect(result.current.draft?.choices.main).toEqual(main);
+    expect(result.current.dirty).toBe(false);
+  });
+
   it("keeps configured choices while switching providers in one settings visit", async () => {
     const f = server(),
       { result } = await opened(f);
@@ -287,7 +302,7 @@ describe("explicit configuration save ownership", () => {
       { result } = await opened(f);
     act(() => result.current.change("main", { provider: "ollama", model: "edited" }));
     act(() => setHidden(true));
-    expect(result.current.saveEnabled).toBe(false);
+    expect(result.current.saveEnabled).toBe(true);
     act(() => setHidden(false));
     await waitFor(() => expect(result.current.saveEnabled).toBe(true));
     expect(result.current.draft?.choices.main?.model).toBe("edited");
@@ -305,11 +320,11 @@ describe("explicit configuration save ownership", () => {
       view = renderHook(() => useSettings(f.api));
     await waitFor(() => expect(view.result.current.mainReady).toBe(true));
     act(() => setHidden(true));
-    expect(view.result.current.mainReady).toBe(false);
+    expect(view.result.current.mainReady).toBe(true);
     act(() => setHidden(false));
     await waitFor(() => expect(view.result.current.mainReady).toBe(true));
   });
-  it("keeps edits when the return read fails and lets Try again recover them", async () => {
+  it("keeps edits when a resumed page read fails and lets Try again recover them", async () => {
     const f = server(),
       { result } = await opened(f);
     act(() => result.current.change("main", { provider: "ollama", model: "edited" }));
@@ -318,6 +333,8 @@ describe("explicit configuration save ownership", () => {
     };
     act(() => setHidden(true));
     act(() => setHidden(false));
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    act(() => window.dispatchEvent(new Event("pageshow")));
     await waitFor(() => expect(result.current.phase).toBe("error"));
     expect(result.current.error).toContain("Your edits are kept");
     expect(result.current.draft?.choices.main?.model).toBe("edited");

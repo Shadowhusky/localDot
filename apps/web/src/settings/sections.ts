@@ -26,7 +26,7 @@ export interface SectionInfo {
   icon: IconName;
 }
 
-// In sidebar order, which is also the order of the one scroll they share.
+// Sidebar and phone index order; each section has its own page.
 export const SECTIONS: readonly SectionInfo[] = [
   { id: "dot", title: "Your dot", icon: "smile" },
   { id: "models", title: "Models", icon: "cpu" },

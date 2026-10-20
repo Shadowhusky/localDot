@@ -89,6 +89,9 @@ export function claudeCodeOptions(input: ClaudeCodeOptionsInput): Options {
       : {}),
     systemPrompt: input.instructions,
     settingSources: [],
+    ...(input.modelOptions?.speed
+      ? { settings: { fastMode: input.modelOptions.speed === "fast" } }
+      : {}),
     strictMcpConfig: true,
     mcpServers: { [LOCALDOT_SERVER]: input.server },
     tools: [],

@@ -3,6 +3,7 @@ import { Fragment, useMemo } from "react";
 import { diffStat } from "./activity.ts";
 import type { AgentChange } from "./model.ts";
 import { OutputCopy } from "./OutputCopy.tsx";
+import { StepPreviewButton } from "./StepPreview.tsx";
 import "./output.css";
 export const DIFF_LIMITS = Object.freeze({ chars: 64_000, lines: 2000, path: 1024 });
 export function diffPreview(patch: string | undefined) {
@@ -82,7 +83,17 @@ export function DiffViewer({
   const numbered = useMemo(() => numberLines(preview.lines), [preview.lines]);
   const stat = diffStat([preview.text]);
   return (
-    <section className="diff-viewer" data-compact={compact || undefined} aria-label="File change">
+    <section
+      className="diff-viewer step-preview-resource"
+      data-compact={compact || undefined}
+      aria-label="File change"
+    >
+      {!preview.unavailable && (
+        <StepPreviewButton
+          label="Preview code changes"
+          resource={{ kind: "text", name: change.path, text: preview.text }}
+        />
+      )}
       <p className="diff-head">
         <span className="diff-op" hidden={compact}>
           {change.type === "memory"

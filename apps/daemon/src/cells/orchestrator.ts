@@ -2046,8 +2046,9 @@ export class CellOrchestrator {
     });
   }
   #summary(record: CellRecord): CellSummary {
+    // Before Docker reconciliation answers, absence of a snapshot is not proof of shutdown.
     const live = this.#live.get(record.id) ?? {
-      state: "stopped" as const,
+      state: "starting" as const,
       restarts: 0,
       stream: NO_STREAM,
     };

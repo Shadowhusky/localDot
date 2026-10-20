@@ -1,10 +1,17 @@
-import { AgentSettingsDocument, ClaudeCodeStatus, SECRET_ID_PATTERN } from "@localdot/protocol";
+import {
+  AgentSettingsDocument,
+  ClaudeCodeStatus,
+  ModelControls,
+  SECRET_ID_PATTERN,
+} from "@localdot/protocol";
 import { PROVIDERS } from "@localdot/providers";
 import { z } from "zod";
 import type { ApiClient } from "../lib/api.ts";
 
 const identifier = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);
 const model = z.strictObject({
+  controls: ModelControls.optional(),
+  controlsCheckedAt: z.iso.datetime().optional(),
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/),
   name: z.string().max(200),
   contextTokens: z.number().int().positive(),
@@ -122,6 +129,7 @@ async function request(
   bytes: number,
   signal?: AbortSignal,
   body?: unknown,
+  checkModels = false,
 ): Promise<unknown> {
   const abort = new AbortController();
   const deadline = AbortSignal.any([
@@ -136,6 +144,7 @@ async function request(
       method,
       headers: {
         authorization: api.authorization(),
+        ...(checkModels ? { "x-localdot-check-models": "1" } : {}),
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -194,9 +203,10 @@ export async function loadSettings(
 export async function loadProviderIndex(
   api: ApiClient,
   signal?: AbortSignal,
+  checkNow = false,
 ): Promise<ProviderIndex> {
   const parsed = ProviderIndex.safeParse(
-    await request(api, "GET", "/api/agent/providers", 4 * 1024 * 1024, signal),
+    await request(api, "GET", "/api/agent/providers", 4 * 1024 * 1024, signal, undefined, checkNow),
   );
   if (!parsed.success) throw new SettingsFailure(false);
   return parsed.data;

@@ -706,7 +706,7 @@ const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
   );
 });
 // serve() is typed as HTTP/1-or-HTTP/2; this daemon only ever creates an HTTP/1 server.
-attachUpgradeRouter(server as Server, { port, token }, [
+attachUpgradeRouter(server as Server, { port, token, guests: remoteAccess }, [
   sessionStreamRoute(eventLog),
   manualStreamRoute({
     session: (id) => agent.routes.runner.get(id),

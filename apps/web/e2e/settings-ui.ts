@@ -25,6 +25,7 @@ export async function openSettings(
   const sheet = settingsSheet(page);
   if (await gear.isVisible()) {
     await press(gear);
+    if (section) await sheet.getByRole("button", { name: section, exact: true }).click();
     return sheet;
   }
   await press(more);

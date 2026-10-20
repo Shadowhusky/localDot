@@ -99,6 +99,8 @@ function ModelMenuBody({
         <ModelOptionsFields
           compact
           choice={draft.choice}
+          accountModel={choices.find((option) => option.id === draft.id)?.accountModel}
+          discovered={choices.find((option) => option.id === draft.id)?.controls}
           outputLimit={outputLimit?.(draft.choice)}
           onChange={(choice) => setDraft({ ...draft, choice })}
         />

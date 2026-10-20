@@ -1,5 +1,5 @@
-/* Settings (design-v2 §10.10, §11 I): one 600 px inspector, a sidebar of sections over the one
-   scroll they share; on a phone a list of sections that pushes into each. It lays kit parts out and
+/* Settings (design-v2 §10.10, §11 I): one 600 px inspector with separate section pages;
+   on a phone a list of sections pushes into each. It lays kit parts out and
    never restyles them: the kit's layer comes after this one. */
 .settings-body {
   /* One gap between the blocks of a section (a group with its heading and note) in every section. */
@@ -11,13 +11,8 @@
   padding-block: calc(var(--spacing) * 2) calc(var(--spacing) * 8);
 }
 
-/* The last section can still scroll to the top, so every sidebar row lands its section there. */
-.settings-sheet[data-side="inspector"] .ui-sheet-body {
-  container-type: size;
-}
-
-.settings-sheet[data-side="inspector"] .settings-section:last-child {
-  min-height: calc(100cqh - var(--spacing) * 2);
+.settings-section[hidden] {
+  display: none;
 }
 
 .settings-index {
@@ -1116,4 +1111,45 @@
   height: calc(var(--spacing) * 14);
   border-radius: var(--radius-row);
   background: linear-gradient(180deg, var(--color-void), var(--color-raised-2));
+}
+
+/* Bound collection height independently of the settings page, with space for the last row. */
+.settings-knowledge .memory-list,
+.settings-knowledge .settings-skills,
+.settings-knowledge .memory-raw {
+  max-block-size: min(24rem, 50dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scroll-padding-block: calc(var(--spacing) * 3);
+  padding-block-end: calc(var(--spacing) * 3);
+}
+
+.share-links {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  margin-block-start: calc(var(--spacing) * 5);
+  min-width: 0;
+}
+.share-link-list {
+  max-block-size: min(24rem, 50dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-block: calc(var(--spacing) * 2);
+}
+.share-link-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 3) 0;
+}
+.share-link-row > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.share-link-row p {
+  font-size: var(--text-callout);
+  color: var(--color-fg-2);
+  margin: calc(var(--spacing) * 1) 0 0;
 }

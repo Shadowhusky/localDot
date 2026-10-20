@@ -103,3 +103,21 @@ describe("safe ChatGPT account metadata", () => {
     );
   });
 });
+
+it("retains actual account effort and speed capabilities without unknown provider values", () => {
+  const item = {
+    id: "gpt-6-astra",
+    displayName: "GPT-6 Astra",
+    isDefault: true,
+    hidden: false,
+    defaultReasoningEffort: "medium",
+    supportedReasoningEfforts: [
+      { reasoningEffort: "high" },
+      { reasoningEffort: "max" },
+      { reasoningEffort: "unsupported" },
+    ],
+    serviceTiers: [{ id: "default" }, { id: "fast" }],
+  };
+  expect(modelsFor({ data: [item] })[0]).toMatchObject({ efforts: ["high", "max"], fast: true });
+  expect(modelsFor({ data: [{ ...item, serviceTiers: [] }] })[0]?.fast).toBe(false);
+});

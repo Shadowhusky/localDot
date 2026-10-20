@@ -4,12 +4,13 @@ import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { PauseButton } from "./HudIsland.tsx";
 import type { PauseSlot, TakeSlot } from "./island.ts";
-import { StreamMenu } from "./StreamMenu.tsx";
+import { type DisplayControl, StreamMenu } from "./StreamMenu.tsx";
 
 const IDLE = "No task is running";
 
 export interface FocusControlsProps {
   stream: StreamPreferenceControl;
+  display?: DisplayControl;
   take: TakeSlot;
   // The task's Pause and Stop; without a task they stay in place, unavailable.
   pause: PauseSlot | null;
@@ -28,6 +29,7 @@ export interface FocusControlsProps {
 // which turning the phone sideways makes bigger.
 export function FocusControls({
   stream,
+  display,
   take,
   pause,
   stop,
@@ -81,7 +83,7 @@ export function FocusControls({
             />
           </>
         )}
-        <StreamMenu stream={stream} />
+        <StreamMenu stream={stream} display={display} />
         <IconButton
           variant="filled"
           round

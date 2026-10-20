@@ -8,6 +8,7 @@ import { parsePublicOrigins } from "../../daemon/src/guard.ts";
 import { KeydClient, keydSocketPath } from "../../daemon/src/keyd/client.ts";
 import { runOpenLink } from "../../daemon/src/open-link.ts";
 import { runStop } from "../../daemon/src/stop.ts";
+import { runChat } from "./chat.ts";
 import { resolveCommandContext } from "./install/command-context.ts";
 import { type DefaultContext, runDefault } from "./install/default.ts";
 import { runInstalledDoctor } from "./install/doctor.ts";
@@ -35,6 +36,7 @@ export interface ConsoleIO {
   err(message: string): void;
 }
 export interface Runtime {
+  chat?(context: RuntimeContext, io: ConsoleIO): Promise<number>;
   context(input: CommandContextInput): Promise<RuntimeContext>;
   default(context: DefaultContext, io: ConsoleIO): Promise<number>;
   up(
@@ -73,6 +75,7 @@ export interface Runtime {
 // Imports have no process side effects. Installation and lifecycle commands perform their own
 // prerequisite and ownership checks. open/stop retain the existing bounded authenticated clients.
 export const runtime: Runtime = {
+  chat: runChat,
   context: resolveCommandContext,
   default: runDefault,
   up: runUp,

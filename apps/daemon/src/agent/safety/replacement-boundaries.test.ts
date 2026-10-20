@@ -384,6 +384,7 @@ describe("replacement crosses real runner, lifecycle and public route boundaries
       id = ulid(),
       checked = hold();
     let fenced = false;
+    let checks = 0;
     const cells = new CellOrchestrator({
       docker: new DockerClient(f.fake.socketPath),
       store: f.store,
@@ -391,7 +392,8 @@ describe("replacement crosses real runner, lifecycle and public route boundaries
       images: { desktop: "localdot/desktop:dev", gate: "localdot/gate:dev" },
       permanentFence: (cell) => cell === id && fenced,
       verifyRuntime: async (record) => {
-        if (record.id !== id || cells.get(id)?.state !== "starting") return;
+        // Fence the post-start readiness check, after the initial ownership check.
+        if (record.id !== id || ++checks !== 2) return;
         fenced = true;
         checked.resolve();
       },

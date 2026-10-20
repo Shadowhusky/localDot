@@ -15,7 +15,9 @@ const off = {
 const online = { ...off, enabled: true, state: "online", url: "https://device--dot.example.com" };
 function fixture(status = off) {
   const api = {
-    get: vi.fn(async () => status),
+    get: vi.fn(async (path: string) =>
+      path.endsWith("/links") ? { links: [] } : path.endsWith("/settings") ? {} : status,
+    ),
     put: vi.fn(async () => online as typeof off),
     post: vi.fn(async () => ({
       url: `${online.url}/_remote/pair#remote=secret&code=code`,

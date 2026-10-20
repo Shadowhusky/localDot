@@ -650,6 +650,20 @@ describe("Stage in a Chromium browser", () => {
     expect(clients()).toHaveLength(1);
   });
 
+  it("does not restart a healthy capture just because another window returned focus", async () => {
+    const { api, calls } = daemon();
+    await streaming(api);
+    const before = client() as HTMLIFrameElement;
+    const send = vi.fn();
+    Object.assign(before.contentWindow as Window, { selkiesTransport: { readyState: 1, send } });
+    fireEvent(window, new Event("focus"));
+    expect(send).not.toHaveBeenCalled();
+    expect(framesSent()).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+    fireEvent(window, new Event("pageshow"));
+    expect(send).toHaveBeenCalled();
+  });
+
   it("keeps a healthy foreground stream once a new frame arrives", async () => {
     fakeTimers();
     const { api, calls } = daemon();

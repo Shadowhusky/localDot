@@ -1,4 +1,8 @@
-import { ModelOptions, type ReasoningEffort } from "@localdot/protocol";
+import {
+  type ModelControls as DiscoveredControls,
+  ModelOptions,
+  type ReasoningEffort,
+} from "@localdot/protocol";
 import { providerById } from "./registry.ts";
 
 // Reviewed against the vendor references in docs/model-options.md. A reasoning model is not
@@ -20,6 +24,7 @@ export interface ModelControls {
   wire?: ThinkingWire;
   budget?: boolean;
   verbosity?: boolean;
+  speeds?: readonly ("standard" | "fast")[];
 }
 const basic = ["low", "medium", "high"] as const;
 const full = [...basic, "xhigh", "max"] as const;
@@ -65,7 +70,28 @@ function claude(model: string): ModelControls {
     return { ...effort(["none"], "anthropic-budget"), budget: true };
   return unknown;
 }
-export function modelControls(provider: string, modelId: string): ModelControls {
+export function modelControls(
+  provider: string,
+  modelId: string,
+  discovered?: DiscoveredControls,
+): ModelControls {
+  if (discovered) return discovered;
+  const controls = reasoningControls(provider, modelId);
+  const model = modelId.toLowerCase().replaceAll(".", "-");
+  // Speed is a separate billing/performance choice, never an effort synonym.
+  // Compatible endpoints do not inherit direct-provider service tiers.
+  if (
+    (["openai", "chatgpt"].includes(provider) &&
+      /^gpt-(?:6(?:[.-])|5[.]3-codex(?:$|-))/.test(modelId) &&
+      !/nano|chat|search/.test(modelId) &&
+      controls.wire) ||
+    (provider === "anthropic" && /^claude-opus-(?:5(?:-5)?|4-8)(?:$|-20)/.test(model)) ||
+    (provider === "claude-code" && /^(?:opus$|claude-opus-(?:5(?:-5)?|4-8)(?:$|-20))/.test(model))
+  )
+    return { ...controls, speeds: ["standard", "fast"] };
+  return controls;
+}
+function reasoningControls(provider: string, modelId: string): ModelControls {
   const model = modelId.toLowerCase();
   const client = providerById(provider)?.client;
   if (provider === "chatgpt") {
@@ -76,7 +102,9 @@ export function modelControls(provider: string, modelId: string): ModelControls 
       : unknown;
   }
   if (provider === "claude-code") {
-    if (/^(opus|sonnet)$/.test(model)) return effort(basic);
+    // Current native aliases support the full effort vocabulary; account metadata
+    // narrows these controls when the installed runtime resolves an older model.
+    if (/^(opus|sonnet|fable|best)$/.test(model)) return effort(full);
     if (model === "haiku") return unknown;
     const c = claude(model);
     return c.wire === "anthropic" || /opus-4[.-]5/.test(model) ? effort(c.efforts) : unknown;
@@ -212,16 +240,19 @@ export function modelOptionsProblem(
   model: string,
   raw: unknown,
   outputCap = 16000,
+  discovered?: DiscoveredControls,
 ): string | undefined {
   if (raw === undefined) return;
   const parsed = ModelOptions.safeParse(raw);
   if (!parsed.success) return "Invalid model options.";
   const o = parsed.data,
-    c = modelControls(provider, model);
+    c = modelControls(provider, model, discovered);
   if (o.reasoningEffort !== undefined && !c.efforts.includes(o.reasoningEffort))
     return "This model does not support that reasoning effort.";
   if (o.thinkingBudget !== undefined && (!c.budget || o.thinkingBudget > outputCap - 1024))
     return "Choose a thinking budget that leaves at least 1,024 tokens for the answer.";
+  if (o.speed !== undefined && !c.speeds?.includes(o.speed))
+    return "Speed selection is not supported for this model and endpoint.";
   if (o.verbosity !== undefined && !c.verbosity)
     return "This model does not support answer detail.";
 }
@@ -229,7 +260,8 @@ export function sameModelOptions(a?: ModelOptions, b?: ModelOptions): boolean {
   return (
     a?.reasoningEffort === b?.reasoningEffort &&
     a?.thinkingBudget === b?.thinkingBudget &&
-    a?.verbosity === b?.verbosity
+    a?.verbosity === b?.verbosity &&
+    a?.speed === b?.speed
   );
 }
 // A closed translation table. No URLs, credentials, arbitrary body keys or sampling controls
@@ -238,14 +270,19 @@ export function modelProviderOptions(
   provider: string,
   model: string,
   options?: ModelOptions,
+  discovered?: DiscoveredControls,
 ): Record<string, string | number | boolean | Record<string, string | number | boolean>> {
   if (!options) return {};
-  const problem = modelOptionsProblem(provider, model, options);
+  const problem = modelOptionsProblem(provider, model, options, 16000, discovered);
   if (problem) throw new Error(problem);
-  const c = modelControls(provider, model),
+  const c = modelControls(provider, model, discovered),
     e = options.reasoningEffort,
     budget = options.thinkingBudget;
   const out: ReturnType<typeof modelProviderOptions> = {};
+  if (options.speed) {
+    if (provider === "openai") out.serviceTier = options.speed === "fast" ? "priority" : "default";
+    else if (provider === "anthropic") out.speed = options.speed;
+  }
   if (options.verbosity) out.textVerbosity = options.verbosity;
   if (e === undefined && budget === undefined) return out;
   switch (c.wire) {

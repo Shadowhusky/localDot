@@ -436,3 +436,24 @@
     display: none;
   }
 }
+
+@layer utilities {
+  .stage-reconnecting {
+    position: absolute;
+    inset-inline: 12px;
+    bottom: 12px;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: calc(var(--spacing) * 2);
+    width: fit-content;
+    max-width: calc(100% - 24px);
+    padding: var(--spacing) calc(var(--spacing) * 3);
+    border-radius: var(--radius-group);
+    background: var(--color-raised-2);
+    color: var(--color-fg-2);
+    font-size: var(--text-callout);
+    box-shadow: var(--shadow-overlay);
+  }
+}

@@ -1,6 +1,7 @@
 // Browsers report an app return differently: tab visibility, window focus, bfcache pageshow,
 // or Page Lifecycle resume. Treat a burst as one refresh, but never skip a new hidden/visible trip.
-export function onForeground(refresh: (reason: string) => void): () => void {
+// biome-ignore lint/suspicious/noConfusingVoidType: returning false declines the event without consuming its coalescing slot; existing void handlers remain valid
+export function onForeground(refresh: (reason: string) => void | false): () => void {
   if (typeof document === "undefined" || typeof window === "undefined") return () => {};
   let last = Number.NEGATIVE_INFINITY;
   let reason = "";
@@ -11,9 +12,9 @@ export function onForeground(refresh: (reason: string) => void): () => void {
     }
     const now = performance.now();
     if (now - last < 500 && !(event.type === "resume" && reason !== "resume")) return;
+    if (refresh(event.type) === false) return;
     last = now;
     reason = event.type;
-    refresh(reason);
   };
   document.addEventListener("visibilitychange", shown);
   document.addEventListener("resume", shown);

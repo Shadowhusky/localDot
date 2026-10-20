@@ -9,7 +9,7 @@ import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
 import { STILL_MS } from "./shell/focus.ts";
 import { closeStreams } from "./stage/live-stream.ts";
-import { fakeChromium } from "./testing/fake-chromium.ts";
+import { fakeChromium, presentFrame } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 
 const json = (value: unknown, status = 200) =>
@@ -69,6 +69,7 @@ function daemon({ held }: { held: boolean }) {
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname;
     if (init?.method === "POST") posts.push(path);
+    if (path === "/api/runtime") return json({ docker: "available", startup: "ready" });
     if (path === "/api/cells") return json([cell]);
     if (path === `/api/cells/${cellId}/live`) return json({ sessionId });
     if (path === `/api/agent/sessions/${sessionId}/takeover`)
@@ -142,6 +143,7 @@ async function open(d: ReturnType<typeof daemon>) {
     feed.onopen?.();
     for (const event of d.events) feed.onmessage?.({ data: JSON.stringify(event) });
   });
+  await presentFrame();
 }
 
 it("takes the computer while an app's connection card waits, and leaves the card to its own answer", async () => {

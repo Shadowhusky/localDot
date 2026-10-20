@@ -1,5 +1,5 @@
 import type { AccountRead, LoginStarted, ModelList } from "@localdot/codex-harness";
-import type { SubscriptionUsageData } from "@localdot/protocol";
+import { ReasoningEffort, type SubscriptionUsageData } from "@localdot/protocol";
 import type { z } from "zod";
 
 export type ChatgptState = "unavailable" | "signed_out" | "signing_in" | "signed_in" | "expired";
@@ -20,7 +20,13 @@ export interface ChatgptStatus {
   login?: ChatgptLogin;
   lastError?: string;
   usage?: SubscriptionUsageData;
-  models?: { id: string; name: string; isDefault: boolean }[];
+  models?: {
+    id: string;
+    name: string;
+    isDefault: boolean;
+    efforts?: ReasoningEffort[];
+    fast?: boolean;
+  }[];
   checkedAt?: number;
 }
 export interface CodexAccount {
@@ -67,7 +73,18 @@ export function modelsFor(list: z.infer<typeof ModelList>): NonNullable<ChatgptS
       .slice(0, 128);
     if (!name) continue;
     seen.add(item.id);
-    models.push({ id: item.id, name, isDefault: item.isDefault });
+    const efforts = item.supportedReasoningEfforts?.flatMap((option) => {
+      const effort = ReasoningEffort.safeParse(option.reasoningEffort);
+      return effort.success ? [effort.data] : [];
+    });
+    const tiers = item.serviceTiers?.map((tier) => tier.id) ?? item.additionalSpeedTiers;
+    models.push({
+      id: item.id,
+      name,
+      isDefault: item.isDefault,
+      ...(efforts ? { efforts: [...new Set(efforts)] } : {}),
+      ...(tiers ? { fast: tiers.some((tier) => tier === "fast" || tier === "priority") } : {}),
+    });
     if (models.length === 128) break;
   }
   return models;

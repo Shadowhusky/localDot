@@ -5,6 +5,7 @@ import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Group, GroupHead, GroupNote } from "../ui/Group.tsx";
 import { Switch } from "../ui/Switch.tsx";
+import { ShareLinkControls } from "./ShareLinkControls.tsx";
 import { SignInLinkSheet } from "./SignInLinkSheet.tsx";
 import { StableText } from "./StableText.tsx";
 
@@ -169,6 +170,7 @@ export function RemoteAccessSettings({ api }: { api: ApiClient }) {
           disconnect remote devices and revoke their access.
         </p>
       </Disclosure>
+      {status.state === "online" && <ShareLinkControls api={api} />}
       <SignInLinkSheet link={link?.url} label="Remote sign-in link" onClose={() => setLink(null)} />
       {(error || loadError) && <GroupNote>{error || loadError}</GroupNote>}
     </div>

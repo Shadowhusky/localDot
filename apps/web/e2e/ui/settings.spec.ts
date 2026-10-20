@@ -29,7 +29,7 @@ test("settings, a change saves itself", async ({ page, ui }) => {
   if (isPhone(page)) {
     await sheet.getByRole("button", { name: "Settings", exact: true }).click();
     await sheet.getByRole("button", { name: /^Autonomy/ }).click();
-  }
+  } else await sheet.getByRole("button", { name: "Autonomy", exact: true }).click();
   const choice = () =>
     sheet.getByRole("radiogroup", { name: "Start from" }).getByRole("radio", { name: /^Careful/ });
   await choice().click();

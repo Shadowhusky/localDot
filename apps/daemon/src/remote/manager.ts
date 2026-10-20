@@ -1,12 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { AgentSettingsDocument } from "@localdot/protocol";
 import { HOST_SUFFIX, SECRET } from "@localdot/protocol/remote";
 import type { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { registerPublicOrigin } from "../guard.ts";
 import type { InstallCodes } from "../install-codes.ts";
 import { connectRemote } from "./connector.ts";
+import { RemoteLinks, ShareOptions } from "./links.ts";
 
 interface Saved {
   enabled: boolean;
@@ -44,6 +46,7 @@ export function configuredRemoteDomain(home: string): string | null {
   }
 }
 export class RemoteAccess {
+  readonly links: RemoteLinks;
   private saved: Saved;
   private file: string;
   private stop?: () => void;
@@ -55,6 +58,7 @@ export class RemoteAccess {
     private domain: string | null,
     private codes: InstallCodes,
   ) {
+    this.links = new RemoteLinks(home);
     this.file = join(home, "remote-access.json");
     this.saved = { enabled: false, owner: secret(), access: secret(), domain: domain ?? "" };
     if (existsSync(this.file)) {
@@ -131,7 +135,20 @@ export class RemoteAccess {
     }
     this.close();
     this.saved = next;
+    if (!enabled || changedService)
+      for (const link of this.links.list()) if (!link.revoked) this.links.revoke(link.id);
     this.start();
+  }
+  authenticate(token: string | undefined) {
+    return this.saved.enabled ? this.links.authenticate(token) : undefined;
+  }
+  share(input: unknown) {
+    if (this.state !== "online") throw new Error("Wait until connected");
+    const issued = this.links.create(input);
+    return {
+      ...issued.grant,
+      url: `${this.origin()}/_remote/pair#remote=${this.saved.access}&code=${issued.token}`,
+    };
   }
   link() {
     if (this.state !== "online") throw new Error("Wait until remote access is connected");
@@ -142,11 +159,46 @@ export class RemoteAccess {
     };
   }
 }
-export function remoteRoutes(app: Hono, remote: RemoteAccess): void {
+export function remoteRoutes(
+  app: Hono,
+  remote: RemoteAccess,
+  settings?: () => AgentSettingsDocument,
+): void {
   app.use("/api/remote-access*", async (c, next) => {
     c.header("cache-control", "no-store");
     c.header("referrer-policy", "no-referrer");
     await next();
+  });
+  app.get("/api/remote-access/links", (c) => c.json({ links: remote.links.list() }));
+  app.delete("/api/remote-access/links/:id", (c) =>
+    remote.links.revoke(c.req.param("id")) ? c.body(null, 204) : c.text("No such link", 404),
+  );
+  app.post("/api/remote-access/links", bodyLimit({ maxSize: 4096 }), async (c) => {
+    try {
+      const raw = await c.req.json();
+      const saved = settings?.();
+      const models = [saved?.main, ...(saved?.models ?? [])].filter(
+        (m): m is NonNullable<typeof m> => !!m,
+      );
+      const index = raw.modelIndex ?? 0;
+      if (!Number.isInteger(index) || !models[index])
+        return c.text("Choose a configured model first", 400);
+      const { modelIndex: _index, ...options } = raw;
+      return c.json(
+        remote.share(
+          ShareOptions.parse({
+            ...options,
+            model: models[index],
+            models: options.chooseModel
+              ? [models[index], ...models.filter((_, i) => i !== index)].slice(0, 32)
+              : [],
+          }),
+        ),
+        201,
+      );
+    } catch {
+      return c.text("Check the link settings and remote connection", 400);
+    }
   });
   app.get("/api/remote-access", (c) => c.json(remote.snapshot()));
   app.put("/api/remote-access", bodyLimit({ maxSize: 64 }), async (c) => {

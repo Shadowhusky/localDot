@@ -39,6 +39,7 @@ import { QuestionCard } from "./QuestionCard.tsx";
 import { restoreQueuedDraft } from "./queued-draft.ts";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
+import { StepPreviewScope } from "./StepPreview.tsx";
 import { showStep } from "./step-focus.ts";
 import { ThreadSkeleton } from "./ThreadSkeleton.tsx";
 import { TurnMeta } from "./TurnMeta.tsx";
@@ -214,6 +215,7 @@ function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean 
           !!other &&
           step.key === other.key &&
           step.readGroup === other.readGroup &&
+          step.output === other.output &&
           step.state === other.state &&
           step.title === other.title &&
           step.meta === other.meta &&
@@ -967,7 +969,7 @@ export function Conversation({
     field.setRangeText(text, 0, field.value.length, "end");
     field.dispatchEvent(new Event("input", { bubbles: true }));
   };
-  return (
+  const content = (
     <div className="thread-body" ref={body} data-covered={covered || undefined}>
       <ScrollArea
         ref={attach}
@@ -1144,5 +1146,10 @@ export function Conversation({
         dockHost,
       )}
     </div>
+  );
+  return (
+    <StepPreviewScope api={api} sessionId={sessionId} results={results}>
+      {content}
+    </StepPreviewScope>
   );
 }

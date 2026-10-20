@@ -8,7 +8,7 @@ import type { CellSummary } from "./cells/types.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
 import { closeStreams } from "./stage/live-stream.ts";
-import { fakeChromium } from "./testing/fake-chromium.ts";
+import { fakeChromium, presentFrame } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 
 const json = (value: unknown) =>
@@ -61,6 +61,7 @@ function daemon(waiting: "approval" | "question" = "approval") {
   });
   const fetchImpl = (async (input: RequestInfo | URL) => {
     const path = new URL(String(input)).pathname;
+    if (path === "/api/runtime") return json({ docker: "available", startup: "ready" });
     if (path === "/api/cells") return json([cell]);
     if (path === `/api/cells/${cellId}/live`) {
       await answered;
@@ -156,6 +157,7 @@ it("opens a tapped notification's live task at its decision, even on a fresh lau
     feed.onopen?.();
     for (const event of d.events) feed.onmessage?.({ data: JSON.stringify(event) });
   });
+  await presentFrame();
   const title = await screen.findByRole("heading", { name: "Send the statement" });
   await waitFor(() => expect(document.activeElement).toBe(title));
   expect(title.id).toBe(`approval-${d.approvalId}`);

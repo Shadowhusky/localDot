@@ -66,7 +66,10 @@ export function openSocket(opts: SocketOptions): SocketHandle {
   connect();
   // A suspended mobile socket can look OPEN indefinitely. Reconnect to obtain the server's
   // current snapshot/replay, invalidating the old connection before accepting anything new.
-  const stopForeground = onForeground(() => {
+  const stopForeground = onForeground((reason) => {
+    // Window focus alone does not imply suspension. Replacing a healthy status socket
+    // also renews the screen ticket, needlessly interrupting a working stream.
+    if (reason === "focus" && live?.readyState === 1) return false;
     if (closed) return;
     clearTimeout(timer);
     const previous = ws;

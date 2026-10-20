@@ -28,7 +28,7 @@ import {
   ULID_PATTERN,
   ulid,
 } from "@localdot/protocol";
-import type { Catalog } from "@localdot/providers";
+import { type Catalog, modelControls, modelOptionsProblem } from "@localdot/providers";
 import type { CellSummary } from "../cells/types.ts";
 import { NO_CONNECTORS, type TaskConnectors } from "../connectors/hub.ts";
 import type { EventLog } from "../event-log.ts";
@@ -119,6 +119,8 @@ export interface TerminalTaskSnapshot {
   readonly models?: TaskModelSelection;
 }
 export interface TaskStartOptions {
+  // Server-selected shared-link model, never arbitrary client request fields.
+  readonly main?: import("@localdot/protocol").AgentRoleChoice;
   readonly origin?: SessionOrigin;
   // Replaces the user's autonomy for this task.
   readonly autonomy?: AutonomyPolicy;
@@ -192,7 +194,9 @@ export interface AgentRunnerDeps {
       Partial<
         Pick<ClaudeCodeDriver, "pauseAtBoundary" | "resumeAtBoundary" | "retirementConfirmed">
       >;
-    status(): Promise<Pick<ClaudeCodeStatus, "state" | "reason">>;
+    status(): Promise<
+      Pick<ClaudeCodeStatus, "state" | "reason"> & Partial<Pick<ClaudeCodeStatus, "models">>
+    >;
   };
 }
 // "none": the user's own hold on the computer, which no model works on.
@@ -377,7 +381,10 @@ export class AgentRunner {
     this.#starting.add(cellId);
     try {
       // Capture at request admission, before prior-task retirement or preflight can await.
-      const settings = AgentSettings.parse(this.deps.settings());
+      const settings = AgentSettings.parse({
+        ...this.deps.settings(),
+        ...(options.main ? { main: options.main, fast: undefined, local: undefined } : {}),
+      });
       const current = this.deps.live.get(cellId);
       if (current) {
         const old = this.sessions.get(current);
@@ -414,6 +421,38 @@ export class AgentRunner {
         signal?.throwIfAborted();
         if (status.state !== "signed_in")
           throw new AgentError(400, status.reason ?? "Claude Code isn't ready.");
+        const capability = status.models?.find((model) => model.id === settings.main?.model);
+        if (
+          settings.main.options?.reasoningEffort &&
+          capability?.efforts &&
+          !capability.efforts.some((effort) => effort === settings.main?.options?.reasoningEffort)
+        )
+          throw new AgentError(
+            400,
+            "This account model does not support the selected effort. Choose an available level in Settings.",
+          );
+        if (settings.main.options?.speed === "fast" && capability?.fast === false)
+          throw new AgentError(400, "Fast mode is unavailable for this account model.");
+        const fallback = modelControls(CLAUDE_CODE, settings.main.model);
+        const problem = modelOptionsProblem(
+          CLAUDE_CODE,
+          settings.main.model,
+          settings.main.options,
+          16000,
+          {
+            ...fallback,
+            efforts: [...(capability?.efforts ?? fallback.efforts)],
+            speeds:
+              capability?.fast === true
+                ? ["standard", "fast"]
+                : capability?.fast === false
+                  ? undefined
+                  : fallback.speeds
+                    ? [...fallback.speeds]
+                    : undefined,
+          },
+        );
+        if (problem) throw new AgentError(400, problem);
         selection = {
           kind: "claude-code",
           model: settings.main.model,
@@ -429,6 +468,35 @@ export class AgentRunner {
           throw new AgentError(400, status.reason ?? "The ChatGPT plan is unavailable.");
         if (status.state !== "signed_in")
           throw new AgentError(400, "ChatGPT plan: sign in under Settings first.");
+        const capability = status.models?.find((model) => model.id === settings.main?.model);
+        if (
+          settings.main.options?.reasoningEffort &&
+          capability?.efforts &&
+          !capability.efforts.includes(settings.main.options.reasoningEffort)
+        )
+          throw new AgentError(400, "This account model does not support the selected effort.");
+        if (settings.main.options?.speed === "fast" && capability?.fast !== true)
+          throw new AgentError(400, "Fast mode is unavailable for this account model.");
+        const fallback = modelControls(CHATGPT, settings.main.model);
+        const problem = modelOptionsProblem(
+          CHATGPT,
+          settings.main.model,
+          settings.main.options,
+          16000,
+          {
+            ...fallback,
+            efforts: [...(capability?.efforts ?? fallback.efforts)],
+            speeds:
+              capability?.fast === true
+                ? ["standard", "fast"]
+                : capability?.fast === false
+                  ? undefined
+                  : fallback.speeds
+                    ? [...fallback.speeds]
+                    : undefined,
+          },
+        );
+        if (problem) throw new AgentError(400, problem);
         selection = {
           kind: "chatgpt",
           model: settings.main.model,

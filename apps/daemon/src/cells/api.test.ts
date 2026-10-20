@@ -259,7 +259,7 @@ describe("cell API", () => {
     ).toBe(404);
     expect(issue).not.toHaveBeenCalled();
     expect((await mint(app, cell.id)).status).toBe(200);
-    expect(issue).toHaveBeenCalledExactlyOnceWith(cell.id);
+    expect(issue).toHaveBeenCalledExactlyOnceWith(cell.id, undefined, undefined);
   });
 
   it("refuses a ticket while the cell is anything but ready", async () => {

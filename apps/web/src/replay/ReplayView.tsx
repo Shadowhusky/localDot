@@ -62,7 +62,7 @@ import {
   TasksSearch,
   useTaskIndex,
 } from "./TasksLibrary.tsx";
-import { type ReplayScreen, useReplay } from "./useReplay.ts";
+import { useReplay } from "./useReplay.ts";
 import "./replay.css";
 
 // Below a laptop the library has no room for its preview, so a row opens its recording at once.
@@ -73,8 +73,11 @@ const CONTINUE_LABEL = "Continue working";
 const NOTICE_MS = 3000;
 // The transport fades this long into playback without the pointer moving over the picture.
 const TRANSPORT_STILL_MS = 2000;
-const SCREENS = [
-  { value: "auto", label: "Auto · follow agent" },
+const VIEWS = [
+  { value: "work", label: "Work", description: "Follow work and screen changes" },
+  { value: "screen", label: "Screen", description: "Show the active screen" },
+] as const;
+const FIXED_SCREENS = [
   { value: "desktop", label: "Computer" },
   { value: "browser", label: "Browser" },
 ] as const;
@@ -207,19 +210,15 @@ function NavBar({
   back,
   onBack,
   title,
-  screenChoice,
+  viewControl,
 }: {
   back: string;
   onBack(): void;
   title: string;
-  screenChoice?: ReactNode;
+  viewControl?: ReactNode;
 }) {
   return (
-    <nav
-      className="replay-nav"
-      aria-label={title}
-      data-screen-choice={screenChoice ? "" : undefined}
-    >
+    <nav className="replay-nav" aria-label={title} data-view-choice={viewControl ? "" : undefined}>
       <Button variant="quiet" className="replay-nav-back" onClick={onBack}>
         <span className="replay-nav-back-label">
           <Icon name="chevron-left" size={22} />
@@ -227,7 +226,7 @@ function NavBar({
         </span>
       </Button>
       <h1 className="replay-nav-title">{title}</h1>
-      {screenChoice}
+      {viewControl}
     </nav>
   );
 }
@@ -575,6 +574,11 @@ function Player({
   const area = useRef<HTMLElement>(null);
   const replay = useReplay(api, sessionId, stage, { onGoLive, onExit: onLibrary });
   const phone = useMediaQuery(HANDHELD);
+  const [view, setView] = useState<{ sessionId: string; mode: "work" | "screen" }>({
+    sessionId,
+    mode: "work",
+  });
+  const viewMode = view.sessionId === sessionId ? view.mode : "work";
   const [railView, setRailView] = useState<"recordings" | "steps">("steps");
   const exportTrigger = useRef<HTMLButtonElement>(null);
   // The popover is keyed by each opening, so its choices start fresh, and it stays mounted while it
@@ -732,22 +736,37 @@ function Player({
     replay.screen === "browser" ||
     replay.model.screenChanges.some((change) => change.screen === "browser") ||
     (!!browser && browser.bytes > 0 && !NO_VIDEO.has(browser.state));
-  const screens = twoScreens && (
+  // Replay's former Auto and Work views both followed the playhead. One choice now owns
+  // both the output overlay and screen source, so a hidden override cannot contradict it.
+  const display = {
+    value: replay.screenChoice === "auto" ? viewMode : "screen",
+    change(value: string) {
+      if (value === "work" || value === "screen") {
+        setView({ sessionId, mode: value });
+        replay.setScreen("auto");
+      } else if (value === "desktop" || value === "browser") {
+        setView({ sessionId, mode: "screen" });
+        replay.setScreen(value);
+      }
+    },
+  };
+  const viewControl = (
     <Select
-      className="replay-screen-choice"
+      className="replay-view-choice"
       appearance="inline"
       size="sm"
-      aria-label="Recording screen"
-      items={SCREENS}
-      value={replay.screenChoice}
-      shown={
-        replay.screenChoice === "auto"
-          ? `Auto · ${replay.screen === "browser" ? "Browser" : "Computer"}`
-          : replay.screen === "browser"
-            ? "Browser"
-            : "Computer"
+      aria-label="Recording view"
+      items={twoScreens ? undefined : VIEWS}
+      groups={
+        twoScreens
+          ? [
+              { label: "Follow recording", items: VIEWS },
+              { label: "Fixed screen", items: FIXED_SCREENS },
+            ]
+          : undefined
       }
-      onValueChange={(screen) => replay.setScreen(screen as ReplayScreen)}
+      value={replay.screenChoice === "auto" ? viewMode : replay.screenChoice}
+      onValueChange={display.change}
     />
   );
   const steps = (
@@ -767,7 +786,12 @@ function Player({
   return (
     <div className="replay" data-view="player">
       {phone && (
-        <NavBar back={backLabel} onBack={onLibrary} title={note || title} screenChoice={screens} />
+        <NavBar
+          back={backLabel}
+          onBack={onLibrary}
+          title={note || title}
+          viewControl={viewControl}
+        />
       )}
       <main
         ref={area}
@@ -824,14 +848,9 @@ function Player({
             sessionId={sessionId}
             candidate={replay.work.at(replay.tMs)}
             replay
-            enabled={
-              visible &&
-              !opening &&
-              !lost &&
-              !replay.compare &&
-              !exportOpen &&
-              replay.screenChoice === "auto"
-            }
+            display={display}
+            hideControls
+            enabled={visible && !opening && !lost && !replay.compare && !exportOpen}
           />
           <Presence show={opening}>
             <DotLoader className="replay-opening" label="Opening this recording" />
@@ -882,7 +901,7 @@ function Player({
               compact={phone}
               noVideo={!!whole}
               cardShown={!noticeOver}
-              screens={screens}
+              viewControl={viewControl}
               exportControl={
                 <ExportButton
                   ref={exportTrigger}

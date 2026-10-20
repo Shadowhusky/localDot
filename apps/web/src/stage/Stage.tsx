@@ -13,6 +13,7 @@ import {
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { onForeground } from "../lib/foreground.ts";
+import { Button } from "../ui/Button.tsx";
 import type { ProbeApi } from "./debug-hooks.ts";
 import { frameTapSupport } from "./frame-source.ts";
 import {
@@ -217,6 +218,8 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     if (!stream) return;
     // Wake the renderer as well as its source; a browser may have suspended either one.
     return onForeground((reason) => {
+      // A window focus event alone does not mean capture was suspended.
+      if (reason === "focus" && stream.picture === "live") return false;
       canvas.current?.setView({ freeze: paused });
       if (reason === "resume") stream.replace();
       else stream.refresh();
@@ -288,6 +291,14 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   return (
     <>
       <StageCanvas ref={canvas} keep={keep} onFlip={onFlip} onStats={onStats} />
+      {mode === "live" && (shown === "held" || shown === "suspended") && ready && (
+        <div className="stage-reconnecting" role="status">
+          <span>Reconnecting screen… Last available frame shown.</span>
+          <Button size="sm" variant="quiet" onClick={() => stream?.replace()}>
+            Reconnect
+          </Button>
+        </div>
+      )}
       {mode === "live" && manual && (
         <ManualSurface
           ref={keyboard}

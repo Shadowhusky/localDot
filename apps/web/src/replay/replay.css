@@ -436,7 +436,7 @@
   color: var(--color-fg-2);
 }
 
-.replay-screen-choice {
+.replay-view-choice {
   flex: none;
   width: auto;
 }
@@ -942,17 +942,17 @@
     padding: 0 calc(var(--spacing) * 2);
   }
 
-  .replay[data-view="player"] .replay-nav[data-screen-choice] {
+  .replay[data-view="player"] .replay-nav[data-view-choice] {
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: var(--spacing);
     height: 52px;
   }
 
-  .replay-nav .replay-screen-choice {
+  .replay-nav .replay-view-choice {
     min-height: 44px;
   }
 
-  .replay-nav .replay-screen-choice::after {
+  .replay-nav .replay-view-choice::after {
     inset: 0;
   }
 

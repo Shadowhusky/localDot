@@ -1,3 +1,4 @@
+import { act, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import { readSource } from "./read-source.ts";
 import { readTokens } from "./tokens.ts";
@@ -88,4 +89,33 @@ export function playInClient(iframe: HTMLIFrameElement, trackId: string): void {
   Object.defineProperty(video, "srcObject", { value: { getVideoTracks: () => [track] } });
   Object.defineProperty(video, "readyState", { value: 4 });
   doc.appendChild(video);
+}
+
+// A connected relay alone is not a rendered frame. Integration fixtures that need a ready
+// screen complete the same track-transfer and presentation acknowledgement as the real worker.
+export async function presentFrame(selector = "iframe.desktop-frame") {
+  await waitFor(() => {
+    if (!document.querySelector(selector)) throw new Error("waiting for stream client");
+  });
+  const frame = [...document.querySelectorAll<HTMLIFrameElement>(selector)].at(-1);
+  if (!frame) throw new Error("stream client disappeared");
+  const previous = new Set(FakeWorker.instances.flatMap((w) => w.sent));
+  playInClient(frame, "fixture-presented-track");
+  const worker = () =>
+    FakeWorker.instances.findLast(
+      (w) =>
+        !w.terminated && w.sent.some((row) => row.message.type === "frames" && !previous.has(row)),
+    );
+  await waitFor(() => {
+    if (!worker()) throw new Error("waiting for transferred frames");
+  });
+  act(() =>
+    worker()?.onmessage?.({
+      data: {
+        type: "stats",
+        sourceId: worker()?.sent.findLast((row) => row.message.type === "frames")?.message.sourceId,
+        stats: { presented: 1, fps: 30, lastFrameAt: 1, width: 1280, height: 720 },
+      },
+    }),
+  );
 }

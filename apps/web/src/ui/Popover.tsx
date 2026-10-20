@@ -46,10 +46,13 @@ export function finishPlacing(element: HTMLElement) {
 
 // Puts a popup beside its anchor, through the CSSOM so the page's CSP holds.
 function put(element: HTMLElement, target: HTMLElement, side: Side, align: Align) {
-  element.style.maxHeight = "";
+  // Measure the full content without temporarily expanding the scrollport. Clearing
+  // maxHeight clamps scrollTop to zero, so every scroll event used to jump tall menus
+  // back to their first item (and a following tap could hit a different choice).
+  const naturalHeight = element.scrollHeight + element.offsetHeight - element.clientHeight;
   const found = place({
     anchor: target.getBoundingClientRect(),
-    size: { width: element.offsetWidth, height: element.offsetHeight },
+    size: { width: element.offsetWidth, height: naturalHeight },
     viewport: { width: document.documentElement.clientWidth, height: window.innerHeight },
     side,
     align,

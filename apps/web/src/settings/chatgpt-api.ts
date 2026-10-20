@@ -2,6 +2,7 @@ import {
   CHATGPT_DEVICE_CODE_OFF,
   ChatgptSandbox,
   CodexInstallState,
+  ReasoningEffort,
   SubscriptionUsageData,
 } from "@localdot/protocol";
 import { z } from "zod";
@@ -25,6 +26,8 @@ const models = z
       id: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/),
       name: text(128).min(1),
       isDefault: z.boolean(),
+      efforts: z.array(ReasoningEffort).max(8).optional(),
+      fast: z.boolean().optional(),
     }),
   )
   .max(128)

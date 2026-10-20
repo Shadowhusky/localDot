@@ -10,6 +10,7 @@ import { DiffViewer } from "./DiffViewer.tsx";
 import type { AgentChange } from "./model.ts";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { StepImage } from "./StepImage.tsx";
+import { StepPreviewButton } from "./StepPreview.tsx";
 import { TerminalViewer } from "./TerminalViewer.tsx";
 
 // The observe frame is 1280×800 CSS px; target rects are device px, so they are divided by the scale.
@@ -84,7 +85,11 @@ function LiveFrame({
   const crop = frameCrop(row.target, scale);
   const url = image?.frameId === frameId ? image.url : undefined;
   return (
-    <div className="activity-frame" data-loaded={url ? "" : undefined}>
+    <div className="activity-frame step-preview-resource" data-loaded={url ? "" : undefined}>
+      <StepPreviewButton
+        label="Preview screenshot"
+        resource={{ kind: "frame", name: "Step screenshot", sessionId, frameId }}
+      />
       {url && (
         <img
           className="activity-frame-crop"
@@ -144,7 +149,11 @@ export function ActivityDetail({
         </p>
       )}
       {note && (
-        <div className="activity-detail-note">
+        <div className="activity-detail-note step-preview-resource">
+          <StepPreviewButton
+            label="Preview step details"
+            resource={{ kind: "text", name: "Step details", text: note, markdown: true }}
+          />
           <SafeMarkdown text={note} compact />
         </div>
       )}
@@ -152,7 +161,16 @@ export function ActivityDetail({
         detail.frame &&
         (replay ? (
           computer.frameId ? (
-            <div className="activity-frame" data-loaded="">
+            <div className="activity-frame step-preview-resource" data-loaded="">
+              <StepPreviewButton
+                label="Preview screenshot"
+                resource={{
+                  kind: "frame",
+                  name: "Step screenshot",
+                  sessionId,
+                  frameId: computer.frameId,
+                }}
+              />
               <ReplayImage api={api} sessionId={sessionId} frameId={computer.frameId} />
             </div>
           ) : (

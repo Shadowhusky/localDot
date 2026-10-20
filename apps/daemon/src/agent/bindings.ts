@@ -3,7 +3,7 @@ import {
   type ClientKind,
   type KeydRecord,
   type ModelBinding,
-  type ModelOptions,
+  ModelOptions,
   SURROGATE_PATTERN,
   type TaskModelSelection,
   TaskPricing,
@@ -38,8 +38,19 @@ export class BindingError extends Error {
 }
 export const OUTPUT_CAP_TOKENS = 16_000;
 export function checkChatgptChoice(role: Role, choice: RoleChoice): void {
-  const problem = modelOptionsProblem(choice.provider, choice.model, choice.options);
-  if (problem) throw new BindingError(role, problem);
+  if (choice.options !== undefined) {
+    const parsed = ModelOptions.safeParse(choice.options);
+    if (
+      !parsed.success ||
+      parsed.data.thinkingBudget !== undefined ||
+      parsed.data.verbosity !== undefined ||
+      (parsed.data.reasoningEffort !== undefined &&
+        !["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
+          parsed.data.reasoningEffort,
+        ))
+    )
+      throw new BindingError(role, "Invalid options for this account runtime.");
+  }
   if (role !== "main") throw new BindingError(role, "the ChatGPT plan can only be the main model");
   if (choice.key !== undefined) throw new BindingError(role, "the ChatGPT plan needs no key");
   if (choice.price !== undefined) throw new BindingError(role, "the ChatGPT plan needs no price");
@@ -47,8 +58,17 @@ export function checkChatgptChoice(role: Role, choice: RoleChoice): void {
     throw new BindingError(role, "unknown ChatGPT model");
 }
 export function checkClaudeCodeChoice(role: Role, choice: RoleChoice): void {
-  const problem = modelOptionsProblem(choice.provider, choice.model, choice.options);
-  if (problem) throw new BindingError(role, problem);
+  if (choice.options !== undefined) {
+    const parsed = ModelOptions.safeParse(choice.options);
+    if (
+      !parsed.success ||
+      parsed.data.thinkingBudget !== undefined ||
+      parsed.data.verbosity !== undefined ||
+      (parsed.data.reasoningEffort !== undefined &&
+        !["low", "medium", "high", "xhigh", "max"].includes(parsed.data.reasoningEffort))
+    )
+      throw new BindingError(role, "Invalid options for this account runtime.");
+  }
   if (role !== "main")
     throw new BindingError(role, "Claude Code (your plan) can only be the main model");
   if (choice.key !== undefined) throw new BindingError(role, "Claude Code needs no key");
@@ -93,8 +113,6 @@ export function resolveRole(
   const parsed = RoleChoice.safeParse(raw);
   if (!parsed.success) throw new BindingError(role, "invalid model selection or price");
   const choice = parsed.data;
-  const optionsProblem = modelOptionsProblem(choice.provider, choice.model, choice.options);
-  if (optionsProblem) throw new BindingError(role, optionsProblem);
   const provider = providerById(choice.provider);
   if (!provider) throw new BindingError(role, `unknown provider ${choice.provider}`);
   if (role === "local" && !provider.local)
@@ -192,6 +210,29 @@ export function resolveRole(
         "this model is already priced by the catalog; remove the manual price",
       );
   }
+  if (!flat && choice.options?.speed === "fast") {
+    // Premium speed must never reuse the standard budget snapshot. Use the documented
+    // long-context upper rate; provider fallbacks/discounts can make the bill lower.
+    const name = choice.model.toLowerCase();
+    const price =
+      choice.provider === "anthropic"
+        ? /opus-5[.-]5/.test(name)
+          ? [8, 40]
+          : [10, 50]
+        : /gpt-6[.-]astra/.test(name)
+          ? [40, 150]
+          : /gpt-6(?:[.]1)?-sol/.test(name)
+            ? [8, 30]
+            : /gpt-6-luna/.test(name)
+              ? [0.4, 1.5]
+              : [3.5, 28];
+    model.inputUSDPerMTok = Math.max(model.inputUSDPerMTok, price[0] ?? 0);
+    model.outputUSDPerMTok = Math.max(model.outputUSDPerMTok, price[1] ?? 0);
+    // Reserve uncached input until the selected tier's cache pricing is known.
+    delete model.cacheReadUSDPerMTok;
+    delete model.cacheWriteUSDPerMTok;
+    delete model.reasoningUSDPerMTok;
+  }
   try {
     model = CatalogModel.parse(model);
     keydRouteModel(model);
@@ -203,6 +244,7 @@ export function resolveRole(
     choice.model,
     choice.options,
     Math.min(model.maxOutputTokens, OUTPUT_CAP_TOKENS),
+    model.controls,
   );
   if (budgetProblem) throw new BindingError(role, budgetProblem);
   const capability = capabilityOf(provider, model);
@@ -247,6 +289,7 @@ export function bindingOf(r: ResolvedRole, surrogates: Record<string, string>): 
     ...(r.options ? { options: r.options } : {}),
     client: r.client,
     model: r.model.id,
+    ...(r.model.controls ? { controls: r.model.controls } : {}),
     ...(surrogate ? { surrogate } : {}),
     computer: r.capability.computer,
     coords: r.capability.coords,
@@ -261,6 +304,9 @@ export function bindingOf(r: ResolvedRole, surrogates: Record<string, string>): 
 export function pricingOf(roles: readonly ResolvedRole[]): TaskPricing {
   const routes = new Map<string, Map<string, ReturnType<typeof keydRouteModel>>>();
   const flat = new Map<string, boolean>();
+  const premium = new Set(
+    roles.filter((r) => r.options?.speed === "fast").map((r) => `${r.route}\0${r.model.id}`),
+  );
   for (const r of roles) {
     if ((flat.get(r.route) ?? !!r.flat) !== !!r.flat)
       throw new BindingError(
@@ -274,12 +320,20 @@ export function pricingOf(roles: readonly ResolvedRole[]): TaskPricing {
     });
     const models = routes.get(r.route) ?? new Map();
     const previous = models.get(model.id);
-    if (previous && JSON.stringify(previous) !== JSON.stringify(model))
-      throw new BindingError(
-        r.role,
-        "one task cannot assign conflicting prices to the same route/model",
-      );
-    models.set(model.id, model);
+    if (previous && JSON.stringify(previous) !== JSON.stringify(model)) {
+      if (!premium.has(`${r.route}\0${model.id}`))
+        throw new BindingError(
+          r.role,
+          "one task cannot assign conflicting prices to the same route/model",
+        );
+      // keyd accounts by route/model, so mixed speed roles reserve the higher rate for both.
+      models.set(model.id, {
+        id: model.id,
+        inputUSDPerMTok: Math.max(previous.inputUSDPerMTok, model.inputUSDPerMTok),
+        outputUSDPerMTok: Math.max(previous.outputUSDPerMTok, model.outputUSDPerMTok),
+        maxOutputTokens: Math.max(previous.maxOutputTokens, model.maxOutputTokens),
+      });
+    } else models.set(model.id, model);
     routes.set(r.route, models);
   }
   return immutable(

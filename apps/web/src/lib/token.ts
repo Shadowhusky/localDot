@@ -45,3 +45,15 @@ function safely<T>(fn: () => T): T | undefined {
     return undefined;
   }
 }
+
+// Presentation only. Every permission is checked by the daemon, even if this hint is edited.
+export function sharedToken(token: string | null): boolean {
+  return !!token && safely(() => window.localStorage.getItem("localdot.shared-token")) === token;
+}
+export function rememberSharedToken(token: string, shared: boolean): void {
+  safely(() =>
+    shared
+      ? window.localStorage.setItem("localdot.shared-token", token)
+      : window.localStorage.removeItem("localdot.shared-token"),
+  );
+}

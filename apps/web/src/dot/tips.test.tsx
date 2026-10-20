@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { DEFAULT_AUTONOMY } from "@localdot/protocol";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bannedWords } from "../copy/banned.ts";
 import { SettingsSheet } from "../settings/SettingsSheet.tsx";
-import { SECTIONS } from "../settings/sections.ts";
+import { SECTIONS, sectionTitle } from "../settings/sections.ts";
 import { knownFixture } from "../settings/testing.ts";
 import { tipText } from "./idle-line.ts";
 import { GREETINGS, TIPS, type TipSignals } from "./tips.ts";
@@ -89,6 +89,7 @@ describe("dot's idle lines", () => {
       expect(["Open", "Try it"], id).toContain(action.label);
       if (action.opens !== "settings") continue;
       expect(ids.has(action.section), id).toBe(true);
+      fireEvent.click(screen.getByRole("button", { name: sectionTitle(action.section) }));
       const section = shown.container.ownerDocument.querySelector(
         `[data-section="${action.section}"]`,
       );

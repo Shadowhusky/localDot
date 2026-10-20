@@ -26,7 +26,7 @@ export function ReplayControls({
   compact = false,
   noVideo = false,
   cardShown = false,
-  screens,
+  viewControl,
   exportControl,
 }: {
   api: ApiClient;
@@ -36,8 +36,8 @@ export function ReplayControls({
   // that said so (`cardShown`) has gone, so nothing in the bar moves when it does.
   noVideo?: boolean;
   cardShown?: boolean;
-  // Auto | Computer | Browser, when the task recorded both (phones place it above the picture).
-  screens?: ReactNode;
+  // Work / Screen and any fixed recording overrides; phones place this above the picture.
+  viewControl?: ReactNode;
   exportControl?: ReactNode;
 }) {
   const loading = replay.map ? undefined : LOADING;
@@ -93,7 +93,7 @@ export function ReplayControls({
       {compact && exportControl}
       {!compact && (
         <span className="replay-transport-side">
-          {screens}
+          {viewControl}
           <Select
             className="replay-speed"
             appearance="inline"

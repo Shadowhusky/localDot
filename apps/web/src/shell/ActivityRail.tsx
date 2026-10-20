@@ -28,6 +28,7 @@ import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/mod
 import { PlanStrip } from "../agent/PlanStrip.tsx";
 import { planPhase } from "../agent/plan-state.ts";
 import { ResearchSources } from "../agent/ResearchSources.tsx";
+import { StepPreviewScope } from "../agent/StepPreview.tsx";
 import { SubagentList } from "../agent/SubagentList.tsx";
 import { onStepFocus, takeStep, wantedStep } from "../agent/step-focus.ts";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
@@ -372,7 +373,7 @@ export function ActivityRail({
     />
   );
 
-  return (
+  const content = (
     <aside className="rail r activity-rail" aria-label="Plan and steps">
       {/* A tab or the column names it on screen; Replay's transport says how far its record runs. */}
       <div className="ui-visually-hidden">
@@ -611,5 +612,10 @@ export function ActivityRail({
         />
       )}
     </aside>
+  );
+  return (
+    <StepPreviewScope api={api} sessionId={owner} results={model.results}>
+      {content}
+    </StepPreviewScope>
   );
 }

@@ -20,6 +20,8 @@ import { createApp } from "../app.ts";
 import { DesktopdTools } from "../desktopd/tools-client.ts";
 import { EventLog } from "../event-log.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
+import { RemoteLinks } from "../remote/links.ts";
+import type { RemoteAccess } from "../remote/manager.ts";
 import { CatalogStore } from "./catalog-store.ts";
 import type { ChatgptStatus } from "./codex/account.ts";
 import { SANDBOX_REASONS } from "./codex/setup.ts";
@@ -1572,5 +1574,80 @@ describe("private saved-key answer verification", () => {
     ).toBe(204);
     expect(await asking).toMatchObject({ by: "user", fields: { key: { provided: true } } });
     expect(f.session.pendingAsk).toBeUndefined();
+  });
+});
+
+describe("shared-link task enforcement", () => {
+  async function guest() {
+    const f = await setup();
+    const links = new RemoteLinks(f.home);
+    const model = {
+      provider: "openai",
+      model: "gpt-6.1-sol",
+      key: "owner-key",
+      options: { reasoningEffort: "high" as const },
+    };
+    const issued = links.create({
+      label: "Guest",
+      expiresInHours: null,
+      maxTasks: 1,
+      taskBudgetUSD: 2,
+      model,
+    });
+    const stopRun = vi.fn(async (_id: string) => true);
+    f.deps.runner.stopRun = stopRun;
+    const app = createApp({
+      token: "o".repeat(43),
+      port: 4750,
+      eventLog: new EventLog(f.home),
+      agent: f.deps,
+      remoteAccess: {
+        links,
+        authenticate: (token?: string) => links.authenticate(token),
+      } as unknown as RemoteAccess,
+    });
+    const send = (path: string, body: unknown) =>
+      app.request(`http://127.0.0.1:4750${path}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${issued.token}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    return { ...f, links, model, issued, send, stopRun };
+  }
+  it("pins the owner's model and minimum budget, atomically counts successful tasks, and blocks owner session mutations", async () => {
+    const f = await guest();
+    f.settings.put({ taskBudgetUSD: 1 });
+    expect((await f.send(`/api/agent/sessions/${SESSION}/stop`, {})).status).toBe(403);
+    expect(
+      (await f.send(`/api/cells/${CELL}/agent`, { task: "Hello", model: "other" })).status,
+    ).toBe(400);
+    expect(f.start).not.toHaveBeenCalled();
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    expect(f.start).toHaveBeenCalledWith(CELL, "Hello", expect.any(AbortSignal), {
+      main: f.model,
+      budgetUSD: 1,
+    });
+    expect(f.links.owns(f.issued.grant.id, SESSION)).toBe(true);
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Another" })).status).toBe(403);
+    expect(f.start).toHaveBeenCalledTimes(1);
+    expect(f.settings.get().main).toBeUndefined();
+    f.links.revoke(f.issued.grant.id);
+    expect(f.stopRun).toHaveBeenCalledWith(SESSION);
+  });
+  it("refunds a rejected start, and stops a task if revocation wins the startup race", async () => {
+    const f = await guest();
+    f.start.mockRejectedValueOnce(new AgentError(409, "Computer busy"));
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(409);
+    expect(f.links.list()[0]?.tasks).toBe(0);
+    const started = deferred<AgentSession>();
+    f.start.mockImplementationOnce(async (_cell, _task, signal) => {
+      f.links.revoke(f.issued.grant.id);
+      expect(signal?.aborted).toBe(true);
+      return started.promise;
+    });
+    const pending = f.send(`/api/cells/${CELL}/agent`, { task: "Hello" });
+    started.resolve(f.session);
+    expect((await pending).status).toBe(403);
+    expect(f.stopRun).toHaveBeenCalledWith(SESSION);
   });
 });

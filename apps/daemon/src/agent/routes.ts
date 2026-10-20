@@ -98,6 +98,7 @@ export interface UploadAccess {
   release(): void;
 }
 export interface AgentRoutesDeps {
+  remoteLinks?: import("../remote/links.ts").RemoteLinks;
   uploads?: { store: UserUploads; hasCell(id: string): boolean };
   runner: Pick<AgentRunner, "start" | "get" | "raiseBudget"> &
     Partial<
@@ -167,7 +168,7 @@ const Budget = BudgetRaiseRequest;
 
 class RouteError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409 | 413 | 415 | 499 | 503,
+    readonly status: 400 | 403 | 404 | 409 | 413 | 415 | 499 | 503,
     message: string,
   ) {
     super(message);
@@ -454,7 +455,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   app.get(
     "/api/agent/providers",
     route(async (c) => {
-      const catalog = await deps.catalog.fresh();
+      const catalog = await deps.catalog.fresh(c.req.header("x-localdot-check-models") === "1");
       let keys: KeydRecord[] = [];
       let keyLayer: "online" | "offline" = "online";
       try {
@@ -508,6 +509,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
             outputUSDPerMTok: model.outputUSDPerMTok,
             ...capabilityOf(provider, model),
             maxOutputTokens: model.maxOutputTokens,
+            ...(model.controls
+              ? { controls: model.controls, controlsCheckedAt: model.controlsCheckedAt }
+              : {}),
           })),
         })),
       });
@@ -581,9 +585,55 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const parsed = await json(c.req.raw, Task);
       check(c.req.raw.signal);
       const task = redact(parsed.task, undefined, cellId);
-      const result = await (parsed.mode === "research"
-        ? deps.runner.start(cellId, task, c.req.raw.signal, { research: true })
-        : deps.runner.start(cellId, task, c.req.raw.signal));
+      const grant = c.get("remoteGrant");
+      let reservation: ReturnType<import("../remote/links.ts").RemoteLinks["reserve"]> | undefined;
+      if (grant) {
+        try {
+          reservation = deps.remoteLinks?.reserve(grant.id);
+        } catch {
+          throw new RouteError(403, "This link has reached its task limit or expired.");
+        }
+        if (!reservation) throw new RouteError(403, "Shared access is unavailable");
+      }
+      let result: AgentSession;
+      const revoked = new AbortController();
+      const unsubscribe = grant
+        ? deps.remoteLinks?.onRevoke((id) => {
+            if (id === grant.id) revoked.abort();
+          })
+        : undefined;
+      try {
+        if (grant && !deps.remoteLinks?.active(grant.id))
+          throw new RouteError(403, "Shared access ended");
+        const startSignal = grant
+          ? AbortSignal.any([c.req.raw.signal, revoked.signal])
+          : c.req.raw.signal;
+        const startOptions = {
+          ...(parsed.mode === "research" ? { research: true } : {}),
+          ...(reservation
+            ? {
+                main: reservation.model,
+                budgetUSD: Math.min(
+                  reservation.budgetUSD,
+                  deps.settings.get().taskBudgetUSD ?? reservation.budgetUSD,
+                ),
+              }
+            : {}),
+        };
+        result = Object.keys(startOptions).length
+          ? await deps.runner.start(cellId, task, startSignal, startOptions)
+          : await deps.runner.start(cellId, task, startSignal);
+        reservation?.finish(result.id);
+        if (grant && !deps.remoteLinks?.active(grant.id)) {
+          await deps.runner.stopRun?.(result.id);
+          throw new RouteError(403, "Shared access ended");
+        }
+      } catch (error) {
+        reservation?.finish();
+        throw error;
+      } finally {
+        unsubscribe?.();
+      }
       check(c.req.raw.signal);
       return c.json({ sessionId: result.id }, 202);
     }),

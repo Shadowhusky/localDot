@@ -138,3 +138,50 @@ it("refreshes a stale disk cache after restarting and keeps it if the download f
   await expect(restarted.refresh()).rejects.toThrow("offline");
   expect(restarted.get()?.fetchedAt).toBe(now().toISOString());
 });
+
+it("rechecks even a fresh disk cache once at launch, sharing that work across tabs", async () => {
+  const home = ownedTemp(join(tmpdir(), "ld-startup-catalog-"));
+  const fetchImpl = async () => Response.json(MODELS_DEV_FIXTURE);
+  await new CatalogStore(home, { now, fetchImpl }).refresh();
+  let calls = 0;
+  const store = new CatalogStore(home, {
+    now,
+    fetchImpl: async () => {
+      calls++;
+      return fetchImpl();
+    },
+  });
+  expect((await store.fresh())?.providers.anthropic).toBeDefined();
+  await store.refresh();
+  await store.fresh();
+  expect(calls).toBe(1);
+});
+
+it("still checks provider capabilities when the public catalog is unavailable", async () => {
+  const home = ownedTemp(join(tmpdir(), "ld-provider-outage-"));
+  await new CatalogStore(home, {
+    now,
+    fetchImpl: async () => Response.json(MODELS_DEV_FIXTURE),
+  }).refresh();
+  let checked = false;
+  const store = new CatalogStore(home, {
+    now: () => new Date("2026-10-20"),
+    fetchImpl: async () => {
+      throw new Error("public catalog unavailable");
+    },
+    enrich: async (catalog) => {
+      checked = true;
+      const model = catalog.providers.anthropic?.models["claude-sonnet-5-5"];
+      if (model) model.controls = { efforts: ["low", "max"], wire: "anthropic" };
+      return catalog;
+    },
+  });
+  await expect(store.refresh()).rejects.toThrow("public catalog unavailable");
+  expect(checked).toBe(true);
+  expect(store.get()?.providers.anthropic?.models["claude-sonnet-5-5"]?.controls?.efforts).toEqual([
+    "low",
+    "max",
+  ]);
+  expect(store.get()?.fetchedAt).toBe(now().toISOString());
+  expect(store.freshness().refreshFailed).toBe(true);
+});

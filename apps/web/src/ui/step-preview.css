@@ -1,0 +1,54 @@
+@layer utilities {
+  .step-output-image {
+    min-height: 48px;
+  }
+  .step-preview-resource {
+    position: relative;
+  }
+  .step-preview-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 1;
+    opacity: 0;
+    transition: opacity var(--dur-fade) var(--ease-enter);
+  }
+  .step-preview-resource:is(:hover, :focus-within) > .step-preview-button {
+    opacity: 1;
+  }
+  /* Reserve the control's space; long names and the first code line must remain readable. */
+  .activity-detail-note.step-preview-resource {
+    min-height: 48px;
+    padding-right: calc(var(--spacing) * 12);
+  }
+  .step-preview-resource > .terminal-stream-name,
+  .step-preview-resource > .diff-head {
+    padding-right: calc(var(--spacing) * 11);
+  }
+  .step-file-resources {
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+    padding: 0 calc(var(--spacing) * 3);
+    min-width: 0;
+  }
+  .step-file-resource {
+    min-height: 40px;
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 11) calc(var(--spacing) * 2)
+      calc(var(--spacing) * 3);
+    border-radius: var(--radius-md);
+    background: var(--color-well);
+  }
+  .step-file-resource > span {
+    overflow-wrap: anywhere;
+  }
+  @media (hover: none), (pointer: coarse) {
+    .step-preview-button {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .step-preview-button {
+      transition: none;
+    }
+  }
+}

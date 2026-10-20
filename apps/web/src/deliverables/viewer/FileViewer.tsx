@@ -13,6 +13,7 @@ import {
 import {
   lazy,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
   Suspense,
   useEffect,
   useRef,
@@ -155,6 +156,9 @@ export interface FileViewerProps {
   open: boolean;
   downloads: Pick<ResultDownloads, "state" | "busy" | "request" | "sessionId">;
   onMac: boolean;
+  previewWidth?: number;
+  displayName?: string;
+  returnFocus?: RefObject<HTMLElement | null>;
   onIndex(next: number): void;
   onClose(): void;
 }
@@ -170,6 +174,9 @@ export function FileViewer({
   open,
   downloads,
   onMac,
+  previewWidth,
+  displayName,
+  returnFocus,
   onIndex,
   onClose,
 }: FileViewerProps) {
@@ -348,19 +355,21 @@ export function FileViewer({
   return (
     <Sheet
       open={open}
+      returnFocus={returnFocus}
       onClose={onClose}
       title={
         <>
-          <span className="ui-visually-hidden">{item.name}</span>
+          <span className="ui-visually-hidden">{displayName ?? item.name}</span>
           <span aria-hidden="true">
-            <FileName name={item.name} />
+            <FileName name={displayName ?? item.name} />
           </span>
         </>
       }
       description={meta}
-      className="file-viewer"
+      className={previewWidth ? "file-viewer step-preview-sheet" : "file-viewer"}
+      style={previewWidth ? { left: 8, right: "auto", width: previewWidth } : undefined}
       size="wide"
-      modal
+      modal={!previewWidth}
       flush
       detents={LARGE}
       footer={footer}

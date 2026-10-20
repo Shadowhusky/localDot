@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import { downloadResult } from "./file-transfer.ts";
 import type { AgentStep } from "./model.ts";
+import { StepPreviewButton } from "./StepPreview.tsx";
 
 // Load only when a step is expanded. The saved JPEG remains available after the computer stops.
 export function StepImage({
@@ -14,7 +15,12 @@ export function StepImage({
   image: NonNullable<AgentStep["images"]>[number];
 }) {
   const key = `${sessionId}/${image.name}`;
-  const [state, setState] = useState<{ key: string; url?: string; failed?: boolean }>();
+  const [state, setState] = useState<{
+    key: string;
+    url?: string;
+    bytes?: number;
+    failed?: boolean;
+  }>();
   useEffect(() => {
     const controller = new AbortController();
     let url: string | undefined;
@@ -22,7 +28,7 @@ export function StepImage({
       .then((blob) => {
         if (controller.signal.aborted) return;
         url = URL.createObjectURL(blob.slice(0, blob.size, "image/jpeg"));
-        setState({ key, url });
+        setState({ key, url, bytes: blob.size });
       })
       .catch(() => {
         if (!controller.signal.aborted) setState({ key, failed: true });
@@ -34,7 +40,7 @@ export function StepImage({
   }, [api, sessionId, image.name, key]);
   const current = state?.key === key ? state : undefined;
   return (
-    <figure className="step-output-image" aria-label="Image output">
+    <figure className="step-output-image step-preview-resource" aria-label="Image output">
       {current?.url ? (
         <img
           src={current.url}
@@ -44,6 +50,20 @@ export function StepImage({
         />
       ) : (
         <p role="status">{current?.failed ? "Image preview unavailable." : "Loading image…"}</p>
+      )}
+      {current?.url && (
+        <StepPreviewButton
+          label="Preview image"
+          resource={{
+            kind: "file",
+            label: image.alt || "Image output",
+            entry: {
+              sessionId,
+              resultId: image.name,
+              file: { name: image.name, path: image.name, bytes: current.bytes ?? 0 },
+            },
+          }}
+        />
       )}
     </figure>
   );

@@ -82,7 +82,13 @@ export function useCell(api: ApiClient): CellController {
     (cells: CellSummary[]) => {
       const next =
         cells.find((row) => row.id === selectedId.current) ??
-        cells.find((row) => !row.fenced && !row.replacementPending && row.state !== "removed") ??
+        cells
+          .filter((row) => !row.fenced && !row.replacementPending && row.state !== "removed")
+          .sort(
+            (a, b) =>
+              Number(["ready", "starting"].includes(b.state)) -
+                Number(["ready", "starting"].includes(a.state)) || b.id.localeCompare(a.id),
+          )[0] ??
         cells
           .filter((row) => row.state !== "removed")
           .sort((a, b) => b.id.localeCompare(a.id))[0] ??

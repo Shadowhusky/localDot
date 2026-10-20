@@ -44,6 +44,11 @@ test("keys, empty", async ({ page, ui }) => {
 test("keys, list", async ({ page, ui }) => {
   const sheet = await keys(page, ui);
   await expect(sheet.getByText("openai-fast", { exact: true })).toBeVisible();
+  for (const box of await rows(sheet)) expect(box[3]).toBeLessThanOrEqual(100);
+  const summaries = sheet.locator(".keys-row-facts");
+  expect(
+    await summaries.evaluateAll((els) => els.every((e) => e.getBoundingClientRect().height <= 24)),
+  ).toBe(true);
 });
 
 test("keys, held while the audit log fails", async ({ page, ui }) => {

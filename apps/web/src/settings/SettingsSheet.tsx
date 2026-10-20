@@ -6,7 +6,7 @@ import {
   personaOf,
   type StartAtLoginState,
 } from "@localdot/protocol";
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
 import type { ComputerUpdate } from "../cells/useComputerUpdate.ts";
 import type { FreshStart } from "../cells/useFreshStart.ts";
@@ -64,7 +64,6 @@ import {
   notificationsValue,
   SECTIONS,
   type SettingsSection,
-  sectionInView,
   sectionTitle,
   spendingValue,
 } from "./sections.ts";
@@ -230,12 +229,14 @@ function Section({
   id,
   title,
   heading = true,
+  hidden = false,
   aside,
   children,
 }: {
   id: SettingsSection;
   title: string;
   heading?: boolean;
+  hidden?: boolean;
   // One action at the heading's end.
   aside?: ReactNode;
   children: ReactNode;
@@ -248,6 +249,7 @@ function Section({
   return (
     <section
       id={`settings-${id}`}
+      hidden={hidden}
       className="settings-section"
       data-section={id}
       aria-labelledby={heading ? `settings-${id}-title` : undefined}
@@ -300,6 +302,51 @@ export function SettingsSheet(props: SettingsSheetProps) {
     }
   }
   const page = stack.at(-1);
+  const selected = page ?? shownSections(props, phone)[0] ?? "models";
+  // Retain visited forms, but only the selected section participates in layout.
+  const [visited, setVisited] = useState<SettingsSection[]>([]);
+  const mountedSections = [...new Set([...visited, selected])];
+  useLayoutEffect(() => {
+    if (!props.open) return;
+    setVisited((before) => (before.includes(selected) ? before : [...before, selected]));
+    const scroll = body?.closest<HTMLElement>(".ui-sheet-body");
+    if (scroll) scroll.scrollTop = 0;
+  }, [selected, body, props.open]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only explicit open/navigation requests move focus; sidebar selection retains its own focus
+  useLayoutEffect(() => {
+    if (props.open && !phone)
+      body
+        ?.querySelector<HTMLElement>(`#settings-${selected}-title`)
+        ?.focus({ preventScroll: true });
+  }, [props.open, props.sectionRequest, body, phone]);
+  const [revealIssue, setRevealIssue] = useState(0);
+  useLayoutEffect(() => {
+    if (!revealIssue || !body) return;
+    const section = body.querySelector<HTMLElement>(`#settings-${selected}`);
+    const target =
+      section?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
+      section?.querySelector<HTMLElement>(
+        '.keys-secret input, input.keys-secret, textarea.keys-secret, input[type="password"]',
+      ) ??
+      section?.querySelector<HTMLElement>('input, [role="combobox"], [role="alert"]');
+    if (target) {
+      bringToTop(target);
+      target.focus({ preventScroll: true });
+    }
+  }, [revealIssue, selected, body]);
+  const revealUnfinished = () => {
+    const text = props.validation?.join(" ").toLowerCase() ?? "";
+    const target: SettingsSection = holding
+      ? "keys"
+      : /budget|spend|price/.test(text)
+        ? "spending"
+        : /check.in|research/.test(text)
+          ? "autonomy"
+          : "models";
+    setStack([target]);
+    setRevealIssue((n) => n + 1);
+    setDoneBlocked(true);
+  };
 
   const edits = JSON.stringify([
     props.choices,
@@ -319,7 +366,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
     return () => window.clearTimeout(timer);
   }, [props.open, props.dirty, canSave, saving, props.busy, leaving, edits]);
 
-  // Closing waits for an edit on its way to be saved; only edits that can't be saved ask first.
+  // Closing waits for a save; incomplete fields are revealed without dropping edits.
   const pending = props.dirty && (canSave || saving || props.busy);
   const done = () => {
     // Done is also an explicit retry after a confirmed failed save. Uncertain
@@ -331,13 +378,17 @@ export function SettingsSheet(props: SettingsSheetProps) {
       return;
     }
     if (holding || (props.dirty && !pending)) {
-      setDoneBlocked(true);
+      revealUnfinished();
       return;
     }
     setDoneBlocked(false);
     close();
   };
   const close = () => {
+    if (holding || (props.dirty && !pending)) {
+      revealUnfinished();
+      return;
+    }
     if (pending || props.busy) setLeaving(true);
     else props.onClose();
   };
@@ -370,7 +421,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
             {props.error || doneProblem}
           </p>
         ) : (
-          <div className="settings-footer-status" role="status">
+          <div className="settings-footer-status" role="alert" data-error="">
             <span>Before this can be saved:</span>
             <ul className="settings-problems">
               {problems?.map((problem) => (
@@ -417,6 +468,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
         onClose={close}
         onDone={done}
         dirty={holding || (props.dirty && !pending)}
+        onDismissAttempt={close}
         title={page ? sectionTitle(page) : "Settings"}
         page={page ?? "root"}
         back={
@@ -424,7 +476,13 @@ export function SettingsSheet(props: SettingsSheetProps) {
             ? {
                 label:
                   stack.length > 1 ? sectionTitle(stack.at(-2) as SettingsSection) : "Settings",
-                onBack: () => setStack((now) => now.slice(0, -1)),
+                onBack: () => {
+                  if (holding) {
+                    revealUnfinished();
+                    return;
+                  }
+                  setStack((now) => now.slice(0, -1));
+                },
               }
             : undefined
         }
@@ -434,7 +492,12 @@ export function SettingsSheet(props: SettingsSheetProps) {
         className="settings-sheet"
         footer={footer}
       >
-        <div id="settings-sheet-body" className="settings-body" data-page={page ?? "root"}>
+        <div
+          ref={setBody}
+          id="settings-sheet-body"
+          className="settings-body"
+          data-page={page ?? "root"}
+        >
           {page ? (
             <Section id={page} title={sectionTitle(page)} heading={false}>
               {content(page)}
@@ -455,24 +518,30 @@ export function SettingsSheet(props: SettingsSheetProps) {
       open={props.open}
       onClose={close}
       dirty={holding || (props.dirty && !pending)}
+      onDismissAttempt={close}
       modal
       title="Settings"
       closeLabel="Close settings"
       className="settings-sheet"
-      sidebar={<SectionIndex shown={shown} body={body} request={props} />}
+      sidebar={<SectionIndex shown={shown} current={selected} onSelect={(id) => setStack([id])} />}
       footer={footer}
     >
       <div ref={setBody} id="settings-sheet-body" className="settings-body">
-        {shown.map((id) => (
-          <Section
-            key={id}
-            id={id}
-            title={sectionTitle(id)}
-            aside={id === "computer" && props.stop && <ShutDown stop={props.stop} props={props} />}
-          >
-            {content(id)}
-          </Section>
-        ))}
+        {mountedSections
+          .filter((id) => shown.includes(id))
+          .map((id) => (
+            <Section
+              key={id}
+              hidden={id !== selected}
+              id={id}
+              title={sectionTitle(id)}
+              aside={
+                id === "computer" && props.stop && <ShutDown stop={props.stop} props={props} />
+              }
+            >
+              {content(id)}
+            </Section>
+          ))}
       </div>
     </Sheet>
   );
@@ -505,139 +574,16 @@ function shownSections(props: SettingsSheetProps, phone = false): SettingsSectio
   return SECTIONS.filter((section) => has[section.id]).map((section) => section.id);
 }
 
-// The sidebar: a row per section, lit for the one being read, and a press scrolls to it.
+// Each tab is a separate page. No scroll spy or resize callback can move the reader.
 function SectionIndex({
   shown,
-  body,
-  request,
+  current,
+  onSelect,
 }: {
   shown: readonly SettingsSection[];
-  body: HTMLDivElement | null;
-  request: Pick<SettingsSheetProps, "open" | "section" | "sectionRequest" | "loading">;
+  current: SettingsSection;
+  onSelect(id: SettingsSection): void;
 }) {
-  const [current, setCurrent] = useState<SettingsSection>(request.section ?? shown[0] ?? "models");
-  // A press holds its section lit while the scroll it started runs, until the reader scrolls.
-  const pinned = useRef<SettingsSection | "top" | null>(null);
-  // Undefined means a new navigation, an element waits for loading, and null leaves focus alone.
-  const pendingFocus = useRef<Element | null | undefined>(null);
-  const scroller = useCallback(() => body?.closest<HTMLElement>(".ui-sheet-body") ?? null, [body]);
-  const go = useCallback(
-    (id: SettingsSection | undefined, smooth: boolean) => {
-      const target = body?.querySelector<HTMLElement>(id ? `#settings-${id}` : "[data-section]");
-      pendingFocus.current = null;
-      pinned.current = id ?? "top";
-      if (target) setCurrent(target.dataset.section as SettingsSection);
-      if (id && target) bringToTop(target, smooth);
-      else if (!id) {
-        const element = scroller();
-        if (element) element.scrollTop = 0;
-      }
-    },
-    [body, scroller],
-  );
-
-  // Navigation and focus share one owner. Place the section before paint; loading must not send a
-  // normal Settings opening to Models, or undo a section the person has since chosen.
-  const asked = useRef<{ at?: number; section?: SettingsSection } | null>(null);
-  useLayoutEffect(() => {
-    if (!request.open) {
-      asked.current = null;
-      pendingFocus.current = null;
-      return;
-    }
-    if (!body) return;
-    if (
-      !asked.current ||
-      asked.current.at !== request.sectionRequest ||
-      asked.current.section !== request.section
-    ) {
-      asked.current = { at: request.sectionRequest, section: request.section };
-      go(request.section, false);
-      pendingFocus.current = undefined;
-    }
-  }, [request.open, request.section, request.sectionRequest, go, body]);
-
-  // The sheet's layer records its opener first. Focus then follows the section without moving
-  // either the body or the clipped panel around it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a repeated request for the same section must move focus too
-  useEffect(() => {
-    if (!request.open || pendingFocus.current === null) return;
-    const focusSection = () => {
-      const id = request.section;
-      const target = body?.querySelector<HTMLElement>(id ? `#settings-${id}` : "[data-section]");
-      const control =
-        !request.loading && !matches("(pointer: coarse)")
-          ? target?.querySelector<HTMLElement>(
-              id === "models"
-                ? "[data-role=main] [role=combobox]"
-                : id === "autonomy"
-                  ? "input[type=radio]:checked"
-                  : id === "spending"
-                    ? "[role=switch]"
-                    : ".settings-section-title",
-            )
-          : undefined;
-      (control ?? target?.querySelector<HTMLElement>(".settings-section-title"))?.focus({
-        preventScroll: true,
-      });
-    };
-    if (pendingFocus.current === undefined) {
-      focusSection();
-      pendingFocus.current = request.loading && request.section ? document.activeElement : null;
-    } else if (!request.loading && pendingFocus.current) {
-      const before = pendingFocus.current;
-      pendingFocus.current = null;
-      if (pinned.current === request.section && document.activeElement === before) focusSection();
-    }
-  }, [request.open, request.loading, request.section, request.sectionRequest, body]);
-
-  useEffect(() => {
-    const element = scroller();
-    if (!element) return;
-    const spy = () => {
-      if (pinned.current) return;
-      const origin = element.getBoundingClientRect().top - element.scrollTop;
-      const tops = [...element.querySelectorAll<HTMLElement>("[data-section]")].map((section) => ({
-        id: section.dataset.section as SettingsSection,
-        top: section.getBoundingClientRect().top - origin,
-      }));
-      const seen = sectionInView(tops, {
-        top: element.scrollTop,
-        height: element.clientHeight,
-        content: element.scrollHeight,
-      });
-      if (seen) setCurrent(seen);
-    };
-    const release = () => {
-      pinned.current = null;
-      pendingFocus.current = null;
-    };
-    // Sections above the one gone to may still be filling in; it stays at the top until the reader
-    // scrolls.
-    const hold = () => {
-      if (pinned.current === "top") {
-        element.scrollTop = 0;
-        const first = body?.querySelector<HTMLElement>("[data-section]");
-        if (first) setCurrent(first.dataset.section as SettingsSection);
-        return;
-      }
-      const target =
-        pinned.current && body?.querySelector<HTMLElement>(`#settings-${pinned.current}`);
-      if (target) bringToTop(target);
-    };
-    const resized = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(hold);
-    if (body) resized?.observe(body);
-    element.addEventListener("scroll", spy, { passive: true });
-    for (const type of ["wheel", "touchstart", "keydown", "pointerdown"])
-      element.addEventListener(type, release, { passive: true });
-    return () => {
-      resized?.disconnect();
-      element.removeEventListener("scroll", spy);
-      for (const type of ["wheel", "touchstart", "keydown", "pointerdown"])
-        element.removeEventListener(type, release);
-    };
-  }, [scroller, body]);
-
   return (
     <nav className="settings-index" aria-label="Settings sections">
       {SECTIONS.filter((section) => shown.includes(section.id)).map((section) => (
@@ -646,7 +592,7 @@ function SectionIndex({
           icon={section.icon}
           label={section.title}
           current={current === section.id}
-          onSelect={() => go(section.id, true)}
+          onSelect={() => onSelect(section.id)}
         />
       ))}
     </nav>

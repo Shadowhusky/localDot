@@ -7,7 +7,6 @@ import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { MiddleTruncate } from "../ui/MiddleTruncate.tsx";
 import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
-import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import { describeKey, PROVIDER_NAMES, type Provider } from "./binding.ts";
 import { type KeyRecord, problemText } from "./keys-api.ts";
 
@@ -192,9 +191,12 @@ export function KeyList({
                 <GroupRow
                   className="keys-row-inner"
                   leading={<Monogram>{initial(k)}</Monogram>}
-                  label={<MiddleTruncate text={k.metadata?.label || k.id} />}
+                  label={
+                    <span title={k.metadata?.label || k.id}>
+                      <MiddleTruncate text={k.metadata?.label || k.id} />
+                    </span>
+                  }
                   detail={
-                    // Each fact wraps whole, so no line starts or ends with a separator.
                     <span className="keys-row-meta">
                       {(stale || changed) && (
                         <span className="keys-row-reenter">
@@ -202,12 +204,9 @@ export function KeyList({
                           {changed ? "Changed elsewhere" : "Needs re-entering"}
                         </span>
                       )}
-                      {facts.map((fact, at) => (
-                        <span key={fact}>
-                          {(at > 0 || stale || changed) && <VisuallyHidden>, </VisuallyHidden>}
-                          {fact}
-                        </span>
-                      ))}
+                      <span className="keys-row-facts" title={facts.join(" · ")}>
+                        {facts.join(" · ")}
+                      </span>
                     </span>
                   }
                   trailing={
@@ -221,44 +220,18 @@ export function KeyList({
                           onClick={() => edit(k)}
                         />
                       )}
-                      {phone ? (
-                        <IconButton
-                          size={44}
-                          icon={armed === k.id ? "check" : "trash"}
-                          label={`${label} ${k.id}`}
-                          disabledReason={removeReason}
-                          onClick={removeKey}
-                          className="keys-remove-icon"
-                          data-confirm={armed === k.id ? "" : undefined}
-                        />
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant={armed === k.id ? "destructive" : "quiet"}
-                          busy={pending === k.id}
-                          disabledReason={
-                            pending === k.id
-                              ? undefined
-                              : (unavailable ??
-                                (busy ? "Wait for the other key change to finish" : undefined))
-                          }
-                          aria-label={`${label} ${k.id}`}
-                          onClick={async () => {
-                            await removeKey();
-                          }}
-                        >
-                          {/* As wide as its longest label, so arming it moves nothing in the row. */}
-                          <span className="keys-remove-label" data-longest="Confirm remove">
-                            <span>{label}</span>
-                          </span>
-                        </Button>
-                      )}
+                      <IconButton
+                        size={phone ? 44 : 36}
+                        icon={armed === k.id ? "check" : "trash"}
+                        label={`${label} ${k.id}`}
+                        disabledReason={removeReason}
+                        onClick={removeKey}
+                        className="keys-remove-icon"
+                        data-confirm={armed === k.id ? "" : undefined}
+                      />
                     </span>
                   }
                 >
-                  {k.metadata?.description && (
-                    <p className="keys-description">{k.metadata.description}</p>
-                  )}
                   {changed && (
                     <p className="keys-row-fix keys-row-why">
                       Where this key is sent was changed outside localDot. Remove it, then add it

@@ -261,8 +261,39 @@ function checkRole(
   accounting: Map<string, string>,
 ): RoleChoice | string {
   if (providerById(value.provider)?.notOffered) return "choose a provider that is available here.";
-  const optionsProblem = modelOptionsProblem(value.provider, value.model, value.options);
+  const accountModel = subscriptionModels.find((m) => m.id === value.model);
+  const isPlan = ["claude-code", "chatgpt"].includes(value.provider);
+  const discovered =
+    isPlan && accountModel?.efforts
+      ? {
+          efforts: [...accountModel.efforts],
+          wire: "effort" as const,
+          ...(accountModel.fast ? { speeds: ["standard", "fast"] as ("standard" | "fast")[] } : {}),
+        }
+      : index.providers
+          .find((p) => p.id === value.provider)
+          ?.models.find((m) => m.id === value.model)?.controls;
+  const optionsProblem = modelOptionsProblem(
+    value.provider,
+    value.model,
+    value.options,
+    undefined,
+    discovered,
+  );
   if (optionsProblem) return optionsProblem;
+  if (["claude-code", "chatgpt"].includes(value.provider) && accountModel) {
+    if (
+      value.options?.reasoningEffort &&
+      accountModel.efforts &&
+      !accountModel.efforts.includes(value.options.reasoningEffort)
+    )
+      return "The signed-in account does not support that effort. Choose an available level.";
+    if (
+      value.options?.speed === "fast" &&
+      (accountModel.fast === false || (value.provider === "chatgpt" && accountModel.fast !== true))
+    )
+      return "Fast mode is unavailable for this account model.";
+  }
   if (modelIdProblem(value.model)) return "choose a valid model ID.";
   if (value.provider === "chatgpt") {
     if (

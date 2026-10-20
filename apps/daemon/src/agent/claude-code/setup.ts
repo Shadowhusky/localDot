@@ -259,7 +259,7 @@ export class ClaudeCodeSetup {
           .filter((model) => CLAUDE_CODE_MODEL.test(model.id) && model.name.trim())
           .filter((model, i, all) => all.findIndex((m) => m.id === model.id) === i)
           .slice(0, 32)
-          .map((model) => ({ id: model.id, name: model.name.trim().slice(0, 128) }));
+          .map((model) => ({ ...model, id: model.id, name: model.name.trim().slice(0, 128) }));
       } catch {
         models = [];
       }

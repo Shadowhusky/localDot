@@ -2,6 +2,7 @@ import "../ui/work-layout.css";
 import { useEffect, useRef, useState } from "react";
 import { downloadResult } from "../agent/file-transfer.ts";
 import type { ApiClient } from "../lib/api.ts";
+import type { DisplayControl } from "../shell/StreamMenu.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
@@ -22,6 +23,8 @@ interface WorkViewProps {
   enabled: boolean;
   sessionId: string;
   replay?: boolean;
+  display?: DisplayControl;
+  hideControls?: boolean;
   // Restore the latest projection under the curtain, without the live-step debounce.
   restoring?: boolean;
 }
@@ -40,6 +43,8 @@ function WorkSurfaceView({
   sessionId,
   replay = false,
   restoring = false,
+  display,
+  hideControls = false,
 }: WorkViewProps) {
   const previews = useRef(new Map<string, { url?: string; failed?: boolean }>());
   useEffect(() => {
@@ -49,13 +54,20 @@ function WorkSurfaceView({
       cache.clear();
     };
   }, []);
-  const [mode, setMode] = useState("auto");
+  const [localMode, setLocalMode] = useState("auto");
+  const mode = display?.value ?? localMode;
+  const setMode = display?.change ?? setLocalMode;
   const [shown, setShown] = useState<WorkCard | null>(restoring ? candidate : null);
   const [wasRestoring, setWasRestoring] = useState(restoring);
   // The final history batch can arrive in the same render that lowers the curtain.
   if ((restoring || wasRestoring) && shown !== candidate) setShown(candidate);
   if (wasRestoring !== restoring) setWasRestoring(restoring);
   const [pinned, setPinned] = useState<WorkCard | null>(null);
+  const [previousMode, setPreviousMode] = useState(mode);
+  if (previousMode !== mode) {
+    setPreviousMode(mode);
+    setPinned(mode === "work" ? (shown ?? candidate) : null);
+  }
   const latest = useRef(candidate);
   latest.current = candidate;
   const [visible, setVisible] = useState(!document.hidden);
@@ -142,24 +154,31 @@ function WorkSurfaceView({
           </ScrollArea>
         </div>
       )}
-      <div className="work-controls">
-        <Select
-          size="sm"
-          appearance="inline"
-          aria-label="Display view"
-          value={mode}
-          items={MODES}
-          onValueChange={(value) => {
-            setPinned(value === "work" ? (card ?? candidate) : null);
-            setMode(value);
-          }}
-        />
-        {mode === "work" && (
-          <Button className="work-follow" size="sm" variant="quiet" onClick={() => setMode("auto")}>
-            Follow work
-          </Button>
-        )}
-      </div>
+      {!hideControls && (
+        <div className="work-controls">
+          <Select
+            size="sm"
+            appearance="inline"
+            aria-label="Display view"
+            value={mode}
+            items={MODES}
+            onValueChange={(value) => {
+              setPinned(value === "work" ? (card ?? candidate) : null);
+              setMode(value);
+            }}
+          />
+          {mode === "work" && (
+            <Button
+              className="work-follow"
+              size="sm"
+              variant="quiet"
+              onClick={() => setMode("auto")}
+            >
+              Follow work
+            </Button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

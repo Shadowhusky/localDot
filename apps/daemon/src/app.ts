@@ -27,7 +27,9 @@ import type { InstallCodes } from "./install-codes.ts";
 import { type KeyRoutesDeps, keyRoutes } from "./keyd/routes.ts";
 import { type NotifyRoutesDeps, notifyRoutes } from "./notify/routes.ts";
 import type { Recorder } from "./recorder/recorder.ts";
+import { publicGrant } from "./remote/links.ts";
 import { type RemoteAccess, remoteRoutes } from "./remote/manager.ts";
+import { revocableResponse } from "./remote/response.ts";
 import { type RoutineRoutesDeps, routineRoutes } from "./routines/routes.ts";
 import { type SearchRoutesDeps, searchRoutes } from "./search/routes.ts";
 import type { ManagedServiceReadiness } from "./service-readiness.ts";
@@ -143,24 +145,75 @@ export function createApp({
   if (desktop) desktopRoutes(app, desktop);
   if (browser) desktopRoutes(app, browser, "browser");
 
+  if (remoteAccess)
+    remoteAccess.links.onRevoke((id) => {
+      desktop?.tickets.revokeScope(id);
+      browser?.tickets.revokeScope(id);
+      for (const sessionId of remoteAccess.links.sessions(id))
+        void agent?.runner
+          .stopRun?.(sessionId)
+          .catch(() => console.error("Shared task could not be stopped after link revocation"));
+    });
   app.use("/api/*", async (c, next) => {
     const given = tokenFromHeaders({ authorization: c.req.header("authorization") });
-    if (!tokensMatch(token, given)) return c.text("unauthorized", 401);
+    if (!tokensMatch(token, given)) {
+      const grant = remoteAccess?.authenticate(given);
+      if (!grant) return c.text("unauthorized", 401);
+      if (!remoteAccess?.links.permits(grant, c.req.method, c.req.path))
+        return c.text("This link does not allow that action", 403);
+      c.set("remoteGrant", grant);
+      c.set("remoteValid", () => !!remoteAccess?.authenticate(given));
+    }
     if (appInstalling?.() && !["GET", "HEAD"].includes(c.req.method))
       return c.text("localDot is installing an update. Please wait.", 503);
     await next();
+    const grant = c.get("remoteGrant");
+    if (grant && remoteAccess)
+      c.res = revocableResponse(
+        c.res,
+        () => !!remoteAccess.authenticate(given),
+        (end) =>
+          remoteAccess.links.onRevoke((id) => {
+            if (id === grant.id) end();
+          }),
+      );
   });
 
   if (appUpdater) appUpdateRoutes(app, appUpdater);
-  if (remoteAccess) remoteRoutes(app, remoteAccess);
-  app.get("/api/whoami", (c) => c.json({ ok: true }));
+  if (remoteAccess) {
+    remoteRoutes(app, remoteAccess, agent?.settings.get.bind(agent.settings));
+    app.get("/api/remote-session", (c) => {
+      const grant = c.get("remoteGrant");
+      return grant
+        ? c.json({ ...publicGrant(grant), ownedSessions: remoteAccess.links.sessions(grant.id) })
+        : c.text("Not a shared session", 400);
+    });
+    app.post("/api/remote-session/model", async (c) => {
+      const grant = c.get("remoteGrant");
+      if (!grant) return c.text("Not a shared session", 400);
+      try {
+        const { index } = await c.req.json();
+        if (!Number.isInteger(index)) return c.text("Invalid model", 400);
+        remoteAccess.links.select(grant.id, index);
+        return c.body(null, 204);
+      } catch {
+        return c.text("Model not permitted", 403);
+      }
+    });
+  }
+  app.get("/api/whoami", (c) =>
+    c.json({ ok: true, ...(c.get("remoteGrant") ? { shared: true } : {}) }),
+  );
   if (doctorSelfTests) doctorSelfTestRoutes(app, doctorSelfTests);
   if (serviceReadiness)
     app.get("/api/service/ready", async (c) => {
       const snapshot = ServiceReadinessReply.parse(await serviceReadiness.snapshot());
       return c.json(snapshot, snapshot.ready ? 200 : 503);
     });
-  if (installCodes) installCodeRoutes(app, installCodes, port, accessLinks);
+  if (installCodes)
+    installCodeRoutes(app, installCodes, port, accessLinks, (code) =>
+      remoteAccess?.authenticate(code) ? code : undefined,
+    );
   if (browser) browserViewerApi(app, browser);
   if (accounts) accountsRoutes(app, accounts);
 
@@ -209,7 +262,7 @@ export function createApp({
 
   if (cells) cellRoutes(app, cells);
   if (keys) keyRoutes(app, keys);
-  if (agent) agentRoutes(app, agent);
+  if (agent) agentRoutes(app, { ...agent, remoteLinks: remoteAccess?.links });
   if (search) searchRoutes(app, search);
   if (routines) routineRoutes(app, routines);
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);

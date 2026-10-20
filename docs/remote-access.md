@@ -125,3 +125,18 @@ revocation, origin isolation, and prompt failure when the local socket refuses a
 CI runs this check. Browser tests cover pairing, opt-in, link copying, and narrow mobile layout
 in Chromium and WebKit. A real cross-network desktop-stream check remains part of deployment;
 local tests do not prove production DNS, certificates, latency, or the estimated bill.
+
+
+## Shared links
+
+The owner can create named links in Settings → Your computer → Links for other people. Each link can expire in an hour, day, week or month, or last until revoked. Several links can coexist. The URL is displayed once; the daemon stores only its hash in a private file. Revocation or expiry disconnects its open streams and stops tasks started by that link. The owner's connection and other links remain active.
+
+Each link fixes a configured model or allows selection from up to 32 saved choices, optionally exposes recordings and session settings, and caps successful task starts plus API dollars per task. The lower of owner and link budgets applies. Failed starts refund their task count. Native subscription plans use the provider's account allowance, not an API-dollar meter. Follow-ups share the original task's budget; the task quota counts task sessions, not messages. Turning remote access off invalidates all existing shared links.
+
+The guest page supports chat, progress, the current computer/browser screen and permitted replays. Owner settings, keys, link management, approvals and computer lifecycle changes are denied by the server, including for guests allowed to see session settings. This is shared access to the same computer, files and conversation, **not separate tenant isolation**. A task may use services configured by the owner; only share with trusted people. The older one-use sign-in link remains full owner access for the owner's own devices.
+
+## Terminal chat
+
+`localdot chat` connects to the local daemon and displays replies, tool progress and task status. Commands: `/new`, `/status`, `/stop`, `/help`, `/quit`. Quitting the terminal leaves the task running; `/stop` stops it. Approval and private-input requests stay in the app.
+
+For a directly reachable remote daemon, set `LOCALDOT_SERVER=https://your-server` and `LOCALDOT_TOKEN_FILE=/absolute/private/credential-file` (mode 0600). Remote credentials must be explicitly supplied; the client never sends the local owner credential to a different server automatically. The terminal client accepts a server origin, not a browser pairing URL, and does not perform relay cookie pairing. It polls only while open, bounds responses, strips terminal escape sequences, and never stores typed history. It is a lightweight terminal chat view, not a desktop screen renderer.

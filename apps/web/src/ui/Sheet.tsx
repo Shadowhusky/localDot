@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import {
+  type CSSProperties,
   createContext,
   type ReactNode,
   type RefObject,
@@ -55,6 +56,8 @@ export interface SheetProps {
   open: boolean;
   // Called once a dismissal is allowed; with unsaved changes, only after the user chose Discard.
   onClose(): void;
+  // A form can reveal invalid fields instead of offering to discard on dismissal.
+  onDismissAttempt?(): void;
   title: ReactNode;
   description?: ReactNode;
   // A side panel on wide screens and a bottom sheet on phones, unless one is asked for.
@@ -87,6 +90,7 @@ export interface SheetProps {
   // The body has no padding or scroll of its own: what it holds fills it and scrolls itself.
   flush?: boolean;
   className?: string;
+  style?: CSSProperties;
   children: ReactNode;
 }
 
@@ -109,6 +113,7 @@ export function Sheet(props: SheetProps) {
 
 function SheetLayer({
   onClose,
+  onDismissAttempt,
   title,
   description,
   side = "auto",
@@ -126,6 +131,7 @@ function SheetLayer({
   size = "regular",
   flush = false,
   className,
+  style,
   children,
   root,
   closing,
@@ -144,8 +150,8 @@ function SheetLayer({
   const [detent, setDetent] = useState(detents[0] ?? "fit");
   const resting = useRef({ detents, setDetent });
   resting.current = { detents, setDetent };
-  const latest = useRef({ dirty, asking, onClose, closing });
-  latest.current = { dirty, asking, onClose, closing };
+  const latest = useRef({ dirty, asking, onClose, closing, onDismissAttempt });
+  latest.current = { dirty, asking, onClose, closing, onDismissAttempt };
 
   const current: PageView = { key: page, title, description, back, footer, children };
   const shownRef = useRef(current);
@@ -211,7 +217,10 @@ function SheetLayer({
     discarding.current = then;
     setAsking(true);
   }, []);
-  const requestClose = useCallback(() => confirmDiscard(null), [confirmDiscard]);
+  const requestClose = useCallback(() => {
+    if (latest.current.onDismissAttempt) latest.current.onDismissAttempt();
+    else confirmDiscard(null);
+  }, [confirmDiscard]);
   const askThen = useCallback((then: () => void) => confirmDiscard(then), [confirmDiscard]);
 
   const discard = () => {
@@ -378,6 +387,7 @@ function SheetLayer({
         tabIndex={-1}
         inert={closing}
         className={clsx("ui-sheet", className)}
+        style={style}
         data-side={placement}
         data-size={size === "wide" ? size : undefined}
         data-flush={flush ? "" : undefined}

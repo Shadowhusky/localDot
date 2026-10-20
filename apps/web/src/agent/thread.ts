@@ -16,6 +16,7 @@ import {
   type AgentModel,
   type AgentQuestion,
   type AgentResult,
+  type AgentStep,
   type AgentTakeover,
   type RoutineProposal,
   type SpendCall,
@@ -23,7 +24,7 @@ import {
 } from "./model.ts";
 
 export type Speaker = "user" | "dot";
-export type WorkStep = EntryView & { key: string; readGroup?: string };
+export type WorkStep = EntryView & { key: string; readGroup?: string; output?: AgentStep };
 export interface ModelRef {
   readonly route: string;
   readonly model: string;
@@ -224,6 +225,7 @@ export function workSteps(
     .map((entry) => ({
       key: entry.key,
       readGroup: activityReadGroup(entry),
+      output: entry.row.kind === "step" ? entry.row.agent : undefined,
       ...entryView(entry, changes.get(entry.row.id) ?? [], !!model.ended),
     }));
 }

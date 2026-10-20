@@ -1,6 +1,6 @@
 # Model controls
 
-Reviewed against vendor documentation on 2026-10-13. Implementation: `packages/providers/src/model-options.ts`; HTTP contract tests: `cells/brain/src/model-options.test.ts`.
+Reviewed against vendor documentation on 2026-10-20. Implementation: `packages/providers/src/model-options.ts`; HTTP contract tests: `cells/brain/src/model-options.test.ts`.
 
 ## User behavior
 
@@ -14,8 +14,8 @@ Unconfigured options are omitted from requests. “Provider default” does not 
 | --- | --- | --- |
 | OpenAI; Azure deployments named for their underlying model; Custom endpoint (OpenAI Responses) | GPT-6 Astra/6.1 Sol: low–max. GPT-6 Sol/Luna and GPT-5.6 also allow off. Earlier GPT-5 and o-series use their own effort vocabulary. GPT-5/6 answer detail: concise/balanced/detailed. Unknown Azure deployment aliases remain default-only. | [OpenAI reasoning](https://developers.openai.com/api/docs/guides/reasoning), [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna), [GPT-5.6](https://developers.openai.com/api/docs/models/gpt-5.6) |
 | Anthropic; Other Anthropic-compatible Claude IDs | Modern adaptive models: effort, with max/xhigh restricted by model family. Older thinking models: token budget or off. Opus 4.5 also has effort independent of its manual budget. | [Effort](https://platform.claude.com/docs/en/build-with-claude/effort), [Extended thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking) |
-| ChatGPT plan | Effort is passed to native Codex `turn/start`. Conservative known-model vocabulary; no API verbosity field is sent to the native app. | Pinned Codex app-server protocol and native driver regression tests; [Codex configuration](https://developers.openai.com/codex/config-reference/) |
-| Claude Code plan | Native SDK effort for supported Claude families; stable `opus`/`sonnet` aliases expose low/medium/high. No manual API budget is injected into the native app. | Installed Claude Agent SDK `Options.effort`; [Claude Code model configuration](https://code.claude.com/docs/en/model-config) |
+| ChatGPT plan | Effort is passed to native Codex `turn/start`. Account-reported effort levels replace the bundled fallback vocabulary. Standard/Fast speed uses the pinned runtime’s `serviceTier`; Fast is exposed only when that account advertises it. No API verbosity field is sent to the native app. | Pinned Codex app-server protocol and native driver regression tests; [Codex configuration](https://developers.openai.com/codex/config-reference/) |
+| Claude Code plan | Native SDK effort for supported Claude families; Native aliases expose the current effort vocabulary; runtime-reported resolved IDs, effort levels and fast-mode availability determine the picker when available. No manual API budget is injected into the native app. | Installed Claude Agent SDK `Options.effort`; [Claude Code model configuration](https://code.claude.com/docs/en/model-config) |
 | Google Gemini | 3.x: model-specific thinking levels (Pro and Flash differ). 2.5: thinking budget; Pro cannot disable thinking. No simultaneous level and budget. | [Thinking](https://ai.google.dev/gemini-api/docs/thinking), [Gemini 3](https://ai.google.dev/gemini-api/docs/gemini-3) |
 | DeepSeek | V4/Flash/Pro: off, low, high, max; legacy chat/reasoner: thinking toggle. Uses `thinking.type` plus `reasoning_effort` where supported. | [Thinking mode](https://api-docs.deepseek.com/guides/thinking_mode/) |
 | xAI | Grok 4.5: low/medium/high; 4.6/4.7 add xhigh. No off switch for these models. | [Reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning) |
@@ -46,10 +46,27 @@ Options form a strict, bounded schema. Arbitrary request-body keys, sampling con
 
 For shorter internal requests such as compaction, the selected budget is reduced to fit that request. Anthropic's SDK adds manual thinking tokens to `maxOutputTokens`, so the wrapper subtracts them first to preserve the total limit used by admission/accounting. Stateless Responses requests retain `store:false` and encrypted reasoning for tool turns. SDKs continue to handle reasoning signatures and replay.
 
-Not included: service tiers, premium/pro modes, arbitrary temperature/top-p, provider-hosted tools, safety settings or permission controls. These differ in billing or execution behavior and are not interchangeable with effort. The UI does not represent effort as a guarantee of answer quality or expose hidden reasoning text.
+Not included: arbitrary service tiers, premium/pro models, arbitrary temperature/top-p, provider-hosted tools, safety settings or permission controls. These differ in billing or execution behavior and are not interchangeable with effort. The UI does not represent effort as a guarantee of answer quality or expose hidden reasoning text.
 
 ## Verification scope
 
 Automated tests exercise actual installed SDK HTTP serialization for every implemented API mapping (including both China/global endpoints and coding-plan aliases), native effort forwarding, strict rejection, defaults, reset, saved settings and token caps. Browser checks cover Chromium desktop/phone and WebKit phone, keyboard use, reload persistence, Escape/focus restoration and CSP. Vendor contract tests intercept requests at the network boundary; they are not live paid calls to every vendor. Live checks are limited to configured credentials and are recorded separately.
 
-The mapping is intentionally conservative and versioned in source. It is not a claim that every future model ID or arbitrary gateway alias can be inferred automatically. Dynamic per-account model capability discovery can extend this table without weakening validation.
+## Startup discovery and offline behavior
+
+Every daemon startup schedules a background catalog refresh; opening the app also requests a check, coalesced across tabs with a one-minute retry interval. The last verified catalog is served immediately. Provider metadata is fetched through keyd with stand-ins, bounded GET-only requests and no paid generation calls. Task bindings snapshot the advertised controls, so a background refresh cannot change a running task.
+
+Anthropic's [Models API](https://platform.claude.com/docs/en/api/http/models) reports supported effort levels and thinking modes. These replace bundled choices, including capabilities newly advertised for an existing catalog model. OpenRouter's [model metadata](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties) advertises parameter support; absent reasoning support removes those controls. Native ChatGPT and Claude Code use their account/runtime model metadata.
+
+The [OpenAI model list](https://developers.openai.com/api/reference/resources/models/methods/list) and DeepSeek model list do not publish effort enums or speed support. Their successful model-list checks cannot establish new effort levels; documented bundled contracts remain the fallback. Custom gateways are not assumed to publish a vendor's capabilities. Unknown options remain hidden rather than inferred from a reasoning boolean. Cached capabilities survive partial provider outages; requests are bounded, cancellable on shutdown and use a separate short-lived listener with a zero generation budget.
+
+## Speed selection (2026-10-20)
+
+Speed is an independent opt-in control with a higher-cost label, not a reduction in reasoning effort. Direct OpenAI GPT-6 and GPT-5.3 Codex requests use `service_tier: priority` (Fast) or `default` (Standard). Direct Claude Opus 5.5/5/4.8 uses `speed`; the installed SDK supplies the required beta for preview models. Native Claude Code uses an isolated `settings.fastMode` overlay and account capability metadata. Defaults omit the setting. Unsupported gateways, Azure aliases and the pinned ChatGPT runtime do not acquire inferred API options. Ultrafast is not yet exposed.
+
+Paid Fast tasks reserve a documented upper rate for long context, without speculative cache discounts, in the immutable keyd pricing snapshot. This conservative estimate may be higher than the final bill, especially if the provider falls back to Standard. Native Claude fast mode can use extra usage credits according to the account plan.
+
+References: [OpenAI Fast](https://developers.openai.com/api/docs/guides/fast-mode), [OpenAI pricing](https://developers.openai.com/api/docs/pricing), [Claude Fast](https://platform.claude.com/docs/en/build-with-claude/fast-mode), [Claude Code model configuration](https://code.claude.com/docs/en/model-config), [Claude Code Fast](https://code.claude.com/docs/en/fast-mode).
+
+
+Native ChatGPT speed is verified against the generated JSON schema of the pinned 0.154.0 binary (`TurnStartParams.serviceTier`, `Model.serviceTiers`) and regression tests, not inferred from API parameters. [Codex speed documentation](https://developers.openai.com/codex/speed) describes the separate speed/usage tradeoff. Ultra-fast tiers and unknown gateway tiers remain hidden until their transport and accounting are supported.

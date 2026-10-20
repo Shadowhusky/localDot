@@ -1,3 +1,4 @@
+import { ModelControls } from "@localdot/protocol";
 import { z } from "zod";
 
 // models.dev's api.json, read loosely: every field this code does not use is ignored, and one
@@ -36,6 +37,8 @@ const DevProvider = z.object({
 // localDot's cache of the catalog: a fixed schema, written by the daemon from models.dev and read
 // by the picker and the session runner. Prices are USD per million tokens.
 export const CatalogModel = z.object({
+  controls: ModelControls.optional(),
+  controlsCheckedAt: z.iso.datetime().optional(),
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/),
   name: z.string().max(200),
   vision: z.boolean(),

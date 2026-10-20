@@ -186,6 +186,10 @@ export function desktopStreamRoute(
         refuse(socket, "503 Service Unavailable");
         return;
       }
+      const remove = deps.tickets.onRevoke((ticket, reason) => {
+        if (reason === "scope" && ticket === params.ticket) socket.destroy();
+      });
+      socket.once("close", remove);
       relay({ req, socket, head }, { id, stream: endpoints.stream, deps, streams, wss });
     },
   };

@@ -14,6 +14,7 @@ export function installCodeRoutes(
   codes: InstallCodes,
   port: number,
   access?: AccessLinks,
+  exchangeGuest?: (code: string) => string | undefined,
 ): void {
   app.get("/api/access-links", async (c) => {
     c.header("cache-control", "no-store");
@@ -80,7 +81,7 @@ export function installCodeRoutes(
     if (typeof body !== "string") return c.text("invalid request", body);
     const match = BODY_PATTERN.exec(body);
     if (!match?.[1]) return c.text("invalid request", 400);
-    const token = codes.consume(match[1]);
+    const token = exchangeGuest?.(match[1]) ?? codes.consume(match[1]);
     return token === undefined ? c.text("invalid or expired link", 401) : c.json({ token });
   });
 }

@@ -99,11 +99,11 @@ function fixture(
   };
   const driver = new CodexDriver(deps),
     running: Promise<number>[] = [];
-  const run = (resume = false, effort?: "low" | "high") => {
+  const run = (resume = false, effort?: "low" | "high", speed?: "standard" | "fast") => {
     const promise = driver.run(session, {
       model: "gpt-6-astra",
       resume,
-      options: effort ? { reasoningEffort: effort } : undefined,
+      options: effort || speed ? { reasoningEffort: effort, speed } : undefined,
     });
     running.push(promise);
     void promise.catch(() => {});
@@ -223,6 +223,21 @@ describe("owned Codex task driver", () => {
     f.done();
     expect(await run).toBe(CODEX_DONE);
   });
+
+  it.each(["standard", "fast"] as const)(
+    "sends the selected %s speed to the native turn",
+    async (speed) => {
+      const f = fixture(),
+        run = f.run(false, "high", speed),
+        conn = await f.fake.nextLaunch(1);
+      expect((await conn.waitFor("turn/start")).params).toMatchObject({
+        effort: "high",
+        serviceTier: speed === "fast" ? "fast" : "default",
+      });
+      f.done();
+      expect(await run).toBe(CODEX_DONE);
+    },
+  );
 
   it("submits the full PNG in the explicit turn, keeps its frame ID in daemon metadata, and registers one lease", async () => {
     const f = fixture(),

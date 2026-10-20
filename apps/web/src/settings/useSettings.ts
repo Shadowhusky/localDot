@@ -108,7 +108,7 @@ export function useSettings(
       try {
         const [nextSaved, nextIndex] = await Promise.all([
           loadSettings(api, abort.signal),
-          loadProviderIndex(api, abort.signal),
+          loadProviderIndex(api, abort.signal, loadedFor.current !== api),
         ]);
         if (
           !mounted.current ||
@@ -193,7 +193,7 @@ export function useSettings(
     // Coming back re-reads what the interruption discarded but keeps the draft, so switching apps
     // to copy a key never costs the user their choices.
     const visible = () => {
-      if (document.hidden) return suspend();
+      if (document.hidden) return;
       if (!blocked.current) return;
       blocked.current = false;
       if (mounted.current) void read(current.current.open && !current.current.draft);
@@ -326,7 +326,17 @@ export function useSettings(
         current.current.saved?.[role],
         ...(models ?? []),
       ].findLast((item) => item?.provider === provider);
-      if (remembered) {
+      const spec = providerById(provider);
+      // Never restore a remembered binding whose key was deleted or rebound.
+      if (
+        remembered &&
+        (!remembered.key ||
+          (spec &&
+            current.current.index &&
+            matchingKeys(spec, pickerKeys(current.current.index)).some(
+              (key) => key.id === remembered.key,
+            )))
+      ) {
         value = remembered;
         const price = formOf({ [role]: remembered }).prices[role];
         if (price) prices[role] = price;
@@ -391,7 +401,6 @@ export function useSettings(
       current.current.api === api &&
       current.current.open &&
       current.current.generation === generation &&
-      !document.hidden &&
       !blocked.current;
     const live = () =>
       sameVisit() && current.current.revision === revision && current.current.draft === captured;

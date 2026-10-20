@@ -1149,3 +1149,20 @@
     overscroll-behavior-x: auto;
   }
 }
+
+@layer kit {
+  /* Headers and their descriptions form one introduction, even in a spaced settings grid. */
+  .settings-body .ui-group-head:has(+ .ui-group-note) {
+    margin-block-end: 0;
+  }
+  .settings-body .ui-group-head + .ui-group-note {
+    margin-block-start: 0;
+  }
+  .settings-body .settings-group-intro {
+    display: grid;
+    gap: var(--spacing);
+  }
+  .settings-body .settings-group-intro > :is(.ui-group-head, .ui-group-note) {
+    margin-block: 0;
+  }
+}

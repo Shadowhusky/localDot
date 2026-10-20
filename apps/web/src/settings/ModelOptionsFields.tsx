@@ -1,8 +1,14 @@
-import type { AgentRoleChoice, ModelOptions, ReasoningEffort } from "@localdot/protocol";
+import type {
+  AgentRoleChoice,
+  ModelControls,
+  ModelOptions,
+  ReasoningEffort,
+} from "@localdot/protocol";
 import { modelControls } from "@localdot/providers";
 import { EffortSlider } from "../ui/EffortSlider.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Select } from "../ui/Select.tsx";
+import type { SubscriptionModel } from "./choices.ts";
 
 export const effortLabel = (value?: string) =>
   value === "none"
@@ -23,11 +29,19 @@ export function optionsLabel(options?: ModelOptions): string {
       ? effortLabel(options.reasoningEffort)
       : options?.verbosity
         ? `${effortLabel(options.verbosity)} detail`
-        : "";
+        : options?.speed === "fast"
+          ? "Fast"
+          : options?.speed === "standard"
+            ? "Standard speed"
+            : "";
 }
 // What more thinking costs, or why the model offers no controls: a note under its rows.
-export function optionsNote(choice: AgentRoleChoice, compact = false): string {
-  if (!modelControls(choice.provider, choice.model).wire)
+export function optionsNote(
+  choice: AgentRoleChoice,
+  compact = false,
+  discovered?: ModelControls,
+): string {
+  if (!modelControls(choice.provider, choice.model, discovered).wire)
     return "This model uses its provider defaults. No adjustable reasoning controls are verified for this endpoint.";
   return compact
     ? "More thinking may take longer."
@@ -40,13 +54,31 @@ export function ModelOptionsFields({
   onChange,
   outputLimit = 4096,
   compact = false,
+  accountModel,
+  discovered,
 }: {
   choice: AgentRoleChoice;
   onChange(choice: AgentRoleChoice): void;
   outputLimit?: number;
   compact?: boolean;
+  accountModel?: SubscriptionModel;
+  discovered?: ModelControls;
 }) {
-  const controls = modelControls(choice.provider, choice.model);
+  const base = modelControls(
+    choice.provider,
+    accountModel?.resolvedModel ?? choice.model,
+    discovered,
+  );
+  const controls = {
+    ...base,
+    efforts: accountModel?.efforts ?? base.efforts,
+    speeds:
+      accountModel?.fast === false || (choice.provider === "chatgpt" && accountModel?.fast !== true)
+        ? undefined
+        : accountModel?.fast === true
+          ? (["standard", "fast"] as const)
+          : base.speeds,
+  };
   const options = choice.options ?? {};
   const change = (patch: Partial<ModelOptions>) => {
     const next = Object.fromEntries(
@@ -71,6 +103,20 @@ export function ModelOptionsFields({
   ];
   const changeDetail = (value: string) =>
     change({ verbosity: (value || undefined) as ModelOptions["verbosity"] });
+  const speed = controls.speeds && (
+    <Field label="Speed" inline className={compact ? "model-speed-field" : "ui-group-row"}>
+      <Select
+        appearance="inline"
+        value={options.speed ?? ""}
+        items={[
+          { value: "", label: "Provider default" },
+          { value: "standard", label: "Standard" },
+          { value: "fast", label: "Fast · higher cost" },
+        ]}
+        onValueChange={(value) => change({ speed: (value || undefined) as ModelOptions["speed"] })}
+      />
+    </Field>
+  );
   if (compact)
     return (
       <div className="model-options-fields" data-compact="">
@@ -89,7 +135,8 @@ export function ModelOptionsFields({
             onChange={changeDetail}
           />
         )}
-        <p className="model-options-note">{optionsNote(choice, true)}</p>
+        {speed}
+        <p className="model-options-note">{optionsNote(choice, true, discovered)}</p>
       </div>
     );
   const budgets = [
@@ -106,6 +153,7 @@ export function ModelOptionsFields({
     .filter((value) => value <= Math.min(outputLimit, 16000) - 1024);
   return (
     <>
+      {speed}
       {controls.efforts.length > 0 && (
         <Field label="Reasoning effort" inline className="ui-group-row">
           <Select

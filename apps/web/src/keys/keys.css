@@ -175,40 +175,16 @@
   }
 }
 
-.keys-remove-label {
-  display: inline-grid;
-  justify-items: end;
-}
-
-.keys-remove-label > span,
-.keys-remove-label::after {
-  grid-area: 1 / 1;
-}
-
-.keys-remove-label::after {
-  visibility: hidden;
-  content: attr(data-longest);
-}
-
-/* The dot between two facts sits in the gap; a fact that wraps to the start of a line takes its dot
-   outside the box, where it is clipped. */
+/* One compact summary; full descriptions and identifiers remain in Edit details. */
 .keys-row-meta {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: calc(var(--spacing) * 3);
-  overflow: clip;
-  overflow-wrap: anywhere;
-}
-
-.keys-row-meta > span {
-  position: relative;
+  display: grid;
   min-width: 0;
 }
-
-.keys-row-meta > span + span::before {
-  position: absolute;
-  left: calc(var(--spacing) * -2);
-  content: "·";
+.keys-row-facts {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* A key to enter again: an amber point beside the words, first on its row's detail line. */
@@ -348,7 +324,6 @@
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
-.keys-description,
 .private-key-request {
   overflow-wrap: anywhere;
   min-width: 0;

@@ -4,6 +4,7 @@ import { RELEASE_VERSION } from "../../../packages/protocol/src/release.ts";
 export type Command =
   | { kind: "default" }
   | { kind: "help" }
+  | { kind: "chat" }
   | { kind: "version" }
   | { kind: "open"; qr?: true }
   | { kind: "down" }
@@ -91,6 +92,7 @@ export function parseArgs(args: readonly string[]): Command | undefined {
       case "--version":
       case "-v":
         return { kind: "version" };
+      case "chat":
       case "open":
       case "down":
       case "up":
@@ -147,6 +149,7 @@ Usage:
                                 Install the latest stable or an exact newer release; keep data
   localdot update --prepare <version>
                                 Download and verify without interrupting the app
+  localdot chat                 Talk to dot and follow progress in this terminal
   localdot open [--qr]          Print a fresh, single-use sign-in link; --qr also draws it as
                                 a QR code for your phone (needs remote access set up)
   localdot stop [--cell <id>]   Stop agent actions and revoke access
@@ -167,6 +170,9 @@ Usage:
   localdot unlock               Enter the passphrase that protects saved keys (Linux servers)
   localdot --version            Show this build's version
   localdot --help               Show this help
+
+For remote chat, set LOCALDOT_SERVER=https://your-server and LOCALDOT_TOKEN_FILE=/private/path.
+Use a private (0600) credential file. Credentials are never accepted as command-line arguments.
 
 LOCALDOT_HOME selects the private installation directory.
 LOCALDOT_PORT selects the local daemon port (default 4750).

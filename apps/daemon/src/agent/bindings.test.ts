@@ -632,3 +632,17 @@ describe("custom endpoints state what their model can do", () => {
         );
   });
 });
+
+it("reserves premium rates for fast inference and accepts mixed-speed roles without undercounting", () => {
+  const choice = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
+  const regular = resolveRole("fast", choice, catalog, keys);
+  const fast = resolveRole("main", { ...choice, options: { speed: "fast" } }, catalog, keys);
+  expect(fast.model.inputUSDPerMTok).toBeGreaterThanOrEqual(8);
+  expect(fast.model.outputUSDPerMTok).toBeGreaterThanOrEqual(40);
+  const prices = pricingOf([fast, regular]);
+  expect(prices.routes[0]?.models[0]).toMatchObject({
+    inputUSDPerMTok: fast.model.inputUSDPerMTok,
+    outputUSDPerMTok: fast.model.outputUSDPerMTok,
+  });
+  expect(prices.routes[0]?.models[0]).not.toHaveProperty("cacheReadUSDPerMTok");
+});

@@ -24,7 +24,12 @@ import {
   readLocalAcceptance,
   writeLocalAcceptance,
 } from "@localdot/codex-harness";
-import { type PersonaId, type SkillSummary, TOOL_API_PORT } from "@localdot/protocol";
+import {
+  CLAUDE_CODE_MODEL,
+  type PersonaId,
+  type SkillSummary,
+  TOOL_API_PORT,
+} from "@localdot/protocol";
 import type { QuarantineItem } from "../../../../packages/protocol/src/quarantine.ts";
 import type { BrowserScope } from "../browser/client.ts";
 import { releaseForFullAccess } from "../browser/full-access-downloads.ts";
@@ -55,6 +60,7 @@ import type { KillSwitch } from "../gateway/kill-switch.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import type { KeydClient } from "../keyd/client.ts";
 import { JudgeCell } from "../keyd/judge-cell.ts";
+import { ModelCatalog } from "../keyd/model-catalog.ts";
 import type { KeydMonitor } from "../keyd/monitor.ts";
 import { ServiceKeys } from "../keyd/service-keys.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
@@ -150,7 +156,9 @@ export function createAgent(d: AgentWiringDeps) {
   const memory = new MemoryStore(d.home),
     people = new PeopleStore(d.home),
     settings = new SettingsStore(d.home),
-    catalog = new CatalogStore(d.home);
+    catalog = new CatalogStore(d.home, {
+      enrich: (next, previous, signal) => modelCatalog.enrich(next, previous, signal),
+    });
   const recentActivity = new RecentActivity({
     log: d.eventLog,
     isLive: (id) => d.live.cellOf(id) !== undefined,
@@ -271,6 +279,10 @@ export function createAgent(d: AgentWiringDeps) {
     desktopPorts: () => d.cells.reservedKeydPorts(),
     ...(d.toolPort === undefined ? {} : { toolPort: d.toolPort }),
     ...(d.relay ? { relay: d.relay } : {}),
+  });
+  const modelCatalog = new ModelCatalog({
+    keyd: d.keyd,
+    ports: { reserve: () => brains.reservePort(), release: (port) => brains.releasePort(port) },
   });
   const judgeCell = new JudgeCell({
     keyd: d.keyd,
@@ -609,6 +621,15 @@ export function createAgent(d: AgentWiringDeps) {
       return (await listing.supportedModels()).map((model) => ({
         id: model.value,
         name: model.displayName,
+        ...(model.resolvedModel && CLAUDE_CODE_MODEL.test(model.resolvedModel)
+          ? { resolvedModel: model.resolvedModel }
+          : {}),
+        ...(model.supportedEffortLevels
+          ? { efforts: model.supportedEffortLevels }
+          : model.supportsEffort === false
+            ? { efforts: [] }
+            : {}),
+        ...(model.supportsFastMode !== undefined ? { fast: model.supportsFastMode } : {}),
       }));
     } finally {
       clearTimeout(timer);
@@ -1111,12 +1132,15 @@ export function createAgent(d: AgentWiringDeps) {
           throw new Error("agent is closed");
         }
         ready = true;
+        // Check provider metadata on every daemon launch without delaying the computer/UI.
+        void tracked(catalog.refresh().catch(() => undefined));
       })();
       return startPromise;
     },
     close(): Promise<void> {
       if (closePromise) return closePromise;
       closing = true;
+      catalog.close();
       ready = false;
       unsubscribe();
       stopExperienceFeed();

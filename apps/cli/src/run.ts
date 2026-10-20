@@ -97,6 +97,13 @@ export async function runCli(
       signal: options.signal,
     });
     options.signal.throwIfAborted();
+    if (command.kind === "chat") {
+      if (!runtime.chat) {
+        io.err("Terminal chat is unavailable in this build.");
+        return 1;
+      }
+      return await runtime.chat(context, io);
+    }
     if (command.kind === "open")
       return await runtime.open(context, io, command.qr ? { qr: true } : {});
     if (command.kind === "stop")

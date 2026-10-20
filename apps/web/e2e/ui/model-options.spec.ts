@@ -14,6 +14,18 @@ test("model thinking can be changed, saved and reset inside the composer", async
   await expect(panel).toBeVisible();
   await panel.getByRole("combobox", { name: "Model", exact: true }).click();
   await page.getByRole("option", { name: "GPT-6 Luna", exact: true }).click();
+  const speed = panel.getByRole("combobox", { name: "Speed", exact: true });
+  await speed.click();
+  await page.getByRole("option", { name: "Fast · higher cost", exact: true }).click();
+  const manage = panel.getByRole("button", { name: /Manage models/ });
+  const bounds = await manage.boundingBox(),
+    panelBounds = await panel.boundingBox();
+  expect(
+    bounds &&
+      panelBounds &&
+      bounds.x >= panelBounds.x &&
+      bounds.x + bounds.width <= panelBounds.x + panelBounds.width,
+  ).toBe(true);
   const detail = panel.getByRole("slider", { name: "Answer detail" });
   await detail.focus();
   await detail.press("End");
@@ -30,6 +42,7 @@ test("model thinking can be changed, saved and reset inside the composer", async
   const again = (await composer(page)).getByRole("button", { name: /^Model:/ });
   await expect(again).toContainText("Maximum");
   await again.click();
+  await expect(speed).toContainText("Fast");
   await expect(detail).toHaveAttribute("aria-valuetext", "Detailed");
   await expect(slider).toHaveAttribute("aria-valuetext", "Maximum");
   await panel.getByRole("button", { name: "Reset to provider defaults" }).click();

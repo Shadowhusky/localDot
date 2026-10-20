@@ -283,7 +283,7 @@
     padding-top: calc(var(--spacing) * 3);
   }
   .model-config-actions .model-config-manage {
-    margin-inline-start: calc(var(--spacing) * -3);
+    margin-inline-start: 0;
   }
   .model-effort-slider {
     display: grid;
