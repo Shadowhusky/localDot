@@ -23,9 +23,11 @@ import { ModelOptionsFields, optionsNote } from "./ModelOptionsFields.tsx";
 
 const ROLE: Record<ModelRole, { title: string; description: string }> = {
   main: { title: "Main model", description: "Does the work" },
-  fast: { title: "Fast model", description: "Titles, summaries and quick checks" },
+  fast: { title: "Fast model", description: "Summarizes long tasks and answers purpose checks" },
   local: { title: "Local model", description: "Runs on this Mac with LM Studio or Ollama" },
 };
+// Claude Code keeps its own history, so beside it the fast model only answers purpose checks.
+const PLAN_FAST = "Answers purpose checks; Claude Code summarizes on its own";
 
 // Models that work the screen, which the main model's heading tags; their note says no more.
 const SCREEN_TIERS = new Set(["native", "vision-tools"]);
@@ -47,6 +49,8 @@ export interface RoleCardProps {
   keys: readonly PickerKey[];
   keyLayer: "online" | "offline" | "unknown";
   subscriptionModels?: readonly SubscriptionModel[];
+  // The main model's provider, which decides what a fast model beside it can be.
+  main?: string;
   // Why the role is off: the main model runs on a plan's own app, which brings its own models.
   inactive?: string;
   manualPrice?: { input: string; output: string };
@@ -74,6 +78,7 @@ export function RoleCard({
   keys,
   keyLayer,
   subscriptionModels = [],
+  main,
   inactive,
   manualPrice,
   onChange,
@@ -82,7 +87,9 @@ export function RoleCard({
 }: RoleCardProps) {
   const titleId = useId();
   const notesId = useId();
-  const { title, description } = ROLE[role];
+  const { title } = ROLE[role];
+  const description =
+    role === "fast" && main === "claude-code" ? PLAN_FAST : ROLE[role].description;
   const provider = value && providerById(value.provider);
   const tier = providers
     .find((row) => row.id === value?.provider)
@@ -117,6 +124,7 @@ export function RoleCard({
         value={value ?? { provider: "", model: "" }}
         providers={providers}
         subscriptionModels={subscriptionModels}
+        main={main}
         describedBy={notes.length ? notesId : undefined}
         onChange={onChange}
       />
@@ -282,6 +290,8 @@ function CustomEndpoint({
   value: RoleChoice;
   onChange(value: RoleChoice): void;
 }) {
+  // OpenAI's service tiers ride only on its own formats.
+  const tiers = providerById(value.provider)?.client !== "anthropic-compatible";
   return (
     <>
       <Switch
@@ -306,6 +316,22 @@ function CustomEndpoint({
           }}
         />
       </Field>
+      {tiers && (
+        <Switch
+          className="ui-group-row"
+          label="Supports speed tiers"
+          description="Fast and Ultrafast, as OpenAI's service tiers."
+          checked={value.speedTiers === true}
+          onCheckedChange={(checked) => {
+            const { speed: _, ...options } = value.options ?? {};
+            onChange({
+              ...value,
+              speedTiers: checked ? true : undefined,
+              ...(checked ? {} : { options: Object.keys(options).length ? options : undefined }),
+            });
+          }}
+        />
+      )}
       <Switch
         className="ui-group-row"
         label="Flat-rate plan"

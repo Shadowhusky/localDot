@@ -99,11 +99,16 @@ function fixture(
   };
   const driver = new CodexDriver(deps),
     running: Promise<number>[] = [];
-  const run = (resume = false, effort?: "low" | "high", speed?: "standard" | "fast") => {
+  const run = (
+    resume = false,
+    effort?: "low" | "high" | "ultra",
+    speed?: { speed: "standard" | "fast" | "ultrafast"; tier?: string },
+  ) => {
     const promise = driver.run(session, {
       model: "gpt-6-astra",
       resume,
-      options: effort || speed ? { reasoningEffort: effort, speed } : undefined,
+      options: effort || speed ? { reasoningEffort: effort, speed: speed?.speed } : undefined,
+      ...(speed?.tier ? { serviceTier: speed.tier } : {}),
     });
     running.push(promise);
     void promise.catch(() => {});
@@ -224,20 +229,34 @@ describe("owned Codex task driver", () => {
     expect(await run).toBe(CODEX_DONE);
   });
 
-  it.each(["standard", "fast"] as const)(
-    "sends the selected %s speed to the native turn",
-    async (speed) => {
+  it.each([
+    ["fast", "priority"],
+    ["ultrafast", "ultrafast"],
+  ] as const)(
+    "sends the account's own tier for the %s speed to the native turn",
+    async (speed, tier) => {
       const f = fixture(),
-        run = f.run(false, "high", speed),
+        run = f.run(false, "ultra", { speed, tier }),
         conn = await f.fake.nextLaunch(1);
       expect((await conn.waitFor("turn/start")).params).toMatchObject({
-        effort: "high",
-        serviceTier: speed === "fast" ? "fast" : "default",
+        effort: "ultra",
+        serviceTier: tier,
       });
       f.done();
       expect(await run).toBe(CODEX_DONE);
     },
   );
+
+  it("leaves the provider's default tier alone at Standard", async () => {
+    const f = fixture(),
+      run = f.run(false, "high", { speed: "standard" }),
+      conn = await f.fake.nextLaunch(1);
+    const params = (await conn.waitFor("turn/start")).params as Record<string, unknown>;
+    expect(params).toMatchObject({ effort: "high" });
+    expect(params).not.toHaveProperty("serviceTier");
+    f.done();
+    expect(await run).toBe(CODEX_DONE);
+  });
 
   it("submits the full PNG in the explicit turn, keeps its frame ID in daemon metadata, and registers one lease", async () => {
     const f = fixture(),

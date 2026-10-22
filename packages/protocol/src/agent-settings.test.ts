@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentModelPrice, AgentRoleChoice, AgentSettingsDocument } from "./agent-settings.ts";
+import { ModelControls, ModelOptions } from "./model-options.ts";
 import { DEFAULT_AGENT_LIMITS } from "./tool-api.ts";
 
 describe("whole agent settings and explicit accounting prices", () => {
@@ -57,6 +58,10 @@ describe("a custom endpoint's stated abilities", () => {
     expect(AgentRoleChoice.parse(custom)).toEqual(custom);
     expect(AgentSettingsDocument.parse({ main: custom })).toEqual({ main: custom });
   });
+  it("takes whether it serves OpenAI's speed tiers", () => {
+    const stated = { ...custom, provider: "openai-responses-compatible", speedTiers: true };
+    expect(AgentRoleChoice.parse(stated)).toEqual(stated);
+  });
   it.each([
     { vision: "false" },
     { vision: 0 },
@@ -67,8 +72,36 @@ describe("a custom endpoint's stated abilities", () => {
     { plan: false },
     { plan: "true" },
     { flat: true },
+    { speedTiers: false },
+    { speedTiers: "priority" },
   ])("refuses %j", (field) => {
     expect(AgentRoleChoice.safeParse({ ...custom, ...field }).success).toBe(false);
+  });
+});
+
+describe("speed choices", () => {
+  const main = { provider: "openai", model: "gpt-6.1-sol", key: "openai" };
+  it("still reads settings saved with the earlier Standard and Fast", () => {
+    for (const speed of ["standard", "fast"]) {
+      const saved = { main: { ...main, options: { speed, reasoningEffort: "high" } } };
+      expect(AgentSettingsDocument.parse(saved)).toEqual(saved);
+    }
+  });
+  it("takes Ultrafast and nothing beyond the three speeds", () => {
+    expect(ModelOptions.parse({ speed: "ultrafast", reasoningEffort: "max" })).toEqual({
+      speed: "ultrafast",
+      reasoningEffort: "max",
+    });
+    for (const speed of ["priority", "flex", "turbo", "", 2])
+      expect(ModelOptions.safeParse({ speed }).success).toBe(false);
+  });
+  it("lists up to the three speeds a model offers", () => {
+    const speeds = ["standard", "fast", "ultrafast"];
+    expect(ModelControls.parse({ efforts: [], speeds }).speeds).toEqual(speeds);
+    expect(ModelControls.safeParse({ efforts: [], speeds: ["priority"] }).success).toBe(false);
+  });
+  it("keeps Codex's ultra effort, which a ChatGPT plan account may list", () => {
+    expect(ModelOptions.parse({ reasoningEffort: "ultra" })).toEqual({ reasoningEffort: "ultra" });
   });
 });
 

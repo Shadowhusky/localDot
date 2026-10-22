@@ -66,6 +66,7 @@ import { ServiceKeys } from "../keyd/service-keys.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
+import { claudeCodeAnswer } from "./claude-code/answer.ts";
 import { ClaudeCodeCleanupError, ClaudeCodeDriver } from "./claude-code/driver.ts";
 import { claudeCodeInstructions } from "./claude-code/instructions.ts";
 import { localdotServer } from "./claude-code/mcp-server.ts";
@@ -717,7 +718,17 @@ export function createAgent(d: AgentWiringDeps) {
     waitForUploads: (id, signal) => transfers.wait(id, signal),
     stopSession: (id) => d.killSwitch.stopSession(id),
     ...(claudeDriver && claudeSetup
-      ? { claudeCode: { driver: claudeDriver, status: () => claudeSetup.status() } }
+      ? {
+          claudeCode: {
+            driver: claudeDriver,
+            status: () => claudeSetup.status(),
+            answer: (fast) =>
+              claudeCodeAnswer(
+                { query: claudeQuery, launch: () => claudeSetup.launch(), spawn: spawnClaudeCode },
+                fast,
+              ),
+          },
+        }
       : {}),
     jev: (secretId, body, signal) => purposeService.post(secretId, body, signal),
     ...(driver && auth

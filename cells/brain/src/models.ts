@@ -7,14 +7,21 @@ import { createMistral } from "@ai-sdk/mistral";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createXai } from "@ai-sdk/xai";
-import { ModelBinding, SURROGATE_PATTERN } from "@localdot/protocol";
-import { gatewayBaseURL, modelOptionsProblem, modelProviderOptions } from "@localdot/providers";
+import { ModelBinding, type PremiumSpeed, SURROGATE_PATTERN } from "@localdot/protocol";
+import {
+  gatewayBaseURL,
+  modelOptionsProblem,
+  modelProviderOptions,
+  providerById,
+  servedSpeed,
+} from "@localdot/providers";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import {
   APICallError,
   type JSONValue,
   type LanguageModel,
   type LanguageModelMiddleware,
+  type ProviderMetadata,
   wrapLanguageModel,
 } from "ai";
 
@@ -84,6 +91,7 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
             thinkingBudget: budget,
           },
           b.controls,
+          b.maxPrice,
         );
         return {
           ...params,
@@ -169,12 +177,20 @@ function baseModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageMod
     case "anthropic-compatible":
       // Vendors' Anthropic routes take the key as a bearer token (their ANTHROPIC_AUTH_TOKEN).
       return createAnthropic({ baseURL, authToken: apiKey, fetch })(b.model);
-    case "openai":
+    case "openai": {
+      const speed = b.options?.speed;
+      const tier = speed === "fast" ? "priority" : speed === "ultrafast" ? "ultrafast" : undefined;
       return stateless(
-        createOpenAI({ baseURL, apiKey, fetch }).responses(b.model),
+        createOpenAI({
+          baseURL,
+          apiKey,
+          fetch:
+            tier && providerById(b.provider ?? "")?.custom ? withServiceTier(fetch, tier) : fetch,
+        }).responses(b.model),
         "openai",
         b.reasoning || b.options?.reasoningEffort !== undefined,
       );
+    }
     case "google":
       return createGoogleGenerativeAI({ baseURL, apiKey, fetch })(b.model);
     case "xai":
@@ -215,6 +231,41 @@ function baseModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageMod
         includeUsage: true,
       })(b.model);
   }
+}
+
+// The OpenAI package sends priority only for model IDs it knows as OpenAI's own, and a custom
+// endpoint names its models as it likes: one its user says takes OpenAI's tiers gets the tier
+// whatever the model is called.
+function withServiceTier(fetch: typeof globalThis.fetch, tier: string): typeof globalThis.fetch {
+  return (input, init) => {
+    const body = init?.body;
+    if (typeof body !== "string" || body.includes('"service_tier"')) return fetch(input, init);
+    return fetch(input, {
+      ...init,
+      body: JSON.stringify({ ...JSON.parse(body), service_tier: tier }),
+    });
+  };
+}
+
+// The service_tier field of an OpenAI-style chat completion chunk or body.
+export function rawTier(value: unknown): unknown {
+  return value && typeof value === "object"
+    ? (value as { service_tier?: unknown }).service_tier
+    : undefined;
+}
+// The premium speed a provider says served a call: a tier in its response metadata, or Anthropic's
+// usage speed; else Gemini's header; else the service_tier an OpenAI-style chat completion carries.
+export function servedTier(
+  metadata: ProviderMetadata | undefined,
+  headers: Record<string, string> | undefined,
+  chatTier: unknown,
+): PremiumSpeed | undefined {
+  for (const entry of Object.values(metadata ?? {})) {
+    const usage = entry.usage as { speed?: unknown } | null | undefined;
+    const report = entry.serviceTier ?? usage?.speed;
+    if (typeof report === "string") return servedSpeed(report);
+  }
+  return servedSpeed(headers?.["x-gemini-service-tier"] ?? chatTier);
 }
 
 // Only Anthropic's tool results carry images (screenshots, as the computer tool expects); every

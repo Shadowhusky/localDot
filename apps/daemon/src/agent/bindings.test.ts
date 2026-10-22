@@ -2,7 +2,15 @@ import type { KeydRecord } from "@localdot/protocol";
 import { keydRouteModel, normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { describe, expect, it } from "vitest";
-import { BindingError, bindingOf, planOnly, pricingOf, resolveRole } from "./bindings.ts";
+import {
+  activeRoles,
+  BindingError,
+  bindingOf,
+  checkPlanChoices,
+  planOnly,
+  pricingOf,
+  resolveRole,
+} from "./bindings.ts";
 
 const catalog = normalizeCatalog(MODELS_DEV_FIXTURE, "2026-10-02T00:00:00.000Z");
 const at = "2026-10-02T00:00:00Z";
@@ -637,12 +645,149 @@ it("reserves premium rates for fast inference and accepts mixed-speed roles with
   const choice = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
   const regular = resolveRole("fast", choice, catalog, keys);
   const fast = resolveRole("main", { ...choice, options: { speed: "fast" } }, catalog, keys);
-  expect(fast.model.inputUSDPerMTok).toBeGreaterThanOrEqual(8);
-  expect(fast.model.outputUSDPerMTok).toBeGreaterThanOrEqual(40);
+  expect(fast.model.inputUSDPerMTok).toBe(8);
+  expect(fast.model.outputUSDPerMTok).toBe(40);
   const prices = pricingOf([fast, regular]);
   expect(prices.routes[0]?.models[0]).toMatchObject({
     inputUSDPerMTok: fast.model.inputUSDPerMTok,
     outputUSDPerMTok: fast.model.outputUSDPerMTok,
   });
   expect(prices.routes[0]?.models[0]).not.toHaveProperty("cacheReadUSDPerMTok");
+});
+
+describe("speeds", () => {
+  const openai: KeydRecord = {
+    id: "openai",
+    kind: "llm",
+    provider: "openai",
+    createdAt: at,
+    updatedAt: at,
+  };
+  const openrouter: KeydRecord = {
+    id: "openrouter",
+    kind: "llm",
+    provider: "openrouter",
+    createdAt: at,
+    updatedAt: at,
+  };
+  const gateway: KeydRecord = {
+    id: "cdx",
+    kind: "llm",
+    provider: "openai-compatible",
+    baseURL: "https://gateway.example/v1",
+    createdAt: at,
+    updatedAt: at,
+  };
+  const all = [...keys, openai, openrouter, gateway];
+  const sol = { provider: "openai", model: "gpt-6.1-sol", key: "openai" };
+  it("sets aside each speed's premium over the catalog rate", () => {
+    const reserved = (speed: "fast" | "ultrafast") => {
+      const { model } = resolveRole("main", { ...sol, options: { speed } }, catalog, all);
+      return [model.inputUSDPerMTok, model.outputUSDPerMTok];
+    };
+    expect(reserved("fast")).toEqual([4, 20]);
+    expect(reserved("ultrafast")).toEqual([12, 60]);
+    expect(() =>
+      resolveRole(
+        "main",
+        { provider: "openai", model: "gpt-6-luna", key: "openai", options: { speed: "ultrafast" } },
+        catalog,
+        all,
+      ),
+    ).toThrow(/Speed selection is not supported/);
+  });
+  it("gives a custom endpoint's model the speeds its user says it takes, at the highest premium when unknown", () => {
+    const custom = {
+      provider: "openai-responses-compatible",
+      model: "gpt-6.1-sol",
+      key: "cdx",
+      price: { inputUSDPerMTok: 2, outputUSDPerMTok: 10 },
+    };
+    expect(() =>
+      resolveRole("main", { ...custom, options: { speed: "fast" } }, catalog, all),
+    ).toThrow(/Speed selection is not supported/);
+    const tiered = resolveRole(
+      "main",
+      { ...custom, speedTiers: true, options: { speed: "ultrafast" } },
+      catalog,
+      all,
+    );
+    expect([tiered.model.inputUSDPerMTok, tiered.model.outputUSDPerMTok]).toEqual([12, 60]);
+    expect(bindingOf(tiered, { cdx: SURROGATE }).controls?.speeds).toEqual([
+      "standard",
+      "fast",
+      "ultrafast",
+    ]);
+    const unknown = resolveRole(
+      "main",
+      { ...custom, model: "house-model", speedTiers: true, options: { speed: "fast" } },
+      catalog,
+      all,
+    );
+    expect([unknown.model.inputUSDPerMTok, unknown.model.outputUSDPerMTok]).toEqual([5, 25]);
+    for (const choice of [
+      { ...custom, provider: "anthropic-compatible", speedTiers: true as const },
+      { ...sol, speedTiers: true as const },
+    ])
+      expect(() => resolveRole("main", choice, catalog, all)).toThrow(BindingError);
+  });
+  it("caps an OpenRouter premium request at the rate it set aside", () => {
+    const role = resolveRole(
+      "main",
+      {
+        provider: "openrouter",
+        model: "google/gemini-3.6-flash",
+        key: "openrouter",
+        options: { speed: "fast" },
+      },
+      catalog,
+      all,
+    );
+    expect(bindingOf(role, { openrouter: SURROGATE }).maxPrice).toEqual({
+      inputUSDPerMTok: role.model.inputUSDPerMTok,
+      outputUSDPerMTok: role.model.outputUSDPerMTok,
+    });
+    expect(role.model.outputUSDPerMTok).toBeCloseTo(5.4);
+    const standard = resolveRole(
+      "main",
+      { provider: "openrouter", model: "google/gemini-3.6-flash", key: "openrouter" },
+      catalog,
+      all,
+    );
+    expect(bindingOf(standard, { openrouter: SURROGATE })).not.toHaveProperty("maxPrice");
+  });
+});
+
+describe("the roles a task runs with", () => {
+  const claude = { provider: "claude-code", model: "opus" };
+  const haiku = { provider: "claude-code", model: "haiku" };
+  const api = { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" };
+  const local = { provider: "lmstudio", model: "qwen3" };
+  it("takes a fast model on the main model's plan, and keeps any other waiting", () => {
+    expect(activeRoles({ main: claude, fast: haiku, local })).toEqual({
+      main: claude,
+      fast: haiku,
+    });
+    expect(activeRoles({ main: claude, fast: api })).toEqual({ main: claude });
+    expect(activeRoles({ main: api, fast: haiku, local })).toEqual({ main: api, local });
+    expect(activeRoles({ main: api, fast: api })).toEqual({ main: api, fast: api });
+  });
+  it("lets Claude Code be the fast model but never the local one, and the ChatGPT plan only main", () => {
+    expect(() => checkPlanChoices({ main: claude, fast: haiku })).not.toThrow();
+    expect(() => checkPlanChoices({ main: claude, local: haiku })).toThrow(BindingError);
+    expect(() =>
+      checkPlanChoices({ main: claude, fast: { ...haiku, options: { speed: "ultrafast" } } }),
+    ).toThrow(BindingError);
+    expect(() =>
+      checkPlanChoices({
+        main: { provider: "chatgpt", model: "gpt-6.1-sol" },
+        fast: { provider: "chatgpt", model: "gpt-6-luna" },
+      }),
+    ).toThrow(/can only be the main model/);
+    expect(() =>
+      checkPlanChoices({
+        main: { provider: "chatgpt", model: "gpt-6.1-sol", options: { reasoningEffort: "ultra" } },
+      }),
+    ).not.toThrow();
+  });
 });

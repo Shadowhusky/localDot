@@ -1,12 +1,13 @@
 import type { TaskModelSelection } from "@localdot/protocol";
 import { useRef, useState } from "react";
 import { count, dollars, spendText } from "../copy/format.ts";
-import { providerName } from "../settings/choices.ts";
+import { providerName, SPEED_NAMES } from "../settings/choices.ts";
 import { Button } from "../ui/Button.tsx";
 import { Meter } from "../ui/Meter.tsx";
 import { Popover } from "../ui/Popover.tsx";
 import { pressHandlers } from "../ui/press.ts";
-import type { AgentModel } from "./model.ts";
+import { SpeedMark } from "../ui/SpeedMark.tsx";
+import type { AgentModel, UsageRow } from "./model.ts";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const whole = (value: number) => value.toLocaleString();
@@ -19,6 +20,13 @@ const ROLES: Record<string, string> = {
 const roleName = (role: string) => ROLES[role] ?? role;
 
 export type ModelName = (provider: string, model: string) => string | undefined;
+
+// The calls a speed above Standard served, as the provider said: all of them, or how many.
+function speedText(row: UsageRow): string {
+  if (!row.speed || !row.premiumCalls) return "";
+  const name = SPEED_NAMES[row.speed];
+  return row.premiumCalls === row.calls ? ` · ${name}` : ` · ${whole(row.premiumCalls)} ${name}`;
+}
 
 export function resetTime(seconds?: number, now = Date.now()): string | null {
   if (seconds === undefined) return null;
@@ -173,7 +181,15 @@ export function UsageDetails({
             <div key={`${row.role}:${row.route}:${row.model}`} className="usage-role">
               <dt>{roleName(row.role)}</dt>
               <dd>
-                <span className="usage-model">{named(row.route, row.model)}</span>
+                <span className="usage-model">
+                  {named(row.route, row.model)}
+                  {row.speed && (
+                    <>
+                      {" "}
+                      <SpeedMark speed={row.speed} />
+                    </>
+                  )}
+                </span>
                 <span className="usage-line num">
                   {whole(row.inputTokens)} in · {whole(row.outputTokens)} out
                   {row.reasoningTokens === undefined
@@ -182,6 +198,7 @@ export function UsageDetails({
                 </span>
                 <span className="usage-line num">
                   {providerName(row.route)} · {count(row.calls, "call", "calls")}
+                  {speedText(row)}
                   {spent ? ` · ${spendText(spent.usd, spent.estimated)}` : ""}
                 </span>
               </dd>

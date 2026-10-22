@@ -47,6 +47,34 @@ describe("Claude Code events", () => {
     expect(f.events).toEqual([{ type: "thought.delta", data: { text: "The dog needs ears." } }]);
     expect(f.said).toEqual([]);
   });
+  it("records the speed the API says served each call", () => {
+    const usage = (f: ReturnType<typeof mapper>) =>
+      f.events.filter((event) => event.type === "model.usage").map((event) => event.data);
+    const fast = mapper();
+    fast.stream({
+      type: "message_start",
+      message: { model: "claude-opus-5-5", usage: { input_tokens: 10, speed: "fast" } },
+    });
+    fast.stream({ type: "message_delta", usage: { output_tokens: 4 } });
+    expect(usage(fast)).toEqual([
+      {
+        role: "main",
+        route: "claude-code",
+        model: "claude-opus-5-5",
+        inputTokens: 10,
+        outputTokens: 4,
+        speed: "fast",
+      },
+    ]);
+    // A fast request served at the standard speed, during a cooldown, says so by the end.
+    const fellBack = mapper();
+    fellBack.stream({
+      type: "message_start",
+      message: { model: "claude-opus-5-5", usage: { input_tokens: 10, speed: "fast" } },
+    });
+    fellBack.stream({ type: "message_delta", usage: { output_tokens: 4, speed: "standard" } });
+    expect(usage(fellBack)[0]).not.toHaveProperty("speed");
+  });
   it("reports the messages a reply took in, and whether more turns are queued", () => {
     const f = mapper();
     expect(f.stream({ type: "ping" }, { user_message_uuid: "a" })).toEqual([

@@ -2,7 +2,7 @@ import { providerById } from "@localdot/providers";
 import { describe, expect, it } from "vitest";
 import { matches, searchTerms } from "../ui/listbox.ts";
 import type { PickerModel } from "./choices.ts";
-import { modelItems, priceLine, providerGroups } from "./chooser.ts";
+import { beside, fastBeside, modelItems, priceLine, providerGroups } from "./chooser.ts";
 
 const models: PickerModel[] = [
   {
@@ -68,7 +68,16 @@ describe("provider choices", () => {
       description: "Uses your own Claude Code",
       disabledReason: undefined,
     });
-    expect(item("fast", "claude-code")?.disabledReason).toBe("Main model only");
+    expect(item("fast", "claude-code")?.disabledReason).toBe(
+      "When the main model uses Claude Code",
+    );
+  });
+  it("offers beside a Claude Code main model only Claude Code's own models as the fast one", () => {
+    const groups = providerGroups("fast", "", "claude-code");
+    expect(groups.map((group) => group.label)).toEqual(["Subscription"]);
+    const rows = groups.flatMap((group) => group.items);
+    expect(rows.find((row) => row.value === "claude-code")?.disabledReason).toBeUndefined();
+    expect(rows.find((row) => row.value === "chatgpt")?.disabledReason).toBe("Main model only");
   });
   it("gives the local model only the servers on this Mac", () => {
     expect(labels("local")).toEqual(["Local servers"]);
@@ -175,5 +184,64 @@ describe("model choices", () => {
   });
   it("prices nothing for a model the catalog prices at zero", () => {
     expect(priceLine(models[1] as PickerModel)).toBeUndefined();
+  });
+});
+
+describe("a fast model on the main model's own provider", () => {
+  const luna = {
+    ...models[0],
+    id: "gpt-6-luna",
+    name: "GPT-6 Luna",
+    inputUSDPerMTok: 0.1,
+  } as PickerModel;
+  const sol = {
+    ...models[0],
+    id: "gpt-6.1-sol",
+    name: "GPT-6.1 Sol",
+    inputUSDPerMTok: 2,
+  } as PickerModel;
+  it("starts from the main model's key and a cheaper model of the catalog", () => {
+    const main = { provider: "openai", model: "gpt-6.1-sol", key: "openai" };
+    expect(beside(main, { provider: "openai", model: "" })).toBe(true);
+    expect(fastBeside(main, [sol, luna], [], [])).toEqual({
+      provider: "openai",
+      key: "openai",
+      model: "gpt-6-luna",
+    });
+  });
+  it("keeps a custom endpoint's address, key, format and what its user said, whatever format the list showed", () => {
+    const main = {
+      provider: "openai-responses-compatible",
+      model: "gpt-6.1-sol",
+      key: "cdx",
+      speedTiers: true as const,
+      plan: true as const,
+    };
+    expect(beside(main, { provider: "openai-compatible", model: "" })).toBe(true);
+    const stale = { provider: "openai-compatible", model: "old-model", key: "elsewhere" };
+    const before = { provider: "openai-responses-compatible", model: "gpt-6-luna", key: "cdx" };
+    expect(fastBeside(main, [], [], [before, stale])).toEqual({
+      provider: "openai-responses-compatible",
+      key: "cdx",
+      model: "gpt-6-luna",
+      plan: true,
+      speedTiers: true,
+    });
+    expect(fastBeside(main, [], [], [stale]).model).toBe("");
+  });
+  it("turns on beside Claude Code with its Haiku", () => {
+    const main = { provider: "claude-code", model: "opus" };
+    expect(beside(main, { provider: "", model: "" })).toBe(true);
+    expect(
+      fastBeside(
+        main,
+        [],
+        [
+          { id: "opus", name: "Opus" },
+          { id: "haiku", name: "Haiku" },
+        ],
+        [],
+      ),
+    ).toEqual({ provider: "claude-code", model: "haiku" });
   });
 });

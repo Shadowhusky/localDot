@@ -79,7 +79,8 @@ it("preserves provider reasoning signatures and tool identities through native c
   for (const chunk of chunks) expect(chunk).toStrictEqual(JSON.parse(JSON.stringify(chunk)));
   const finish = chunks.find((chunk) => chunk.type === "finish");
   expect(finish?.type === "finish" && finish.replayState).toBeTruthy();
-  expect(usage).toHaveBeenCalledWith(10, 5);
+  // The scripted provider says nothing of the tier that served it.
+  expect(usage).toHaveBeenCalledWith(10, 5, undefined);
   expect(chunks).toContainEqual(
     expect.objectContaining({
       type: "block-end",

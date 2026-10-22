@@ -1,4 +1,10 @@
-import { isOpenRouterRouterId, PROVIDERS, type ProviderSpec } from "@localdot/providers";
+import {
+  isOpenRouterRouterId,
+  PROVIDERS,
+  type ProviderSpec,
+  providerById,
+} from "@localdot/providers";
+import { recommendedFast } from "../onboarding/wizard.ts";
 import type { PickerGroup, PickerItem } from "../ui/listbox.ts";
 import {
   customModelAllowed,
@@ -7,6 +13,7 @@ import {
   modelAllowed,
   type PickerModel,
   PROVIDER_GROUPS,
+  type RoleChoice,
   type SubscriptionModel,
 } from "./choices.ts";
 
@@ -70,8 +77,9 @@ export const isCustomFormat = (id: string) => CUSTOM_FORMATS.some((format) => fo
 
 // Every provider a role can use, grouped as the registry groups them, with one entry for a custom
 // endpoint whatever its format. A plan its vendor keeps to their own tools can still be chosen,
-// only to read why it can't be used.
-export function providerGroups(role: ModelRole, value: string): PickerGroup[] {
+// only to read why it can't be used. Beside Claude Code, the fast model is one of its own.
+export function providerGroups(role: ModelRole, value: string, main?: string): PickerGroup[] {
+  if (role === "fast" && main === CLAUDE_CODE) return [subscriptions(role, main)];
   const offered = PROVIDERS.filter(
     (provider) =>
       (role !== "local" || provider.local) &&
@@ -96,13 +104,15 @@ export function providerGroups(role: ModelRole, value: string): PickerGroup[] {
             }
           : providerItem(provider),
       );
-    if (label === "Local servers" && role !== "local") groups.push(subscriptions(role));
+    if (label === "Local servers" && role !== "local") groups.push(subscriptions(role, main));
     if (items.length) groups.push({ label, items });
   }
   return groups;
 }
 
-function subscriptions(role: ModelRole): PickerGroup {
+// A plan runs its own models in its own app: Claude Code's fast model works only beside its main
+// one, and the ChatGPT plan's app can't answer a second model while a task holds it.
+function subscriptions(role: ModelRole, main?: string): PickerGroup {
   return {
     label: "Subscription",
     items: [
@@ -118,7 +128,12 @@ function subscriptions(role: ModelRole): PickerGroup {
         label: "Claude Code (your plan)",
         keywords: "claude code anthropic subscription plan pro max",
         description: "Uses your own Claude Code",
-        disabledReason: role === "main" ? undefined : "Main model only",
+        disabledReason:
+          role === "main" || (role === "fast" && main === CLAUDE_CODE)
+            ? undefined
+            : role === "fast"
+              ? "When the main model uses Claude Code"
+              : "Main model only",
       },
     ],
   };
@@ -166,4 +181,44 @@ export function modelItems(
     });
   }
   return items;
+}
+
+// A fast model picked on the main model's own provider: the same plan, or the same endpoint
+// whatever format the list showed it in. Turning the fast model on beside Claude Code picks it.
+export function beside(main: RoleChoice, fast: RoleChoice): boolean {
+  return (
+    fast.provider === main.provider ||
+    (isCustomFormat(fast.provider) && isCustomFormat(main.provider)) ||
+    (fast.provider === "" && main.provider === CLAUDE_CODE)
+  );
+}
+// That fast model, with the main model's key and endpoint, and a model to start from: Claude
+// Code's Haiku, the cheapest other model the catalog lists, or one this endpoint ran before.
+export function fastBeside(
+  main: RoleChoice,
+  models: readonly PickerModel[],
+  account: readonly SubscriptionModel[],
+  history: readonly (RoleChoice | undefined)[],
+): RoleChoice {
+  if (main.provider === CLAUDE_CODE)
+    return {
+      provider: CLAUDE_CODE,
+      model: account.find((model) => /haiku/.test(model.id) && model.id !== main.model)?.id ?? "",
+    };
+  const endpoint = { provider: main.provider, ...(main.key ? { key: main.key } : {}) };
+  if (providerById(main.provider)?.custom)
+    return {
+      ...endpoint,
+      model:
+        history.findLast(
+          (choice) =>
+            choice &&
+            isCustomFormat(choice.provider) &&
+            choice.key === main.key &&
+            choice.model !== main.model,
+        )?.model ?? "",
+      ...(main.plan ? { plan: true } : {}),
+      ...(main.speedTiers ? { speedTiers: true } : {}),
+    };
+  return { ...endpoint, model: recommendedFast(models, main.model)?.id ?? "" };
 }

@@ -62,6 +62,7 @@ import { DesktopdError } from "../desktopd/client.ts";
 import type { DesktopdTools } from "../desktopd/tools-client.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import {
+  activeRoles,
   BindingError,
   CHATGPT,
   CLAUDE_CODE,
@@ -561,9 +562,10 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         const keys = await deps.keyd.secrets();
         check(c.req.raw.signal);
         const catalog = deps.catalog.get();
+        const roles = activeRoles(parsed);
         const active: ResolvedRole[] = [];
         for (const role of ["main", "fast", "local"] as const) {
-          const choice = parsed[role];
+          const choice = roles[role];
           if (choice) active.push(resolveRole(role, choice, catalog, keys));
         }
         if (active.length) pricingOf(active);

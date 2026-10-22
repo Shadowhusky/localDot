@@ -200,6 +200,46 @@ describe("role card", () => {
       plan: true,
     });
     expect(screen.getByText("Uses the plan's limits, not a spending limit.")).toBeTruthy();
+    // OpenAI's service tiers ride only on its own formats.
+    expect(screen.queryByRole("switch", { name: "Supports speed tiers" })).toBeNull();
+  });
+  it("lets an OpenAI-format endpoint say it takes speed tiers, which offers Fast and Ultrafast", () => {
+    const changes: RoleChoice[] = [];
+    function Form() {
+      const [value, set] = useState<RoleChoice | undefined>({
+        provider: "openai-responses-compatible",
+        model: "gpt-6.1-sol",
+        key: "cdx",
+      });
+      return (
+        <RoleCard
+          {...base()}
+          value={value}
+          providers={[]}
+          keys={[{ id: "cdx", kind: "llm", provider: "openai-compatible" }]}
+          onChange={(next) => {
+            if (next) changes.push(next);
+            set(next);
+          }}
+        />
+      );
+    }
+    render(<Form />);
+    expect(screen.queryByRole("combobox", { name: "Speed" })).toBeNull();
+    fireEvent.click(screen.getByRole("switch", { name: "Supports speed tiers" }));
+    expect(changes.at(-1)).toMatchObject({ speedTiers: true });
+    const speed = screen.getByRole("combobox", { name: "Speed" });
+    fireEvent.click(speed);
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Standard",
+      "Fast2× the price",
+      "Ultrafast6× the price",
+    ]);
+    fireEvent.click(screen.getByRole("option", { name: /^Ultrafast/ }));
+    expect(changes.at(-1)).toMatchObject({ options: { speed: "ultrafast" } });
+    // Turning it off takes the premium speed with it.
+    fireEvent.click(screen.getByRole("switch", { name: "Supports speed tiers" }));
+    expect(changes.at(-1)).toMatchObject({ speedTiers: undefined, options: undefined });
   });
   it("turns an optional role on and off, and a new provider clears the old model and key", () => {
     const onChange = vi.fn();
@@ -225,6 +265,14 @@ describe("role card", () => {
     expect(onChange).toHaveBeenLastCalledWith({ provider: "groq", model: "" });
     fireEvent.click(screen.getByRole("switch", { name: "Fast model" }));
     expect(onChange).toHaveBeenLastCalledWith(undefined);
+  });
+  it("says what the fast model does, and beside Claude Code that it only answers purpose checks", () => {
+    const view = render(<RoleCard {...base()} modelRole="fast" value={undefined} />);
+    expect(screen.getByText("Summarizes long tasks and answers purpose checks")).toBeTruthy();
+    view.rerender(<RoleCard {...base()} modelRole="fast" value={undefined} main="claude-code" />);
+    expect(
+      screen.getByText("Answers purpose checks; Claude Code summarizes on its own"),
+    ).toBeTruthy();
   });
   it("keeps an optional role's choice but turns it off while the main model uses the ChatGPT plan", () => {
     render(

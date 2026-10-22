@@ -2,6 +2,7 @@ import type {
   ActionClass,
   ApprovalCard,
   EventOf,
+  PremiumSpeed,
   ResearchBudget,
   ResearchSourceData,
   ResearchStop,
@@ -125,6 +126,8 @@ export interface AgentResearch {
 export type UsageRow = EventOf<"model.usage">["data"] & {
   readonly calls: number;
   readonly reasoningPartial: boolean;
+  // How many calls a premium speed served; `speed` is the fastest of them.
+  readonly premiumCalls?: number;
 };
 // One model call's tokens, at its session time, as the provider reported them.
 export interface UsageCall {
@@ -135,6 +138,11 @@ export interface UsageCall {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly reasoningTokens?: number;
+  readonly speed?: PremiumSpeed;
+}
+// The faster of two premium speeds that served calls; none when neither did.
+export function fastest(a?: PremiumSpeed, b?: PremiumSpeed) {
+  return a === "ultrafast" || b === "ultrafast" ? ("ultrafast" as const) : (a ?? b);
 }
 // One model call's cost, at its session time, as keyd charged it.
 export interface SpendCall {

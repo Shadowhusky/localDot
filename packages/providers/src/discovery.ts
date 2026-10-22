@@ -65,6 +65,8 @@ export function discoveredControls(
       verbosity: false,
     };
   }
+  // A requested service tier falls back to standard where no endpoint serves it, so the listed
+  // parameters don't gate speeds.
   if (provider === "openrouter" && item.supported_parameters) {
     const reasoning =
       item.supported_parameters.includes("reasoning") ||
@@ -74,7 +76,6 @@ export function discoveredControls(
       efforts: reasoning ? base.efforts : [],
       budget: reasoning && !!base.budget,
       verbosity: false,
-      speeds: undefined,
       wire: reasoning ? base.wire : undefined,
     };
   }

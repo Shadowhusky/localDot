@@ -68,6 +68,14 @@ export const ModelBinding = z.object({
   reasoning: z.boolean(),
   contextTokens: z.number().int().positive(),
   maxOutputTokens: z.number().int().positive(),
+  // What the task set aside per million tokens for a premium speed: a router that takes a price
+  // cap is held to it, so a pricier endpoint is passed over rather than billed.
+  maxPrice: z
+    .strictObject({
+      inputUSDPerMTok: z.number().nonnegative().max(10_000),
+      outputUSDPerMTok: z.number().nonnegative().max(10_000),
+    })
+    .optional(),
 });
 export type ModelBinding = z.infer<typeof ModelBinding>;
 

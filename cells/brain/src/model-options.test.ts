@@ -8,7 +8,13 @@ import { binding } from "./testing/scripted.ts";
 
 // Exercise each installed SDK, stopping at its network boundary. Expectations are HTTP fields,
 // not the intermediate providerOptions object; a silently ignored option fails this test.
-async function request(provider: string, modelId: string, options?: ModelOptions, max = 16000) {
+async function request(
+  provider: string,
+  modelId: string,
+  options?: ModelOptions,
+  max = 16000,
+  extra: Partial<ModelBinding> = {},
+) {
   const spec = providerById(provider);
   if (!spec) throw new Error(provider);
   let body: Record<string, unknown> | undefined;
@@ -21,6 +27,7 @@ async function request(provider: string, modelId: string, options?: ModelOptions
       model: modelId,
       options,
       maxOutputTokens: 16000,
+      ...extra,
     },
     async (_url, init) => {
       body = JSON.parse(String(init?.body));
@@ -45,12 +52,28 @@ const cases: [string, string, ModelOptions, Record<string, unknown>][] = [
   ],
   ["openai", "gpt-6.1-sol", { speed: "standard" }, { service_tier: "default" }],
   [
+    "openai",
+    "gpt-6.1-sol",
+    { speed: "ultrafast", reasoningEffort: "max" },
+    { service_tier: "ultrafast", reasoning: { effort: "max" } },
+  ],
+  ["openai", "gpt-5.3-codex", { speed: "fast" }, { service_tier: "priority" }],
+  [
     "anthropic",
     "claude-opus-5-5",
     { speed: "fast", reasoningEffort: "xhigh" },
     { speed: "fast", output_config: { effort: "xhigh" } },
   ],
   ["anthropic", "claude-opus-4-8", { speed: "standard" }, { speed: "standard" }],
+  ["google", "gemini-3.8-flash", { speed: "fast" }, { serviceTier: "priority" }],
+  [
+    "xai",
+    "grok-4.7",
+    { speed: "fast", reasoningEffort: "xhigh" },
+    { service_tier: "priority", reasoning: { effort: "xhigh" } },
+  ],
+  ["openrouter", "openai/gpt-6.1-sol", { speed: "ultrafast" }, { service_tier: "ultrafast" }],
+  ["openrouter", "anthropic/claude-opus-4.8", { speed: "fast" }, { service_tier: "fast" }],
   [
     "openai",
     "gpt-6-astra",
@@ -204,6 +227,78 @@ describe("model option wire contracts", () => {
     const body = await request("deepseek", "deepseek-flash");
     expect(body).not.toHaveProperty("reasoning_effort");
     expect(body).not.toHaveProperty("thinking");
+  });
+});
+
+describe("speed on the wire", () => {
+  it("gives an OpenAI-format endpoint that takes speed tiers the tier, whatever its model is called", async () => {
+    const controls: Partial<ModelBinding> = {
+      controls: { efforts: [], speeds: ["standard", "fast", "ultrafast"] },
+    };
+    expect(
+      await request(
+        "openai-responses-compatible",
+        "house-model",
+        { speed: "fast" },
+        16000,
+        controls,
+      ),
+    ).toMatchObject({ service_tier: "priority" });
+    expect(
+      await request(
+        "openai-responses-compatible",
+        "gpt-6.1-sol",
+        { speed: "ultrafast" },
+        16000,
+        controls,
+      ),
+    ).toMatchObject({ service_tier: "ultrafast" });
+    expect(
+      await request("openai-compatible", "house-model", { speed: "fast" }, 16000, {
+        controls: { efforts: [], speeds: ["standard", "fast"] },
+      }),
+    ).toMatchObject({ service_tier: "priority" });
+    const plain = await request(
+      "openai-responses-compatible",
+      "house-model",
+      undefined,
+      16000,
+      controls,
+    );
+    expect(plain).not.toHaveProperty("service_tier");
+    await expect(
+      request("openai-responses-compatible", "house-model", { speed: "fast" }),
+    ).rejects.toThrow(/Speed selection is not supported/);
+  });
+  it("holds an OpenRouter premium request to the rate the task set aside", async () => {
+    expect(
+      await request("openrouter", "google/gemini-3.6-flash", { speed: "fast" }, 16000, {
+        maxPrice: { inputUSDPerMTok: 0.9, outputUSDPerMTok: 5.4 },
+      }),
+    ).toMatchObject({
+      service_tier: "fast",
+      provider: { max_price: { prompt: 0.9, completion: 5.4 } },
+    });
+  });
+  it("asks Anthropic for fast mode with the beta it requires", async () => {
+    let beta = "";
+    const model = languageModel(
+      {
+        ...binding(),
+        provider: "anthropic",
+        client: "anthropic",
+        route: "anthropic",
+        model: "claude-opus-4-8",
+        options: { speed: "fast" },
+        maxOutputTokens: 16000,
+      },
+      async (_url, init) => {
+        beta = new Headers(init?.headers).get("anthropic-beta") ?? "";
+        throw new Error("captured request");
+      },
+    );
+    await expect(generateText({ model, prompt: "2 + 2?", maxRetries: 0 })).rejects.toThrow();
+    expect(beta).toContain("fast-mode-2026-02-01");
   });
 });
 

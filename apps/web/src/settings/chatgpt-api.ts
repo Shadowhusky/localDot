@@ -7,6 +7,7 @@ import {
 } from "@localdot/protocol";
 import { z } from "zod";
 import type { ApiClient } from "../lib/api.ts";
+import type { SubscriptionModel } from "./choices.ts";
 
 const text = (max: number) =>
   z
@@ -20,6 +21,7 @@ const login = z.strictObject({
   userCode: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
   startedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 });
+const TIER = /^[a-z0-9][a-z0-9._-]{0,31}$/;
 const models = z
   .array(
     z.strictObject({
@@ -27,7 +29,13 @@ const models = z
       name: text(128).min(1),
       isDefault: z.boolean(),
       efforts: z.array(ReasoningEffort).max(8).optional(),
-      fast: z.boolean().optional(),
+      // The account's own tier for each premium speed it offers the model.
+      tiers: z
+        .strictObject({
+          fast: z.string().regex(TIER).optional(),
+          ultrafast: z.string().regex(TIER).optional(),
+        })
+        .optional(),
     }),
   )
   .max(128)
@@ -74,8 +82,9 @@ const status = z
   });
 export type ChatgptResponse = z.infer<typeof status>;
 export type ChatgptLoginMaterial = z.infer<typeof login>;
-export type ChatgptSummary = Omit<ChatgptResponse, "lastError" | "login"> & {
+export type ChatgptSummary = Omit<ChatgptResponse, "lastError" | "login" | "models"> & {
   login?: Pick<ChatgptLoginMaterial, "loginId" | "startedAt">;
+  models?: (SubscriptionModel & { isDefault: boolean })[];
 };
 // Copy public fields explicitly. Device codes and URLs never enter React state, logs or storage.
 export function chatgptSummary(value: ChatgptResponse): ChatgptSummary {
@@ -88,7 +97,16 @@ export function chatgptSummary(value: ChatgptResponse): ChatgptSummary {
     ...(value.reason ? { reason: value.reason } : {}),
     ...(value.account ? { account: value.account } : {}),
     ...(value.usage ? { usage: value.usage } : {}),
-    ...(value.models ? { models: value.models } : {}),
+    ...(value.models
+      ? {
+          models: value.models.map(({ tiers, ...model }) => ({
+            ...model,
+            ...(tiers
+              ? { speeds: (["fast", "ultrafast"] as const).filter((speed) => tiers[speed]) }
+              : {}),
+          })),
+        }
+      : {}),
     ...(value.checkedAt === undefined ? {} : { checkedAt: value.checkedAt }),
     ...(value.login
       ? { login: { loginId: value.login.loginId, startedAt: value.login.startedAt } }

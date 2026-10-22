@@ -101,4 +101,12 @@ describe("Purpose Check diagnostics", () => {
     f.keys.mockResolvedValue([]);
     expect((await f.service.status()).mode).toBe("unconfigured");
   });
+  it("counts a fast model on the main model's Claude Code plan, which answers the check", async () => {
+    const f = fixture({
+      main: { provider: "claude-code", model: "opus" },
+      fast: { provider: "claude-code", model: "haiku" },
+    });
+    f.keys.mockResolvedValue([]);
+    expect((await f.service.status()).mode).toBe("active");
+  });
 });

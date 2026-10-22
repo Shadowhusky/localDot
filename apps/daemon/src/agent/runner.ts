@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { CHATGPT_SWITCHED_OFF } from "@localdot/codex-harness";
 import {
   type AgentLimits,
+  type AgentRoleChoice,
   type AutonomyPolicy,
   BootConfig,
   type CheckIns,
@@ -14,7 +15,9 @@ import {
   type ModelBinding,
   type ModelOptions,
   type PersonaId,
+  type PremiumSpeed,
   personaOf,
+  type ReasoningEffort,
   type RecentLine,
   ReviseLink,
   SESSION_PAUSE_REASONS,
@@ -37,6 +40,7 @@ import type { LiveSessions } from "../gateway/live.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import type { KeydHealth } from "../keyd/monitor.ts";
 import {
+  activeRoles,
   BindingError,
   bindingOf,
   CHATGPT,
@@ -50,6 +54,7 @@ import {
   taskSelection,
 } from "./bindings.ts";
 import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell.ts";
+import type { ClaudeCodeAnswer } from "./claude-code/answer.ts";
 import { ClaudeCodeCleanupError, type ClaudeCodeDriver } from "./claude-code/driver.ts";
 import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
@@ -197,14 +202,57 @@ export interface AgentRunnerDeps {
     status(): Promise<
       Pick<ClaudeCodeStatus, "state" | "reason"> & Partial<Pick<ClaudeCodeStatus, "models">>
     >;
+    // Asks a task's fast model on the plan one question, with no tools.
+    answer?(fast: { model: string; options?: ModelOptions }): ClaudeCodeAnswer;
   };
 }
 // "none": the user's own hold on the computer, which no model works on.
 type ModelSelection =
   | { kind: "api"; roles: readonly ResolvedRole[]; pricing: TaskPricing; initialBudget?: number }
-  | { kind: "chatgpt"; model: string; options?: ModelOptions; denyRead: readonly string[] }
-  | { kind: "claude-code"; model: string; options?: ModelOptions }
+  | {
+      kind: "chatgpt";
+      model: string;
+      options?: ModelOptions;
+      // The account's own name for the chosen speed's tier.
+      serviceTier?: string;
+      denyRead: readonly string[];
+    }
+  | {
+      kind: "claude-code";
+      model: string;
+      options?: ModelOptions;
+      fast?: { model: string; options?: ModelOptions };
+    }
   | { kind: "none" };
+// A plan's account says what each of its models takes: its efforts and speeds replace the bundled
+// ones. Unsaid, the bundled ones stand.
+function planOptionsProblem(
+  provider: typeof CHATGPT | typeof CLAUDE_CODE,
+  choice: AgentRoleChoice,
+  account?: { efforts?: readonly ReasoningEffort[]; speeds?: readonly PremiumSpeed[] },
+): string | undefined {
+  const { options, model } = choice;
+  if (
+    options?.reasoningEffort &&
+    account?.efforts &&
+    !account.efforts.includes(options.reasoningEffort)
+  )
+    return "This account model does not support the selected effort. Choose an available level in Settings.";
+  const fallback = modelControls(provider, model);
+  const speeds =
+    account?.speeds ??
+    (fallback.speeds ?? []).filter((speed): speed is PremiumSpeed => speed !== "standard");
+  if (
+    (options?.speed === "fast" || options?.speed === "ultrafast") &&
+    !speeds.includes(options.speed)
+  )
+    return "This account model doesn't offer that speed. Choose another in Settings.";
+  return modelOptionsProblem(provider, model, options, 16000, {
+    ...fallback,
+    efforts: [...(account?.efforts ?? fallback.efforts)],
+    speeds: speeds.length ? ["standard", ...speeds] : undefined,
+  });
+}
 interface Runtime {
   session: AgentSession;
   selection: ModelSelection;
@@ -308,9 +356,10 @@ export class AgentRunner {
     const snapshot = AgentSettings.parse(settings);
     if (!snapshot.main) throw new AgentError(400, "choose a main model first");
     const catalog = this.deps.catalog();
+    const active = activeRoles(snapshot);
     const roles: ResolvedRole[] = [];
     for (const role of ["main", "fast", "local"] as const satisfies readonly Role[]) {
-      const choice = snapshot[role];
+      const choice = active[role];
       if (!choice) continue;
       try {
         roles.push(resolveRole(role, choice, catalog, keys));
@@ -421,42 +470,26 @@ export class AgentRunner {
         signal?.throwIfAborted();
         if (status.state !== "signed_in")
           throw new AgentError(400, status.reason ?? "Claude Code isn't ready.");
-        const capability = status.models?.find((model) => model.id === settings.main?.model);
-        if (
-          settings.main.options?.reasoningEffort &&
-          capability?.efforts &&
-          !capability.efforts.some((effort) => effort === settings.main?.options?.reasoningEffort)
-        )
-          throw new AgentError(
-            400,
-            "This account model does not support the selected effort. Choose an available level in Settings.",
+        const account = (choice: AgentRoleChoice) => {
+          const model = status.models?.find((row) => row.id === choice.model);
+          return (
+            model && {
+              ...(model.efforts ? { efforts: model.efforts } : {}),
+              ...(model.fast !== undefined ? { speeds: model.fast ? ["fast" as const] : [] } : {}),
+            }
           );
-        if (settings.main.options?.speed === "fast" && capability?.fast === false)
-          throw new AgentError(400, "Fast mode is unavailable for this account model.");
-        const fallback = modelControls(CLAUDE_CODE, settings.main.model);
-        const problem = modelOptionsProblem(
-          CLAUDE_CODE,
-          settings.main.model,
-          settings.main.options,
-          16000,
-          {
-            ...fallback,
-            efforts: [...(capability?.efforts ?? fallback.efforts)],
-            speeds:
-              capability?.fast === true
-                ? ["standard", "fast"]
-                : capability?.fast === false
-                  ? undefined
-                  : fallback.speeds
-                    ? [...fallback.speeds]
-                    : undefined,
-          },
-        );
+        };
+        const problem = planOptionsProblem(CLAUDE_CODE, settings.main, account(settings.main));
         if (problem) throw new AgentError(400, problem);
+        // Claude Code keeps its own history, so a fast model on the plan answers the purpose check.
+        const fast = activeRoles(settings).fast;
+        const fastProblem = fast && planOptionsProblem(CLAUDE_CODE, fast, account(fast));
+        if (fastProblem) throw new AgentError(400, `fast model: ${fastProblem}`);
         selection = {
           kind: "claude-code",
           model: settings.main.model,
           options: settings.main.options,
+          ...(fast ? { fast: { model: fast.model, options: fast.options } } : {}),
         };
       } else if (settings.main?.provider === CHATGPT) {
         const codex = this.deps.codex;
@@ -469,38 +502,19 @@ export class AgentRunner {
         if (status.state !== "signed_in")
           throw new AgentError(400, "ChatGPT plan: sign in under Settings first.");
         const capability = status.models?.find((model) => model.id === settings.main?.model);
-        if (
-          settings.main.options?.reasoningEffort &&
-          capability?.efforts &&
-          !capability.efforts.includes(settings.main.options.reasoningEffort)
-        )
-          throw new AgentError(400, "This account model does not support the selected effort.");
-        if (settings.main.options?.speed === "fast" && capability?.fast !== true)
-          throw new AgentError(400, "Fast mode is unavailable for this account model.");
-        const fallback = modelControls(CHATGPT, settings.main.model);
-        const problem = modelOptionsProblem(
-          CHATGPT,
-          settings.main.model,
-          settings.main.options,
-          16000,
-          {
-            ...fallback,
-            efforts: [...(capability?.efforts ?? fallback.efforts)],
-            speeds:
-              capability?.fast === true
-                ? ["standard", "fast"]
-                : capability?.fast === false
-                  ? undefined
-                  : fallback.speeds
-                    ? [...fallback.speeds]
-                    : undefined,
-          },
-        );
+        const tiers = capability?.tiers ?? {};
+        const problem = planOptionsProblem(CHATGPT, settings.main, {
+          ...(capability?.efforts ? { efforts: capability.efforts } : {}),
+          speeds: (["fast", "ultrafast"] as const).filter((speed) => tiers[speed]),
+        });
         if (problem) throw new AgentError(400, problem);
+        const speed = settings.main.options?.speed;
+        const serviceTier = speed === "fast" || speed === "ultrafast" ? tiers[speed] : undefined;
         selection = {
           kind: "chatgpt",
           model: settings.main.model,
           options: settings.main.options,
+          ...(serviceTier ? { serviceTier } : {}),
           denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
         };
       } else {
@@ -702,11 +716,28 @@ export class AgentRunner {
       rt.selection.kind === "api"
         ? rt.selection.roles.find((role) => role.role === "fast")
         : undefined;
-    const choice = judgeChoice(settings.purposeCheck, keys, fast !== undefined);
+    const planFast = rt.selection.kind === "claude-code" ? rt.selection.fast : undefined;
+    const answer = planFast && this.deps.claudeCode?.answer?.(planFast);
+    const choice = judgeChoice(settings.purposeCheck, keys, !!fast || !!answer);
     const jev = this.deps.jev;
     if (choice?.kind === "jev" && jev)
       return jevJudge((body, signal) => jev(choice.secretId, body, signal));
-    if (choice?.kind !== "model" || !fast) return undefined;
+    if (choice?.kind !== "model") return undefined;
+    if (planFast && answer)
+      return modelJudge(async (system, prompt, signal) => {
+        const reply = await answer(system, prompt, signal);
+        if (!rt.session.stopped)
+          rt.session.append("model.usage", {
+            role: "fast",
+            route: CLAUDE_CODE,
+            model: planFast.model,
+            inputTokens: reply.inputTokens,
+            outputTokens: reply.outputTokens,
+            ...(reply.speed ? { speed: reply.speed } : {}),
+          });
+        return reply.text;
+      });
+    if (!fast) return undefined;
     return modelJudge(
       gatewayCompletion(
         () => (rt.brain ? bindingOf(fast, rt.brain.surrogates) : undefined),
@@ -1398,6 +1429,7 @@ export class AgentRunner {
               ? await this.deps.codex?.driver.run(session, {
                   model: rt.selection.model,
                   options: rt.selection.options,
+                  serviceTier: rt.selection.serviceTier,
                   resume,
                 })
               : rt.selection.kind === "claude-code"

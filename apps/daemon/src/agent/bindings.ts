@@ -3,6 +3,7 @@ import {
   type ClientKind,
   type KeydRecord,
   type ModelBinding,
+  ModelControls,
   ModelOptions,
   SURROGATE_PATTERN,
   type TaskModelSelection,
@@ -13,6 +14,7 @@ import {
   type Catalog,
   CatalogModel,
   capabilityOf,
+  choiceControls,
   findModel,
   isOpenRouterRouterId,
   keydRouteModel,
@@ -20,6 +22,7 @@ import {
   modelOptionsProblem,
   providerById,
   routeFor,
+  speedPremium,
   usableAs,
 } from "@localdot/providers";
 import { immutable } from "./private-files.ts";
@@ -44,13 +47,12 @@ export function checkChatgptChoice(role: Role, choice: RoleChoice): void {
       !parsed.success ||
       parsed.data.thinkingBudget !== undefined ||
       parsed.data.verbosity !== undefined ||
-      (parsed.data.reasoningEffort !== undefined &&
-        !["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
-          parsed.data.reasoningEffort,
-        ))
+      parsed.data.reasoningEffort === "enabled"
     )
       throw new BindingError(role, "Invalid options for this account runtime.");
   }
+  // One Codex process at a time holds the account's credentials, and a working task holds it when
+  // the purpose check would need a second: the plan can't be a fast model.
   if (role !== "main") throw new BindingError(role, "the ChatGPT plan can only be the main model");
   if (choice.key !== undefined) throw new BindingError(role, "the ChatGPT plan needs no key");
   if (choice.price !== undefined) throw new BindingError(role, "the ChatGPT plan needs no price");
@@ -64,13 +66,14 @@ export function checkClaudeCodeChoice(role: Role, choice: RoleChoice): void {
       !parsed.success ||
       parsed.data.thinkingBudget !== undefined ||
       parsed.data.verbosity !== undefined ||
+      parsed.data.speed === "ultrafast" ||
       (parsed.data.reasoningEffort !== undefined &&
         !["low", "medium", "high", "xhigh", "max"].includes(parsed.data.reasoningEffort))
     )
       throw new BindingError(role, "Invalid options for this account runtime.");
   }
-  if (role !== "main")
-    throw new BindingError(role, "Claude Code (your plan) can only be the main model");
+  if (role === "local")
+    throw new BindingError(role, "Claude Code (your plan) can't be the local model");
   if (choice.key !== undefined) throw new BindingError(role, "Claude Code needs no key");
   if (choice.price !== undefined) throw new BindingError(role, "Claude Code needs no price");
   if (!CLAUDE_CODE_MODEL.test(choice.model))
@@ -83,6 +86,22 @@ export function checkPlanChoices(settings: Partial<Record<Role, RoleChoice>>): v
     if (choice?.provider === CHATGPT) checkChatgptChoice(role, choice);
     if (choice?.provider === CLAUDE_CODE) checkClaudeCodeChoice(role, choice);
   }
+}
+const planApp = (provider: string | undefined) => provider === CHATGPT || provider === CLAUDE_CODE;
+// The roles a task runs with. A plan's own app runs only that plan's models: beside it a fast model
+// on the same plan works and any other waits, kept for when the main model changes back. A plan's
+// model in turn waits beside a main model billed per token.
+export function activeRoles(
+  settings: Partial<Record<Role, RoleChoice>>,
+): Partial<Record<Role, RoleChoice>> {
+  const { main, fast, local } = settings;
+  if (planApp(main?.provider))
+    return { main, ...(fast?.provider === main?.provider ? { fast } : {}) };
+  return {
+    main,
+    ...(fast && !planApp(fast.provider) ? { fast } : {}),
+    ...(local && !planApp(local.provider) ? { local } : {}),
+  };
 }
 export function unpriced(m: CatalogModel): boolean {
   return m.inputUSDPerMTok === 0 && m.outputUSDPerMTok === 0;
@@ -125,12 +144,17 @@ export function resolveRole(
   if (provider.notOffered) throw new BindingError(role, provider.notOffered);
   if (
     !provider.custom &&
-    (choice.vision !== undefined || choice.contextTokens !== undefined || choice.plan)
+    (choice.vision !== undefined ||
+      choice.contextTokens !== undefined ||
+      choice.plan ||
+      choice.speedTiers)
   )
     throw new BindingError(
       role,
       "only a custom endpoint states what its model can do or a flat-rate plan",
     );
+  if (choice.speedTiers && provider.client === "anthropic-compatible")
+    throw new BindingError(role, "only an endpoint in an OpenAI format takes OpenAI's speed tiers");
   const flat = provider.plan || (provider.custom && choice.plan);
   let keyId: string | undefined;
   if (!provider.local) {
@@ -165,7 +189,10 @@ export function resolveRole(
   const route = routeFor(provider, keyId);
   if (!route) throw new BindingError(role, "no route");
   let model = provider.custom
-    ? localModel(choice.model, { vision: choice.vision, contextTokens: choice.contextTokens })
+    ? {
+        ...localModel(choice.model, { vision: choice.vision, contextTokens: choice.contextTokens }),
+        ...(choice.speedTiers ? { controls: ModelControls.parse(choiceControls(choice)) } : {}),
+      }
     : ((catalog && findModel(catalog, provider.id, choice.model)) ??
       (provider.local ? localModel(choice.model) : undefined));
   if (!model)
@@ -210,24 +237,13 @@ export function resolveRole(
         "this model is already priced by the catalog; remove the manual price",
       );
   }
-  if (!flat && choice.options?.speed === "fast") {
-    // Premium speed must never reuse the standard budget snapshot. Use the documented
-    // long-context upper rate; provider fallbacks/discounts can make the bill lower.
-    const name = choice.model.toLowerCase();
-    const price =
-      choice.provider === "anthropic"
-        ? /opus-5[.-]5/.test(name)
-          ? [8, 40]
-          : [10, 50]
-        : /gpt-6[.-]astra/.test(name)
-          ? [40, 150]
-          : /gpt-6(?:[.]1)?-sol/.test(name)
-            ? [8, 30]
-            : /gpt-6-luna/.test(name)
-              ? [0.4, 1.5]
-              : [3.5, 28];
-    model.inputUSDPerMTok = Math.max(model.inputUSDPerMTok, price[0] ?? 0);
-    model.outputUSDPerMTok = Math.max(model.outputUSDPerMTok, price[1] ?? 0);
+  const speed = choice.options?.speed;
+  if (!flat && (speed === "fast" || speed === "ultrafast")) {
+    // A premium speed never reuses the standard snapshot. A provider that falls back to the
+    // standard tier bills less than this.
+    const premium = speedPremium(choice.provider, choice.model, speed, choice.speedTiers);
+    model.inputUSDPerMTok *= premium;
+    model.outputUSDPerMTok *= premium;
     // Reserve uncached input until the selected tier's cache pricing is known.
     delete model.cacheReadUSDPerMTok;
     delete model.cacheWriteUSDPerMTok;
@@ -297,16 +313,24 @@ export function bindingOf(r: ResolvedRole, surrogates: Record<string, string>): 
     reasoning: r.model.reasoning,
     contextTokens: r.model.contextTokens,
     maxOutputTokens: Math.min(r.model.maxOutputTokens, OUTPUT_CAP_TOKENS),
+    ...(r.providerId === "openrouter" && premium(r) && !r.flat
+      ? {
+          maxPrice: {
+            inputUSDPerMTok: r.model.inputUSDPerMTok,
+            outputUSDPerMTok: r.model.outputUSDPerMTok,
+          },
+        }
+      : {}),
   });
 }
+const premium = (r: ResolvedRole) =>
+  r.options?.speed === "fast" || r.options?.speed === "ultrafast";
 // Immutable session account policy, sent with every priced-task initialization/recovery. These
 // are real secret-backed/local routes; this never mutates shared route model tables or aliases.
 export function pricingOf(roles: readonly ResolvedRole[]): TaskPricing {
   const routes = new Map<string, Map<string, ReturnType<typeof keydRouteModel>>>();
   const flat = new Map<string, boolean>();
-  const premium = new Set(
-    roles.filter((r) => r.options?.speed === "fast").map((r) => `${r.route}\0${r.model.id}`),
-  );
+  const premiums = new Set(roles.filter(premium).map((r) => `${r.route}\0${r.model.id}`));
   for (const r of roles) {
     if ((flat.get(r.route) ?? !!r.flat) !== !!r.flat)
       throw new BindingError(
@@ -321,7 +345,7 @@ export function pricingOf(roles: readonly ResolvedRole[]): TaskPricing {
     const models = routes.get(r.route) ?? new Map();
     const previous = models.get(model.id);
     if (previous && JSON.stringify(previous) !== JSON.stringify(model)) {
-      if (!premium.has(`${r.route}\0${model.id}`))
+      if (!premiums.has(`${r.route}\0${model.id}`))
         throw new BindingError(
           r.role,
           "one task cannot assign conflicting prices to the same route/model",

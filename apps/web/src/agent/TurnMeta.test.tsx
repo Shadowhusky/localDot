@@ -57,6 +57,20 @@ describe("a turn's meta line", () => {
     ).toBe("Claude Sonnet 5.5");
   });
 
+  it("marks a turn a premium speed served, and says which in words", () => {
+    const fast = { ...sonnet, model: "claude-opus-4-8", speed: "fast" as const };
+    const line = metaLine(item({ models: [fast, luna] }), names);
+    expect(line).toMatch(/^claude-opus-4-8 · Fast · 1:12/);
+    render(<TurnMeta item={item({ models: [fast, luna] })} names={names} />);
+    const trigger = screen.getByRole("button", { name: `This turn: ${line}` });
+    expect(trigger.querySelector(".ui-speed-mark")?.getAttribute("data-speed")).toBe("fast");
+    expect(trigger.textContent).not.toContain("Fast");
+    fireEvent.click(trigger);
+    const details = screen.getByRole("dialog", { name: "Models this turn used" });
+    expect(details.textContent).toContain("Anthropic · Fast · 18,420 in");
+    expect(details.querySelectorAll(".ui-speed-mark")).toHaveLength(1);
+  });
+
   it("names a plan's app, where the plan paid rather than a key", () => {
     const plan = { ...sonnet, route: "claude-code", model: "sonnet", reasoningTokens: undefined };
     expect(metaLine(item({ models: [plan], usd: undefined }), names)).toBe(

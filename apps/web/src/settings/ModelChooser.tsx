@@ -26,6 +26,8 @@ export interface ModelChooserProps {
   value: RoleChoice;
   providers: readonly ProviderModels[];
   subscriptionModels: readonly SubscriptionModel[];
+  // The main model's provider, which decides what a fast model beside it can be.
+  main?: string;
   // The role's notes under its rows, which say what the choice means.
   describedBy?: string;
   onChange(value: RoleChoice): void;
@@ -70,6 +72,7 @@ export function ModelChooser({
   value,
   providers,
   subscriptionModels,
+  main,
   describedBy,
   onChange,
 }: ModelChooserProps) {
@@ -91,7 +94,7 @@ export function ModelChooser({
         <Combobox
           appearance="inline"
           value={value.provider}
-          groups={providerGroups(role, value.provider)}
+          groups={providerGroups(role, value.provider, main)}
           aria-describedby={describedBy}
           placeholder="Choose a provider"
           searchPlaceholder="Search providers"

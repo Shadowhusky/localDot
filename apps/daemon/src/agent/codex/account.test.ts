@@ -114,10 +114,40 @@ it("retains actual account effort and speed capabilities without unknown provide
     supportedReasoningEfforts: [
       { reasoningEffort: "high" },
       { reasoningEffort: "max" },
+      { reasoningEffort: "ultra" },
       { reasoningEffort: "unsupported" },
     ],
     serviceTiers: [{ id: "default" }, { id: "fast" }],
   };
-  expect(modelsFor({ data: [item] })[0]).toMatchObject({ efforts: ["high", "max"], fast: true });
-  expect(modelsFor({ data: [{ ...item, serviceTiers: [] }] })[0]?.fast).toBe(false);
+  expect(modelsFor({ data: [item] })[0]).toMatchObject({
+    efforts: ["high", "max", "ultra"],
+    tiers: { fast: "fast" },
+  });
+  expect(modelsFor({ data: [{ ...item, serviceTiers: [] }] })[0]?.tiers).toEqual({});
+  expect(modelsFor({ data: [{ ...item, serviceTiers: undefined }] })[0]).not.toHaveProperty(
+    "tiers",
+  );
+});
+
+it("keeps the account's own name for each premium tier it lists", () => {
+  const item = {
+    id: "gpt-6.1-sol",
+    displayName: "GPT-6.1 Sol",
+    isDefault: false,
+    hidden: false,
+    defaultReasoningEffort: "medium",
+    serviceTiers: [{ id: "default" }, { id: "priority" }, { id: "ultrafast" }, { id: "flex" }],
+  };
+  expect(modelsFor({ data: [item] })[0]?.tiers).toEqual({
+    fast: "priority",
+    ultrafast: "ultrafast",
+  });
+  expect(
+    modelsFor({ data: [{ ...item, serviceTiers: undefined, additionalSpeedTiers: ["fast"] }] })[0]
+      ?.tiers,
+  ).toEqual({ fast: "fast" });
+  // Passed through to the account's own app as listed, so only a plain tier name is kept.
+  expect(modelsFor({ data: [{ ...item, serviceTiers: [{ id: "PRIORITY" }] }] })[0]?.tiers).toEqual(
+    {},
+  );
 });

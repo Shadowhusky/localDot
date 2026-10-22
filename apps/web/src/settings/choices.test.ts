@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from "vitest";
 import type { KeyRecord } from "../keys/keys-api.ts";
 import {
+  controlsOf,
   customModelAllowed,
   groupOf,
   matchingKeys,
@@ -17,6 +18,8 @@ import {
   planOnly,
   providerAllowed,
   providerName,
+  roleActive,
+  speedCost,
 } from "./choices.ts";
 
 const key = (provider: string, baseURL?: string): KeyRecord => ({
@@ -191,5 +194,55 @@ describe("provider names", () => {
     expect(providerName("minimax-coding-plan")).toBe("MiniMax Token Plan");
     expect(providerName("chatgpt")).toBe("ChatGPT plan");
     expect(providerName("retired-provider")).toBe("retired-provider");
+  });
+});
+
+describe("speeds", () => {
+  it("says what each speed costs: its price over Standard, or what a plan draws on", () => {
+    const sol = { provider: "openai", model: "gpt-6.1-sol", key: "openai" };
+    expect(controlsOf(sol).speeds).toEqual(["fast", "ultrafast"]);
+    expect(speedCost(sol, "fast")).toBe("2× the price");
+    expect(speedCost(sol, "ultrafast")).toBe("6× the price");
+    expect(speedCost({ provider: "google", model: "gemini-3.8-flash" }, "fast")).toBe(
+      "1.8× the price",
+    );
+    const custom = {
+      provider: "openai-compatible",
+      model: "house-model",
+      speedTiers: true as const,
+    };
+    expect(controlsOf(custom).speeds).toEqual(["fast"]);
+    expect(speedCost(custom, "fast")).toBe("Costs more");
+    expect(speedCost({ provider: "chatgpt", model: "gpt-6.1-sol" }, "ultrafast")).toBe(
+      "Uses more of your plan",
+    );
+    expect(speedCost({ provider: "claude-code", model: "opus" }, "fast")).toBe(
+      "Uses usage credits",
+    );
+  });
+  it("takes a plan's speeds from its account, and a ChatGPT plan's only from there", () => {
+    const chatgpt = { provider: "chatgpt", model: "gpt-6.1-sol" };
+    expect(controlsOf(chatgpt).speeds).toEqual([]);
+    expect(
+      controlsOf(chatgpt, { id: "gpt-6.1-sol", name: "Sol", speeds: ["fast", "ultrafast"] }).speeds,
+    ).toEqual(["fast", "ultrafast"]);
+    const opus = { provider: "claude-code", model: "opus" };
+    expect(controlsOf(opus).speeds).toEqual(["fast"]);
+    expect(controlsOf(opus, { id: "opus", name: "Opus", speeds: [] }).speeds).toEqual([]);
+  });
+});
+
+describe("the roles a task runs with", () => {
+  const opus = { provider: "claude-code", model: "opus" };
+  const haiku = { provider: "claude-code", model: "haiku" };
+  const api = { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" };
+  it("puts a fast model beside Claude Code only on the same plan, and a plan's model never beside an API one", () => {
+    expect(roleActive("fast", { main: opus, fast: haiku })).toBe(true);
+    expect(roleActive("fast", { main: opus, fast: api })).toBe(false);
+    expect(roleActive("local", { main: opus, local: { provider: "ollama", model: "q" } })).toBe(
+      false,
+    );
+    expect(roleActive("fast", { main: api, fast: haiku })).toBe(false);
+    expect(roleActive("fast", { main: api, fast: api })).toBe(true);
   });
 });

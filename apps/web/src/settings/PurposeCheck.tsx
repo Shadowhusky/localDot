@@ -5,7 +5,8 @@ import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { Group, GroupRow } from "../ui/Group.tsx";
 import { Switch } from "../ui/Switch.tsx";
-import { CLAUDE_CODE, subscription } from "./chooser.ts";
+import { roleActive } from "./choices.ts";
+import { CLAUDE_CODE } from "./chooser.ts";
 import type { SettingsDraft } from "./settings-form.ts";
 
 // What Auto checks with: a saved Jev key, else the fast model, else nothing yet.
@@ -19,8 +20,7 @@ export interface PurposeCheckControl {
   manageJevKey?(trigger: HTMLButtonElement): void;
   change(on: boolean): void;
   judge: PurposeJudge;
-  // The plan the main model runs on, if any. A plan runs no fast model of its own, so only a Jev
-  // key can check.
+  // The plan the main model runs on, if any: a fast model checks only on Claude Code's own plan.
   plan?: string;
   // Opens Keys with a Jev key's form filled in.
   addJevKey?(trigger: HTMLButtonElement): void;
@@ -28,7 +28,7 @@ export interface PurposeCheckControl {
 
 export function purposeJudge(jevKey: boolean, choices: SettingsDraft["choices"]): PurposeJudge {
   if (jevKey) return "jev";
-  return choices.fast && !subscription(choices.main?.provider) ? "fast" : "none";
+  return roleActive("fast", choices) ? "fast" : "none";
 }
 
 const WHY = "Stops dot sending what it read somewhere unrelated.";
@@ -46,7 +46,7 @@ export function purposeDescription({
   if (judge === "fast") return `${WHY} Checked by your fast model.`;
   const needs =
     plan === CLAUDE_CODE
-      ? " with Claude Code"
+      ? " or a fast model on Claude Code"
       : plan
         ? " with the ChatGPT plan"
         : " or a fast model";

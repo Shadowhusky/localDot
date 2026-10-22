@@ -126,4 +126,34 @@ describe("the composer's model configuration", () => {
     fireEvent.click(saving.chip);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("marks Fast and Ultrafast beside the effort, and offers each speed with what it costs", () => {
+    const sol = {
+      id: "sol",
+      name: "GPT-6.1 Sol",
+      choice: {
+        provider: "openai",
+        model: "gpt-6.1-sol",
+        key: "openai",
+        options: { speed: "ultrafast" as const, reasoningEffort: "max" as const },
+      },
+    };
+    const { chip } = setup({
+      name: "GPT-6.1 Sol",
+      groups: [{ label: "OpenAI", options: [sol] }],
+      current: "sol",
+      choice: sol.choice,
+    });
+    expect(chip.getAttribute("aria-label")).toBe("Model: GPT-6.1 Sol, Maximum, Ultrafast");
+    expect(chip.textContent).toContain("Maximum");
+    const mark = chip.querySelector(".ui-speed-mark");
+    expect(mark?.getAttribute("data-speed")).toBe("ultrafast");
+    expect(mark?.querySelectorAll("svg")).toHaveLength(2);
+    fireEvent.click(chip);
+    const speed = screen.getByRole("combobox", { name: "Speed" });
+    expect(speed.textContent).toContain("Ultrafast");
+    fireEvent.click(speed);
+    const options = screen.getAllByRole("option").map((option) => option.textContent);
+    expect(options).toEqual(["Standard", "Fast2× the price", "Ultrafast6× the price"]);
+  });
 });

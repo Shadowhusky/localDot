@@ -1,4 +1,4 @@
-import type { SessionOrigin } from "@localdot/protocol";
+import type { PremiumSpeed, SessionOrigin } from "@localdot/protocol";
 import { microsToMs, ULID_PATTERN, ulidTime } from "@localdot/protocol";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
@@ -18,6 +18,7 @@ import {
   type AgentResult,
   type AgentStep,
   type AgentTakeover,
+  fastest,
   type RoutineProposal,
   type SpendCall,
   type UsageCall,
@@ -36,6 +37,8 @@ export interface TurnModel extends ModelRef {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly reasoningTokens?: number;
+  // The fastest premium speed that served any of those calls.
+  readonly speed?: PremiumSpeed;
 }
 
 interface Item<K extends string> {
@@ -279,6 +282,7 @@ function turnModels(calls: readonly UsageCall[]): TurnModel[] {
       was?.reasoningTokens === undefined && call.reasoningTokens === undefined
         ? undefined
         : (was?.reasoningTokens ?? 0) + (call.reasoningTokens ?? 0);
+    const speed = fastest(was?.speed, call.speed);
     models.set(id, {
       role: call.role,
       route: call.route,
@@ -287,6 +291,7 @@ function turnModels(calls: readonly UsageCall[]): TurnModel[] {
       inputTokens: (was?.inputTokens ?? 0) + call.inputTokens,
       outputTokens: (was?.outputTokens ?? 0) + call.outputTokens,
       ...(reasoning === undefined ? {} : { reasoningTokens: reasoning }),
+      ...(speed ? { speed } : {}),
     });
   }
   const all = [...models.values()];

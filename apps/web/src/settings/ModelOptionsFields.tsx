@@ -2,13 +2,20 @@ import type {
   AgentRoleChoice,
   ModelControls,
   ModelOptions,
+  PremiumSpeed,
   ReasoningEffort,
 } from "@localdot/protocol";
-import { modelControls } from "@localdot/providers";
+import { choiceControls } from "@localdot/providers";
 import { EffortSlider } from "../ui/EffortSlider.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Select } from "../ui/Select.tsx";
-import type { SubscriptionModel } from "./choices.ts";
+import {
+  controlsOf,
+  premiumSpeed,
+  SPEED_NAMES,
+  type SubscriptionModel,
+  speedCost,
+} from "./choices.ts";
 
 export const effortLabel = (value?: string) =>
   value === "none"
@@ -22,6 +29,7 @@ export const effortLabel = (value?: string) =>
           : value
             ? value.charAt(0).toUpperCase() + value.slice(1)
             : "Provider default";
+// Thinking, in a word or two. Speed has its own mark beside it.
 export function optionsLabel(options?: ModelOptions): string {
   return options?.thinkingBudget
     ? `${options.thinkingBudget.toLocaleString()} thinking tokens`
@@ -29,11 +37,7 @@ export function optionsLabel(options?: ModelOptions): string {
       ? effortLabel(options.reasoningEffort)
       : options?.verbosity
         ? `${effortLabel(options.verbosity)} detail`
-        : options?.speed === "fast"
-          ? "Fast"
-          : options?.speed === "standard"
-            ? "Standard speed"
-            : "";
+        : "";
 }
 // What more thinking costs, or why the model offers no controls: a note under its rows.
 export function optionsNote(
@@ -41,14 +45,15 @@ export function optionsNote(
   compact = false,
   discovered?: ModelControls,
 ): string {
-  if (!modelControls(choice.provider, choice.model, discovered).wire)
+  if (!choiceControls(choice, discovered).wire)
     return "This model uses its provider defaults. No adjustable reasoning controls are verified for this endpoint.";
   return compact
     ? "More thinking may take longer."
     : "More thinking can take longer and use more tokens.";
 }
 
-// A model's reasoning controls: pop-up rows of a settings group, or sliders in the composer's panel.
+// A model's reasoning controls and speed: pop-up rows of a settings group, or sliders in the
+// composer's panel.
 export function ModelOptionsFields({
   choice,
   onChange,
@@ -64,21 +69,7 @@ export function ModelOptionsFields({
   accountModel?: SubscriptionModel;
   discovered?: ModelControls;
 }) {
-  const base = modelControls(
-    choice.provider,
-    accountModel?.resolvedModel ?? choice.model,
-    discovered,
-  );
-  const controls = {
-    ...base,
-    efforts: accountModel?.efforts ?? base.efforts,
-    speeds:
-      accountModel?.fast === false || (choice.provider === "chatgpt" && accountModel?.fast !== true)
-        ? undefined
-        : accountModel?.fast === true
-          ? (["standard", "fast"] as const)
-          : base.speeds,
-  };
+  const controls = controlsOf(choice, accountModel, discovered);
   const options = choice.options ?? {};
   const change = (patch: Partial<ModelOptions>) => {
     const next = Object.fromEntries(
@@ -103,17 +94,20 @@ export function ModelOptionsFields({
   ];
   const changeDetail = (value: string) =>
     change({ verbosity: (value || undefined) as ModelOptions["verbosity"] });
-  const speed = controls.speeds && (
+  const speed = controls.speeds.length > 0 && (
     <Field label="Speed" inline className={compact ? "model-speed-field" : "ui-group-row"}>
       <Select
         appearance="inline"
-        value={options.speed ?? ""}
+        value={premiumSpeed(options) ?? ""}
         items={[
-          { value: "", label: "Provider default" },
-          { value: "standard", label: "Standard" },
-          { value: "fast", label: "Fast · higher cost" },
+          { value: "", label: "Standard" },
+          ...controls.speeds.map((value) => ({
+            value,
+            label: SPEED_NAMES[value],
+            description: speedCost(choice, value),
+          })),
         ]}
-        onValueChange={(value) => change({ speed: (value || undefined) as ModelOptions["speed"] })}
+        onValueChange={(value) => change({ speed: (value || undefined) as PremiumSpeed })}
       />
     </Field>
   );

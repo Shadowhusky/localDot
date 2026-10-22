@@ -1,5 +1,17 @@
-import type { AgentRoleChoice } from "@localdot/protocol";
-import { type Capability, type ProviderSpec, providerById, usableAs } from "@localdot/providers";
+import type {
+  AgentRoleChoice,
+  ModelControls,
+  ModelOptions,
+  PremiumSpeed,
+} from "@localdot/protocol";
+import {
+  type Capability,
+  choiceControls,
+  type ProviderSpec,
+  providerById,
+  speedTiers,
+  usableAs,
+} from "@localdot/providers";
 import type { KeyRecord } from "../keys/keys-api.ts";
 
 export type ModelRole = "main" | "fast" | "local";
@@ -10,7 +22,8 @@ export interface SubscriptionModel {
   name: string;
   resolvedModel?: string;
   efforts?: readonly import("@localdot/protocol").ReasoningEffort[];
-  fast?: boolean;
+  // The premium speeds the account offers the model; unsaid when the account doesn't list them.
+  speeds?: readonly PremiumSpeed[];
 }
 export interface PickerModel extends Capability {
   controls?: import("@localdot/protocol").ModelControls;
@@ -62,14 +75,28 @@ export function providerAllowed(role: ModelRole, provider: ProviderSpec): boolea
     !provider.availableIn && !provider.notOffered && (role !== "local" || provider.local === true)
   );
 }
+const planApp = (id: string | undefined) => id === "chatgpt" || id === "claude-code";
+// Whether a role's choice works beside the main model, as the daemon decides it. A plan's own app
+// runs only that plan's models: beside it a fast model on the same plan works and any other waits,
+// kept for when the main model changes back; a plan's model in turn waits beside an API model.
+export function roleActive(role: ModelRole, choices: Partial<Record<ModelRole, RoleChoice>>) {
+  const choice = choices[role];
+  if (!choice) return false;
+  const main = choices.main?.provider;
+  if (role === "main") return true;
+  if (planApp(main)) return role === "fast" && choice.provider === main;
+  return !planApp(choice.provider);
+}
 // A registry plan, or a custom endpoint its user says is on a flat-rate plan.
 export function onPlan(choice: RoleChoice | undefined): boolean {
   const provider = providerById(choice?.provider ?? "");
   return !!provider?.plan || (!!provider?.custom && choice?.plan === true);
 }
-// No chosen role is billed per token and at least one runs on a plan.
+// No role a task runs with is billed per token and at least one runs on a plan.
 export function planOnly(choices: Partial<Record<ModelRole, RoleChoice>>): boolean {
-  const chosen = Object.values(choices);
+  const chosen = (["main", "fast", "local"] as const)
+    .filter((role) => roleActive(role, choices))
+    .map((role) => choices[role]);
   return (
     chosen.some(onPlan) &&
     chosen.every((choice) => onPlan(choice) || providerById(choice?.provider ?? "")?.local)
@@ -116,4 +143,38 @@ export function modelIdProblem(id: string): string | null {
   return /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/.test(id)
     ? null
     : "Use a model ID of 1–128 letters, numbers or supported separators.";
+}
+export const SPEED_NAMES: Readonly<Record<PremiumSpeed, string>> = {
+  fast: "Fast",
+  ultrafast: "Ultrafast",
+};
+// The premium speed a choice asks for, if any; Standard and the provider's default are one.
+export const premiumSpeed = (options?: ModelOptions): PremiumSpeed | undefined =>
+  options?.speed === "fast" || options?.speed === "ultrafast" ? options.speed : undefined;
+// What a premium speed costs: its price per token over Standard, or what a plan draws on.
+export function speedCost(choice: AgentRoleChoice, speed: PremiumSpeed): string {
+  if (choice.provider === "chatgpt") return "Uses more of your plan";
+  if (choice.provider === "claude-code") return "Uses usage credits";
+  const price = speedTiers(choice.provider, choice.model, choice.speedTiers).find(
+    (tier) => tier.speed === speed,
+  )?.price;
+  return price ? `${price}× the price` : "Costs more";
+}
+// The controls a choice offers: a plan account's own for its model, else the provider's.
+export function controlsOf(
+  choice: AgentRoleChoice,
+  accountModel?: SubscriptionModel,
+  discovered?: ModelControls,
+) {
+  const base = choiceControls(
+    { ...choice, model: accountModel?.resolvedModel ?? choice.model },
+    discovered,
+  );
+  // A ChatGPT plan's speeds come only from its account; Claude Code's when its account says.
+  const speeds =
+    accountModel?.speeds ??
+    (choice.provider === "chatgpt"
+      ? []
+      : (base.speeds ?? []).filter((speed): speed is PremiumSpeed => speed !== "standard"));
+  return { ...base, efforts: accountModel?.efforts ?? base.efforts, speeds };
 }

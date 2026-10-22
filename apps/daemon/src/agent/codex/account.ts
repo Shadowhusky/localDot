@@ -1,5 +1,6 @@
 import type { AccountRead, LoginStarted, ModelList } from "@localdot/codex-harness";
-import { ReasoningEffort, type SubscriptionUsageData } from "@localdot/protocol";
+import { type PremiumSpeed, ReasoningEffort, type SubscriptionUsageData } from "@localdot/protocol";
+import { servedSpeed } from "@localdot/providers";
 import type { z } from "zod";
 
 export type ChatgptState = "unavailable" | "signed_out" | "signing_in" | "signed_in" | "expired";
@@ -25,7 +26,8 @@ export interface ChatgptStatus {
     name: string;
     isDefault: boolean;
     efforts?: ReasoningEffort[];
-    fast?: boolean;
+    // The account's own tier for each premium speed it offers the model; empty when it lists none.
+    tiers?: Partial<Record<PremiumSpeed, string>>;
   }[];
   checkedAt?: number;
 }
@@ -75,15 +77,20 @@ export function modelsFor(list: z.infer<typeof ModelList>): NonNullable<ChatgptS
     seen.add(item.id);
     const efforts = item.supportedReasoningEfforts?.flatMap((option) => {
       const effort = ReasoningEffort.safeParse(option.reasoningEffort);
-      return effort.success ? [effort.data] : [];
+      return effort.success && effort.data !== "enabled" ? [effort.data] : [];
     });
-    const tiers = item.serviceTiers?.map((tier) => tier.id) ?? item.additionalSpeedTiers;
+    const listed = item.serviceTiers?.map((tier) => tier.id) ?? item.additionalSpeedTiers;
+    const tiers: Partial<Record<PremiumSpeed, string>> = {};
+    for (const id of listed ?? []) {
+      const speed = servedSpeed(id);
+      if (speed && !tiers[speed] && /^[a-z0-9][a-z0-9._-]{0,31}$/.test(id)) tiers[speed] = id;
+    }
     models.push({
       id: item.id,
       name,
       isDefault: item.isDefault,
       ...(efforts ? { efforts: [...new Set(efforts)] } : {}),
-      ...(tiers ? { fast: tiers.some((tier) => tier === "fast" || tier === "priority") } : {}),
+      ...(listed ? { tiers } : {}),
     });
     if (models.length === 128) break;
   }

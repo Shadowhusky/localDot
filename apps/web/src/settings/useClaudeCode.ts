@@ -1,6 +1,7 @@
 import { CLAUDE_CODE_MODELS, type ClaudeCodeStatus } from "@localdot/protocol";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
+import type { SubscriptionModel } from "./choices.ts";
 import { loadClaudeCode } from "./settings-api.ts";
 
 // Coming back from Terminal looks again, at most this often.
@@ -55,12 +56,22 @@ export function useClaudeCode(api: ApiClient, active: boolean) {
     };
   }, [active, ready, run]);
   useEffect(() => () => flight.current?.abort(), []);
+  // Until Claude Code is set up, its own aliases stand in so the chosen model reads by name.
+  const models = useMemo<readonly SubscriptionModel[]>(
+    () =>
+      ready
+        ? status.models.map(({ fast, ...model }) => ({
+            ...model,
+            ...(fast === undefined ? {} : { speeds: fast ? (["fast"] as const) : [] }),
+          }))
+        : CLAUDE_CODE_MODELS,
+    [ready, status],
+  );
   return {
     status,
     checking,
     error,
-    // Until Claude Code is set up, its own aliases stand in so the chosen model reads by name.
-    models: ready ? status.models : CLAUDE_CODE_MODELS,
+    models,
     canStart: ready,
     check: () => run(true),
   };

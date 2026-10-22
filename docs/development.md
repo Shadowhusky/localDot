@@ -313,7 +313,7 @@ Authorization header and JSON request bodies:
 - `GET /api/agent/providers` lists providers, catalog models, capabilities and available key IDs.
   `POST /api/agent/catalog/refresh` refreshes the models.dev catalog.
 - `GET` and `PUT /api/agent/settings` read or replace settings. `main` drives the task, optional
-  `fast` handles summaries, and optional `local` provides a fallback. A role choice contains
+  `fast` writes summaries and answers the purpose check, and optional `local` provides a fallback. A role choice contains
   `provider`, `model`, and a stored `key` ID for remote providers. LM Studio and Ollama need no
   key; keyd reaches them on `127.0.0.1:1234` and `:11434` respectively.
 - Remote models missing a catalog price need an explicit `price` object containing both

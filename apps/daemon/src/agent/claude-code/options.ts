@@ -56,20 +56,26 @@ export const onlyLocaldot: CanUseTool = async (name, input, { mcpServer }) =>
     ? { behavior: "allow", updatedInput: input }
     : { behavior: "deny", message: "Only localDot's tools are available." };
 
-export interface ClaudeCodeOptionsInput {
+export const refuseAll: CanUseTool = async () => ({
+  behavior: "deny",
+  message: "No tools are available.",
+});
+
+export interface ClaudeCodeRunInput {
   readonly launch: ClaudeCodeLaunch;
   readonly model?: string;
   readonly modelOptions?: ModelOptions;
   readonly instructions: string;
-  readonly server: McpSdkServerConfigWithInstance;
   readonly abort: AbortController;
   readonly spawn: (options: SpawnOptions) => SpawnedProcess;
 }
+export interface ClaudeCodeOptionsInput extends ClaudeCodeRunInput {
+  readonly server: McpSdkServerConfigWithInstance;
+}
 
-// Dot's brain on the user's own Claude Code: localDot's tools over MCP and nothing else. No
-// settings, CLAUDE.md, memory, skills, plugins or other MCP servers of the user's reach dot, and
-// nothing of the task is saved in Claude Code's history.
-export function claudeCodeOptions(input: ClaudeCodeOptionsInput): Options {
+// The user's own Claude Code with none of their setup: no settings, CLAUDE.md, memory, skills,
+// plugins, MCP servers or built-in tools reach dot, and nothing is saved in Claude Code's history.
+function isolated(input: ClaudeCodeRunInput): Options {
   const effort = input.modelOptions?.reasoningEffort;
   if (effort && !["low", "medium", "high", "xhigh", "max"].includes(effort))
     throw new Error("Unsupported Claude Code effort.");
@@ -93,18 +99,32 @@ export function claudeCodeOptions(input: ClaudeCodeOptionsInput): Options {
       ? { settings: { fastMode: input.modelOptions.speed === "fast" } }
       : {}),
     strictMcpConfig: true,
-    mcpServers: { [LOCALDOT_SERVER]: input.server },
+    mcpServers: {},
     tools: [],
     disallowedTools: [...BUILT_IN_TOOLS],
     permissionMode: "default",
-    canUseTool: onlyLocaldot,
+    canUseTool: refuseAll,
     skills: [],
     plugins: [],
     agents: {},
     persistSession: false,
     enableFileCheckpointing: false,
-    includePartialMessages: true,
     verbatimPrompts: true,
     extraArgs: { "disable-slash-commands": null, "no-chrome": null },
   };
+}
+
+// Dot's brain: localDot's tools over MCP and nothing else.
+export function claudeCodeOptions(input: ClaudeCodeOptionsInput): Options {
+  return {
+    ...isolated(input),
+    mcpServers: { [LOCALDOT_SERVER]: input.server },
+    canUseTool: onlyLocaldot,
+    includePartialMessages: true,
+  };
+}
+
+// One answer to one question, in one turn, with no tools at all.
+export function claudeCodeAnswerOptions(input: ClaudeCodeRunInput): Options {
+  return { ...isolated(input), maxTurns: 1 };
 }

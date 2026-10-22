@@ -388,11 +388,13 @@ export function ModelStep({
   fastModel,
   plan,
   price,
+  fastPrice,
   onMain,
   onFast,
   onFastModel,
   onPlan,
   onPrice,
+  onFastPrice,
 }: {
   loading?: boolean;
   onRefresh?(): void;
@@ -411,13 +413,40 @@ export function ModelStep({
   fastModel: string;
   plan: boolean;
   price: { input: string; output: string };
+  fastPrice: { input: string; output: string };
   onMain(model: string): void;
   onFast(on: boolean): void;
   onFastModel(model: string): void;
   onPlan(on: boolean): void;
   onPrice(price: { input: string; output: string }): void;
+  onFastPrice(price: { input: string; output: string }): void;
 }) {
   const spec = providerById(provider);
+  const prices = (
+    value: { input: string; output: string },
+    change: (price: { input: string; output: string }) => void,
+    input: string,
+    output: string,
+  ) =>
+    (
+      [
+        ["input", input],
+        ["output", output],
+      ] as const
+    ).map(([side, label]) => (
+      <Field key={side} label={label} inline className="ui-group-row">
+        <TextField
+          size="sm"
+          inputMode="decimal"
+          maxLength={64}
+          autoComplete="off"
+          prefix="$"
+          suffix="per million"
+          value={value[side]}
+          onChange={(event) => change({ ...value, [side]: event.currentTarget.value })}
+        />
+      </Field>
+    ));
   if (kind === "local" || kind === "custom")
     return (
       <>
@@ -439,6 +468,21 @@ export function ModelStep({
           />
         </Field>
         {kind === "custom" && (
+          <Field
+            label="Fast model"
+            description="Optional. A quicker model on the same server, for summaries and purpose checks."
+          >
+            <TextField
+              {...PLAIN}
+              size="lg"
+              maxLength={128}
+              placeholder="Leave empty for none"
+              value={fastModel}
+              onChange={(event) => onFastModel(event.currentTarget.value)}
+            />
+          </Field>
+        )}
+        {kind === "custom" && (
           <Group roomy>
             <Switch
               className="ui-group-row"
@@ -447,26 +491,10 @@ export function ModelStep({
               checked={plan}
               onCheckedChange={onPlan}
             />
+            {!plan && prices(price, onPrice, "Input price", "Output price")}
             {!plan &&
-              (["input", "output"] as const).map((side) => (
-                <Field
-                  key={side}
-                  label={side === "input" ? "Input price" : "Output price"}
-                  inline
-                  className="ui-group-row"
-                >
-                  <TextField
-                    size="sm"
-                    inputMode="decimal"
-                    maxLength={64}
-                    autoComplete="off"
-                    prefix="$"
-                    suffix="per million"
-                    value={price[side]}
-                    onChange={(event) => onPrice({ ...price, [side]: event.currentTarget.value })}
-                  />
-                </Field>
-              ))}
+              fastModel.trim() &&
+              prices(fastPrice, onFastPrice, "Fast model input", "Fast model output")}
           </Group>
         )}
       </>
@@ -549,7 +577,7 @@ export function ModelStep({
           <Switch
             className="ui-group-row onboarding-fast"
             label="Use a faster model for small jobs"
-            description="Titles, summaries and quick checks, for less"
+            description="Summaries of long tasks and purpose checks, for less"
             checked={fast}
             onCheckedChange={onFast}
           />

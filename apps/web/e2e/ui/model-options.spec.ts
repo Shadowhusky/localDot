@@ -16,7 +16,7 @@ test("model thinking can be changed, saved and reset inside the composer", async
   await page.getByRole("option", { name: "GPT-6 Luna", exact: true }).click();
   const speed = panel.getByRole("combobox", { name: "Speed", exact: true });
   await speed.click();
-  await page.getByRole("option", { name: "Fast · higher cost", exact: true }).click();
+  await page.getByRole("option", { name: /^Fast/ }).click();
   const manage = panel.getByRole("button", { name: /Manage models/ });
   const bounds = await manage.boundingBox(),
     panelBounds = await panel.boundingBox();

@@ -491,6 +491,9 @@ export const ModelUsage = event(
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
     reasoningTokens: z.number().int().nonnegative().optional(),
+    // The premium speed the provider says served the call; absent when it served the standard one
+    // or did not say.
+    speed: z.enum(["fast", "ultrafast"]).optional(),
   }),
 );
 export const ModelRetry = event(

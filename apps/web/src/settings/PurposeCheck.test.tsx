@@ -17,9 +17,11 @@ describe("the purpose check row", () => {
     expect(purposeJudge(false, { main: { provider: "chatgpt", model: "gpt-6-astra" }, fast })).toBe(
       "none",
     );
-    expect(purposeJudge(false, { main: { provider: "claude-code", model: "opus" }, fast })).toBe(
-      "none",
-    );
+    const opus = { provider: "claude-code", model: "opus" };
+    expect(purposeJudge(false, { main: opus, fast })).toBe("none");
+    expect(
+      purposeJudge(false, { main: opus, fast: { provider: "claude-code", model: "haiku" } }),
+    ).toBe("fast");
     expect(purposeJudge(false, { main: fast })).toBe("none");
   });
 
@@ -34,7 +36,7 @@ describe("the purpose check row", () => {
       /Needs a Jev key with the ChatGPT plan\.$/,
     );
     expect(purposeDescription({ on: true, judge: "none", plan: "claude-code" })).toMatch(
-      /Needs a Jev key with Claude Code\.$/,
+      /Needs a Jev key or a fast model on Claude Code\.$/,
     );
     expect(purposeDescription({ on: true, judge: "none" })).toMatch(
       /Needs a Jev key or a fast model\.$/,

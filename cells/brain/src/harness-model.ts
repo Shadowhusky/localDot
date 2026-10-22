@@ -1,5 +1,5 @@
 import { type GenerateOptions, type StreamChunk, ToolCallId } from "@deepseek-ai/dsh-llm";
-import type { ClientKind } from "@localdot/protocol";
+import type { ClientKind, PremiumSpeed } from "@localdot/protocol";
 import {
   type AssistantContent,
   jsonSchema,
@@ -9,13 +9,14 @@ import {
   tool,
 } from "ai";
 import { cachedPrompt } from "./context.ts";
+import { rawTier, servedTier } from "./models.ts";
 
 // Native DSH histories retain the exact AI SDK response for provider-specific
 // reasoning signatures. Tool observations remain ordinary untrusted tool content.
 export async function* harnessModel(
   options: GenerateOptions,
   model: LanguageModel,
-  usage: (input: number, output: number) => void,
+  usage: (input: number, output: number, speed?: PremiumSpeed) => void,
   client?: ClientKind,
 ): AsyncIterable<StreamChunk> {
   const names = new Map<string, string>();
@@ -76,6 +77,7 @@ export async function* harnessModel(
   // A child's prompt is cached as the parent's is: Anthropic up to the marked blocks, OpenAI on the
   // server its session's key routes to.
   const prompt = cachedPrompt(instructions.join("\n\n"), messages, "", client === "anthropic");
+  let chatTier: unknown;
   const stream = streamText({
     model,
     messages: prompt.messages,
@@ -95,17 +97,26 @@ export async function* harnessModel(
     abortSignal: options.signal,
     maxRetries: 0,
     maxOutputTokens: options.maxTokens,
+    includeRawChunks: true,
+    onChunk: ({ chunk }) => {
+      if (chunk.type === "raw") chatTier = rawTier(chunk.rawValue) ?? chatTier;
+    },
   });
   // Use the same streaming transport as the parent. Compatible Responses gateways
   // can support streaming requests while rejecting the non-streaming endpoint shape.
-  const [text, toolCalls, response, totalUsage] = await Promise.all([
+  const [text, toolCalls, response, totalUsage, metadata] = await Promise.all([
     stream.text,
     stream.toolCalls,
     stream.response,
     stream.totalUsage,
+    stream.providerMetadata,
   ]);
   const result = { text, toolCalls, response };
-  usage(totalUsage.inputTokens ?? 0, totalUsage.outputTokens ?? 0);
+  usage(
+    totalUsage.inputTokens ?? 0,
+    totalUsage.outputTokens ?? 0,
+    servedTier(metadata, response.headers, chatTier),
+  );
   let index = 0;
   if (result.text) {
     yield { type: "block-start", index, blockType: "text" };

@@ -17,6 +17,7 @@ import {
   type AgentStep,
   type AgentWords,
   emptyAgentModel,
+  fastest,
   interruptRunning,
   AGENT_LIMITS as L,
 } from "./model.ts";
@@ -241,6 +242,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           row.role === e.data.role && row.route === e.data.route && row.model === e.data.model,
       );
       const add = (a: number, b: number) => Math.min(Number.MAX_SAFE_INTEGER, a + b);
+      const speed = fastest(old?.speed, e.data.speed);
       const row = {
         ...e.data,
         inputTokens: add(old?.inputTokens ?? 0, e.data.inputTokens),
@@ -250,6 +252,9 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           : {}),
         calls: add(old?.calls ?? 0, 1),
         reasoningPartial: (old?.reasoningPartial ?? false) || e.data.reasoningTokens === undefined,
+        ...(speed
+          ? { speed, premiumCalls: add(old?.premiumCalls ?? 0, e.data.speed ? 1 : 0) }
+          : {}),
       };
       const rows = [...model.usage.filter((value) => value !== old), row];
       const call = {
@@ -262,6 +267,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         ...(e.data.reasoningTokens === undefined
           ? {}
           : { reasoningTokens: e.data.reasoningTokens }),
+        ...(e.data.speed ? { speed: e.data.speed } : {}),
       };
       next = {
         ...next,

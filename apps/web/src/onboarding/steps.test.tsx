@@ -42,11 +42,13 @@ it("offers an in-place model-list retry and distinguishes loading from failure",
     fastModel: "",
     plan: false,
     price: { input: "", output: "" },
+    fastPrice: { input: "", output: "" },
     onMain: vi.fn(),
     onFast: vi.fn(),
     onFastModel: vi.fn(),
     onPlan: vi.fn(),
     onPrice: vi.fn(),
+    onFastPrice: vi.fn(),
     onRefresh,
   };
   const view = render(<ModelStep {...props} />);
@@ -57,4 +59,39 @@ it("offers an in-place model-list retry and distinguishes loading from failure",
   expect(screen.getByRole("status").textContent).toContain("Loading models");
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(onRefresh).toHaveBeenCalledTimes(1);
+});
+
+it("asks a custom endpoint for its fast model by name, on the same server, and its price when priced per token", () => {
+  const onFastModel = vi.fn();
+  const props = {
+    kind: "custom" as const,
+    provider: "openai-responses-compatible",
+    models: [],
+    allModels: [],
+    subscriptionModels: [],
+    main: "gpt-6.1-sol",
+    typedModel: "gpt-6.1-sol",
+    fast: false,
+    fastAvailable: false,
+    fastModel: "",
+    plan: false,
+    price: { input: "2", output: "10" },
+    fastPrice: { input: "", output: "" },
+    onMain: vi.fn(),
+    onFast: vi.fn(),
+    onFastModel,
+    onPlan: vi.fn(),
+    onPrice: vi.fn(),
+    onFastPrice: vi.fn(),
+  };
+  const view = render(<ModelStep {...props} />);
+  fireEvent.change(screen.getByRole("textbox", { name: "Fast model" }), {
+    target: { value: "gpt-6-luna" },
+  });
+  expect(onFastModel).toHaveBeenCalledWith("gpt-6-luna");
+  expect(screen.queryByRole("textbox", { name: "Fast model input" })).toBeNull();
+  view.rerender(<ModelStep {...props} fastModel="gpt-6-luna" />);
+  expect(screen.getByRole("textbox", { name: "Fast model input" })).toBeTruthy();
+  view.rerender(<ModelStep {...props} fastModel="gpt-6-luna" plan />);
+  expect(screen.queryByRole("textbox", { name: "Fast model input" })).toBeNull();
 });

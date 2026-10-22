@@ -10,6 +10,7 @@ import {
   type RoleChoice,
   type SubscriptionModel,
 } from "./choices.ts";
+import { beside, fastBeside } from "./chooser.ts";
 import {
   loadProviderIndex,
   loadSettings,
@@ -318,7 +319,24 @@ export function useSettings(
         ].slice(-100);
       }
     }
-    if (value && old?.provider !== value.provider) {
+    const main = choices.main;
+    if (
+      role === "fast" &&
+      value &&
+      main &&
+      old?.provider !== value.provider &&
+      beside(main, value)
+    ) {
+      // The main model's own provider: its key and format, and a model to start from rather than
+      // whatever was chosen there last.
+      delete prices[role];
+      value = fastBeside(
+        main,
+        current.current.index?.providers.find((row) => row.id === main.provider)?.models ?? [],
+        subscriptionModels,
+        [...(current.current.saved?.models ?? []), current.current.saved?.fast, ...(models ?? [])],
+      );
+    } else if (value && old?.provider !== value.provider) {
       delete prices[role];
       const provider = value.provider;
       const remembered = [
@@ -412,10 +430,15 @@ export function useSettings(
       const checked = validateForm(captured, previous, fresh, subscriptionModels);
       if (!checked.ok) return;
       // Keep the previous saved model when a replacement is actually committed, not
-      // when the user merely browses providers and returns to the saved choice.
+      // when the user merely browses providers and returns to the saved choice, nor when
+      // only its options change: the daemon keeps no history of a model still in use.
       for (const role of ["main", "fast", "local"] as const) {
         const old = previous[role];
-        if (old && !sameSettingsValue(old, checked.document[role])) {
+        const now = checked.document[role];
+        if (
+          old &&
+          (old.provider !== now?.provider || old.model !== now.model || old.key !== now.key)
+        ) {
           const models = checked.document.models ?? [];
           if (!models.some((choice) => sameSettingsValue(choice, old)))
             checked.document.models = [...models, old].slice(-100);

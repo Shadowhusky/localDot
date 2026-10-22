@@ -1,6 +1,7 @@
 import type { AgentRoleChoice } from "@localdot/protocol";
 import { sameModelOptions } from "@localdot/providers";
 import { type RefObject, useRef, useState } from "react";
+import { premiumSpeed, SPEED_NAMES } from "../settings/choices.ts";
 import { ModelOptionsFields, optionsLabel } from "../settings/ModelOptionsFields.tsx";
 import type { ModelGroup, ModelOption } from "../settings/model-options.ts";
 import { Button } from "../ui/Button.tsx";
@@ -11,6 +12,7 @@ import { mergeHandlers } from "../ui/merge.ts";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
 import type { Align, Side } from "../ui/position.ts";
 import { Select } from "../ui/Select.tsx";
+import { SpeedMark } from "../ui/SpeedMark.tsx";
 import { useTooltip } from "../ui/Tooltip.tsx";
 
 export interface ModelMenuProps {
@@ -154,6 +156,9 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
   });
   // The menu and the label give the full name; the chip leaves out a family name the rest says.
   const label = name.replace(/^Claude (?=[A-Za-z])/, "");
+  const effort = menu.choice?.options && optionsLabel(menu.choice.options);
+  const speed = premiumSpeed(menu.choice?.options);
+  const said = [name, effort, speed && SPEED_NAMES[speed]].filter(Boolean).join(", ");
   return (
     <>
       <Button
@@ -163,7 +168,7 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
         size="sm"
         className="composer-model"
         disabledReason={disabledReason}
-        aria-label={next ? `Model for the next task: ${name}` : `Model: ${name}`}
+        aria-label={next ? `Model for the next task: ${said}` : `Model: ${said}`}
         aria-describedby={tip["aria-describedby"]}
         {...triggerProps("dialog", open)}
         onClick={() => {
@@ -172,9 +177,8 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
         }}
       >
         <MiddleTruncate text={label} tail={Math.max(0, label.length - label.lastIndexOf(" "))} />
-        {menu.choice?.options && (
-          <span className="composer-effort">{optionsLabel(menu.choice.options)}</span>
-        )}
+        {effort && <span className="composer-effort">{effort}</span>}
+        {speed && <SpeedMark speed={speed} className="composer-speed" />}
         <Icon name="chevron-down" size={12} className="composer-model-chevron" />
       </Button>
       {tooltip}

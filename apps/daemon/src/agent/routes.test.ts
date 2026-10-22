@@ -775,12 +775,29 @@ describe("Claude Code (your plan) routes", () => {
     for (const bad of [
       { main: { provider: "claude-code", model: "sonnet", key: "anthropic" } },
       {
-        main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
-        fast: { provider: "claude-code", model: "sonnet" },
+        main: { provider: "claude-code", model: "sonnet" },
+        local: { provider: "claude-code", model: "haiku" },
+      },
+      {
+        main: { provider: "claude-code", model: "sonnet" },
+        fast: { provider: "claude-code", model: "haiku", options: { verbosity: "low" } },
       },
     ])
       expect((await f.send("PUT", "/api/agent/settings", bad)).status).toBe(400);
     expect(f.settings.get()).toEqual(settings);
+  });
+  it("saves a fast model on the main model's Claude Code plan, and keeps it waiting beside an API model", async () => {
+    const f = await setup({ claudeCode: claude() });
+    const fast = { provider: "claude-code", model: "haiku", options: { reasoningEffort: "low" } };
+    const plan = { main: { provider: "claude-code", model: "opus" }, fast };
+    expect((await f.send("PUT", "/api/agent/settings", plan)).status).toBe(200);
+    expect(f.settings.get()).toMatchObject(plan);
+    const api = {
+      main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
+      fast,
+    };
+    expect((await f.send("PUT", "/api/agent/settings", api)).status).toBe(200);
+    expect(f.settings.get()).toMatchObject(api);
   });
 });
 

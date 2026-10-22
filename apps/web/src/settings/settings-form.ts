@@ -19,6 +19,7 @@ import {
   routeFor,
 } from "@localdot/providers";
 import {
+  controlsOf,
   type ModelRole,
   matchingKeys,
   modelAllowed,
@@ -28,6 +29,7 @@ import {
   planOnly,
   providerAllowed,
   type RoleChoice,
+  roleActive,
   type SubscriptionModel,
 } from "./choices.ts";
 import { subscription as onSubscription } from "./chooser.ts";
@@ -182,7 +184,8 @@ export function validateForm(
       delete document[role];
       continue;
     }
-    if (subscription && role !== "main") {
+    // A choice that waits beside the main model is kept as it was, for when it works again.
+    if (!roleActive(role, draft.choices)) {
       document[role] = { ...value };
       continue;
     }
@@ -261,39 +264,25 @@ function checkRole(
   accounting: Map<string, string>,
 ): RoleChoice | string {
   if (providerById(value.provider)?.notOffered) return "choose a provider that is available here.";
-  const accountModel = subscriptionModels.find((m) => m.id === value.model);
-  const isPlan = ["claude-code", "chatgpt"].includes(value.provider);
-  const discovered =
-    isPlan && accountModel?.efforts
-      ? {
-          efforts: [...accountModel.efforts],
-          wire: "effort" as const,
-          ...(accountModel.fast ? { speeds: ["standard", "fast"] as ("standard" | "fast")[] } : {}),
-        }
-      : index.providers
-          .find((p) => p.id === value.provider)
-          ?.models.find((m) => m.id === value.model)?.controls;
+  // What the choice offers: a plan account's own controls for its model, a custom endpoint's
+  // speeds as its user states them, else the catalog's.
+  const offered = controlsOf(
+    value,
+    subscriptionModels.find((m) => onSubscription(value.provider) && m.id === value.model),
+    index.providers.find((p) => p.id === value.provider)?.models.find((m) => m.id === value.model)
+      ?.controls,
+  );
   const optionsProblem = modelOptionsProblem(
     value.provider,
     value.model,
     value.options,
     undefined,
-    discovered,
+    {
+      ...offered,
+      speeds: offered.speeds.length ? ["standard", ...offered.speeds] : undefined,
+    },
   );
   if (optionsProblem) return optionsProblem;
-  if (["claude-code", "chatgpt"].includes(value.provider) && accountModel) {
-    if (
-      value.options?.reasoningEffort &&
-      accountModel.efforts &&
-      !accountModel.efforts.includes(value.options.reasoningEffort)
-    )
-      return "The signed-in account does not support that effort. Choose an available level.";
-    if (
-      value.options?.speed === "fast" &&
-      (accountModel.fast === false || (value.provider === "chatgpt" && accountModel.fast !== true))
-    )
-      return "Fast mode is unavailable for this account model.";
-  }
   if (modelIdProblem(value.model)) return "choose a valid model ID.";
   if (value.provider === "chatgpt") {
     if (
@@ -315,14 +304,14 @@ function checkRole(
   }
   if (value.provider === "claude-code") {
     if (
-      role !== "main" ||
+      role === "local" ||
       value.key !== undefined ||
       value.price !== undefined ||
       !CLAUDE_CODE_MODEL.test(value.model)
     )
-      return "Claude Code is available for main only, without an API key or manual price.";
+      return "Claude Code works as the main or fast model, without an API key or manual price.";
     const model = subscriptionModels.find((m) => m.id === value.model);
-    const unchanged = saved.main?.provider === "claude-code" && saved.main.model === value.model;
+    const unchanged = saved[role]?.provider === "claude-code" && saved[role]?.model === value.model;
     if (!model && !unchanged) return "set up Claude Code and choose one of its models.";
     return {
       provider: value.provider,
@@ -358,6 +347,7 @@ function checkRole(
     if (value.vision === false) next.vision = false;
     if (context !== undefined) next.contextTokens = context;
     if (flat) next.plan = true;
+    if (value.speedTiers && provider.client !== "anthropic-compatible") next.speedTiers = true;
   }
   if (provider.local) {
     if (value.key !== undefined || value.price !== undefined)

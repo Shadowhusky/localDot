@@ -38,6 +38,21 @@ describe("parseEvent", () => {
     ).toThrow();
   });
 
+  it("records the premium speed that served a model call, when the provider said so", () => {
+    const usage = {
+      role: "main",
+      route: "openai",
+      model: "gpt-6.1-sol",
+      inputTokens: 1,
+      outputTokens: 2,
+    };
+    for (const data of [usage, { ...usage, speed: "fast" }, { ...usage, speed: "ultrafast" }])
+      expect(parseEvent({ ...base, type: "model.usage", data }).data).toEqual(data);
+    expect(() =>
+      parseEvent({ ...base, type: "model.usage", data: { ...usage, speed: "priority" } }),
+    ).toThrow();
+  });
+
   it("rejects an envelope id that is not a ULID", () => {
     expect(() =>
       parseEvent({ ...base, id: "invalid", type: "agent.state", data: { state: "idle" } }),

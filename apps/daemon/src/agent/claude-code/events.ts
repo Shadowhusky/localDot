@@ -1,4 +1,10 @@
-import { type SubscriptionUsageData, type SubscriptionWindow, ulid } from "@localdot/protocol";
+import {
+  type PremiumSpeed,
+  type SubscriptionUsageData,
+  type SubscriptionWindow,
+  ulid,
+} from "@localdot/protocol";
+import { servedSpeed } from "@localdot/providers";
 import { z } from "zod";
 import type { Redactor } from "../redact.ts";
 import { LOCALDOT_TOOLS } from "./options.ts";
@@ -35,6 +41,7 @@ const Usage = z.looseObject({
   cache_read_input_tokens: z.number().int().nonnegative().nullish(),
   cache_creation_input_tokens: z.number().int().nonnegative().nullish(),
   output_tokens: z.number().int().nonnegative().nullish(),
+  speed: z.string().nullish(),
 });
 
 const MessageStart = z.looseObject({
@@ -134,6 +141,7 @@ export class ClaudeCodeEventMapper {
   #limited = false;
   #usage: string | undefined;
   #input = 0;
+  #speed: PremiumSpeed | undefined;
   #callModel: string;
   constructor(sink: MapperSink, redact: Redactor, model: string) {
     this.#sink = sink;
@@ -248,6 +256,7 @@ export class ClaudeCodeEventMapper {
         (usage?.input_tokens ?? 0) +
         (usage?.cache_read_input_tokens ?? 0) +
         (usage?.cache_creation_input_tokens ?? 0);
+      this.#speed = servedSpeed(usage?.speed);
       const model = start.success ? start.data.message.model : undefined;
       this.#callModel = model && model.length <= 128 ? model : this.#model;
       this.#sink.append("agent.state", { state: "thinking" });
@@ -294,14 +303,17 @@ export class ClaudeCodeEventMapper {
     }
     if (event.type === "message_delta") {
       const delta = MessageDelta.safeParse(event);
-      if (delta.success)
-        this.#sink.append("model.usage", {
-          role: "main",
-          route: CLAUDE_CODE_ROUTE,
-          model: this.#callModel,
-          inputTokens: this.#input,
-          outputTokens: delta.data.usage?.output_tokens ?? 0,
-        });
+      if (!delta.success) return [];
+      const reported = delta.data.usage?.speed;
+      const speed = reported == null ? this.#speed : servedSpeed(reported);
+      this.#sink.append("model.usage", {
+        role: "main",
+        route: CLAUDE_CODE_ROUTE,
+        model: this.#callModel,
+        inputTokens: this.#input,
+        outputTokens: delta.data.usage?.output_tokens ?? 0,
+        ...(speed ? { speed } : {}),
+      });
     }
     return [];
   }

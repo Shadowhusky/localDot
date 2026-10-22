@@ -5,3 +5,4 @@ export * from "./discovery.ts";
 export * from "./model-options.ts";
 export * from "./model-point.ts";
 export * from "./registry.ts";
+export * from "./speeds.ts";

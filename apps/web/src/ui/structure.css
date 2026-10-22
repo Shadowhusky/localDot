@@ -56,6 +56,21 @@
     transition: stroke-dashoffset var(--dur-snappy) var(--ease-enter);
   }
 
+  .ui-speed-mark {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+  }
+
+  .ui-speed-mark > .ui-icon {
+    fill: currentColor;
+  }
+
+  /* Ultrafast's two bolts overlap, so the pair reads as one mark. */
+  .ui-speed-mark > .ui-icon + .ui-icon {
+    margin-inline-start: calc(var(--spacing) * -1.5);
+  }
+
   @starting-style {
     .ui-status-check {
       stroke-dashoffset: 1;

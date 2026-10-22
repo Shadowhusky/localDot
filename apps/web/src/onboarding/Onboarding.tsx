@@ -86,6 +86,7 @@ export interface SetupDraft {
   fastModel: string;
   plan: boolean;
   price: { input: string; output: string };
+  fastPrice: { input: string; output: string };
   preset: string;
   persona: PersonaId;
 }
@@ -116,6 +117,10 @@ function draftOf(progress: WizardProgress, saved: AgentSettingsDocument | null):
     price: {
       input: main?.price ? String(main.price.inputUSDPerMTok) : "",
       output: main?.price ? String(main.price.outputUSDPerMTok) : "",
+    },
+    fastPrice: {
+      input: saved?.fast?.price ? String(saved.fast.price.inputUSDPerMTok) : "",
+      output: saved?.fast?.price ? String(saved.fast.price.outputUSDPerMTok) : "",
     },
     preset: (saved?.autonomy && presetOf(saved.autonomy)?.label) || "Balanced",
     persona: saved?.persona ?? DEFAULT_PERSONA,
@@ -204,11 +209,13 @@ export function Onboarding(props: OnboardingProps) {
       : draft.model.trim();
   const allModels = index?.providers.find((row) => row.id === draft.provider)?.models ?? [];
   const fastPick = catalog ? recommendedFast(allModels, mainModel) : undefined;
-  const fastModel = allModels.some(
-    (model) => model.id === draft.fastModel && model.id !== mainModel,
-  )
-    ? draft.fastModel
-    : (fastPick?.id ?? "");
+  // A custom endpoint's fast model is typed, on the main model's address, key and format.
+  const fastModel =
+    draft.kind === "custom"
+      ? draft.fastModel.trim()
+      : allModels.some((model) => model.id === draft.fastModel && model.id !== mainModel)
+        ? draft.fastModel
+        : (fastPick?.id ?? "");
   const keydOff = keys.health?.online === false;
 
   const advance = (extra: Partial<WizardProgress> = {}) =>
@@ -294,8 +301,12 @@ export function Onboarding(props: OnboardingProps) {
             delete prices.main;
             delete prices.fast;
             if (draft.kind === "custom" && !draft.plan) prices.main = draft.price;
-            if (catalog && draft.fast && fastModel)
-              choices.fast = { provider: draft.provider, model: fastModel, key: mainChoice().key };
+            const { key, plan } = mainChoice();
+            if (draft.kind === "custom" && fastModel) {
+              choices.fast = { provider: draft.provider, model: fastModel, key, plan };
+              if (!draft.plan) prices.fast = draft.fastPrice;
+            } else if (catalog && draft.fast && fastModel)
+              choices.fast = { provider: draft.provider, model: fastModel, key };
             else delete choices.fast;
             return { ...form, choices, prices };
           },
@@ -517,11 +528,13 @@ export function Onboarding(props: OnboardingProps) {
               fastModel={fastModel}
               plan={draft.plan}
               price={draft.price}
+              fastPrice={draft.fastPrice}
               onMain={(model) => change({ model })}
               onFast={(fast) => change({ fast })}
               onFastModel={(fastModel) => change({ fastModel })}
               onPlan={(plan) => change({ plan })}
               onPrice={(price) => change({ price })}
+              onFastPrice={(fastPrice) => change({ fastPrice })}
             />
           ),
           primary: "Continue",

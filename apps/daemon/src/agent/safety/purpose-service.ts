@@ -6,6 +6,7 @@ import {
   type KeydRecord,
   type PurposeCheckStatus,
 } from "@localdot/protocol";
+import { activeRoles } from "../bindings.ts";
 import { jevFits, jevRequest } from "./judges.ts";
 
 type Stats = Pick<PurposeCheckStatus, "calls" | "succeeded" | "failed" | "last">;
@@ -36,9 +37,7 @@ export class PurposeService {
           ? "off"
           : settings.permissionMode === "full"
             ? "bypassed"
-            : key ||
-                (settings.fast &&
-                  !["chatgpt", "claude-code"].includes(settings.main?.provider ?? ""))
+            : key || activeRoles(settings).fast
               ? "active"
               : "unconfigured",
       ...(key ? { keyId: key.id } : {}),

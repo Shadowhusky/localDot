@@ -46,6 +46,7 @@ import {
   type ProviderModels,
   planOnly,
   type RoleChoice,
+  roleActive,
   type SubscriptionModel,
 } from "./choices.ts";
 import { CHATGPT, CLAUDE_CODE, subscription } from "./chooser.ts";
@@ -967,10 +968,12 @@ function SectionContent({
       if (props.loading)
         return <DotLoader className="settings-loading" label="Loading your settings" />;
       const main = props.choices.main?.provider;
-      const inactive =
-        main === CHATGPT
+      // A plan's own app runs only its own models: no local model beside either, and the ChatGPT
+      // plan's app can't answer a fast model while a task holds it.
+      const inactive = (role: ModelRole) =>
+        (role === "local" || role === "fast") && main === CHATGPT
           ? "Off while the main model uses the ChatGPT plan."
-          : main === CLAUDE_CODE
+          : role === "local" && main === CLAUDE_CODE
             ? "Off while the main model uses Claude Code."
             : undefined;
       return (
@@ -983,12 +986,16 @@ function SectionContent({
             <RoleCard
               key={role}
               modelRole={role}
-              value={props.choices[role]}
+              // A choice that waits beside this main model shows as off until it works again.
+              value={
+                roleActive(role, props.choices) || inactive(role) ? props.choices[role] : undefined
+              }
               providers={props.providers}
               keys={props.keys}
               keyLayer={props.keyLayer}
               subscriptionModels={props.subscriptionModels}
-              inactive={role === "main" ? undefined : inactive}
+              main={main}
+              inactive={inactive(role)}
               manualPrice={props.manualPrices?.[role]}
               onChange={(value) => props.onChange(role, value)}
               onKeys={props.onKeys}

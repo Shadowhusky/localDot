@@ -6,6 +6,7 @@ import type {
   DoneInput,
   InboxItem,
   ModelBinding,
+  PremiumSpeed,
   ToolResult,
   TranscriptMessage,
   UpdatePlanInput,
@@ -56,7 +57,7 @@ import {
 import type { EventSink } from "./events.ts";
 import { driveHarness, type HarnessRequest } from "./harness.ts";
 import { harnessModel } from "./harness-model.ts";
-import { editsOlderTurns, imagesInToolResults } from "./models.ts";
+import { editsOlderTurns, imagesInToolResults, rawTier, servedTier } from "./models.ts";
 import { type PlanLine, reminder, screenHands, systemPrompt } from "./prompt.ts";
 import { providerFailure } from "./provider-failure.ts";
 import type { ToolClient } from "./tool-client.ts";
@@ -405,7 +406,7 @@ export class Agent {
             yield* harnessModel(
               options,
               self.#model(),
-              (inputTokens, outputTokens) => {
+              (inputTokens, outputTokens, speed) => {
                 sink.push({
                   type: "model.usage",
                   data: {
@@ -414,6 +415,7 @@ export class Agent {
                     model: binding.model,
                     inputTokens,
                     outputTokens,
+                    ...(speed ? { speed } : {}),
                   },
                 });
               },
@@ -799,10 +801,16 @@ export class Agent {
           maxOutputTokens: binding.maxOutputTokens,
           maxRetries: 0,
           abortSignal: signal,
+          // An OpenAI-style chat completion says which tier served it only in its chunks.
+          includeRawChunks: true,
         });
+        let chatTier: unknown, speed: PremiumSpeed | undefined;
         for await (const part of result.fullStream) {
           signal.throwIfAborted();
-          if (part.type === "text-delta") {
+          if (part.type === "raw") chatTier = rawTier(part.rawValue) ?? chatTier;
+          else if (part.type === "finish-step")
+            speed = servedTier(part.providerMetadata, part.response.headers, chatTier);
+          else if (part.type === "text-delta") {
             if (opening === undefined) say(part.text);
             else {
               opening += part.text;
@@ -836,6 +844,7 @@ export class Agent {
                 ...(part.totalUsage.outputTokenDetails?.reasoningTokens
                   ? { reasoningTokens: part.totalUsage.outputTokenDetails.reasoningTokens }
                   : {}),
+                ...(speed ? { speed } : {}),
               },
             });
           }
@@ -1177,10 +1186,17 @@ export class Agent {
         maxOutputTokens: 4000,
         maxRetries: 0,
         abortSignal: signal,
+        // An OpenAI-style chat completion says which tier served it only in its body.
+        include: { responseBody: true },
       });
       signal.throwIfAborted();
       text = result.text;
       const usage = result.totalUsage;
+      const speed = servedTier(
+        result.providerMetadata,
+        result.response.headers,
+        rawTier(result.response.body),
+      );
       this.#o.sink.push({
         type: "model.usage",
         data: {
@@ -1192,6 +1208,7 @@ export class Agent {
           ...(usage.outputTokenDetails?.reasoningTokens
             ? { reasoningTokens: usage.outputTokenDetails.reasoningTokens }
             : {}),
+          ...(speed ? { speed } : {}),
         },
       });
     } catch {

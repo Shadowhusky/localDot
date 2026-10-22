@@ -1,9 +1,6 @@
-import {
-  type ModelControls as DiscoveredControls,
-  ModelOptions,
-  type ReasoningEffort,
-} from "@localdot/protocol";
+import { ModelOptions, type ModelSpeed, type ReasoningEffort } from "@localdot/protocol";
 import { providerById } from "./registry.ts";
+import { speedTiers } from "./speeds.ts";
 
 // Reviewed against the vendor references in docs/model-options.md. A reasoning model is not
 // necessarily configurable. Unknown families deliberately keep the provider default.
@@ -24,7 +21,7 @@ export interface ModelControls {
   wire?: ThinkingWire;
   budget?: boolean;
   verbosity?: boolean;
-  speeds?: readonly ("standard" | "fast")[];
+  speeds?: readonly ModelSpeed[];
 }
 const basic = ["low", "medium", "high"] as const;
 const full = [...basic, "xhigh", "max"] as const;
@@ -70,26 +67,25 @@ function claude(model: string): ModelControls {
     return { ...effort(["none"], "anthropic-budget"), budget: true };
   return unknown;
 }
+// Speed is a separate billing and latency choice, never an effort synonym. Compatible endpoints
+// don't inherit a vendor's service tiers unless their user says they take them.
 export function modelControls(
   provider: string,
   modelId: string,
-  discovered?: DiscoveredControls,
+  discovered?: ModelControls,
+): ModelControls {
+  return choiceControls({ provider, model: modelId }, discovered);
+}
+export function choiceControls(
+  choice: { provider: string; model: string; speedTiers?: boolean },
+  discovered?: ModelControls,
 ): ModelControls {
   if (discovered) return discovered;
-  const controls = reasoningControls(provider, modelId);
-  const model = modelId.toLowerCase().replaceAll(".", "-");
-  // Speed is a separate billing/performance choice, never an effort synonym.
-  // Compatible endpoints do not inherit direct-provider service tiers.
-  if (
-    (["openai", "chatgpt"].includes(provider) &&
-      /^gpt-(?:6(?:[.-])|5[.]3-codex(?:$|-))/.test(modelId) &&
-      !/nano|chat|search/.test(modelId) &&
-      controls.wire) ||
-    (provider === "anthropic" && /^claude-opus-(?:5(?:-5)?|4-8)(?:$|-20)/.test(model)) ||
-    (provider === "claude-code" && /^(?:opus$|claude-opus-(?:5(?:-5)?|4-8)(?:$|-20))/.test(model))
-  )
-    return { ...controls, speeds: ["standard", "fast"] };
-  return controls;
+  const controls = reasoningControls(choice.provider, choice.model);
+  const tiers = speedTiers(choice.provider, choice.model, choice.speedTiers === true);
+  return tiers.length
+    ? { ...controls, speeds: ["standard", ...tiers.map((tier) => tier.speed)] }
+    : controls;
 }
 function reasoningControls(provider: string, modelId: string): ModelControls {
   const model = modelId.toLowerCase();
@@ -240,7 +236,7 @@ export function modelOptionsProblem(
   model: string,
   raw: unknown,
   outputCap = 16000,
-  discovered?: DiscoveredControls,
+  discovered?: ModelControls,
 ): string | undefined {
   if (raw === undefined) return;
   const parsed = ModelOptions.safeParse(raw);
@@ -264,25 +260,53 @@ export function sameModelOptions(a?: ModelOptions, b?: ModelOptions): boolean {
     a?.speed === b?.speed
   );
 }
+type Wire = string | number | boolean | { readonly [key: string]: Wire };
+// Per million tokens, what a task set aside for a premium speed.
+export interface SpeedCap {
+  readonly inputUSDPerMTok: number;
+  readonly outputUSDPerMTok: number;
+}
+// Each provider's own name for a speed, under its client's options. OpenAI's Ultrafast is in its
+// Responses API only; an OpenAI-format custom endpoint's chat route gets the field as sent.
+// OpenRouter serves a premium request from a pricier endpoint only within the cap, else standard.
+function speedOptions(provider: string, speed: ModelSpeed, cap?: SpeedCap): Record<string, Wire> {
+  const spec = providerById(provider);
+  const tier = speed === "standard" ? "default" : speed === "fast" ? "priority" : "ultrafast";
+  if (provider === "anthropic") return { speed };
+  if (provider === "google") return { serviceTier: speed === "standard" ? "standard" : "priority" };
+  if (provider === "xai") return { serviceTier: tier };
+  if (provider === "openrouter")
+    return {
+      service_tier: speed === "fast" ? "fast" : tier,
+      ...(cap && speed !== "standard"
+        ? {
+            provider: {
+              max_price: { prompt: cap.inputUSDPerMTok, completion: cap.outputUSDPerMTok },
+            },
+          }
+        : {}),
+    };
+  if (provider === "openai" || (spec?.custom && spec.client === "openai"))
+    return { serviceTier: tier };
+  if (spec?.custom && spec.client === "openai-compatible") return { service_tier: tier };
+  return {};
+}
 // A closed translation table. No URLs, credentials, arbitrary body keys or sampling controls
 // can enter the request through settings. SDK adapters preserve signatures between tool turns.
 export function modelProviderOptions(
   provider: string,
   model: string,
   options?: ModelOptions,
-  discovered?: DiscoveredControls,
-): Record<string, string | number | boolean | Record<string, string | number | boolean>> {
+  discovered?: ModelControls,
+  cap?: SpeedCap,
+): Record<string, Wire> {
   if (!options) return {};
   const problem = modelOptionsProblem(provider, model, options, 16000, discovered);
   if (problem) throw new Error(problem);
   const c = modelControls(provider, model, discovered),
     e = options.reasoningEffort,
     budget = options.thinkingBudget;
-  const out: ReturnType<typeof modelProviderOptions> = {};
-  if (options.speed) {
-    if (provider === "openai") out.serviceTier = options.speed === "fast" ? "priority" : "default";
-    else if (provider === "anthropic") out.speed = options.speed;
-  }
+  const out: Record<string, Wire> = options.speed ? speedOptions(provider, options.speed, cap) : {};
   if (options.verbosity) out.textVerbosity = options.verbosity;
   if (e === undefined && budget === undefined) return out;
   switch (c.wire) {

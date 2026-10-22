@@ -27,6 +27,8 @@ export const AgentRoleChoice = z.strictObject({
   contextTokens: z.number().int().min(4_096).max(2_000_000).optional(),
   // A custom endpoint on a flat-rate plan: no per-token price, on a route keyd marks flat.
   plan: z.literal(true).optional(),
+  // A custom endpoint that takes OpenAI's service_tier, so its models offer Fast and Ultrafast.
+  speedTiers: z.literal(true).optional(),
 });
 export type AgentRoleChoice = z.infer<typeof AgentRoleChoice>;
 export const AgentDenyFolder = z

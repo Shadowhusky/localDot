@@ -401,8 +401,43 @@ describe("configuration validation before explicit save", () => {
     expect(validateForm(draft, saved, index, [{ id: "sonnet", name: "Sonnet" }])).toEqual({
       ok: false,
       problems: [
-        "Main: Claude Code is available for main only, without an API key or manual price.",
+        "Main: Claude Code works as the main or fast model, without an API key or manual price.",
       ],
+    });
+  });
+  it("saves a fast model on the main model's Claude Code plan, checked against the account", () => {
+    const index = providerFixture();
+    const saved = { main: { provider: "claude-code", model: "opus" } };
+    const account = [
+      { id: "opus", name: "Opus", speeds: ["fast"] as const },
+      { id: "haiku", name: "Haiku", efforts: ["low", "high"] as const, speeds: [] },
+    ];
+    const draft = formOf(saved);
+    draft.choices.fast = {
+      provider: "claude-code",
+      model: "haiku",
+      options: { reasoningEffort: "low" },
+    };
+    expect(validateForm(draft, saved, index, account)).toEqual({
+      ok: true,
+      document: { ...saved, fast: draft.choices.fast },
+    });
+    draft.choices.fast = { provider: "claude-code", model: "haiku", options: { speed: "fast" } };
+    expect(validateForm(draft, saved, index, account)).toMatchObject({ ok: false });
+    draft.choices.main = { provider: "claude-code", model: "opus", options: { speed: "fast" } };
+    draft.choices.fast = undefined;
+    expect(validateForm(draft, saved, index, account)).toMatchObject({ ok: true });
+  });
+  it("keeps a fast model that waits beside the main model, and checks it once it works again", () => {
+    const index = providerFixture();
+    index.keys = [];
+    const haiku = { provider: "claude-code", model: "haiku" };
+    const saved = { main: { provider: "claude-code", model: "opus" }, fast: haiku };
+    const draft = formOf(saved);
+    draft.choices.main = { provider: "ollama", model: "local" };
+    expect(validateForm(draft, saved, index)).toEqual({
+      ok: true,
+      document: { main: { provider: "ollama", model: "local" }, fast: haiku },
     });
   });
   it("reports every problem at once instead of the first one", () => {

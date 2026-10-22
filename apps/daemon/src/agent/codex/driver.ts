@@ -282,7 +282,8 @@ export class CodexDriver {
   }
   async run(
     session: AgentSession,
-    input: { model: string; options?: ModelOptions; resume: boolean },
+    // serviceTier: the account's own tier for the chosen speed, passed through as it lists it.
+    input: { model: string; options?: ModelOptions; serviceTier?: string; resume: boolean },
   ): Promise<number> {
     if (this.#blocked.has(session.id)) throw new CodexCleanupError();
     if (this.#running.has(session.id)) throw new Error("The ChatGPT task is already running.");
@@ -378,7 +379,10 @@ export class CodexDriver {
           generation,
           lease,
           input.model,
-          input.options,
+          {
+            ...(input.options?.reasoningEffort ? { effort: input.options.reasoningEffort } : {}),
+            ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+          },
           recap,
           next,
           redact,
@@ -561,7 +565,7 @@ export class CodexDriver {
     generation: BrainGeneration,
     lease: CodexDriverLease,
     model: string,
-    options: ModelOptions | undefined,
+    turnSettings: { effort?: string; serviceTier?: string },
     recap: boolean,
     suffix: string,
     redact: Redactor,
@@ -1108,8 +1112,7 @@ export class CodexDriver {
         "turn/start",
         {
           threadId: mainThread,
-          ...(options?.reasoningEffort ? { effort: options.reasoningEffort } : {}),
-          ...(options?.speed ? { serviceTier: options.speed === "fast" ? "fast" : "default" } : {}),
+          ...turnSettings,
           input: [
             { type: "text", text },
             { type: "image", url: `data:image/png;base64,${image.toString("base64")}` },

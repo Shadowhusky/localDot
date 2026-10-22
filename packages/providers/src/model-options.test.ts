@@ -1,6 +1,7 @@
 import { ModelOptions } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  choiceControls,
   modelControls,
   modelOptionsProblem,
   modelProviderOptions,
@@ -12,17 +13,103 @@ describe("model controls", () => {
   it("separates speed from effort and does not leak direct API tiers to gateways", () => {
     expect(modelControls("claude-code", "sonnet").efforts).toContain("xhigh");
     expect(modelControls("claude-code", "opus").efforts).toContain("max");
-    expect(modelControls("openai", "gpt-6-astra").speeds).toEqual(["standard", "fast"]);
+    expect(modelControls("openai", "gpt-6-astra").speeds).toEqual([
+      "standard",
+      "fast",
+      "ultrafast",
+    ]);
+    expect(modelControls("openai", "gpt-6-luna").speeds).toEqual(["standard", "fast"]);
     for (const provider of [
       "deepseek",
       "azure",
+      "groq",
       "openai-compatible",
       "openai-responses-compatible",
       "openrouter",
     ])
       expect(modelOptionsProblem(provider, "gpt-6-astra", { speed: "fast" })).toBeTruthy();
     expect(modelOptionsProblem("anthropic", "claude-opus-4-7", { speed: "fast" })).toBeTruthy();
+    expect(
+      modelOptionsProblem("anthropic", "claude-opus-5-5", { speed: "ultrafast" }),
+    ).toBeTruthy();
+    expect(modelOptionsProblem("openai", "gpt-6-luna", { speed: "ultrafast" })).toBeTruthy();
     expect(sameModelOptions({ speed: "standard" }, { speed: "fast" })).toBe(false);
+    expect(sameModelOptions({ speed: "fast" }, { speed: "ultrafast" })).toBe(false);
+  });
+  it("gives a custom endpoint speeds only when its user says it takes OpenAI's tiers", () => {
+    const sol = { provider: "openai-responses-compatible", model: "gpt-6.1-sol" };
+    expect(choiceControls(sol).speeds).toBeUndefined();
+    expect(choiceControls({ ...sol, speedTiers: true }).speeds).toEqual([
+      "standard",
+      "fast",
+      "ultrafast",
+    ]);
+    expect(choiceControls({ ...sol, speedTiers: true }).efforts).toEqual(
+      modelControls(sol.provider, sol.model).efforts,
+    );
+    expect(
+      choiceControls({ provider: "openai-compatible", model: "my-model", speedTiers: true }).speeds,
+    ).toEqual(["standard", "fast"]);
+    expect(
+      choiceControls({ provider: "anthropic-compatible", model: "glm-5.3", speedTiers: true })
+        .speeds,
+    ).toBeUndefined();
+  });
+  it("names each speed in each provider's own words", () => {
+    const wire = (provider: string, model: string, speed: "standard" | "fast" | "ultrafast") =>
+      modelProviderOptions(provider, model, { speed });
+    expect(wire("openai", "gpt-6.1-sol", "fast")).toEqual({ serviceTier: "priority" });
+    expect(wire("openai", "gpt-6.1-sol", "ultrafast")).toEqual({ serviceTier: "ultrafast" });
+    expect(wire("openai", "gpt-5.3-codex", "fast")).toEqual({ serviceTier: "priority" });
+    expect(wire("openai", "gpt-6.1-sol", "standard")).toEqual({ serviceTier: "default" });
+    expect(wire("anthropic", "claude-opus-5-5", "fast")).toEqual({ speed: "fast" });
+    expect(wire("google", "gemini-3.8-flash", "fast")).toEqual({ serviceTier: "priority" });
+    expect(wire("google", "gemini-3.8-flash", "standard")).toEqual({ serviceTier: "standard" });
+    expect(wire("xai", "grok-4.7", "fast")).toEqual({ serviceTier: "priority" });
+    expect(wire("openrouter", "openai/gpt-6.1-sol", "ultrafast")).toEqual({
+      service_tier: "ultrafast",
+    });
+    expect(
+      modelProviderOptions(
+        "openai-responses-compatible",
+        "my-model",
+        { speed: "ultrafast" },
+        { efforts: [], speeds: ["standard", "fast", "ultrafast"] },
+      ),
+    ).toEqual({ serviceTier: "ultrafast" });
+    expect(
+      modelProviderOptions(
+        "openai-compatible",
+        "my-model",
+        { speed: "fast" },
+        { efforts: [], speeds: ["standard", "fast"] },
+      ),
+    ).toEqual({ service_tier: "priority" });
+  });
+  it("caps an OpenRouter premium request at the rate the task set aside", () => {
+    const cap = { inputUSDPerMTok: 8, outputUSDPerMTok: 30 };
+    expect(
+      modelProviderOptions(
+        "openrouter",
+        "anthropic/claude-opus-4.8",
+        { speed: "fast", reasoningEffort: "high" },
+        undefined,
+        cap,
+      ),
+    ).toEqual({
+      service_tier: "fast",
+      provider: { max_price: { prompt: 8, completion: 30 } },
+      reasoning: { effort: "high" },
+    });
+    expect(
+      modelProviderOptions(
+        "openrouter",
+        "anthropic/claude-opus-4.8",
+        { speed: "standard" },
+        undefined,
+        cap,
+      ),
+    ).toEqual({ service_tier: "default" });
   });
   it.each(PROVIDERS.map((p) => p.id))(
     "%s preserves provider defaults and rejects invented controls",
@@ -60,7 +147,8 @@ describe("model controls", () => {
   });
   it("rejects unsafe or contradictory configuration and preserves the output reserve", () => {
     for (const options of [
-      { reasoningEffort: "ultra" },
+      { reasoningEffort: "extreme" },
+      { speed: "priority" },
       { temperature: 1 },
       { thinkingBudget: -1 },
       { reasoningEffort: "high", thinkingBudget: 2048 },
