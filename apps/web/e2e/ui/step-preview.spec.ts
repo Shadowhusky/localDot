@@ -17,7 +17,10 @@ for (const surface of ["activity", "chat"] as const) {
       .locator(surface === "chat" ? ".thread-work-list" : ".activity-rail")
       .getByTestId("tool-row")
       .filter({ hasText: "read flower-poster/assets/hero1.jpg" });
-    await row.getByRole("button", { name: /read flower-poster/ }).click();
+    const step = row.getByRole("button", { name: /read flower-poster/ });
+    // Centred first: at the thread's foot the floating Latest button would take the press.
+    await step.evaluate((node) => node.scrollIntoView({ block: "center" }));
+    await step.click();
     const image = row.getByRole("img", { name: "~/flower-poster/assets/hero1.jpg" });
     await expect(image).toBeVisible();
     await image.scrollIntoViewIfNeeded();

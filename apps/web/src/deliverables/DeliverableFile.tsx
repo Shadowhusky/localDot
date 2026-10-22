@@ -1,5 +1,5 @@
 import { canOpenOnMac, type FileVersion, fileKind, viewerKind } from "@localdot/protocol";
-import { type Ref, useId, useRef, useState } from "react";
+import { type Ref, useCallback, useId, useRef, useState } from "react";
 import type { AgentResult } from "../agent/model.ts";
 import type { FileState, ResultDownloads } from "../agent/ResultFiles.tsx";
 import { bytes } from "../copy/format.ts";
@@ -44,6 +44,8 @@ export interface DeliverableFileProps {
   onMac: boolean;
   // Revise goes to the composer; without one in reach it is not offered.
   revisable?: boolean;
+  // One line, as in the chat, where an image shows its own picture on the row's tile.
+  compact?: boolean;
 }
 
 // A file dot handed over: a row to open its preview, download it or open it on the Mac, and under
@@ -60,9 +62,18 @@ export function DeliverableFile({
   defaultOpen = false,
   onMac,
   revisable = true,
+  compact = false,
 }: DeliverableFileProps) {
   const panel = useId();
-  const body = useRef<HTMLDivElement>(null);
+  const row = useRef<HTMLLIElement | null>(null);
+  const attach = useCallback(
+    (node: HTMLLIElement | null) => {
+      row.current = node;
+      if (typeof measure === "function") measure(node);
+      else if (measure) measure.current = node;
+    },
+    [measure],
+  );
   const [open, setOpen] = useState(defaultOpen);
   const [shown, setShown] = useState<ShownVersion>({ sessionId, version: file.version ?? null });
   const [attempt, setAttempt] = useState(0);
@@ -81,13 +92,15 @@ export function DeliverableFile({
       : undefined);
   const newest = !current || current === versions.at(-1);
   const kind = fileKind(file.name);
+  // The tile's picture is the preview itself, so it loads while the row is closed.
+  const picture = compact && kind === "image";
   const preview = usePreview(
     api,
-    body,
+    row,
     shown.sessionId,
     file.name,
     shown.version,
-    open && (kind !== "attachment" || viewerKind(file.name) === "details"),
+    (open || picture) && (kind !== "attachment" || viewerKind(file.name) === "details"),
     attempt,
   );
   const pair = comparePair(file.name, versions, current);
@@ -130,10 +143,14 @@ export function DeliverableFile({
         : undefined;
 
   return (
-    <li ref={measure} data-index={index} className="deliverable" aria-label={file.name}>
+    <li ref={attach} data-index={index} className="deliverable" aria-label={file.name}>
       <FileRow
         name={file.name}
         meta={meta}
+        compact={compact}
+        thumbnail={
+          picture && preview.state === "image" && <img src={preview.url} alt="" draggable={false} />
+        }
         expanded={open}
         controls={panel}
         toggleLabel={`${open ? "Hide" : "Show"} ${file.name}`}
@@ -186,7 +203,7 @@ export function DeliverableFile({
         }
       />
       <Collapse id={panel} open={open} className="deliverable-panel">
-        <div ref={body} className="deliverable-body">
+        <div className="deliverable-body">
           <FilePreview
             state={preview}
             kind={kind}

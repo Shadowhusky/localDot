@@ -33,10 +33,4 @@ export function versionDetail(v: FileVersion, now = Date.now()): string {
   return `${timeLabel(ulidTime(v.sessionId) + v.tMs, now)} · ${bytes(v.bytes)}`;
 }
 
-// A result with a few files shows each one's preview; with more, only the first that has one.
-export function opensAtFirst(names: readonly string[], index: number): boolean {
-  if (names.length <= 3) return true;
-  return index === names.findIndex((name) => fileKind(name) !== "attachment");
-}
-
 export const previewable = (kind: FileKind) => kind !== "attachment";

@@ -90,10 +90,11 @@ function fakeRevise(
   };
 }
 
-// /__qa/files hands over one file of every kind; /__qa/revise answers a follow-up with v2 of
-// totals.csv; /__qa/previews hands over real files of every kind the full preview shows, the page
-// and the SVG carrying scripts that would call /__qa/canary if they ever ran. ?probe=<port> also
-// points the page's connection hints and links at that port, for a listener counting connections.
+// /__qa/files hands over one file of every kind (?count=<n>, the first n); /__qa/revise answers a
+// follow-up with v2 of totals.csv; /__qa/previews hands over real files of every kind the full
+// preview shows, the page and the SVG carrying scripts that would call /__qa/canary if they ever
+// ran. ?probe=<port> also points the page's connection hints and links at that port, for a listener
+// counting connections.
 export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
   const outputs = new OutputStore(f.home);
   const observe = (s: AgentSession, step: string, n: number) => {
@@ -139,7 +140,7 @@ export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
     })
       .png()
       .toBuffer();
-    hand(s, "Here are the sample files.", {
+    const files = Object.entries({
       "chart.png": chart,
       "totals.csv": "Month,Net\nNov,11800\nDec,12000\n",
       "notes.md": "# Sample notes\n\n- Totals checked\n- Chart attached\n",
@@ -149,6 +150,8 @@ export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
       "diagram.svg": '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
       "page.html": "<script>alert(1)</script>",
     });
+    const count = Number(c.req.query("count") ?? files.length);
+    hand(s, "Here are the sample files.", Object.fromEntries(files.slice(0, count)));
     return c.json({ ok: true });
   });
   app.get("/__qa/canary", (c) => {

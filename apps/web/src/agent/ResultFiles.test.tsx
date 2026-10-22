@@ -93,6 +93,8 @@ describe("user-activated inert result downloads", () => {
         ]}
       />,
     );
+    // The first three show and the rest are one press away.
+    fireEvent.click(screen.getByText("Show 29 more"));
     expect(screen.getAllByRole("button", { name: /^Download report-/ })).toHaveLength(32);
     expect(downloadsOf(fetchImpl)).toEqual([]);
     expect(created).not.toHaveBeenCalled();
@@ -237,6 +239,101 @@ describe("the result card", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download all 2 files" }));
     await waitFor(() => expect(clicked).toHaveBeenCalledTimes(2));
     expect(downloadsOf(fetchImpl).map((url) => url.split("/").at(-1))).toEqual(["a.txt", "b.txt"]);
+  });
+
+  it("starts every preview closed and folds the files after the first three", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("not found", { status: 404 }));
+    const files = ["a.md", "b.csv", "c.txt", "d.md", "e.md"].map((name) => ({
+      name,
+      path: name,
+      bytes: 1,
+    }));
+    render(
+      <ResultFiles
+        api={apiFor(fetchImpl)}
+        sessionId={SESSION}
+        results={[{ id: "r", summary: "Five files", files }]}
+      />,
+    );
+    const list = screen.getByRole("list", { name: "Files in result r" });
+    const rows = () => list.querySelectorAll(":scope > li");
+    expect(rows()).toHaveLength(3);
+    expect(
+      [...list.querySelectorAll("[aria-expanded]")].map((row) => [
+        row.getAttribute("aria-label"),
+        row.getAttribute("aria-expanded"),
+      ]),
+    ).toEqual([
+      ["Show a.md", "false"],
+      ["Show b.csv", "false"],
+      ["Show c.txt", "false"],
+    ]);
+    const more = screen.getByRole("button", { name: "Show 2 more files" });
+    expect(more.textContent).toBe("Show 2 more");
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    expect(more.getAttribute("aria-controls")).toBe(list.id);
+    fireEvent.click(more);
+    expect(rows()).toHaveLength(5);
+    expect(more.getAttribute("aria-label")).toBe("Show fewer files");
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(more);
+    expect(rows()).toHaveLength(3);
+    await act(async () => {});
+    const asked = fetchImpl.mock.calls.map((call) => String(call[0]));
+    expect(asked.filter((url) => url.includes("/preview"))).toEqual([]);
+  });
+
+  it("lists four files whole rather than fold away one", () => {
+    const files = ["a.md", "b.md", "c.md", "d.md"].map((name) => ({ name, path: name, bytes: 1 }));
+    render(
+      <ResultFiles
+        api={apiFor(vi.fn<typeof fetch>(async () => new Response("", { status: 404 })))}
+        sessionId={SESSION}
+        results={[{ id: "r", summary: "Four files", files }]}
+      />,
+    );
+    expect(
+      screen.getByRole("list", { name: "Files in result r" }).querySelectorAll(":scope > li"),
+    ).toHaveLength(4);
+    expect(screen.queryByText(/^Show \d+ more$/)).toBeNull();
+  });
+
+  it("puts an image's own picture on its tile while its row stays closed", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (url) =>
+      String(url).includes("/chart.png/preview")
+        ? new Response(new Uint8Array([137, 80, 78, 71]), {
+            headers: { "content-type": "image/png" },
+          })
+        : new Response("not found", { status: 404 }),
+    );
+    const { container } = render(
+      <ResultFiles
+        api={apiFor(fetchImpl)}
+        sessionId={SESSION}
+        results={[
+          {
+            id: "r",
+            summary: "A chart and its notes",
+            files: [
+              { name: "chart.png", path: "chart.png", bytes: 4 },
+              { name: "notes.md", path: "notes.md", bytes: 1 },
+            ],
+          },
+        ]}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".ui-file-tile > img")?.getAttribute("src")).toBe(
+        "blob:owned-result",
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Show chart.png" }).getAttribute("aria-expanded"),
+    ).toBe("false");
+    expect(
+      fetchImpl.mock.calls.map((call) => String(call[0])).filter((url) => url.includes("/preview")),
+    ).toEqual([`http://127.0.0.1:4747/api/agent/sessions/${SESSION}/files/chart.png/preview`]);
+    expect(downloadsOf(fetchImpl)).toEqual([]);
   });
 
   it("still lists a result's files, with nothing to do, when its task is gone", () => {

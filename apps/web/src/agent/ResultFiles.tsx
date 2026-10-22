@@ -2,6 +2,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -10,9 +11,8 @@ import {
 import { bytes, count } from "../copy/format.ts";
 import { downloadVersion, isLoopbackPage } from "../deliverables/api.ts";
 import { DeliverableFile } from "../deliverables/DeliverableFile.tsx";
-import { ProofStrip, proofOf } from "../deliverables/ProofStrip.tsx";
+import { ProofStrip, ReplayRow } from "../deliverables/ProofStrip.tsx";
 import { useProof } from "../deliverables/useProof.ts";
-import { opensAtFirst } from "../deliverables/versions.ts";
 import { FileViewerScope, type ViewerEntry } from "../deliverables/viewer/scope.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
@@ -42,6 +42,8 @@ interface Selection {
 export type FileState = "busy" | "done" | "failed";
 // How long a finished download shows its check.
 const DONE_MS = 1500;
+// A result shows this many files and folds the rest behind Show more, unless that would fold one.
+const FOLD_AFTER = 3;
 
 const fileKey = (resultId: string, file: ResultFile) => `${resultId}/${file.name}`;
 const valid = (file: ResultFile) =>
@@ -291,7 +293,8 @@ export interface ResultCardProps {
   revisable?: boolean;
 }
 
-// A result: what dot says it did, the files it handed over, and the proof of the work.
+// A result: what dot says it did, the files it handed over, and the proof of the work. In the chat
+// it stays short: one line a file, previews closed, and the files after the first few folded away.
 export function ResultCard({
   result,
   downloads,
@@ -303,6 +306,10 @@ export function ResultCard({
   const files = result.files;
   const api = downloads.api;
   const task = result.sessionId ?? downloads.sessionId;
+  const list = useId();
+  const [unfolded, setUnfolded] = useState(false);
+  const folds = files.length > FOLD_AFTER + 1;
+  const shown = folds && !unfolded ? files.slice(0, FOLD_AFTER) : files;
   const entries = useMemo<ViewerEntry[]>(
     () =>
       task
@@ -332,11 +339,7 @@ export function ResultCard({
       Download all
     </Button>
   );
-  const replay = onReplay && (
-    <Button variant="quiet" size="sm" icon="play" aria-label="Replay this task" onClick={onReplay}>
-      Replay
-    </Button>
-  );
+  const folded = files.length - FOLD_AFTER;
   return (
     <section className="result-card" aria-label="Task result">
       {result.summary && (
@@ -353,8 +356,8 @@ export function ResultCard({
             </div>
           )}
           <ViewerScope api={api} entries={entries} downloads={downloads} onMac={onMac}>
-            <ul className="deliverables" aria-label={`Files in result ${result.id}`}>
-              {files.map((file, index) =>
+            <ul id={list} className="deliverables" aria-label={`Files in result ${result.id}`}>
+              {shown.map((file, index) =>
                 valid(file) && api && task ? (
                   <DeliverableFile
                     key={`${file.name}/${file.version ?? 0}`}
@@ -364,12 +367,9 @@ export function ResultCard({
                     file={file}
                     downloads={downloads}
                     refresh={refresh}
-                    defaultOpen={opensAtFirst(
-                      files.map((f) => f.name),
-                      index,
-                    )}
                     onMac={onMac}
                     revisable={revisable}
+                    compact
                   />
                 ) : valid(file) ? (
                   // Without its task the file is still listed, with nothing it can do.
@@ -377,6 +377,7 @@ export function ResultCard({
                     <FileRow
                       name={file.name}
                       meta={bytes(file.bytes)}
+                      compact
                       actions={
                         <IconButton
                           icon="download"
@@ -389,18 +390,40 @@ export function ResultCard({
                 ) : (
                   // biome-ignore lint/suspicious/noArrayIndexKey: an unsafe name is never shown or used as a key.
                   <li key={index} className="deliverable">
-                    <FileRow name="Unavailable file" meta="Can't be downloaded" />
+                    <FileRow name="Unavailable file" meta="Can't be downloaded" compact />
                   </li>
                 ),
               )}
             </ul>
           </ViewerScope>
+          {folds && (
+            <div className="deliverables-more">
+              <Button
+                variant="quiet"
+                size="sm"
+                aria-expanded={unfolded}
+                aria-controls={list}
+                aria-label={
+                  unfolded ? "Show fewer files" : `Show ${count(folded, "more file", "more files")}`
+                }
+                onClick={() => setUnfolded((was) => !was)}
+              >
+                {unfolded ? "Show fewer" : `Show ${folded.toLocaleString()} more`}
+              </Button>
+            </div>
+          )}
         </Card>
       )}
       {api && task ? (
-        <ResultProof api={api} task={task} resultId={result.id} refresh={refresh} replay={replay} />
+        <ResultProof
+          api={api}
+          task={task}
+          resultId={result.id}
+          refresh={refresh}
+          onReplay={onReplay}
+        />
       ) : (
-        replay && <div className="proof-actions">{replay}</div>
+        onReplay && <ReplayRow onReplay={onReplay} />
       )}
     </section>
   );
@@ -411,26 +434,16 @@ function ResultProof({
   task,
   resultId,
   refresh,
-  replay,
+  onReplay,
 }: {
   api: ApiClient;
   task: string;
   resultId: string;
   refresh: number;
-  replay: ReactNode;
+  onReplay?: () => void;
 }) {
   const proof = useProof(api, task, refresh);
-  // Without its proof, the result still opens its task in Replay.
-  const missing =
-    proof.state === "failed" || (proof.state === "ready" && !proofOf(proof, resultId));
-  if (missing && !replay) return null;
   return (
-    <ProofStrip
-      api={api}
-      sessionId={task}
-      resultId={resultId}
-      proof={proof}
-      end={missing ? replay : undefined}
-    />
+    <ProofStrip api={api} sessionId={task} resultId={resultId} proof={proof} onReplay={onReplay} />
   );
 }

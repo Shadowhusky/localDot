@@ -141,17 +141,35 @@
   }
 
   .ui-file-tile {
+    position: relative;
     display: grid;
     flex-shrink: 0;
     place-items: center;
     width: calc(var(--spacing) * 8);
     height: calc(var(--spacing) * 8);
+    overflow: hidden;
     border-radius: var(--radius-row);
     background-color: var(--color-raised-2);
     color: var(--color-fg-2);
     font:
       var(--font-weight-semibold) var(--text-tile) / var(--text-tile--line-height) var(--font-ui);
     letter-spacing: 0.04em;
+  }
+
+  /* A picture covers the tile once it arrives: an image's own, or a recording's last moment. */
+  .ui-file-tile > :is(img, video, canvas, [role="img"]) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  @starting-style {
+    .ui-file-tile > img {
+      opacity: 0;
+    }
   }
 
   .ui-file-text {
@@ -192,6 +210,61 @@
     flex-shrink: 0;
     align-items: center;
     gap: calc(var(--spacing) * 1.5);
+  }
+
+  /* Compact: one line 40 px tall, the meta beside the name and a 30 px tile, untracked so a four
+     letter type such as DOCX still fits. */
+  .ui-file-row[data-compact] {
+    min-height: calc(var(--spacing) * 10);
+    padding-block: 0;
+  }
+
+  .ui-file-row[data-compact] .ui-file-tile {
+    width: calc(var(--spacing) * 7.5);
+    height: calc(var(--spacing) * 7.5);
+    border-radius: var(--radius-sm);
+    letter-spacing: 0;
+  }
+
+  .ui-file-row[data-compact] .ui-file-text {
+    display: flex;
+    align-items: baseline;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .ui-file-row[data-compact] .ui-file-meta {
+    flex-shrink: 0;
+  }
+
+  /* A recording keeps its title whole and lets the line beside it give way. Its poster is as wide
+     as a chevron and a tile, so the title starts where the file names do. */
+  .ui-file-row[data-play] .ui-file-name {
+    flex-shrink: 0;
+  }
+
+  .ui-file-row[data-play] .ui-file-meta {
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  .ui-file-row[data-play] .ui-file-tile {
+    width: calc(var(--spacing) * 12);
+    box-shadow: var(--shadow-thumbnail);
+  }
+
+  /* The play glyph on a porcelain disc, as on Replay's poster. */
+  .ui-file-play {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    width: calc(var(--spacing) * 5);
+    height: calc(var(--spacing) * 5);
+    margin: auto;
+    border-radius: var(--radius-full);
+    background-image: var(--porcelain);
+    box-shadow: var(--shadow-porcelain-sm);
+    color: var(--color-porcelain-ink);
   }
 
   /* A picture to press, such as a moment of a recording. */
@@ -1061,6 +1134,16 @@
     }
     .ui-file-actions .ui-button[data-size="sm"]::after {
       inset: calc(var(--spacing) * -1.5) -1px;
+    }
+    /* A compact row is a finger tall; its buttons keep their drawn size and reach its edges. */
+    .ui-file-row[data-compact] {
+      min-height: calc(var(--spacing) * 11);
+    }
+    .ui-file-row[data-compact] .ui-file-actions .ui-button[data-size="sm"] {
+      min-height: 0;
+    }
+    .ui-file-row[data-compact] .ui-file-actions .ui-button[data-size="sm"]::after {
+      inset: calc(-1px - var(--spacing) * 2) -1px;
     }
   }
 }

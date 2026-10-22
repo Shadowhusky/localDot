@@ -123,6 +123,42 @@ describe("a handed-over file", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Turn on your computer to preview this file.")).toBeTruthy();
   });
+  it("loads no picture for a closed row outside the chat, and one for a compact row", async () => {
+    const d = daemon({
+      "/versions": () => versions("chart.png", 1),
+      "/preview?v=1": () =>
+        new Response(new Uint8Array([137, 80]), { headers: { "content-type": "image/png" } }),
+    });
+    const row = (compact: boolean) =>
+      render(
+        <ul>
+          <DeliverableFile
+            api={d.api}
+            sessionId={ID}
+            resultId={RESULT}
+            file={{ name: "chart.png", path: "Documents/chart.png", bytes: 10, version: 1 }}
+            downloads={downloads}
+            refresh={1}
+            onMac={false}
+            compact={compact}
+          />
+        </ul>,
+      );
+    const activity = row(false);
+    await waitFor(() => expect(d.calls.some((path) => path.endsWith("/versions"))).toBe(true));
+    expect(d.calls.some((path) => path.includes("/preview"))).toBe(false);
+    expect(activity.container.querySelector(".ui-file-tile img")).toBeNull();
+    cleanup();
+    const chat = row(true);
+    await waitFor(() =>
+      expect(chat.container.querySelector(".ui-file-tile img")?.getAttribute("src")).toBe(
+        "blob:preview",
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Show chart.png" }).getAttribute("aria-expanded"),
+    ).toBe("false");
+  });
   it("hides and shows its preview from its row", async () => {
     const d = daemon({
       "/versions": () => versions("notes.md", 1),

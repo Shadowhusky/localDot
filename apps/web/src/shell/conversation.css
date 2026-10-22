@@ -882,9 +882,18 @@
   align-items: center;
   justify-content: space-between;
   gap: calc(var(--spacing) * 2);
-  height: calc(var(--spacing) * 9);
+  min-height: calc(var(--spacing) * 8);
   padding: 0 0 0 calc(var(--spacing) * 2);
   box-shadow: inset 0 -1px 0 var(--color-separator);
+}
+
+/* Under them, Show more: its words start where the file names do. */
+.deliverables-more {
+  display: flex;
+  align-items: center;
+  min-height: calc(var(--spacing) * 8);
+  padding-left: calc(var(--spacing) * 13.5);
+  box-shadow: inset 0 1px 0 var(--color-separator);
 }
 
 .deliverables-count {
@@ -1062,45 +1071,25 @@
   margin-left: auto;
 }
 
-/* The proof: three moments of the recording, what dot checked, and the way to watch or export it. */
+/* The proof: one row under the files, set in as far as their rows are. */
 .proof {
-  display: grid;
-  gap: calc(var(--spacing) * 2);
   min-width: 0;
+  margin-top: calc(var(--spacing) * -1);
+  padding-inline: var(--spacing);
 }
 
-.proof-frames {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: calc(var(--spacing) * 2);
-  list-style: none;
-}
-
-.proof-frame {
-  display: grid;
-  gap: calc(var(--spacing) * 1.5);
-  min-width: 0;
-}
-
-.proof-caption {
-  color: var(--color-fg-3);
-  font:
-    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
-    var(--font-ui);
-  letter-spacing: var(--text-footnote--letter-spacing);
-}
-
+/* What dot checked, beside the replay's length: its end gives way, and its words, not its glyph,
+   share the title's baseline. */
 .proof-checked {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: calc(var(--spacing) * 1.5);
   min-width: 0;
-  color: var(--color-fg-2);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .proof-checked-icon {
   flex-shrink: 0;
+  align-self: center;
 }
 
 .proof-checked-text {
@@ -1108,20 +1097,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Quiet buttons line their ink up with the text above; anything for the whole result sits at the end. */
-.proof-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: calc(var(--spacing) * 1.5);
-  margin: 0 calc(var(--spacing) * -2.5);
-}
-
-.proof-end {
-  display: flex;
-  margin-left: auto;
 }
 
 .compare-body {
