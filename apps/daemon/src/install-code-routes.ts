@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
-import type { AccessLinks } from "./access-links.ts";
-import { configuredAccessOrigins, isPublicOrigin } from "./guard.ts";
+import { type AccessLinks, accessAddresses } from "./access-links.ts";
+import { isPublicOrigin } from "./guard.ts";
 import { InstallCodeCapacityError, type InstallCodes } from "./install-codes.ts";
 
 const MAX_BODY_BYTES = 128;
@@ -18,22 +18,14 @@ export function installCodeRoutes(
 ): void {
   app.get("/api/access-links", async (c) => {
     c.header("cache-control", "no-store");
-    if (access) return c.json(await access.read());
+    if (access) return c.json(await access.read(c.req.query("fresh") === "1"));
     return c.json({
-      links: [
-        {
-          origin: `http://localhost:${port}`,
-          label: "This computer",
-          description: "Works only on the computer running localDot.",
-        },
-        ...configuredAccessOrigins().map((origin) => ({
-          origin,
-          label: new URL(origin).hostname.endsWith(".ts.net") ? "Tailscale" : "Remote address",
-          description: new URL(origin).hostname.endsWith(".ts.net")
-            ? "Connect your other device to the same Tailscale network."
-            : "Use this configured address from another device.",
-        })),
-      ],
+      links: accessAddresses(port),
+      tailscale: {
+        state: "unavailable",
+        reason: "failed",
+        message: "This localDot doesn't check Tailscale.",
+      },
     });
   });
   app.post("/api/access-links/tailscale", async (c) => {
@@ -41,10 +33,7 @@ export function installCodeRoutes(
     try {
       return c.json(await access.enableTailscale());
     } catch {
-      return c.text(
-        "Tailscale could not be enabled. Check Tailscale is signed in and HTTPS is enabled, then try again.",
-        503,
-      );
+      return c.text("Tailscale couldn't be turned on. Check Tailscale, then try again.", 503);
     }
   });
   app.post("/api/install-code", (c) => {

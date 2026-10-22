@@ -1,3 +1,4 @@
+import type { AccessLinksStatus } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
 import type { EventLog } from "./event-log.ts";
@@ -299,13 +300,14 @@ it("lists only the local address and configured fronts, without issuing a creden
       headers: { authorization: `Bearer ${TOKEN}` },
     });
     expect(result.headers.get("cache-control")).toBe("no-store");
-    const value = (await result.json()) as { links: { origin: string; label: string }[] };
+    const value = (await result.json()) as AccessLinksStatus;
     expect(value.links.map((link: { origin: string }) => link.origin)).toEqual([
       "http://localhost:4750",
       "https://computer.tail123.ts.net:4750",
       "https://dot.example.test",
     ]);
     expect(value.links[1]?.label).toBe("Tailscale");
+    expect(value.tailscale.state).toBe("unavailable");
     expect(JSON.stringify(value)).not.toContain(TOKEN);
     expect(JSON.stringify(value)).not.toContain("#code");
   } finally {

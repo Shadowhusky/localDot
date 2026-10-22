@@ -595,8 +595,9 @@ const appUpdater = serviceIdentity
   : await sourceAppUpdater(home, process.env.LOCALDOT_INSTALL_PREFIX, installWait, installSettled);
 appUpdater.start();
 shutdown.unshift({ name: "app updater", stop: () => appUpdater.close() });
-const accessLinks = new AccessLinks(port);
+const accessLinks = new AccessLinks(port, home);
 void accessLinks.read().catch(() => {});
+shutdown.push({ name: "access links", stop: () => accessLinks.close() });
 const app = createApp({
   remoteAccess,
   appUpdater,

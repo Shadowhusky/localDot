@@ -72,7 +72,10 @@ owner key, preventing another installation from claiming it. A separate pairing 
 app traffic, and the daemon still checks its own bearer token or stream ticket. A fresh app sign-in
 uses the existing one-use, one-minute installation code. Pairing secrets are transmitted in URL
 fragments, removed immediately, then exchanged for a Secure/HttpOnly/SameSite cookie. No secrets
-are placed in URL query strings. Turning remote access off rotates the pairing secret.
+are placed in URL query strings. Turning remote access off rotates the pairing secret. A page opened
+from another site, such as the localDot menu on localhost or a tailnet address, arrives without that
+Strict cookie, so the relay answers it once with a same-origin refresh to the same address: a paired
+browser arrives signed in and an unpaired one gets the pair page.
 
 The host connector can reach only its own loopback daemon port; it is not an arbitrary destination
 proxy. Request Origin is checked, hop-by-hop and forwarding headers are rebuilt, the daemon's

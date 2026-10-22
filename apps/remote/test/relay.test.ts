@@ -192,6 +192,55 @@ test("real Worker relay: pairing, HTTP streaming, WebSockets, isolation and revo
   const cookie = paired.headers.get("set-cookie")?.split(";")[0];
   assert.ok(cookie);
   assert.match(paired.headers.get("set-cookie") ?? "", /HttpOnly; SameSite=Strict/);
+  // The localDot menu on localhost or a tailnet address opens this origin from another site, where
+  // the Strict cookie stays behind; the same address requested again by this origin carries it.
+  // Miniflare's dispatch sets its own Sec-Fetch-Mode and restores the one given in MF-Sec-Fetch-Mode.
+  const navigate = (path: string, more: Record<string, string> = {}) =>
+    call(path, {
+      headers: {
+        "sec-fetch-site": "cross-site",
+        "mf-sec-fetch-mode": "navigate",
+        "sec-fetch-dest": "document",
+        ...more,
+      },
+    });
+  const bounced = await navigate("/?x=1&y=<2>");
+  assert.equal(bounced.status, 200);
+  assert.equal(bounced.headers.get("referrer-policy"), "same-origin");
+  assert.equal(
+    bounced.headers.get("content-security-policy"),
+    "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+  );
+  assert.ok(
+    (await bounced.text()).includes(
+      `<meta http-equiv="refresh" content="0;url=${origin}/?x=1&#38;y=%3C2%3E">`,
+    ),
+  );
+  assert.ok(
+    (await (await navigate("//attacker.example/x")).text()).includes(
+      `content="0;url=${origin}//attacker.example/x"`,
+    ),
+    "the bounce never leaves this origin",
+  );
+  assert.match(
+    await (await navigate("/", { referer: `${origin}/` })).text(),
+    /isn't connected to this localDot yet/,
+    "a visit bounces once: what this origin's page asked for gets the pair page",
+  );
+  assert.match(await (await navigate("/_remote/pair")).text(), /Connect to localDot/);
+  assert.equal(
+    await (await navigate("/", { cookie })).text(),
+    "unauthorized",
+    "a paired request reaches the computer",
+  );
+  assert.match(
+    await (
+      await call("/replay/1", {
+        headers: { "sec-fetch-site": "same-origin", "mf-sec-fetch-mode": "navigate" },
+      })
+    ).text(),
+    /Connect to localDot/,
+  );
   const headers = { cookie, authorization: "Bearer test-token", origin };
   assert.equal(await (await call("/slow-response", { headers })).text(), "firstsecond");
   assert.match(

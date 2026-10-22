@@ -12,7 +12,7 @@ import {
   type Open,
   SECRET,
 } from "../../../packages/protocol/src/remote-wire.ts";
-import { pairPage } from "./pair-page.ts";
+import { bouncePage, crossSiteEntry, pairPage } from "./pair-page.ts";
 
 const COOKIE = "__Host-localdot-remote";
 const encoder = new TextEncoder();
@@ -202,7 +202,10 @@ export class DeviceRelay extends DurableObject<Env> {
         .find((v) => v.startsWith(`${COOKIE}=`))
         ?.slice(COOKIE.length + 1) ?? "";
     if (!SECRET.test(key) || !same(await digest(key), state.access)) {
-      return request.method === "GET" && url.pathname === "/" && !upgrade
+      if (crossSiteEntry(request, url)) return bouncePage(url);
+      return request.method === "GET" &&
+        !upgrade &&
+        (url.pathname === "/" || request.headers.get("sec-fetch-mode") === "navigate")
         ? pairPage()
         : reply("Pair this browser from localDot Settings", 401);
     }

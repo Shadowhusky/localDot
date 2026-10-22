@@ -1070,9 +1070,16 @@
   margin-top: calc(var(--spacing) * 3);
 }
 
-.settings-access-origin {
-  max-width: 100%;
-  overflow-wrap: anywhere;
+.settings-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+/* A command to run in a terminal: one press selects all of it. */
+.settings-command {
+  margin-inline: calc(var(--spacing) * 3.5);
+  user-select: all;
 }
 
 /* Known feedback states share a grid cell: wrapping text reserves its real height at any width. */

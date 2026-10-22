@@ -129,8 +129,10 @@ export function createApp({
   app.use("*", async (c, next) => {
     const urlHost = new URL(c.req.url).host;
     const rawHost = c.req.header("host") ?? urlHost;
-    if (!isAllowedHost(rawHost, port) || !isAllowedHost(urlHost, port)) {
-      return c.text("forbidden host", 403);
+    const allowed = () => isAllowedHost(rawHost, port) && isAllowedHost(urlHost, port);
+    if (!allowed()) {
+      await accessLinks?.recheck(rawHost);
+      if (!allowed()) return c.text("forbidden host", 403);
     }
     if (!isAllowedOrigin(c.req.header("origin"), port)) return c.text("forbidden origin", 403);
     await next();
