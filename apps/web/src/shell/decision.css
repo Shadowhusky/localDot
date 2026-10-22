@@ -274,7 +274,6 @@
   place-items: center;
   flex: none;
   height: 24px;
-  touch-action: none;
   cursor: ns-resize;
 }
 .decision-sheet-expand {

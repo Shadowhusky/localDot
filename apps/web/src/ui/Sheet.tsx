@@ -374,6 +374,7 @@ function SheetLayer({
     asking,
     sidebar: placement === "inspector" ? sidebar : undefined,
     doneLabel: placement === "bottom" ? doneLabel : undefined,
+    grip: placement === "bottom",
   };
   return (
     <LayerPortal kind="sheet" closing={closing} rootRef={root} className="ui-sheet-layer">
@@ -397,7 +398,7 @@ function SheetLayer({
         data-behind={behind ? "" : undefined}
       >
         {placement === "bottom" && (
-          <div className="ui-sheet-handle">
+          <div className="ui-sheet-handle" data-sheet-grip="">
             <div className="ui-sheet-grabber" aria-hidden="true" />
           </div>
         )}
@@ -450,6 +451,8 @@ interface SheetPageProps {
   asking: boolean;
   sidebar?: ReactNode;
   doneLabel?: string;
+  // A bottom sheet is picked up by its header as well as its grabber.
+  grip: boolean;
 }
 
 // A page keeps its key while it is held or slides away, so what it holds keeps its state.
@@ -465,6 +468,7 @@ function SheetPage({
   asking,
   sidebar,
   doneLabel,
+  grip,
 }: SheetPageProps) {
   return (
     <div
@@ -475,7 +479,7 @@ function SheetPage({
       data-direction={view.direction}
       inert={held || leaving}
     >
-      <header className="ui-sheet-header">
+      <header className="ui-sheet-header" data-sheet-grip={grip ? "" : undefined}>
         <div className="ui-sheet-heading">
           {view.back && (
             <Button

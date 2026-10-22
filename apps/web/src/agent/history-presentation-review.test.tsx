@@ -58,6 +58,7 @@ it("preserves selected Activity text while a reader scrolls within the current h
     scrollHeight: { configurable: true, value: 10_000 },
     clientHeight: { configurable: true, value: 600 },
   });
+  fireEvent.wheel(pane, { deltaY: -120 });
   pane.scrollTop = 100;
   fireEvent.scroll(pane);
   const selected = screen.getByText("Reading step 80");

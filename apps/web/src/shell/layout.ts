@@ -165,12 +165,13 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
   }, [page, handheld]);
 }
 
-// How much of the page's foot the on-screen keyboard covers, so a sheet can rest on top of it.
+// How much of the page's foot the on-screen keyboard covers, so a sheet can rest on top of it. Less
+// than a keyboard is Safari's toolbars coming and going, which cover nothing.
 function keyboardInset(): number {
   const view = window.visualViewport;
-  return view && view.scale === 1
-    ? Math.max(0, Math.round(window.innerHeight - view.height - view.offsetTop))
-    : 0;
+  if (view?.scale !== 1) return 0;
+  const inset = Math.round(window.innerHeight - view.height - view.offsetTop);
+  return inset >= KEYBOARD_PX ? inset : 0;
 }
 
 export function useKeyboardInset(): number {

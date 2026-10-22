@@ -460,7 +460,8 @@
     flex-shrink: 0;
   }
 
-  .ui-sheet[data-side="bottom"] .ui-sheet-handle {
+  /* What picks a bottom sheet up (sheet-drag.ts) pans and selects nothing. */
+  [data-sheet-grip] {
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;

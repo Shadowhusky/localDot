@@ -28,7 +28,9 @@ const message = (id: string, text = "Same message", role: "user" | "assistant" =
 const items = (messages: AgentMessage[], questions: AgentQuestion[] = []) =>
   threadItems(messages, questions);
 const history = () => screen.getByRole("region", { name: "Conversation history" });
-// `threadEnd` is where the thread's last row ends; below it there is only the foot.
+// The reader wheels the thread to `top`, from its end the first time: jsdom lays nothing out, so a
+// thread following its end still sits at 0. `threadEnd` is where the thread's last row ends; below
+// it there is only the foot.
 function scrolled(top: number, height = 1000, view = 200, threadEnd = height) {
   const scroller = history().closest(".thread-scroll") as HTMLElement;
   Object.defineProperties(scroller, {
@@ -37,6 +39,7 @@ function scrolled(top: number, height = 1000, view = 200, threadEnd = height) {
   });
   scroller.getBoundingClientRect = () => ({ top: 0, bottom: view }) as DOMRect;
   history().getBoundingClientRect = () => ({ top: -top, bottom: threadEnd - top }) as DOMRect;
+  fireEvent.wheel(scroller, { deltaY: top - (scroller.scrollTop || height - view) });
   scroller.scrollTop = top;
   fireEvent.scroll(scroller);
   return scroller;
@@ -237,7 +240,7 @@ describe("the conversation thread", () => {
     expect(within(jump()).getByRole("button", { name: "2 new updates" })).toBeTruthy();
   });
 
-  it("brings the end, where your message waits, into view from a page of earlier messages", () => {
+  it("brings the end, where your message waits, into view from a page of earlier messages", async () => {
     const data = Array.from({ length: 260 }, (_, n) => message(`message-${n}`, `Content ${n}`));
     function Sender() {
       const outbox = useContext(Outbox);
@@ -249,8 +252,10 @@ describe("the conversation thread", () => {
     }
     render(<Conversation items={items(data)} truncated={false} composer={<Sender />} />);
     const scroller = history().closest(".thread-scroll") as HTMLElement;
-    const scrollTo = vi.fn();
-    scroller.scrollTo = scrollTo;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 200 },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Show earlier messages" }));
     expect(screen.getByText("Loading later…")).toBeTruthy();
     const outbox = history().querySelector(".thread-outbox");
@@ -259,7 +264,7 @@ describe("the conversation thread", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(screen.queryByText("Loading later…")).toBeNull();
     expect(screen.getByText("Content 259")).toBeTruthy();
-    expect(scrollTo).toHaveBeenCalled();
+    await waitFor(() => expect(scroller.scrollTop).toBe(800));
   });
 
   it("turns the jump button into the way to a message's choice while one waits", () => {

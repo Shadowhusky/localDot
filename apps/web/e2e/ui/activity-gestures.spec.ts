@@ -8,7 +8,7 @@ async function bounds(node: Locator) {
   return box;
 }
 
-test("Activity content scrolls without dragging the sheet; only its handle dismisses", async ({
+test("a mouse on Activity content never drags the sheet; its handle dismisses it", async ({
   page,
   ui,
 }) => {

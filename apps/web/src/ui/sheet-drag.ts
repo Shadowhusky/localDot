@@ -34,6 +34,14 @@ export function detentStops(detents: readonly SheetDetent[]): number[] {
   return tops.map((top) => top - highest);
 }
 
+export function nearestStop(landing: number, stops: readonly number[]): number {
+  let nearest = 0;
+  stops.forEach((stop, index) => {
+    if (Math.abs(stop - landing) < Math.abs((stops[nearest] as number) - landing)) nearest = index;
+  });
+  return nearest;
+}
+
 // Where a release comes to rest: the stop nearest where it would land, or off the bottom edge once
 // that landing is past the lowest stop by 30 % of the sheet still showing there.
 export function restingStop(
@@ -45,11 +53,22 @@ export function restingStop(
   const landing = offset + project(velocity);
   const lowest = Math.max(...stops);
   if (landing > lowest + (height - lowest) * DISMISS_AT) return "dismiss";
-  let nearest = 0;
-  stops.forEach((stop, index) => {
-    if (Math.abs(stop - landing) < Math.abs((stops[nearest] as number) - landing)) nearest = index;
-  });
-  return nearest;
+  return nearestStop(landing, stops);
+}
+
+// Whether a finger moving this way on a sheet's content takes the sheet rather than scrolling it:
+// up while the sheet rests below its top height, to raise it; down once everything that scrolls
+// under the finger is at its top, to lower it. A move more sideways than up or down never does.
+export function takesSheet(dx: number, dy: number, lowered: boolean, atTop: boolean): boolean {
+  if (dy === 0 || Math.abs(dx) > Math.abs(dy)) return false;
+  return dy < 0 ? lowered : atTop;
+}
+
+// Whether everything that scrolls between a press and its sheet is scrolled to its top.
+export function scrolledToTop(target: Element, panel: Element): boolean {
+  for (let node: Element | null = target; node && node !== panel; node = node.parentElement)
+    if (node.scrollTop > 0 && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) return false;
+  return true;
 }
 
 interface Sample {
@@ -79,10 +98,20 @@ export interface SheetDragHost {
   presentation?: { read(): number; apply(offset: number): void; clear(): void };
 }
 
+// Where any pointer picks the sheet up: its grabber strip and its header. A press on a control
+// there stays the control's.
+const GRIP = "[data-sheet-grip]";
+const CONTROL =
+  "button, a[href], input, select, textarea, [contenteditable], [role=button], [role=link], [role=tab]";
+
 interface Press {
   id: number;
   x: number;
   y: number;
+  // A finger on the content, until its first move says whether the sheet or the content takes it.
+  content: Element | null;
+  // Whether the sheet rests below its top height; one still springing, where it is headed.
+  lowered: boolean;
   dragging: boolean;
   // Where the sheet was when the finger landed: it then moves exactly as far as the finger does.
   from: number;
@@ -99,6 +128,8 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
   let press: Press | undefined;
   let offset = 0;
   let frame = 0;
+  // Where the spring under way is taking the sheet.
+  let heading = 0;
 
   const apply = (value: number) => {
     offset = value;
@@ -125,6 +156,7 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
   };
 
   const animate = (to: number, velocity: number, done: () => void, leaving = false) => {
+    heading = to;
     const from = offset;
     const params = Math.abs(velocity) >= FLICK_SPEED ? FLICK : SETTLE;
     const start = performance.now();
@@ -169,7 +201,9 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
       );
       return;
     }
-    const index = decision === "dismiss" ? stops.indexOf(Math.min(...stops)) : decision;
+    // Kept open (it may not close, or asks first), it rests at the height nearest the landing.
+    const index =
+      decision === "dismiss" ? nearestStop(offset + project(velocity), stops) : decision;
     const landed = () => {
       host.rest(index);
       settle();
@@ -178,11 +212,11 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
     animate(stops[index] ?? 0, velocity, landed);
   };
 
-  const begin = (event: PointerEvent, current: Press) => {
+  const begin = (current: Press) => {
     current.dragging = true;
     cancelAnimationFrame(frame);
     frame = 0;
-    panel.setPointerCapture(event.pointerId);
+    panel.setPointerCapture(current.id);
     panel.style.transition = "none";
     if (scrim) scrim.style.transition = "none";
   };
@@ -190,25 +224,59 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
   const onPointerDown = (event: PointerEvent) => {
     if (press || (event.pointerType === "mouse" && event.button !== 0)) return;
     const target = event.target instanceof Element ? event.target : null;
-    const inHandle = Boolean(target?.closest(".ui-sheet-handle"));
-    if (!inHandle) return;
+    if (!target) return;
+    const grip = target.closest(GRIP);
+    const control = target.closest(CONTROL);
+    if (grip && control && grip.contains(control)) return;
+    if (event.pointerType === "mouse") {
+      // Only a finger or a pen moves the sheet by its content: a mouse selects text there.
+      if (!grip) return;
+      // Nor does a mouse dragging a grip select the page it passes over. A touch's press is never
+      // cancelled: WebKit would drop its tap's click.
+      event.preventDefault();
+    }
+    const at = frame ? offset : presented();
     press = {
       id: event.pointerId,
       x: event.clientX,
       y: event.clientY,
+      content: grip ? null : target,
+      lowered: (frame ? heading : at) > 0.5,
       dragging: false,
-      from: frame ? offset : presented(),
+      from: at,
       stretch: Number.parseFloat(getComputedStyle(panel).paddingBottom) || 1,
       samples: [],
     };
-    // A sheet still springing is caught at once, wherever it is.
-    if (frame) begin(event, press);
+    // A sheet still springing is caught at once by a grip; by the content, only once it takes it.
+    if (frame && grip) begin(press);
+  };
+
+  // Whether the sheet takes the press: one on the content only if its first move goes the sheet's
+  // way (see takesSheet), else the content scrolls and the press is let go. Unknown until it moves.
+  const claims = (current: Press, x: number, y: number): boolean | undefined => {
+    if (!current.content) return true;
+    const dx = x - current.x;
+    const dy = y - current.y;
+    if (!dx && !dy) return undefined;
+    if (!takesSheet(dx, dy, current.lowered, scrolledToTop(current.content, panel))) {
+      press = undefined;
+      return false;
+    }
+    current.content = null;
+    // Caught on its way, it stops where it is and follows the finger from there.
+    if (frame) {
+      begin(current);
+      current.from = offset;
+      current.y = y;
+    }
+    return true;
   };
 
   const onPointerMove = (event: PointerEvent) => {
     const current = press;
     if (!current || event.pointerId !== current.id) return;
     if (!current.dragging) {
+      if (!claims(current, event.clientX, event.clientY)) return;
       const dx = event.clientX - current.x;
       const dy = event.clientY - current.y;
       if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return;
@@ -216,7 +284,7 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
         press = undefined;
         return;
       }
-      begin(event, current);
+      begin(current);
     }
     const raw = current.from + (event.clientY - current.y);
     apply(raw >= 0 ? raw : -rubberband(-raw, current.stretch));
@@ -235,9 +303,13 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
     release(event.type === "pointercancel" || still ? 0 : velocityOf(current.samples));
   };
 
-  // Only the handle owns this gesture. Content keeps native scrolling in either direction.
+  // A finger the sheet takes moves only the sheet. The browser commits to scrolling on the first
+  // move it is not stopped on, so the content's fate is settled by then.
   const onTouchMove = (event: TouchEvent) => {
-    if (press?.dragging) event.preventDefault();
+    const current = press;
+    const touch = event.touches[0];
+    if (!current || !touch) return;
+    if (current.dragging || claims(current, touch.clientX, touch.clientY)) event.preventDefault();
   };
 
   // A press is followed on the window: before the drag takes the pointer, the first moves can

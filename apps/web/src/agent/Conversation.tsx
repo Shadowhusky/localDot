@@ -625,7 +625,7 @@ export function Conversation({
   const page = usePagedRows(shown, itemKey, ownerKey, { size: WINDOW, step: WINDOW / 2 });
   // Following the end, the end is held in the same frame as anything arrives, so nothing at the
   // end moves; a new row eases in where it lands instead.
-  const follow = useFollowScroll(ownerKey, true, { glide: false });
+  const follow = useFollowScroll(ownerKey, true);
   // The thread speaks through the page's one polite region, only while it is on show; a task left
   // behind takes back what it had not said yet.
   const heard = useRef(visible);
@@ -763,8 +763,7 @@ export function Conversation({
     observer.current?.unobserve(node);
     observer.current?.observe(node);
   }, [page.start, lastPageKey]);
-  const reading = (stop = true) => {
-    if (stop) follow.interrupt();
+  const reading = () => {
     setHolding(null);
     if (!held.current) return;
     held.current = false;
@@ -1016,17 +1015,7 @@ export function Conversation({
           if (!follow.onScroll()) page.freeze();
           else if (!page.following && !page.hasNewer) page.latest();
         }}
-        // Only a move toward earlier rows stops following; a gesture that ends at the end resumes it.
-        onWheel={(event) => {
-          reading(event.deltaY <= 0);
-          if (event.deltaY > 0) follow.resume();
-        }}
-        onTouchStart={() => reading()}
-        onPointerDown={() => reading()}
-        onKeyDown={() => reading()}
-        onTouchEnd={follow.resume}
-        onPointerUp={follow.resume}
-        onKeyUp={follow.resume}
+        {...follow.gestures(reading)}
       >
         <div className="thread-content">
           <section

@@ -435,14 +435,25 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
   known. The side sheet slides 24 px and fades in on `--ease-spring`; the bottom sheet rises from 100%
   on `--ease-spring` and leaves on `--ease-exit`. Exits retrace the entrance. Every movement is scaled
   by `--_motion` on `.ui-layer`, which reduced motion sets to 0, leaving opacity alone.
-- **Bottom sheet drag.** From the grabber and header with any pointer, or from the content by touch when
-  it is scrolled to the top and the finger moves down. Past 10 px of slop it follows the finger 1:1 from
-  where it was grabbed; pulled up past rest it stretches by a rubber band that never exceeds the 48 px of
-  surface below the screen's edge. A release is projected with deceleration .998: past 30% of the height
-  it closes, otherwise it springs back, with the release velocity handed to a closed-form spring from
-  `@localdot/stage` (ζ 1, or ζ .8 after a flick). A sheet still moving can be grabbed again from where
-  it is. With unsaved changes it springs back and asks. Moves are followed on the window, since the first
-  ones can leave the sheet before the drag takes the pointer.
+- **Bottom sheet drag.** Any pointer picks a sheet up by its grips (`data-sheet-grip`, `touch-action:
+  none`): the grabber strip and the header below it, together at least 52 px tall; a press on a button,
+  link, field or tab there stays the control's. A finger or pen also moves it by its content, as an iOS
+  sheet does, and its first move decides (the browser commits to scrolling on the first touch move it is
+  not stopped on): up, while the sheet rests below its top height (Activity's medium, a collapsed
+  question), raises the sheet; down, once everything that scrolls under the finger is at its top, lowers
+  it; any other move, sideways included, scrolls the content. A mouse on the content selects text. There
+  is no hand-over within one gesture: a sheet raised to its top stretches rather than scrolling on. Past
+  10 px of slop it follows the finger 1:1 from where it was grabbed; pulled up past rest it stretches by a
+  rubber band that never exceeds the 48 px of surface below the screen's edge. A release is projected with
+  deceleration .998: past 30% of the height it closes, otherwise it springs to the nearest height, with
+  the release velocity handed to a closed-form spring from `@localdot/stage` (ζ 1, or ζ .8 after a
+  flick). A sheet that may not close (a question, or unsaved changes, which ask) also rests at the height
+  nearest its landing. A sheet still moving can be grabbed again from where it is. Moves are followed on
+  the window, since the first ones can leave the sheet before the drag takes the pointer. The question
+  sheet counts only an inset of 120 px or more as a keyboard, and reads it as a drag lets go, so Safari's
+  toolbars resizing the viewport neither drop a drag nor force the sheet to full height.
+  `e2e/ui/sheet-drag.spec.ts` drags the grips in both engines but the content only in Chromium:
+  Playwright's WebKit sends no touch moves.
 - **Nested pages.** `page` names the page on show and `back` gives it a Back above its title. A new
   page slides 24 px in from the right over the old one, which slides 24 px left and fades; Back runs the
   same path the other way. The pages a nested page was opened from stay mounted under it, faded out and

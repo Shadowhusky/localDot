@@ -3,10 +3,12 @@ import { type RefObject, useCallback, useLayoutEffect, useState } from "react";
 
 // Lists can live in a sheet, rail or page. Observe their actual scroll parent instead of
 // introducing a nested scroller. Small lists retain their normal layout and keyboard behavior.
+// An anchored list's scroller keeps the reader's place itself (useFollowScroll).
 export function useVirtualRows(
   list: RefObject<HTMLElement | null>,
   keys: readonly string[],
   estimateSize: (index: number) => number,
+  { anchored = false }: { anchored?: boolean } = {},
 ) {
   const enabled = keys.length > 30;
   const [scroll, setScroll] = useState<HTMLElement | null>(null);
@@ -58,6 +60,9 @@ export function useVirtualRows(
     initialOffset: () => scroll?.scrollTop ?? 0,
     initialRect: { width: 400, height: 500 },
   });
+  // Correcting for a row measured above the view as well would move it twice, by a scroll its
+  // keeper did not make.
+  virtual.shouldAdjustScrollPositionOnItemSizeChange = anchored ? () => false : undefined;
   const items = virtual.getVirtualItems();
   const active = enabled && !!scroll;
   const scrollTo = useCallback(

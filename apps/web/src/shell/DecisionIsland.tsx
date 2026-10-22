@@ -330,6 +330,9 @@ export function DecisionSheetPresence({ show, ...sheet }: DecisionSheetProps & {
 
 export function DecisionSheet({ label, elapsedS, children }: DecisionSheetProps) {
   const keyboard = useKeyboardInset();
+  // Read as a drag lets go: the keyboard coming or going never drops a drag under way.
+  const typing = useRef(keyboard);
+  typing.current = keyboard;
   const panel = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const full = expanded || keyboard > 0;
@@ -341,7 +344,7 @@ export function DecisionSheet({ label, elapsedS, children }: DecisionSheetProps)
     return attachSheetDrag({
       panel: element,
       scrim: null,
-      stops: () => (keyboard ? [0] : [0, height() * 0.45]),
+      stops: () => (typing.current ? [0] : [0, height() * 0.45]),
       rest: (index) => flushSync(() => setExpanded(index === 0)),
       // A swipe must never dismiss or answer an outstanding question.
       allowDismiss: () => false,
@@ -355,7 +358,7 @@ export function DecisionSheet({ label, elapsedS, children }: DecisionSheetProps)
         clear: () => element.style.removeProperty("height"),
       },
     });
-  }, [keyboard, expanded]);
+  }, [expanded]);
   return (
     <div
       ref={panel}
@@ -364,10 +367,10 @@ export function DecisionSheet({ label, elapsedS, children }: DecisionSheetProps)
       data-keyboard={keyboard ? "" : undefined}
       style={keyboard ? ({ "--_keyboard": `${keyboard}px` } as CSSProperties) : undefined}
     >
-      <div className="decision-sheet-handle ui-sheet-handle">
+      <div className="decision-sheet-handle" data-sheet-grip="">
         <span className="decision-grabber" aria-hidden="true" />
       </div>
-      <div className="decision-sheet-head">
+      <div className="decision-sheet-head" data-sheet-grip="">
         <span className="decision-attention" aria-hidden="true" />
         <span>{label}</span>
         <span className="decision-sheet-elapsed num">

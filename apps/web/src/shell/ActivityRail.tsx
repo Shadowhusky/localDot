@@ -208,7 +208,7 @@ export function ActivityRail({
   const tabKey = tabs.map((item) => item.value).join(",");
   const tabValues = useMemo(() => tabKey.split(","), [tabKey]);
   const onSteps = tab === "steps";
-  const follow = useFollowScroll(`${owner}:${filter}`, !replay && started, { glide: false });
+  const follow = useFollowScroll(`${owner}:${filter}`, !replay && started);
   const timeline = useRef<HTMLElement>(null);
 
   const steps = entries.filter((entry) => entry.row.kind === "step");
@@ -243,7 +243,7 @@ export function ActivityRail({
     [groups, expanded, owner, replay],
   );
   const virtualKeys = useMemo(() => display.map((item) => item.key), [display]);
-  const virtual = useVirtualRows(timeline, virtualKeys, estimateStep);
+  const virtual = useVirtualRows(timeline, virtualKeys, estimateStep, { anchored: true });
 
   // When embedded without its own scroll constraint, bring the live step into the outer scroller.
   const placed = useRef(false);
@@ -297,10 +297,6 @@ export function ActivityRail({
     ].find((row) => row.getBoundingClientRect().bottom > top);
     if (anchor) follow.anchorTo(anchor);
     history.older();
-  };
-  const interrupt = () => {
-    follow.interrupt();
-    history.freeze();
   };
   useEffect(() => {
     const freezeSelection = () => {
@@ -429,10 +425,7 @@ export function ActivityRail({
                   if (onSteps && history.hasOlder && event.currentTarget.scrollTop < 32) older();
                 }
               }}
-              onWheel={interrupt}
-              onTouchStart={interrupt}
-              onPointerDown={interrupt}
-              onKeyDown={interrupt}
+              {...follow.gestures(history.freeze)}
             >
               <div className="activity-content">
                 {!started && (

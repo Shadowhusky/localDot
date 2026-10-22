@@ -219,7 +219,7 @@ function WorkHistory({
   const id = useId();
   const preview = useStepPreviewEnvironment();
   const [opened, setOpened] = useState<string | null>(null);
-  const follow = useFollowScroll(String(startMs), true, { glide: false });
+  const follow = useFollowScroll(String(startMs), true);
   const list = useRef<HTMLOListElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const groups = useMemo(() => groupReadSteps(steps, readGroupOf), [steps]);
@@ -240,7 +240,7 @@ function WorkHistory({
     [groups, expanded],
   );
   const keys = useMemo(() => display.map((row) => row.key), [display]);
-  const virtual = useVirtualRows(list, keys, estimateWorkStep);
+  const virtual = useVirtualRows(list, keys, estimateWorkStep, { anchored: true });
   return (
     <ScrollArea
       className="thread-work-scroll"
@@ -249,10 +249,7 @@ function WorkHistory({
       role="region"
       aria-label="Work history"
       onScroll={follow.onScroll}
-      onWheel={follow.interrupt}
-      onTouchStart={follow.interrupt}
-      onPointerDown={follow.interrupt}
-      onKeyDown={follow.interrupt}
+      {...follow.gestures()}
     >
       <ol ref={list} className="thread-work-list" aria-label="Steps in this turn">
         <li role="presentation" aria-hidden="true" style={{ height: virtual.before }} />

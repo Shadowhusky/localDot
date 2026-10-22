@@ -1,10 +1,46 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type PointerEvent,
+  type TouchEvent,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type WheelEvent,
+} from "react";
 
-// Within this many px of the end, the reader is following the live end.
-const PIN_SLACK = 32;
-// Scrolling down to within this many px of it, they mean to follow it again: rows that arrive during
-// the scroll leave them short of an end that moved.
-const RESUME_SLACK = 160;
+// A gesture toward the end that comes to rest this close to it follows the end again...
+const END_SLACK = 24;
+// ...or further by as much as arrived meanwhile, up to this: rows that arrive during the gesture
+// move the end, not the reader.
+const ARRIVING_SLACK = 136;
+// A gesture's scrolling can go on this long after its last event or scroll: a wheel's or a key's
+// smooth scroll, a flick's momentum.
+const TAIL_MS = 300;
+// A finger that moved this far toward the end swiped there, even with nothing left to scroll.
+const SWIPE = 10;
+// A jump to the end takes this long, eased like --ease-enter, toward the end as each frame finds it.
+const JUMP_MS = 360;
+const eased = (progress: number) => 1 - (1 - progress) ** 4;
+
+// The keys that scroll a list holding the focus, and which way.
+const SCROLL_KEYS: Readonly<Record<string, "up" | "down">> = {
+  ArrowUp: "up",
+  PageUp: "up",
+  Home: "up",
+  ArrowDown: "down",
+  PageDown: "down",
+  End: "down",
+};
+
+interface Gesture {
+  // Its scrolling may still arrive until then; a press holds it open.
+  until: number;
+  // How tall the content was as it began.
+  height: number;
+  // Whether it last moved toward the end.
+  down: boolean;
+}
 
 interface Tracking {
   element: HTMLElement | null;
@@ -12,28 +48,30 @@ interface Tracking {
   mutations: MutationObserver | null;
   pinned: boolean;
   anchor: HTMLElement | null;
-  anchorTop: number;
+  // Where the anchor sits in the content: scrolling never moves it, only what changes above it.
+  anchorAt: number;
   frame: number;
-  // A jump scrolls smoothly; until it lands, its own scroll events must not end the following.
-  jumping: boolean;
-  glide: { frame: number; from: number; start: number; at: number } | null;
-  height: number;
-  // Where the view was when it was last held or scrolled.
+  // Where the view was when the hook last put it there or saw it scrolled: a scroll that finds it
+  // anywhere else was not the hook's own.
   top: number;
+  jump: { frame: number; from: number; start: number } | null;
+  gesture: Gesture | null;
+  // A finger or a button is down on the list, or a flick it let go of still coasts: the end is not
+  // held under it, so what it is about to press stays where it is.
+  pressed: boolean;
+  coast: number;
+  touchY: number;
+  unlisten: (() => void) | null;
 }
-
-// Following the end, a new row lifts the list by its height over this long, eased like --ease-enter.
-const GLIDE_MS = 360;
-const eased = (progress: number) => 1 - (1 - progress) ** 4;
 
 export const reducedMotion = () =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-const scrollToEnd = (element: HTMLElement) =>
-  element.scrollTo?.({ top: element.scrollHeight, behavior: reducedMotion() ? "auto" : "smooth" });
+const below = (element: HTMLElement) =>
+  element.scrollHeight - element.clientHeight - element.scrollTop;
 
-// Where a row sits in the view, by layout: a row still easing in (a transform) has not moved.
-function topOf(element: HTMLElement, scroller: HTMLElement): number {
+// Where a row sits in the content, by layout: a row still easing in (a transform) has not moved.
+function offsetIn(element: HTMLElement, scroller: HTMLElement): number {
   let top = 0;
   for (let node: HTMLElement | null = element; node; ) {
     top += node.offsetTop;
@@ -43,16 +81,31 @@ function topOf(element: HTMLElement, scroller: HTMLElement): number {
         ? parent
         : null;
   }
-  return top - scroller.scrollTop;
+  return top;
 }
 
-// Following the end, the end stays in view; scrolled back, the first [data-anchor] row in view stays
-// put. The browser's own scroll anchoring is off (WebKit has none), so both engines behave alike.
-// Without glide the end is held at once, in the same frame as the growth, so nothing at the end
-// moves.
-export function useFollowScroll(owner: string, follow: boolean, { glide = true } = {}) {
-  const glides = useRef(glide);
-  glides.current = glide;
+const topOf = (element: HTMLElement, scroller: HTMLElement) =>
+  offsetIn(element, scroller) - scroller.scrollTop;
+
+// Within reach of the end; what arrived since the gesture began moved the end, not the reader.
+const near = (element: HTMLElement, gesture: Gesture) =>
+  below(element) <=
+  END_SLACK + Math.min(ARRIVING_SLACK, Math.max(0, element.scrollHeight - gesture.height));
+
+// Keys pressed in a field type, and Space on a control presses it: neither scrolls the list.
+function scrolls(event: KeyboardEvent): boolean {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return true;
+  if (target.isContentEditable || target.closest("input, textarea, select")) return false;
+  return event.key !== " " || !target.closest("button, a[href], summary, [role=button]");
+}
+
+// Following the end, the end stays in view, held in the same frame as anything arrives, so nothing
+// at the end moves; scrolled back, the first [data-anchor] row in view stays put. The browser's own
+// scroll anchoring is off (WebKit has none), so both engines behave alike. Only the reader leaves
+// the end, by scrolling back, and only the reader comes back to it: by a gesture toward the end that
+// comes to rest there, or by a jump. The list's own scrolls, and anyone else's, never bring it back.
+export function useFollowScroll(owner: string, follow: boolean) {
   const [pinned, setPinned] = useState(follow);
   const tracking = useRef<Tracking>({
     element: null,
@@ -60,13 +113,18 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     mutations: null,
     pinned: follow,
     anchor: null,
-    anchorTop: 0,
+    anchorAt: 0,
     frame: 0,
-    jumping: false,
-    glide: null,
-    height: 0,
     top: 0,
+    jump: null,
+    gesture: null,
+    pressed: false,
+    coast: 0,
+    touchY: 0,
+    unlisten: null,
   });
+  const follows = useRef(follow);
+  follows.current = follow;
 
   const setPin = useCallback((next: boolean) => {
     tracking.current.pinned = next;
@@ -82,76 +140,117 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     for (const row of element.querySelectorAll<HTMLElement>("[data-anchor]")) {
       if (row.getBoundingClientRect().bottom > top) {
         t.anchor = row;
-        t.anchorTop = topOf(row, element);
+        t.anchorAt = offsetIn(row, element);
         break;
       }
     }
   }, []);
 
+  // The hook's own scrolls: their scroll events find the view where it was put.
+  const put = useCallback((top: number) => {
+    const t = tracking.current;
+    if (!t.element) return;
+    t.element.scrollTop = top;
+    t.top = t.element.scrollTop;
+  }, []);
+
+  const stopJump = useCallback(() => {
+    const t = tracking.current;
+    if (t.jump) cancelAnimationFrame(t.jump.frame);
+    t.jump = null;
+  }, []);
+
+  // The reader moved back from the end: from now on what is in view stays put. Called before the
+  // scroll it announces where it can be (a wheel, a key), as a resize can arrive in the same frame
+  // and would otherwise pull the list back down under the reader's gesture.
+  const leave = useCallback(() => {
+    stopJump();
+    if (!tracking.current.pinned) return;
+    setPin(false);
+    pickAnchor();
+  }, [stopJump, setPin, pickAnchor]);
+
   const hold = useCallback(() => {
     const t = tracking.current,
       element = t.element;
     if (!element) return;
-    // Moved back from the end before its scroll event (a control brought into view as it takes the
-    // focus): the end is no longer held, or the move would be undone under the reader's press. A
+    // Moved up before its scroll event (a control brought into view as it takes the focus): not the
+    // hook, so the end is no longer held, or the move would be undone under the reader's press. A
     // view only clamped by shorter content is still at the end.
-    const back = (height: number) => height - element.clientHeight - element.scrollTop >= PIN_SLACK;
-    if (
-      t.pinned &&
-      !t.jumping &&
-      !t.glide &&
-      element.scrollTop < t.top - 1 &&
-      back(t.height) &&
-      back(element.scrollHeight)
-    ) {
-      setPin(false);
-      pickAnchor();
+    if (t.pinned && element.scrollTop < t.top - 1) {
+      if (below(element) > 1) leave();
+      else t.top = element.scrollTop;
     }
-    t.height = element.scrollHeight;
-    if (t.pinned) {
+    if (t.jump) return;
+    if (t.pinned && !t.pressed) {
       const end = element.scrollHeight - element.clientHeight;
-      const lift = end - element.scrollTop;
-      if (lift <= 0.5) return;
-      // A jump still on its way was aimed at the old end; aim it at the new one instead.
-      if (t.jumping) {
-        scrollToEnd(element);
-        return;
-      }
-      // A whole screen or more (a first load, a page) is taken at once; one or two rows glide, from
-      // wherever a glide in flight has got to, toward the end as it is when each frame is drawn.
-      const starts = glides.current;
-      if (lift >= element.clientHeight || reducedMotion() || !(starts || t.glide)) {
-        if (t.glide) cancelAnimationFrame(t.glide.frame);
-        t.glide = null;
-        element.scrollTop = end;
-        return;
-      }
-      // Where growth is held at once, a glide already under way keeps its pace to the end.
-      if (!starts) return;
-      if (t.glide) cancelAnimationFrame(t.glide.frame);
-      const glide = { frame: 0, from: element.scrollTop, start: performance.now(), at: -1 };
-      const step = (now: number) => {
-        const progress = Math.min(1, (now - glide.start) / GLIDE_MS);
-        const target = element.scrollHeight - element.clientHeight;
-        element.scrollTop = glide.from + (target - glide.from) * eased(progress);
-        glide.at = element.scrollTop;
-        if (progress < 1 && t.glide === glide) glide.frame = requestAnimationFrame(step);
-        else if (t.glide === glide) t.glide = null;
-      };
-      t.glide = glide;
-      glide.frame = requestAnimationFrame(step);
+      if (end - element.scrollTop > 0.5) put(end);
       return;
     }
     if (!t.anchor?.isConnected) return;
-    const delta = topOf(t.anchor, element) - t.anchorTop;
-    if (Math.abs(delta) >= 0.5) element.scrollTop += delta;
-    t.anchorTop = topOf(t.anchor, element);
-  }, [setPin, pickAnchor]);
-  const settle = useCallback(() => {
+    const at = offsetIn(t.anchor, element);
+    if (Math.abs(at - t.anchorAt) >= 0.5) put(element.scrollTop + at - t.anchorAt);
+    t.anchorAt = at;
+  }, [leave, put]);
+
+  // A gesture toward the end came to rest at it.
+  const stick = useCallback(() => {
+    if (!follows.current) return;
+    setPin(true);
     hold();
-    const element = tracking.current.element;
-    if (element) tracking.current.top = element.scrollTop;
+  }, [setPin, hold]);
+
+  // Wheels and keys toward the end continue the gesture their scrolling belongs to; a press starts
+  // one of its own.
+  const begin = useCallback((down: boolean, fresh: boolean) => {
+    const t = tracking.current,
+      element = t.element;
+    if (!element) return null;
+    const now = performance.now();
+    if (fresh || !t.gesture || (!t.pressed && now > t.gesture.until))
+      t.gesture = { until: now, height: element.scrollHeight, down };
+    t.gesture.until = now + TAIL_MS;
+    t.gesture.down ||= down;
+    return t.gesture;
+  }, []);
+
+  // A wheel or a key toward the end follows it again at once when the end is already in view,
+  // where there is nothing left to scroll.
+  const toward = useCallback(() => {
+    const t = tracking.current,
+      element = t.element,
+      gesture = begin(true, false);
+    if (element && gesture && !t.pinned && near(element, gesture)) stick();
+  }, [begin, stick]);
+
+  const rest = useCallback(() => {
+    const t = tracking.current;
+    clearTimeout(t.coast);
+    t.coast = 0;
+    t.unlisten?.();
+    t.unlisten = null;
+    t.pressed = false;
+    hold();
   }, [hold]);
+
+  // The list may coast on after the finger lifts; the end is held again once it comes to rest.
+  const coast = useCallback(() => {
+    const t = tracking.current;
+    clearTimeout(t.coast);
+    t.coast = window.setTimeout(rest, TAIL_MS);
+  }, [rest]);
+
+  // A finger or a button comes down on the list: a jump stops where it is, and what is under the
+  // press stays there until it lets go.
+  const press = useCallback(() => {
+    const t = tracking.current;
+    if (t.jump) leave();
+    clearTimeout(t.coast);
+    t.coast = 0;
+    t.pressed = true;
+    begin(false, true);
+    pickAnchor();
+  }, [leave, begin, pickAnchor]);
 
   const ref = useCallback(
     (element: HTMLDivElement | null) => {
@@ -160,103 +259,159 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       t.observer = null;
       t.mutations?.disconnect();
       t.mutations = null;
+      if (!element) {
+        stopJump();
+        cancelAnimationFrame(t.frame);
+        clearTimeout(t.coast);
+        t.coast = 0;
+        t.unlisten?.();
+        t.unlisten = null;
+        t.pressed = false;
+      }
       t.element = element;
       if (!element || typeof ResizeObserver === "undefined") return;
-      t.observer = new ResizeObserver(settle);
+      t.observer = new ResizeObserver(hold);
       t.observer.observe(element);
       if (element.firstElementChild) t.observer.observe(element.firstElementChild);
       // Rows and words are held in the task that adds them, before the frame that draws them; a
       // resize is only observed after that frame has been laid out, a frame late.
       if (typeof MutationObserver === "undefined") return;
-      t.mutations = new MutationObserver(settle);
+      t.mutations = new MutationObserver(hold);
       t.mutations.observe(element, { childList: true, subtree: true, characterData: true });
     },
-    [settle],
+    [hold, stopJump],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the owner is the trigger.
   useLayoutEffect(() => {
     const t = tracking.current;
+    stopJump();
     t.anchor = null;
+    t.gesture = null;
     setPin(follow);
-    if (t.element) t.element.scrollTop = follow ? t.element.scrollHeight : 0;
-  }, [owner, follow, setPin]);
+    if (t.element) put(follow ? t.element.scrollHeight : 0);
+  }, [owner, follow, setPin, put, stopJump]);
 
   // Says whether the reader still follows the live end after this scroll.
   const onScroll = useCallback((): boolean => {
     const t = tracking.current,
       element = t.element;
     if (!element) return t.pinned;
-    const down = element.scrollTop > t.top + 0.5;
+    const moved = element.scrollTop - t.top;
     t.top = element.scrollTop;
-    // A streamed row can arrive before the next animation frame. Keep the old anchor at
-    // its new scroll position until pickAnchor chooses the first visible row.
-    if (t.anchor?.isConnected) t.anchorTop = topOf(t.anchor, element);
-    const below = element.scrollHeight - element.clientHeight - element.scrollTop;
-    // Rows that arrived before their resize was observed moved the end, not the reader; a reader who
-    // scrolled back further than they grew is reading.
-    const unseen = element.scrollHeight - t.height;
-    if (t.pinned && t.observer && unseen > 0.5 && below < unseen + PIN_SLACK) {
-      settle();
-      return true;
+    const now = performance.now();
+    // The reader's gesture, while its scrolling goes on.
+    const gesture = t.gesture && (t.pressed || now <= t.gesture.until) ? t.gesture : null;
+    if (gesture) {
+      gesture.until = now + TAIL_MS;
+      if (Math.abs(moved) > 0.5) gesture.down = moved > 0;
     }
-    // A scroll the glide did not make (the reader's, or the page's) ends the glide.
-    if (t.glide && t.glide.at >= 0 && Math.abs(element.scrollTop - t.glide.at) > 1) {
-      cancelAnimationFrame(t.glide.frame);
-      t.glide = null;
-    }
-    if ((t.jumping || t.glide) && below >= PIN_SLACK) return t.pinned;
-    if (below <= 1) t.jumping = false;
-    const next = follow && (below < PIN_SLACK || (down && below < RESUME_SLACK));
-    if (next !== t.pinned) setPin(next);
+    if (t.coast) coast();
+    // Back up, and neither the hook's own scroll nor a view clamped by shorter content: reading.
+    if (moved < -1 && below(element) > 1) leave();
+    else if (gesture?.down && !t.pinned && near(element, gesture)) stick();
     cancelAnimationFrame(t.frame);
     t.frame = requestAnimationFrame(pickAnchor);
-    return next;
-  }, [follow, pickAnchor, setPin, settle]);
+    return t.pinned;
+  }, [coast, leave, stick, pickAnchor]);
 
   return {
     ref,
     pinned,
     onScroll,
+    // The reader's input on the list, for its scroller. `then` runs as the reader takes hold of it,
+    // for what the list itself does about that.
+    gestures(then?: () => void) {
+      return {
+        onWheel(event: WheelEvent) {
+          then?.();
+          // A pinch zooms, and a sideways wheel moves nothing here.
+          if (event.ctrlKey || !event.deltaY) return;
+          if (event.deltaY < 0) leave();
+          else toward();
+        },
+        onKeyDown(event: KeyboardEvent) {
+          then?.();
+          if (event.defaultPrevented || !scrolls(event)) return;
+          const way = event.key === " " ? (event.shiftKey ? "up" : "down") : SCROLL_KEYS[event.key];
+          if (way === "up") leave();
+          else if (way === "down") toward();
+        },
+        onTouchStart(event: TouchEvent) {
+          then?.();
+          press();
+          tracking.current.touchY = event.touches[0]?.clientY ?? 0;
+        },
+        onTouchEnd(event: TouchEvent) {
+          if (event.touches.length) return;
+          const t = tracking.current,
+            element = t.element,
+            y = event.changedTouches[0]?.clientY;
+          // A swipe toward an end already in view has nothing to scroll, yet goes there.
+          const swiped = y !== undefined && t.touchY - y > SWIPE;
+          if (element && t.gesture && swiped && !t.pinned && near(element, t.gesture)) stick();
+          coast();
+        },
+        onTouchCancel: coast,
+        // A finger is followed by its touch events.
+        onPointerDown(event: PointerEvent) {
+          if (event.pointerType === "touch" || event.button !== 0) return;
+          then?.();
+          press();
+          const id = event.pointerId;
+          const lift = (up: globalThis.PointerEvent) => {
+            if (up.pointerId === id) rest();
+          };
+          const t = tracking.current;
+          t.unlisten?.();
+          window.addEventListener("pointerup", lift);
+          window.addEventListener("pointercancel", lift);
+          t.unlisten = () => {
+            window.removeEventListener("pointerup", lift);
+            window.removeEventListener("pointercancel", lift);
+          };
+        },
+      };
+    },
     anchorTo(element: HTMLElement, margin?: number) {
-      const t = tracking.current;
-      if (!t.element) return;
+      const t = tracking.current,
+        view = t.element;
+      if (!view) return;
       cancelAnimationFrame(t.frame);
-      t.jumping = false;
+      stopJump();
       if (margin !== undefined) {
-        const delta = topOf(element, t.element) - margin;
-        if (delta < 0) t.element.scrollTop += delta;
+        const delta = topOf(element, view) - margin;
+        if (delta < 0) put(view.scrollTop + delta);
       }
-      if (t.glide) cancelAnimationFrame(t.glide.frame);
-      t.glide = null;
       setPin(false);
       t.anchor = element;
-      t.anchorTop = topOf(element, t.element);
+      t.anchorAt = offsetIn(element, view);
     },
+    // Goes to the end and follows it: Jump to latest, or a message just sent.
     jump() {
-      const t = tracking.current;
-      if (!t.element) return;
-      setPin(true);
-      t.jumping = true;
-      scrollToEnd(t.element);
-    },
-    interrupt() {
-      const t = tracking.current;
-      t.jumping = false;
-      if (t.glide) cancelAnimationFrame(t.glide.frame);
-      t.glide = null;
-      // A resize and the reader's first scroll can arrive in the same frame. Stop following
-      // before that resize, or it can pull the list back down over the reader's gesture.
-      setPin(false);
-      pickAnchor();
-    },
-    // A gesture that has ended with the reader at the end (a click, a tap, a key, a wheel that met
-    // the end) follows it again.
-    resume() {
       const t = tracking.current,
         element = t.element;
-      if (!element || t.pinned || !follow) return;
-      if (element.scrollHeight - element.clientHeight - element.scrollTop < PIN_SLACK) setPin(true);
+      if (!element) return;
+      setPin(true);
+      stopJump();
+      clearTimeout(t.coast);
+      t.coast = 0;
+      t.pressed = false;
+      if (reducedMotion()) {
+        put(element.scrollHeight);
+        return;
+      }
+      const jump = { frame: 0, from: element.scrollTop, start: performance.now() };
+      const step = () => {
+        if (t.jump !== jump) return;
+        const progress = Math.min(1, (performance.now() - jump.start) / JUMP_MS);
+        const end = element.scrollHeight - element.clientHeight;
+        put(jump.from + (end - jump.from) * eased(progress));
+        if (progress < 1) jump.frame = requestAnimationFrame(step);
+        else t.jump = null;
+      };
+      t.jump = jump;
+      jump.frame = requestAnimationFrame(step);
     },
     // Following the end, an element whose top the end would hide is brought to the top of the view,
     // this far below it, and held there instead. Says whether it was.
@@ -265,23 +420,19 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
         view = t.element;
       const content = view?.firstElementChild;
       if (!view || !t.pinned || !(content instanceof HTMLElement)) return false;
-      const top = topOf(element, view) - topOf(content, view) - margin;
+      const top = offsetIn(element, view) - offsetIn(content, view) - margin;
       if (top >= view.scrollHeight - view.clientHeight - 0.5) return false;
-      t.jumping = false;
-      if (t.glide) cancelAnimationFrame(t.glide.frame);
-      t.glide = null;
-      view.scrollTop = top;
+      stopJump();
+      put(top);
       setPin(false);
       t.anchor = element;
-      t.anchorTop = topOf(element, view);
+      t.anchorAt = offsetIn(element, view);
       return true;
     },
     // Stops following the end before the reader is moved elsewhere on purpose, such as a page.
     release() {
       const t = tracking.current;
-      t.jumping = false;
-      if (t.glide) cancelAnimationFrame(t.glide.frame);
-      t.glide = null;
+      stopJump();
       t.anchor = null;
       setPin(false);
     },
