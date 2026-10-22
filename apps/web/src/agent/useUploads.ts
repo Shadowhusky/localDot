@@ -1,12 +1,14 @@
 import { USER_UPLOAD } from "@localdot/protocol";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
+import { fileName } from "./attachments.ts";
 import { FileTransferFailure, safeTransferName } from "./file-transfer.ts";
 import { discardUpload, uploadFile } from "./resumable-upload.ts";
 export interface UploadRow {
   readonly id: number;
   readonly name: string;
-  readonly bytes: number;
+  // Unknown for a file a message already carried, which comes back without uploading again.
+  readonly bytes?: number;
   readonly phase: "pending" | "uploading" | "placing" | "complete" | "refused" | "uncertain";
   readonly uploaded?: number;
   readonly path?: string;
@@ -160,7 +162,7 @@ export function useUploads(props: Owner) {
       setProblem("Choose at most 16 attachments in this draft.");
       return;
     }
-    let bytes = list.current.reduce((total, row) => total + row.bytes, 0);
+    let bytes = list.current.reduce((total, row) => total + (row.bytes ?? 0), 0);
     const chosen: File[] = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -198,6 +200,22 @@ export function useUploads(props: Owner) {
     update([...list.current, ...added]);
     void pump();
   };
+  // Files a message already carried, back in the draft: they are on the computer, so nothing
+  // uploads, and removing one leaves the file where it is.
+  const restore = (paths: readonly string[]) => {
+    const kept = new Set(list.current.map((row) => row.path));
+    const added = paths
+      .filter((path) => !kept.has(path))
+      .map((path) => ({
+        id: ++nextId.current,
+        name: fileName(path),
+        phase: "complete" as const,
+        path,
+      }));
+    setProblem(null);
+    setNotice(null);
+    update([...list.current, ...added]);
+  };
   const remove = (id: number) => {
     if (active.current?.id === id) {
       active.current.abort.abort();
@@ -226,6 +244,7 @@ export function useUploads(props: Owner) {
     problem,
     notice,
     select,
+    restore,
     remove,
     retry,
     cancel: pause,

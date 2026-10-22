@@ -48,14 +48,16 @@ export function AttachmentChips({
             <FileName name={row.name} />
             {row.phase === "complete" ? (
               <>
-                <span className="file-chip-meta num" aria-hidden="true">
-                  {bytes(row.bytes)}
-                </span>
+                {row.bytes !== undefined && (
+                  <span className="file-chip-meta num" aria-hidden="true">
+                    {bytes(row.bytes)}
+                  </span>
+                )}
                 <VisuallyHidden>{STATUS.complete}</VisuallyHidden>
               </>
             ) : (
               <span className="file-chip-meta num">
-                {row.phase === "uploading" && row.bytes > 0
+                {row.phase === "uploading" && row.bytes
                   ? `${Math.floor(((row.uploaded ?? 0) / row.bytes) * 100)}% · ${bytes(row.bytes)}`
                   : STATUS[row.phase]}
               </span>
@@ -87,19 +89,5 @@ export function AttachmentChips({
         </p>
       ))}
     </div>
-  );
-}
-
-// The files a sent message carried, under its bubble.
-export function SentFiles({ names }: { names: readonly string[] }) {
-  return (
-    <ul className="file-chips" data-sent="" aria-label="Attached files">
-      {names.map((name) => (
-        <li key={name} className="file-chip">
-          <Icon name="file" size={12} className="file-chip-icon" />
-          <FileName name={name} />
-        </li>
-      ))}
-    </ul>
   );
 }

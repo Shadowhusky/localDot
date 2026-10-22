@@ -344,9 +344,14 @@ export const MessageUser = event(
     files: z.array(z.string().max(255)).max(16).optional(),
   }),
 );
+// A queued message cancelled because its task stopped, not by the user, says so.
 export const MessageDelivery = event(
   "message.delivery",
-  z.object({ messageId: MessageId, state: z.enum(["sent", "steering", "cancelled", "withdrawn"]) }),
+  z.object({
+    messageId: MessageId,
+    state: z.enum(["sent", "steering", "cancelled", "withdrawn"]),
+    reason: z.enum(["stopped"]).optional(),
+  }),
 );
 export const MessageDelta = event(
   "message.delta",

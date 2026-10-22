@@ -243,8 +243,7 @@
   overflow-wrap: anywhere;
 }
 
-/* Your message: the bubble with its copy button beside it, then any files and a word on when it
-   was sent. */
+/* Your message: the bubble with its copy button beside it, then a word on when it was sent. */
 .thread-message[data-role="user"] {
   display: grid;
   justify-items: end;
@@ -266,8 +265,11 @@
 }
 
 .thread-bubble {
+  --_inset: calc(var(--spacing) * 3.5);
+  min-width: 0;
   max-width: 86%;
-  padding: calc(var(--spacing) * 2.25) calc(var(--spacing) * 3.5);
+  padding: calc(var(--spacing) * 2.25) var(--_inset);
+  overflow: clip;
   border-radius: var(--radius-xl) var(--radius-xl) var(--radius-tail) var(--radius-xl);
   background-color: var(--color-raised-2);
   font: var(--text-row) / var(--text-row--line-height) var(--font-ui);
@@ -1263,17 +1265,14 @@
   display: grid;
 }
 
+/* As far below the row before it as its own row will be. */
 .thread-outbox > .thread-row {
-  margin-top: calc(var(--spacing) * 5);
+  margin-top: calc(var(--spacing) * 3.5);
 }
 
 /* First in a new task's thread, it carries the time its row will. */
 .thread-empty + .thread-outbox > .thread-row {
   margin-top: 0;
-}
-
-.thread-row[data-speaker="user"] + .thread-outbox > .thread-row {
-  margin-top: calc(var(--spacing) * 1.5);
 }
 
 .thread-pending > .thread-time {
@@ -1330,7 +1329,8 @@
   margin-top: calc(var(--spacing) * 0.5);
 }
 
-/* Files, as chips: over the field while they upload, and under the message that sent them. */
+/* Files, as chips: over the field while they upload, and in the bubble of the message that sent
+   them. */
 .file-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1338,11 +1338,6 @@
   min-width: 0;
   max-width: 100%;
   list-style: none;
-}
-
-.file-chips[data-sent] {
-  justify-content: flex-end;
-  max-width: 85%;
 }
 
 .file-chip {
@@ -1357,10 +1352,6 @@
   background-color: var(--color-raised-2);
   color: var(--color-fg-1);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
-
-.file-chips[data-sent] .file-chip {
-  padding-inline-end: calc(var(--spacing) * 2.5);
 }
 
 .file-chip .file-name {
@@ -1408,6 +1399,36 @@
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   overflow-wrap: anywhere;
   text-wrap: pretty;
+}
+
+/* The files your message carried, first in its bubble and lined up with its words: one line, which
+   scrolls sideways out to the bubble's edge when it is longer than the bubble. */
+.thread-bubble-files {
+  display: flex;
+  gap: calc(var(--spacing) * 1.5);
+  margin: 0 calc(var(--_inset) * -1) calc(var(--spacing) * 2);
+  padding-inline: var(--_inset);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+  list-style: none;
+  white-space: nowrap;
+}
+
+/* The ring keeps inside the bubble's rounded corners. */
+.thread-bubble-files:focus-visible {
+  border-radius: var(--radius-md);
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+/* A hairline sets each file apart from the bubble it sits on. */
+.thread-bubble-files > .file-chip {
+  flex: none;
+  max-width: none;
+  padding-inline-end: calc(var(--spacing) * 2.5);
+  background-color: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
 }
 
 /* The composer: one card, the field over a row of its controls. What comes and goes in it (a key

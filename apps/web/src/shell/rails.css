@@ -271,14 +271,6 @@
   min-height: 44px;
   text-align: start;
 }
-.conversations-pick > .ui-button-content {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  column-gap: calc(var(--spacing) * 3);
-  align-items: center;
-  width: 100%;
-  min-width: 0;
-}
 
 /* The current conversation keeps a quiet light and a heavier title; the row the arrows or the
    pointer are on lights as a picker's does. */

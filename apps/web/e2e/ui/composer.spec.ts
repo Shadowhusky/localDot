@@ -1,3 +1,4 @@
+import { attachFiles } from "./attach.ts";
 import { composer, expect, runAt, test } from "./harness.ts";
 
 // The composer in each of its states.
@@ -21,19 +22,7 @@ test("composer, at rest", async ({ page, ui }) => {
 test("composer, with files", async ({ page, ui }) => {
   await ui.open("running");
   const card = await composer(page);
-  await page.route("**/upload?**", (route) => {
-    const name = new URL(route.request().url()).searchParams.get("name");
-    return route.fulfill({ status: 201, json: { path: `~/Downloads/${name}` } });
-  });
-  const attach = card.getByRole("button", { name: "Attach files" });
-  await expect(attach).toBeEnabled();
-  const chooser = page.waitForEvent("filechooser");
-  await attach.click();
-  await (await chooser).setFiles([
-    { name: "monthly-sales-figures-final.csv", mimeType: "text/csv", buffer: Buffer.from("a,b") },
-    { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("notes") },
-  ]);
-  await expect(card.getByText("Uploaded to Downloads")).toHaveCount(2);
+  await attachFiles(page, card, ["monthly-sales-figures-final.csv", "notes.txt"]);
   await card.getByRole("textbox", { name: "Message" }).fill("Use both files for the summary");
   await page.mouse.move(0, 0);
   await ui.settle();

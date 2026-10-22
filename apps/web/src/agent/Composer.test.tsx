@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
@@ -10,7 +10,7 @@ import { withAttachments } from "./attachments.ts";
 import { Composer, type ComposerProps, type ReplyOutcome } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
 import { Outbox } from "./outbox.ts";
-import { restoreQueuedDraft } from "./queued-draft.ts";
+import { editQueued } from "./queued-draft.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 
 const spoken = vi.hoisted(() => ({ announce: vi.fn() }));
@@ -1016,7 +1016,7 @@ describe("a message on its way", () => {
     expect(waiting.textContent).toContain("monthly-figures.csv");
     // A refused message was never sent while dot worked, so it says no such thing.
     expect(waiting.querySelector(".thread-tag")).toBeNull();
-    expect(waiting.querySelector(".thread-bubble")?.textContent).toBe("Use this");
+    expect(waiting.querySelector(".thread-bubble-text")?.textContent).toBe("Use this");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.queryByRole("region", { name: "Message delivery" })).toBeNull();
     expect(document.activeElement).toBe(f.field);
@@ -1400,18 +1400,105 @@ describe("revising a result file", () => {
   });
 });
 
-it("restores a queued message without losing a newer draft, and resends only on Send", async () => {
-  const f = setup();
-  f.input("My newer draft");
-  act(() => expect(restoreQueuedDraft(sessionId, "queued-id", "Original queued words")).toBe(true));
-  expect(f.field.value).toBe("My newer draft\n\nOriginal queued words");
-  expect(document.activeElement).toBe(f.field);
-  expect(f.requests).toHaveLength(0);
-  act(() => restoreQueuedDraft(sessionId, "queued-id", "Original queued words"));
-  expect(f.field.value).toBe("My newer draft\n\nOriginal queued words");
-  act(() => expect(restoreQueuedDraft(otherSession, "other", "Wrong conversation")).toBe(false));
-  f.input("Edited queued words");
-  f.submit();
-  await waitFor(() => expect(f.requests).toHaveLength(1));
-  expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "Edited queued words" });
+describe("a queued message taken back to edit", () => {
+  const messageId = "01JXYZ00000000000000000M09";
+  const path = "~/Downloads/Uploads/0f0f1558-d8b6-478a-8daf-eadc6dc3725f/totals.csv";
+  const edit = `/api/agent/sessions/${sessionId}/messages/${messageId}/edit`;
+  // The edit route answers with the words dot gave back; anything sent is accepted.
+  function editing(reply: () => Response | Promise<Response>) {
+    const calls: { method: string; path: string; body?: unknown }[] = [];
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: async (url, init) => {
+        const at = new URL(String(url)).pathname;
+        if (at === "/api/voice") return Response.json({ onMac: { available: false } });
+        calls.push({
+          method: init?.method ?? "GET",
+          path: at,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return at === edit ? reply() : new Response(null, { status: 202 });
+      },
+    });
+    return { calls, f: setup(undefined, { api }) };
+  }
+
+  it("fills an empty composer, its files back as chips, and sends it as any message", async () => {
+    const { calls, f } = editing(() =>
+      Response.json({ text: withAttachments("Original words", [path]) }),
+    );
+    const taking = editQueued(sessionId, messageId);
+    // Focused in the press, so a phone's keyboard comes up for the words on their way.
+    expect(document.activeElement).toBe(f.field);
+    await act(async () => expect(await taking).toBe(true));
+    expect(f.field.value).toBe("Original words");
+    expect(f.field.selectionStart).toBe("Original words".length);
+    const chips = screen.getByRole("list", { name: "Attached files" });
+    expect(within(chips).getByText("Uploaded to Downloads")).toBeTruthy();
+    expect(chips.textContent).toContain("totals.csv");
+    expect(said()).toContain("Message moved to the composer. Edit it, then send when ready.");
+    f.submit();
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1]).toEqual({
+      method: "POST",
+      path: `/api/agent/sessions/${sessionId}/messages`,
+      body: { kind: "followup", text: withAttachments("Original words", [path]) },
+    });
+  });
+
+  it("follows a newer draft once, however often it is asked, and a file removed stays on the computer", async () => {
+    const { calls, f } = editing(() =>
+      Response.json({ text: withAttachments("Original words", [path]) }),
+    );
+    f.input("My newer draft");
+    await act(async () => expect(await editQueued(sessionId, messageId)).toBe(true));
+    expect(f.field.value).toBe("My newer draft\n\nOriginal words");
+    await act(async () => expect(await editQueued(sessionId, messageId)).toBe(true));
+    expect(f.field.value).toBe("My newer draft\n\nOriginal words");
+    expect(calls.filter((call) => call.path === edit)).toHaveLength(1);
+    expect(editQueued(otherSession, messageId)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove totals.csv" }));
+    f.submit();
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1]?.body).toEqual({
+      kind: "followup",
+      text: "My newer draft\n\nOriginal words",
+    });
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+  });
+
+  it("takes back a message Stop left unsent from its own words, without asking dot", async () => {
+    const { calls, f } = editing(() => new Response(null, { status: 409 }));
+    f.input("My newer draft");
+    const taking = editQueued(otherSession, messageId, withAttachments("Original words", [path]));
+    expect(document.activeElement).toBe(f.field);
+    await act(async () => expect(await taking).toBe(true));
+    expect(f.field.value).toBe("My newer draft\n\nOriginal words");
+    expect(screen.getByRole("list", { name: "Attached files" }).textContent).toContain(
+      "totals.csv",
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps the draft and says why when the message has already started", async () => {
+    const { f } = editing(() => new Response("message is no longer queued", { status: 409 }));
+    f.input("Keep me");
+    await act(async () => expect(await editQueued(sessionId, messageId)).toBe(false));
+    expect(f.field.value).toBe("Keep me");
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Couldn't move your queued message here. It may have started already.",
+    );
+  });
+
+  it("asks again when the reply carrying its words is lost", async () => {
+    let tries = 0;
+    const { calls, f } = editing(() =>
+      ++tries === 1
+        ? Promise.reject(new TypeError("connection lost"))
+        : Response.json({ text: "Original words" }),
+    );
+    await act(async () => expect(await editQueued(sessionId, messageId)).toBe(true));
+    expect(f.field.value).toBe("Original words");
+    expect(calls.filter((call) => call.path === edit)).toHaveLength(2);
+  });
 });

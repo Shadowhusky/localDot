@@ -157,12 +157,16 @@ it("holds queued messages outside the inbox, promotes exactly once, and releases
   ]);
   session.stop();
 });
-it("Stop cancels queued follow-ups instead of launching them after the task", () => {
+it("Stop cancels queued follow-ups instead of launching them after the task, and says so", () => {
   const { session, events } = setup();
   session.setStatus("running");
+  session.enqueue("Never mind this");
   session.enqueue("Do this later");
+  const [mine, later] = events.filter((e) => e.type === "message.user");
+  expect(session.cancelQueued(String(mine?.data.messageId))).toBe(true);
   session.stop();
-  expect(events.filter((e) => e.type === "message.delivery").map((e) => e.data.state)).toEqual([
-    "cancelled",
+  expect(events.filter((e) => e.type === "message.delivery").map((e) => e.data)).toEqual([
+    { messageId: mine?.data.messageId, state: "cancelled" },
+    { messageId: later?.data.messageId, state: "cancelled", reason: "stopped" },
   ]);
 });

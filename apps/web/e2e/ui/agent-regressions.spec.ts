@@ -291,7 +291,10 @@ for (const screen of ["desktop", "browser"] as const) {
   });
 }
 
-test("queued Edit restores the draft and resends the edited message once", async ({ page, ui }) => {
+test("queued Edit moves the message into the draft and resends the edited message once", async ({
+  page,
+  ui,
+}) => {
   await ui.open("running");
   const form = page.getByRole("form", { name: "Message dot" });
   const field = form.getByRole("textbox", { name: "Message", exact: true });
@@ -305,8 +308,7 @@ test("queued Edit restores the draft and resends the edited message once", async
   await original.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(field).toHaveValue("My existing draft\n\nOriginal queued request");
   await expect(field).toBeFocused();
-  await expect(original.getByText("Moved to draft")).toBeVisible();
-  await expect(original.getByRole("button", { name: "Steer now" })).toHaveCount(0);
+  await expect(original).toHaveCount(0);
   await field.fill("Revised queued request");
   await form.getByRole("button", { name: "Queue message" }).click();
   const revised = page

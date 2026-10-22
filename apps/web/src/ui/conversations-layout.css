@@ -1,0 +1,17 @@
+/* A row of the conversation list lays out the kit button's own content, so it must follow the kit
+   layer: from the legacy rail sheet the kit's inline-flex wins, and a long title squeezes the
+   status point. */
+@layer utilities {
+  .conversations-pick > .ui-button-content {
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    column-gap: calc(var(--spacing) * 3);
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .conversations-when {
+    white-space: nowrap;
+  }
+}

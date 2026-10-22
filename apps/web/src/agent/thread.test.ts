@@ -173,6 +173,75 @@ describe("the work line of each turn", () => {
     expect(work.map((item) => item.startMs)).toEqual([1000, 10_000]);
   });
 
+  it("files a follow-up dot received after the task it waited for, as a turn of its own", () => {
+    // Queued at 4, while dot worked; delivered at 10, once the task was done.
+    const items = threadItems([
+      message("task", 1),
+      message("working", 3, "assistant"),
+      message("followup", 10, "user", { kind: "followup", delivery: "sent" }),
+      message("done", 8, "assistant"),
+      message("next", 12, "assistant"),
+    ]);
+    const thread = withWork(items, [step("a", 1500), step("b", 4000), step("c", 11_000)], false);
+    expect(thread.map((item) => item.key)).toEqual([
+      "message-task",
+      "message-working",
+      "message-done",
+      "work-message-task",
+      "message-followup",
+      "message-next",
+      "work-message-followup",
+    ]);
+    const work = thread.filter((item) => item.kind === "work");
+    expect(work.map((item) => item.steps.map((s) => s.key))).toEqual([["a", "b"], ["c"]]);
+  });
+
+  it("starts no turn at a queued message, nor at one taken back to edit or cancelled", () => {
+    const messages = [
+      message("task", 1),
+      message("working", 3, "assistant"),
+      message("queued", 4, "user", { kind: "followup", queued: true }),
+      message("withdrawn", 5, "user", { kind: "followup", delivery: "withdrawn" }),
+      message("cancelled", 6, "user", { kind: "followup", delivery: "cancelled" }),
+      message("still", 8, "assistant"),
+    ];
+    const items = threadItems(messages);
+    expect(items.map((item) => item.key)).toEqual([
+      "message-task",
+      "message-working",
+      "message-queued",
+      "message-still",
+    ]);
+    const steps = [step("a", 2000), step("b", 7000)];
+    const lines = (thread: ThreadItem[]) =>
+      thread.flatMap((item) =>
+        item.kind === "work" ? [[item.startMs, item.steps.map((s) => s.key)]] : [],
+      );
+    expect(lines(withWork(items, steps, true))).toEqual([[1000, ["a", "b"]]]);
+    // Handed the unsent ones as well, the live line still counts the task from its start.
+    const unsent = messages.slice(3, 5).map(
+      (sent): ThreadItem => ({
+        kind: "message",
+        key: `message-${sent.id}`,
+        speaker: "user",
+        message: sent,
+      }),
+    );
+    expect(lines(withWork([...items, ...unsent], steps, true))).toEqual([[1000, ["a", "b"]]]);
+  });
+
+  it("keeps a message Stop left unsent after the turn's line, and starts no turn for it", () => {
+    const items = threadItems([
+      message("task", 1),
+      message("working", 3, "assistant"),
+      message("cancelled", 4, "user", { kind: "followup", delivery: "cancelled" }),
+      message("unsent", 9, "user", { kind: "followup", delivery: "cancelled", stopped: true }),
+    ]);
+    expect(
+      withWork(items, [step("a", 2000), step("b", 5000)], false).map((item) => item.key),
+    ).toEqual(["message-task", "message-working", "work-message-task", "message-unsent"]);
+  });
+
   it("says what each turn's model calls cost on its line, an estimate if any call was", () => {
     const items = threadItems([
       message("task", 1),
@@ -355,6 +424,27 @@ describe("rows and quiet times", () => {
     expect(rows.map((row) => row.groupStart)).toEqual([true, true, false, true]);
     expect(rows.map((row) => row.separator !== null)).toEqual([true, false, false, true]);
     expect(rows[0]?.separator).toBe(timeLabel(start, start));
+  });
+
+  it("times a queued message by when dot received it", () => {
+    const start = Date.UTC(2026, 9, 8, 9, 0);
+    const items = threadItems([
+      message(ulidAt(start), 1),
+      message(ulidAt(start + 60_000), 3, "assistant"),
+      message(ulidAt(start + 30_000), 9, "user", {
+        kind: "followup",
+        delivery: "sent",
+        time: start + 25 * 60_000,
+      }),
+      message(ulidAt(start + 26 * 60_000), 10, "assistant"),
+    ]);
+    const rows = threadRows(items, start + 30 * 60_000);
+    expect(rows.map((row) => row.separator)).toEqual([
+      timeLabel(start, start),
+      null,
+      timeLabel(start + 25 * 60_000, start),
+      null,
+    ]);
   });
 
   it("names the day for an older time", () => {

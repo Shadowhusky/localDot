@@ -99,6 +99,12 @@ export interface ThreadRow {
 
 const wallTime = (id: string) => (ULID_PATTERN.test(id) ? ulidTime(id) : undefined);
 
+// A queued message the user took back to edit, or cancelled, never reached dot.
+const unsent = (message: AgentMessage) =>
+  message.delivery === "withdrawn" || message.delivery === "cancelled";
+// Only one Stop left unsent stays in the thread, for the user to take back.
+const dropped = (message: AgentMessage) => unsent(message) && !message.stopped;
+
 interface Placed {
   item: ThreadItem;
   order: number;
@@ -119,16 +125,17 @@ export function threadItems(
   const place = (item: ThreadItem, order: number | undefined) =>
     placed.push({ item, order: order ?? Number.NaN, index: placed.length });
   for (const message of messages)
-    place(
-      {
-        kind: "message",
-        key: `message-${message.id}`,
-        speaker: message.role === "user" ? "user" : "dot",
-        time: wallTime(message.id),
-        message,
-      },
-      message.seq,
-    );
+    if (!dropped(message))
+      place(
+        {
+          kind: "message",
+          key: `message-${message.id}`,
+          speaker: message.role === "user" ? "user" : "dot",
+          time: message.time ?? wallTime(message.id),
+          message,
+        },
+        message.seq,
+      );
   for (const question of questions) {
     place(
       {
@@ -230,12 +237,16 @@ export function workSteps(
     }));
 }
 
-// A turn starts at each task or follow-up the user sends; steering a running task stays in its turn.
+// A turn starts at each task or follow-up dot receives; steering a running task stays in its turn.
 const startsTurn = (item: ThreadItem) =>
   item.kind === "message" &&
   item.message.role === "user" &&
   item.message.kind !== "steer" &&
-  !item.message.queued;
+  !item.message.queued &&
+  !unsent(item.message);
+
+const trails = (item: ThreadItem | undefined) =>
+  item?.kind === "control" || (item?.kind === "message" && !!item.message.stopped);
 
 const startOf = (item: ThreadItem) =>
   item.kind === "message" && item.message.at !== undefined ? microsToMs(item.message.at) : null;
@@ -379,9 +390,10 @@ export function withWork(
     const bills = charged.get(index) ?? [];
     const usd = bills.reduce((sum, call) => sum + call.usd, 0);
     const work = own.length > 0 || open;
-    // The lines close dot's own part of the turn: the computer changing hands after it stays after.
+    // The lines close dot's own part of the turn: the computer changing hands after it, and a message
+    // Stop left unsent, stay after.
     let end = turn.items.length;
-    while (end > 0 && turn.items[end - 1]?.kind === "control") end--;
+    while (end > 0 && trails(turn.items[end - 1])) end--;
     const calls = counted(turn.start, usage, AGENT_LIMITS.usageCalls)
       ? (called.get(index) ?? [])
       : [];

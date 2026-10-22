@@ -350,6 +350,8 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     }
     case "message.delivery": {
       const message = model.messages.get(e.data.messageId);
+      const reached = e.data.state === "sent" || e.data.state === "steering";
+      const stopped = e.data.state === "cancelled" && e.data.reason === "stopped";
       if (message)
         next = {
           ...next,
@@ -358,8 +360,12 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
             message.id,
             {
               ...message,
+              // A queued message moves to where dot received it, so what dot did meanwhile stays
+              // above it and the turn it starts is its own; or to where Stop left it unsent.
+              ...(reached || stopped ? { seq: e.seq, at: e.t, time: ulidTime(e.id) } : {}),
               queued: false,
               delivery: e.data.state,
+              ...(stopped ? { stopped: true } : {}),
               ...(e.data.state === "steering" ? { kind: "steer" as const } : {}),
             },
             L.messages,

@@ -231,6 +231,48 @@ describe("what was said earlier", () => {
     ]);
   });
 
+  it("says a queued message where dot received it, after what dot did while it waited", async () => {
+    const f = setup();
+    const first = await f.task("Draw a dog");
+    const queue = (text: string) => {
+      const messageId = ulid();
+      f.log.append(first, {
+        type: "message.user",
+        agent: "main",
+        data: { messageId, text, kind: "followup", queued: true },
+      });
+      return messageId;
+    };
+    const deliver = (messageId: string, state: "sent" | "steering") =>
+      f.log.append(first, { type: "message.delivery", agent: "main", data: { messageId, state } });
+    const later = queue("Then add a hat");
+    const now = queue("Make it brown");
+    queue("Never reached dot");
+    f.reply(first, "Drawing the dog.");
+    deliver(now, "steering");
+    f.reply(first, "Making it brown.");
+    f.log.append(first, {
+      type: "task.result",
+      agent: "main",
+      data: { summary: "Drew a brown dog.", files: [] },
+    });
+    deliver(later, "sent");
+    f.reply(first, "Adding a hat.");
+    f.end(first, "done");
+    const second = await f.task("Make it bigger", first);
+    expect(f.open().earlier(second)).toEqual([
+      "The user: Draw a dog",
+      "dot: Drawing the dog.",
+      "The user: Make it brown",
+      "dot: Making it brown.",
+      "dot's result: Drew a brown dog.",
+      "The user: Then add a hat",
+      "dot: Adding a hat.",
+      "The user: Make it bigger",
+      "(That task was interrupted.)",
+    ]);
+  });
+
   it("stops reading older tasks once the record is full", async () => {
     const f = setup();
     const old = await f.task("An old task");

@@ -1,4 +1,4 @@
-import { LocalDotEvent } from "@localdot/protocol";
+import { LocalDotEvent, ulidTime } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import { emptyAgentModel, AGENT_LIMITS as L } from "./model.ts";
 import { createAgentFeed, parseAgentEvent, projectAgentEvent } from "./reducer.ts";
@@ -165,6 +165,85 @@ describe("bounded agent projection", () => {
     expect(projectAgentEvent(model, events[2] as LocalDotEvent).messages.get(queued)?.queued).toBe(
       true,
     );
+  });
+  it("moves a queued message to where dot received it, whether sent or steered, and on replay", () => {
+    const later = id(10002),
+      steered = id(10003),
+      kept = id(10004);
+    const queued = (seq: number, messageId: string) =>
+      ev(seq, "message.user", { messageId, text: messageId, kind: "followup", queued: true });
+    const events = [
+      ev(0, "message.user", { messageId: message, text: "Draw a dog", kind: "task" }),
+      queued(1, later),
+      queued(2, steered),
+      queued(3, kept),
+      ev(4, "message.assistant", { messageId: other, text: "Drawing it now." }),
+      ev(5, "message.delivery", { messageId: steered, state: "steering" }),
+      ev(6, "message.delivery", { messageId: kept, state: "withdrawn" }),
+      ev(7, "task.result", { summary: "Drew a dog.", files: [] }),
+      ev(8, "message.delivery", { messageId: later, state: "sent" }),
+    ];
+    const model = reduce(events);
+    const placed = (messageId: string) => {
+      const { seq, at, time, queued, kind, delivery } = model.messages.get(messageId) ?? {};
+      return { seq, at, time, queued, kind, delivery };
+    };
+    expect(placed(later)).toEqual({
+      seq: 8,
+      at: 8000,
+      time: ulidTime(id(8)),
+      queued: false,
+      kind: "followup",
+      delivery: "sent",
+    });
+    expect(placed(steered)).toMatchObject({
+      seq: 5,
+      at: 5000,
+      kind: "steer",
+      delivery: "steering",
+    });
+    expect(placed(kept)).toEqual({
+      seq: 3,
+      at: 3000,
+      time: undefined,
+      queued: false,
+      kind: "followup",
+      delivery: "withdrawn",
+    });
+    // History read again projects the same thread; the queued event replayed moves nothing back.
+    expect(reduce(events).messages.get(later)).toEqual(model.messages.get(later));
+    expect(projectAgentEvent(model, events[1] as LocalDotEvent)).toBe(model);
+  });
+  it("keeps a queued message Stop left unsent where Stop left it, unlike one the user cancelled", () => {
+    const mine = id(10002),
+      unsent = id(10003);
+    const model = reduce([
+      ev(0, "message.user", { messageId: message, text: "Draw a dog", kind: "task" }),
+      ev(1, "message.user", {
+        messageId: mine,
+        text: "Never mind",
+        kind: "followup",
+        queued: true,
+      }),
+      ev(2, "message.user", {
+        messageId: unsent,
+        text: "Then a hat",
+        kind: "followup",
+        queued: true,
+      }),
+      ev(3, "message.delivery", { messageId: mine, state: "cancelled" }),
+      ev(4, "message.delivery", { messageId: unsent, state: "cancelled", reason: "stopped" }),
+      ev(5, "session.end", { reason: "stopped" }),
+    ]);
+    expect(model.messages.get(mine)).toMatchObject({ seq: 1, delivery: "cancelled" });
+    expect(model.messages.get(mine)?.stopped).toBeUndefined();
+    expect(model.messages.get(unsent)).toMatchObject({
+      seq: 4,
+      at: 4000,
+      queued: false,
+      delivery: "cancelled",
+      stopped: true,
+    });
   });
   it("projects plans, memory changes and file patches without mutating older snapshots", () => {
     const original = reduce([

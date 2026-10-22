@@ -36,12 +36,13 @@ import "../ui/composer-layout.css";
 import { useVoice } from "../voice/useVoice.ts";
 import { VoiceButton, VoiceStrip } from "../voice/VoiceControls.tsx";
 import { AttachmentChips } from "./Attachments.tsx";
-import { fileName, withAttachments } from "./attachments.ts";
+import { splitAttachments, withAttachments } from "./attachments.ts";
+import { editQueuedMessage } from "./control-api.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import { Outbox } from "./outbox.ts";
 import { pastedFiles, pastedText } from "./paste.ts";
-import { onQueuedDraft } from "./queued-draft.ts";
+import { onQueuedEdit } from "./queued-draft.ts";
 import { ResearchLine, ResearchToggle } from "./ResearchToggle.tsx";
 import { RevisingChip } from "./RevisingChip.tsx";
 import { looksLikeResearch, onResearchRequest, researchWait } from "./research.ts";
@@ -102,6 +103,7 @@ export interface Delivery {
   readonly revision: number;
   readonly draftText: string;
   readonly attachmentIDs: readonly number[];
+  // Where the attached files are on the computer.
   readonly files: readonly string[];
   // The file the composer was revising when this was sent.
   readonly revising: ReviseDraft | null;
@@ -497,28 +499,55 @@ export function Composer(props: ComposerProps) {
       }),
     [measure],
   );
-  const restoredQueue = useRef(new Set<string>());
-  useEffect(
-    () =>
-      onQueuedDraft((sessionId, messageId, text) => {
-        if (sessionId !== props.agent.sessionId) return false;
-        const input = form.current?.querySelector("textarea");
-        if (!input || input.readOnly) return false;
-        const key = `${sessionId}:${messageId}`;
-        if (!restoredQueue.current.has(key)) {
-          // Preserve an in-progress draft and the original attachment references.
-          input.value = input.value ? `${input.value}\n\n${text}` : text;
-          restoredQueue.current.add(key);
+  // Edit on a message that never reached dot: its words and files come back into the draft, after
+  // anything already written there. One still queued, dot gives back first.
+  const takenBack = useRef(new Set<string>());
+  const restoreFiles = useRef(uploads.restore);
+  restoreFiles.current = uploads.restore;
+  useEffect(() => {
+    const lifetime = new AbortController();
+    const unsubscribe = onQueuedEdit((sessionId, messageId, unsent) => {
+      const now = current.current;
+      const input = form.current?.querySelector("textarea");
+      if (!input || (unsent === undefined && sessionId !== now.agent.sessionId)) return null;
+      // In the press itself, so a phone raises its keyboard for the words on their way.
+      input.focus();
+      const key = `${sessionId}:${messageId}`;
+      if (takenBack.current.has(key)) return Promise.resolve(true);
+      const words =
+        unsent === undefined
+          ? editQueuedMessage(now.api, sessionId, messageId, lifetime.signal)
+          : Promise.resolve(unsent);
+      return words.then(
+        (text) => {
+          const box = form.current?.querySelector("textarea");
+          if (!box || takenBack.current.has(key)) return !!box;
+          takenBack.current.add(key);
+          const { body, files } = splitAttachments(text);
+          box.value = box.value.trim() ? `${box.value}\n\n${body}` : body;
+          restoreFiles.current(files);
           revision.current += 1;
-          measure(input);
+          keepDraft(guardOwner.current.check(box) ? box.value : "");
+          measure(box);
           setProblem(null);
-        }
-        input.focus();
-        input.setSelectionRange(input.value.length, input.value.length);
-        return true;
-      }),
-    [measure, props.agent.sessionId],
-  );
+          box.focus();
+          box.setSelectionRange(box.value.length, box.value.length);
+          box.scrollTop = box.scrollHeight;
+          announce("composer", "Message moved to the composer. Edit it, then send when ready.");
+          return true;
+        },
+        () => {
+          if (!lifetime.signal.aborted)
+            setProblem("Couldn't move your queued message here. It may have started already.");
+          return false;
+        },
+      );
+    });
+    return () => {
+      lifetime.abort();
+      unsubscribe();
+    };
+  }, [measure]);
   // A key taken out, or discarded, changes the text under the composer.
   // biome-ignore lint/correctness/useExhaustiveDependencies: a notice's change is the trigger.
   useLayoutEffect(() => {
@@ -806,12 +835,12 @@ export function Composer(props: ComposerProps) {
       {
         draftText: text,
         attachmentIDs: attached.map((row) => row.id),
-        files: attached.map((row) => fileName(row.path)),
+        files: attached.map((row) => row.path),
         revising: revisingNow.current,
         tag:
           chosen === "steer"
             ? "Sent while working"
-            : chosen === "followup" && later
+            : chosen === "followup" && later && now.agent.snapshot?.status !== "idle"
               ? "After this task"
               : undefined,
       },

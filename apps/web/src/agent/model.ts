@@ -28,11 +28,14 @@ export const AGENT_LIMITS = Object.freeze({
   outputText: 65_536,
   patchText: 8192,
 });
-// seq orders the conversation; at is the session time (µs) it was first seen.
+// seq orders the conversation; at is the session time (µs) it was first seen, or for a queued
+// message the time dot received it.
 export interface AgentMessage {
   readonly id: string;
   readonly seq?: number;
   readonly at?: number;
+  // Wall-clock ms a queued message reached dot; any other takes its time from its ID.
+  readonly time?: number;
   readonly role: "user" | "assistant";
   readonly text: string;
   readonly final: boolean;
@@ -43,6 +46,8 @@ export interface AgentMessage {
   readonly queued?: boolean;
   readonly sessionId?: string;
   readonly delivery?: "sent" | "steering" | "cancelled" | "withdrawn";
+  // Cancelled because its task stopped, not by the user: it waits, unsent, for them to edit it.
+  readonly stopped?: boolean;
   readonly files?: readonly string[];
   readonly truncated?: boolean;
 }

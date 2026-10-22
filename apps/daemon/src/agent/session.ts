@@ -1722,7 +1722,7 @@ export class AgentSession {
     this.#stopping = true;
     for (const messageId of this.#queued.keys()) {
       try {
-        this.append("message.delivery", { messageId, state: "cancelled" });
+        this.append("message.delivery", { messageId, state: "cancelled", reason: "stopped" });
       } catch {
         /* Stopping must still retire all input. */
       }

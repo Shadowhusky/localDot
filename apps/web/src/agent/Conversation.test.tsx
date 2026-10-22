@@ -8,7 +8,7 @@ import { Conversation } from "./Conversation.tsx";
 import { OPENING_ROWS } from "./earlier.ts";
 import type { AgentMessage, AgentQuestion } from "./model.ts";
 import { Outbox } from "./outbox.ts";
-import { onQueuedDraft } from "./queued-draft.ts";
+import { onQueuedEdit } from "./queued-draft.ts";
 import { threadItems } from "./thread.ts";
 
 const spoken = vi.hoisted(() => ({ announce: vi.fn(), withdraw: vi.fn() }));
@@ -74,7 +74,7 @@ describe("the conversation thread", () => {
     expect(rows[1]?.querySelector(".thread-bubble")).toBeNull();
   });
 
-  it("shows files sent with your message as chips, and when a message was sent", () => {
+  it("shows files sent with your message as chips atop its bubble, and when a message was sent", () => {
     render(
       <Conversation
         items={items([
@@ -92,11 +92,17 @@ describe("the conversation thread", () => {
       />,
     );
     const [first, second, third] = document.querySelectorAll(".thread-message");
-    expect(first?.querySelector(".thread-bubble")?.textContent).toBe("Read both files");
+    const bubble = first?.querySelector(".thread-bubble");
+    expect([...(bubble?.children ?? [])].map((part) => part.className)).toEqual([
+      "thread-bubble-files",
+      "thread-bubble-text",
+    ]);
+    expect(bubble?.querySelector(".thread-bubble-text")?.textContent).toBe("Read both files");
     expect(
-      within(first as HTMLElement).getByRole("list", { name: "Attached files" }).textContent,
+      within(bubble as HTMLElement).getByRole("list", { name: "Attached files" }).textContent,
     ).toBe("one.txttwo.csv");
     expect(first?.textContent).not.toContain("Attached files on this computer");
+    expect(second?.querySelector(".thread-bubble-files")).toBeNull();
     expect(first?.querySelector(".thread-tag")?.textContent).toBe("Sent while working");
     expect(second?.querySelector(".thread-tag")?.textContent).toBe("After this task");
     expect(third?.querySelector(".thread-tag")).toBeNull();
@@ -512,42 +518,165 @@ it("steers the existing queued message by ID without posting its text again", as
   expect(screen.getAllByText("Use the latest numbers")).toHaveLength(1);
 });
 
-it("moves a queued message to the composer only after withdrawal is confirmed", async () => {
+it("keeps a queued message at the end, under what dot says meanwhile, until dot receives it", () => {
+  const sessionId = "01J00000000000000000000001";
+  const api = createApi("fixture", { origin: "http://127.0.0.1:4790", fetchImpl: vi.fn() });
+  const said = (id: string, text: string, seq: number, extra: Partial<AgentMessage> = {}) => ({
+    ...message(id, text, extra.kind ? "user" : "assistant"),
+    seq,
+    ...extra,
+  });
+  const task = said("01J00000000000000000000010", "Draw a dog", 1, { kind: "task" });
+  const queued = said("01J00000000000000000000011", "Then add a hat", 2, {
+    kind: "followup",
+    queued: true,
+    sessionId,
+  });
+  const working = said("01J00000000000000000000012", "Drawing it now.", 3);
+  const order = () =>
+    [...document.querySelectorAll(".thread > .thread-row")].map(
+      (row) => row.querySelector(".thread-bubble-text, .safe-markdown")?.textContent,
+    );
+  const view = render(
+    <Conversation
+      items={items([task, queued, working])}
+      truncated={false}
+      api={api}
+      sessionId={sessionId}
+    />,
+  );
+  expect(order()).toEqual(["Draw a dog", "Drawing it now.", "Then add a hat"]);
+  // A message on its way waits right under it.
+  expect(document.querySelector(".thread-outbox")?.previousElementSibling?.textContent).toContain(
+    "Then add a hat",
+  );
+  const done = said("01J00000000000000000000013", "Done.", 4);
+  const next = said("01J00000000000000000000014", "Adding the hat.", 6);
+  view.rerender(
+    <Conversation
+      items={items([
+        task,
+        { ...queued, seq: 5, queued: false, delivery: "sent" },
+        working,
+        done,
+        next,
+      ])}
+      truncated={false}
+      api={api}
+      sessionId={sessionId}
+    />,
+  );
+  expect(order()).toEqual([
+    "Draw a dog",
+    "Drawing it now.",
+    "Done.",
+    "Then add a hat",
+    "Adding the hat.",
+  ]);
+  expect(screen.queryByText("After this task")).toBeNull();
+  // A task that ended with it still waiting never sent it: it stays where it was written.
+  view.rerender(
+    <Conversation
+      items={items([task, queued, working])}
+      truncated={false}
+      api={api}
+      sessionId={sessionId}
+      ended="interrupted"
+    />,
+  );
+  expect(order()).toEqual(["Draw a dog", "Then add a hat", "Drawing it now."]);
+});
+
+it("asks the composer to take a queued message back, which then leaves the thread", async () => {
   const sessionId = "01J00000000000000000000001",
     messageId = "01J00000000000000000000002";
-  let reply: (r: Response) => void = () => {};
-  const fetch = vi.fn(
-    async () =>
-      new Promise<Response>((resolve) => {
-        reply = resolve;
-      }),
-  );
+  const fetch = vi.fn(async () => new Response(null, { status: 204 }));
   const api = createApi("fixture", { origin: "http://127.0.0.1:4790", fetchImpl: fetch });
-  const receive = vi.fn(() => true);
-  const unsubscribe = onQueuedDraft(receive);
+  const taken = Promise.withResolvers<boolean>();
+  const take = vi.fn(() => taken.promise);
+  const unsubscribe = onQueuedEdit(take);
   try {
-    render(
+    const queued = { ...message(messageId, "Preview"), queued: true, sessionId, kind: "followup" };
+    const view = render(
       <Conversation
-        items={items([
-          { ...message(messageId, "Preview"), queued: true, sessionId, kind: "followup" },
-        ])}
+        items={items([queued as AgentMessage])}
         truncated={false}
         api={api}
         sessionId={sessionId}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /^Edit$/ }));
-    expect(receive).not.toHaveBeenCalled();
-    await act(async () =>
-      reply(new Response(JSON.stringify({ text: "Complete queued message" }), { status: 200 })),
+    expect(take).toHaveBeenCalledWith(sessionId, messageId, undefined);
+    expect(fetch).not.toHaveBeenCalled();
+    // dot gives it back before the composer has its words: the row goes, and the words still land.
+    view.rerender(
+      <Conversation
+        items={items([{ ...queued, queued: false, delivery: "withdrawn" } as AgentMessage])}
+        truncated={false}
+        api={api}
+        sessionId={sessionId}
+      />,
     );
-    await waitFor(() =>
-      expect(receive).toHaveBeenCalledWith(sessionId, messageId, "Complete queued message"),
-    );
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Preview")).toBeNull();
+    expect(document.querySelectorAll(".thread-row")).toHaveLength(0);
+    await act(async () => taken.resolve(true));
   } finally {
     unsubscribe();
   }
+});
+
+it("shows a message Stop left unsent, and Edit moves it, files and all, out to the composer", async () => {
+  const sessionId = "01J00000000000000000000001",
+    messageId = "01J00000000000000000000002";
+  const text =
+    "Then add a hat\n\nAttached files on this computer:\n- ~/Downloads/Uploads/a/hat.png";
+  const take = vi.fn(() => Promise.resolve(true));
+  const unsubscribe = onQueuedEdit(take);
+  try {
+    render(
+      <Conversation
+        items={items([
+          {
+            ...message(messageId, text),
+            sessionId,
+            kind: "followup",
+            delivery: "cancelled",
+            stopped: true,
+          },
+        ])}
+        truncated={false}
+        ended="stopped"
+      />,
+    );
+    const row = screen.getByRole("article", { name: "You" });
+    expect(within(row).getByText("Not sent")).toBeTruthy();
+    expect(within(row).getByRole("list", { name: "Attached files" }).textContent).toBe("hat.png");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    expect(take).toHaveBeenCalledWith(sessionId, messageId, text);
+    await waitFor(() => expect(screen.queryByRole("article", { name: "You" })).toBeNull());
+  } finally {
+    unsubscribe();
+  }
+});
+
+it("says so when no composer can take a queued message back", () => {
+  const sessionId = "01J00000000000000000000001",
+    messageId = "01J00000000000000000000002";
+  const api = createApi("fixture", { origin: "http://127.0.0.1:4790", fetchImpl: vi.fn() });
+  render(
+    <Conversation
+      items={items([
+        { ...message(messageId, "Preview"), queued: true, sessionId, kind: "followup" },
+      ])}
+      truncated={false}
+      api={api}
+      sessionId={sessionId}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^Edit$/ }));
+  expect(screen.getByRole("alert").textContent).toBe(
+    "Couldn't move this message to the composer. Try again.",
+  );
 });
 
 it("cancels a queued message without replacing the current draft", async () => {
@@ -555,8 +684,8 @@ it("cancels a queued message without replacing the current draft", async () => {
     messageId = "01J00000000000000000000002";
   const fetch = vi.fn(async (_url: RequestInfo | URL) => new Response(null, { status: 204 }));
   const api = createApi("fixture", { origin: "http://127.0.0.1:4790", fetchImpl: fetch });
-  const receive = vi.fn(() => true);
-  const unsubscribe = onQueuedDraft(receive);
+  const receive = vi.fn(() => null);
+  const unsubscribe = onQueuedEdit(receive);
   try {
     const queued = { ...message(messageId), queued: true, sessionId, kind: "followup" as const };
     const view = render(
@@ -576,8 +705,9 @@ it("cancels a queued message without replacing the current draft", async () => {
         sessionId={sessionId}
       />,
     );
+    // Never sent, it leaves the thread.
     expect(screen.queryByRole("button", { name: /^Cancel$/ })).toBeNull();
-    expect(screen.getByText("Not sent")).toBeTruthy();
+    expect(screen.queryByText("Same message")).toBeNull();
   } finally {
     unsubscribe();
   }

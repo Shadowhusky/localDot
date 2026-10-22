@@ -32,6 +32,7 @@ import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
+import "../ui/conversations-layout.css";
 import "./rails.css";
 
 export interface ConversationListProps {

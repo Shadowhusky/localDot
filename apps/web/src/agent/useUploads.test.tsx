@@ -125,6 +125,22 @@ describe("user-owned resumable attachment queue", () => {
     expect(f.result.current.rows).toEqual([]);
     expect(f.result.current.forMessage()).toEqual([]);
   });
+  it("brings back files a message carried as finished chips, without uploading or deleting them", () => {
+    const f = setup();
+    const paths = ["~/Downloads/Uploads/a/notes.txt", "~/Downloads/Uploads/b/totals.csv"];
+    act(() => f.result.current.restore(paths));
+    act(() => f.result.current.restore([paths[1] as string]));
+    expect(f.result.current.rows.map((row) => [row.name, row.phase, row.bytes])).toEqual([
+      ["notes.txt", "complete", undefined],
+      ["totals.csv", "complete", undefined],
+    ]);
+    expect(f.result.current.blocked).toBe(false);
+    expect(f.result.current.forMessage()?.map((row) => row.path)).toEqual(paths);
+    act(() => f.result.current.remove(f.result.current.rows[0]?.id ?? 0));
+    expect(f.result.current.rows.map((row) => row.path)).toEqual([paths[1]]);
+    expect(transfer.uploadFile).not.toHaveBeenCalled();
+    expect(transfer.discardUpload).not.toHaveBeenCalled();
+  });
   it("accepts same-named files safely but enforces per-file, draft and name limits", () => {
     transfer.uploadFile.mockReturnValue(new Promise(() => {}));
     const f = setup();

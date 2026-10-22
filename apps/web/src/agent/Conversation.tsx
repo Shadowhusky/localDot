@@ -25,18 +25,17 @@ import { Collapse } from "../ui/Disclosure.tsx";
 import { fadeIn } from "../ui/motion.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
-import { SentFiles } from "./Attachments.tsx";
 import { answerSummary } from "./ask-form.ts";
-import { fileName, splitAttachments } from "./attachments.ts";
+import { splitAttachments } from "./attachments.ts";
 import { CopyButton } from "./CopyButton.tsx";
-import { cancelQueuedMessage, editQueuedMessage, steerQueuedMessage } from "./control-api.ts";
+import { cancelQueuedMessage, steerQueuedMessage } from "./control-api.ts";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
 import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
 import type { AgentMessage, AgentResult, AgentWords } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
-import { restoreQueuedDraft } from "./queued-draft.ts";
+import { editQueued } from "./queued-draft.ts";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { StepPreviewScope } from "./StepPreview.tsx";
@@ -52,6 +51,7 @@ import {
   timeLabel,
   type WorkStep,
 } from "./thread.ts";
+import { UserBubble } from "./UserBubble.tsx";
 import { useFollowScroll } from "./useFollowScroll.ts";
 import { usePagedRows } from "./usePagedRows.ts";
 
@@ -91,6 +91,8 @@ interface QueueActions {
 }
 interface ThreadContext {
   queue?: QueueActions;
+  // Puts a message Stop left unsent back into the composer.
+  takeBack(message: AgentMessage): Promise<boolean> | null;
   announce(text: string): void;
   words?: AgentWords;
   downloads: ResultDownloads;
@@ -130,8 +132,10 @@ const MessageCard = memo(function MessageCard({
   words,
   announce,
   queue,
+  takeBack,
 }: {
   queue?: QueueActions;
+  takeBack(message: AgentMessage): Promise<boolean> | null;
   message: AgentMessage;
   words?: AgentWords;
   announce(text: string): void;
@@ -149,16 +153,13 @@ const MessageCard = memo(function MessageCard({
       />
     </span>
   );
-  const tag =
-    message.delivery === "withdrawn"
-      ? "Moved to draft"
-      : message.delivery === "cancelled"
-        ? "Not sent"
-        : message.kind === "steer"
-          ? "Sent while working"
-          : message.queued
-            ? "After this task"
-            : undefined;
+  const tag = message.stopped
+    ? "Not sent"
+    : message.kind === "steer"
+      ? "Sent while working"
+      : message.queued
+        ? "After this task"
+        : undefined;
   return (
     <article
       className="thread-message"
@@ -168,24 +169,14 @@ const MessageCard = memo(function MessageCard({
     >
       {user ? (
         <>
-          <div className="thread-said">
-            {copy}
-            <p className="thread-bubble">{body}</p>
-          </div>
-          {files.length > 0 && <SentFiles names={files.map(fileName)} />}
+          <UserBubble text={body} files={files} lead={copy} />
           {tag && (
             <div className="thread-queue">
               <p className="thread-tag">{tag}</p>
-              {(message.queued || message.delivery === "withdrawn") &&
-                queue &&
-                message.sessionId === queue.sessionId && (
-                  <SteerMessage
-                    messageId={message.id}
-                    queued={!!message.queued}
-                    queue={queue}
-                    announce={announce}
-                  />
-                )}
+              {message.queued && queue && message.sessionId === queue.sessionId && (
+                <SteerMessage messageId={message.id} queue={queue} announce={announce} />
+              )}
+              {message.stopped && <TakeBack onTakeBack={() => takeBack(message)} />}
             </div>
           )}
         </>
@@ -229,12 +220,10 @@ function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean 
 
 function SteerMessage({
   messageId,
-  queued,
   queue,
   announce,
 }: {
   messageId: string;
-  queued: boolean;
   queue: QueueActions;
   announce(text: string): void;
 }) {
@@ -251,24 +240,43 @@ function SteerMessage({
         disabledReason={busy ? "Updating message…" : undefined}
         onClick={() => {
           if (pending.current) return;
+          // The composer takes the message back, and says how that went; this row leaves once
+          // dot has given it back.
+          const taking = editQueued(queue.sessionId, messageId);
+          if (!taking) {
+            setError("Couldn't move this message to the composer. Try again.");
+            return;
+          }
           pending.current = true;
           setBusy(true);
           setError(null);
           const abort = new AbortController();
           lifetime.current = abort;
-          void editQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
-            .then((text) => {
-              if (!restoreQueuedDraft(queue.sessionId, messageId, text))
-                setError(
-                  "Message removed from the queue. Tap Edit again to open it in the composer.",
-                );
-              else announce("Message moved to the composer. Edit it, then send when ready.");
+          void taking.finally(() => {
+            pending.current = false;
+            if (!abort.signal.aborted) setBusy(false);
+          });
+        }}
+      >
+        Edit
+      </Button>
+      <Button
+        variant="quiet"
+        size="sm"
+        busy={busy}
+        onClick={() => {
+          if (pending.current) return;
+          pending.current = true;
+          setBusy(true);
+          setError(null);
+          const abort = new AbortController();
+          lifetime.current = abort;
+          void steerQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
+            .then(() => {
+              if (!abort.signal.aborted) announce("Message sent to steer dot.");
             })
             .catch(() => {
-              if (!abort.signal.aborted)
-                setError(
-                  "Couldn't move this message to the composer. It may have started already. Try again.",
-                );
+              if (!abort.signal.aborted) setError("Couldn't confirm steering. Try again.");
             })
             .finally(() => {
               pending.current = false;
@@ -276,65 +284,59 @@ function SteerMessage({
             });
         }}
       >
+        Steer now
+      </Button>
+      <Button
+        variant="quiet"
+        size="sm"
+        disabledReason={busy ? "Updating message…" : undefined}
+        onClick={() => {
+          if (pending.current) return;
+          pending.current = true;
+          setBusy(true);
+          setError(null);
+          const abort = new AbortController();
+          lifetime.current = abort;
+          void cancelQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
+            .then(() => {
+              if (!abort.signal.aborted) announce("Queued message cancelled.");
+            })
+            .catch(() => {
+              if (!abort.signal.aborted)
+                setError("Couldn't cancel this message. It may have started already. Try again.");
+            })
+            .finally(() => {
+              pending.current = false;
+              if (!abort.signal.aborted) setBusy(false);
+            });
+        }}
+      >
+        Cancel
+      </Button>
+      {error && (
+        <span className="thread-note" role="alert">
+          {error}
+        </span>
+      )}
+    </>
+  );
+}
+
+// Edit on a message Stop left unsent; the row leaves once its words are in the composer.
+function TakeBack({ onTakeBack }: { onTakeBack(): Promise<boolean> | null }) {
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      <Button
+        variant="quiet"
+        size="sm"
+        onClick={() => {
+          setError(null);
+          if (!onTakeBack()) setError("Couldn't move this message to the composer. Try again.");
+        }}
+      >
         Edit
       </Button>
-      {queued && (
-        <Button
-          variant="quiet"
-          size="sm"
-          busy={busy}
-          onClick={() => {
-            if (pending.current) return;
-            pending.current = true;
-            setBusy(true);
-            setError(null);
-            const abort = new AbortController();
-            lifetime.current = abort;
-            void steerQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
-              .then(() => {
-                if (!abort.signal.aborted) announce("Message sent to steer dot.");
-              })
-              .catch(() => {
-                if (!abort.signal.aborted) setError("Couldn't confirm steering. Try again.");
-              })
-              .finally(() => {
-                pending.current = false;
-                if (!abort.signal.aborted) setBusy(false);
-              });
-          }}
-        >
-          Steer now
-        </Button>
-      )}
-      {queued && (
-        <Button
-          variant="quiet"
-          size="sm"
-          disabledReason={busy ? "Updating message…" : undefined}
-          onClick={() => {
-            if (pending.current) return;
-            pending.current = true;
-            setBusy(true);
-            setError(null);
-            const abort = new AbortController();
-            lifetime.current = abort;
-            void cancelQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
-              .then(() => {
-                if (!abort.signal.aborted) announce("Queued message cancelled.");
-              })
-              .catch(() => {
-                if (!abort.signal.aborted)
-                  setError("Couldn't cancel this message. It may have started already. Try again.");
-              })
-              .finally(() => {
-                pending.current = false;
-                if (!abort.signal.aborted) setBusy(false);
-              });
-          }}
-        >
-          Cancel
-        </Button>
-      )}
       {error && (
         <span className="thread-note" role="alert">
           {error}
@@ -352,13 +354,15 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
         words={thread.words}
         announce={thread.announce}
         queue={thread.queue}
+        takeBack={thread.takeBack}
       />
     ),
     same: (was, now, then, thread) =>
       was.message === now.message &&
       then.announce === thread.announce &&
       then.words === thread.words &&
-      then.queue === thread.queue,
+      then.queue === thread.queue &&
+      then.takeBack === thread.takeBack,
   },
   question: {
     draw: ({ item, thread }) => (
@@ -592,10 +596,29 @@ export function Conversation({
   // turn is over it joins the thread as that turn's last row.
   const latestWork = items.findLast((item) => item.kind === "work") as WorkItem | undefined;
   const liveWork = live ? latestWork : undefined;
-  const shown = useMemo(
-    () => (liveWork ? items.filter((item) => item !== liveWork) : items),
-    [items, liveWork],
+  // Messages Stop left unsent that the user took back into the composer.
+  const [taken, setTaken] = useState<ReadonlySet<string>>(() => new Set());
+  const takeBack = useCallback(
+    (message: AgentMessage) =>
+      editQueued(message.sessionId ?? "", message.id, message.text)?.then((done) => {
+        if (done) setTaken((was) => new Set(was).add(message.id));
+        return done;
+      }) ?? null,
+    [],
   );
+  // A message that waits for the task to finish stays at the end of the thread, under whatever dot
+  // does meanwhile, until dot receives it and it takes its place in the thread.
+  const [shown, queued] = useMemo(() => {
+    const waits = (item: ThreadItem) =>
+      item.kind === "message" &&
+      !!item.message.queued &&
+      !ended &&
+      item.message.sessionId === sessionId;
+    const kept = items.filter(
+      (item) => item !== liveWork && !(item.kind === "message" && taken.has(item.message.id)),
+    );
+    return [kept.filter((item) => !waits(item)), kept.filter(waits)];
+  }, [items, liveWork, ended, sessionId, taken]);
   const lastLive = useRef<WorkItem | undefined>(undefined);
   if (liveWork) lastLive.current = liveWork;
   const footWork = liveWork ?? lastLive.current;
@@ -936,6 +959,7 @@ export function Conversation({
   );
   const thread: ThreadContext = {
     queue,
+    takeBack,
     announce,
     words,
     downloads,
@@ -948,7 +972,7 @@ export function Conversation({
     replayTask: onReplayTask && replayTask,
     names,
   };
-  const empty = !shown.length && !liveWork;
+  const empty = !shown.length && !liveWork && !queued.length;
   const olderTasks = !!earlier?.more;
   // What setup has left reads from its top; the thread follows its end again once it has gone.
   const startShown = empty && !loading && !!start;
@@ -1078,6 +1102,19 @@ export function Conversation({
                 Loading later…
               </p>
             )}
+            {!loading &&
+              queued.map((item, index) => (
+                <Row
+                  key={item.key}
+                  row={{
+                    item,
+                    groupStart: index === 0 && rows.at(-1)?.item.speaker !== item.speaker,
+                    separator: null,
+                  }}
+                  fresh={false}
+                  thread={thread}
+                />
+              ))}
             <div className="thread-outbox" ref={setOutboxSlot} />
             <div className="thread-recovery-slot" ref={recoverySlot}>
               {recovery}

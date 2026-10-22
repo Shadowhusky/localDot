@@ -321,32 +321,43 @@ export function cancelQueuedMessage(
   );
 }
 
-export function editQueuedMessage(
+// The daemon keeps the words it gave back, so a reply lost on the way is asked for again: by then the
+// message has left the thread, and its words are nowhere else.
+const EDIT_TRIES = 3;
+export async function editQueuedMessage(
   api: ApiClient,
   sessionId: string,
   messageId: string,
   signal: AbortSignal,
 ): Promise<string> {
   if (!ULID_PATTERN.test(sessionId) || !ULID_PATTERN.test(messageId))
-    return Promise.reject(new ControlFailure(false));
-  return controlRequest(
-    api,
-    `${sessionPath(sessionId)}/messages/${messageId}/edit`,
-    undefined,
-    200,
-    signal,
-    (body) => {
-      const value: unknown = JSON.parse(body);
-      if (
-        !value ||
-        typeof value !== "object" ||
-        !("text" in value) ||
-        typeof value.text !== "string"
-      )
-        throw new ControlFailure(true);
-      return value.text;
-    },
-    "POST",
-    262_144,
-  );
+    throw new ControlFailure(false);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await controlRequest(
+        api,
+        `${sessionPath(sessionId)}/messages/${messageId}/edit`,
+        undefined,
+        200,
+        signal,
+        (body) => {
+          const value: unknown = JSON.parse(body);
+          if (
+            !value ||
+            typeof value !== "object" ||
+            !("text" in value) ||
+            typeof value.text !== "string"
+          )
+            throw new ControlFailure(true);
+          return value.text;
+        },
+        "POST",
+        262_144,
+      );
+    } catch (error) {
+      if (!(error instanceof ControlFailure && error.uncertain) || attempt === EDIT_TRIES)
+        throw error;
+      await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+    }
+  }
 }

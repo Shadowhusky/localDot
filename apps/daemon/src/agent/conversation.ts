@@ -170,20 +170,25 @@ export class Conversations {
     let ended = false;
     let completed = false;
     const events = this.#events(sessionId);
-    // A queued message the user withdrew or cancelled never reached dot.
-    const unsaid = new Set(
-      events.flatMap((event) =>
-        event.type === "message.delivery" &&
-        (event.data.state === "withdrawn" || event.data.state === "cancelled")
-          ? [event.data.messageId]
-          : [],
-      ),
-    );
+    // A queued message reached dot when it was sent or steered, after what dot did while it waited;
+    // one the user withdrew or cancelled never did.
+    const waiting = new Map<string, string>();
     for (const event of events) {
       switch (event.type) {
         case "message.user":
-          if (!unsaid.has(event.data.messageId)) turns.push(`The user: ${clip(event.data.text)}`);
+          if (event.data.queued) waiting.set(event.data.messageId, event.data.text);
+          else turns.push(`The user: ${clip(event.data.text)}`);
           break;
+        case "message.delivery": {
+          const text = waiting.get(event.data.messageId);
+          waiting.delete(event.data.messageId);
+          if (
+            text !== undefined &&
+            (event.data.state === "sent" || event.data.state === "steering")
+          )
+            turns.push(`The user: ${clip(text)}`);
+          break;
+        }
         case "message.assistant":
           if (event.data.text.trim()) turns.push(`dot: ${clip(event.data.text)}`);
           break;
