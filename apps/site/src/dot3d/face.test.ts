@@ -4,7 +4,7 @@ import { eyeGeometry } from "@app/dot/render/eye-geometry.ts";
 import { LOD_DETAIL } from "@app/dot/render/lod.ts";
 import { Quaternion, Vector3 } from "three";
 import { describe, expect, it } from "vitest";
-import { eyeUniforms, faceQuaternion, perspectiveTip, tippedFace } from "./face.ts";
+import { eyeUniforms, faceQuaternion, perspectiveTip, tippedFace, tippedHead } from "./face.ts";
 
 const front = () => new Vector3(0, 0, 1);
 
@@ -34,6 +34,18 @@ describe("tippedFace", () => {
   it("tips the head by the angle the camera's perspective takes off its top", () => {
     expect(perspectiveTip(0, 5)).toBe(0);
     expect(perspectiveTip(1, 10)).toBeCloseTo(Math.atan(0.1), 9);
+  });
+});
+
+describe("tippedHead", () => {
+  it("turns what the head wears as the face turns, keeping the head's tip", () => {
+    const turn = faceQuaternion(6, -3, 0);
+    const head = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), 0.1);
+    for (const axis of [front(), new Vector3(0, 1, 0)]) {
+      const seen = axis.clone().applyQuaternion(head.clone().multiply(tippedHead(turn, 0.1)));
+      const wanted = axis.clone().applyQuaternion(head).applyQuaternion(turn);
+      expect(seen.distanceTo(wanted)).toBeLessThan(1e-9);
+    }
   });
 });
 

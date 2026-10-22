@@ -134,16 +134,17 @@ describe("dot in a recording", () => {
 describe("the tool dot works with", () => {
   const action = (verb: ActionState["verb"], label: string, more: Partial<ActionState> = {}) =>
     ({ id: "a1", step: "s1", verb, label, intentT: 100, progress: [], ...more }) as ActionState;
-  const step = (tool: string | undefined, title = "", kind = "gui"): StepState => ({
+  const step = (tool: string | undefined, title = "", kind = "gui", more = {}): StepState => ({
     id: "s1",
     kind,
     startT: 50,
     ...(tool ? { tool, title } : {}),
+    ...more,
   });
 
   it("follows the action in progress", () => {
     const of = (verb: ActionState["verb"], label: string) =>
-      toolFor("acting", step(undefined), action(verb, label));
+      toolFor("acting", step(undefined), action(verb, label), 200);
     expect(of("type", "Type “london”")).toBe("typing");
     expect(of("key", "Press Enter")).toBe("typing");
     expect(of("key", "Press Ctrl+S")).toBe("filing");
@@ -156,61 +157,111 @@ describe("the tool dot works with", () => {
     expect(of("wait", "Wait")).toBe("waiting");
   });
 
-  it("follows the tool a step runs when it has no action of its own", () => {
-    const of = (tool: string, title = "", kind = "gui") =>
-      toolFor("acting", step(tool, title, kind), undefined);
-    expect(of("shell", "ls -la", "shell")).toBe("terminal");
-    expect(of("shell", "cat > app.py <<'EOF'", "shell")).toBe("typing");
-    expect(of("shell", "tee notes.txt", "shell")).toBe("typing");
-    expect(of("files", "write src/app.ts", "file")).toBe("typing");
-    expect(of("files", "write notes.md", "file")).toBe("filing");
-    expect(of("files", "read report.pdf", "file")).toBe("looking");
-    expect(of("browser_navigate", "Opening bbc.co.uk", "browser")).toBe("browsing");
-    expect(of("browser_read", "Reading page", "browser")).toBe("browsing");
-    expect(of("browser_upload", "Uploading photo.jpg", "browser")).toBe("sending");
-    expect(of("web_search", "Searched the web for “Zelda”", "browser")).toBe("browsing");
-    expect(of("web_search", "Searched the news for “Zelda”", "browser")).toBe("browsing");
-    expect(of("web_search", "Looked at images of “Zelda”", "browser")).toBe("looking");
-    expect(of("web_fetch", "Read en.wikipedia.org", "browser")).toBe("browsing");
-    expect(of("web_fetch", "Looked at a picture from upload.wikimedia.org", "browser")).toBe(
-      "looking",
-    );
-    expect(of("find", "Looking for “Save”")).toBe("looking");
-    expect(of("recall", "Recall", "think")).toBe("recalling");
-    expect(of("research", "Reading a PDF from iea.org", "browser")).toBe("browsing");
-    expect(of("research", "Writing the report", "file")).toBe("typing");
-    expect(of("people", "Look up Mum", "think")).toBe("recalling");
-    expect(of("ask_user", "Ask", "ask")).toBe("needs-you");
-    expect(toolFor("acting", step(undefined, "", "shell"), undefined)).toBe("terminal");
+  it("gives each tool a step runs its own prop", () => {
+    const table: [tool: string | undefined, title: string, kind: string, prop: string | null][] = [
+      ["shell", "ls -la", "shell", "terminal"],
+      ["shell", "cat > app.py <<'EOF'", "shell", "terminal"],
+      ["shell", "python3 - <<'PY'", "shell", "terminal"],
+      ["shell", "cat notes.md 2>/dev/null || echo missing", "shell", "terminal"],
+      ["shell", 'echo "== build ==" && npm run build 2>&1 | tail', "shell", "terminal"],
+      ["shell", "tee notes.txt", "shell", "terminal"],
+      ["files", "write src/app.ts", "file", "typing"],
+      ["files", "edit scripts/build.py", "file", "typing"],
+      ["files", "write notes.md", "file", "filing"],
+      ["files", "read report.pdf", "file", "reading"],
+      ["files", "list /home/user/Desktop", "file", "reading"],
+      ["browser_navigate", "Opening bbc.co.uk", "browser", "browsing"],
+      ["browser_read", "Reading page", "browser", "browsing"],
+      ["switch_screen", "Switching to the web browser", "browser", "browsing"],
+      ["browser_upload", "Upload 1 file", "browser", "sending"],
+      ["web_search", "Searched the web for “Zelda”", "browser", "searching"],
+      ["web_search", "Looked at images of “Zelda”", "browser", "searching"],
+      ["web_fetch", "Read en.wikipedia.org", "browser", "browsing"],
+      ["web_fetch", "Looked at a picture from upload.wikimedia.org", "browser", "inspecting"],
+      ["find", "Looking for “Save”", "gui", "searching"],
+      ["research", "Reading a PDF from iea.org", "browser", "browsing"],
+      ["research", "Writing the report", "file", "typing"],
+      ["work_context", "Checking available tools and access", "think", "inspecting"],
+      ["recall", "Search earlier tasks: invoices", "think", "recalling"],
+      ["people", "Look up Mum", "think", "recalling"],
+      ["people", "Remember Mum on WhatsApp", "think", "remembering"],
+      ["remember", "Save to USER.md", "think", "remembering"],
+      ["update_plan", "Update the plan", "think", "planning"],
+      ["routine", "Propose “Morning brief”", "think", "scheduling"],
+      ["follow_up_at", "Schedule a follow-up", "think", "scheduling"],
+      ["api_request", "Calling api.github.com", "app", "sending"],
+      ["credentials", "Add a key", "ask", "needs-you"],
+      ["ask_user", "Ask", "ask", "needs-you"],
+      ["request_takeover", "Your turn", "ask", "needs-you"],
+      ["done", "Waiting for progress", "think", "waiting"],
+      ["linear__list_issues", "Linear · List issues", "app", "browsing"],
+      ["github__search_code", "GitHub · Search code", "app", "browsing"],
+      ["linear__create_issue", "Linear · Create issue", "app", "sending"],
+      ["slack__send_message", "Slack · Send message", "app", "sending"],
+      [undefined, "", "shell", "terminal"],
+      [undefined, "", "file", "filing"],
+      [undefined, "", "browser", "browsing"],
+      [undefined, "", "app", "sending"],
+      [undefined, "", "think", "thinking"],
+    ];
+    const seen = table.map(([tool, title, kind]) => [
+      tool,
+      title,
+      kind,
+      toolFor("acting", step(tool, title, kind), undefined, 200),
+    ]);
+    expect(seen).toEqual(table);
   });
 
-  it("reads a page for a connected app's reading tool and sends one for a change", () => {
-    const of = (tool: string, title: string) =>
-      toolFor("acting", step(tool, title, "app"), undefined);
-    expect(of("linear__list_issues", "Linear · List issues")).toBe("browsing");
-    expect(of("github__search_code", "GitHub · Search code")).toBe("browsing");
-    expect(of("linear__create_issue", "Linear · Create issue")).toBe("sending");
-    expect(of("slack__send_message", "Slack · Send message")).toBe("sending");
+  it("looks closely at the screen for an on-screen step that took no action, once it is over", () => {
+    const look = step(undefined, "", "gui", { endT: 300 });
+    expect(toolFor("acting", step(undefined, "", "gui"), undefined, 200)).toBeNull();
+    expect(toolFor("thinking", look, undefined, 400)).toBe("inspecting");
+    expect(toolFor("thinking", look, action("click", "Click A", { intentT: 120 }), 400)).toBe(
+      "pointing",
+    );
+  });
+
+  it("keeps a step that has just ended as dot's work for a moment, then thinks", () => {
+    const read = step("files", "read notes.md", "file", { endT: 60 });
+    expect(toolFor("thinking", read, undefined, 200)).toBe("reading");
+    expect(toolFor("thinking", read, undefined, 700)).toBe("thinking");
+    expect(toolFor("observing", read, undefined, 200)).toBe("reading");
+    expect(toolFor("observing", read, undefined, 700)).toBe("looking");
+    expect(toolFor("working", read, undefined, 700)).toBeNull();
   });
 
   it("prefers the step's own newer tool over an older action", () => {
     const old = action("click", "Click A", { step: "s0", intentT: 10 });
-    expect(toolFor("acting", step("shell", "make", "shell"), old)).toBe("terminal");
+    expect(toolFor("acting", step("shell", "make", "shell"), old, 200)).toBe("terminal");
+  });
+
+  it("shows its sub-agents at work while it waits on them, but its own work first", () => {
+    const shell = step("shell", "make", "shell");
+    expect(toolFor("thinking", undefined, undefined, 200, true)).toBe("delegating");
+    expect(toolFor("working", undefined, undefined, 200, true)).toBe("delegating");
+    expect(toolFor("acting", shell, undefined, 200, true)).toBe("terminal");
+    expect(toolFor("question", shell, undefined, 200, true)).toBe("needs-you");
+    expect(toolFor("thinking", undefined, undefined, 200)).toBe("thinking");
   });
 
   it("takes needing the user, thinking and looking from the row, and puts tools down otherwise", () => {
     const busy = action("type", "Type");
-    expect(toolFor("approval", step(undefined), busy)).toBe("needs-you");
-    expect(toolFor("question", undefined, undefined)).toBe("needs-you");
-    expect(toolFor("takeover", undefined, undefined)).toBe("needs-you");
-    expect(toolFor("thinking", step(undefined), busy)).toBe("thinking");
-    expect(toolFor("retrying", undefined, undefined)).toBe("thinking");
-    expect(toolFor("observing", step(undefined), busy)).toBe("looking");
+    expect(toolFor("approval", step(undefined), busy, 200)).toBe("needs-you");
+    expect(toolFor("question", undefined, undefined, 200)).toBe("needs-you");
+    expect(toolFor("takeover", undefined, undefined, 200)).toBe("needs-you");
+    expect(toolFor("thinking", step(undefined, "", "gui", { endT: 90 }), busy, 2000)).toBe(
+      "thinking",
+    );
+    expect(toolFor("retrying", undefined, undefined, 200)).toBe("thinking");
+    expect(toolFor("observing", step(undefined, "", "gui", { endT: 90 }), busy, 2000)).toBe(
+      "looking",
+    );
     for (const row of ["done", "ready", "stopped", "control", "failed"] as const)
-      expect(toolFor(row, step(undefined), busy)).toBeNull();
+      expect(toolFor(row, step(undefined), busy, 200)).toBeNull();
   });
 
-  it("counts typing progress per action and output per command, up to the moment", () => {
+  it("counts typing progress per action and output per command, up to the moment, with how it ended", () => {
     const m = model({
       id: "a1",
       verb: "type",
@@ -223,10 +274,80 @@ describe("the tool dot works with", () => {
     expect(dotFeed(status("acting"), m, 200).beat).toEqual({ key: "a1", n: 3 });
     expect(dotFeed(status("acting"), m, 400).beat).toEqual({ key: "a1", n: 9 });
     const shell = emptyModel();
-    shell.steps.push({ id: "s9", kind: "shell", startT: 10, tool: "shell", outputs: [20, 40, 90] });
+    shell.steps.push({
+      id: "s9",
+      kind: "shell",
+      startT: 10,
+      endT: 120,
+      status: "failed",
+      tool: "shell",
+      outputs: [20, 40, 90],
+    });
     expect(dotFeed(status("acting"), shell, 50)).toMatchObject({
       tool: "terminal",
       beat: { key: "s9", n: 2 },
+    });
+    expect(dotFeed(status("acting"), shell, 50).beat).not.toHaveProperty("ok");
+    expect(dotFeed(status("thinking"), shell, 300)).toMatchObject({
+      tool: "terminal",
+      beat: { key: "s9", n: 3, ok: false },
+    });
+  });
+
+  it("brings out the plan when dot sets one out or gets items done, with no step of its own", () => {
+    const m = emptyModel();
+    const item = (text: string, status: string) => ({ id: text, text, status });
+    m.steps.push({ id: "s1", kind: "shell", startT: 10, endT: 50, status: "ok", tool: "shell" });
+    m.plans.push(
+      { t: 100, items: [item("Find flights", "doing"), item("Book a hotel", "todo")] },
+      { t: 2000, items: [item("Find flights", "done"), item("Book a hotel", "todo")] },
+      { t: 2000.3, items: [item("Find flights", "done"), item("Book a hotel", "doing")] },
+      { t: 4000, items: [item("Find flights", "done"), item("Book a hotel", "todo")] },
+    );
+    expect(dotFeed(status("thinking"), m, 300)).toMatchObject({
+      tool: "planning",
+      beat: { key: "plan-100", n: 0 },
+    });
+    expect(dotFeed(status("thinking"), m, 2100)).toMatchObject({
+      tool: "planning",
+      beat: { key: "plan-2000.3", n: 1 },
+    });
+    expect(dotFeed(status("thinking"), m, 2700).tool).toBe("thinking");
+    // A change that gets nothing done brings out nothing.
+    expect(dotFeed(status("thinking"), m, 4100).tool).toBe("thinking");
+    // A step that started since is dot's work.
+    m.steps.push({ id: "s2", kind: "shell", startT: 2050, tool: "shell" });
+    expect(dotFeed(status("acting"), m, 2100).tool).toBe("terminal");
+  });
+
+  it("counts a note as written when it is saved", () => {
+    const note = emptyModel();
+    note.steps.push({ id: "m1", kind: "think", startT: 10, tool: "remember", title: "Save" });
+    expect(dotFeed(status("acting"), note, 20)).toMatchObject({
+      tool: "remembering",
+      beat: { key: "m1", n: 1 },
+    });
+  });
+
+  it("brings out a helper for each sub-agent at work, and lets one go with how it went", () => {
+    const m = emptyModel();
+    m.subagents.push(
+      { runId: "r1", startT: 100, endT: 900, ok: true },
+      { runId: "r2", startT: 150 },
+      { runId: "r3", startT: 2000 },
+    );
+    expect(dotFeed(status("thinking"), m, 500)).toMatchObject({
+      tool: "delegating",
+      helpers: [{ id: "r1" }, { id: "r2" }],
+    });
+    expect(dotFeed(status("thinking"), m, 1000).helpers).toEqual([
+      { id: "r1", ok: true },
+      { id: "r2" },
+    ]);
+    expect(dotFeed(status("thinking"), m, 1800).helpers).toEqual([{ id: "r2" }]);
+    expect(dotFeed(status("thinking"), emptyModel(), 1800)).toMatchObject({
+      tool: "thinking",
+      helpers: [],
     });
   });
 

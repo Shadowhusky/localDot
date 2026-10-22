@@ -29,6 +29,12 @@ export function tippedFace(turn: Quaternion, tip: number): Quaternion {
   return new Quaternion().setFromAxisAngle(X, -tip).multiply(turn);
 }
 
+// The turn of what sits on a head tipped forward by `tip`: it turns as the face does and keeps the
+// tip, so a hat stays where it sits on the head.
+export function tippedHead(turn: Quaternion, tip: number): Quaternion {
+  return tippedFace(turn, tip).multiply(new Quaternion().setFromAxisAngle(X, tip));
+}
+
 // One eye's shape for the body's shader, in the eye's own frame units (y down), as eyeGeometry
 // gives it to the app's SVG.
 export interface EyeUniformValues {

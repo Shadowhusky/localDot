@@ -267,8 +267,13 @@ export class DotView implements Frameable {
     kick();
   }
 
-  beat(key: string, n: number): void {
-    this.engine.beat(key, n, now());
+  beat(key: string, n: number, ok?: boolean): void {
+    this.engine.beat(key, n, now(), ok);
+    kick();
+  }
+
+  setHelpers(list: readonly { id: string; ok?: boolean }[]): void {
+    this.engine.setHelpers(list, now());
     kick();
   }
 
@@ -396,6 +401,8 @@ export class DotView implements Frameable {
     const layers = this.props ?? this.makeProps();
     const px = Math.max(1, Math.round(this.size * dpr));
     const xenon = this.xenon();
+    const body = this.plates.neutral;
+    const plate = body.complete && body.naturalWidth > 0 ? body : null;
     for (const layer of ["back", "front"] as const) {
       const canvas = layers[layer];
       if (canvas.width !== px) {
@@ -409,7 +416,7 @@ export class DotView implements Frameable {
       ctx.clearRect(0, 0, px, px);
       if (!out) continue;
       ctx.setTransform(px / 64, 0, 0, px / 64, 0, 0);
-      paintProps(ctx, p, layer, xenon);
+      paintProps(ctx, p, layer, xenon, plate);
     }
   }
 

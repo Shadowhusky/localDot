@@ -206,22 +206,40 @@ describe("dot in an exported video", () => {
     const beat = vi.spyOn(DotEngine.prototype, "beat");
     const react = vi.spyOn(DotEngine.prototype, "react");
     const dot = make();
-    const typing = (n: number, failed: string | null = null) =>
-      feed({ state: "acting", tool: "typing", beat: { key: "a1", n }, failed });
+    const typing = (n: number, failed: string | null = null, ok?: boolean) =>
+      feed({ state: "acting", tool: "typing", beat: { key: "a1", n, ok }, failed });
     dot.update(10, { feed: typing(3), line: "", forUser: false });
     dot.update(20, { feed: typing(3), line: "", forUser: false });
     dot.update(30, { feed: typing(8, "a0"), line: "", forUser: false });
     dot.update(40, { feed: typing(8, "a0"), line: "", forUser: false });
+    dot.update(45, { feed: typing(8, null, true), line: "", forUser: false });
     dot.update(50, { feed: feed({ tool: null }), line: "", forUser: false });
     expect(setTool.mock.calls).toEqual([
       ["typing", 10],
       [null, 50],
     ]);
     expect(beat.mock.calls).toEqual([
-      ["a1", 3, 10],
-      ["a1", 8, 30],
+      ["a1", 3, 10, undefined],
+      ["a1", 8, 30, undefined],
+      ["a1", 8, 45, true],
     ]);
     expect(react.mock.calls.map(([name]) => name)).toEqual(["wince"]);
+  });
+
+  it("brings out a helper for each sub-agent as the app's dot does, once per change", () => {
+    const setHelpers = vi.spyOn(DotEngine.prototype, "setHelpers");
+    const dot = make();
+    const crew = (helpers: DotFeed["helpers"]) =>
+      feed({ state: "thinking", tool: "delegating", helpers });
+    dot.update(10, { feed: crew([{ id: "r1" }]), line: "", forUser: false });
+    dot.update(20, { feed: crew([{ id: "r1" }]), line: "", forUser: false });
+    dot.update(30, { feed: crew([{ id: "r1", ok: true }]), line: "", forUser: false });
+    dot.update(40, { feed: crew([]), line: "", forUser: false });
+    expect(setHelpers.mock.calls).toEqual([
+      [[{ id: "r1" }], 10],
+      [[{ id: "r1", ok: true }], 30],
+      [[], 40],
+    ]);
   });
 
   it("shows each line as the band does, and puts it on glass only on the picture", () => {

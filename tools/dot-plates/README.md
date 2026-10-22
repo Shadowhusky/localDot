@@ -27,8 +27,10 @@ is an N px dot.
 The wearables (`wear-<name>`, one per `Wearable` in `@localdot/protocol`) are transparent plates of
 the same frame. The body is a shadow catcher in their scene, so each plate keeps the shadow its
 wearable casts on dot and nothing of dot itself. DotView lays them over the face inside the body, so
-they hop and squash with it: glasses and the mustache turn with the face as the eyes do, and the rest
-turns only with the face's roll.
+they hop and squash with it: glasses and the mustache turn with the face as the eyes do; hats, the
+headphones and the bow take a share of the turn about the point where their front meets the head
+(`HEAD` in `render/wearables.ts`); clothes and the star pin turn only with the face's roll. On the
+site, whatever sits on the head turns with the face whole.
 
 ## Regenerate
 

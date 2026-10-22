@@ -15,6 +15,8 @@ import type { EyeUniformValues } from "./face.ts";
 // sphere carries it and a turn foreshortens it.
 export interface BodyUniforms {
   uFace: { value: Matrix3 };
+  // The turn of what the head wears, as uFace is the face's.
+  uHead: { value: Matrix3 };
   uAnchor: { value: Vector2[] };
   uCaps: { value: Vector4[] };
   uLidA: { value: Vector4[] };
@@ -27,13 +29,17 @@ export interface BodyUniforms {
   uUnitsPerPx: { value: number };
   uDim: { value: number };
   // The shade each worn item casts on the body (tools/dot-plates export_glb.py), white when none,
-  // and which of them are cast by what sits on the face, so they turn with it.
+  // and which of them are cast by what sits on the face or the head, so they turn with it.
   uShade0: { value: Texture };
   uShade1: { value: Texture };
   uShade2: { value: Texture };
   uShade3: { value: Texture };
   uShadeOnFace: { value: Vector4 };
+  uShadeOnHead: { value: Vector4 };
 }
+
+// What carries a worn item's shade: the body, or the face's or the head's turn.
+export type Carrier = "body" | "face" | "head";
 
 const WHITE = new DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
 WHITE.needsUpdate = true;
@@ -41,6 +47,7 @@ export const SHADES = 4;
 
 const EYE_GLSL = /* glsl */ `
 uniform mat3 uFace;
+uniform mat3 uHead;
 uniform vec2 uAnchor[2];
 uniform vec4 uCaps[2];
 uniform vec4 uLidA[2];
@@ -57,6 +64,7 @@ uniform sampler2D uShade1;
 uniform sampler2D uShade2;
 uniform sampler2D uShade3;
 uniform vec4 uShadeOnFace;
+uniform vec4 uShadeOnHead;
 varying vec3 vBody;
 
 vec2 shadeUv(vec3 p) {
@@ -64,12 +72,16 @@ vec2 shadeUv(vec3 p) {
 }
 
 // The worn items' shade at a point of the body: u = 0.5 + atan2(x, z) / 2pi, v = 0.5 + asin(y) / pi,
-// read where the body is for what the head wears and where the face is for what the face wears.
-float shade(vec3 body, vec3 face) {
+// read where the body is for clothes, where the face is for what the face wears and where the head's
+// turn carries the point for what the head wears.
+float shade(vec3 body, vec3 face, vec3 head) {
   vec2 b = shadeUv(body);
-  vec2 f = shadeUv(face);
-  return texture2D(uShade0, mix(b, f, uShadeOnFace.x)).r * texture2D(uShade1, mix(b, f, uShadeOnFace.y)).r *
-    texture2D(uShade2, mix(b, f, uShadeOnFace.z)).r * texture2D(uShade3, mix(b, f, uShadeOnFace.w)).r;
+  vec2 f = shadeUv(face) - b;
+  vec2 h = shadeUv(head) - b;
+  return texture2D(uShade0, b + f * uShadeOnFace.x + h * uShadeOnHead.x).r *
+    texture2D(uShade1, b + f * uShadeOnFace.y + h * uShadeOnHead.y).r *
+    texture2D(uShade2, b + f * uShadeOnFace.z + h * uShadeOnHead.z).r *
+    texture2D(uShade3, b + f * uShadeOnFace.w + h * uShadeOnHead.w).r;
 }
 
 float quadY(float x, float halfW, float y0, float y1, float y2) {
@@ -158,6 +170,7 @@ vec2 eye(int i, vec2 q, float aa) {
 export function bodyMaterial(): { material: MeshPhysicalMaterial; uniforms: BodyUniforms } {
   const uniforms: BodyUniforms = {
     uFace: { value: new Matrix3() },
+    uHead: { value: new Matrix3() },
     uAnchor: { value: EYE_ANCHORS.map(([x, y]) => new Vector2(x, y)) },
     uCaps: { value: [new Vector4(), new Vector4()] },
     uLidA: { value: [new Vector4(), new Vector4()] },
@@ -174,6 +187,7 @@ export function bodyMaterial(): { material: MeshPhysicalMaterial; uniforms: Body
     uShade2: { value: WHITE },
     uShade3: { value: WHITE },
     uShadeOnFace: { value: new Vector4() },
+    uShadeOnHead: { value: new Vector4() },
   };
   const material = new MeshPhysicalMaterial({
     color: new Color(0.8, 0.812, 0.83),
@@ -195,6 +209,7 @@ export function bodyMaterial(): { material: MeshPhysicalMaterial; uniforms: Body
         "#include <color_fragment>",
         /* glsl */ `#include <color_fragment>
         vec3 faceP = uFace * normalize(vBody);
+        vec3 headP = uHead * normalize(vBody);
         vec2 frame = vec2(faceP.x, -faceP.y) * ${R.toFixed(1)};
         float aa = max(uUnitsPerPx, 0.02) * 0.75;
         vec2 inkGloss = vec2(0.0);
@@ -204,7 +219,7 @@ export function bodyMaterial(): { material: MeshPhysicalMaterial; uniforms: Body
           inkGloss = max(a, b);
         }
         vec3 eyeInk = mix(vec3(0.0105, 0.0115, 0.014), vec3(0.003, 0.0035, 0.004), clamp(frame.y * 0.08 + 0.5, 0.0, 1.0));
-        diffuseColor.rgb *= shade(normalize(vBody), normalize(faceP));
+        diffuseColor.rgb *= shade(normalize(vBody), normalize(faceP), normalize(headP));
         diffuseColor.rgb = mix(diffuseColor.rgb, eyeInk, inkGloss.x);`,
       )
       .replace(
@@ -241,13 +256,14 @@ export function setEyes(
 export function setShades(
   uniforms: BodyUniforms,
   shades: readonly (Texture | null)[],
-  onFace: readonly boolean[],
+  carriers: readonly Carrier[],
 ): void {
   uniforms.uShade0.value = shades[0] ?? WHITE;
   uniforms.uShade1.value = shades[1] ?? WHITE;
   uniforms.uShade2.value = shades[2] ?? WHITE;
   uniforms.uShade3.value = shades[3] ?? WHITE;
-  uniforms.uShadeOnFace.value.set(
-    ...([0, 1, 2, 3].map((i) => (onFace[i] ? 1 : 0)) as [number, number, number, number]),
-  );
+  const on = (carrier: Carrier) =>
+    [0, 1, 2, 3].map((i) => (carriers[i] === carrier ? 1 : 0)) as [number, number, number, number];
+  uniforms.uShadeOnFace.value.set(...on("face"));
+  uniforms.uShadeOnHead.value.set(...on("head"));
 }

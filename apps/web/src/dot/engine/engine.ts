@@ -23,6 +23,9 @@ import {
 import {
   DEFAULT_ANGLE,
   type DotTool,
+  HAPPY_MS,
+  HELPER_SLOTS,
+  type HelperPose,
   PAUSES,
   type PropPose,
   TOOL_GAP_MS,
@@ -45,6 +48,18 @@ interface Track {
   scroll: Channel;
   lines: number;
   seed: number;
+  // The work done with it since it came out, the newest under `key`; the progress that reached it
+  // while it waited to come out, at `touched`, belongs to its next entrance.
+  runs: { line: number; t: number; end: { t: number; ok: boolean } | null }[];
+  key: string | null;
+  touched: number;
+}
+interface Helper {
+  slot: number;
+  amount: Channel;
+  since: number;
+  end: { t: number; ok: boolean } | null;
+  seed: number;
 }
 interface Scheduled {
   t: number;
@@ -63,8 +78,11 @@ const ANNOYED_WINDOW_MS = 60_000;
 // Beats older than this no longer show; a fast typist keeps at most this many in hand.
 const BEAT_MS = 2000;
 const BEAT_CAP = 32;
+// A prop keeps its last few runs of work, enough to fill it.
+const RUN_CAP = 8;
 const MAX_TAPS = 14;
 const TAP_GAP_MS = 85;
+const TICK_GAP_MS = 180;
 // How far one unit of each channel moves something on screen, in frame units, so activity() can
 // compare them: lids and eye shapes by the eye's height, a body scale by its height, tilt and roll
 // by how far a degree swings a lid corner or an eye, and a full fade counts as a 20-unit move.
@@ -131,6 +149,8 @@ export interface DotPose {
   plate: { dim: number; rim: number };
   // The props out with dot, in the order they came out; empty where the body does not animate.
   props: PropPose[];
+  // The sub-agents at work beside dot, for the delegating prop; empty where props are.
+  helpers: HelperPose[];
   // Fine props: full keyboards and page detail, where dot is big enough to show them.
   fine: boolean;
   eyes: [EyePose, EyePose];
@@ -179,6 +199,8 @@ export class DotEngine {
   private readonly tracks = new Map<DotTool, Track>();
   private tool: DotTool | null = null;
   private wanted: DotTool | null = null;
+  private wantedAt = Number.NEGATIVE_INFINITY;
+  private readonly helpers = new Map<string, Helper>();
   private toolSince = Number.NEGATIVE_INFINITY;
   private toolToken = 0;
   private draws = 0;
@@ -281,15 +303,46 @@ export class DotEngine {
   }
 
   // Progress on the current tool, as a count that grows within one key: characters typed into an
-  // action, lines of a command's output. A new key starts counting from zero.
-  beat(key: string, n: number, t: number): void {
+  // action, lines of a command's output, a plan's items done. A new key starts counting from zero
+  // and is a new run of work; `ok` says how it ended, once it has.
+  beat(key: string, n: number, t: number, ok?: boolean): void {
     this.advance(t);
     const d = key === this.beatKey ? n - this.beatN : n;
     this.beatKey = key;
     this.beatN = n;
     const tool = this.wanted ?? this.tool;
-    if (d <= 0 || !tool) return;
+    if (!tool) return;
     const track = this.track(tool, t);
+    if (tool !== this.tool && track.amount.value(t) < 0.02 && track.touched < this.wantedAt)
+      this.freshen(track, t);
+    track.touched = t;
+    const first = track.runs.length === 0;
+    if (key !== track.key) {
+      // A command after the first takes a line of its own for its prompt.
+      if (tool === "terminal" && !first) {
+        track.lines += 1;
+        track.scroll.set(track.lines, t, this.sp(SPRINGS.scroll));
+      }
+      track.runs.push({ line: track.lines, t, end: null });
+      if (track.runs.length > RUN_CAP) track.runs.shift();
+      track.key = key;
+    }
+    const run = track.runs.at(-1);
+    if (run && ok !== undefined && !run.end) run.end = { t, ok };
+    if (tool === "planning") {
+      // The plan's count is whole, not a change: what was done before shows done, and each item
+      // done since ticks in turn.
+      if (first) {
+        track.lines = Math.max(0, n - 1);
+        track.scroll.jump(track.lines, t);
+      }
+      const ticks = Math.min(Math.max(0, n - track.lines), 3);
+      for (let i = 0; i < ticks; i++) this.pushBeat(track, t + i * TICK_GAP_MS);
+      track.lines = n;
+      track.scroll.set(n, t, this.sp(SPRINGS.scroll));
+      return;
+    }
+    if (d <= 0) return;
     if (tool === "typing") {
       const taps = Math.min(d, MAX_TAPS);
       for (let i = 0; i < taps; i++) {
@@ -298,11 +351,44 @@ export class DotEngine {
       }
       return;
     }
-    if (tool === "terminal" || tool === "browsing") {
+    if (
+      tool === "terminal" ||
+      tool === "browsing" ||
+      tool === "reading" ||
+      tool === "remembering"
+    ) {
       track.lines += Math.min(d, 3);
       track.scroll.set(track.lines, t, this.sp(SPRINGS.scroll));
     }
     this.pushBeat(track, t);
+  }
+
+  // The sub-agents at work, by id, with how each one's work ended once it has. A helper comes out of
+  // dot for each, and goes back when its work is done, with a smile when it went well.
+  setHelpers(list: readonly { id: string; ok?: boolean }[], t: number): void {
+    this.advance(t);
+    for (const [id, h] of this.helpers) {
+      if (h.end && h.amount.value(t) < 0.001 && t > h.end.t + HAPPY_MS) this.helpers.delete(id);
+    }
+    for (const { id, ok } of list) {
+      let h = this.helpers.get(id);
+      if (!h) {
+        const slot = this.freeSlot(t);
+        if (ok !== undefined || slot < 0) continue;
+        h = {
+          slot,
+          amount: new Channel(0, SPRINGS.propIn),
+          since: t,
+          end: null,
+          seed: this.draw(),
+        };
+        h.amount.set(1, t, this.sp(SPRINGS.propIn));
+        this.helpers.set(id, h);
+      }
+      if (ok !== undefined) this.release(h, ok, t);
+    }
+    for (const [id, h] of this.helpers)
+      if (!list.some((c) => c.id === id)) this.release(h, false, t);
   }
 
   setControl(on: boolean, t: number): void {
@@ -345,6 +431,7 @@ export class DotEngine {
       track.amount.jump(tool === this.tool ? 1 : 0, t);
       track.scroll.jump(track.lines, t);
     }
+    for (const h of this.helpers.values()) h.amount.jump(h.end ? 0 : 1, t);
     this.aim.x.jump(this.aim.x.to, t);
     this.aim.y.jump(this.aim.y.to, t);
     this.enter(next, t, null, true);
@@ -357,6 +444,7 @@ export class DotEngine {
     const fine = this.lod === "glance" || this.lod === "hero";
     const props = this.props(t);
     const tool = blend(props, fine);
+    const helpers = this.rich ? this.helperPoses(t) : [];
     const body = this.rich ? 1 : 0;
     const b = rich ? v("breath") * this.breathValue(t) : 0;
     // Like breath, the talk-bob shows only where the body animates.
@@ -402,6 +490,7 @@ export class DotEngine {
       },
       plate: { dim: clamp(v("dim"), 0, 1), rim: clamp(v("rim"), 0, 1) },
       props: this.rich ? props : [],
+      helpers,
       fine,
       eyes: [eye(0), eye(1)],
       blink,
@@ -426,6 +515,7 @@ export class DotEngine {
       if (rich || !RICH_ONLY.has(k)) m = Math.max(m, this.ch[k].speed(t) * SPEED_UNITS[k]);
     }
     for (const track of this.tracks.values()) m = Math.max(m, track.amount.speed(t) * FADE);
+    for (const h of this.helpers.values()) m = Math.max(m, h.amount.speed(t) * FADE);
     return m + this.blinkAmount(t) * 50;
   }
 
@@ -463,10 +553,55 @@ export class DotEngine {
         scroll: new Channel(0, SPRINGS.scroll),
         lines: 0,
         seed: this.draw(),
+        runs: [],
+        key: null,
+        touched: Number.NEGATIVE_INFINITY,
       };
       this.tracks.set(tool, track);
     }
     return track;
+  }
+
+  // A prop coming out anew starts from nothing: its loops' clock, its lines and its work.
+  private freshen(track: Track, t: number): void {
+    track.since = t;
+    track.seed = this.draw();
+    track.lines = 0;
+    track.scroll.jump(0, t);
+    track.runs = [];
+    track.key = null;
+  }
+
+  private freeSlot(t: number): number {
+    const taken = new Set<number>();
+    for (const h of this.helpers.values()) {
+      if (!h.end || h.amount.value(t) > 0.02) taken.add(h.slot);
+    }
+    for (let slot = 0; slot < HELPER_SLOTS.length; slot++) if (!taken.has(slot)) return slot;
+    return -1;
+  }
+
+  private release(h: Helper, ok: boolean, t: number): void {
+    if (h.end) return;
+    h.end = { t, ok };
+    const at = ok ? t + HAPPY_MS : t;
+    this.at(at, (tt) => h.amount.set(0, tt, this.sp(SPRINGS.propOut)), true);
+  }
+
+  private helperPoses(t: number): HelperPose[] {
+    const out: HelperPose[] = [];
+    for (const h of this.helpers.values()) {
+      const amount = clamp(h.amount.value(t), 0, 1);
+      if (amount < 0.001) continue;
+      out.push({
+        slot: h.slot,
+        amount,
+        age: this.reduced ? 0 : t - h.since,
+        end: h.end ? { ok: h.end.ok, age: t - h.end.t } : null,
+        seed: h.seed,
+      });
+    }
+    return out;
   }
 
   private pushBeat(track: Track, t: number): void {
@@ -476,6 +611,7 @@ export class DotEngine {
 
   private requestTool(next: DotTool | null, t: number, gap: number): void {
     const token = ++this.toolToken;
+    if (next !== this.wanted) this.wantedAt = t;
     this.wanted = next;
     if (next === this.tool) return;
     const at = Math.max(this.tool === null ? t : this.toolSince + TOOL_HOLD_MS, t + gap);
@@ -502,10 +638,10 @@ export class DotEngine {
     if (!next) return;
     const track = this.track(next, t);
     if (track.amount.value(t) < 0.02) {
+      // Work that reached it while it waited to come out starts as it does.
+      if (track.touched < this.wantedAt) this.freshen(track, t);
       track.since = t;
-      track.seed = this.draw();
-      track.lines = 0;
-      track.scroll.jump(0, t);
+      for (const run of track.runs) run.t = Math.max(run.t, t);
     }
     track.amount.set(1, t, this.sp(SPRINGS.propIn));
   }
@@ -525,6 +661,11 @@ export class DotEngine {
         beats: track.beats.map((b) => ({ age: t - b.t, k: b.k })),
         scroll: track.scroll.value(t),
         lines: track.lines,
+        runs: track.runs.map((r) => ({
+          line: r.line,
+          age: t - r.t,
+          end: r.end ? { ok: r.end.ok, age: t - r.end.t } : null,
+        })),
         angle,
         seed: track.seed,
         still: this.reduced,
@@ -1107,7 +1248,7 @@ function blend(props: readonly PropPose[], fine: boolean): ToolBlend {
     out.gaze += w * look.gaze;
     out.gx += w * look.gaze * m.gx;
     out.gy += w * look.gaze * m.gy;
-    if (p.tool === "looking") out.lens += w;
+    if (p.tool === "looking" || p.tool === "inspecting") out.lens += w;
   }
   return out;
 }

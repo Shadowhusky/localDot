@@ -16,10 +16,27 @@ import {
   PlaneGeometry,
   SphereGeometry,
 } from "three";
-import { type BodyUniforms, bodyMaterial, SHADES, setEyes, setShades } from "./body.ts";
-import { eyeUniforms, faceQuaternion, tippedFace } from "./face.ts";
+import {
+  type BodyUniforms,
+  bodyMaterial,
+  type Carrier,
+  SHADES,
+  setEyes,
+  setShades,
+} from "./body.ts";
+import { eyeUniforms, faceQuaternion, tippedFace, tippedHead } from "./face.ts";
 import { XENON_COLOUR, XENON_LIGHTS } from "./rig.ts";
-import { loadedShadow, loadedWearable, ON_FACE, wearable, wearableShadow } from "./wardrobe.ts";
+import {
+  loadedShadow,
+  loadedWearable,
+  ON_FACE,
+  ON_HEAD,
+  wearable,
+  wearableShadow,
+} from "./wardrobe.ts";
+
+const carrier = (name: Wearable): Carrier =>
+  ON_FACE.has(name) ? "face" : ON_HEAD.has(name) ? "head" : "body";
 
 // Every dot shares its ball and its shadow.
 let sphere: SphereGeometry | null = null;
@@ -53,6 +70,8 @@ export class Dot3D {
   readonly head = new Group();
   // Glasses and the like, which turn with the face as the eyes do.
   readonly face = new Group();
+  // Hats and the like, which turn with the face and keep the head's tip.
+  readonly headwear = new Group();
   private readonly uniforms: BodyUniforms;
   private engine: DotEngine;
   private readonly now: () => number;
@@ -60,6 +79,7 @@ export class Dot3D {
   private readonly shadow: Mesh;
   private readonly xenon: DirectionalLight[];
   private readonly faceMatrix = new Matrix3();
+  private readonly headwearMatrix = new Matrix3();
   private readonly worn = new Map<Wearable, Object3D>();
   private wearing: readonly Wearable[] = [];
   private readonly m4 = new Matrix4();
@@ -84,7 +104,7 @@ export class Dot3D {
     this.uniforms = uniforms;
     sphere ??= new SphereGeometry(1, 96, 64);
     const body = new Mesh(sphere, material);
-    this.head.add(body, this.face);
+    this.head.add(body, this.face, this.headwear);
     this.head.position.y = 1;
     this.bob.position.y = -1;
     this.bob.add(this.head);
@@ -161,7 +181,8 @@ export class Dot3D {
     }
     const putOn = (name: Wearable, item: Object3D | null) => {
       if (!item || !this.wearing.includes(name) || this.worn.has(name)) return;
-      (ON_FACE.has(name) ? this.face : this.head).add(item);
+      const on = carrier(name);
+      (on === "face" ? this.face : on === "head" ? this.headwear : this.head).add(item);
       this.worn.set(name, item);
     };
     for (const name of list) {
@@ -172,12 +193,12 @@ export class Dot3D {
     }
     const wanted = this.wearing;
     const casters = wanted.slice(0, SHADES);
-    const onFace = casters.map((name) => ON_FACE.has(name));
+    const carriers = casters.map(carrier);
     const shades = casters.map(loadedShadow);
-    if (shades.every((shade) => shade)) setShades(this.uniforms, shades, onFace);
+    if (shades.every((shade) => shade)) setShades(this.uniforms, shades, carriers);
     else
       void Promise.all(casters.map(wearableShadow)).then((loaded) => {
-        if (wanted === this.wearing) setShades(this.uniforms, loaded, onFace);
+        if (wanted === this.wearing) setShades(this.uniforms, loaded, carriers);
       });
   }
 
@@ -187,10 +208,15 @@ export class Dot3D {
     this.bob.position.set(p.body.x / R, -1 - p.body.y / R, 0);
     this.bob.scale.set(p.body.sx, p.body.sy, p.body.sx);
     this.head.rotation.set(this.tip, this.spin, (-p.roll * Math.PI) / 180);
-    const turn = tippedFace(faceQuaternion(p.gaze.x, p.gaze.y, 0), this.tip);
+    const gaze = faceQuaternion(p.gaze.x, p.gaze.y, 0);
+    const turn = tippedFace(gaze, this.tip);
+    const hats = tippedHead(gaze, this.tip);
     this.face.quaternion.copy(turn);
+    this.headwear.quaternion.copy(hats);
     this.faceMatrix.setFromMatrix4(this.m4.makeRotationFromQuaternion(turn.invert()));
     this.uniforms.uFace.value.copy(this.faceMatrix);
+    this.headwearMatrix.setFromMatrix4(this.m4.makeRotationFromQuaternion(hats.invert()));
+    this.uniforms.uHead.value.copy(this.headwearMatrix);
     const devPerUnit = Math.max(0.5, pxPerRadius / R);
     this.uniforms.uUnitsPerPx.value = 1 / devPerUnit;
     setEyes(this.uniforms, [

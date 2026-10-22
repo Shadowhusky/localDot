@@ -106,6 +106,39 @@ describe("DotView", () => {
     expect(root.querySelector<HTMLElement>('[data-wear="hoodie"]')?.style.transform).toBe("");
   });
 
+  it("turns a hat with the face about its front edge, by a share across, while clothes stay", () => {
+    const { root, view } = mount({ size: 192, wearables: ["cap", "hoodie"] });
+    const cap = root.querySelector<HTMLElement>('[data-wear="cap"]');
+    expect(cap?.style.transformOrigin).toBe("50% 26.5625%");
+    const k = 192 / 64;
+    // Where the eyes' midpoint went from its place on a still face, in frame units.
+    const eyes = () => {
+      const [l, r] = [...root.querySelectorAll(".dot-face g[transform]")].map((g) =>
+        matrix(g.getAttribute("transform")),
+      );
+      return [((l?.[4] ?? 0) + (r?.[4] ?? 0)) / 2 - 32, ((l?.[5] ?? 0) + (r?.[5] ?? 0)) / 2 - 27.5];
+    };
+    for (const gaze of [
+      { x: 6, y: 4 },
+      { x: -5, y: -5 },
+    ]) {
+      view.setBias(gaze);
+      drive(view, clock, clock + 3000);
+      const [ex = 0, ey = 0] = eyes();
+      const m = matrix(cap?.style.transform);
+      const [dx, dy] = [(m[4] ?? 0) / k, (m[5] ?? 0) / k];
+      // Up and down the bill keeps to the eyes; across, it follows them by about half.
+      expect(Math.sign(dy)).toBe(Math.sign(ey));
+      expect(Math.abs(dy - ey)).toBeLessThan(1.2);
+      expect(dx / ex).toBeGreaterThan(0.3);
+      expect(dx / ex).toBeLessThan(0.6);
+      // The turn tilts and foreshortens it a little, never warps it.
+      for (const [i, rest] of [1, 0, 0, 1].entries())
+        expect(Math.abs((m[i] ?? rest) - rest)).toBeLessThanOrEqual(0.081);
+    }
+    expect(root.querySelector<HTMLElement>('[data-wear="hoodie"]')?.style.transform).toBe("");
+  });
+
   it("dims what it wears with the body", () => {
     const { root, view } = mount({ wearables: ["beret"] });
     const beret = root.querySelector<HTMLElement>('[data-wear="beret"]');

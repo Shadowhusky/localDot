@@ -2,12 +2,13 @@ import { mulberry32 } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import { DotEngine, type DotPose } from "./engine.ts";
 import type { DotState } from "./states.ts";
-import { type DotTool, TOOL_GAP_MS, TOOL_HOLD_MS, TOOLS } from "./tools.ts";
+import { type DotTool, HAPPY_MS, TOOL_GAP_MS, TOOL_HOLD_MS, TOOLS } from "./tools.ts";
 
 const engine = (state: DotState = "acting", reducedMotion = false) =>
   new DotEngine({ seed: 5, t: 0, state, lod: "glance", reducedMotion, control: true });
 
 const amount = (p: DotPose, tool: DotTool) => p.props.find((x) => x.tool === tool)?.amount ?? 0;
+const prop = (p: DotPose, tool: DotTool) => p.props.find((x) => x.tool === tool);
 
 // The largest amount a tool reached between two times, sampled every frame.
 function peak(e: DotEngine, tool: DotTool, from: number, to: number): number {
@@ -141,6 +142,95 @@ describe("dot's tools", () => {
     expect(p?.scroll).toBeCloseTo(2, 2);
   });
 
+  it("types each command on a line of its own, scrolls its output and marks how it ended", () => {
+    const e = engine();
+    e.setTool("terminal", 0);
+    e.beat("s1", 0, 0);
+    e.beat("s1", 2, 300);
+    e.beat("s1", 2, 500, true);
+    e.beat("s2", 0, 900);
+    e.beat("s2", 1, 1200, false);
+    const p = prop(e.pose(2000), "terminal");
+    expect(p?.lines).toBe(4);
+    expect(p?.runs).toEqual([
+      { line: 0, age: 2000, end: { ok: true, age: 1500 } },
+      { line: 3, age: 1100, end: { ok: false, age: 800 } },
+    ]);
+  });
+
+  it("keeps the work that reached a prop while it waited to come out, from its entrance", () => {
+    const e = engine();
+    e.setTool("typing", 0);
+    e.pose(200);
+    e.setTool("terminal", 200);
+    e.beat("s1", 1, 300);
+    e.beat("s1", 1, 400, true);
+    expect(amount(e.pose(TOOL_HOLD_MS - 16), "terminal")).toBe(0);
+    const p = prop(e.pose(TOOL_HOLD_MS + 100), "terminal");
+    expect(p?.lines).toBe(1);
+    expect(p?.runs).toEqual([{ line: 0, age: 100, end: { ok: true, age: TOOL_HOLD_MS - 300 } }]);
+  });
+
+  it("starts a prop afresh each time it comes out", () => {
+    const e = engine();
+    e.setTool("reading", 0);
+    e.beat("f1", 1, 0);
+    e.pose(1000);
+    e.setTool("typing", 1000);
+    e.pose(5000);
+    e.setTool("reading", 5000);
+    e.beat("f2", 1, 5000);
+    expect(prop(e.pose(5100), "reading")).toMatchObject({ lines: 1, clock: 100 });
+    expect(prop(e.pose(5100), "reading")?.runs).toHaveLength(1);
+  });
+
+  it("ticks a plan's items off as they are done, the newest drawing in as it comes out", () => {
+    const e = engine();
+    e.setTool("planning", 0);
+    e.beat("p1", 2, 0);
+    let p = prop(e.pose(100), "planning");
+    expect(p?.lines).toBe(2);
+    expect(p?.beats.map((b) => b.age)).toEqual([100]);
+    // An update that does nothing ticks nothing; one that gets two items done ticks each in turn.
+    e.beat("p2", 2, 1000);
+    e.beat("p3", 4, 1500);
+    p = prop(e.pose(1600), "planning");
+    expect(p?.lines).toBe(4);
+    expect(p?.beats.map((b) => b.age)).toEqual([1600, 100, -80]);
+  });
+
+  it("brings out a helper for each sub-agent at work and sends it back when it is done", () => {
+    const e = engine("thinking");
+    e.setTool("delegating", 0);
+    e.setHelpers([{ id: "a" }, { id: "b" }], 0);
+    let helpers = e.pose(800).helpers;
+    expect(helpers.map((h) => h.slot)).toEqual([0, 1]);
+    expect(helpers.every((h) => h.amount > 0.9 && h.end === null)).toBe(true);
+    // A helper whose work went well smiles before it goes back; one that failed goes at once.
+    e.setHelpers(
+      [
+        { id: "a", ok: true },
+        { id: "b", ok: false },
+      ],
+      1000,
+    );
+    helpers = e.pose(1000 + HAPPY_MS - 20).helpers;
+    expect(helpers.find((h) => h.slot === 0)).toMatchObject({ end: { ok: true } });
+    expect(helpers.find((h) => h.slot === 0)?.amount).toBeGreaterThan(0.99);
+    expect(helpers.find((h) => h.slot === 1)?.amount ?? 0).toBeLessThan(0.9);
+    expect(e.pose(1000 + HAPPY_MS + 1500).helpers).toEqual([]);
+    // A new one takes the first place free.
+    e.setHelpers([{ id: "c" }], 4000);
+    expect(e.pose(4500).helpers.map((h) => h.slot)).toEqual([0]);
+  });
+
+  it("never brings out a helper for work that finished before dot saw it start", () => {
+    const e = engine("thinking");
+    e.setTool("delegating", 0);
+    e.setHelpers([{ id: "a", ok: true }], 0);
+    expect(e.pose(500).helpers).toEqual([]);
+  });
+
   it("taps the pointer when an action's input goes to the computer", () => {
     const e = engine();
     e.setTool("pointing", 0);
@@ -180,13 +270,16 @@ describe("dot's tools", () => {
       inputs.push([i * 1300, (e, t) => e.setTool(tool, t)]);
       inputs.push([i * 1300 + 300, (e, t) => e.beat(`k${i}`, 7, t)]);
       inputs.push([i * 1300 + 500, (e, t) => e.react("dispatch", t)]);
+      inputs.push([i * 1300 + 700, (e, t) => e.beat(`k${i}`, 9, t, i % 2 === 0)]);
+      inputs.push([i * 1300 + 900, (e, t) => e.setHelpers([{ id: `h${i}` }], t)]);
+      inputs.push([i * 1300 + 1100, (e, t) => e.setHelpers([{ id: `h${i}`, ok: true }], t)]);
     });
     const drive = (step: () => number) => {
       const e = engine();
       const probes: string[] = [];
       let i = 0;
       let next = 0;
-      for (let t = 0; t <= 18_000; t += step()) {
+      for (let t = 0; t <= TOOLS.length * 1300 + 2000; t += step()) {
         for (let input = inputs[i]; input && input[0] <= t; input = inputs[++i]) {
           for (; next < input[0]; next += 250) probes.push(JSON.stringify(e.pose(next)));
           e.pose(input[0]);

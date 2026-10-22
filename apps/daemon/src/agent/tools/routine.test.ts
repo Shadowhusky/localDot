@@ -33,6 +33,29 @@ function port() {
 }
 
 describe("routine tool", () => {
+  it("shows each call as a step, with what it did", async () => {
+    const h = toolHarness({ routines: port() });
+    harnesses.push(h);
+    await h.call("routine", { op: "list" });
+    await h.call("follow_up_at", { at: "2026-10-12T15:00", note: "Check the reply" });
+    await h.call("routine", { op: "propose", name: "Morning bills", instruction: "Check" });
+    const steps = h.events().filter((e) => e.type === "tool.start" || e.type === "step.end");
+    expect(steps.map((e) => e.data)).toEqual([
+      { tool: "routine", title: "Check the routines" },
+      { status: "ok" },
+      { tool: "follow_up_at", title: "Schedule a follow-up" },
+      { status: "ok" },
+      { tool: "routine", title: "Propose a routine: Morning bills" },
+      { status: "failed" },
+    ]);
+    expect(
+      h
+        .events()
+        .filter((e) => e.type === "step.start")
+        .map((e) => e.data),
+    ).toEqual([{ kind: "think" }, { kind: "think" }, { kind: "think" }]);
+  });
+
   it("propose records a card in the thread and asks for no approval", async () => {
     const routines = port();
     const h = toolHarness({ autoApprove: false, routines });

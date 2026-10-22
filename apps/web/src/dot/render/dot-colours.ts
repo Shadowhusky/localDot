@@ -76,6 +76,7 @@ export const PROP = {
   cardDarkBar: mixColours(GRAPHITE, VOID, 0.2),
   dots: shadeOf(PEARL[0], 0.22),
   lineLight: shadeOf(PEARL[2], 0.62),
+  command: shadeOf(PEARL[1], 0.9),
   porcelainHi: PEARL[0],
   porcelainLo: PEARL[2],
   porcelainFold: mixColours(PEARL[2], PEARL[3], 0.45),

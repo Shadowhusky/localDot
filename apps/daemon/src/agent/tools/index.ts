@@ -6,6 +6,8 @@ import {
   isConnectorToolName,
   isToolName,
   type PeopleInput,
+  type RememberInput,
+  type RoutineToolInput,
   type ShellInput,
   TOOL_INPUTS,
   type ToolName,
@@ -86,6 +88,29 @@ const STEP_KIND: Record<ToolName, string> = {
   follow_up_at: "think",
   research: "browser",
 };
+
+// What saving to each memory file says in the chat and Activity.
+const REMEMBERED: Record<RememberInput["file"], string> = {
+  "USER.md": "Remember this about you",
+  "MEMORY.md": "Save to memory",
+  notes: "Add to today's notes",
+};
+
+// A call that records nothing of its own still shows as a step, as every other call does.
+async function stepped(
+  ctx: ToolCallContext,
+  tool: ToolName,
+  title: string,
+  run: (ctx: ToolCallContext) => ToolResult | Promise<ToolResult>,
+): Promise<ToolResult> {
+  append(ctx, "step.start", { kind: STEP_KIND[tool] });
+  append(ctx, "tool.start", { tool, title: clipText(title, 200) });
+  const result = await run(ctx);
+  if (ctx.session.stopped) return result;
+  append(ctx, "tool.end", { ok: result.ok });
+  append(ctx, "step.end", { status: result.ok ? "ok" : "failed" });
+  return result;
+}
 
 function blocked(
   session: AgentSession,
@@ -476,7 +501,9 @@ async function dispatchAdmitted(
         result = await requestTakeoverTool(t, ctx, input);
         break;
       case "remember":
-        result = await rememberTool(t, ctx, input);
+        result = await stepped(ctx, name, REMEMBERED[(frozen as RememberInput).file], (c) =>
+          rememberTool(t, c, input),
+        );
         break;
       case "recall":
         result = await recallTool(t, ctx, input);
@@ -500,11 +527,21 @@ async function dispatchAdmitted(
           };
         break;
       }
-      case "routine":
-        result = await routineTool(t, ctx, input);
+      case "routine": {
+        const routine = frozen as RoutineToolInput;
+        const title =
+          routine.op === "list"
+            ? "Check the routines"
+            : routine.op === "pause"
+              ? "Pause a routine"
+              : `Propose a routine: ${redact(routine.name ?? "")}`;
+        result = await stepped(ctx, name, title, (c) => routineTool(t, c, input));
         break;
+      }
       case "follow_up_at":
-        result = await followUpAtTool(t, ctx, input);
+        result = await stepped(ctx, name, "Schedule a follow-up", (c) =>
+          followUpAtTool(t, c, input),
+        );
         break;
       case "research":
         result = await researchTool(t, ctx, input);

@@ -14,6 +14,14 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 // What sits on the face and turns with it, as the app's glasses and mustache do.
 export const ON_FACE: ReadonlySet<Wearable> = new Set(["round-glasses", "sunglasses", "mustache"]);
+// What sits on the head and turns with the face, as the app's hats do.
+export const ON_HEAD: ReadonlySet<Wearable> = new Set([
+  "cap",
+  "beret",
+  "mortarboard",
+  "headphones",
+  "bow",
+]);
 
 const MODELS = `${import.meta.env.BASE_URL}models`;
 const gltf = new GLTFLoader();

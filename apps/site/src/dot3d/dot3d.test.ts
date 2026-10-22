@@ -43,6 +43,21 @@ describe("Dot3D", () => {
     expect(lights(new Dot3D({ control: false }))).toBe(0);
   });
 
+  it("turns what its head wears with its face as it looks around, keeping the head's tip", () => {
+    let t = 1000;
+    const dot = new Dot3D({ state: "your-turn", now: () => t });
+    dot.tip = 0.1;
+    dot.pointerAt({ x: 6, y: -3 });
+    t = 3000;
+    dot.update(100);
+    dot.group.updateMatrixWorld(true);
+    const face = dot.face.getWorldQuaternion(new Quaternion());
+    const hats = dot.headwear.getWorldQuaternion(new Quaternion());
+    expect(new Vector3(0, 0, 1).applyQuaternion(face).x).toBeGreaterThan(0.2);
+    const tip = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), 0.1);
+    expect(hats.angleTo(face.clone().multiply(tip))).toBeLessThan(0.01);
+  });
+
   it("turns on the turntable about its own tipped axis, its top still toward the camera", () => {
     const dot = new Dot3D({ reducedMotion: true });
     dot.tip = 0.1;

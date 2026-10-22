@@ -540,6 +540,17 @@ describe("the tools", () => {
     expect(change?.type === "memory.change" && change.data.patch).toContain(
       "+- Likes window seats",
     );
+    // Saving to memory shows as a step, around the change it made.
+    const step = h.events().filter((e) => e.step === change?.step);
+    expect(step.map((e) => e.type)).toEqual([
+      "step.start",
+      "tool.start",
+      "memory.change",
+      "tool.end",
+      "step.end",
+    ]);
+    expect(step[1]?.data).toEqual({ tool: "remember", title: "Remember this about you" });
+    expect(step[4]?.data).toEqual({ status: "ok" });
     h.desktop.files.set("Documents/flights.ods", "sheet");
     const done = await h.call("done", {
       summary: "Cheapest is Friday.\nSee the sheet.",

@@ -155,6 +155,7 @@ export class ExportDot extends Container {
   #failed: string | null = null;
   #tool: DotTool | null = null;
   #beat = "";
+  #helpers = "";
   #done: boolean;
   #said: string;
   #shown = "";
@@ -305,14 +306,19 @@ export class ExportDot extends Container {
     this.#words.alpha = shown.alpha;
   }
 
-  // The tool dot works with and its progress, as the app's dot takes them.
+  // The tool dot works with, its progress and its helpers, as the app's dot takes them.
   #use(feed: RecordedPresence["feed"], t: number): void {
     const tool = feed.tool ?? null;
     if (tool !== this.#tool) this.#engine.setTool(tool, t);
     this.#tool = tool;
-    const beat = feed.beat ? `${feed.beat.key}:${feed.beat.n}` : "";
-    if (feed.beat && beat !== this.#beat) this.#engine.beat(feed.beat.key, feed.beat.n, t);
+    const beat = feed.beat ? `${feed.beat.key}:${feed.beat.n}:${feed.beat.ok ?? ""}` : "";
+    if (feed.beat && beat !== this.#beat)
+      this.#engine.beat(feed.beat.key, feed.beat.n, t, feed.beat.ok);
     this.#beat = beat;
+    const helpers = feed.helpers ?? [];
+    const crew = helpers.map((helper) => `${helper.id}:${helper.ok ?? ""}`).join(" ");
+    if (crew !== this.#helpers) this.#engine.setHelpers(helpers, t);
+    this.#helpers = crew;
   }
 
   #centre(): Point {

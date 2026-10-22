@@ -44,7 +44,7 @@ export function paintDot(ctx: Context, pose: DotPose, o: PaintOptions): void {
     ctx.drawImage(plates.shadow, 0, 0, px, px);
     ctx.restore();
   }
-  props(ctx, pose, "back", o.xenon, k);
+  props(ctx, pose, "back", o, k);
   ctx.save();
   ctx.translate(pose.body.x * k, pose.body.y * k);
   around(ctx, 32 * k, 56 * k, pose.body.sx, pose.body.sy);
@@ -62,14 +62,14 @@ export function paintDot(ctx: Context, pose: DotPose, o: PaintOptions): void {
   ctx.clip();
   for (const eye of pose.eyes) paintEye(ctx, eyeGeometry(eye, detail, k), detail.gloss);
   ctx.restore();
-  props(ctx, pose, "front", o.xenon, k);
+  props(ctx, pose, "front", o, k);
 }
 
-function props(ctx: Context, pose: DotPose, layer: PropLayer, xenon: string, k: number): void {
+function props(ctx: Context, pose: DotPose, layer: PropLayer, o: PaintOptions, k: number): void {
   if (!pose.props.length) return;
   ctx.save();
   ctx.scale(k, k);
-  paintProps(ctx, pose, layer, xenon);
+  paintProps(ctx, pose, layer, o.xenon, o.plates?.neutral ?? null);
   ctx.restore();
 }
 

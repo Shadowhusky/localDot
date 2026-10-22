@@ -99,6 +99,13 @@ export interface SaidLine {
   t: number;
   text: string;
 }
+// A sub-agent dot started: when it ran, and whether its work went well once it ended.
+export interface SubagentRun {
+  runId: string;
+  startT: number;
+  endT?: number;
+  ok?: boolean;
+}
 export interface PlanItemState {
   id: string;
   text: string;
@@ -125,6 +132,7 @@ export interface SessionModel {
   observes: ObserveAt[];
   steps: StepState[];
   plans: PlanSnapshot[];
+  subagents: SubagentRun[];
   said: SaidState[];
   // When the user gave dot a task or a follow-up: each starts a turn of work.
   turns: number[];
@@ -151,6 +159,7 @@ export function emptyModel(): SessionModel {
     observes: [],
     steps: [],
     plans: [],
+    subagents: [],
     said: [],
     turns: [],
     marks: [],
@@ -332,6 +341,18 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
       case "session.end":
         model.ended = { t, reason: e.data.reason };
         break;
+      case "subagent.state": {
+        const run = model.subagents.findLast((s) => s.runId === e.data.runId);
+        if (e.data.state === "running") {
+          if (!run) model.subagents.push({ runId: e.data.runId, startT: t });
+        } else if (run && run.endT === undefined) {
+          run.endT = t;
+          run.ok = e.data.state === "completed";
+        }
+        const mark = markOf(e);
+        if (mark) model.marks.push(mark);
+        break;
+      }
       case "agent.state":
         model.agentStates.push({
           state: e.data.state,

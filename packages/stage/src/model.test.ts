@@ -257,6 +257,26 @@ describe("tool steps", () => {
   });
 });
 
+describe("sub-agents", () => {
+  it("keeps each sub-agent's run from its start to how it ended, once", () => {
+    const state = (t: number, runId: string, s: string) =>
+      ev("subagent.state", t, { id: `agent-${runId}`, runId, label: "Research", state: s });
+    const m = foldEvents(emptyModel(), [
+      state(100, "r1", "running"),
+      state(150, "r2", "running"),
+      state(150, "r2", "running"),
+      state(900, "r1", "completed"),
+      state(1200, "r2", "failed"),
+      state(1300, "r2", "completed"),
+      state(1400, "r3", "interrupted"),
+    ]);
+    expect(m.subagents).toEqual([
+      { runId: "r1", startT: 100, endT: 900, ok: true },
+      { runId: "r2", startT: 150, endT: 1200, ok: false },
+    ]);
+  });
+});
+
 describe("replay model indexes", () => {
   it("keeps observes, steps and plans in order and indexes the current action by step", () => {
     const events = [

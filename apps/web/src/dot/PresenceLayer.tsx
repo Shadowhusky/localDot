@@ -13,6 +13,7 @@ const RESTING_MS = 60_000;
 const DOZING_MS = 5 * 60_000;
 const AWAY_MS = 30_000;
 const COMPOSER = ".composer textarea";
+const NO_HELPERS: NonNullable<DotFeed["helpers"]> = [];
 
 export interface PresenceLayerProps {
   place: PresencePlace | null;
@@ -79,9 +80,15 @@ export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
   useEffect(() => presence.current?.view.setTool(tool), [tool]);
   const beatKey = feed.beat?.key;
   const beatN = feed.beat?.n;
+  const beatOk = feed.beat?.ok;
   useEffect(() => {
-    if (beatKey !== undefined && beatN !== undefined) presence.current?.view.beat(beatKey, beatN);
-  }, [beatKey, beatN]);
+    if (beatKey !== undefined && beatN !== undefined)
+      presence.current?.view.beat(beatKey, beatN, beatOk);
+  }, [beatKey, beatN, beatOk]);
+  const helpers = feed.helpers ?? NO_HELPERS;
+  const crew = helpers.map((helper) => `${helper.id}:${helper.ok ?? ""}`).join(" ");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the crew's words say when it changed.
+  useEffect(() => presence.current?.view.setHelpers(helpers), [crew]);
   useEffect(() => {
     if (feed.failed) presence.current?.view.react("wince");
   }, [feed.failed]);
