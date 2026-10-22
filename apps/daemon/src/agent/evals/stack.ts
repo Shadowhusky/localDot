@@ -6,6 +6,7 @@ import {
   type ActionClass,
   type AgentLimits,
   type ApprovalCard,
+  ASK_ANSWER_ID,
   type BootConfig,
   type ComputerAction,
   DEFAULT_AGENT_LIMITS,
@@ -327,14 +328,21 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
             abort.abort(error);
           }),
       );
-    else if (event.type === "ask.request")
+    else if (event.type === "ask.request") {
+      const { askId, fields = [] } = event.data;
+      // Nothing here can fill in a form: a quick choice takes its first option, and any other
+      // question is declined.
+      const first =
+        fields.length === 1 && fields[0]?.id === ASK_ANSWER_ID && fields[0].options?.[0];
       setTimeout(() => {
-        const askId = String(data.askId);
-        // Nothing here can fill in a form: a question with fields is declined.
-        if (data.fields ? session.decline(askId) : session.answer(askId, "A", undefined))
+        if (
+          first
+            ? session.answerFields(askId, { [ASK_ANSWER_ID]: first }, (text) => text)
+            : session.decline(askId)
+        )
           assisted.answers += 1;
       }, 0);
-    else if (event.type === "safety.pause" && !abort.signal.aborted)
+    } else if (event.type === "safety.pause" && !abort.signal.aborted)
       abort.abort(new Error("the repeat guard paused the task"));
     else if (event.type === "agent.state" && data.state === "paused" && data.reason === "budget")
       abort.abort(new Error("the spend cap was reached"));

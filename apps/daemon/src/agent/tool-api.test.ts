@@ -7,6 +7,7 @@ import {
   SURROGATE,
   TOOL_TOKEN,
 } from "./testing/harness.ts";
+import { plainForm } from "./tools/ask.ts";
 
 const harnesses: ReturnType<typeof createHarness>[] = [];
 function toolHarness(options?: Parameters<typeof createHarness>[0]) {
@@ -20,7 +21,10 @@ afterEach(() => {
 
 it("keeps a pending question authoritative over delayed model progress", async () => {
   const h = toolHarness();
-  const asking = h.session.ask("Which dataset?", [], true, 0);
+  const asking = h.session.askFields(
+    plainForm({ question: "Which dataset?" }, (text) => text),
+    0,
+  );
   const ask = h.session.pendingAsk;
   for (const state of ["acting", "thinking", "observing"]) {
     const response = await h.app.request("/v1/events", {
@@ -41,7 +45,9 @@ it("keeps a pending question authoritative over delayed model progress", async (
       reason: "question",
     });
   }
-  expect(h.session.answer(ask as string, undefined, "Use the attached dataset")).toBe(true);
+  expect(
+    h.session.answerFields(ask as string, { answer: "Use the attached dataset" }, (text) => text),
+  ).toBe(true);
   await asking;
   expect(h.session.status).toBe("running");
 });
@@ -512,7 +518,9 @@ describe("the tools", () => {
     await until(() => h.session.pendingAsk !== undefined);
     const askId = h.session.pendingAsk;
     expect(askId).toBeDefined();
-    expect(h.session.answer(askId as string, "B", undefined)).toBe(true);
+    expect(h.session.answerFields(askId as string, { answer: "Saturday" }, (text) => text)).toBe(
+      true,
+    );
     expect((await asked).body.content[0]?.text).toBe("The user chose B: Saturday");
     const second = h.call("ask_user", { question: "Anything else?" });
     await until(() => h.session.pendingAsk !== undefined);

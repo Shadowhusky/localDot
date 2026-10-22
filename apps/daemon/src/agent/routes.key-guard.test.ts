@@ -11,6 +11,7 @@ import { MemoryStore } from "./memory.ts";
 import { agentRoutes } from "./routes.ts";
 import { AgentSession } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
+import { plainForm } from "./tools/ask.ts";
 import { TranscriptStore } from "./transcript.ts";
 
 const shapes = [
@@ -137,14 +138,29 @@ describe("independent key safeguard at all four daemon text ingresses", () => {
       expect(f.start).not.toHaveBeenCalled();
       for (const kind of ["steer", "followup"])
         await rejected(f.endpoint("messages"), { kind, text: `前面\n${key}\n后面` });
-      const asking = f.session.ask("Choose", [], true, 0);
+      const asking = f.session.askFields(
+        plainForm({ question: "Choose", options: ["One", "Two"] }, (text) => text),
+        0,
+      );
       const askId = f.session.pendingAsk;
-      await rejected(f.endpoint("answer"), { askId, text: key });
+      await rejected(f.endpoint("answer"), { askId, fields: { answer: key } });
+      await rejected(f.endpoint("answer"), {
+        askId,
+        fields: { answer: { other: `前面 ${key}` } },
+      });
       expect(f.session.pendingAsk).toBe(askId);
       expect(
-        (await f.send(f.endpoint("answer"), { askId, text: "安全回答, no credential" })).status,
+        (
+          await f.send(f.endpoint("answer"), {
+            askId,
+            fields: { answer: "安全回答, no credential" },
+          })
+        ).status,
       ).toBe(204);
-      expect(await asking).toMatchObject({ by: "user", text: "安全回答, no credential" });
+      expect(await asking).toMatchObject({
+        by: "user",
+        fields: { answer: { other: "安全回答, no credential" } },
+      });
       const taking = f.session.takeover("login", "safe prompt");
       await Promise.resolve();
       await Promise.resolve();

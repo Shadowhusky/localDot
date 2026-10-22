@@ -1,5 +1,6 @@
 import { offeredTools } from "@localdot/protocol";
 import {
+  ASK_FORM_GUIDANCE,
   DONE_TOOL_DESCRIPTION,
   ENVIRONMENT_CONTEXT,
   researchSection,
@@ -120,6 +121,8 @@ describe("Codex developer instructions", () => {
     expect(CODEX_TOOL_DESCRIPTIONS.ask_user).toContain("non-secret client IDs");
     expect(CODEX_TOOL_DESCRIPTIONS.ask_user).toContain("Never ask for permission");
     expect(CODEX_TOOL_DESCRIPTIONS.ask_user).toContain("you only learn that it was provided");
+    expect(CODEX_TOOL_DESCRIPTIONS.ask_user).toContain(ASK_FORM_GUIDANCE);
+    expect(CODEX_TOOL_DESCRIPTIONS.ask_user).not.toContain("allow_text");
     expect(CODEX_TOOL_DESCRIPTIONS.request_takeover).toContain(
       "Only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
     );

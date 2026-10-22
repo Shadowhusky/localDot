@@ -4,13 +4,14 @@ import { Badge } from "./Badge.tsx";
 import { useFieldControl } from "./Field.tsx";
 import { Icon } from "./Icon.tsx";
 import type { IconName } from "./icons.ts";
+import { joinIds } from "./merge.ts";
 import { pressHandlers } from "./press.ts";
 
 export interface RadioCardOption {
   value: string;
   label: string;
   description?: ReactNode;
-  // A short tag after the label, such as "Recommended".
+  // A short tag after the label, such as "Recommended": read with the description.
   tag?: string;
   // A small picture of the choice, such as a theme's colours, drawn inside the card.
   preview?: ReactNode;
@@ -69,6 +70,7 @@ export function RadioCards({
         const note = option.disabledReason ?? option.description;
         const labelId = `${id}${index}label`;
         const noteId = `${id}${index}note`;
+        const tagId = `${id}${index}tag`;
         return (
           <label
             key={option.value}
@@ -84,7 +86,7 @@ export function RadioCards({
               className="ui-choice-input"
               aria-disabled={option.disabledReason ? true : undefined}
               aria-labelledby={labelId}
-              aria-describedby={note ? noteId : undefined}
+              aria-describedby={joinIds(option.tag ? tagId : undefined, note ? noteId : undefined)}
               onClick={(event) => {
                 if (option.disabledReason) event.preventDefault();
               }}
@@ -108,7 +110,7 @@ export function RadioCards({
                 <span id={labelId} className="ui-choice-label">
                   {option.label}
                 </span>
-                {option.tag && <Badge>{option.tag}</Badge>}
+                {option.tag && <Badge id={tagId}>{option.tag}</Badge>}
               </span>
               {note && (
                 <span id={noteId} className="ui-choice-note">

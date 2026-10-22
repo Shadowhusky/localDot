@@ -6,15 +6,15 @@ const MOST = 99;
 
 type Tone = "neutral" | "attention" | "danger";
 
-export type BadgeProps = { tone?: Tone; className?: string } & (
+export type BadgeProps = { tone?: Tone; className?: string; id?: string } & (
   | { kind: "dot"; label: string }
   | { kind: "count"; children: number; label?: string }
   | { kind?: "label"; children: ReactNode }
 );
 
 export function Badge(props: BadgeProps) {
-  const { tone = "neutral", className } = props;
-  const shared = { "data-tone": tone, className: clsx("ui-badge", className) };
+  const { tone = "neutral", className, id } = props;
+  const shared = { id, "data-tone": tone, className: clsx("ui-badge", className) };
   if (props.kind === "dot") {
     return <span {...shared} data-kind="dot" role="img" aria-label={props.label} />;
   }

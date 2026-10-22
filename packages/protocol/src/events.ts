@@ -363,6 +363,10 @@ export const AskRequestField = z.object({
   label: z.string().min(1).max(200),
   hint: z.string().min(1).max(300).optional(),
   options: z.array(z.string().min(1).max(200)).min(1).max(6).optional(),
+  // The option dot recommends, by index: marked, never picked for the user.
+  recommended: z.number().int().min(0).max(5).optional(),
+  // false: the user may leave it to dot (see askRequired).
+  required: z.boolean().optional(),
   length: z.number().int().min(4).max(12).optional(),
   value: z.string().min(1).max(2000).optional(),
   // secret: where the field the answer is typed into was when dot asked, in the screen's pixels,
@@ -377,8 +381,8 @@ export const AskRequestField = z.object({
     .optional(),
 });
 export type AskRequestField = z.infer<typeof AskRequestField>;
-// A request with `fields` answers per field (options is empty and allowText false); one without
-// is a plain question with lettered options.
+// A request with `fields` answers per field (options is empty and allowText false); one without,
+// from before every question had fields, is a plain question with lettered options.
 export const AskRequest = event(
   "ask.request",
   z.object({
@@ -413,6 +417,8 @@ export const AskAnswer = event(
     text: z.string().max(2000).optional(),
     // Per field id; a secret only as { provided: true }.
     fields: z.record(AskFieldId, AskFieldRecord).optional(),
+    // The fields the user left blank for dot to decide.
+    skipped: z.array(AskFieldId).min(1).max(MAX_ASK_FIELDS).optional(),
     // The user chose the way out ("Not now").
     declined: z.literal(true).optional(),
     by: z.enum(["user", "timeout", "stop", "pause", "control"]),

@@ -30,8 +30,17 @@ function mount(takeover: boolean, manualControl: "ready" | "unconfirmed" = "read
   const question: AgentQuestion = {
     askId: ID,
     question: "Which result?",
-    options: [{ key: "A", text: "Text" }],
-    allowText: true,
+    options: [],
+    allowText: false,
+    fields: [
+      {
+        id: "answer",
+        kind: "choice",
+        label: "Your answer",
+        options: ["Text", "Table"],
+        required: false,
+      },
+    ],
   };
   const control: AgentTakeover = {
     requestId: ID,
@@ -127,7 +136,7 @@ function mount(takeover: boolean, manualControl: "ready" | "unconfirmed" = "read
 }
 it("respects Chinese composition, exact pending ask ID and shared answer exclusion", async () => {
   const f = mount(false);
-  const field = screen.getByRole("textbox", { name: "Something else" }) as HTMLInputElement;
+  const field = screen.getByRole("textbox", { name: "Other" }) as HTMLInputElement;
   fireEvent.compositionStart(field);
   fireEvent.change(field, { target: { value: "中文" } });
   fireEvent.keyDown(field, { key: "Enter", isComposing: true });
@@ -136,7 +145,9 @@ it("respects Chinese composition, exact pending ask ID and shared answer exclusi
   fireEvent.keyDown(field, { key: "Enter" });
   fireEvent.submit(screen.getByRole("form", { name: "Answer dot" }));
   await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
-  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ askId: ID, text: "中文" }));
+  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(
+    JSON.stringify({ askId: ID, fields: { answer: "中文" } }),
+  );
   expect(screen.getByRole("button", { name: "Send answer" }).getAttribute("aria-disabled")).toBe(
     "true",
   );
@@ -149,14 +160,16 @@ it("respects Chinese composition, exact pending ask ID and shared answer exclusi
 it("keeps a recognized key out of an answer and out of the page", async () => {
   const sentinel = `sk-proj-${"z".repeat(80)}`;
   const f = mount(false);
-  const field = screen.getByRole("textbox", { name: "Something else" }) as HTMLInputElement;
+  const field = screen.getByRole("textbox", { name: "Other" }) as HTMLInputElement;
   fireEvent.change(field, { target: { value: `use ${sentinel}` } });
   expect(field.value).toBe("use ");
   expect(f.container.innerHTML).not.toContain(sentinel);
   expect(screen.getByText(/That looked like a key/)).toBeTruthy();
   fireEvent.submit(screen.getByRole("form", { name: "Answer dot" }));
   await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
-  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ askId: ID, text: "use" }));
+  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(
+    JSON.stringify({ askId: ID, fields: { answer: "use" } }),
+  );
 });
 it("types pasted credentials on the computer through the input stream, clears the field and keeps them out of React state", async () => {
   const f = mount(true),
@@ -217,20 +230,21 @@ it("hands back while the computer is still confirming the user's last input", as
   await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
   expect(String(f.fetchImpl.mock.calls[0]?.[0])).toContain("/takeover/done");
 });
-it("picks an answer by its number, writes one under Something else, and sends only the choice", async () => {
+it("picks an answer by its number, writes one under Other, and sends only the choice", async () => {
   const f = mount(false);
-  const send = screen.getByRole("button", { name: "Send answer" });
-  expect(send.getAttribute("aria-disabled")).toBe("true");
+  const send = screen.getByRole("button", { name: "Let dot decide" });
+  expect(send.hasAttribute("aria-disabled")).toBe(false);
   const form = screen.getByRole("form", { name: "Answer dot" });
-  fireEvent.change(screen.getByRole("textbox", { name: "Something else" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "Other" }), {
     target: { value: "Both" },
   });
   expect(screen.getByRole("radio", { name: "Text" })).toHaveProperty("checked", false);
-  expect(send.hasAttribute("aria-disabled")).toBe(false);
+  expect(send.textContent).toBe("Send answer");
   fireEvent.keyDown(form, { key: "1" });
   expect(screen.getByRole("radio", { name: "Text" })).toHaveProperty("checked", true);
-  expect(send.hasAttribute("aria-disabled")).toBe(false);
   fireEvent.click(send);
   await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
-  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ askId: ID, option: "A" }));
+  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(
+    JSON.stringify({ askId: ID, fields: { answer: "Text" } }),
+  );
 });

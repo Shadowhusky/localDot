@@ -305,7 +305,7 @@ describe("taint and containment", () => {
     h.tools.askTimeoutMs = 10000;
     const call = h.call("ask_user", { question: "Confirm?" });
     await turns();
-    h.session.answer(required(h.session.pendingAsk), undefined, "Yes");
+    h.session.answerFields(required(h.session.pendingAsk), { answer: "Yes" }, (text) => text);
     expect((await call).result.ok).toBe(true);
     expect(h.session.tainted).toBe(false);
     expect(

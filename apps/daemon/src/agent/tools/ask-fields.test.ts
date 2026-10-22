@@ -410,39 +410,153 @@ describe("ask_user with fields", () => {
       { format: "PDF", extras: ["Charts"] },
       { format: "PDF", extras: ["Charts"], code: "12345" },
       { format: "PDF", extras: ["Slides"], code: "123456" },
+      { format: "PDF", extras: { selected: ["Charts"], other: " " }, code: "123456" },
+      { format: { selected: ["PDF"], other: "x" }, code: "123456" },
       { format: "PDF", extras: [], code: "123456", other: "x" },
     ];
     for (const values of wrong) expect(h.session.answerFields(askId, values, keep)).toBe(false);
-    expect(h.session.answer(askId, "A", undefined)).toBe(false);
     expect(
-      h.session.answerFields(askId, { format: "Markdown", extras: [], code: "123456" }, keep),
+      h.session.answerFields(
+        askId,
+        {
+          format: "Markdown",
+          extras: { selected: ["Notes"], other: "Team quotes" },
+          code: "123456",
+        },
+        keep,
+      ),
     ).toBe(true);
     const { result } = await asking;
     expect(textOf(result)).toContain(
-      'The user answered: {"format":"Markdown","extras":[],"code":{"provided":true}}',
+      'The user answered: {"format":{"other":"Markdown"},"extras":{"selected":["Notes"],"other":"Team quotes"},"code":{"provided":true}}',
     );
     expect(h.state.typed.at(-1)?.text).toBe("123456");
     expect(textOf(result)).not.toContain("123456");
     expect(h.stored().join("\n")).not.toContain("123456");
   });
 
-  it("keeps a plain question with options working as before", async () => {
+  it("lets the user leave optional fields to dot, and says so in the answer and the log", async () => {
     const h = setup();
-    const asking = h.call({ question: "Which format?", options: ["PDF", "Word"] });
-    const askId = await h.asked();
-    expect(h.events().find((e) => e.type === "ask.request")?.data).toEqual({
-      askId,
-      question: "Which format?",
-      options: [
-        { key: "A", text: "PDF" },
-        { key: "B", text: "Word" },
+    const asking = h.call({
+      question: "How should I set up the project?",
+      fields: [
+        { id: "name", kind: "text", label: "Project name", required: true },
+        {
+          id: "framework",
+          kind: "choice",
+          label: "Framework",
+          options: ["Next.js", "Remix"],
+          recommended: 0,
+        },
+        { id: "extras", kind: "multichoice", label: "Extras", options: ["ESLint", "Tests"] },
+        { id: "notes", kind: "longtext", label: "Notes" },
       ],
-      allowText: false,
+      submit: "Continue",
     });
-    expect(h.session.answerFields(askId, { answer: "PDF" }, (t) => t)).toBe(false);
-    expect(h.session.answer(askId, "B", undefined)).toBe(true);
+    const askId = await h.asked();
+    expect(h.events().find((e) => e.type === "ask.request")?.data).toMatchObject({
+      fields: [
+        { id: "name", required: true },
+        { id: "framework", required: false, recommended: 0 },
+        { id: "extras", required: false },
+        { id: "notes", required: false },
+      ],
+    });
+    const keep = (text: string) => text;
+    expect(h.session.answerFields(askId, { framework: "Remix" }, keep)).toBe(false);
+    expect(
+      h.session.answerFields(
+        askId,
+        { name: "Atlas", framework: "SvelteKit", extras: ["Tests"], notes: "  " },
+        keep,
+      ),
+    ).toBe(true);
     const { result } = await asking;
-    expect(textOf(result)).toBe("The user chose B: Word");
-    expect(h.state.calls).toEqual([]);
+    expect(textOf(result)).toBe(
+      'The user answered: {"name":"Atlas","framework":{"other":"SvelteKit"},"extras":{"selected":["Tests"]},"notes":{"skipped":true}}\nSkipped questions are optional: use your recommended or default choice, state it as an assumption, and don\'t ask again unless you\'re blocked.',
+    );
+    expect(h.events().find((e) => e.type === "ask.answer")?.data).toEqual({
+      askId,
+      fields: { name: "Atlas", framework: { other: "SvelteKit" }, extras: ["Tests"] },
+      skipped: ["notes"],
+      by: "user",
+    });
+    const conversation = new Conversations(h.home, h.eventLog);
+    expect(conversation.earlier(h.session.id).join("\n")).toContain(
+      "The user answered: Project name: Atlas\nFramework: SvelteKit\nExtras: Tests\nNotes: left to dot",
+    );
+  });
+
+  it("needs every answer to a sign-in, a verification and a lone confirm", async () => {
+    for (const ask of [
+      {
+        question: "Which account?",
+        purpose: "sign_in",
+        fields: [{ id: "user", kind: "text", label: "Email" }],
+      },
+      { question: "Delete 12 drafts?", fields: [{ id: "sure", kind: "confirm", label: "Delete" }] },
+      LOGIN,
+    ]) {
+      const h = setup();
+      const asking = h.call(ask);
+      const askId = await h.asked();
+      expect(h.events().find((e) => e.type === "ask.request")?.data).toMatchObject({
+        fields: ask.fields.map(() => ({ required: true })),
+      });
+      expect(h.session.answerFields(askId, {}, (text) => text)).toBe(false);
+      expect(h.session.decline(askId)).toBe(true);
+      await asking;
+    }
+  });
+
+  it("asks a quick choice as one field, answered in the lettered form dot knows", async () => {
+    for (const [answer, said] of [
+      [{ answer: "Word" }, "The user chose B: Word"],
+      [{ answer: "ODT, please" }, "The user wrote: ODT, please"],
+      [
+        {},
+        "The user skipped the question.\nSkipped questions are optional: use your recommended or default choice, state it as an assumption, and don't ask again unless you're blocked.",
+      ],
+    ] as const) {
+      const h = setup();
+      const asking = h.call({
+        question: "Which format?",
+        options: ["PDF", "Word"],
+        recommended: 1,
+        allow_text: false,
+      });
+      const askId = await h.asked();
+      expect(h.events().find((e) => e.type === "ask.request")?.data).toEqual({
+        askId,
+        question: "Which format?",
+        options: [],
+        allowText: false,
+        fields: [
+          {
+            id: "answer",
+            kind: "choice",
+            label: "Your answer",
+            options: ["PDF", "Word"],
+            recommended: 1,
+            required: false,
+          },
+        ],
+      });
+      expect(h.session.answerFields(askId, answer, (text) => text)).toBe(true);
+      const { result } = await asking;
+      expect(textOf(result)).toBe(said);
+      expect(h.state.calls).toEqual([]);
+    }
+  });
+
+  it("asks a question with nothing to fill in as one free answer", async () => {
+    const h = setup();
+    const asking = h.call({ question: "Anything else I should know?" });
+    const askId = await h.asked();
+    expect(h.events().find((e) => e.type === "ask.request")?.data).toMatchObject({
+      fields: [{ id: "answer", kind: "longtext", label: "Your answer", required: false }],
+    });
+    expect(h.session.answerFields(askId, { answer: " Use the\nblue theme " }, (t) => t)).toBe(true);
+    expect(textOf((await asking).result)).toBe("The user wrote: Use the\nblue theme");
   });
 });

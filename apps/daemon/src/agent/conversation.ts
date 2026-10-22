@@ -17,6 +17,7 @@ import {
   EARLIER_LEFT_OUT,
   EARLIER_TURN_CHARS,
   EARLIER_TURNS,
+  isOwnWords,
   type LocalDotEvent,
   ULID_PATTERN,
   ulidTime,
@@ -76,7 +77,9 @@ const fieldText = (value: AskFieldRecord) =>
       ? value.join(", ")
       : value === true
         ? "yes"
-        : "(given, kept secret)";
+        : isOwnWords(value)
+          ? [...(value.selected ?? []), value.other].join(", ")
+          : "(given, kept secret)";
 
 // The conversation the next task continues. Each task names the one it continues in its
 // session.start, so a conversation is a chain of tasks that survives restarts and ends where a
@@ -204,11 +207,15 @@ export class Conversations {
           }
           const asked = questions.get(event.data.askId);
           const option = asked?.options.find((choice) => choice.key === event.data.option)?.text;
-          const fields = Object.entries(event.data.fields ?? {}).map(([id, value]) => {
-            const label = asked?.fields?.find((field) => field.id === id)?.label ?? id;
-            return `${label}: ${fieldText(value)}`;
-          });
-          const answer = [option, event.data.text, ...fields].filter(Boolean).join("\n");
+          const label = (id: string) =>
+            asked?.fields?.find((field) => field.id === id)?.label ?? id;
+          const fields = Object.entries(event.data.fields ?? {}).map(
+            ([id, value]) => `${label(id)}: ${fieldText(value)}`,
+          );
+          const skipped = (event.data.skipped ?? []).map((id) => `${label(id)}: left to dot`);
+          const answer = [option, event.data.text, ...fields, ...skipped]
+            .filter(Boolean)
+            .join("\n");
           if (answer) turns.push(`The user answered: ${clip(answer)}`);
           break;
         }

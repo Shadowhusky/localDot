@@ -12,6 +12,7 @@ import {
 } from "react";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { KeysController } from "../keys/useKeys.ts";
+import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
 import { CodeField } from "../ui/CodeField.tsx";
@@ -32,7 +33,11 @@ import {
   confirmsBySubmit,
   fieldProblem,
   fieldValue,
-  submitProblem,
+  LEFT_TO_DOT,
+  leftToDot,
+  marksOptional,
+  OTHER,
+  plainAnswer,
 } from "./ask-form.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { FileTransferFailure } from "./file-transfer.ts";
@@ -104,7 +109,7 @@ function StandardAskForm({ draft, layout, answer, reason, upload, receiveKey }: 
   const { question, fields } = draft;
   const sheet = layout === "sheet";
   const waiting = state.sending ? "Wait a moment" : undefined;
-  const incomplete = submitProblem(fields, state.draft);
+  const optional = marksOptional(fields);
   const choice = fields.length === 1 && fields[0]?.kind === "choice" ? fields[0] : undefined;
   const plain = useMemo(() => markdownToPlain(question.question), [question.question]);
   const asked = useMemo(() => revealText(plain), [plain]);
@@ -120,9 +125,22 @@ function StandardAskForm({ draft, layout, answer, reason, upload, receiveKey }: 
     form.current?.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true });
   }, [touch, reason, layout, typed]);
 
+  // Nothing waits on an answer the user may leave to dot. A field that needs one, or holds one
+  // that doesn't fit, takes focus and says why, so a phone opens its keyboard there.
   const submit = () => {
-    if (reason || state.sending || incomplete || composing.current) return;
-    void draft.submit(answer);
+    if (reason || state.sending || composing.current) return;
+    const filled = draft.state().draft;
+    const wrong = fields.find((field) => fieldProblem(field, filled, fields));
+    if (!wrong) {
+      void draft.submit(answer);
+      return;
+    }
+    draft.check();
+    const slot = form.current?.querySelector(`[data-ask-field="${CSS.escape(wrong.id)}"]`);
+    (
+      slot?.querySelector<HTMLElement>("input:checked") ??
+      slot?.querySelector<HTMLElement>("input:not([type='file']), textarea, button")
+    )?.focus();
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
@@ -151,17 +169,19 @@ function StandardAskForm({ draft, layout, answer, reason, upload, receiveKey }: 
   const body = (
     <div className="ask-fields">
       {fields.map((field) => (
-        <AskFieldControl
-          key={field.id}
-          field={field}
-          fields={fields}
-          state={state}
-          draft={draft}
-          plain={!question.fields?.length}
-          touch={touch}
-          reason={reason}
-          upload={upload}
-        />
+        <div key={field.id} className="ask-slot" data-ask-field={field.id}>
+          <AskFieldControl
+            field={field}
+            fields={fields}
+            state={state}
+            draft={draft}
+            plain={plainAnswer(fields)}
+            optional={optional && !field.required}
+            touch={touch}
+            reason={reason}
+            upload={upload}
+          />
+        </div>
       ))}
       <KeyFound
         className="ask-key"
@@ -194,11 +214,9 @@ function StandardAskForm({ draft, layout, answer, reason, upload, receiveKey }: 
           variant="primary"
           size={sheet ? "xxl" : "md"}
           busy={state.sending === "answer"}
-          disabledReason={
-            reason ?? (state.sending === "decline" ? waiting : undefined) ?? incomplete
-          }
+          disabledReason={reason ?? (state.sending === "decline" ? waiting : undefined)}
         >
-          {question.submit ?? "Send answer"}
+          {leftToDot(fields, state.draft) ? LEFT_TO_DOT : (question.submit ?? "Send answer")}
         </Button>
       </div>
     </div>
@@ -246,6 +264,8 @@ interface ControlProps {
   draft: AskDraft;
   // A plain question's one field: dot's question is its label.
   plain: boolean;
+  // Said after its label: the form mixes fields that need an answer with this one, which doesn't.
+  optional: boolean;
   touch: boolean;
   reason?: string;
   upload?: AskUpload;
@@ -257,6 +277,7 @@ function AskFieldControl({
   state,
   draft,
   plain,
+  optional,
   touch,
   reason,
   upload,
@@ -265,11 +286,12 @@ function AskFieldControl({
   const text = typeof raw === "string" ? raw : "";
   const filled = fieldValue(field, state.draft, fields) !== undefined;
   const named = useMemo(() => revealText(markdownToPlain(field.label)), [field.label]);
-  const label = plainReveal(named.parts);
-  // A problem shows once the field has been left with something in it, and then as it is typed.
+  const label = `${plainReveal(named.parts)}${optional ? " (optional)" : ""}`;
+  // A problem shows once the field has been left with something in it, and then as it is typed;
+  // after a try at sending, every field's shows.
   const problem = state.keys.has(field.id)
     ? KEY_TAKEN
-    : state.left.has(field.id) && filled
+    : state.checked || (state.left.has(field.id) && filled)
       ? fieldProblem(field, state.draft, fields)
       : undefined;
   const common = {
@@ -353,22 +375,40 @@ function AskFieldControl({
       );
     case "multichoice": {
       const picked = Array.isArray(raw) ? raw : [];
+      const words = state.draft.other[field.id] ?? "";
       return (
-        <ChoiceGroup label={label} note={common.description}>
-          {field.options.map((option) => (
-            <Checkbox
-              key={option}
-              label={markdownToPlain(option)}
-              checked={picked.includes(option)}
-              disabledReason={reason}
-              onCheckedChange={(on) =>
-                draft.set(
-                  field.id,
-                  on ? [...picked, option] : picked.filter((other) => other !== option),
-                )
-              }
+        <ChoiceGroup label={label} note={common.description} error={problem}>
+          {field.options.map((option, index) => {
+            const mark = String(index);
+            return (
+              <Checkbox
+                key={mark}
+                label={
+                  <>
+                    {markdownToPlain(option)}
+                    {index === field.recommended && <Recommended />}
+                  </>
+                }
+                checked={picked.includes(mark)}
+                disabledReason={reason}
+                onCheckedChange={(on) =>
+                  draft.set(
+                    field.id,
+                    on ? [...picked, mark] : picked.filter((other) => other !== mark),
+                  )
+                }
+              />
+            );
+          })}
+          {field.other && (
+            <OwnWords
+              field={field}
+              draft={draft}
+              words={words}
+              on={!!words.trim()}
+              reason={reason}
             />
-          ))}
+          )}
         </ChoiceGroup>
       );
     }
@@ -376,7 +416,7 @@ function AskFieldControl({
       return confirmsBySubmit(fields) ? null : (
         <Checkbox
           label={label}
-          description={common.description}
+          description={problem ? <FieldError>{problem}</FieldError> : common.description}
           checked={raw === true}
           disabledReason={reason}
           onCheckedChange={(on) => draft.set(field.id, on)}
@@ -384,7 +424,7 @@ function AskFieldControl({
       );
     case "file":
       return (
-        <ChoiceGroup label={label} note={common.description}>
+        <ChoiceGroup label={label} note={common.description} error={problem}>
           <FileDrop
             value={text}
             reason={reason}
@@ -440,22 +480,114 @@ function fieldNote(warning?: string, site?: string, hint?: string): ReactNode {
   );
 }
 
-// A label and note over controls that are not one input, such as checkbox rows.
+// A label and note over controls that are not one input, such as checkbox rows, and the problem
+// in its place once there is one.
 function ChoiceGroup({
   label,
   note,
+  error,
   children,
 }: {
   label: string;
   note?: ReactNode;
+  error?: string;
   children: ReactNode;
 }) {
+  const id = useId();
   return (
-    <fieldset className="ui-field ask-field ask-fieldset">
+    <fieldset className="ui-field ask-field ask-fieldset" aria-describedby={error ? id : undefined}>
       <legend className="ui-field-label">{label}</legend>
       <div className="ask-group">{children}</div>
-      {note && <p className="ui-field-description">{note}</p>}
+      {/* Holds a line for a problem, as the kit's Field does, so its arrival moves nothing. */}
+      <div className="ui-field-message">
+        {error ? (
+          <p id={id} className="ui-field-description">
+            <FieldError>{error}</FieldError>
+          </p>
+        ) : (
+          note && <p className="ui-field-description">{note}</p>
+        )}
+      </div>
     </fieldset>
+  );
+}
+
+// A problem said under controls the kit's Field doesn't hold, with the Field's alert glyph.
+function FieldError({ children }: { children: ReactNode }) {
+  return (
+    <span className="ask-error">
+      <Icon name="circle-alert" size={12} />
+      <span>{children}</span>
+    </span>
+  );
+}
+
+function Recommended() {
+  return <Badge className="ask-recommended">Recommended</Badge>;
+}
+
+// The row that takes the user's own words: a choice's last option, or one more pick beside a
+// multichoice's. Typing makes it the answer; the mark says whether it is.
+function OwnWords({
+  field,
+  draft,
+  words,
+  on,
+  reason,
+}: {
+  field: AskField;
+  draft: AskDraft;
+  words: string;
+  on: boolean;
+  reason?: string;
+}) {
+  const id = useId();
+  const input = useRef<HTMLInputElement>(null);
+  const choice = field.kind === "choice";
+  const mark = (
+    <span
+      className="ask-other-mark"
+      data-kind={choice ? "radio" : "check"}
+      data-on={on || undefined}
+      aria-hidden="true"
+    >
+      {!choice && <Icon name="check" size={12} strokeWidth={2.4} />}
+    </span>
+  );
+  const box = (
+    <TextField
+      ref={input}
+      id={`${id}other`}
+      className="ask-other"
+      aria-label="Other"
+      aria-invalid={false}
+      placeholder="Other…"
+      value={words}
+      maxLength={2000}
+      autoComplete="off"
+      readOnly={!!reason}
+      {...(choice ? { prefix: mark } : {})}
+      onChange={(event) => draft.setOther(field.id, event.currentTarget.value)}
+      onFocus={(event) => {
+        if (event.currentTarget.value.trim()) draft.setOther(field.id, event.currentTarget.value);
+      }}
+      onBlur={() => draft.leave(field.id)}
+    />
+  );
+  if (choice) return box;
+  return (
+    // The mark is a pointer convenience; the field itself is the way in by keyboard.
+    <div
+      className="ask-other-row"
+      onPointerDown={(event) => {
+        if (event.target === input.current) return;
+        event.preventDefault();
+        input.current?.focus();
+      }}
+    >
+      {mark}
+      {box}
+    </div>
   );
 }
 
@@ -538,21 +670,19 @@ function ChoiceRows({
           options={field.options.map((option, index) => ({
             value: String(index),
             label: markdownToPlain(option),
+            ...(index === field.recommended ? { tag: "Recommended" } : {}),
             ...(touch || field.options.length < 2
               ? {}
               : { preview: <Kbd keys={[String(index + 1)]} /> }),
           }))}
         />
         {field.other && (
-          <TextField
-            id={`${id}other`}
-            className="ask-other"
-            aria-label="Something else"
-            placeholder="Something else…"
-            value={other}
-            autoComplete="off"
-            onChange={(event) => draft.setOther(field.id, event.currentTarget.value)}
-            onBlur={() => draft.leave(field.id)}
+          <OwnWords
+            field={field}
+            draft={draft}
+            words={other}
+            on={picked === OTHER}
+            reason={reason}
           />
         )}
       </div>

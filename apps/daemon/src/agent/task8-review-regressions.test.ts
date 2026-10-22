@@ -55,7 +55,7 @@ it("does not clear fresh browser taint in the question continuation after user a
     outline: "",
     truncated: false,
   });
-  h.session.answer(required(h.session.pendingAsk), undefined, "Yes");
+  h.session.answerFields(required(h.session.pendingAsk), { answer: "Yes" }, (text) => text);
   expect(h.session.tainted).toBe(false);
   expect((await reading).result.ok).toBe(true);
   expect((await asking).result.ok).toBe(true);

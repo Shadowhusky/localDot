@@ -16,6 +16,8 @@ export interface AskState {
   readonly draft: Draft;
   // Fields left at least once: their problems show from then on, as they are typed.
   readonly left: ReadonlySet<string>;
+  // Sending was tried with something missing or wrong: every field's problem shows from then on.
+  readonly checked: boolean;
   // Fields a key was taken out of, and where the keys were: never the keys themselves.
   readonly keys: ReadonlySet<string>;
   readonly found: KeyNotice | null;
@@ -40,6 +42,7 @@ export class AskDraft {
     this.#state = {
       draft: emptyDraft(this.fields),
       left: new Set(),
+      checked: false,
       keys: new Set(),
       found: null,
       sending: null,
@@ -136,18 +139,19 @@ export class AskDraft {
     if (this.#state.found) this.#set({ found: null });
   };
 
-  // Text in a choice's "Something else…" row, which picks that row while it has any.
+  // Text in a choice's or multichoice's own-words row. On a choice it picks that row while it has
+  // any, and again when the row is used after another option was picked.
   setOther(id: string, text: string) {
     if (this.#state.sending) return;
     const { text: clean, keys } = this.#withoutKeys(id, text);
     const values = this.#state.draft.values;
     const picked = values[id];
+    const choice = this.fields.some((field) => field.id === id && field.kind === "choice");
     this.#set({
       draft: {
-        values: {
-          ...values,
-          [id]: clean.trim() ? OTHER : picked === OTHER ? "" : (picked ?? ""),
-        },
+        values: choice
+          ? { ...values, [id]: clean.trim() ? OTHER : picked === OTHER ? "" : (picked ?? "") }
+          : values,
         other: { ...this.#state.draft.other, [id]: clean },
       },
       keys,
@@ -158,6 +162,11 @@ export class AskDraft {
   leave(id: string) {
     if (this.#state.left.has(id)) return;
     this.#set({ left: new Set(this.#state.left).add(id) });
+  }
+
+  // Sending was tried with something missing or wrong.
+  check() {
+    if (!this.#state.checked) this.#set({ checked: true });
   }
 
   // Every secret typed into this draft goes, and any key taken out of it, as after an answer is
@@ -175,11 +184,15 @@ export class AskDraft {
   }
 
   // Sends the answer through `answer`. The request is built once and the draft forgets its secrets
-  // before it leaves, whatever comes back.
+  // before it leaves, whatever comes back. With something missing or wrong nothing is sent, and
+  // every field's problem shows.
   async submit(answer: (request: QuestionAnswerRequest) => Promise<boolean>): Promise<boolean> {
     if (this.#state.sending) return false;
     const request = answerRequest(this.question, this.fields, this.#state.draft);
-    if (!request) return false;
+    if (!request) {
+      this.check();
+      return false;
+    }
     this.forget();
     return this.#send("answer", request, answer);
   }

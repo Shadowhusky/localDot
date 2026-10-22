@@ -27,6 +27,7 @@ import { ComputerFences } from "./safety/fences.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
 import { type AgentSettings, SettingsStore } from "./settings.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
+import { plainForm } from "./tools/ask.ts";
 import type { ToolCallContext } from "./tools/deps.ts";
 import { TranscriptStore } from "./transcript.ts";
 
@@ -719,7 +720,14 @@ it.each(["the Pause itself", "a repeated action", "an approval", "a question"] a
       expect(session.pendingApproval).toBeDefined();
     }
     if (wait === "a question") {
-      void session.ask("Which file?", [], true, 0, undefined, generation).catch(() => {});
+      void session
+        .askFields(
+          plainForm({ question: "Which file?" }, (text) => text),
+          0,
+          undefined,
+          generation,
+        )
+        .catch(() => {});
       expect(session.pendingAsk).toBeDefined();
     }
     await expect(

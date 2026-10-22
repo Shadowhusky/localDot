@@ -278,6 +278,17 @@ export const UpdatePlanInput = z.object({
 });
 export type UpdatePlanInput = z.infer<typeof UpdatePlanInput>;
 
+const options = z.array(z.string().min(1).max(200)).min(2).max(6);
+const recommended = z
+  .number()
+  .int()
+  .min(0)
+  .max(5)
+  .optional()
+  .describe(
+    "The 0-based index of the option you recommend. It is marked Recommended for the user, never chosen for them.",
+  );
+
 // The id's pattern is checked below, not declared: some providers refuse `pattern` in a schema.
 export const AskField = z.object({
   id: z.string().min(1).max(32),
@@ -285,7 +296,14 @@ export const AskField = z.object({
   label: z.string().min(1).max(200),
   hint: z.string().min(1).max(300).optional(),
   // choice and multichoice.
-  options: z.array(z.string().min(1).max(200)).min(1).max(6).optional(),
+  options: options.optional(),
+  recommended,
+  required: z
+    .boolean()
+    .optional()
+    .describe(
+      "true only when you cannot continue without this answer. Leave preferences optional: the user may leave them to you. Secret and code fields, sign-in and verification questions and a lone confirm are always required.",
+    ),
   // secret: the field to type the answer into, as [x, y] in the computer tool's coordinates;
   // without it, the field that has keyboard focus.
   target: z.array(z.number()).length(2).optional(),
@@ -298,11 +316,14 @@ export type AskField = z.infer<typeof AskField>;
 
 const FIELD_ONLY = {
   options: ["choice", "multichoice"],
+  recommended: ["choice", "multichoice"],
   target: ["secret", "code"],
   length: ["code"],
   value: ["qr"],
 } as const satisfies Record<string, readonly AskFieldKind[]>;
 
+// `allow_text`, from before the user could always answer in their own words, is still taken and
+// dropped: an unknown key never fails a call.
 export const AskUserInput = z
   .object({
     question: z.string().min(1).max(1000),
@@ -313,8 +334,9 @@ export const AskUserInput = z
       .describe(
         "Set sign_in for every account/email/username or password sign-in request so saved credentials are checked before prompting. Set verification for an authentication code. Omit for ordinary task information.",
       ),
-    options: z.array(z.string().min(1).max(200)).max(6).optional(),
-    allow_text: z.boolean().optional(),
+    // One quick choice the user may also answer in their own words, or leave to dot.
+    options: options.optional(),
+    recommended,
     fields: z.array(AskField).min(1).max(MAX_ASK_FIELDS).optional(),
     // The answer buttons: dot's verb ("Sign in") and the way out ("Not now").
     submit: z.string().min(1).max(40).optional(),
@@ -322,9 +344,10 @@ export const AskUserInput = z
   })
   .superRefine((input, ctx) => {
     const issue = (message: string) => ctx.addIssue({ code: "custom", message });
+    if (input.recommended !== undefined && input.recommended >= (input.options?.length ?? 0))
+      issue("recommended is the index of one of the options");
     if (!input.fields) return;
-    if (input.options || input.allow_text !== undefined)
-      issue("fields replace options and allow_text");
+    if (input.options) issue("fields replace options");
     const ids = new Set<string>();
     for (const field of input.fields) {
       if (!ASK_FIELD_ID.test(field.id))
@@ -339,6 +362,12 @@ export const AskUserInput = z
           issue(`${key} is only for ${kinds.join(" and ")} fields`);
       if ((field.kind === "choice" || field.kind === "multichoice") && !field.options)
         issue(`${field.kind} fields need options`);
+      if (
+        field.options &&
+        field.recommended !== undefined &&
+        field.recommended >= field.options.length
+      )
+        issue(`recommended is the index of one of ${field.id}'s options`);
       if (field.kind === "qr" && !field.value) issue("qr fields need the value the code holds");
     }
   });

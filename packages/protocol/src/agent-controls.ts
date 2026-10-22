@@ -12,7 +12,8 @@ const Text = (limit: number) =>
     .string()
     .max(limit)
     .refine((text) => text.length <= limit && text.isWellFormed() && !text.includes("\0"));
-// A plain question takes an option and/or text; a question with fields takes one value per field
+// A plain question (asked before every question had fields) takes an option and/or text; a question
+// with fields takes a value for each field the user answered, none when they leave it all to dot
 // (checked against the fields by the daemon); either can be declined ("Not now").
 export const QuestionAnswerRequest = z
   .strictObject({

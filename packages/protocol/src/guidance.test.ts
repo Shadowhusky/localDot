@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASK_FORM_GUIDANCE,
   DONE_TOOL_DESCRIPTION,
   HUMAN_INPUT_GUIDANCE,
   researchSection,
@@ -248,6 +249,18 @@ describe("missing-input handoff", () => {
       "Never use a confirmation question to bypass the action-approval system",
     );
   });
+});
+
+it("tells every harness the app adds Other, what required means and how a skip comes back", () => {
+  for (const rule of [
+    "Choices: 2–6 short, distinct options",
+    "Never add options such as Other, Skip, None or Something else yourself",
+    "Set required only on fields you cannot continue without",
+    'never write "optional" in a label',
+    'the user\'s own words as {"other": "..."}, and a field left blank as {"skipped": true}',
+    "use your recommended or default choice, state it as an assumption, and don't ask again unless you're blocked",
+  ])
+    expect(ASK_FORM_GUIDANCE, rule).toContain(rule);
 });
 
 it("distinguishes routine visible verification from evidence-based manual handoff", () => {

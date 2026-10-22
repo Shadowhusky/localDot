@@ -63,16 +63,40 @@ describe("AskDraft", () => {
     expect(draft.state().keys.has("user")).toBe(false);
   });
 
-  it("picks Something else while it has text", () => {
+  it("picks a choice's Other row while it has text, and again when it is used", () => {
     const draft = new AskDraft({
       ...login,
-      fields: [{ id: "tone", kind: "choice", label: "Tone", options: ["Formal"] }],
+      fields: [{ id: "tone", kind: "choice", label: "Tone", options: ["Formal", "Plain"] }],
     });
     draft.set("tone", "0");
     draft.setOther("tone", "Warm");
     expect(draft.state().draft.values.tone).toBe("other");
+    draft.set("tone", "1");
+    expect(draft.state().draft.other.tone).toBe("Warm");
+    draft.setOther("tone", "Warm");
+    expect(draft.state().draft.values.tone).toBe("other");
     draft.setOther("tone", "");
     expect(draft.state().draft.values.tone).toBe("");
+  });
+
+  it("keeps a multichoice's picks beside its own words", () => {
+    const draft = new AskDraft({
+      ...login,
+      fields: [
+        { id: "parts", kind: "multichoice", label: "Include", options: ["Totals", "Charts"] },
+      ],
+    });
+    draft.set("parts", ["1"]);
+    draft.setOther("parts", "Notes");
+    expect(draft.state().draft).toEqual({ values: { parts: ["1"] }, other: { parts: "Notes" } });
+  });
+
+  it("sends nothing while a field that needs an answer is blank, and shows every problem", async () => {
+    const draft = new AskDraft(login);
+    const answer = vi.fn(async () => true);
+    await expect(draft.submit(answer)).resolves.toBe(false);
+    expect(answer).not.toHaveBeenCalled();
+    expect(draft.state().checked).toBe(true);
   });
 });
 

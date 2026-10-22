@@ -125,6 +125,7 @@ describe("RadioCards", () => {
       />,
     );
     const balanced = screen.getByRole("radio", { name: "Balanced" });
+    expect(describedBy(balanced)).toBe("Recommended Asks first");
     const row = balanced.closest("label");
     expect(row?.querySelector(".ui-radio-mark")?.getAttribute("aria-hidden")).toBe("true");
     expect(row?.querySelector(".ui-badge")?.textContent).toBe("Recommended");

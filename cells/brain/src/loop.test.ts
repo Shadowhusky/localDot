@@ -444,14 +444,19 @@ describe("Agent", () => {
         boot: { limits: { maxTurns: 3, maxFailedCalls: 5, maxRetries: 1 } },
         answer: (name) =>
           name === "ask_user"
-            ? { ok: true, content: [{ type: "text", text: "The user chose B: Stop here" }] }
+            ? { ok: true, content: [{ type: "text", text: "The user declined (Not now)." }] }
             : undefined,
       });
       expect(await t.run()).toBe("gave_up");
       expect(t.f.toolCalls.filter((c) => c.name === "update_plan")).toHaveLength(3);
       expect(t.f.toolCalls.at(-1)).toMatchObject({
         name: "ask_user",
-        input: { question: "This task has taken 3 steps. Keep going?" },
+        input: {
+          question: "This task has taken 3 steps. Keep going?",
+          fields: [{ id: "keep_going", kind: "confirm", label: "Keep going" }],
+          submit: "Keep going",
+          decline: "Stop here",
+        },
       });
     });
 
@@ -464,7 +469,7 @@ describe("Agent", () => {
             name === "shell"
               ? { ok: false, content: [{ type: "text", text: "Exit code 1." }] }
               : name === "ask_user"
-                ? { ok: true, content: [{ type: "text", text: "The user chose B: Stop here" }] }
+                ? { ok: true, content: [{ type: "text", text: "The user declined (Not now)." }] }
                 : undefined,
         },
       );
@@ -489,7 +494,7 @@ describe("Agent", () => {
           : name === "ask_user"
             ? {
                 ok: true,
-                content: [{ type: "text" as const, text: "The user chose B: Stop here" }],
+                content: [{ type: "text" as const, text: "The user declined (Not now)." }],
               }
             : undefined;
       const keys = (t: ReturnType<typeof agent>) =>

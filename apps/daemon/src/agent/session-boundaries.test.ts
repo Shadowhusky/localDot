@@ -3,12 +3,14 @@ import { join } from "node:path";
 import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
+import { plainForm } from "./tools/ask.ts";
 import { TranscriptStore } from "./transcript.ts";
 
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("fixture missing value");
   return value;
 }
+const CONTINUE = plainForm({ question: "Continue?", options: ["Yes", "No"] }, (text) => text);
 const homes: string[] = [];
 afterEach(() => {
   vi.useRealTimers();
@@ -169,7 +171,7 @@ describe("daemon-owned generations and control", () => {
   it("cancels an ordinary question on generation loss without clearing taint", async () => {
     const { session, generation, events } = setup();
     session.tainted = true;
-    const answer = session.ask("Continue?", ["Yes"], false, 10000, undefined, generation);
+    const answer = session.askFields(CONTINUE, 10000, undefined, generation);
     session.retireBrain(generation);
     expect(await answer).toEqual({ by: "stop" });
     expect(session.tainted).toBe(true);
@@ -177,24 +179,32 @@ describe("daemon-owned generations and control", () => {
     expect(events.filter((e) => e.type === "ask.answer")).toHaveLength(1);
     session.beginBrain();
   });
-  it("only a valid real answer clears taint; timeout does not", async () => {
+  it("only a valid real answer clears taint; timeout and leaving it to dot do not", async () => {
     vi.useFakeTimers();
     const { session, generation } = setup();
     session.tainted = true;
-    const first = session.ask("Continue?", ["Yes"], false, 100, undefined, generation);
-    expect(session.answer(required(session.pendingAsk), "Z", undefined)).toBe(false);
+    const first = session.askFields(CONTINUE, 100, undefined, generation);
+    const keep = (text: string) => text;
+    expect(session.answerFields(required(session.pendingAsk), { answer: ["Yes"] }, keep)).toBe(
+      false,
+    );
+    expect(session.answerFields(required(session.pendingAsk), { other: "Yes" }, keep)).toBe(false);
     await vi.advanceTimersByTimeAsync(100);
     expect(await first).toEqual({ by: "timeout" });
     expect(session.tainted).toBe(true);
-    const second = session.ask("Continue?", ["Yes"], false, 100, undefined, generation);
-    session.answer(required(session.pendingAsk), "A", undefined);
-    expect(await second).toEqual({ by: "user", option: "A" });
+    const skipped = session.askFields(CONTINUE, 100, undefined, generation);
+    expect(session.answerFields(required(session.pendingAsk), {}, keep)).toBe(true);
+    expect(await skipped).toMatchObject({ by: "user", fields: {}, skipped: ["answer"] });
+    expect(session.tainted).toBe(true);
+    const second = session.askFields(CONTINUE, 100, undefined, generation);
+    session.answerFields(required(session.pendingAsk), { answer: "Yes" }, keep);
+    expect(await second).toMatchObject({ by: "user", fields: { answer: "Yes" } });
     expect(session.tainted).toBe(false);
   });
   it("keeps taint when the user says Not now to a question or a hand-off", async () => {
     const { session, generation } = setup();
     session.tainted = true;
-    const question = session.ask("Continue?", ["Yes"], false, 10000, undefined, generation);
+    const question = session.askFields(CONTINUE, 10000, undefined, generation);
     expect(session.decline(required(session.pendingAsk))).toBe(true);
     expect(await question).toEqual({ declined: true, by: "user" });
     expect(session.tainted).toBe(true);
@@ -373,7 +383,7 @@ describe("storage failure boundaries", () => {
       },
     });
     const generation = session.beginBrain();
-    const asked = session.ask("Continue?", ["Yes"], false, 60_000);
+    const asked = session.askFields(CONTINUE, 60_000);
     const rejection = expect(asked).rejects.toThrow("disk unavailable");
     expect(() => session.retireBrain(generation)).not.toThrow();
     await rejection;

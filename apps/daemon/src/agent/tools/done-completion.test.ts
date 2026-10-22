@@ -200,7 +200,13 @@ describe("completion waits for external progress", () => {
     });
     await vi.waitFor(() => expect(h.session.pendingAsk).toBeDefined());
     expect(h.session.status).toBe("waiting_user");
-    expect(h.session.answer(h.session.pendingAsk as string, undefined, "Room fixture")).toBe(true);
+    expect(
+      h.session.answerFields(
+        h.session.pendingAsk as string,
+        { answer: "Room fixture" },
+        (text) => text,
+      ),
+    ).toBe(true);
     expect((await pending).body.final).not.toBe(true);
     expect(sleep).not.toHaveBeenCalled();
     expect(h.events().some((e) => e.type === "task.result")).toBe(false);

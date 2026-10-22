@@ -12,12 +12,15 @@ import {
   APPROVAL_TIMEOUT_MS,
   type ApprovalCard,
   type AutonomyPolicy,
+  askAnswered,
+  askRequired,
   askValueProblem,
   type BootConfig,
   type EventDraft,
   freezeAutonomy,
   InboxItem,
   type InboxReply,
+  isOwnWords,
   SessionRun,
   type TranscriptAppend,
   ulid,
@@ -52,10 +55,10 @@ const HANDBACK_WAIT_MS = 5000;
 const CONFIRM_RETRY_MS = { first: 250, max: 5000 };
 export type SessionStatus = "starting" | "running" | "waiting_user" | "paused" | "idle" | "ended";
 export interface AskAnswer {
-  option?: string;
-  text?: string;
   // Per field id, as the journal and the model may see them: a secret only as provided.
   fields?: Readonly<Record<string, AskFieldRecord>>;
+  // The fields the user left blank for dot to decide.
+  skipped?: readonly string[];
   declined?: true;
   // Never journaled: the ask tool types these into their fields and clears them.
   secrets?: SecretAnswers;
@@ -69,9 +72,7 @@ export interface AskForm {
 }
 interface Question {
   question: string;
-  options: string[];
-  allowText: boolean;
-  form?: Omit<AskForm, "question">;
+  form: Omit<AskForm, "question">;
   // Only an answer ends it: "Not now" is refused.
   declinable?: boolean;
 }
@@ -168,6 +169,22 @@ function handedBack(ms: number, asked: boolean): string {
   const s = Math.max(1, Math.round(ms / 1000));
   const took = s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
   return `(The user took over the computer for ${took} and has handed it back. The screen may have changed since you last looked: take a screenshot before your next action.${asked ? " They took it instead of answering your question: ask it again if you still need the answer." : ""})`;
+}
+
+// How the journal keeps an answer: picked options as given, the user's own words apart from them
+// as { other } (a choice's own words may come as its text), and other text trimmed and redacted.
+function recorded(
+  field: AskRequestField,
+  answer: AskFieldValue,
+  redact: (text: string) => string,
+): AskFieldRecord {
+  if (isOwnWords(answer)) {
+    const other = redact(answer.other.trim());
+    return answer.selected ? { selected: [...answer.selected], other } : { other };
+  }
+  if (typeof answer !== "string") return answer;
+  const text = redact(answer.trim());
+  return field.kind === "choice" && !field.options?.includes(answer) ? { other: text } : text;
 }
 
 export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -281,9 +298,7 @@ export class AgentSession {
   #ask:
     | {
         askId: string;
-        options: string[];
-        allowText: boolean;
-        fields?: readonly AskRequestField[];
+        fields: readonly AskRequestField[];
         declinable: boolean;
         finish(a: AskAnswer): boolean;
       }
@@ -636,7 +651,7 @@ export class AgentSession {
   }
   requestedCredentials(askId: string) {
     if (this.#ask?.askId !== askId) return [];
-    return (this.#ask.fields ?? [])
+    return this.#ask.fields
       .filter((field) => field.kind === "api_key")
       .map((field) => structuredClone(field));
   }
@@ -1151,27 +1166,23 @@ export class AgentSession {
     this.#delivered = store.state(this.id).inboxAfter;
   }
 
-  ask(
-    question: string,
-    options: string[],
-    allowText: boolean,
-    timeoutMs: number,
-    step?: string,
-    generation = this.generation,
-    signal?: AbortSignal,
-  ): Promise<AskAnswer> {
-    return this.#owned({ question, options, allowText }, timeoutMs, step, generation, signal);
-  }
   // A question answered per field (HITL.md): secret answers come back apart from everything stored.
+  // Each field says whether it needs an answer, so a viewer never has to guess.
   askFields(
-    { question, ...form }: AskForm,
+    { question, fields, ...form }: AskForm,
     timeoutMs: number,
     step?: string,
     generation = this.generation,
     signal?: AbortSignal,
   ): Promise<AskAnswer> {
     return this.#owned(
-      { question, options: [], allowText: false, form },
+      {
+        question,
+        form: {
+          ...form,
+          fields: fields.map((field) => ({ ...field, required: askRequired(field) })),
+        },
+      },
       timeoutMs,
       step,
       generation,
@@ -1195,7 +1206,7 @@ export class AgentSession {
     return this.#question(prompt, timeoutMs, step, combined, () => this.isCurrent(generation));
   }
   #question(
-    { question, options, allowText, form, declinable = true }: Question,
+    { question, form, declinable = true }: Question,
     timeoutMs: number,
     step: string | undefined,
     combined: AbortSignal,
@@ -1206,7 +1217,6 @@ export class AgentSession {
     combined.throwIfAborted();
     if (!ownerCurrent()) throw new SessionStoppedError();
     const askId = ulid();
-    const keys = options.map((_, i) => String.fromCharCode(65 + i));
     return new Promise<AskAnswer>((resolve, reject) => {
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1226,9 +1236,8 @@ export class AgentSession {
             "ask.answer",
             {
               askId,
-              ...(answer.option ? { option: answer.option } : {}),
-              ...(answer.text ? { text: answer.text } : {}),
               ...(answer.fields ? { fields: answer.fields } : {}),
+              ...(answer.skipped?.length ? { skipped: [...answer.skipped] } : {}),
               ...(answer.declined ? { declined: true } : {}),
               by: answer.by,
             },
@@ -1239,8 +1248,9 @@ export class AgentSession {
           reject(error);
           return false;
         }
-        // Only the user's own words vouch for what comes next; "Not now" says nothing.
-        if (answer.by === "user" && !answer.declined) this.tainted = false;
+        // Only the user's own words vouch for what comes next; "Not now" says nothing, and nor
+        // does leaving every field to dot.
+        if (answer.by === "user" && Object.keys(answer.fields ?? {}).length) this.tainted = false;
         if (ownerCurrent() && !this.#control && !this.safetyPause) this.status = "running";
         resolve(answer);
         return true;
@@ -1251,8 +1261,8 @@ export class AgentSession {
           {
             askId,
             question,
-            options: options.map((text, i) => ({ key: keys[i], text })),
-            allowText,
+            options: [],
+            allowText: false,
             ...form,
             ...(declinable ? {} : { declinable: false }),
           },
@@ -1266,56 +1276,48 @@ export class AgentSession {
         reject(error);
         return;
       }
-      this.#ask = {
-        askId,
-        options: keys,
-        allowText,
-        ...(form ? { fields: form.fields } : {}),
-        declinable,
-        finish,
-      };
+      this.#ask = { askId, fields: form.fields, declinable, finish };
       if (!this.safetyPause) this.status = "waiting_user";
       if (timeoutMs > 0) timer = setTimeout(() => finish({ by: "timeout" }), timeoutMs);
       combined.addEventListener("abort", aborted, { once: true });
       if (combined.aborted) aborted();
     });
   }
-  answer(askId: string, option: string | undefined, text: string | undefined): boolean {
-    const ask = this.#ask;
-    if (!ask || ask.askId !== askId || ask.fields || this.stopped) return false;
-    if (
-      (option && !ask.options.includes(option)) ||
-      (text && (!ask.allowText || text.length > 8000)) ||
-      (!option && !text)
-    )
-      return false;
-    return ask.finish({ ...(option ? { option } : {}), ...(text ? { text } : {}), by: "user" });
-  }
-  // Every field but a QR code needs its answer. `redact` cleans what may be stored or shown to the
-  // model; secret answers are kept apart, unredacted, for typing.
+  // A required field needs its answer; one the user leaves blank is skipped, for dot to decide.
+  // `redact` cleans what may be stored or shown to the model; secret answers are kept apart,
+  // unredacted, for typing.
   answerFields(
     askId: string,
     values: Readonly<Record<string, AskFieldValue>>,
     redact: (text: string) => string,
   ): boolean {
     const ask = this.#ask;
-    const fields = ask?.fields;
-    if (!ask || ask.askId !== askId || !fields || this.stopped) return false;
+    if (!ask || ask.askId !== askId || this.stopped) return false;
+    const { fields } = ask;
     if (Object.keys(values).some((id) => !fields.some((field) => field.id === id))) return false;
-    const value = (id: string) => (Object.hasOwn(values, id) ? values[id] : undefined);
-    if (fields.some((field) => askValueProblem(field, value(field.id)) !== undefined)) return false;
     const record: Record<string, AskFieldRecord> = {};
+    const skipped: string[] = [];
     const secrets: [string, string][] = [];
     for (const field of fields) {
-      const answer = value(field.id);
-      if (answer === undefined) continue;
+      const answer = Object.hasOwn(values, field.id) ? values[field.id] : undefined;
+      if (field.kind === "qr") {
+        if (askValueProblem(field, answer) !== undefined) return false;
+        record[field.id] = true;
+        continue;
+      }
+      if (answer === undefined || !askAnswered(answer)) {
+        if (askRequired(field)) return false;
+        skipped.push(field.id);
+        continue;
+      }
+      if (askValueProblem(field, answer) !== undefined) return false;
       if ((field.kind === "secret" || field.kind === "code") && typeof answer === "string") {
         secrets.push([field.id, answer]);
         record[field.id] = { provided: true };
       } else if (field.kind === "api_key") record[field.id] = { provided: true };
-      else record[field.id] = typeof answer === "string" ? redact(answer.trim()) : answer;
+      else record[field.id] = recorded(field, answer, redact);
     }
-    return ask.finish({ fields: record, secrets: new SecretAnswers(secrets), by: "user" });
+    return ask.finish({ fields: record, skipped, secrets: new SecretAnswers(secrets), by: "user" });
   }
   // "Not now": dot is told the user declined. A question that has no way out keeps waiting.
   decline(askId: string): boolean {

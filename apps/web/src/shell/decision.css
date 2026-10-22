@@ -489,6 +489,117 @@
   margin-left: auto;
 }
 
+/* Holds a field's place for focus; the field itself lays out in the form's grid. */
+.ask-slot {
+  display: contents;
+}
+
+.ask-recommended {
+  margin-left: calc(var(--spacing) * 2);
+  vertical-align: 1px;
+}
+
+/* A problem under controls the kit's Field doesn't hold, drawn as the Field draws its own. */
+.ask-error {
+  display: inline-flex;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-1);
+}
+
+.ask-error > .ui-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-danger-fg);
+}
+
+/* The own-words row's mark: a choice's radio, drawn inside its field in line with the options'
+   radios, or a multichoice's box in line with the others. Filled while the row is the answer. */
+.ask-other-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 var(--stroke-ring) var(--color-fg-3);
+  color: var(--color-void);
+  transition:
+    background-color var(--dur-snappy) var(--ease-standard),
+    box-shadow var(--dur-snappy) var(--ease-standard);
+}
+
+.ask-other .ask-other-mark {
+  margin-left: 1px;
+  margin-right: var(--spacing);
+}
+
+.ask-other-mark[data-kind="radio"]::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-void);
+  scale: 0;
+  transition: scale var(--dur-snappy) var(--ease-spring);
+}
+
+.ask-other-mark[data-on] {
+  background-color: var(--color-fg-1);
+  box-shadow: none;
+}
+
+.ask-other-mark[data-on]::after {
+  scale: 1;
+}
+
+.ask-other-mark[data-kind="check"] {
+  width: var(--size-checkbox);
+  height: var(--size-checkbox);
+  border-radius: var(--radius-xs);
+}
+
+.ask-other-mark[data-kind="check"][data-on] {
+  background-color: var(--color-fg-2);
+}
+
+.ask-other-mark[data-kind="check"] > .ui-icon {
+  opacity: 0;
+  transition: opacity var(--dur-snappy) var(--ease-standard);
+}
+
+.ask-other-mark[data-kind="check"][data-on] > .ui-icon {
+  opacity: 1;
+}
+
+.ask-other-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+}
+
+.ask-other-row > .ask-other {
+  flex: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask-other-mark[data-kind="radio"]::after {
+    transition-property: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .ask-other-mark {
+    forced-color-adjust: none;
+    border: 1px solid ButtonText;
+    background-color: Canvas;
+  }
+
+  .ask-other-mark[data-on],
+  .ask-other-mark[data-kind="check"][data-on] {
+    background-color: Highlight;
+  }
+}
+
 .ask-file {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) auto;

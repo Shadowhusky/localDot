@@ -1,12 +1,15 @@
-import type {
-  AskRequestField,
-  AskUserInput,
-  RequestTakeoverInput,
-  ToolResult,
+import {
+  ASK_ANSWER_ID,
+  type AskFieldRecord,
+  type AskRequestField,
+  type AskUserInput,
+  isOwnWords,
+  type RequestTakeoverInput,
+  type ToolResult,
 } from "@localdot/protocol";
 import { addTaskSecret } from "../redact.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
-import type { AgentSession, AskAnswer } from "../session.ts";
+import type { AgentSession, AskAnswer, AskForm } from "../session.ts";
 import { fail, frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { accountOrigin, findSecretField, type SecretField, typeSecret } from "./secret-field.ts";
 
@@ -15,6 +18,8 @@ const reusedLogins = new WeakMap<AgentSession, Set<string>>();
 const ASK_TIMEOUT_MS = 30 * 60_000;
 const DECLINED =
   "The user declined (Not now). Do not ask for this again unless the user brings it up; continue without it, or finish and say what is left.";
+const SKIPPED =
+  "Skipped questions are optional: use your recommended or default choice, state it as an assumption, and don't ask again unless you're blocked.";
 
 // The site whose page holds the field, so the user sees where the password goes.
 function siteOf(url: string | undefined): string | undefined {
@@ -52,6 +57,35 @@ function unanswered(answer: AskAnswer, timeoutMs: number): ToolResult | undefine
   return undefined;
 }
 
+// A quick choice, or a question with nothing to fill in, as the one field it is answered in: an
+// option, the user's own words, or nothing, which leaves it to dot.
+export function plainForm(input: AskUserInput, redact: (text: string) => string): AskForm {
+  const options = input.options?.map(redact);
+  return {
+    question: redact(input.question),
+    fields: [
+      {
+        id: ASK_ANSWER_ID,
+        kind: options ? "choice" : "longtext",
+        label: "Your answer",
+        ...(options ? { options } : {}),
+        ...(input.recommended === undefined ? {} : { recommended: input.recommended }),
+        required: false,
+      },
+    ],
+    ...(input.submit ? { submit: redact(input.submit) } : {}),
+    ...(input.decline ? { decline: redact(input.decline) } : {}),
+  };
+}
+
+// How an answer reads to dot: what was typed as it is, picked options as `selected` and the
+// user's own words as `other`.
+function shownAnswer(field: Pick<AskRequestField, "kind">, value: AskFieldRecord): unknown {
+  if (field.kind === "choice" && typeof value === "string") return { selected: [value] };
+  if (field.kind === "multichoice" && Array.isArray(value)) return { selected: value };
+  return value;
+}
+
 export async function askUserTool(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -59,36 +93,25 @@ export async function askUserTool(
 ): Promise<ToolResult> {
   ctx.check();
   if (input.fields) return askFields(deps, ctx, input, input.fields);
-  const options = (input.options ?? []).map(ctx.redact);
+  const form = plainForm(input, ctx.redact);
   const timeoutMs = askTimeoutMs(deps, ctx);
-  const answer = await ctx.session.ask(
-    ctx.redact(input.question),
-    options,
-    input.allow_text ?? options.length === 0,
-    timeoutMs,
-    ctx.step,
-    ctx.generation,
-    ctx.signal,
-  );
+  const answer = await ctx.session.askFields(form, timeoutMs, ctx.step, ctx.generation, ctx.signal);
   ctx.check();
   const early = unanswered(answer, timeoutMs);
   if (early) return early;
-  const picked = answer.option ? options["ABCDEF".indexOf(answer.option)] : undefined;
-  return {
-    ok: true,
-    content: [
-      text(
-        ctx.redact(
-          [
-            picked ? `The user chose ${answer.option}: ${picked}` : undefined,
-            answer.text ? `The user wrote: ${answer.text}` : undefined,
-          ]
-            .filter(Boolean)
-            .join("\n") || "The user answered without text.",
-        ),
-      ),
-    ],
-  };
+  // Read as the lettered choice dot has always been told, which older brains still look for.
+  const given = answer.fields?.[ASK_ANSWER_ID];
+  const options = form.fields[0]?.options ?? [];
+  const picked = typeof given === "string" ? options.indexOf(given) : -1;
+  const said =
+    picked >= 0
+      ? `The user chose ${"ABCDEF"[picked]}: ${given}`
+      : isOwnWords(given)
+        ? `The user wrote: ${given.other}`
+        : typeof given === "string"
+          ? `The user wrote: ${given}`
+          : `The user skipped the question.\n${SKIPPED}`;
+  return { ok: true, content: [text(ctx.redact(said))] };
 }
 // A question answered per field. Secret answers are typed into the fields dot named and come back
 // to the model only as { provided: true }; a field that moved meanwhile gets nothing typed.
@@ -182,6 +205,7 @@ async function askFields(
                   id: field.id,
                   kind: field.kind,
                   label: ctx.redact(field.label),
+                  required: true,
                 })),
                 submit: input.submit ?? "Continue",
                 decline: input.decline ?? "Not now",
@@ -254,6 +278,12 @@ async function askFields(
   const promptedFields = knownAccount
     ? fields.filter((field) => !loginFields.includes(field))
     : fields;
+  // Signing in and verifying need every answer, and a lone confirm is the answer itself.
+  const signing =
+    input.purpose !== undefined ||
+    fields.some((field) => field.kind === "secret" || field.kind === "code");
+  const required = (field: (typeof fields)[number]) =>
+    field.required === true || signing || (fields.length === 1 && field.kind === "confirm");
   const shown = (field: (typeof fields)[number]): AskRequestField => {
     const where = secrets.get(field.id);
     const target = where?.found.target;
@@ -270,6 +300,8 @@ async function askFields(
           ? { hint: ctx.redact(field.hint) }
           : {}),
       ...(field.options ? { options: field.options.map(ctx.redact) } : {}),
+      ...(field.recommended === undefined ? {} : { recommended: field.recommended }),
+      required: required(field),
       ...(field.length ? { length: field.length } : {}),
       ...(field.value ? { value: ctx.redact(field.value) } : {}),
       ...(where && target
@@ -302,12 +334,15 @@ async function askFields(
     ctx.check();
     const early = unanswered(answer, timeoutMs);
     if (early) return early;
-    const answers: Record<string, unknown> = {
-      ...(knownAccount
-        ? Object.fromEntries(loginFields.map((field) => [field.id, ctx.redact(knownAccount)]))
-        : {}),
-      ...answer.fields,
-    };
+    const answers: Record<string, unknown> = {};
+    for (const field of fields) {
+      const value =
+        knownAccount && loginFields.includes(field)
+          ? ctx.redact(knownAccount)
+          : answer.fields?.[field.id];
+      if (value !== undefined) answers[field.id] = shownAnswer(field, value);
+      else if (answer.skipped?.includes(field.id)) answers[field.id] = { skipped: true };
+    }
     const moved: string[] = [];
     const deliveries: string[] = [];
     let saveFailed = false;
@@ -380,7 +415,7 @@ async function askFields(
       ok: true,
       content: [
         text(
-          `The user answered: ${given}${
+          `The user answered: ${given}${answer.skipped?.length ? `\n${SKIPPED}` : ""}${
             secrets.size
               ? `\n${deliveries.join("\n")} Verification codes are never saved. The page may advance after the last character; inspect it and never replay a code after it advances. A rejected password needs a replacement; a different verification step needs the matching input form.`
               : ""

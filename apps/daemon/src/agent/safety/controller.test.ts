@@ -136,7 +136,7 @@ it.each(["approval", "ask"])(
     const pending =
       kind === "approval"
         ? f.call("files", { op: "write", path: "denied.txt", content: "no" })
-        : f.call("ask_user", { question: "Which?", options: ["One"] });
+        : f.call("ask_user", { question: "Which?", options: ["One", "Two"] });
     await until(() => (kind === "approval" ? !!f.session.pendingApproval : !!f.session.pendingAsk));
     const card = f.session.pendingApproval;
     const ask = f.session.pendingAsk;
@@ -146,7 +146,7 @@ it.each(["approval", "ask"])(
     expect(f.session.safetyPause?.phase).toBe("paused");
     expect(f.desktop.files.has("denied.txt")).toBe(false);
     if (card) expect(f.session.answerApproval({ ...card, decision: "approve" })).toBe(false);
-    if (ask) expect(f.session.answer(ask, "One", undefined)).toBe(false);
+    if (ask) expect(f.session.answerFields(ask, { answer: "One" }, (text) => text)).toBe(false);
     await f.controller.resume(pause.requestId, pause.revision);
     expect(f.session.pendingAsk).toBeUndefined();
     expect(f.session.pendingApproval).toBeUndefined();

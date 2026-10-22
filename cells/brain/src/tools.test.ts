@@ -1,5 +1,6 @@
 import { GenericComputerInput } from "@localdot/protocol";
 import {
+  ASK_FORM_GUIDANCE,
   DONE_TOOL_DESCRIPTION,
   ENVIRONMENT_CONTEXT,
   researchSection,
@@ -258,6 +259,8 @@ describe("the model's advertised tools and instructions", () => {
     );
     expect(tools.ask_user?.description).toContain("Never ask for permission");
     expect(tools.ask_user?.description).toContain("you only learn that it was provided");
+    expect(tools.ask_user?.description).toContain(ASK_FORM_GUIDANCE);
+    expect(tools.ask_user?.description).not.toContain("allow_text");
     expect(tools.request_takeover?.description).toContain(
       "try a visible checkbox/Verify button once, then inspect the result",
     );

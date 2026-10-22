@@ -24,11 +24,12 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   fixture, `POST /__qa/scenario/<name>` takes a scenario's step and `GET /__qa/scenarios` lists
   them all. By hand: `QA_PORT=0 node --import tsx e2e/fixtures/ui-server.ts --scenario approval`,
   then open the `origin` from the ready line with `#token=` and 43 `a`s.
-- **Questions:** `POST /__qa/ask` asks a plain question (`?text=0` without a free answer);
-  `?fields=<form>` asks one with typed fields: `login` (a username and a password typed into
-  the page), `pin`, `code`, `choice`, `multichoice`, `longtext`, `confirm`, `details` (number, date,
-  phone and web address), `file`, `qr` (a link) or `pair` (plain text). Answers go through the real
-  answer route; `GET /__qa/state` lists them under `effects`, secret answers only counted.
+- **Questions:** `POST /__qa/ask` asks a quick choice the user may leave to dot, as the ask tool
+  does; `?fields=<form>` asks one with typed fields: `login` (a username and a password typed into
+  the page), `pin`, `code`, `choice`, `multichoice`, `setup` (one field that needs an answer and
+  three that don't), `longtext`, `confirm`, `details` (number, date, phone and web address), `file`,
+  `qr` (a link) or `pair` (plain text). Answers go through the real answer route; `GET /__qa/state`
+  lists them under `effects`, secret answers only counted.
 - **Notifications:** the fixture records what would reach the Mac and phones instead of sending
   it: `GET /__qa/notify` lists Mac banners (`mac`, title and body) and counts phone pushes.
   `POST /__qa/finish?done=1` ends the task as the real runner does, which raises a Done;

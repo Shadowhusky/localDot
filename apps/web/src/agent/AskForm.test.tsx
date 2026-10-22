@@ -40,7 +40,11 @@ it("answers a sign-in with its fields, the password masked and gone once sent", 
   expect(password.value).toBe("");
   expect(screen.getByText("localDot enters this without sharing it with the agent.")).toBeTruthy();
   const send = screen.getByRole("button", { name: "Sign in" });
-  expect(send.getAttribute("aria-disabled")).toBe("true");
+  expect(send.hasAttribute("aria-disabled")).toBe(false);
+  fireEvent.click(send);
+  expect(f.answer).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(user);
+  expect(screen.getAllByText("Fill this in")).toHaveLength(2);
   fireEvent.change(user, { target: { value: "henry" } });
   fireEvent.change(password, { target: { value: "correct horse" } });
   fireEvent.click(screen.getByRole("button", { name: "Show password" }));
@@ -245,3 +249,107 @@ it.each(["thread", "sheet"] as const)(
     expect(f.container.innerHTML).not.toContain(code);
   },
 );
+
+const setup: AgentQuestion = {
+  askId: ASK,
+  question: "How should I set up the project?",
+  options: [],
+  allowText: false,
+  fields: [
+    { id: "name", kind: "text", label: "Project name", required: true },
+    {
+      id: "framework",
+      kind: "choice",
+      label: "Framework",
+      options: ["Next.js", "Remix"],
+      recommended: 0,
+      required: false,
+    },
+    {
+      id: "extras",
+      kind: "multichoice",
+      label: "Extras",
+      options: ["ESLint", "Tests"],
+      recommended: 1,
+      required: false,
+    },
+    { id: "notes", kind: "longtext", label: "Notes", required: false },
+  ],
+  submit: "Continue",
+};
+
+it.each(["thread", "sheet"] as const)(
+  "takes own words for a choice and a multichoice and leaves optional fields blank (%s)",
+  async (layout) => {
+    const f = mount(setup, layout);
+    for (const name of ["Framework (optional)", "Extras (optional)", "Notes (optional)"])
+      expect(screen.getByText(name)).toBeTruthy();
+    expect(screen.getByText("Project name")).toBeTruthy();
+    const next = screen.getByRole("radio", { name: "Next.js" });
+    expect(next).toHaveProperty("checked", false);
+    expect(next.getAttribute("aria-describedby")).toBeTruthy();
+    expect(screen.getAllByText("Recommended")).toHaveLength(2);
+    const send = screen.getByRole("button", { name: "Continue" });
+    expect(send.hasAttribute("aria-disabled")).toBe(false);
+    fireEvent.click(send);
+    expect(f.answer).not.toHaveBeenCalled();
+    const name = screen.getByRole("textbox", { name: "Project name" });
+    expect(document.activeElement).toBe(name);
+    expect(screen.getAllByText("Fill this in")).toHaveLength(1);
+    fireEvent.change(name, { target: { value: "Atlas" } });
+    const [framework, extras] = screen.getAllByRole("textbox", { name: "Other" }) as [
+      HTMLInputElement,
+      HTMLInputElement,
+    ];
+    fireEvent.change(framework, { target: { value: "SvelteKit" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Tests/ }));
+    fireEvent.change(extras, { target: { value: "Storybook" } });
+    await act(async () => {
+      fireEvent.click(send);
+    });
+    expect(f.answer).toHaveBeenCalledExactlyOnceWith({
+      askId: ASK,
+      fields: {
+        name: "Atlas",
+        framework: "SvelteKit",
+        extras: { selected: ["Tests"], other: "Storybook" },
+      },
+    });
+  },
+);
+
+it("offers to let dot decide when nothing needs an answer, and marks the recommended option", async () => {
+  const quick: AgentQuestion = {
+    askId: ASK,
+    question: "Which format?",
+    options: [],
+    allowText: false,
+    fields: [
+      {
+        id: "answer",
+        kind: "choice",
+        label: "Your answer",
+        options: ["Markdown", "PDF"],
+        recommended: 1,
+        required: false,
+      },
+    ],
+  };
+  const f = mount(quick, "island");
+  const pdf = screen.getByRole("radio", { name: "PDF" });
+  expect(pdf).toHaveProperty("checked", false);
+  expect(document.getElementById(pdf.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+    "Recommended",
+  );
+  expect(screen.queryByText("(optional)", { exact: false })).toBeNull();
+  fireEvent.click(pdf);
+  expect(screen.getByRole("button", { name: "Send answer" })).toBeTruthy();
+  const other = screen.getByRole("textbox", { name: "Other" });
+  fireEvent.change(other, { target: { value: "ODT" } });
+  expect(pdf).toHaveProperty("checked", false);
+  fireEvent.change(other, { target: { value: "" } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Let dot decide" }));
+  });
+  expect(f.answer).toHaveBeenCalledExactlyOnceWith({ askId: ASK, fields: {} });
+});

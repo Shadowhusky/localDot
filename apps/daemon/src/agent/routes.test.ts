@@ -32,6 +32,7 @@ import { type AgentRoutesDeps, agentRoutes } from "./routes.ts";
 import { AgentError, type TaskStartOptions } from "./runner.ts";
 import { AgentSession } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
+import { plainForm } from "./tools/ask.ts";
 
 const CELL = "01JXYZ0000000000000000CE11";
 const SESSION = "01JXYZ0000000000000000SESS";
@@ -482,12 +483,23 @@ describe("agent user routes", () => {
       ).status,
     ).toBe(202);
     expect(f.events.at(-1)?.data).toMatchObject({ text: "  [redacted]  " });
-    const asking = f.session.ask("which", [], true, 0);
+    const asking = f.session.askFields(
+      plainForm({ question: "which" }, (text) => text),
+      0,
+    );
     const askId = f.session.pendingAsk;
     expect(
       (await f.send("POST", endpoint("answer"), { askId, text: "credential-fixture" })).status,
+    ).toBe(409);
+    expect(
+      (
+        await f.send("POST", endpoint("answer"), {
+          askId,
+          fields: { answer: "credential-fixture" },
+        })
+      ).status,
     ).toBe(204);
-    expect(await asking).toMatchObject({ text: "[redacted]", by: "user" });
+    expect(await asking).toMatchObject({ fields: { answer: "[redacted]" }, by: "user" });
     const taking = f.session.takeover("login", "note");
     await Promise.resolve();
     await Promise.resolve();
@@ -529,7 +541,10 @@ describe("agent user routes", () => {
     expect(answer.fields).toEqual({ email: "[redacted]", password: { provided: true } });
     expect(answer.secrets?.take("password")).toBe(secret);
     expect(JSON.stringify(f.events)).not.toContain("credential-fixture");
-    const plain = f.session.ask("Which?", ["One", "Two"], false, 0);
+    const plain = f.session.askFields(
+      plainForm({ question: "Which?", options: ["One", "Two"] }, (text) => text),
+      0,
+    );
     expect(
       (await f.send("POST", endpoint("answer"), { askId: f.session.pendingAsk, declined: true }))
         .status,

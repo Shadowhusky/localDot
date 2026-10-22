@@ -30,7 +30,10 @@ it.each(["failure-count", "turn-count"] as const)(
       }
       if (isPaused) return paused;
       if (name === "ask_user")
-        return { ok: true, content: [{ type: "text", text: "The user chose A" }] };
+        return {
+          ok: true,
+          content: [{ type: "text", text: 'The user answered: {"keep_going":true}' }],
+        };
     });
     f.api.control = async (_after, waitMs, signal) => {
       if (!isPaused) return { revision: 2 };
@@ -122,7 +125,10 @@ it("Pause arriving during a loop guard waits and asks again only after explicit 
         isPaused = true;
         return { ok: false, pause: true, content: [] };
       }
-      return { ok: true, content: [{ type: "text", text: "The user chose A" }] };
+      return {
+        ok: true,
+        content: [{ type: "text", text: 'The user answered: {"keep_going":true}' }],
+      };
     }
   });
   const requestId = ulid();

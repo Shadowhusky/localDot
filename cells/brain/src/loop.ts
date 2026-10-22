@@ -714,13 +714,19 @@ export class Agent {
     this.#o.sink.state("thinking");
   }
 
+  // A lone confirm, which the user must answer: Keep going confirms it, Stop here declines it.
   async #keepGoing(question: string, signal: AbortSignal): Promise<boolean> {
     for (;;) {
       await this.#waitSafety(signal);
       const r = await this.#o.api.tool(
         "ask_user",
         callId("guard"),
-        { question, options: ["Keep going", "Stop here"] },
+        {
+          question,
+          fields: [{ id: "keep_going", kind: "confirm", label: "Keep going" }],
+          submit: "Keep going",
+          decline: "Stop here",
+        },
         signal,
       );
       signal.throwIfAborted();
@@ -731,7 +737,7 @@ export class Agent {
         continue;
       }
       const answer = r.content.map((c) => (c.type === "text" ? c.text : "")).join(" ");
-      return r.ok && /chose A/.test(answer);
+      return r.ok && answer.includes('"keep_going":true');
     }
   }
 

@@ -877,15 +877,11 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           check(c.req.raw.signal);
         }
       }
+      // Every question is asked with fields; a lettered option or text answers none of them.
       const ok = parsed.declined
         ? s.decline(parsed.askId)
-        : parsed.fields
-          ? s.answerFields(parsed.askId, parsed.fields, (text) => redact(text, s.id, s.cellId))
-          : s.answer(
-              parsed.askId,
-              parsed.option,
-              parsed.text === undefined ? undefined : redact(parsed.text, s.id, s.cellId, 2000),
-            );
+        : !!parsed.fields &&
+          s.answerFields(parsed.askId, parsed.fields, (text) => redact(text, s.id, s.cellId));
       return ok ? c.body(null, 204) : c.text("that question is not waiting", 409);
     }),
   );

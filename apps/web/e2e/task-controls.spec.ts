@@ -13,6 +13,7 @@ import { MemoryStore } from "../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../daemon/src/agent/routes.ts";
 import { AgentSession } from "../../daemon/src/agent/session.ts";
 import { SettingsStore } from "../../daemon/src/agent/settings.ts";
+import { plainForm } from "../../daemon/src/agent/tools/ask.ts";
 import { createApp } from "../../daemon/src/app.ts";
 import type { CellControls } from "../../daemon/src/cells/orchestrator.ts";
 import { TicketRegistry } from "../../daemon/src/cells/secrets.ts";
@@ -383,7 +384,13 @@ for (const width of [1280, 390])
   test(`question, masked takeover and hand-back at ${width}px`, async ({ page }, info) => {
     const f = await fixture();
     try {
-      const answer = f.session.ask("Which report format?", ["Markdown", "Plain text"], true, 0);
+      const answer = f.session.askFields(
+        plainForm(
+          { question: "Which report format?", options: ["Markdown", "Plain text"] },
+          (t) => t,
+        ),
+        0,
+      );
       await page.setViewportSize({ width, height: 900 });
       const p = await load(page, f);
       const askId = f.session.pendingAsk;
@@ -394,10 +401,13 @@ for (const width of [1280, 390])
       await expect(form).toBeVisible();
       await form.getByRole("radio", { name: "Markdown", exact: true }).check();
       await expect(form.getByRole("button", { name: "Send answer" })).toBeEnabled();
-      await form.getByRole("textbox", { name: "Something else" }).fill("中文 and English, please");
+      await form.getByRole("textbox", { name: "Other" }).fill("中文 and English, please");
       await page.screenshot({ path: info.outputPath(`question-${width}.png`), fullPage: true });
       await form.getByRole("button", { name: "Send answer" }).click();
-      expect(await answer).toMatchObject({ by: "user", text: "中文 and English, please" });
+      expect(await answer).toMatchObject({
+        by: "user",
+        fields: { answer: { other: "中文 and English, please" } },
+      });
       await expect(form).toHaveCount(0);
       expect(f.log.read(f.id).filter((event) => event.type === "ask.answer")).toHaveLength(1);
       expect(f.log.read(f.id).find((event) => event.type === "ask.answer")?.data).toMatchObject({

@@ -69,6 +69,7 @@ import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
+import { plainForm } from "../../../daemon/src/agent/tools/ask.ts";
 import { createApp } from "../../../daemon/src/app.ts";
 import { AppEvents, appEventsRoute } from "../../../daemon/src/app-events.ts";
 import type { AccountsDeps } from "../../../daemon/src/browser/accounts.ts";
@@ -2501,10 +2502,19 @@ function liveActions(): string | undefined {
   );
   act(9000, "key", "Save the report", { kind: "key", combo: ["ctrl", "s"] });
 }
-function ask(allowText: boolean): string | undefined {
+// A quick choice, asked as dot's ask_user tool asks one.
+function ask(): string | undefined {
   if (!session) return "no session";
+  const question = {
+    question: "Which report format should I use?",
+    options: ["Markdown", "Plain text", "PDF"],
+    recommended: 0,
+  };
   void session
-    .ask("Which report format should I use?", ["Markdown", "Plain text", "PDF"], allowText, 0)
+    .askFields(
+      plainForm(question, (text) => text),
+      0,
+    )
     .then((a) => effects.push(`ask:${JSON.stringify(a)}`))
     .catch((e) => effects.push(`ask-error:${String(e)}`));
 }
@@ -2608,6 +2618,30 @@ const ASK_FORMS: Record<string, AskForm> = {
       },
     ],
     submit: "Write it",
+  },
+  // A form as a model asks one: one field that needs an answer, the rest the user may leave to dot.
+  setup: {
+    question: "How should I set up the new project?",
+    fields: [
+      { id: "name", kind: "text", label: "Project name", required: true },
+      {
+        id: "framework",
+        kind: "choice",
+        label: "Framework",
+        options: ["Next.js", "Remix", "Astro"],
+        recommended: 0,
+        required: false,
+      },
+      {
+        id: "extras",
+        kind: "multichoice",
+        label: "Extras",
+        options: ["ESLint", "Tailwind", "Tests"],
+        required: false,
+      },
+      { id: "notes", kind: "longtext", label: "Notes", required: false },
+    ],
+    submit: "Continue",
   },
   longtext: {
     question: "What should the reply to Sam say?",
@@ -2811,7 +2845,7 @@ function setCell(kind: CellKind): undefined {
 }
 const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | undefined>> = {
   approval: () => requestApproval("high"),
-  ask: () => ask(true),
+  ask: () => ask(),
   takeover: () => takeover(),
   budget: () => budget(),
   finish,
@@ -2930,7 +2964,7 @@ routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
 routes.post("/__qa/actions", () => reply(liveActions()));
 routes.post("/__qa/ask", (c) => {
   const form = c.req.query("fields");
-  return reply(form ? askForm(form) : ask(c.req.query("text") !== "0"));
+  return reply(form ? askForm(form) : ask());
 });
 routes.post("/__qa/takeover", (c) =>
   reply(takeover(c.req.query("field"), c.req.query("known") === "1")),

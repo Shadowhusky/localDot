@@ -20,7 +20,11 @@ import {
   WEB_SEARCH_TOOL_DESCRIPTION,
   WORK_CONTEXT_DESCRIPTION,
 } from "@localdot/protocol";
-import { DONE_TOOL_DESCRIPTION, HUMAN_INPUT_GUIDANCE } from "@localdot/protocol/guidance";
+import {
+  ASK_FORM_GUIDANCE,
+  DONE_TOOL_DESCRIPTION,
+  HUMAN_INPUT_GUIDANCE,
+} from "@localdot/protocol/guidance";
 import { z } from "zod";
 
 // The tools Codex sees: exactly the v1 table (spec "Tools"), the same schemas the daemon checks.
@@ -92,12 +96,11 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Ask the user a question and wait for the answer (up to 30 minutes). Only when you cannot continue " +
     "without the user's information or a choice that would change the result; otherwise pick a sensible " +
     "default and mention it in your summary. Never ask for permission: the safety system asks the user " +
-    "before consequential steps. For a quick choice, give up to six short options, and set allow_text to " +
-    "accept a free answer. " +
-    "To get what the user types, give fields instead of options (up to 4, each with an id, a kind and a short " +
+    "before consequential steps. For one quick choice, give options. " +
+    "To get what the user types, or several answers at once, give fields instead of options (up to 4, each with an id, a kind and a short " +
     "label): text, longtext, secret (a password, PIN or recovery code), code (a verification or access code; length only if you know " +
     "it), choice or multichoice (with options), confirm, number, date, email, url, phone, file (the user adds a " +
-    "file and you get its path) or qr (shows value as a QR code for the user's other device). Name the buttons " +
+    `file and you get its path) or qr (shows value as a QR code for the user's other device). ${ASK_FORM_GUIDANCE} Name the buttons ` +
     'with submit, such as "Sign in", and decline, such as "Not now". A secret answer is typed straight into the ' +
     "password box at target ([x, y] in screen pixels), or into the password box that has keyboard focus when " +
     "there is no target; you only learn that it was provided. For a combined sign-in page, use username/email " +
@@ -105,7 +108,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "the verified sign-in form. Check the tool result before acting; do not submit again when it already did. " +
     "A code answer is delivered privately to the verification box at target and submitted once, never saved. " +
     "Read the current page and ask for a replacement password or a verification code as it requires; keep it open while waiting. " +
-    "Answers come back by field id. If the user declines, respect that choice and state which requested work remains incomplete. " +
+    "If the user declines, respect that choice and state which requested work remains incomplete. " +
     HUMAN_INPUT_GUIDANCE,
   request_takeover:
     "Hand the screen to the user and wait until they hand it back. Only for a CAPTCHA, a device approval " +
