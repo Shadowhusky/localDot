@@ -25,6 +25,7 @@ export const PACK_ALLOWLIST = [
   /^dist\/sandbox-runtime\/vendor\/java-proxy-agent\/srt-proxy-agent\.jar$/,
   /^dist\/canary-(scan|worker)\.py$/,
   /^skills\/office-files\/SKILL\.md$/,
+  /^release-notes\/\d+\.\d+\.\d+(?:-rc\.\d+)?\.md$/,
   /^web\/dist\/native\/localDot\.app\/Contents\/(Info\.plist|MacOS\/localdot-notify|Resources\/dot\.icns|_CodeSignature\/CodeResources)$/,
   /^web\/dist\/(index|export)\.html$/,
   /^web\/dist\/(sw\.js|manifest\.webmanifest)$/,

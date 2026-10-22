@@ -5,11 +5,13 @@ import {
   compareReleaseVersions,
   DEFAULT_APP_UPDATES,
   PreparedAppUpdate,
+  type UpdateProgressLine,
 } from "../../../../packages/protocol/src/app-update.ts";
 import type { ServiceConfiguration } from "../../../../packages/protocol/src/install-services.ts";
 import { UpdateJournal } from "../../../../packages/protocol/src/install-update.ts";
 import type { ConsoleIO } from "../runtime.ts";
 import { activateInstalledRelease } from "./activate-release.ts";
+import { imageShare } from "./image-share.ts";
 import { prepareInstalledReleaseImages } from "./prepare-images.ts";
 import { withPreparedRelease } from "./prepare-release.ts";
 import { privateRecordStore } from "./private-record.ts";
@@ -27,9 +29,12 @@ export const appUpdateRecordStore = (state: string) =>
 export async function prepareBackgroundUpdate(
   input: { home: string; version: string; signal: AbortSignal },
   io: ConsoleIO,
+  progress: (line: UpdateProgressLine) => void = () => {},
 ): Promise<number> {
   try {
     const state = join(input.home, "install");
+    // The release's download and its checks report no bytes; the images report theirs.
+    progress({ step: "download" });
     await withPreparedRelease(state, input.version, input.signal, async (release, signal) => {
       const current = await serviceJournalStore({
         state,
@@ -47,11 +52,17 @@ export async function prepareBackgroundUpdate(
         compareReleaseVersions(release.identity.version, current.configuration.release.version) <= 0
       )
         throw new Error("Cannot prepare update");
+      const images = imageShare();
+      progress({ step: "images", share: 0 });
       await prepareInstalledReleaseImages(
         state,
         release.identity,
         current.configuration.settings.dockerSocket,
         signal,
+        (report) => {
+          const share = images(report);
+          if (share) progress({ step: "images", ...share });
+        },
       );
       signal.throwIfAborted();
       await preparedAppUpdateStore(state).save({

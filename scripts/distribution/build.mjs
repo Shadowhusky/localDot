@@ -179,7 +179,16 @@ export async function buildDistribution({
   const filename = `localdot-${version}-${target}.tgz`;
   // npm packs regular files under package/ with one gzip member, matching the audited extractor.
   const metadata = JSON.parse(await readFile(join(app, "package.json"), "utf8"));
-  metadata.files = ["bin", "dist", "web", "skills", "keyd", "install.sh", "npm-shrinkwrap.json"];
+  metadata.files = [
+    "bin",
+    "dist",
+    "web",
+    "skills",
+    "release-notes",
+    "keyd",
+    "install.sh",
+    "npm-shrinkwrap.json",
+  ];
   metadata.bundleDependencies = Object.keys(metadata.dependencies);
   await writeFile(join(app, "package.json"), JSON.stringify(metadata));
   const finalFiles = await inventory(app);

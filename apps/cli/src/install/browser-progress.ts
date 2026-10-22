@@ -1,9 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { IMAGE_ROLES } from "../../../../packages/protocol/src/release.ts";
 import type { ConsoleIO } from "../runtime.ts";
 import { isInstallerBrowserURL, openInstallerBrowser } from "./browser-open.ts";
 import { PROGRESS_HTML, PROGRESS_SCRIPT, PROGRESS_STYLE } from "./browser-page.ts";
+import { imageShare } from "./image-share.ts";
 import type { ImagePreparationProgress } from "./prepare-images.ts";
 
 type Status =
@@ -18,9 +18,6 @@ type Status =
   | { phase: "ready"; url: string };
 const digest = (text: string) => createHash("sha256").update(text).digest("base64");
 const CSP = `default-src 'none'; script-src 'sha256-${digest(PROGRESS_SCRIPT)}'; style-src 'sha256-${digest(PROGRESS_STYLE)}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
-const IMAGE_PHASES = ["checking", "ready", "pulling", "downloading", "extracting", "verifying"];
-// Docker names each layer it pulls; more than this and the rest go uncounted.
-const MAX_LAYERS = 512;
 
 /** Pure state/HTTP boundary, kept separate from socket and OS browser effects for auditing. */
 export function progressChannel(capability: string, targetPort: number) {
@@ -34,29 +31,9 @@ export function progressChannel(capability: string, targetPort: number) {
     throw new Error("Invalid progress channel");
   const authorization = Buffer.from(`Bearer ${capability}`);
   let status: Status = { phase: "release" },
-    terminal = false,
-    progress = 0;
-  // Downloaded and total bytes per image and layer. Only the shares leave this function.
-  const layers = new Map<string, { current: number; total: number }>();
-  const ready = new Set<string>();
-  const share = () => {
-    let sum = 0;
-    for (const role of IMAGE_ROLES) {
-      if (ready.has(role)) {
-        sum += 1;
-        continue;
-      }
-      let current = 0,
-        total = 0;
-      for (const [key, bytes] of layers) {
-        if (!key.startsWith(`${role} `)) continue;
-        current += bytes.current;
-        total += bytes.total;
-      }
-      if (total > 0) sum += current / total;
-    }
-    return Math.floor((sum / IMAGE_ROLES.length) * 1000) / 1000;
-  };
+    terminal = false;
+  // Only the share leaves this function, never the bytes behind it.
+  const images = imageShare();
   let seen!: () => void;
   const delivered = new Promise<void>((resolve) => {
     seen = resolve;
@@ -64,28 +41,10 @@ export function progressChannel(capability: string, targetPort: number) {
   return {
     delivered,
     report(report: ImagePreparationProgress) {
-      if (terminal || !IMAGE_ROLES.includes(report.role) || !IMAGE_PHASES.includes(report.phase))
-        return;
-      const { role, phase, layer, currentBytes, totalBytes } = report;
-      if (phase === "ready") ready.add(role);
-      const key = `${role} ${layer ?? ""}`;
-      const known = layers.get(key);
-      if (known || layers.size < MAX_LAYERS) {
-        if (
-          phase === "downloading" &&
-          Number.isSafeInteger(currentBytes) &&
-          Number.isSafeInteger(totalBytes) &&
-          currentBytes !== undefined &&
-          totalBytes !== undefined &&
-          currentBytes >= 0 &&
-          totalBytes >= currentBytes
-        )
-          layers.set(key, { current: currentBytes, total: totalBytes });
-        else if (known && (phase === "verifying" || phase === "extracting"))
-          known.current = known.total;
-      }
-      progress = Math.max(progress, share());
-      status = { phase: "images", role, imagePhase: phase, progress };
+      if (terminal) return;
+      const progress = images(report)?.share;
+      if (progress !== undefined)
+        status = { phase: "images", role: report.role, imagePhase: report.phase, progress };
     },
     starting() {
       if (!terminal) status = { phase: "starting" };

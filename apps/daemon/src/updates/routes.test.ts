@@ -41,3 +41,14 @@ it("validates preferences and requires explicit shutdown confirmation", async ()
   ).toBe(202);
   expect(install).toHaveBeenCalledTimes(1);
 });
+it("sends progress and notes only to pages that ask, as older pages refuse unknown fields", async () => {
+  const app = new Hono();
+  appUpdateRoutes(app, new AppUpdater(null));
+  const legacy = await (await app.request("/api/app-update")).json();
+  expect(legacy).not.toHaveProperty("progress");
+  expect(legacy).not.toHaveProperty("notes");
+  expect(await (await app.request("/api/app-update?v=2")).json()).toMatchObject({
+    progress: null,
+    notes: [],
+  });
+});

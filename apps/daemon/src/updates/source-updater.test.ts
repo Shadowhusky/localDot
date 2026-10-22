@@ -32,7 +32,11 @@ async function fixture(platform: NodeJS.Platform = "linux") {
             ? args[3] === "HEAD"
               ? current
               : newer
-            : "";
+            : verb === "ls-tree"
+              ? `docs/releases/0.1.0-rc.19.md\ndocs/releases/README.md${args[4] === newer ? "\ndocs/releases/0.1.0-rc.20.md" : ""}`
+              : verb === "cat-file"
+                ? `## Fixes\n\n- Fixed in ${args[4]?.split(":")[1]}.\n`
+                : "";
     return { stdout, stderr: "" };
   });
   const spawn = vi.fn(() => {
@@ -114,4 +118,13 @@ it("does not adopt a writable install record or an ordinary source checkout", as
     ).supported,
   ).toBe(false);
   expect(f.command).not.toHaveBeenCalled();
+});
+it("shows the release notes the fetched commit adds, never ones the installed commit has", async () => {
+  const f = await fixture(),
+    updater = await f.create();
+  await updater.check();
+  expect((await updater.status()).notes).toEqual([
+    { version: "0.1.0-rc.20", markdown: "## Fixes\n\n- Fixed in docs/releases/0.1.0-rc.20.md." },
+  ]);
+  expect(f.command.mock.calls.some(([, args]) => args.includes("checkout"))).toBe(false);
 });

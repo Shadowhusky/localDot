@@ -774,6 +774,38 @@
   color: var(--color-danger-fg);
 }
 
+/* Under the update row, past its tile: the bar and one line of detail, or what failed. */
+.settings-update-progress {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
+  padding: calc(var(--spacing) * 2) 0 var(--spacing) calc(var(--spacing) * 10);
+}
+
+.settings-update-detail,
+.settings-update-error {
+  margin: 0;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-update-error {
+  color: var(--color-fg-1);
+}
+
+.settings-update-steps .settings-step {
+  min-height: 0;
+  padding: var(--spacing) 0;
+}
+
+.settings-update-steps .settings-step + .settings-step {
+  box-shadow: none;
+}
+
+.settings-release-notes {
+  margin-top: var(--_settings-block);
+}
+
 /* How the last Stop went: Details sits under the computer's name, past its tile. */
 .settings-stop-details {
   margin: calc(var(--spacing) * 0.5) 0 calc(var(--spacing) * 0.5) calc(var(--spacing) * 10);

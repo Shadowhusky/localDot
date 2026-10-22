@@ -198,3 +198,52 @@ prepare_package`;
     expect(f.read("app/identity")).toBe("previous");
   },
 );
+
+it("hands the app's kept archive to the verifier and pulls only images Docker lacks", () => {
+  const f = fixture();
+  const verifier = "pinned verifier";
+  mkdirSync(join(f.root, "app", "dist"));
+  writeFileSync(join(f.root, "app", "dist", "package-bootstrap.mjs"), verifier);
+  mkdirSync(join(f.root, "node", "bin"), { recursive: true });
+  // Plays the verifier's prepare, and is Node for the installer's reads of its record.
+  writeFileSync(
+    join(f.root, "node", "bin", "node"),
+    `#!/bin/bash
+if [ "$2" = prepare ]; then
+  printf '%s\\n' "$@" > "$TEST_ROOT/verifier-args"
+  mkdir -p "$6"
+  printf '{"commit":"c","images":{"desktop":"d@x","gate":"g@x","brain":"b@x","browser":"w@x"}}' > "$6/package-release.json"
+  exit 0
+fi
+exec "${process.execPath}" "$@"
+`,
+    { mode: 0o700 },
+  );
+  const script = `source "$INSTALLER"
+PREFIX=$TEST_ROOT APP=$TEST_ROOT/app RUNTIME=$TEST_ROOT/runtime NODE_DIR=$TEST_ROOT/node
+OPT_PACKAGE_VERSION=0.1.0-rc.2 PACKAGE_BOOTSTRAP_SHA256=$PIN NODE_PLATFORM=darwin-arm64
+PACKAGE_CHANNEL=https://downloads.localdot.dev/channels/releases.json
+docker() {
+  if [ "$1 $2" = "image inspect" ]; then [ "$3" = d@x ] || [ "$3" = g@x ]; return; fi
+  echo "$*" >> "$TEST_ROOT/pulled"
+}
+prepare_package`;
+  execFileSync("/bin/bash", ["-c", script], {
+    env: {
+      ...process.env,
+      TEST_ROOT: f.root,
+      PIN: createHash("sha256").update(verifier).digest("hex"),
+      INSTALLER: join(process.cwd(), "install.sh"),
+      LOCALDOT_PACKAGE_ARCHIVE: "/kept/app.tgz",
+    },
+    stdio: "pipe",
+  });
+  const args = f.read("verifier-args").split("\n");
+  expect(args.slice(1, 4)).toEqual([
+    "prepare",
+    "https://downloads.localdot.dev/channels/releases.json",
+    "darwin-arm64",
+  ]);
+  expect(args.slice(6)).toEqual(["0.1.0-rc.2", "/kept/app.tgz"]);
+  expect(f.read("pulled")).toBe("pull b@x\npull w@x");
+});

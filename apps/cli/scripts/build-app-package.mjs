@@ -223,6 +223,7 @@ export async function buildAppPackage(
       "dist/",
       "web/",
       "skills/",
+      "release-notes/",
       "release.json",
       "THIRD-PARTY.md",
       "npm-shrinkwrap.json",

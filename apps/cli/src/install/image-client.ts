@@ -1,6 +1,6 @@
 import { type IncomingMessage, request } from "node:http";
 import { isAbsolute, normalize } from "node:path";
-import { ImagePin, imageRef } from "../../../../packages/protocol/src/release.ts";
+import { imageRef, PlatformImagePin } from "../../../../packages/protocol/src/release.ts";
 import { DOCKER_API } from "../../../daemon/src/cells/docker.ts";
 import { type ImagePullProgress, readImagePullProgress } from "./image-progress.ts";
 import { SetupFailure } from "./setup-failure.ts";
@@ -12,9 +12,9 @@ export interface ImageEngine {
 }
 export interface InstallImageClient {
   engine(signal: AbortSignal): Promise<ImageEngine>;
-  inspect(pin: ImagePin, signal: AbortSignal): Promise<unknown | null>;
+  inspect(pin: PlatformImagePin, signal: AbortSignal): Promise<unknown | null>;
   pull(
-    pin: ImagePin,
+    pin: PlatformImagePin,
     signal: AbortSignal,
     report: (progress: ImagePullProgress) => void,
   ): Promise<void>;
@@ -23,10 +23,13 @@ const fail = () => new Error("Docker image preparation failed. Check Docker Desk
 
 /** Fixed local-socket operations only. No CLI spawn, environment auth, credential helper or
  * registry-login request. Callers obtain this socket through the local installation preflight.
+ * The release installer runs on Docker Desktop only; a downloaded package's updater runs on
+ * whichever Linux engine the installed app already uses (`anyEngine`).
  */
 export function installImageClient(
   socketPath: string,
   architecture: ImageEngine["architecture"] = "arm64",
+  { anyEngine = false } = {},
 ): InstallImageClient {
   if (
     !["arm64", "amd64"].includes(architecture) ||
@@ -147,17 +150,17 @@ export function installImageClient(
         typeof info.ID !== "string" ||
         !/^[A-Za-z0-9_:-]{1,256}$/.test(info.ID) ||
         typeof info.OperatingSystem !== "string" ||
-        !/^Docker Desktop(?:\s|$)/.test(info.OperatingSystem)
+        (!anyEngine && !/^Docker Desktop(?:\s|$)/.test(info.OperatingSystem))
       )
         throw fail();
       return { id: info.ID, operatingSystem: "linux", architecture };
     },
     async inspect(input, signal) {
-      const pin = ImagePin.parse(input);
+      const pin = PlatformImagePin.parse(input);
       return json(`/${DOCKER_API}/images/${encodeURIComponent(imageRef(pin))}/json`, signal, true);
     },
     async pull(input, signal, report) {
-      const pin = ImagePin.parse(input);
+      const pin = PlatformImagePin.parse(input);
       if (!pin.platforms.includes(`linux/${architecture}`)) throw fail();
       const query = new URLSearchParams({
         fromImage: imageRef(pin),

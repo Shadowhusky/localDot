@@ -14,6 +14,7 @@ import { readInstalledLockHelper } from "./promote-release.ts";
 import { latestReleaseVersion } from "./registry-download.ts";
 import { serviceJournalStore } from "./service-journal.ts";
 import { runUp } from "./up.ts";
+import { updateProgressReporter } from "./update-progress.ts";
 import { recoverUpdate } from "./update-transaction.ts";
 
 export interface UpdateContext {
@@ -43,7 +44,11 @@ export async function runUpdate(input: UpdateContext, io: ConsoleIO): Promise<nu
     if (requested !== undefined) valid(requested);
     if (input.prepareOnly) {
       if (!requested) throw failure();
-      return prepareBackgroundUpdate({ home, signal, version: requested }, io);
+      return prepareBackgroundUpdate(
+        { home, signal, version: requested },
+        io,
+        updateProgressReporter(),
+      );
     }
     if (!(await hasInstallState(home))) {
       io.err("localDot is not installed. Run localdot first.");

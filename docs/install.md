@@ -255,9 +255,15 @@ model stays selected. Catalog entries describe models, not your account’s acce
 
 ## Automatic updates
 
-Settings → Your computer → Software update shows the installed build, last successful check,
-new version, download progress, and errors with retry. A quiet notice appears once per version
-when dot is idle; dismissing it does not remove the update from Settings.
+Settings → Your computer → localDot updates shows the installed build, the last successful
+check and the new version. While an update downloads, a bar under it says how far it has got
+("Downloading · 212 of 640 MB", then "Preparing the computer · 1.4 of 3.1 GB") and never moves
+back; then it says "Ready to install". Under the group, "What's new in" shows the new version's
+release notes, with any versions it skips folded below. If an update fails, one sentence says so
+over the steps it went through, marking the one that failed. Installing shows "Restarting
+localDot…" until the new version answers, then the page reloads and says once "Updated to …",
+with its notes a tap away. A quiet notice appears once per version when dot is idle; dismissing
+it does not remove the update from Settings.
 
 The installed daemon checks after a short startup delay, then about every six hours with jitter.
 Offline failures back off from five minutes to six hours. Checks are shared across tabs and phones,
@@ -273,6 +279,11 @@ release. A build can still require dependency/image downloads and take several m
 Existing installations need one `localdot update` to register the updater with their service.
 
 The public testing channel checks the signed catalog, archive inventory and image digests.
+Download fetches and checks the app package and then the computer's four pinned images, so that
+installing only swaps versions and restarts: the installer checks the kept package against the
+signed catalog again and skips images Docker already holds. With less than 10 GB free, the images
+are left for the installer and Settings says so. An update from 0.1.0-rc.31 or earlier still runs
+that version's installer, which downloads everything again.
 `localdot update` installs the newest testing package while keeping your settings and computer data.
 The separate signed desktop-release path verifies publisher provenance, helper signatures and image
 digests before marking a download ready. Its Install at next launch option applies a prepared

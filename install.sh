@@ -1775,8 +1775,9 @@ prepare_package() {
   fi
   scratch=$(mktemp -d "$RUNTIME/.package.XXXXXX")
   PACKAGE_SCRATCH=$scratch
-  # A failed or interrupted attempt owns only its private staging directory.
-  if ! "$NODE_DIR/bin/node" "$bootstrap" prepare "$PACKAGE_CHANNEL" "$NODE_PLATFORM" "$scratch" "$scratch/app" "$OPT_PACKAGE_VERSION"; then
+  # A failed or interrupted attempt owns only its private staging directory. An update started
+  # from the app names the archive it downloaded; the verifier uses it only if it still matches.
+  if ! "$NODE_DIR/bin/node" "$bootstrap" prepare "$PACKAGE_CHANNEL" "$NODE_PLATFORM" "$scratch" "$scratch/app" "$OPT_PACKAGE_VERSION" "${LOCALDOT_PACKAGE_ARCHIVE:-}"; then
     rm -rf "$scratch"
     die "The packaged download could not be prepared. Your existing app and computer data are kept."
   fi
@@ -1786,6 +1787,12 @@ prepare_package() {
   local role image
   for role in $IMAGE_ROLES; do
     image=$("$NODE_DIR/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).images[process.argv[2]]' "$PACKAGE_STAGE/package-release.json" "$role")
+    # A pin names exact image contents, so one Docker already holds (fetched while the app
+    # downloaded the update) needs no download and no network.
+    if docker image inspect "$image" >/dev/null 2>&1; then
+      say "Computer image: $role is already downloaded."
+      continue
+    fi
     step "Computer image: $role (Docker shows progress for each layer)"
     docker pull "$image" || die "Couldn't download the $role image. Rerun setup to reuse completed downloads; the current app is kept."
   done

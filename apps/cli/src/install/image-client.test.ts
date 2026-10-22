@@ -239,3 +239,22 @@ it("makes no request for malformed pins or pre-existing cancellation", async () 
   await expect(client().inspect({ ...pin, digest: "latest" }, signal())).rejects.toThrow();
   expect(request).not.toHaveBeenCalled();
 });
+it("lets a downloaded package's updater use the Linux engine the app already runs on", async () => {
+  mockResponse((path) => ({
+    chunks: [
+      Buffer.from(
+        JSON.stringify(
+          path === "/version"
+            ? { Os: "linux", Arch: "x86_64" }
+            : { ID: "engine-1", OperatingSystem: "Ubuntu 24.04.1 LTS" },
+        ),
+      ),
+    ],
+  }));
+  await expect(
+    installImageClient("/fixture/docker.sock", "amd64").engine(signal()),
+  ).rejects.toThrow();
+  expect(
+    await installImageClient("/fixture/docker.sock", "amd64", { anyEngine: true }).engine(signal()),
+  ).toEqual({ id: "engine-1", operatingSystem: "linux", architecture: "amd64" });
+});

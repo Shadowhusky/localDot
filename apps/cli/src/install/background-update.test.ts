@@ -81,6 +81,7 @@ it("prepares exact pinned images without activation while the app runs", async (
     candidate,
     config.settings.dockerSocket,
     signal,
+    expect.any(Function),
   );
   expect(mock.files.get("prepared-app-update.json")).toMatchObject({
     previous: config.release,
@@ -136,4 +137,22 @@ it("does not recover or activate an unfinished update in the background", async 
   expect(await prepare()).toBe(1);
   expect(mock.images).not.toHaveBeenCalled();
   expect(mock.activate).not.toHaveBeenCalled();
+});
+it("reports the download, then the images' share and bytes, on the progress channel", async () => {
+  const lines: unknown[] = [];
+  mock.images.mockImplementation(async (_state, _identity, _socket, _signal, report) => {
+    report({ role: "desktop", phase: "ready" });
+    report({ role: "gate", phase: "downloading", layer: "l1", currentBytes: 5, totalBytes: 10 });
+  });
+  await prepareBackgroundUpdate(
+    { home: config.settings.home, version: "1.1.0", signal },
+    io,
+    (line) => lines.push(line),
+  );
+  expect(lines).toEqual([
+    { step: "download" },
+    { step: "images", share: 0 },
+    { step: "images", share: 0.25, done: 0, total: 0 },
+    { step: "images", share: 0.375, done: 5, total: 10 },
+  ]);
 });

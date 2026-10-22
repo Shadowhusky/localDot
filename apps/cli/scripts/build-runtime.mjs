@@ -4,6 +4,9 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { compareReleaseVersions } from "../../../packages/protocol/src/app-update.ts";
+import { RELEASE_VERSION } from "../../../packages/protocol/src/release.ts";
+import { releaseNotesProblems } from "../../../packages/protocol/src/release-notes.ts";
 import { RULES } from "../../../scripts/check-hygiene.mjs";
 import { MAX_FILE_BYTES, PACK_ALLOWLIST, PACK_RULES } from "../../../scripts/check-pack.mjs";
 import { buildMacNotifier } from "../../web/scripts/mac-notifier.mjs";
@@ -41,6 +44,26 @@ async function copyAsset(source, destination) {
     throw new Error("Invalid runtime asset");
   await mkdir(dirname(destination), { recursive: true });
   await copyFile(source, destination);
+}
+
+/** The release's notes and those of up to nine releases before it, so an update that skips
+ * versions can show each. A release without valid notes of its own is not built. */
+export async function writeReleaseNotes(out, version, source = join(WORKSPACE, "docs/releases")) {
+  const versions = (await readdir(source))
+    .map((name) => name.match(/^(.+)\.md$/)?.[1])
+    .filter(
+      (name) => name && RELEASE_VERSION.test(name) && compareReleaseVersions(name, version) <= 0,
+    )
+    .sort((a, b) => compareReleaseVersions(b, a))
+    .slice(0, 10);
+  if (versions[0] !== version)
+    throw new Error(`Write docs/releases/${version}.md before building this release.`);
+  for (const name of versions) {
+    const problems = releaseNotesProblems(await readFile(join(source, `${name}.md`), "utf8"));
+    if (problems.length)
+      throw new Error(`docs/releases/${name}.md needs work: ${problems.join(" ")}`);
+    await copyAsset(join(source, `${name}.md`), join(out, "release-notes", `${name}.md`));
+  }
 }
 
 /** Assemble the real runtime payload. Metadata/dependency verification and publishing stay separate. */
@@ -114,6 +137,7 @@ export async function buildRuntime({
   // Replace only the generic mediabunny notice with its full source-location notice. The same
   // installed license bytes remain included; other generated notices are never overwritten.
   writeNotices({ webDir, outDir: join(webOut, "assets") });
+  await writeReleaseNotes(out, version);
 
   const files = [];
   for (const path of await filesIn(out)) {

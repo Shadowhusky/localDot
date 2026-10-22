@@ -2,7 +2,32 @@ import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto
 import { copyFile, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { authenticatedCatalog, validateCatalog } from "./catalog.ts";
+import { compareReleaseVersions } from "../../packages/protocol/src/app-update.ts";
+import { releaseNotesProblems } from "../../packages/protocol/src/release-notes.ts";
+import { authenticatedCatalog, type CatalogNote, validateCatalog } from "./catalog.ts";
+
+/** The notes a verified package ships, checked against its build inventory and the notes rules.
+ * The release's own notes are required. */
+export async function packageNotes(
+  dir: string,
+  receipt: { version: string; artifact: { files: Record<string, { sha256: string }> } },
+): Promise<CatalogNote[]> {
+  const notes: CatalogNote[] = [];
+  for (const [path, file] of Object.entries(receipt.artifact.files)) {
+    const version = path.match(/^release-notes\/(.+)\.md$/)?.[1];
+    if (!version) continue;
+    const bytes = await readFile(join(dir, "app", path));
+    if (createHash("sha256").update(bytes).digest("hex") !== file.sha256)
+      throw new Error(`The release notes for ${version} changed after the package was built.`);
+    const problems = releaseNotesProblems(bytes.toString("utf8"));
+    if (problems.length)
+      throw new Error(`The release notes for ${version} need work: ${problems.join(" ")}`);
+    notes.push({ version, markdown: bytes.toString("utf8").replace(/\r\n?/g, "\n").trim() });
+  }
+  if (!notes.some((note) => note.version === receipt.version))
+    throw new Error(`Write docs/releases/${receipt.version}.md before publishing this release.`);
+  return notes.sort((a, b) => compareReleaseVersions(b.version, a.version)).slice(0, 10);
+}
 
 /** Create a testing-channel site from previously verified packages. Never uploads source or keys. */
 export async function assemble(input: {
@@ -82,6 +107,7 @@ export async function assemble(input: {
     commit,
     images: input.images,
     platforms: Object.fromEntries(entries.map(({ receipt: r }) => [r.target, r.artifact])),
+    notes: await packageNotes(first.dir, first.receipt),
   });
   const signedCatalog = (value: unknown) => {
     const payload = Buffer.from(JSON.stringify(validateCatalog(value)));
@@ -93,9 +119,10 @@ export async function assemble(input: {
   const signed = signedCatalog(catalog);
   if (!!input.migrationBridge === !!input.legacyCatalog)
     throw new Error("Preserve the legacy catalog, or explicitly publish the migration bridge.");
+  const { notes: _notes, ...bridge } = catalog;
   const legacy = input.migrationBridge
     ? signedCatalog({
-        ...catalog,
+        ...bridge,
         platforms: Object.fromEntries(
           Object.entries(catalog.platforms).map(([target, artifact]) => [
             target,

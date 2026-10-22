@@ -1,10 +1,19 @@
 import { createHash } from "node:crypto";
-import { chmod, copyFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { chmod, copyFile, mkdir, open, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { withExtractedDependency } from "../../apps/cli/src/install/extract-release.ts";
-import { authenticatedCatalog, TARGETS, type Target } from "./catalog.ts";
+import { updateProgressReporter } from "../../apps/cli/src/install/update-progress.ts";
+import {
+  type Artifact,
+  authenticatedCatalog,
+  catalogNotes,
+  TARGETS,
+  type Target,
+} from "./catalog.ts";
 
 declare const __LOCALDOT_DISTRIBUTION_KEY__: string;
+const progress = updateProgressReporter();
 async function download(
   url: string,
   max: number,
@@ -35,6 +44,7 @@ async function download(
       size += chunk.length;
       if (size > max) throw new Error("Download exceeds the release size limit.");
       chunks.push(chunk);
+      if (label) progress?.({ step: "download", done: size, total: max });
     }
     if (label) report();
     return Buffer.concat(chunks);
@@ -43,8 +53,26 @@ async function download(
     if (label && process.stderr.isTTY) process.stderr.write("\n");
   }
 }
+// An archive this verifier kept from an earlier download, used when it is still the signed one.
+async function kept(path: string | undefined, artifact: Artifact): Promise<Buffer | undefined> {
+  if (!path) return;
+  try {
+    const handle = await open(resolve(path), constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const st = await handle.stat();
+      if (!st.isFile() || st.size !== artifact.bytes || st.uid !== process.getuid?.()) return;
+      const body = await handle.readFile();
+      return createHash("sha512").update(body).digest("hex") === artifact.sha512 ? body : undefined;
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return;
+  }
+}
 async function main() {
-  const [command, channel, target, workspace, destination, expectedVersion] = process.argv.slice(2);
+  const [command, channel, target, workspace, destination, expectedVersion, keptArchive] =
+    process.argv.slice(2);
   if (
     !command ||
     !channel ||
@@ -56,7 +84,7 @@ async function main() {
     (command === "prepare" && !destination)
   )
     throw new Error("Invalid packaged installation request.");
-  const signal = AbortSignal.timeout(10 * 60_000);
+  const signal = AbortSignal.timeout(30 * 60_000);
   const signed = (await download(channel, 2 * 1024 * 1024, signal)).toString("utf8");
   const catalog = authenticatedCatalog(signed, __LOCALDOT_DISTRIBUTION_KEY__);
   if (expectedVersion && catalog.version !== expectedVersion)
@@ -67,7 +95,7 @@ async function main() {
       `A tested download for ${target} has not been published yet. No source checkout or build will be attempted.`,
     );
   if (command === "check") {
-    console.log(catalog.version);
+    console.log(JSON.stringify({ version: catalog.version, notes: catalogNotes(catalog) }));
     return;
   }
   if (!destination) throw new Error("A package staging directory is required.");
@@ -75,7 +103,11 @@ async function main() {
     stage = resolve(destination);
   await mkdir(work, { recursive: true, mode: 0o700 });
   const archive = join(work, "app.tgz");
-  const body = await download(artifact.url, artifact.bytes, signal, "Downloading localDot");
+  const reused = await kept(keptArchive, artifact);
+  if (reused) console.error("Using the app package downloaded earlier.");
+  const body =
+    reused ?? (await download(artifact.url, artifact.bytes, signal, "Downloading localDot"));
+  progress?.({ step: "verify" });
   console.error("Download complete. Verifying the signed app package...");
   if (
     body.length !== artifact.bytes ||
@@ -123,7 +155,7 @@ async function main() {
       await copyFile(new URL(import.meta.url), join(stage, "bootstrap.mjs"));
     },
   );
-  await rm(archive);
+  // The checked archive stays beside the staged app, so installing it later needs no download.
   console.log(`Prepared localDot ${catalog.version}.`);
 }
 main().catch((error) => {

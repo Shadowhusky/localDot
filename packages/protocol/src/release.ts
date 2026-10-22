@@ -21,15 +21,23 @@ export const PackagePath = z
   .refine((p) => p.split("/").length <= 16, "package paths have at most16 segments")
   .refine((p) => !p.split("/").some((s) => s === "." || s === ".."), "no . or .. segments");
 
-export const ImagePin = z.strictObject({
+const ImagePlatforms = z
+  .array(z.enum(["linux/arm64", "linux/amd64"]))
+  .min(1)
+  .max(2);
+const unrepeated = (p: readonly string[]) => new Set(p).size === p.length;
+// One architecture's pin, as the download channel's catalog publishes each.
+export const PlatformImagePin = z.strictObject({
   repository: z.string().regex(/^ghcr\.io\/[a-z0-9-]+\/localdot-(desktop|gate|brain|browser)$/),
   digest: z.string().regex(IMAGE_DIGEST),
-  platforms: z
-    .array(z.enum(["linux/arm64", "linux/amd64"]))
-    .min(1)
-    .max(2)
-    .refine((p) => p.includes("linux/arm64"), "every image must have linux/arm64")
-    .refine((p) => new Set(p).size === p.length, "no repeated platform"),
+  platforms: ImagePlatforms.refine(unrepeated, "no repeated platform"),
+});
+export type PlatformImagePin = z.infer<typeof PlatformImagePin>;
+export const ImagePin = PlatformImagePin.extend({
+  platforms: ImagePlatforms.refine(
+    (p) => p.includes("linux/arm64"),
+    "every image must have linux/arm64",
+  ).refine(unrepeated, "no repeated platform"),
 });
 export type ImagePin = z.infer<typeof ImagePin>;
 
@@ -82,6 +90,6 @@ export const ReleaseManifest = z
 export type ReleaseManifest = z.infer<typeof ReleaseManifest>;
 
 // The reference a cell is created from: never a tag.
-export function imageRef(pin: ImagePin): string {
+export function imageRef(pin: PlatformImagePin): string {
   return `${pin.repository}@${pin.digest}`;
 }

@@ -54,15 +54,17 @@ silicon/Intel hardware, prerequisites and live computer startup have been exerci
 1. Build and test all four computer images for each advertised architecture. Publish only clean
    image builds from the reviewed Dockerfiles, never commits of a user's computer. Record registry
    manifest digests, not local image IDs. Verify anonymous access after making packages public.
-2. Upload only `localdot-<version>-<target>.tgz` to a prerelease in `Shadowhusky/localdot`.
-   Release notes state which actual platforms were tested and any remaining limitations.
+2. Upload only `localdot-<version>-<target>.tgz` to a prerelease in `Shadowhusky/localdot`,
+   with `docs/releases/<version>.md` as its text (`gh release create … --notes-file`). Under it,
+   say which actual platforms were tested and any remaining limitations.
 3. Create an input JSON with `packages` (candidate directories), `images` (architecture → role →
    GHCR digest), `key` (private signing key path), `output` (new static site directory),
    and `legacyCatalog` (the previously published, signed `channels/testing.json`).
 4. Run `node --experimental-transform-types scripts/distribution/assemble.ts /path/to/input.json`.
    Assembly requires matching verification receipts, unchanged archives and bootstrap hashes,
-   matching release identities and the correct compiled-in public key. It signs only a testing
-   prerelease. Keep older `bootstrap/<sha256>.mjs` assets when deploying later releases.
+   matching release identities, the correct compiled-in public key and the release's notes in its
+   packages, which it signs into the catalog. It signs only a testing prerelease. Keep older
+   `bootstrap/<sha256>.mjs` assets when deploying later releases.
 5. Deploy the assembled site with the downloads Worker's config and Wrangler's `--assets` option.
    Inspect the deployment file list: it must contain only installers, bootstrap files, metadata
    and `_headers`, never the input JSON or private key. The existing remote-access relay is separate.

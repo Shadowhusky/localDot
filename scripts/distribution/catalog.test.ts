@@ -1,6 +1,6 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { authenticatedCatalog, validateCatalog } from "./catalog.ts";
+import { authenticatedCatalog, catalogNotes, validateCatalog } from "./catalog.ts";
 
 const keys = generateKeyPairSync("ed25519");
 const pub = keys.publicKey.export({ format: "pem", type: "spki" }).toString();
@@ -104,6 +104,18 @@ describe("public distribution trust", () => {
     const value = fixture();
     value.images.arm64.desktop = "ghcr.io/shadowhusky/localdot-desktop:latest";
     expect(() => validateCatalog(value)).toThrow("immutable");
+  });
+  it("carries signed notes that verifiers ignore, passing on only note-shaped entries", () => {
+    const note = { version: "0.1.0-rc.1", markdown: "## Fixes\n\n- One fix." };
+    const value = {
+      ...fixture(),
+      notes: [note, { version: "latest", markdown: "x" }, { version: "0.1.0-rc.0" }, "text"],
+    };
+    const catalog = authenticatedCatalog(envelope(value), pub);
+    expect(catalog).toEqual(value);
+    expect(catalogNotes(catalog)).toEqual([note]);
+    expect(catalogNotes(validateCatalog(fixture()))).toEqual([]);
+    expect(catalogNotes({ ...fixture(), notes: { version: "0.1.0-rc.1" } } as never)).toEqual([]);
   });
   it("rejects incomplete app downloads", () => {
     const value = fixture();

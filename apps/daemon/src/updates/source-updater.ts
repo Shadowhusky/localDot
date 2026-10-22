@@ -3,10 +3,12 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { AppUpdateRecord } from "../../../../packages/protocol/src/app-update.ts";
+import { AppUpdateAttempt, AppUpdateRecord } from "../../../../packages/protocol/src/app-update.ts";
+import { RELEASE_VERSION } from "../../../../packages/protocol/src/release.ts";
 import { privateRecordStore } from "../../../cli/src/install/private-record.ts";
 import { AppUpdater } from "./app-updater.ts";
 import { packageAppUpdater } from "./package-updater.ts";
+import { pickNotes, releaseNote } from "./release-notes.ts";
 
 const exec = promisify(execFile);
 const Commit = z.string().regex(/^[0-9a-f]{40}$/);
@@ -78,9 +80,34 @@ export async function sourceAppUpdater(
       throw new Error("Source checkout changed");
     const records = privateRecordStore(home, "source-app-update.json", AppUpdateRecord);
     const prepared = privateRecordStore(home, "prepared-source-update.json", Prepared);
+    const notesIn = async (commit: string) =>
+      new Set(
+        (await git(["ls-tree", "--name-only", Commit.parse(commit), "docs/releases/"]))
+          .split("\n")
+          .map((path) => path.match(/^docs\/releases\/(.+)\.md$/)?.[1])
+          .filter((name): name is string => !!name && RELEASE_VERSION.test(name)),
+      );
     return new AppUpdater({
       version,
       ...records,
+      attempts: privateRecordStore(home, "app-update-attempt.json", AppUpdateAttempt.nullable()),
+      // A commit's notes are the release notes files it adds; a commit alone says nothing new.
+      async notes(after, upTo) {
+        if (!after) return [];
+        const before = await notesIn(after);
+        const added = [...(await notesIn(upTo))].filter((name) => !before.has(name));
+        return pickNotes(
+          await Promise.all(
+            added.map(async (name) =>
+              releaseNote(
+                name,
+                await git(["cat-file", "blob", `${upTo}:docs/releases/${name}.md`]),
+              ),
+            ),
+          ),
+          () => true,
+        );
+      },
       async read() {
         const record = await records.read();
         const pending = await prepared.read();
@@ -102,6 +129,7 @@ export async function sourceAppUpdater(
         return Commit.parse(commit);
       },
       async prepare(candidate, signal) {
+        // Git reports no progress here, so the bar shows work of unknown length.
         Commit.parse(candidate);
         if ((await git(["rev-parse", "HEAD"], signal)) !== version)
           throw new Error("Installation changed");
@@ -121,6 +149,7 @@ export async function sourceAppUpdater(
         if ((await git(["rev-parse", `${candidate}^{commit}`], signal)) !== candidate)
           throw new Error("Source mismatch");
         await prepared.save({ v: 1, previous: version, candidate });
+        return undefined;
       },
       async prepared(candidate) {
         const saved = await prepared.read();

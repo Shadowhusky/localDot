@@ -1,12 +1,25 @@
 import {
+  type AppUpdateAttempt,
   AppUpdatePreferences,
+  type AppUpdateProgress,
   AppUpdateRecord,
   type AppUpdateStatus,
   compareReleaseVersions,
   DEFAULT_APP_UPDATES,
+  type ReleaseNote,
+  type UpdateProgressLine,
 } from "../../../../packages/protocol/src/app-update.ts";
+import { progressAfter, READY_SHARE } from "./progress.ts";
 
 const HOUR = 3_600_000;
+const READY = "Ready to install";
+const READY_LOW_DISK =
+  "Ready to install · low on disk space, so installing downloads the computer first";
+
+export interface PreparedUpdate {
+  // The computer images were left for the installer, because free disk space was short.
+  imagesDeferred?: boolean;
+}
 export interface AppUpdaterHost {
   version: string;
   installOnLaunchSupported?: boolean;
@@ -14,13 +27,25 @@ export interface AppUpdaterHost {
   read(): Promise<AppUpdateRecord | null>;
   save(record: AppUpdateRecord): Promise<void>;
   latest(signal: AbortSignal): Promise<string>;
-  prepare(version: string, signal: AbortSignal): Promise<void>;
+  prepare(
+    version: string,
+    signal: AbortSignal,
+    progress: (line: UpdateProgressLine) => void,
+  ): Promise<PreparedUpdate | undefined>;
   prepared(version: string): Promise<boolean>;
   install?(version: string): Promise<void>;
   installWait?(): string | null;
+  // Newest first: notes after `after` up to `upTo`, or `upTo`'s own when `after` is unknown.
+  notes?(after: string | null, upTo: string): Promise<ReleaseNote[]>;
+  attempts?: {
+    read(): Promise<AppUpdateAttempt | null>;
+    save(attempt: AppUpdateAttempt | null): Promise<void>;
+  };
   now?(): number;
   random?(): number;
 }
+// A source build is named by its commit.
+const shown = (version: string) => (version.length === 40 ? version.slice(0, 8) : version);
 /** One scheduler per daemon, not per tab/device. Cached discovery is not package trust. */
 export class AppUpdater {
   #record: AppUpdateRecord = {
@@ -34,6 +59,11 @@ export class AppUpdater {
   };
   #phase: AppUpdateStatus["phase"] = "idle";
   #error: string | null = null;
+  #progress: AppUpdateProgress | null = null;
+  #readyDetail = READY;
+  #notes: ReleaseNote[] = [];
+  // The version this one replaced, known only on the first start after an update.
+  #previous: string | null = null;
   #flight: Promise<void> | undefined;
   #writes: Promise<void> = Promise.resolve();
   #abort = new AbortController();
@@ -57,6 +87,7 @@ export class AppUpdater {
       const stored = await this.host.read();
       if (stored) this.#record = AppUpdateRecord.parse(stored);
       if (this.#record.installedVersion && this.#record.installedVersion !== this.host.version) {
+        this.#previous = this.#record.installedVersion;
         this.#record.availableVersion = null;
         this.#record.dismissedVersion = null;
         this.#record.nextCheckAt = 0;
@@ -76,6 +107,30 @@ export class AppUpdater {
       };
       this.#error = "Update settings couldn't be read. Check for updates to try again.";
     }
+    await this.#settleAttempt();
+    await this.#refreshNotes();
+  }
+  // An explicit install that left this same version running was rolled back.
+  async #settleAttempt() {
+    try {
+      const attempt = await this.host?.attempts?.read();
+      if (!attempt) return;
+      await this.host?.attempts?.save(null);
+      if (attempt.version === this.host?.version) return;
+      this.#error = `localDot ${shown(attempt.version)} didn't start, so your previous version was restored.`;
+      this.#progress = { step: "restart", value: null, detail: null };
+    } catch {}
+  }
+  async #refreshNotes() {
+    if (!this.host?.notes) return;
+    const available = this.#record.availableVersion;
+    try {
+      this.#notes = available
+        ? await this.host.notes(this.host.version, available)
+        : await this.host.notes(this.#previous, this.host.version);
+    } catch {
+      this.#notes = [];
+    }
   }
   #save() {
     const record = {
@@ -85,6 +140,13 @@ export class AppUpdater {
     const next = this.#writes.catch(() => {}).then(() => this.host?.save(record));
     this.#writes = next;
     return next;
+  }
+  #shownProgress(): AppUpdateProgress | null {
+    // A failed update keeps the progress of the step that failed.
+    if (this.#error) return this.#progress;
+    if (this.#phase === "ready")
+      return { step: "install", value: READY_SHARE, detail: this.#readyDetail };
+    return this.#phase === "downloading" || this.#phase === "installing" ? this.#progress : null;
   }
   async status(): Promise<AppUpdateStatus> {
     await this.#ready;
@@ -98,6 +160,8 @@ export class AppUpdater {
       availableVersion: this.#record.availableVersion,
       dismissedVersion: this.#record.dismissedVersion,
       error: this.#error,
+      progress: this.#shownProgress(),
+      notes: this.#notes.map((note) => ({ ...note })),
     };
   }
   start() {
@@ -134,11 +198,17 @@ export class AppUpdater {
     if (wait) throw new Error(wait);
     this.#phase = "installing";
     this.#error = null;
+    this.#progress = {
+      step: "install",
+      value: null,
+      detail: `Installing localDot ${shown(version)}`,
+    };
+    await this.host.attempts?.save({ v: 1, version }).catch(() => {});
     // Deliberately not in #flight: the independent updater must outlive daemon shutdown.
-    void this.host.install(version).catch(() => {
-      this.#phase = "idle";
-      this.#error =
-        "Installation didn't complete. Check for updates to retry, or run localdot up to recover.";
+    void this.host.install(version).catch(async () => {
+      await this.host?.attempts?.save(null).catch(() => {});
+      this.#phase = (await this.host?.prepared(version).catch(() => false)) ? "ready" : "idle";
+      this.#error = `localDot ${shown(version)} couldn't be installed, so nothing has changed.`;
     });
   }
   async check(manual = true): Promise<void> {
@@ -161,6 +231,7 @@ export class AppUpdater {
     const wasReady = this.#phase === "ready";
     this.#phase = "checking";
     this.#error = null;
+    this.#progress = null;
     try {
       const version = await this.host.latest(
         AbortSignal.any([this.#abort.signal, AbortSignal.timeout(30_000)]),
@@ -182,6 +253,7 @@ export class AppUpdater {
           ? "ready"
           : "idle";
       await this.#save();
+      await this.#refreshNotes();
       if (
         this.#record.availableVersion &&
         this.#phase !== "ready" &&
@@ -222,16 +294,20 @@ export class AppUpdater {
     if (!version || !this.host) return;
     this.#phase = "downloading";
     this.#error = null;
+    this.#progress = { step: "download", value: null, detail: "Downloading" };
     try {
-      await this.host.prepare(version, this.#abort.signal);
+      const prepared = await this.host.prepare(version, this.#abort.signal, (line) => {
+        if (this.#phase === "downloading") this.#progress = progressAfter(this.#progress, line);
+      });
       this.#abort.signal.throwIfAborted();
       if (!(await this.host.prepared(version))) throw new Error("Unconfirmed preparation");
+      this.#readyDetail = prepared?.imagesDeferred ? READY_LOW_DISK : READY;
       this.#phase = "ready";
+      await this.#refreshNotes();
     } catch {
       this.#phase = "idle";
       if (!this.#abort.signal.aborted) {
-        this.#error =
-          "The update couldn't be downloaded or verified. Your current app is unchanged.";
+        this.#error = `localDot ${shown(version)} couldn't be downloaded, so nothing has changed.`;
         await this.#failed();
       }
     }

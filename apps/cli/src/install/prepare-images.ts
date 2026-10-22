@@ -4,6 +4,7 @@ import {
   IMAGE_DIGEST,
   IMAGE_ROLES,
   imageRef,
+  type PlatformImagePin,
   ReleaseManifest,
 } from "../../../../packages/protocol/src/release.ts";
 import { imageVerdict } from "../../../daemon/src/doctor-image.ts";
@@ -33,6 +34,21 @@ export async function prepareReleaseImages(
 ) {
   signal.throwIfAborted();
   const manifest = ReleaseManifest.parse(input);
+  return Object.freeze({
+    version: manifest.version,
+    ...(await prepareImages(manifest.images, client, signal, report)),
+  });
+}
+
+/** The four authenticated pins, each inspected and pulled only when Docker lacks it. */
+export async function prepareImages(
+  pins: Readonly<Record<(typeof IMAGE_ROLES)[number], PlatformImagePin>>,
+  client: InstallImageClient,
+  signal: AbortSignal,
+  report: (progress: ImagePreparationProgress) => void = () => {},
+) {
+  signal.throwIfAborted();
+  const pinned = structuredClone(pins);
   const engine = { ...(await client.engine(signal)) };
   if (
     engine.operatingSystem !== "linux" ||
@@ -40,11 +56,7 @@ export async function prepareReleaseImages(
     !engine.id
   )
     throw fail();
-  if (
-    IMAGE_ROLES.some(
-      (role) => !manifest.images[role].platforms.includes(`linux/${engine.architecture}`),
-    )
-  )
+  if (IMAGE_ROLES.some((role) => !pinned[role].platforms.includes(`linux/${engine.architecture}`)))
     throw fail();
   const images: Record<string, { reference: string; imageId: string }> = {};
   function verified(reference: string, inspection: unknown): string | undefined {
@@ -65,7 +77,7 @@ export async function prepareReleaseImages(
   }
   for (const role of IMAGE_ROLES) {
     signal.throwIfAborted();
-    const pin = manifest.images[role],
+    const pin = pinned[role],
       reference = imageRef(pin);
     report(Object.freeze({ role, phase: "checking" }));
     let id = verified(reference, await client.inspect(pin, signal));
@@ -111,18 +123,16 @@ export async function prepareReleaseImages(
     const expected = images[role];
     if (
       !expected ||
-      verified(expected.reference, await client.inspect(manifest.images[role], signal)) !==
-        expected.imageId
+      verified(expected.reference, await client.inspect(pinned[role], signal)) !== expected.imageId
     )
       throw fail();
   }
   signal.throwIfAborted();
-  return Object.freeze({
-    version: manifest.version,
+  return {
     engineId: engine.id,
     platform: `linux/${engine.architecture}` as const,
     images: Object.freeze(images),
-  });
+  };
 }
 
 /** Production entry point: reacquire the manifest through its installed trust anchor before

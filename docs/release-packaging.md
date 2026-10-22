@@ -65,6 +65,14 @@ and publication provenance, the matching signed helper package, notarization, pu
 and installed acceptance remain separate release gates. A local receipt does not authorize the
 installer to trust this archive.
 
+## Release notes
+
+Each release needs `docs/releases/<version>.md` in the shape `docs/releases/README.md` describes.
+The runtime build, which both release builds use, refuses a version without valid notes and ships
+them with up to nine earlier releases' notes in `release-notes/`. The download site's assembly
+adds the same notes to the signed catalog's `notes` field; verifiers up to 0.1.0-rc.31 ignore
+fields they don't know, and `release.json` stays unchanged, so earlier installs keep updating.
+
 ## Native macOS validation
 
 The signed helper has a separate package-tree command:

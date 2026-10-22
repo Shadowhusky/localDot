@@ -15,6 +15,31 @@ export interface Catalog {
   commit: string;
   platforms: Partial<Record<Target, Artifact>>;
   images: Record<"arm64" | "x64", Record<(typeof ROLES)[number], string>>;
+  // Recent releases' notes, newest first, signed with the rest. Verifiers up to 0.1.0-rc.31
+  // ignore fields they don't know, so they keep accepting a catalog that carries them.
+  notes?: unknown;
+}
+export interface CatalogNote {
+  version: string;
+  markdown: string;
+}
+const MAX_NOTES = 10;
+const MAX_NOTE_BYTES = 2048;
+/** The notes shaped as notes, at most ten. Whether their words may be shown is the app's call. */
+export function catalogNotes(catalog: Catalog): CatalogNote[] {
+  if (!Array.isArray(catalog.notes)) return [];
+  return catalog.notes
+    .filter(
+      (note): note is CatalogNote =>
+        !!note &&
+        typeof note === "object" &&
+        typeof note.version === "string" &&
+        /^\d+\.\d+\.\d+(?:-rc\.\d+)?$/.test(note.version) &&
+        typeof note.markdown === "string" &&
+        Buffer.byteLength(note.markdown) <= MAX_NOTE_BYTES,
+    )
+    .slice(0, MAX_NOTES)
+    .map(({ version, markdown }) => ({ version, markdown }));
 }
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value))

@@ -1,13 +1,22 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { AppUpdatePreferences } from "../../../../packages/protocol/src/app-update.ts";
+import {
+  AppUpdatePreferences,
+  type AppUpdateStatus,
+} from "../../../../packages/protocol/src/app-update.ts";
 import type { AppUpdater } from "./app-updater.ts";
+
+// Pages from 0.1.0-rc.31 and earlier refuse a status with fields they don't know, and an open one
+// must still see the new version answer to reload. Progress and notes go to pages that ask.
+function reply(c: Context, { progress, notes, ...status }: AppUpdateStatus) {
+  return c.json(c.req.query("v") === "2" ? { ...status, progress, notes } : status);
+}
 
 export function appUpdateRoutes(app: Hono, updater: AppUpdater) {
   app.use("/api/app-update/*", bodyLimit({ maxSize: 1024 }));
   app.get("/api/app-update", async (c) => {
     c.header("cache-control", "no-store");
-    return c.json(await updater.status());
+    return reply(c, await updater.status());
   });
   for (const operation of ["check", "download"] as const) {
     app.post(`/api/app-update/${operation}`, async (c) => {
@@ -39,6 +48,6 @@ export function appUpdateRoutes(app: Hono, updater: AppUpdater) {
     if (!(await updater.status()).supported)
       return c.text("Updates work in the installed app.", 409);
     await updater.preferences(input.data);
-    return c.json(await updater.status());
+    return reply(c, await updater.status());
   });
 }

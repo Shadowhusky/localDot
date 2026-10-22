@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { build } from "esbuild";
 import { afterEach, expect, it } from "vitest";
 import { assertRuntimeImports, runtimeBuildOptions, WORKSPACE } from "./build-options.mjs";
-import { buildRuntime } from "./build-runtime.mjs";
+import { buildRuntime, writeReleaseNotes } from "./build-runtime.mjs";
 
 const roots = [];
 afterEach(async () => {
@@ -159,4 +159,23 @@ it("does not overwrite an existing payload directory", async () => {
     code: "EEXIST",
   });
   expect(await readFile(path, "utf8")).toBe("keep existing data");
+});
+it("ships the release's notes and up to nine before it, and refuses a release without valid notes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "localdot-release-notes-"));
+  roots.push(root);
+  const source = join(root, "docs");
+  await mkdir(source);
+  for (let rc = 1; rc <= 12; rc++)
+    await writeFile(join(source, `1.0.0-rc.${rc}.md`), `## Fixes\n\n- Fix ${rc}.\n`);
+  await writeFile(join(source, "README.md"), "# Release notes\n");
+  await writeReleaseNotes(join(root, "out"), "1.0.0-rc.11", source);
+  const { readdir } = await import("node:fs/promises");
+  expect((await readdir(join(root, "out/release-notes"))).sort()).toEqual(
+    [2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((rc) => `1.0.0-rc.${rc}.md`).sort(),
+  );
+  await expect(writeReleaseNotes(join(root, "none"), "1.0.0", source)).rejects.toThrow(
+    "docs/releases/1.0.0.md",
+  );
+  await writeFile(join(source, "1.0.0.md"), "## Fixes\n\n- See https://example.com for details.\n");
+  await expect(writeReleaseNotes(join(root, "bad"), "1.0.0", source)).rejects.toThrow("needs work");
 });
