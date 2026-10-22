@@ -1159,11 +1159,7 @@ function Theatre({ api }: { api: ApiClient }) {
             : null,
     canStop: controls.canStop,
     link: linkLost ? "lost" : null,
-    mayControl:
-      !controls.fenced &&
-      agent.fresh &&
-      !agent.model.pendingTakeover &&
-      !agent.snapshot?.pendingTakeover,
+    letGo: controls.fenced || !!agent.model.pendingTakeover || !!agent.snapshot?.pendingTakeover,
   });
   // From the moment a message is sent until the task's first word, dot is shown thinking.
   const [sendingSince, setSendingSince] = useState<number | null>(null);

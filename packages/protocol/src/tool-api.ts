@@ -203,4 +203,5 @@ export const BrainEvent = z.discriminatedUnion("type", [
   ModelRetry.pick({ type: true, data: true }),
 ]);
 export type BrainEvent = z.infer<typeof BrainEvent>;
-export const BrainEvents = z.object({ events: z.array(BrainEvent).min(1).max(256) });
+export const MAX_BRAIN_EVENTS = 256;
+export const BrainEvents = z.object({ events: z.array(BrainEvent).min(1).max(MAX_BRAIN_EVENTS) });

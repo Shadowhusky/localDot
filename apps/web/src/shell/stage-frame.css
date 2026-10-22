@@ -81,7 +81,9 @@
 }
 
 /* The rim is the control indicator: a hairline when nobody acts, xenon for dot, porcelain for you.
-   It is always mounted and only its light fades: 400 ms in, 300 ms out. */
+   It is always mounted and only its light fades: 400 ms in, 300 ms out. Going out to the hairline
+   waits a moment first, so a light that comes straight back never blinks; one hand passing the
+   computer to the other doesn't wait. */
 .stage-rim {
   position: absolute;
   inset: 0;
@@ -107,6 +109,10 @@
 
 .stage-frame:not([data-light="none"]) .stage-spill > [data-light="none"] {
   opacity: 0;
+}
+
+.stage-frame[data-light="none"] :is(.stage-rim, .stage-spill) > [data-light] {
+  transition-delay: var(--delay-light-out);
 }
 
 .stage-band {

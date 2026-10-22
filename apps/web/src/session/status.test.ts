@@ -383,7 +383,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     ];
     expect(replay(shell, 60_000)).toMatchObject({
       label: "Pausing after this step",
-      control: false,
+      control: true,
       elapsedS: 60,
     });
     // A step whose end never reached the log (a takeover cut it short) is pausing only until the
@@ -589,7 +589,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
   it("names the Pause's resuming and unconfirmed phases", () => {
     expect(
       view([...typed(), ev("safety.pause", 1100, pause("resuming"))], 9500).status,
-    ).toMatchObject({ label: "Resuming…", control: false, elapsedS: 9, actions: stopsTask });
+    ).toMatchObject({ label: "Resuming…", control: true, elapsedS: 9, actions: stopsTask });
     expect(view([...typed(), ev("safety.pause", 1100, pause("uncertain"))], 9500)).toMatchObject({
       task: { row: "paused", phase: "waiting", label: "Pause not confirmed" },
       status: { actions: stopsTask, control: false, elapsedS: null },
@@ -742,7 +742,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     const settling = [...typed(), ev("safety.pause", 1100, pause("pausing"))];
     expect(view(settling, 9500).status).toMatchObject({
       label: "Pausing after this step",
-      control: false,
+      control: true,
     });
     const paused = [
       ...typed(),
@@ -895,6 +895,20 @@ const asked = (tMs: number) =>
   ev("ask.request", tMs, { askId: ID, question: "Which format?", options: [], allowText: true });
 const takeoverRequest = (tMs: number) =>
   ev("takeover.request", tMs, { requestId: ID, reason: "login", note: "Sign in for me" });
+const modelBusy = (tMs: number, waitMs: number) =>
+  ev("model.retry", tMs, { role: "main", attempt: 1, waitMs, status: 529, message: "overloaded" });
+const connectionRequest = (tMs: number) =>
+  ev("approval.request", tMs, {
+    approvalId: ID,
+    generation: 1,
+    revision: 1,
+    expiresAt: 9_999_999_999,
+    actionClass: "network",
+    risk: "medium",
+    title: "WeChat wants to connect to chat.example.com on port 5222",
+    kind: "permission",
+    preview: { fields: [["App", "WeChat"]] },
+  });
 const paused = [
   ...typed(),
   ev("safety.pause", 1100, pause("pausing")),
@@ -1165,8 +1179,8 @@ describe("one status model for every surface (T10)", () => {
     expect(at(start(), 7200, stream("stalled"))).toMatchObject({ elapsedS: 7, control: true });
   });
 
-  it("gives dot control only while it works or waits on the user's word, and the app allows it", () => {
-    expect(statusFor({ computer: live, task: typing(), mayControl: false }).control).toBe(false);
+  it("gives dot control while the task runs or waits on the user's word, until it lets go", () => {
+    expect(statusFor({ computer: live, task: typing(), letGo: true }).control).toBe(false);
     const working = [
       "acting",
       "just acted",
@@ -1174,9 +1188,9 @@ describe("one status model for every surface (T10)", () => {
       "observing",
       "working",
       "pausing",
+      "resuming",
       "approval",
       "question",
-      "out of touch",
       "reconnecting, task running",
       "approval, reconnecting",
       "question, reconnecting",
@@ -1184,6 +1198,50 @@ describe("one status model for every surface (T10)", () => {
     const stopping = ["task stopping", "stop unconfirmed"];
     for (const [name, status] of Object.entries(STATES))
       expect(status.control, name).toBe([...working, ...stopping].includes(name));
+    // A busy model, a brain starting again and an app's connection card keep dot's light; the
+    // computer in the user's hands doesn't.
+    const busy = [
+      ...typed(),
+      modelBusy(1100, 5000),
+      ev("agent.state", 1101, { state: "paused", reason: "model busy" }),
+    ];
+    expect(at(busy, 2000)).toMatchObject({ row: "retrying", control: true });
+    const restart = "the brain stopped; restarting from saved history";
+    expect(
+      at([...typed(), ev("agent.state", 1500, { state: "error", reason: restart })]),
+    ).toMatchObject({ label: "Starting again…", control: true });
+    expect(at([...typed(), connectionRequest(1500)])).toMatchObject({
+      row: "approval",
+      control: true,
+    });
+    const yours = [
+      ...typed(),
+      takeoverRequest(1500),
+      ev("control.change", 1600, { holder: "user", reason: "handoff_request" }),
+    ];
+    expect(at(yours)).toMatchObject({ row: "control", control: false });
+  });
+
+  it("keeps dot's light on as each agent event arrives while the task runs", () => {
+    const events = [
+      ...typed(),
+      ev("agent.state", 1100, { state: "thinking" }),
+      ev("agent.state", 1200, { state: "acting" }),
+      ev("agent.state", 1300, { state: "observing" }),
+      modelBusy(1400, 500),
+      ev("agent.state", 1401, { state: "paused", reason: "model busy" }),
+      ev("agent.state", 1900, { state: "thinking" }),
+      approvalRequest(2000),
+      ev("agent.state", 2001, { state: "waiting_user", reason: "approval" }),
+      ev("approval.resolve", 2500, { approvalId: ID, decision: "approve", by: "user" }),
+      ev("agent.state", 2600, { state: "acting" }),
+      connectionRequest(2700),
+      ev("approval.resolve", 2800, { approvalId: ID, decision: "approve", by: "user" }),
+    ];
+    for (const [i, event] of events.entries()) {
+      const nowMs = sessionMsOf(event);
+      expect(at(events.slice(0, i + 1), nowMs).control, `${event.type} at ${nowMs} ms`).toBe(true);
+    }
   });
 
   it("offers the task's Stop while it runs, and the computer's own controls otherwise", () => {
@@ -1228,8 +1286,8 @@ it("keeps task status when only its viewer is suspended, but still reports a los
     view([...start(), approvalRequest(1500)], 9500).task,
     view([...typed(), ev("task.result", 1500, { summary: "Done", files: [] })], 9500).task,
   ]) {
-    const expected = statusFor({ computer: live, task, mayControl: false });
-    const hidden = statusFor({ computer, task, mayControl: false });
+    const expected = statusFor({ computer: live, task, letGo: true });
+    const hidden = statusFor({ computer, task, letGo: true });
     expect(hidden.title).toBe(expected.title);
     expect(hidden.attention).toBe(expected.attention);
     expect(hidden.control).toBe(false);

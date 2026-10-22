@@ -15,6 +15,7 @@ export const AGENT_LIMITS = Object.freeze({
   messages: 512,
   steps: 256,
   subagents: 128,
+  subagentRuns: 32,
   plan: 200,
   changes: 128,
   questions: 64,
@@ -160,9 +161,19 @@ export interface ApprovalOutcome {
   readonly rule?: RuleChange;
   readonly ruleRemoved?: boolean;
 }
+// One run of a child agent: each time dot wakes the child again, it runs once more.
+export interface AgentRun {
+  readonly runId: string;
+  readonly state: EventOf<"subagent.state">["data"]["state"];
+  readonly summary?: string;
+  readonly startedAt: number;
+  readonly endedAt?: number;
+}
+// A child's row follows its latest run; the runs before it are kept, newest first.
 export type AgentChild = EventOf<"subagent.state">["data"] & {
   readonly startedAt: number;
   readonly endedAt?: number;
+  readonly earlier: readonly AgentRun[];
 };
 export interface AgentModel {
   readonly screen?: ScreenSelectionSnapshot;
@@ -215,6 +226,21 @@ export interface AgentModel {
 export function heldByUser(model: AgentModel): AgentTakeover | undefined {
   const held = model.pendingTakeover ? model.takeovers.get(model.pendingTakeover) : undefined;
   return held && (held.by === "user" || held.taken) ? held : undefined;
+}
+// Children still running when their task ends, or is found cut short, ended with it.
+export function interruptRunning(
+  children: ReadonlyMap<string, AgentChild>,
+  endedAt?: number,
+): ReadonlyMap<string, AgentChild> {
+  if (![...children.values()].some((child) => child.state === "running")) return children;
+  return new Map(
+    [...children].map(([id, child]) => [
+      id,
+      child.state === "running"
+        ? { ...child, state: "interrupted", ...(endedAt === undefined ? {} : { endedAt }) }
+        : child,
+    ]),
+  );
 }
 
 export function emptyAgentModel(): AgentModel {

@@ -3,6 +3,7 @@ import type {
   AskFieldRecord,
   AskFieldValue,
   AskRequestField,
+  EventOf,
   PageElement,
   PauseSnapshot,
   RecentLine,
@@ -291,6 +292,8 @@ export class AgentSession {
     notify(): void;
   }>();
   readonly #fetched = new Map<number, InboxItem>();
+  // Delegated runs the brain has started and not ended, by run id.
+  readonly #childRuns = new Map<string, { id: string; label: string }>();
   #seq = 0;
   #generationId = 0;
   #brain: { generation: BrainGeneration; abort: AbortController } | undefined;
@@ -778,6 +781,16 @@ export class AgentSession {
     for (const observer of this.#controlObservers)
       if (observer.generation === generation) this.#controlObservers.delete(observer);
     previous.abort.abort(new SessionStoppedError());
+    // Children run inside their brain and end with it. Their own end can no longer arrive, so it is
+    // journaled here; a viewer would otherwise show them running for the rest of the task.
+    const orphans = [...this.#childRuns];
+    this.#childRuns.clear();
+    for (const [runId, { id, label }] of orphans)
+      try {
+        this.append("subagent.state", { id, runId, label, state: "interrupted" });
+      } catch {
+        /* Retirement must finish whether or not the journal takes the note. */
+      }
     void this.releaseInput();
     this.#screenReady = undefined;
     if (this.#screens && !this.stopped) {
@@ -961,6 +974,11 @@ export class AgentSession {
       ...(step ? { step } : {}),
       data,
     } as unknown as EventDraft);
+    if (type === "subagent.state") {
+      const { id, runId, label, state } = data as EventOf<"subagent.state">["data"];
+      if (state === "running") this.#childRuns.set(runId, { id, label });
+      else this.#childRuns.delete(runId);
+    }
   }
   post(kind: InboxItem["kind"], text: string): InboxItem {
     return this.#deliverInbox(kind, text, ulid(), true);

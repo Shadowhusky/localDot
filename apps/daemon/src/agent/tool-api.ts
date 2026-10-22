@@ -1,13 +1,15 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { serve } from "@hono/node-server";
 import {
-  BrainEvents,
+  BrainEvent,
+  MAX_BRAIN_EVENTS,
   TOOL_API_PORT,
   ToolCallRequest,
   TranscriptAppend,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { Hono } from "hono";
+import { z } from "zod";
 import type { FramePng, Region } from "./frame-png.ts";
 import type { Redactor } from "./redact.ts";
 import { type AgentSession, abortable, type BrainGeneration } from "./session.ts";
@@ -69,6 +71,41 @@ function redactValue(value: unknown, redact: Redactor, depth = 0): unknown {
     return out;
   }
   return value;
+}
+// A brain's batch is checked event by event, so one bad event costs only itself, never the rest,
+// which may hold a child's end. Redaction can lengthen text past its limit (a marker longer than
+// the secret it hides): that text is cut to fit. An event wrong in any other way is dropped.
+const BrainBatch = z.object({ events: z.array(z.unknown()).min(1).max(MAX_BRAIN_EVENTS) });
+const where = (issues: readonly z.core.$ZodIssue[]) =>
+  issues.map((issue) => `${issue.path.join(".") || "event"} ${issue.code}`).join(", ");
+function brainEvent(raw: unknown): BrainEvent | undefined {
+  const parsed = BrainEvent.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  const { issues } = parsed.error;
+  const long = issues.filter(
+    (issue): issue is z.core.$ZodIssueTooBig =>
+      issue.code === "too_big" && issue.origin === "string",
+  );
+  if (long.length === issues.length) {
+    for (const issue of long) cut(raw, issue.path, Number(issue.maximum));
+    const fitted = BrainEvent.safeParse(raw);
+    if (fitted.success) {
+      console.error(`brain event text cut to fit: ${where(long)}`);
+      return fitted.data;
+    }
+  }
+  console.error(`brain event dropped: ${where(issues)}`);
+  return undefined;
+}
+// The schema measures text in code points, so the cut does too and never splits a character.
+function cut(value: unknown, path: readonly PropertyKey[], max: number): void {
+  const key = path.at(-1);
+  let node = value;
+  for (const step of path.slice(0, -1)) node = (node as Record<PropertyKey, unknown>)?.[step];
+  if (key === undefined || typeof node !== "object" || node === null) return;
+  const owner = node as Record<PropertyKey, unknown>;
+  const text = owner[key];
+  if (typeof text === "string") owner[key] = Array.from(text).slice(0, max).join("");
 }
 function integerQuery(value: string | undefined, fallback: number, maximum: number): number {
   if (value === undefined) return fallback;
@@ -191,9 +228,11 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
     const signal = AbortSignal.any([session.abort.signal, generation.signal, c.req.raw.signal]);
     const raw = await jsonBody(c.req.raw, signal);
     session.check(generation, signal);
-    const parsed = BrainEvents.safeParse(redactValue(raw, deps.redactorFor(session)));
-    if (!parsed.success) return c.text("invalid brain events", 400);
-    for (const event of parsed.data.events) {
+    const batch = BrainBatch.safeParse(redactValue(raw, deps.redactorFor(session)));
+    if (!batch.success) return c.text("invalid brain events", 400);
+    const events = batch.data.events.flatMap((event) => brainEvent(event) ?? []);
+    if (!events.length) return c.text("invalid brain events", 400);
+    for (const event of events) {
       session.check(generation, signal);
       session.append(event.type, event.data as Record<string, unknown>);
       if (event.type === "agent.state") {

@@ -396,9 +396,11 @@
   --dur-default: 470ms;
   /* Sheets, the curtain, the stage materialising, full screen. */
   --dur-gentle: 670ms;
-  /* The stage's light: the rim and the spill come up and go down. */
+  /* The stage's light: the rim and the spill come up and go down. A light holds this long before
+     it goes out, so one that drops for an instant never blinks; reduced motion keeps the hold. */
   --dur-light-in: 400ms;
   --dur-light-out: 300ms;
+  --delay-light-out: 800ms;
   /* A label's new words, the dim over the picture, the island leaving under the curtain. */
   --dur-text-in: 180ms;
   --dur-text-out: 120ms;

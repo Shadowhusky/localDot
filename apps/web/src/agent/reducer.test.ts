@@ -522,7 +522,7 @@ it("retains image references when rebuilding historical steps and bounds their c
   expect(many.steps.get("image-read")?.images).toHaveLength(8);
 });
 
-it("retains interleaved child results, separates resumed runs, and interrupts unsettled children on session end", () => {
+it("keeps one row per child, led by its latest run, with the runs before kept inside it", () => {
   const child = { id: "child-a", runId: "run-1", label: "Research" };
   const events = [
     ev(0, "subagent.state", { ...child, state: "running" }),
@@ -532,15 +532,59 @@ it("retains interleaved child results, separates resumed runs, and interrupts un
       state: "completed",
       summary: "Verified https://example.test",
     }),
+    // dot wakes child-a again: the new run leads its row, which moves to the top of the list.
     ev(3, "subagent.state", { ...child, runId: "run-3", state: "running" }),
-    ev(4, "session.end", { reason: "error" }),
   ];
   const model = reduce(events);
-  expect([...model.subagents.values()].map((c) => c.state)).toEqual([
-    "completed",
-    "interrupted",
-    "interrupted",
+  expect([...model.subagents.values()].map((c) => [c.id, c.runId, c.state])).toEqual([
+    ["child-b", "run-2", "running"],
+    ["child-a", "run-3", "running"],
   ]);
-  expect(model.subagents.get("run-1")?.summary).toContain("Verified");
-  expect(events.reduce(projectAgentEvent, model)).toBe(model);
+  expect(model.subagents.get("child-a")).toMatchObject({
+    startedAt: 3000,
+    earlier: [
+      {
+        runId: "run-1",
+        state: "completed",
+        summary: "Verified https://example.test",
+        startedAt: 0,
+        endedAt: 2000,
+      },
+    ],
+  });
+  expect(model.subagents.get("child-a")?.summary).toBeUndefined();
+  // Earlier runs read newest first; one replaced while it still ran ended unheard.
+  const woken = [
+    ev(4, "subagent.state", { ...child, runId: "run-3", state: "completed", summary: "Again" }),
+    ev(5, "subagent.state", { ...child, runId: "run-4", state: "running" }),
+    ev(6, "subagent.state", { ...child, runId: "run-5", state: "running" }),
+  ].reduce(projectAgentEvent, model);
+  const runs = (m: typeof model) =>
+    m.subagents.get("child-a")?.earlier.map((run) => [run.runId, run.state, run.summary]);
+  expect(runs(woken)).toEqual([
+    ["run-4", "interrupted", undefined],
+    ["run-3", "completed", "Again"],
+    ["run-1", "completed", "Verified https://example.test"],
+  ]);
+  // Its end, arriving late, lands on that run; the row still follows run-5.
+  const late = projectAgentEvent(
+    woken,
+    ev(7, "subagent.state", { ...child, runId: "run-4", state: "completed", summary: "Late" }),
+  );
+  expect(late.subagents.get("child-a")).toMatchObject({ runId: "run-5", state: "running" });
+  expect(runs(late)?.[0]).toEqual(["run-4", "completed", "Late"]);
+  // The task's end interrupts only what still runs.
+  const ended = projectAgentEvent(late, ev(8, "session.end", { reason: "error" }));
+  expect([...ended.subagents.values()].map((c) => [c.id, c.state])).toEqual([
+    ["child-b", "interrupted"],
+    ["child-a", "interrupted"],
+  ]);
+  expect(runs(ended)).toEqual(runs(late));
+  expect(events.reduce(projectAgentEvent, ended)).toBe(ended);
+  // A child woken many times keeps its latest runs and says the rest were let go.
+  const many = Array.from({ length: L.subagentRuns + 2 }, (_, i) =>
+    ev(i, "subagent.state", { ...child, runId: `wake-${i}`, state: "running" }),
+  ).reduce(projectAgentEvent, emptyAgentModel());
+  expect(many.subagents.get("child-a")?.earlier).toHaveLength(L.subagentRuns);
+  expect(many.historyTruncated).toBe(true);
 });

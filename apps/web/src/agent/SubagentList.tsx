@@ -3,16 +3,24 @@ import { Disclosure } from "../ui/Disclosure.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { VirtualList } from "../ui/VirtualList.tsx";
-import type { AgentChild } from "./model.ts";
+import type { AgentChild, AgentRun } from "./model.ts";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 
-const key = (child: AgentChild) => child.runId;
+const key = (child: AgentChild) => child.id;
 const labels = {
   running: "Running",
   completed: "Finished",
   interrupted: "Interrupted",
   failed: "Failed",
 };
+const glyph = (state: AgentRun["state"]) =>
+  state === "running"
+    ? "doing"
+    : state === "completed"
+      ? "done"
+      : state === "failed"
+        ? "failed"
+        : "skipped";
 export function SubagentList({ agents }: { agents: ReadonlyMap<string, AgentChild> }) {
   const children = useMemo(() => [...agents.values()].reverse(), [agents]);
   return (
@@ -25,23 +33,28 @@ export function SubagentList({ agents }: { agents: ReadonlyMap<string, AgentChil
           {(child) => (
             <section className="subagent-row">
               <div className="subagent-heading">
-                <StatusGlyph
-                  state={
-                    child.state === "running"
-                      ? "doing"
-                      : child.state === "completed"
-                        ? "done"
-                        : child.state === "failed"
-                          ? "failed"
-                          : "skipped"
-                  }
-                />
+                <StatusGlyph state={glyph(child.state)} />
                 <strong>{child.label}</strong>
                 <span>{labels[child.state]}</span>
               </div>
               {child.summary && (
                 <Disclosure summary="Result">
                   <SafeMarkdown text={child.summary} compact />
+                </Disclosure>
+              )}
+              {child.earlier.length > 0 && (
+                <Disclosure summary="Earlier runs" meta={child.earlier.length}>
+                  <ol className="subagent-runs">
+                    {child.earlier.map((run) => (
+                      <li key={run.runId}>
+                        <div className="subagent-run-heading">
+                          <StatusGlyph state={glyph(run.state)} />
+                          <span>{labels[run.state]}</span>
+                        </div>
+                        {run.summary && <SafeMarkdown text={run.summary} compact />}
+                      </li>
+                    ))}
+                  </ol>
                 </Disclosure>
               )}
             </section>

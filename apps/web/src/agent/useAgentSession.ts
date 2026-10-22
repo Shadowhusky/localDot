@@ -3,7 +3,7 @@ import type { CellSummary } from "../cells/types.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import type { LiveSession } from "../session/useLiveSession.ts";
 import { AgentResponseError, type AgentSnapshot, loadAgentSnapshot } from "./api.ts";
-import { type AgentModel, emptyAgentModel } from "./model.ts";
+import { type AgentModel, emptyAgentModel, interruptRunning } from "./model.ts";
 
 const EMPTY_AGENT_MODEL = emptyAgentModel();
 // A task at rest whose log stops short of its end (the daemon went away under it) is over all the
@@ -146,8 +146,9 @@ export function useAgentSession(
       void poll();
       timer = setInterval(() => {
         // The end event may beat its final status response, or that response may fail.
-        // Keep reconciling until the daemon has confirmed terminal ownership too.
-        if (!terminalConfirmed) void poll();
+        // Keep reconciling until the daemon has confirmed terminal ownership too. A read already
+        // on its way is this second's check.
+        if (!terminalConfirmed && !busy) void poll();
       }, 1000);
     };
     document.addEventListener("visibilitychange", activity);
@@ -165,7 +166,14 @@ export function useAgentSession(
   const current = feed.read();
   const atRest = !!live.resting;
   const model = useMemo(
-    () => (atRest && !current.model.ended ? { ...current.model, ended: CUT_SHORT } : current.model),
+    () =>
+      atRest && !current.model.ended
+        ? {
+            ...current.model,
+            ended: CUT_SHORT,
+            subagents: interruptRunning(current.model.subagents),
+          }
+        : current.model,
     [atRest, current.model],
   );
   const owned = view?.api === api && view.cellId === cellId && view.sessionId === sessionId;

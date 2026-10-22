@@ -3126,6 +3126,18 @@ routes.post("/__qa/agents", (c) => {
   });
   return c.json({ ok: true });
 });
+// dot wakes the review agent again: its second run starts, or with ?done=1 finishes.
+routes.post("/__qa/agents/again", (c) => {
+  if (!session) return c.text("no session", 409);
+  const run = { id: "review-child", runId: "review-run-2", label: "Review implementation" };
+  session.append(
+    "subagent.state",
+    c.req.query("done") === "1"
+      ? { ...run, state: "completed", summary: "Checked the fix: the monthly totals now match." }
+      : { ...run, state: "running" },
+  );
+  return c.json({ ok: true });
+});
 routes.post("/__qa/steps", (c) => {
   if (!session) return c.text("no session", 409);
   for (let n = Number(c.req.query("n") ?? 1); n > 0; n--)
@@ -3159,6 +3171,18 @@ routes.post("/__qa/stream", (c) => {
     }
     if (tick % 15 === 0) nextStep(owned, "colour");
   }, 40);
+  return c.json({ ok: true });
+});
+// dot's turns as the brain reports them: thinking on each model call, acting on each tool call,
+// n of each, `ms` apart. Answers once the last has been sent.
+routes.post("/__qa/turns", async (c) => {
+  if (!session) return c.text("no session", 409);
+  const owned = session;
+  const ms = Number(c.req.query("ms") ?? 150);
+  for (let n = 2 * Number(c.req.query("n") ?? 5); n > 0 && !teardown && session === owned; n--) {
+    owned.append("agent.state", { state: n % 2 ? "acting" : "thinking" });
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
   return c.json({ ok: true });
 });
 // dot thinks: its thoughts are never the band's line, which holds dot's last line for the user.

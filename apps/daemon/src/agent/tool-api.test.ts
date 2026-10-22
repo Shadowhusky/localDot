@@ -1,6 +1,7 @@
 import { ULID_PATTERN, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolPolicy } from "./policy.ts";
+import type { BrainGeneration } from "./session.ts";
 import {
   toolHarness as createHarness,
   PROXY_TOKEN,
@@ -700,5 +701,55 @@ describe("the brain's own channels", () => {
       (await post([{ type: "agent.state", data: { state: "paused", reason: "budget" } }])).status,
     ).toBe(204);
     expect(h.session.status).toBe("paused");
+  });
+});
+
+describe("delegated runs", () => {
+  const research = { id: "child-a", runId: "run-1", label: "Research sources" };
+  const review = { id: "child-b", runId: "run-2", label: "Review the draft" };
+  const post = (h: ReturnType<typeof toolHarness>, events: unknown[]) =>
+    h.app.request("/v1/events", {
+      method: "POST",
+      headers: h.auth,
+      body: JSON.stringify({ events }),
+    });
+  const children = (h: ReturnType<typeof toolHarness>) =>
+    h
+      .events()
+      .filter((event) => event.type === "subagent.state")
+      .map((event) => event.data);
+
+  it("ends a child its brain can no longer finish when the user takes the computer", async () => {
+    const h = toolHarness();
+    const started = await post(h, [
+      { type: "subagent.state", data: { ...research, state: "running" } },
+      { type: "subagent.state", data: { ...review, state: "running" } },
+      { type: "subagent.state", data: { ...review, state: "completed", summary: "Looks right." } },
+    ]);
+    expect(started.status).toBe(204);
+    h.session.takeControl();
+    expect(children(h).slice(3)).toEqual([{ ...research, state: "interrupted" }]);
+    h.session.stop();
+    expect(children(h)).toHaveLength(4);
+  });
+
+  it("ends a child whose brain stopped, and lets the restarted brain run it again", async () => {
+    const h = toolHarness();
+    await post(h, [{ type: "subagent.state", data: { ...research, state: "running" } }]);
+    h.session.retireBrain(h.session.generation as BrainGeneration);
+    h.session.beginBrain();
+    h.session.toolToken = TOOL_TOKEN;
+    const again = { ...research, runId: "run-3" };
+    await post(h, [
+      { type: "subagent.state", data: { ...again, state: "running" } },
+      { type: "subagent.state", data: { ...again, state: "completed", summary: "Three sources." } },
+    ]);
+    h.session.retireBrain(h.session.generation as BrainGeneration);
+    expect(children(h).map(({ runId, state }) => `${runId} ${state}`)).toEqual([
+      "run-1 running",
+      "run-1 interrupted",
+      "run-3 running",
+      "run-3 completed",
+    ]);
   });
 });

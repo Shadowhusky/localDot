@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { redactor } from "./redact.ts";
+import { addTaskSecret, redactor } from "./redact.ts";
 import { AgentSession } from "./session.ts";
 import { createToolApi, type ToolApiDeps } from "./tool-api.ts";
 import { TranscriptStore } from "./transcript.ts";
@@ -33,7 +33,7 @@ function setup() {
     sessions: () => [session],
     transcripts,
     png: { png },
-    redactorFor: () => redactor([token]),
+    redactorFor: () => redactor([token], session),
     policy: { decide: async () => ({ kind: "act" }) },
     tools: {} as ToolApiDeps["tools"],
   });
@@ -132,6 +132,46 @@ describe("authenticated generation boundary", () => {
       ).status,
     ).toBe(400);
     expect(h.events).toEqual([]);
+  });
+  it("checks each brain event on its own: redacted text is cut to fit, a bad event dropped", async () => {
+    const h = setup();
+    // Masking a short code lengthens the text it stands in.
+    addTaskSecret(h.session, "4821");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const summary = `Code 4821. ${"x".repeat(4989)}`;
+    const child = { id: "child", runId: "run", label: "Research" };
+    expect(
+      (
+        await h.request("/v1/events", {
+          events: [
+            { type: "agent.state", data: { state: "thinking" } },
+            { type: "action.dispatch", data: {} },
+            { type: "subagent.state", data: { ...child, state: "completed", summary } },
+            // Text is measured, and cut, in whole characters.
+            { type: "agent.state", data: { state: "acting", reason: `4821 ${"😀".repeat(190)}` } },
+          ],
+        })
+      ).status,
+    ).toBe(204);
+    expect(h.events.map((event) => event.type)).toEqual([
+      "agent.state",
+      "subagent.state",
+      "agent.state",
+    ]);
+    const ended = h.events[1]?.data as { state: string; summary: string };
+    expect(ended.state).toBe("completed");
+    expect(ended.summary).toHaveLength(5000);
+    expect(ended.summary).toMatch(/^Code \[redacted\]\. x+$/);
+    expect(h.events[2]?.data).toEqual({
+      state: "acting",
+      reason: `[redacted] ${"😀".repeat(189)}`,
+    });
+    expect(logged.mock.calls).toEqual([
+      ["brain event dropped: type invalid_union"],
+      ["brain event text cut to fit: data.summary too_big"],
+      ["brain event text cut to fit: data.reason too_big"],
+    ]);
+    logged.mockRestore();
   });
   it("counts multibyte transcript size in bytes", async () => {
     const h = setup();

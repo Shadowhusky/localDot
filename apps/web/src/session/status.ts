@@ -278,7 +278,6 @@ export const STATE_CAPTIONS: ReadonlySet<string> = new Set([
 ]);
 
 const PAST_HOLD_MS = 1200;
-const WORKING = new Set(["acting", "observing", "thinking"]);
 // Replay folds the whole recording, so an action's end may still lie ahead of nowMs.
 const ended = (a: ActionState, nowMs: number) => {
   const t = a.cancel?.t ?? a.resultT;
@@ -310,14 +309,15 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     countdownS: null,
     control,
   });
-  const running = (row: TaskRow, label: string, caption: string, control: boolean): TaskHud => ({
+  // dot holds the computer for as long as the task runs, between steps and through a retry too.
+  const running = (row: TaskRow, label: string, caption: string): TaskHud => ({
     row,
     phase: "running",
     label,
     caption,
     elapsedS,
     countdownS: null,
-    control,
+    control: true,
   });
 
   const at = agentStateAt(model, nowMs);
@@ -351,8 +351,8 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (facts?.takeover != null)
     return waiting("takeover", "Your turn", facts.takeover || "Your turn to use the computer.");
   if (facts?.pause === "pausing" || state === "pausing")
-    return running("pausing", "Pausing after this step", "Pausing after this step.", acting);
-  if (facts?.pause === "resuming") return running("resuming", "Resuming…", "Resuming…", false);
+    return running("pausing", "Pausing after this step", "Pausing after this step.");
+  if (facts?.pause === "resuming") return running("resuming", "Resuming…", "Resuming…");
   if (facts?.pause === "uncertain")
     return waiting(
       "paused",
@@ -372,7 +372,6 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
         facts.retry.unreachable
           ? "I can't reach the model. I'll try again in a moment."
           : "The model is busy. I'll try again in a moment.",
-        false,
       ),
       elapsedS: null,
       countdownS: leftS > 0 ? leftS : null,
@@ -387,7 +386,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   }
   if (state === "error")
     return /restarting/.test(reason ?? "")
-      ? running("working", "Starting again…", "Starting again where I left off.", false)
+      ? running("working", "Starting again…", "Starting again where I left off.")
       : waiting(
           "recovery",
           "Needs attention",
@@ -403,25 +402,23 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
       ? finished("done", "Done", "Done.")
       : finished("ready", "Ready", "Ready for a follow-up.");
 
-  const control = state !== undefined && WORKING.has(state);
   const step = stepAt(model, nowMs);
   const stepRunning = step && (step.endT === undefined || step.endT > nowMs);
   // Tool work does not emit screen action intents. Use the same recorded description in live
   // status and Replay, without letting a completed tool masquerade as a running one.
   if (stepRunning && (step.kind !== "gui" || !acting)) {
     const description = (step.intent || step.title || "").replace(/\s+/g, " ").trim();
-    if (description) return running("acting", progressive(description), description, control);
+    if (description) return running("acting", progressive(description), description);
   }
-  if (current && acting)
-    return running("acting", progressive(current.label), current.label, control);
+  if (current && acting) return running("acting", progressive(current.label), current.label);
   if (current?.resultT !== undefined && current.ok && !current.cancel) {
     const done = past(current.label);
     if (done !== current.label && nowMs - current.resultT < PAST_HOLD_MS)
-      return running("acting", done, done, control);
+      return running("acting", done, done);
   }
-  if (state === "thinking") return running("thinking", "Thinking…", THINKING, control);
-  if (state === "observing") return running("observing", "Checking the screen", CHECKING, control);
-  return running("working", "Working", n ? WORKING_ON : STARTING_OUT, control);
+  if (state === "thinking") return running("thinking", "Thinking…", THINKING);
+  if (state === "observing") return running("observing", "Checking the screen", CHECKING);
+  return running("working", "Working", n ? WORKING_ON : STARTING_OUT);
 }
 
 // The thread's foot follows dot's own work. While the user has the computer it says nothing: the
@@ -467,8 +464,9 @@ export interface StatusInput {
   readonly canStop?: boolean;
   // The running task's feed has been out of touch for a moment.
   readonly link?: "lost" | null;
-  // False while the task feed is stale, a takeover waits or the computer is fenced.
-  readonly mayControl?: boolean;
+  // dot has let go of the computer whatever the task says: a Stop has fenced it or a takeover
+  // waits. The light reads only this, never the feed's freshness, which gates input alone.
+  readonly letGo?: boolean;
 }
 
 const COMPUTER_POSE: Record<ComputerPhase, DotState> = {
@@ -572,7 +570,7 @@ export function statusFor({
   stop = null,
   canStop = true,
   link = null,
-  mayControl = true,
+  letGo = false,
 }: StatusInput): Status {
   const held = computer.paused ? null : task;
   const own = DOWN.has(computer.phase) ? null : held;
@@ -621,7 +619,7 @@ export function statusFor({
     elapsedS: running?.elapsedS ?? null,
     countdownS: halting ? null : (running?.countdownS ?? null),
     actions,
-    control: (running?.control ?? false) && mayControl,
+    control: !!running?.control && !lost && !letGo,
     dotPose:
       halting === "unconfirmed"
         ? "error"

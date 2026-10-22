@@ -8,13 +8,16 @@ import {
   ulidTime,
 } from "@localdot/protocol";
 import {
+  type AgentChild,
   type AgentConnection,
   type AgentFeed,
   type AgentFeedState,
   type AgentModel,
+  type AgentRun,
   type AgentStep,
   type AgentWords,
   emptyAgentModel,
+  interruptRunning,
   AGENT_LIMITS as L,
 } from "./model.ts";
 import { appendTerminal, emptyTerminal, finishTerminal } from "./terminal-text.ts";
@@ -93,6 +96,18 @@ function output(row: AgentStep, stream: "stdout" | "stderr", chunk: string): Age
   };
 }
 
+// A child's run that a newer one replaced. One still running then has ended unheard.
+function replaced(child: AgentChild, t: number): AgentRun {
+  const { runId, state, summary, startedAt, endedAt } = child;
+  return {
+    runId,
+    state: state === "running" ? "interrupted" : state,
+    ...(summary ? { summary } : {}),
+    startedAt,
+    endedAt: endedAt ?? t,
+  };
+}
+
 // Pure projection of already schema-checked events. Identity is messageId, request ID or envelope
 // step, never message text, arrival position or the last tool shown on screen.
 export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): AgentModel {
@@ -101,13 +116,40 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
   const e = event;
   switch (e.type) {
     case "subagent.state": {
-      const previous = model.subagents.get(e.data.runId);
+      // One row per child. Each time dot wakes it again, the new run takes the row to the top and
+      // gives it its state; the runs before stay in the row, newest first, and a late word about
+      // one of them lands on that run.
+      const previous = model.subagents.get(e.data.id);
+      const { id: _id, label: _label, ...run } = e.data;
+      const ended = e.data.state === "running" ? {} : { endedAt: e.t };
+      const late = previous?.earlier.findIndex((old) => old.runId === e.data.runId) ?? -1;
+      if (previous && late !== -1) {
+        const earlier = previous.earlier.map((old, i) =>
+          i === late ? { ...old, ...run, ...ended } : old,
+        );
+        next = {
+          ...next,
+          subagents: put(model.subagents, e.data.id, { ...previous, earlier }, L.subagents),
+        };
+        break;
+      }
+      const rerun = previous !== undefined && previous.runId !== e.data.runId;
+      const runs = rerun
+        ? [replaced(previous, e.t), ...previous.earlier]
+        : (previous?.earlier ?? []);
       const child = {
         ...e.data,
-        startedAt: previous?.startedAt ?? e.t,
-        ...(e.data.state === "running" ? {} : { endedAt: e.t }),
+        startedAt: previous && !rerun ? previous.startedAt : e.t,
+        ...ended,
+        earlier: runs.slice(0, L.subagentRuns),
       };
-      next = { ...next, subagents: put(model.subagents, e.data.runId, child, L.subagents) };
+      const rows = new Map(model.subagents);
+      if (rerun) rows.delete(e.data.id);
+      next = {
+        ...next,
+        subagents: put(rows, e.data.id, child, L.subagents),
+        historyTruncated: next.historyTruncated || runs.length > L.subagentRuns,
+      };
       break;
     }
     case "screen.switch": {
@@ -135,12 +177,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         ended: { ...e.data },
         pendingAsk: null,
         pendingTakeover: null,
-        subagents: new Map(
-          [...model.subagents].map(([id, child]) => [
-            id,
-            child.state === "running" ? { ...child, state: "interrupted", endedAt: e.t } : child,
-          ]),
-        ),
+        subagents: interruptRunning(model.subagents, e.t),
       };
       break;
     case "approval.request": {

@@ -551,6 +551,35 @@ it("reads a task at rest as ended, whatever status the daemon can still give for
     view.unmount();
   }
 });
+it("shows a child agent left running in a task at rest as interrupted", async () => {
+  const api = createApi("inert", {
+    origin: "http://fixture",
+    fetchImpl: async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/live")) return new Response(null, { status: 204 });
+      if (path.startsWith("/api/agent/sessions/")) return json({}, 404);
+      return json({ originMicros: 0, t: 0 });
+    },
+  });
+  const view = renderHook(() => {
+    const stage = useRef<StageHandle | null>(null);
+    const live = useLiveSession(api, cell(), stage, SESSION);
+    return useAgentSession(api, cell(), live);
+  });
+  await advance(1000);
+  open();
+  const child = { id: "child-a", runId: "run-1", label: "Research" };
+  send(ev(0, "subagent.state", { ...child, state: "running" }));
+  send(ev(1, "subagent.state", { ...child, id: "child-b", runId: "run-2", state: "running" }));
+  send(ev(2, "subagent.state", { ...child, id: "child-b", runId: "run-2", state: "completed" }));
+  await advance(1000);
+  expect(view.result.current.model.ended).toEqual({ reason: "stopped" });
+  expect([...view.result.current.model.subagents.values()].map((c) => c.state)).toEqual([
+    "interrupted",
+    "completed",
+  ]);
+  view.unmount();
+});
 it("does not render the app again for a status poll that brings the same answer", async () => {
   const f = server(() => json(snapshot()));
   let commits = 0;
@@ -571,4 +600,46 @@ it("does not render the app again for a status poll that brings the same answer"
   await advance(3000);
   expect(f.calls.filter((path) => path.startsWith("/api/agent/sessions/")).length).toBe(polls + 3);
   expect(commits).toBe(settled);
+});
+
+it("reads the status once more for a burst of events during a read, not once per event", async () => {
+  const reads: PromiseWithResolvers<Response>[] = [];
+  const { api } = server(() => {
+    const read = Promise.withResolvers<Response>();
+    reads.push(read);
+    return read.promise;
+  });
+  const { result } = hook(api);
+  await flush();
+  open();
+  for (let seq = 0; seq < 6; seq++)
+    send(ev(seq, "agent.state", { state: seq % 2 ? "acting" : "thinking" }));
+  await flush();
+  expect(reads).toHaveLength(1);
+  await act(async () => reads[0]?.resolve(json(snapshot())));
+  expect(reads).toHaveLength(2);
+  await act(async () => reads[1]?.resolve(json(snapshot())));
+  expect(reads).toHaveLength(2);
+  expect(result.current.agent.fresh).toBe(true);
+});
+
+it("lets a status read already on its way stand for the periodic check", async () => {
+  let held: PromiseWithResolvers<Response> | undefined;
+  const { api, calls } = server(() => (held ? held.promise : json(snapshot())));
+  const reads = () => calls.filter((path) => path.startsWith("/api/agent/sessions/")).length;
+  const { result } = hook(api);
+  await flush();
+  open();
+  await flush();
+  expect(result.current.agent.fresh).toBe(true);
+  const read = Promise.withResolvers<Response>();
+  held = read;
+  send(ev(0, "agent.state", { state: "thinking" }));
+  const before = reads();
+  await advance(1000);
+  expect(reads()).toBe(before);
+  held = undefined;
+  await act(async () => read.resolve(json(snapshot())));
+  expect(reads()).toBe(before);
+  expect(result.current.agent.fresh).toBe(true);
 });
