@@ -83,6 +83,19 @@ describe("persistent browser container isolation", () => {
     expect(spec.Env.some((entry) => entry.startsWith("LOCALDOT_STREAM_TOKEN="))).toBe(true);
   });
 
+  it("passes the host timezone to the browser, and omits it when unavailable", () => {
+    const record = sampleBrowserRecord();
+    expect(
+      browserSpec(record, "browser-image", streamOptions(), "localdot-accounts", "Asia/Tokyo").Env,
+    ).toContain("LOCALDOT_BROWSER_TZ=Asia/Tokyo");
+    // A falsy timezone (what hostBrowserTimezone returns when the host has none) omits the entry.
+    expect(
+      browserSpec(record, "browser-image", streamOptions(), "localdot-accounts", "").Env.some(
+        (entry) => entry.startsWith("LOCALDOT_BROWSER_TZ="),
+      ),
+    ).toBe(false);
+  });
+
   it("streams the browser screen 4:2:0 unless the 4:4:4 opt-in is set", () => {
     const record = sampleBrowserRecord();
     expect(

@@ -27,6 +27,12 @@ const configSchema = schema
     gateAddress: privateAddress,
     scale: schema.union([schema.literal(1), schema.literal(2)]),
     fullcolor: schema.boolean(),
+    timezone: schema
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[A-Za-z][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9._+-]+)*$/u)
+      .optional(),
   })
   .refine((value) => value.browserCellId !== value.parentCellId)
   .refine((value) => value.serviceToken !== value.streamToken);
@@ -45,6 +51,14 @@ function streamFullcolor(value: string | undefined): boolean | undefined {
   return value === "1" ? true : undefined;
 }
 
+// The daemon passes the host's IANA timezone so the browser's clock and Intl match the machine (and
+// its public IP) instead of a container's UTC. An unset or malformed value leaves Chromium's own
+// default rather than failing the cell.
+function browserTimezone(value: string | undefined): string | undefined {
+  if (!value || value.length > 64) return undefined;
+  return /^[A-Za-z][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9._+-]+)*$/u.test(value) ? value : undefined;
+}
+
 export function browserRuntimeConfig(
   environment: Readonly<NodeJS.ProcessEnv>,
 ): BrowserRuntimeConfig {
@@ -57,6 +71,7 @@ export function browserRuntimeConfig(
     scale:
       environment.LOCALDOT_SCALE === "1" ? 1 : environment.LOCALDOT_SCALE === "2" ? 2 : undefined,
     fullcolor: streamFullcolor(environment.LOCALDOT_STREAM_FULLCOLOR),
+    timezone: browserTimezone(environment.LOCALDOT_BROWSER_TZ),
   });
   if (!parsed.success) throw new BrowserConfigurationError();
   return Object.freeze(parsed.data);
@@ -106,11 +121,17 @@ export function browserProcessSpecs(
     PATH: "/lsiopy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     HOME: "/home/browser",
     USER: "abc",
-    LANG: "C.UTF-8",
+    // A real desktop locale, not "C": navigator.language and Accept-Language then read en-US rather
+    // than the bare-container default a detector flags. The image generates en_US.UTF-8.
+    LANG: "en_US.UTF-8",
+    LANGUAGE: "en_US:en",
     DISPLAY: BROWSER_DISPLAY,
     XDG_RUNTIME_DIR: BROWSER_RUNTIME_DIR,
     XDG_CONFIG_HOME: "/home/browser/.config",
     DBUS_SESSION_BUS_ADDRESS: `unix:path=${BROWSER_RUNTIME_DIR}/session-bus`,
+    // The host's timezone so the container clock and Intl match the machine, not UTC. Omitted when
+    // the daemon supplies none.
+    ...(checked.data.timezone ? { TZ: checked.data.timezone } : {}),
   };
   const streaming: NodeJS.ProcessEnv = {
     ...common,
@@ -235,6 +256,9 @@ export function browserProcessSpecs(
         "--password-store=basic",
         "--proxy-server=http://127.0.0.1:3129",
         "--proxy-bypass-list=<-loopback>",
+        // Match the container locale so the UI language, navigator.language and Accept-Language are
+        // en-US rather than a bare-container default.
+        "--lang=en-US",
         "about:blank",
       ],
       { ...common, ACCESSIBILITY_ENABLED: "1", LIBGL_ALWAYS_SOFTWARE: "1" },

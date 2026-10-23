@@ -138,6 +138,28 @@ describe("browser runtime bootstrap confinement", () => {
     expect(args).toContain("--user-data-dir=/profile/chromium");
   });
 
+  it("presents a real desktop locale instead of a bare-container C locale", () => {
+    const { chromium } = browserProcessSpecs(browserRuntimeConfig(fixture()));
+    expect(chromium.env.LANG).toBe("en_US.UTF-8");
+    expect(chromium.env.LANGUAGE).toBe("en_US:en");
+    expect(chromium.args).toContain("--lang=en-US");
+  });
+
+  it("applies the daemon's host timezone, and ignores an absent or malformed one", () => {
+    const withTz = browserProcessSpecs(
+      browserRuntimeConfig({ ...fixture(), LOCALDOT_BROWSER_TZ: "Europe/London" }),
+    );
+    expect(withTz.chromium.env.TZ).toBe("Europe/London");
+    expect(withTz.display.env.TZ).toBe("Europe/London");
+
+    expect(browserProcessSpecs(browserRuntimeConfig(fixture())).chromium.env.TZ).toBeUndefined();
+    for (const bad of ["", "Europe/Lon don", "a; rm -rf /", "$(id)", "../etc"])
+      expect(
+        browserProcessSpecs(browserRuntimeConfig({ ...fixture(), LOCALDOT_BROWSER_TZ: bad }))
+          .chromium.env.TZ,
+      ).toBeUndefined();
+  });
+
   it.each([1, 2])("matches stream pixels and display pixels at scale %s", (scale) => {
     const specs = browserProcessSpecs(
       browserRuntimeConfig({ ...fixture(), LOCALDOT_SCALE: String(scale) }),

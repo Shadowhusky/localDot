@@ -35,12 +35,23 @@ export function browserNetworkSpec(
   return { ...spec, Labels: { ...spec.Labels, "localdot.parent": parentCellId } };
 }
 
+// The daemon's own host timezone (IANA), passed to the browser so its clock and Intl match the
+// machine and its public IP rather than the container's UTC. Returns undefined when unavailable.
+export function hostBrowserTimezone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // The profile is the shared accounts volume, never one named after this cell.
 export function browserSpec(
   record: BrowserCellRecord,
   image: string,
   stream: StreamOptions,
   profileVolume: string,
+  timezone: string | undefined = hostBrowserTimezone(),
 ) {
   const d = record.docker;
   return {
@@ -58,6 +69,7 @@ export function browserSpec(
       `LOCALDOT_GATE_ADDR=${d.gateInternalIp}`,
       `LOCALDOT_SCALE=${record.scale}`,
       `LOCALDOT_STREAM_FULLCOLOR=${stream.fullcolor ? 1 : 0}`,
+      ...(timezone ? [`LOCALDOT_BROWSER_TZ=${timezone}`] : []),
     ],
     Labels: {
       "localdot.cell": record.id,
