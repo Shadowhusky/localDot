@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { browserProcessSpecs, browserRuntimeConfig } from "./runtime-config.ts";
+import {
+  browserProcessSpecs,
+  browserRuntimeConfig,
+  CHROME_EXECUTABLE,
+  CHROMIUM_EXECUTABLE,
+  resolveBrowserExecutable,
+} from "./runtime-config.ts";
 
 function fixture() {
   return {
@@ -104,8 +110,22 @@ describe("browser runtime bootstrap confinement", () => {
     expect(stream.env.SELKIES_VIDEO_FULLCOLOR).toBe(expected);
   });
 
+  it("prefers Google Chrome only when the image contains it, else the sandboxed Chromium", () => {
+    expect(resolveBrowserExecutable(() => true)).toBe(CHROME_EXECUTABLE);
+    expect(resolveBrowserExecutable(() => false)).toBe(CHROMIUM_EXECUTABLE);
+    expect(resolveBrowserExecutable((path) => path === CHROME_EXECUTABLE)).toBe(CHROME_EXECUTABLE);
+    const chrome = browserProcessSpecs(browserRuntimeConfig(fixture()), CHROME_EXECUTABLE).chromium;
+    expect(chrome.executable).toBe(CHROME_EXECUTABLE);
+    // The private-pipe automation, sandbox and proxy confinement are identical on either binary.
+    expect(chrome.args).toContain("--remote-debugging-pipe");
+    expect(chrome.args).toContain("--proxy-server=http://127.0.0.1:3129");
+  });
+
   it("uses the real sandboxed Chromium binary, private pipe and forced loopback-excluding proxy", () => {
-    const chromium = browserProcessSpecs(browserRuntimeConfig(fixture())).chromium;
+    const chromium = browserProcessSpecs(
+      browserRuntimeConfig(fixture()),
+      CHROMIUM_EXECUTABLE,
+    ).chromium;
     expect(chromium.executable).toBe("/usr/lib/chromium/chromium");
     expect(chromium.channel).toBe("cdp");
     expect(chromium.args).toContain("--remote-debugging-pipe");
@@ -136,6 +156,45 @@ describe("browser runtime bootstrap confinement", () => {
       ),
     ).toBe(false);
     expect(args).toContain("--user-data-dir=/profile/chromium");
+  });
+
+  it("presents a real desktop locale instead of a bare-container C locale", () => {
+    const { chromium } = browserProcessSpecs(browserRuntimeConfig(fixture()));
+    expect(chromium.env.LANG).toBe("en_US.UTF-8");
+    expect(chromium.env.LANGUAGE).toBe("en_US:en");
+    expect(chromium.args).toContain("--lang=en-US");
+  });
+
+  it("applies the daemon's host timezone, and ignores an absent or malformed one", () => {
+    const withTz = browserProcessSpecs(
+      browserRuntimeConfig({ ...fixture(), LOCALDOT_BROWSER_TZ: "Europe/London" }),
+    );
+    expect(withTz.chromium.env.TZ).toBe("Europe/London");
+    expect(withTz.display.env.TZ).toBe("Europe/London");
+
+    expect(browserProcessSpecs(browserRuntimeConfig(fixture())).chromium.env.TZ).toBeUndefined();
+    for (const bad of ["", "Europe/Lon don", "a; rm -rf /", "$(id)", "../etc"])
+      expect(
+        browserProcessSpecs(browserRuntimeConfig({ ...fixture(), LOCALDOT_BROWSER_TZ: bad }))
+          .chromium.env.TZ,
+      ).toBeUndefined();
+  });
+
+  it("forces software GL by default and releases it only on an opt-in GPU", () => {
+    const software = browserProcessSpecs(browserRuntimeConfig(fixture())).chromium;
+    expect(software.env.LIBGL_ALWAYS_SOFTWARE).toBe("1");
+
+    const hardware = browserProcessSpecs(
+      browserRuntimeConfig({ ...fixture(), LOCALDOT_BROWSER_GPU: "1" }),
+    ).chromium;
+    expect(hardware.env.LIBGL_ALWAYS_SOFTWARE).toBeUndefined();
+    // The ANGLE/GL selection and the on-by-default GPU sandbox are unchanged either way.
+    expect(hardware.args).toEqual(
+      expect.arrayContaining(["--use-gl=angle", "--use-angle=gl", "--ignore-gpu-blocklist"]),
+    );
+    expect(hardware.args.some((a) => /no-sandbox|disable-gpu-sandbox|swiftshader/u.test(a))).toBe(
+      false,
+    );
   });
 
   it.each([1, 2])("matches stream pixels and display pixels at scale %s", (scale) => {

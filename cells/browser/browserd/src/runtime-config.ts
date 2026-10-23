@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { isIP } from "node:net";
 import { ULID_PATTERN } from "@localdot/protocol";
 import { z as schema } from "zod";
@@ -7,6 +8,19 @@ export const BROWSER_PROFILE_DIR = "/profile/chromium";
 export const BROWSER_UPLOAD_DIR = "/tmp/browser-runtime/uploads";
 export const BROWSER_DOWNLOAD_DIR = "/downloads";
 export const BROWSER_DISPLAY = ":1";
+
+// The always-present sandboxed Chromium from the base image.
+export const CHROMIUM_EXECUTABLE = "/usr/lib/chromium/chromium";
+// Google Chrome's real binary (the google-chrome-stable package; /usr/bin/google-chrome is only a
+// wrapper, and /proc/<pid>/exe resolves to this). Opt-in: present only when the image was built with
+// INSTALL_CHROME. Chrome carries the proprietary codecs and Widevine that bare Chromium lacks, which
+// some sign-in walls treat as a human-browser signal.
+export const CHROME_EXECUTABLE = "/opt/google/chrome/chrome";
+
+// Prefer Google Chrome when the image was built with it; otherwise the always-present Chromium.
+export function resolveBrowserExecutable(exists: (path: string) => boolean = existsSync): string {
+  return exists(CHROME_EXECUTABLE) ? CHROME_EXECUTABLE : CHROMIUM_EXECUTABLE;
+}
 
 const token = schema.string().regex(/^[A-Za-z0-9_-]{43}$/u);
 const privateAddress = schema.string().refine((value) => {
@@ -27,6 +41,13 @@ const configSchema = schema
     gateAddress: privateAddress,
     scale: schema.union([schema.literal(1), schema.literal(2)]),
     fullcolor: schema.boolean(),
+    gpu: schema.boolean(),
+    timezone: schema
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[A-Za-z][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9._+-]+)*$/u)
+      .optional(),
   })
   .refine((value) => value.browserCellId !== value.parentCellId)
   .refine((value) => value.serviceToken !== value.streamToken);
@@ -45,6 +66,21 @@ function streamFullcolor(value: string | undefined): boolean | undefined {
   return value === "1" ? true : undefined;
 }
 
+// Opt-in hardware GPU. The shipped image has no GPU device, so the default forces Mesa software GL.
+// When the operator mounts a real render device (LOCALDOT_BROWSER_GPU=1) ANGLE uses it instead,
+// which removes the llvmpipe/SwiftShader WebGL-renderer fingerprint. The GPU sandbox stays on.
+function browserGpu(value: string | undefined): boolean {
+  return value === "1";
+}
+
+// The daemon passes the host's IANA timezone so the browser's clock and Intl match the machine (and
+// its public IP) instead of a container's UTC. An unset or malformed value leaves Chromium's own
+// default rather than failing the cell.
+function browserTimezone(value: string | undefined): string | undefined {
+  if (!value || value.length > 64) return undefined;
+  return /^[A-Za-z][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9._+-]+)*$/u.test(value) ? value : undefined;
+}
+
 export function browserRuntimeConfig(
   environment: Readonly<NodeJS.ProcessEnv>,
 ): BrowserRuntimeConfig {
@@ -57,6 +93,8 @@ export function browserRuntimeConfig(
     scale:
       environment.LOCALDOT_SCALE === "1" ? 1 : environment.LOCALDOT_SCALE === "2" ? 2 : undefined,
     fullcolor: streamFullcolor(environment.LOCALDOT_STREAM_FULLCOLOR),
+    gpu: browserGpu(environment.LOCALDOT_BROWSER_GPU),
+    timezone: browserTimezone(environment.LOCALDOT_BROWSER_TZ),
   });
   if (!parsed.success) throw new BrowserConfigurationError();
   return Object.freeze(parsed.data);
@@ -96,6 +134,7 @@ function spec(
 
 export function browserProcessSpecs(
   config: BrowserRuntimeConfig,
+  executable: string = resolveBrowserExecutable(),
 ): Readonly<Record<BrowserProcessName, BrowserProcessSpec>> {
   const checked = configSchema.safeParse(config);
   if (!checked.success) throw new BrowserConfigurationError();
@@ -106,11 +145,17 @@ export function browserProcessSpecs(
     PATH: "/lsiopy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     HOME: "/home/browser",
     USER: "abc",
-    LANG: "C.UTF-8",
+    // A real desktop locale, not "C": navigator.language and Accept-Language then read en-US rather
+    // than the bare-container default a detector flags. The image generates en_US.UTF-8.
+    LANG: "en_US.UTF-8",
+    LANGUAGE: "en_US:en",
     DISPLAY: BROWSER_DISPLAY,
     XDG_RUNTIME_DIR: BROWSER_RUNTIME_DIR,
     XDG_CONFIG_HOME: "/home/browser/.config",
     DBUS_SESSION_BUS_ADDRESS: `unix:path=${BROWSER_RUNTIME_DIR}/session-bus`,
+    // The host's timezone so the container clock and Intl match the machine, not UTC. Omitted when
+    // the daemon supplies none.
+    ...(checked.data.timezone ? { TZ: checked.data.timezone } : {}),
   };
   const streaming: NodeJS.ProcessEnv = {
     ...common,
@@ -203,12 +248,13 @@ export function browserProcessSpecs(
     xhelper: spec("/usr/bin/python3", ["-u", "/opt/localdot/browser-helper.py"], common, "stdio"),
     capture: spec("/usr/bin/python3", ["-u", "/opt/localdot/browser-capture.py"], common, "stdio"),
     chromium: spec(
-      "/usr/lib/chromium/chromium",
+      executable,
       [
         "--ozone-platform=x11",
-        // This Xvfb computer has no GPU device. Use the image's Mesa renderer explicitly:
-        // Chromium no longer supplies automatic software WebGL fallback. Keep its GPU sandbox
-        // and site isolation; do not opt into unsafe SwiftShader or disable GPU security.
+        // ANGLE's OpenGL backend. Without a GPU device the Mesa software driver backs it (forced by
+        // LIBGL_ALWAYS_SOFTWARE below), because Chromium no longer supplies automatic software WebGL
+        // fallback; with an opt-in render device mounted it drives that GPU instead. Either way the
+        // GPU sandbox and site isolation stay on; no unsafe SwiftShader, no disabled GPU security.
         "--use-gl=angle",
         "--use-angle=gl",
         "--ignore-gpu-blocklist",
@@ -235,9 +281,18 @@ export function browserProcessSpecs(
         "--password-store=basic",
         "--proxy-server=http://127.0.0.1:3129",
         "--proxy-bypass-list=<-loopback>",
+        // Match the container locale so the UI language, navigator.language and Accept-Language are
+        // en-US rather than a bare-container default.
+        "--lang=en-US",
         "about:blank",
       ],
-      { ...common, ACCESSIBILITY_ENABLED: "1", LIBGL_ALWAYS_SOFTWARE: "1" },
+      {
+        ...common,
+        ACCESSIBILITY_ENABLED: "1",
+        // Force Mesa software GL unless an operator mounted a real GPU (gpu), so WebGL still works
+        // where there is no device and ANGLE uses the GPU where there is one.
+        ...(checked.data.gpu ? {} : { LIBGL_ALWAYS_SOFTWARE: "1" }),
+      },
       "cdp",
     ),
   });

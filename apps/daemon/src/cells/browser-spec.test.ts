@@ -83,6 +83,51 @@ describe("persistent browser container isolation", () => {
     expect(spec.Env.some((entry) => entry.startsWith("LOCALDOT_STREAM_TOKEN="))).toBe(true);
   });
 
+  it("passes the host timezone to the browser, and omits it when unavailable", () => {
+    const record = sampleBrowserRecord();
+    expect(
+      browserSpec(record, "browser-image", streamOptions(), "localdot-accounts", "Asia/Tokyo").Env,
+    ).toContain("LOCALDOT_BROWSER_TZ=Asia/Tokyo");
+    // A falsy timezone (what hostBrowserTimezone returns when the host has none) omits the entry.
+    expect(
+      browserSpec(record, "browser-image", streamOptions(), "localdot-accounts", "").Env.some(
+        (entry) => entry.startsWith("LOCALDOT_BROWSER_TZ="),
+      ),
+    ).toBe(false);
+  });
+
+  it("mounts only the render node for an opt-in GPU and keeps the sandbox otherwise unchanged", () => {
+    const record = sampleBrowserRecord();
+    const software = browserSpec(record, "browser-image", streamOptions(), "localdot-accounts");
+    expect(software.HostConfig).not.toHaveProperty("Devices");
+    expect(software.Env.some((e) => e.startsWith("LOCALDOT_BROWSER_GPU="))).toBe(false);
+
+    const gpu = browserSpec(
+      record,
+      "browser-image",
+      streamOptions(),
+      "localdot-accounts",
+      undefined,
+      {
+        path: "/dev/dri/renderD128",
+        gid: 993,
+      },
+    );
+    expect(gpu.HostConfig.Devices).toEqual([
+      {
+        PathOnHost: "/dev/dri/renderD128",
+        PathInContainer: "/dev/dri/renderD128",
+        CgroupPermissions: "rw",
+      },
+    ]);
+    expect(gpu.HostConfig.GroupAdd).toEqual(["993"]);
+    expect(gpu.Env).toContain("LOCALDOT_BROWSER_GPU=1");
+    // The opt-in only adds the render node; it never relaxes the rest of the sandbox.
+    expect(gpu.HostConfig.CapDrop).toEqual(["ALL"]);
+    expect(gpu.HostConfig.SecurityOpt).toContain("no-new-privileges");
+    expect(gpu.HostConfig.ReadonlyRootfs).toBe(true);
+  });
+
   it("streams the browser screen 4:2:0 unless the 4:4:4 opt-in is set", () => {
     const record = sampleBrowserRecord();
     expect(

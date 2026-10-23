@@ -2,6 +2,10 @@ import hashlib
 import os
 import time
 
+# The managed web browser is Chromium, or Google Chrome when the image was built with it.
+# /proc/<pid>/exe resolves to the real binary, never the /usr/bin wrapper script.
+MANAGED_BROWSER_EXECUTABLES = ('/usr/lib/chromium/chromium', '/opt/google/chrome/chrome')
+
 
 class SurfaceUnavailable(Exception):
     pass
@@ -27,7 +31,7 @@ def inspect_surface(commands, window_id, atspi, read_executable=os.readlink, clo
         if process is None or len(process) != 1 or int(process[0]) <= 1:
             raise SurfaceUnavailable()
         process_id = int(process[0])
-        if read_executable('/proc/' + str(process_id) + '/exe') != '/usr/lib/chromium/chromium':
+        if read_executable('/proc/' + str(process_id) + '/exe') not in MANAGED_BROWSER_EXECUTABLES:
             raise SurfaceUnavailable()
         geometry = window.get_geometry()
         position = commands.root.translate_coords(window, 0, 0)
