@@ -12,6 +12,7 @@ import {
 import type { Images } from "./cells/images.ts";
 import { gateRelay } from "./cells/relay.ts";
 import { computerContainerCheck } from "./doctor-computers.ts";
+import { egressCheck } from "./doctor-egress.ts";
 import { imageVerdict } from "./doctor-image.ts";
 import { runDoctorNetworkProbe } from "./doctor-network.ts";
 import { recoveryChecks } from "./doctor-recovery.ts";
@@ -57,6 +58,8 @@ export interface DoctorDeps {
   // This machine; detected when absent.
   host?: HostPlatform;
   relayProbe?: (deps: RelayProbeDeps) => Promise<RelayVerdict>;
+  // Overrides the link-local cloud-metadata probe behind the browser-egress advisory, for tests.
+  egressProbe?: () => Promise<boolean>;
 }
 
 // Isolated gateway mode for internal networks shipped with Engine 28; S3 verified it on 29.2.
@@ -78,7 +81,11 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   if (deps.signal?.aborted) return { ok: false, checks };
   checks.push(
     ...(deps.home
-      ? [await computerContainerCheck(deps.docker, deps.home), ...recoveryChecks(deps.home)]
+      ? [
+          await computerContainerCheck(deps.docker, deps.home),
+          ...recoveryChecks(deps.home),
+          await egressCheck(deps.egressProbe),
+        ]
       : []),
     await portCheck(deps.port, deps.home),
     ...(deps.keyd ? await keydChecks(deps.keyd, deps.discoveryDeadlineMs, deps.signal) : []),
