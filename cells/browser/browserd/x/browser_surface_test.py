@@ -92,6 +92,12 @@ class BrowserSurfaceTests(unittest.TestCase):
         result = inspect_surface(peer.commands, 8, peer.atspi, read_executable=lambda _path: '/bin/other')
         self.assertIsNone(result['page'])
 
+    def test_accepts_google_chrome_native_window(self):
+        peer = setup()
+        result = inspect_surface(peer.commands, 8, peer.atspi,
+                                 read_executable=lambda _path: '/opt/google/chrome/chrome')
+        self.assertIsNotNone(result['page'])
+
     def test_refuses_multiple_visible_documents_and_native_dialogs(self):
         for role in ['document web', 'dialog', 'menu', 'alert']:
             with self.subTest(role=role):

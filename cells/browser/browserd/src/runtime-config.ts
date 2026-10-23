@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { isIP } from "node:net";
 import { ULID_PATTERN } from "@localdot/protocol";
 import { z as schema } from "zod";
@@ -7,6 +8,19 @@ export const BROWSER_PROFILE_DIR = "/profile/chromium";
 export const BROWSER_UPLOAD_DIR = "/tmp/browser-runtime/uploads";
 export const BROWSER_DOWNLOAD_DIR = "/downloads";
 export const BROWSER_DISPLAY = ":1";
+
+// The always-present sandboxed Chromium from the base image.
+export const CHROMIUM_EXECUTABLE = "/usr/lib/chromium/chromium";
+// Google Chrome's real binary (the google-chrome-stable package; /usr/bin/google-chrome is only a
+// wrapper, and /proc/<pid>/exe resolves to this). Opt-in: present only when the image was built with
+// INSTALL_CHROME. Chrome carries the proprietary codecs and Widevine that bare Chromium lacks, which
+// some sign-in walls treat as a human-browser signal.
+export const CHROME_EXECUTABLE = "/opt/google/chrome/chrome";
+
+// Prefer Google Chrome when the image was built with it; otherwise the always-present Chromium.
+export function resolveBrowserExecutable(exists: (path: string) => boolean = existsSync): string {
+  return exists(CHROME_EXECUTABLE) ? CHROME_EXECUTABLE : CHROMIUM_EXECUTABLE;
+}
 
 const token = schema.string().regex(/^[A-Za-z0-9_-]{43}$/u);
 const privateAddress = schema.string().refine((value) => {
@@ -120,6 +134,7 @@ function spec(
 
 export function browserProcessSpecs(
   config: BrowserRuntimeConfig,
+  executable: string = resolveBrowserExecutable(),
 ): Readonly<Record<BrowserProcessName, BrowserProcessSpec>> {
   const checked = configSchema.safeParse(config);
   if (!checked.success) throw new BrowserConfigurationError();
@@ -233,7 +248,7 @@ export function browserProcessSpecs(
     xhelper: spec("/usr/bin/python3", ["-u", "/opt/localdot/browser-helper.py"], common, "stdio"),
     capture: spec("/usr/bin/python3", ["-u", "/opt/localdot/browser-capture.py"], common, "stdio"),
     chromium: spec(
-      "/usr/lib/chromium/chromium",
+      executable,
       [
         "--ozone-platform=x11",
         // ANGLE's OpenGL backend. Without a GPU device the Mesa software driver backs it (forced by

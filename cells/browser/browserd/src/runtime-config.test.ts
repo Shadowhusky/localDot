@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { browserProcessSpecs, browserRuntimeConfig } from "./runtime-config.ts";
+import {
+  browserProcessSpecs,
+  browserRuntimeConfig,
+  CHROME_EXECUTABLE,
+  CHROMIUM_EXECUTABLE,
+  resolveBrowserExecutable,
+} from "./runtime-config.ts";
 
 function fixture() {
   return {
@@ -104,8 +110,22 @@ describe("browser runtime bootstrap confinement", () => {
     expect(stream.env.SELKIES_VIDEO_FULLCOLOR).toBe(expected);
   });
 
+  it("prefers Google Chrome only when the image contains it, else the sandboxed Chromium", () => {
+    expect(resolveBrowserExecutable(() => true)).toBe(CHROME_EXECUTABLE);
+    expect(resolveBrowserExecutable(() => false)).toBe(CHROMIUM_EXECUTABLE);
+    expect(resolveBrowserExecutable((path) => path === CHROME_EXECUTABLE)).toBe(CHROME_EXECUTABLE);
+    const chrome = browserProcessSpecs(browserRuntimeConfig(fixture()), CHROME_EXECUTABLE).chromium;
+    expect(chrome.executable).toBe(CHROME_EXECUTABLE);
+    // The private-pipe automation, sandbox and proxy confinement are identical on either binary.
+    expect(chrome.args).toContain("--remote-debugging-pipe");
+    expect(chrome.args).toContain("--proxy-server=http://127.0.0.1:3129");
+  });
+
   it("uses the real sandboxed Chromium binary, private pipe and forced loopback-excluding proxy", () => {
-    const chromium = browserProcessSpecs(browserRuntimeConfig(fixture())).chromium;
+    const chromium = browserProcessSpecs(
+      browserRuntimeConfig(fixture()),
+      CHROMIUM_EXECUTABLE,
+    ).chromium;
     expect(chromium.executable).toBe("/usr/lib/chromium/chromium");
     expect(chromium.channel).toBe("cdp");
     expect(chromium.args).toContain("--remote-debugging-pipe");
