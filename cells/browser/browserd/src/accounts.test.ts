@@ -159,6 +159,7 @@ describe("sign-ins in the shared browser", () => {
         gateAddress: "10.0.0.2",
         scale: 2,
         fullcolor: false,
+        gpu: false,
       },
       instance: "54ca7ee3-bff0-40eb-a8c6-08ca30443067",
       control,
