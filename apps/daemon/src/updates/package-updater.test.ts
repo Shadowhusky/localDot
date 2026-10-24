@@ -183,13 +183,17 @@ it.each(["darwin", "linux"] as const)(
     const [executable, args, options] = f.installs()[0] as unknown as [
       string,
       string[],
-      { detached: boolean },
+      { detached: boolean; env: Record<string, string> },
     ];
     expect(executable).toBe(platform === "linux" ? "/usr/bin/systemd-run" : "/bin/bash");
     expect(args).toContain("--package-version");
     expect(args).toContain("0.1.0-rc.2");
     expect(options.detached).toBe(true);
-    if (platform === "linux") expect(args).toContain("--wait");
+    if (platform === "linux") {
+      expect(args).toContain("--wait");
+      // systemd-run --user refuses to start without the user manager's runtime directory.
+      expect(options.env.XDG_RUNTIME_DIR).toBe(`/run/user/${process.getuid?.()}`);
+    }
     f.child.emit("close", 1);
     await vi.waitFor(() => expect(f.settled).toHaveBeenCalledOnce());
     await vi.waitFor(async () =>

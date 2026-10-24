@@ -42,6 +42,12 @@ const pullImages = (
     report,
   );
 
+// systemd-run --user reaches the user manager through the runtime directory systemd makes for this
+// UID; an installer's replaced environment would otherwise drop it and every Linux update fails.
+export function userManagerEnvironment(): { XDG_RUNTIME_DIR: string } {
+  return { XDG_RUNTIME_DIR: `/run/user/${process.getuid?.()}` };
+}
+
 export async function packageAppUpdater(
   home: string,
   prefix: string,
@@ -275,7 +281,10 @@ export async function packageAppUpdater(
               detached: true,
               cwd: "/",
               stdio: ["ignore", logFd, logFd],
-              env: environment,
+              env:
+                deps.platform === "linux"
+                  ? { ...environment, ...userManagerEnvironment() }
+                  : environment,
             });
             child.unref();
             child.once("error", reject);
