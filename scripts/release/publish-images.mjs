@@ -10,10 +10,11 @@ const run = (command, args, options = {}) =>
     maxBuffer: 4 * 1024 * 1024,
     ...options,
   }).trim();
+// GitHub owner and repository names are case-insensitive; the repository is now named localDot.
 if (
   process.argv.length !== 3 ||
   process.env.GITHUB_ACTIONS !== "true" ||
-  process.env.GITHUB_REPOSITORY !== "Shadowhusky/localdot" ||
+  process.env.GITHUB_REPOSITORY?.toLowerCase() !== "shadowhusky/localdot" ||
   process.env.GITHUB_REF !== "refs/heads/main"
 )
   throw new Error("Candidate publication requires the trusted repository's main workflow");
