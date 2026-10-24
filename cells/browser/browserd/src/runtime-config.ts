@@ -32,6 +32,8 @@ const privateAddress = schema.string().refine((value) => {
     (parts[0] === 192 && parts[1] === 168)
   );
 });
+// An IANA zone name: every segment starts with a letter, so "." and ".." can never escape zoneinfo.
+const TIMEZONE = /^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z][A-Za-z0-9_+-]*)*$/u;
 const configSchema = schema
   .strictObject({
     browserCellId: schema.string().regex(ULID_PATTERN),
@@ -41,13 +43,7 @@ const configSchema = schema
     gateAddress: privateAddress,
     scale: schema.union([schema.literal(1), schema.literal(2)]),
     fullcolor: schema.boolean(),
-    gpu: schema.boolean(),
-    timezone: schema
-      .string()
-      .min(1)
-      .max(64)
-      .regex(/^[A-Za-z][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9._+-]+)*$/u)
-      .optional(),
+    timezone: schema.string().max(64).regex(TIMEZONE).optional(),
   })
   .refine((value) => value.browserCellId !== value.parentCellId)
   .refine((value) => value.serviceToken !== value.streamToken);
@@ -66,19 +62,11 @@ function streamFullcolor(value: string | undefined): boolean | undefined {
   return value === "1" ? true : undefined;
 }
 
-// Opt-in hardware GPU. The shipped image has no GPU device, so the default forces Mesa software GL.
-// When the operator mounts a real render device (LOCALDOT_BROWSER_GPU=1) ANGLE uses it instead,
-// which removes the llvmpipe/SwiftShader WebGL-renderer fingerprint. The GPU sandbox stays on.
-function browserGpu(value: string | undefined): boolean {
-  return value === "1";
-}
-
 // The daemon passes the host's IANA timezone so the browser's clock and Intl match the machine (and
 // its public IP) instead of a container's UTC. An unset or malformed value leaves Chromium's own
 // default rather than failing the cell.
 function browserTimezone(value: string | undefined): string | undefined {
-  if (!value || value.length > 64) return undefined;
-  return /^[A-Za-z][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9._+-]+)*$/u.test(value) ? value : undefined;
+  return value && value.length <= 64 && TIMEZONE.test(value) ? value : undefined;
 }
 
 export function browserRuntimeConfig(
@@ -93,7 +81,6 @@ export function browserRuntimeConfig(
     scale:
       environment.LOCALDOT_SCALE === "1" ? 1 : environment.LOCALDOT_SCALE === "2" ? 2 : undefined,
     fullcolor: streamFullcolor(environment.LOCALDOT_STREAM_FULLCOLOR),
-    gpu: browserGpu(environment.LOCALDOT_BROWSER_GPU),
     timezone: browserTimezone(environment.LOCALDOT_BROWSER_TZ),
   });
   if (!parsed.success) throw new BrowserConfigurationError();
@@ -251,10 +238,9 @@ export function browserProcessSpecs(
       executable,
       [
         "--ozone-platform=x11",
-        // ANGLE's OpenGL backend. Without a GPU device the Mesa software driver backs it (forced by
-        // LIBGL_ALWAYS_SOFTWARE below), because Chromium no longer supplies automatic software WebGL
-        // fallback; with an opt-in render device mounted it drives that GPU instead. Either way the
-        // GPU sandbox and site isolation stay on; no unsafe SwiftShader, no disabled GPU security.
+        // This Xvfb computer has no GPU device. Use the image's Mesa renderer explicitly (forced by
+        // LIBGL_ALWAYS_SOFTWARE below): Chromium no longer supplies automatic software WebGL
+        // fallback. Keep its GPU sandbox and site isolation; no unsafe SwiftShader.
         "--use-gl=angle",
         "--use-angle=gl",
         "--ignore-gpu-blocklist",
@@ -286,13 +272,7 @@ export function browserProcessSpecs(
         "--lang=en-US",
         "about:blank",
       ],
-      {
-        ...common,
-        ACCESSIBILITY_ENABLED: "1",
-        // Force Mesa software GL unless an operator mounted a real GPU (gpu), so WebGL still works
-        // where there is no device and ANGLE uses the GPU where there is one.
-        ...(checked.data.gpu ? {} : { LIBGL_ALWAYS_SOFTWARE: "1" }),
-      },
+      { ...common, ACCESSIBILITY_ENABLED: "1", LIBGL_ALWAYS_SOFTWARE: "1" },
       "cdp",
     ),
   });

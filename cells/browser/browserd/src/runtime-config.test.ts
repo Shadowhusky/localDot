@@ -173,28 +173,19 @@ describe("browser runtime bootstrap confinement", () => {
     expect(withTz.display.env.TZ).toBe("Europe/London");
 
     expect(browserProcessSpecs(browserRuntimeConfig(fixture())).chromium.env.TZ).toBeUndefined();
-    for (const bad of ["", "Europe/Lon don", "a; rm -rf /", "$(id)", "../etc"])
+    // Every segment must start with a letter, so no "." or ".." segment can escape the zoneinfo tree.
+    for (const bad of [
+      "",
+      "Europe/Lon don",
+      "a; rm -rf /",
+      "$(id)",
+      "../etc",
+      "A/../../../etc/passwd",
+    ])
       expect(
         browserProcessSpecs(browserRuntimeConfig({ ...fixture(), LOCALDOT_BROWSER_TZ: bad }))
           .chromium.env.TZ,
       ).toBeUndefined();
-  });
-
-  it("forces software GL by default and releases it only on an opt-in GPU", () => {
-    const software = browserProcessSpecs(browserRuntimeConfig(fixture())).chromium;
-    expect(software.env.LIBGL_ALWAYS_SOFTWARE).toBe("1");
-
-    const hardware = browserProcessSpecs(
-      browserRuntimeConfig({ ...fixture(), LOCALDOT_BROWSER_GPU: "1" }),
-    ).chromium;
-    expect(hardware.env.LIBGL_ALWAYS_SOFTWARE).toBeUndefined();
-    // The ANGLE/GL selection and the on-by-default GPU sandbox are unchanged either way.
-    expect(hardware.args).toEqual(
-      expect.arrayContaining(["--use-gl=angle", "--use-angle=gl", "--ignore-gpu-blocklist"]),
-    );
-    expect(hardware.args.some((a) => /no-sandbox|disable-gpu-sandbox|swiftshader/u.test(a))).toBe(
-      false,
-    );
   });
 
   it.each([1, 2])("matches stream pixels and display pixels at scale %s", (scale) => {
