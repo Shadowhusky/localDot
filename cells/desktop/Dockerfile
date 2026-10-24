@@ -42,8 +42,6 @@ RUN apt-get update \
       libreoffice-calc libreoffice-writer libreoffice-impress libreoffice-gtk3 poppler-utils \
       gimp ffmpeg imagemagick pandoc \
       fonts-inter fonts-jetbrains-mono fonts-noto-cjk fonts-noto-color-emoji \
-      fonts-liberation fonts-dejavu-core locales \
- && locale-gen en_US.UTF-8 \
  && rm -rf /var/lib/apt/lists/*
 
 # Stream credentials are random base64url strings and may begin with a hyphen. The base's

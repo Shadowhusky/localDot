@@ -3,13 +3,23 @@ FROM ${DESKTOP_IMAGE}
 USER root
 RUN install -d -m 0700 -o 1000 -g 1000 /profile /downloads
 
+# Everyday fonts and the en_US locale browserd selects, so pages render and identify like an
+# ordinary desktop browser. They live here, not in the desktop image: a computer's update merges its
+# system files with the user's, and package changes there conflict with any app the user installed.
+# The browser cell is recreated from its image every start, so it never migrates. apt bypasses the
+# base image's proxy (Acquire::Proxy DIRECT): it points at the cell's runtime forwarder on
+# 127.0.0.1:3129, which does not exist during the build.
+RUN apt-get -o Acquire::http::Proxy=DIRECT -o Acquire::https::Proxy=DIRECT update \
+ && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::http::Proxy=DIRECT -o Acquire::https::Proxy=DIRECT \
+      install -y --no-install-recommends fonts-liberation fonts-dejavu-core locales \
+ && locale-gen en_US.UTF-8 \
+ && rm -rf /var/lib/apt/lists/*
+
 # Opt-in Google Chrome for the account browser. Off by default, so the distributed image ships only
 # Chromium and never redistributes Chrome; an operator who builds with --build-arg INSTALL_CHROME=1
 # installs it from Google's own apt repo (amd64 and, since 2026, arm64) and accepts Google's terms.
 # browserd then prefers /opt/google/chrome/chrome, whose codecs and Widevine some sign-in walls check
-# for. The signing key is pinned by sha256. apt bypasses the base image's proxy (Acquire::Proxy
-# DIRECT): that proxy points at the cell's runtime forwarder on 127.0.0.1:3129, which does not exist
-# during the build.
+# for. The signing key is pinned by sha256; apt bypasses the base image's proxy as above.
 ARG INSTALL_CHROME=
 # Google rotates this key file; re-verify and bump the pin when a build reports a checksum mismatch.
 ARG CHROME_KEY_SHA256=54dea5f6c2a26091578cf52a999cebc6b64df478d37ad4dce96376b711e3b27c
