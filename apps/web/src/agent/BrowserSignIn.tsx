@@ -114,7 +114,7 @@ export function BrowserSignIn({
           <p>
             If a site won't accept sign-in while dot controls the browser, switch to a private
             browser only you control. Sign in, then choose Hand back — dot stays signed in
-            afterwards and never sees your password or the page.
+            afterwards and never sees your password.
           </p>
           <Button variant="primary" busy={busy || state?.changing} onClick={() => void start()}>
             Sign in without agent control
