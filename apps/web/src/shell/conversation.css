@@ -2174,9 +2174,17 @@
   margin-block: calc(var(--spacing) * 3);
   min-width: 0;
   overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--spacing) * 2);
+}
+.thread-browser-signin strong {
+  color: var(--color-fg-1);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 .thread-browser-signin p {
-  margin-top: var(--spacing);
+  margin-top: 0;
   color: var(--color-fg-2);
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
