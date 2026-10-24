@@ -101,24 +101,25 @@ export function BrowserSignIn({
       {changing ? (
         <p role="status">Switching browser mode…</p>
       ) : signingIn ? (
-        <p role="status">
-          Sign-in mode is on. Retry sign-in in the browser, then choose Hand back. dot cannot
-          inspect the page while you sign in.
-        </p>
+        <>
+          <strong>Sign-in mode is on — you're in control</strong>
+          <p role="status">
+            Sign in now in the browser, then choose Hand back. dot can't see the page while you sign
+            in, and stays signed in afterwards.
+          </p>
+        </>
       ) : (
         <>
-          <Button
-            variant="secondary"
-            size="sm"
-            busy={busy || state?.changing}
-            onClick={() => void start()}
-          >
+          <strong>Sign in yourself</strong>
+          <p>
+            If a site won't accept sign-in while dot controls the browser, switch to a private
+            browser only you control. Sign in, then choose Hand back — dot stays signed in
+            afterwards and never sees your password or the page.
+          </p>
+          <Button variant="primary" busy={busy || state?.changing} onClick={() => void start()}>
             Sign in without agent control
           </Button>
-          <p>
-            Restarts just the browser with automation disconnected. Your tabs and saved sign-ins are
-            kept.
-          </p>
+          <p>Only the browser restarts; your tabs and saved sign-ins are kept.</p>
         </>
       )}
       {error && (
