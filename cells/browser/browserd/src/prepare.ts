@@ -162,7 +162,6 @@ export async function prepareBrowserRuntime(
       gateAddress: config.gateAddress,
       scale: config.scale,
       fullcolor: config.fullcolor,
-      gpu: config.gpu,
       timezone: config.timezone,
     });
     browserProcessSpecs(captured);

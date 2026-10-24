@@ -80,7 +80,6 @@ async function fixture(overrides: Partial<BrowserHttpOptions> = {}) {
       gateAddress: "10.0.0.2",
       scale: 1,
       fullcolor: false,
-      gpu: false,
     },
     instance: identity.instance,
     control,

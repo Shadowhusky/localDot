@@ -59,7 +59,7 @@ export interface DoctorDeps {
   host?: HostPlatform;
   relayProbe?: (deps: RelayProbeDeps) => Promise<RelayVerdict>;
   // Overrides the link-local cloud-metadata probe behind the browser-egress advisory, for tests.
-  egressProbe?: () => Promise<boolean>;
+  egressProbe?: (signal?: AbortSignal) => Promise<boolean>;
 }
 
 // Isolated gateway mode for internal networks shipped with Engine 28; S3 verified it on 29.2.
@@ -84,7 +84,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       ? [
           await computerContainerCheck(deps.docker, deps.home),
           ...recoveryChecks(deps.home),
-          await egressCheck(deps.egressProbe),
+          await egressCheck(deps.egressProbe, deps.signal),
         ]
       : []),
     await portCheck(deps.port, deps.home),

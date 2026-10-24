@@ -175,7 +175,6 @@ async function setup(enableNavigation = true) {
       gateAddress: "10.0.0.2",
       scale: 2,
       fullcolor: false,
-      gpu: false,
     },
     instance,
     control,

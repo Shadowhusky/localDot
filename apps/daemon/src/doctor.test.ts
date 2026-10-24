@@ -667,6 +667,7 @@ describe("runDoctor on Linux", () => {
       host: linux,
       home: "/nonexistent/ld-home",
       relayProbe: async () => ({ ok: true, detail: "reached" }),
+      egressProbe: async () => false,
     });
     expect(byName(report)["gate-relay"]).toMatchObject({ ok: false, detail: "skipped" });
   });
@@ -678,6 +679,7 @@ describe("runDoctor on Linux", () => {
       port: await freePort(),
       host: linux,
       home: "/nonexistent/ld-home",
+      egressProbe: async () => false,
     });
     const detail = byName(report)["docker-socket"]?.detail ?? "";
     expect(detail).toMatch(/running\? Start Docker:/);
