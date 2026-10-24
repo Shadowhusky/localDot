@@ -583,7 +583,7 @@ const installWait = () => {
       .list()
       .some((cell) => live.get(cell.id) || live.idleOperationPending(cell.id) || cell.operation)
   )
-    return "Finish or stop the task before updating localDot.";
+    return "dot is still working on a task, or waiting for you to hand back control. Finish or stop it, then update localDot.";
   appInstalling = true;
   return null;
 };
