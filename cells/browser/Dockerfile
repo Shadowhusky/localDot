@@ -7,7 +7,9 @@ RUN install -d -m 0700 -o 1000 -g 1000 /profile /downloads
 # Chromium and never redistributes Chrome; an operator who builds with --build-arg INSTALL_CHROME=1
 # installs it from Google's own apt repo (amd64 and, since 2026, arm64) and accepts Google's terms.
 # browserd then prefers /opt/google/chrome/chrome, whose codecs and Widevine some sign-in walls check
-# for. The signing key is pinned by sha256.
+# for. The signing key is pinned by sha256. apt bypasses the base image's proxy (Acquire::Proxy
+# DIRECT): that proxy points at the cell's runtime forwarder on 127.0.0.1:3129, which does not exist
+# during the build.
 ARG INSTALL_CHROME=
 # Google rotates this key file; re-verify and bump the pin when a build reports a checksum mismatch.
 ARG CHROME_KEY_SHA256=54dea5f6c2a26091578cf52a999cebc6b64df478d37ad4dce96376b711e3b27c
@@ -16,8 +18,8 @@ RUN if [ -n "$INSTALL_CHROME" ]; then set -eu; \
       echo "${CHROME_KEY_SHA256}  /tmp/google.pub" | sha256sum -c -; \
       gpg --dearmor < /tmp/google.pub > /usr/share/keyrings/google-chrome.gpg; \
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list; \
-      apt-get update; \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends google-chrome-stable; \
+      apt-get -o Acquire::http::Proxy=DIRECT -o Acquire::https::Proxy=DIRECT update; \
+      DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::http::Proxy=DIRECT -o Acquire::https::Proxy=DIRECT install -y --no-install-recommends google-chrome-stable; \
       rm -rf /var/lib/apt/lists/* /tmp/google.pub; \
     fi
 COPY cells/browser/root/etc/localdot/browser-nginx.conf /etc/localdot/browser-nginx.conf
