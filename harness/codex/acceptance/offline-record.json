@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "dd8d5c794813f9a4cb222c29cab715973e4845d054ee1763ce483736f2b90bd0",
+  "inputSha256": "f5d0d1b96649cbfadef895d9c8f8a26bfab03470596f7586afcf1dd9a1fac908",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -372,8 +372,8 @@
     "apps/daemon/src/cells/browser-recovery.ts": "01f9328c6db97289e386b7d5300188a667307a8de187ca94eba3cca24db74456",
     "apps/daemon/src/cells/browser-resources.ts": "301ad3a20d010c85285e0b9b144cc0327c795135165ceb07fb464d6d53a4baaa",
     "apps/daemon/src/cells/browser-seccomp.json": "3bee7b156387cf83fe901afa5e01b9e4475adbe39490d4d6651ea0432e4a6f02",
-    "apps/daemon/src/cells/browser-spec.test.ts": "157fbc7e6675eff03686b693e41ba9574df312cea81fcd7aa945601f53a952d7",
-    "apps/daemon/src/cells/browser-spec.ts": "02e73c5eb2fb888a69b9f4d17aa28010c1d2327264ce624925bc23dee8438804",
+    "apps/daemon/src/cells/browser-spec.test.ts": "a034eda769f8518167d60ef6320f1d72f3c09787b8a49966f842daf53272d43d",
+    "apps/daemon/src/cells/browser-spec.ts": "7398c7febb355ed2ec7f000cdd1b8a11a652e2bcc515845335d59615bddbb4f4",
     "apps/daemon/src/cells/browserd-drag.docker.test.ts": "c61e3cd1c3a7644efb48e9e76765d52af33acdf47e2dca27e8ac079f8bf2e1b7",
     "apps/daemon/src/cells/capture.docker.test.ts": "316a310a6e9fed9025ac5a520398affd051c0c6cddde408f7b27d66b3121807f",
     "apps/daemon/src/cells/computer-update.docker.test.ts": "fbfaa2678f1027832b9bde3eaf0dbc1eb09fb4ad26c3d0d7c85b13e021298448",
@@ -558,6 +558,8 @@
     "apps/daemon/src/diagnostics/canary-verdict.ts": "8309d8339e3f2717af8ac85c97734f3577b00a7515d3ac79650e7eb4b4378326",
     "apps/daemon/src/doctor-computers.test.ts": "05c60fc7107c013dca7ec7b6b2e9e1f7e9b95eaf0c25868d16ca932d1f697ee1",
     "apps/daemon/src/doctor-computers.ts": "edea97447b8df9efdefdf7722490e72547a9ad374ba5aa7a7330ad723e461922",
+    "apps/daemon/src/doctor-egress.test.ts": "8b1acc38dc1ca40cc9e56dfdfad6ba5bac0c44acced65aca133830bdb1ed2b01",
+    "apps/daemon/src/doctor-egress.ts": "77fe086ad2d7cf14960d85782560187040a3670af687523bc21d17cb10a36b6b",
     "apps/daemon/src/doctor-image-integration.test.ts": "773381c83d7b2453dafc1356f7e1f9ae358c10c202f5dfb696d9e888f942abe8",
     "apps/daemon/src/doctor-image.test.ts": "dd2d9123c672e977c2915918c05f9c7d95b201fce0e7e38203c1f879aa04c1ae",
     "apps/daemon/src/doctor-image.ts": "2d24561c9cbbb94961faa1c9765c6bc1349ce4d9a3f3696e6128f7218bda00f4",
@@ -574,8 +576,8 @@
     "apps/daemon/src/doctor-socket.test.ts": "14ee4608b6f1342158aae1884dd8ab4ceae9ce465cf2d1f95baebdcaa0741d31",
     "apps/daemon/src/doctor-socket.ts": "950835e7e454a83b082b481bb050a8d757b0225117e2754117c096c736b75e6a",
     "apps/daemon/src/doctor.docker.test.ts": "579209399356b96b5f8a39246a5cf7456e5d83d96d93bc3bc312785fede78c93",
-    "apps/daemon/src/doctor.test.ts": "49c2c3d00737a8fdb0be0ee5af3484f1578893b26827dd7f2386000d7811a9c0",
-    "apps/daemon/src/doctor.ts": "8b67296794ebe707b0457e6d46fbd51245801bbbc5d31a6701768adc0430944c",
+    "apps/daemon/src/doctor.test.ts": "a72cbf895d0ec5869fda91c76ac6105b12b9a35bf81ab42dadaf1cc6d55d05fc",
+    "apps/daemon/src/doctor.ts": "db0cbede0a75581ff81ce71f29a90c21632c57dcfdb500dbb2a56e96feb862c0",
     "apps/daemon/src/error-code.ts": "ea0cd3359f00f34bc4c8fe60295c4865eb676e487e80777c2704dec39dc36d8e",
     "apps/daemon/src/event-file.ts": "2070e97cf8ac40bc0be12d1925fee0862f431f73215e08f53f08a5f11c8bf301",
     "apps/daemon/src/event-log.test.ts": "c0e1fee6fe43dc9dda1facb14c8b1142d7c79c8148cc93237e8a8faefc0fa7b5",
@@ -1091,7 +1093,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "e8a9f015c1521bb1043a8d64d9b19e5554fce6c2cd550904cfa34adfdd509d85",
+  "reportSha256": "88ea58288c60904b799f199b609bd8c870bb92c5031f4eaae8bd50a81a4d84af",
   "exit": {
     "code": 0,
     "signal": null
