@@ -22,7 +22,7 @@ const Prepared = z.strictObject({
 export async function sourceAppUpdater(
   home: string,
   prefix: string | undefined,
-  installWait: () => string | null,
+  installWait: () => string | null | Promise<string | null>,
   settled: () => void,
   deps = { exec, spawn, platform: process.platform },
 ): Promise<AppUpdater> {
