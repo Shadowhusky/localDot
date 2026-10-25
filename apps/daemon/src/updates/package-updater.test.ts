@@ -15,7 +15,18 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, expect, it, vi } from "vitest";
 import { SetupFailure } from "../../../cli/src/install/setup-failure.ts";
-import { IMAGE_ROOM, packageAppUpdater } from "./package-updater.ts";
+import { IMAGE_ROOM, packageAppUpdater, pullImages } from "./package-updater.ts";
+
+const docker = vi.hoisted(() => ({
+  socket: vi.fn(() => ({ path: "/home/me/.docker/desktop/docker.sock", source: "a context" })),
+  client: vi.fn(() => ({
+    engine: async () => {
+      throw new Error("engine checked");
+    },
+  })),
+}));
+vi.mock("../doctor-socket.ts", () => ({ findDockerSocket: docker.socket }));
+vi.mock("../../../cli/src/install/image-client.ts", () => ({ installImageClient: docker.client }));
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -103,6 +114,16 @@ async function fixture(platform: NodeJS.Platform = "linux") {
     create: () => packageAppUpdater(home, prefix, installWait, settled, deps),
   };
 }
+it("fetches images from the Docker engine the daemon uses, not only the default socket", async () => {
+  await expect(pullImages({} as never, new AbortController().signal, () => {})).rejects.toThrow(
+    "engine checked",
+  );
+  expect(docker.client).toHaveBeenCalledWith(
+    "/home/me/.docker/desktop/docker.sock",
+    expect.any(String),
+    { anyEngine: true },
+  );
+});
 it("keeps a verified download ready after the app restarts", async () => {
   const f = await fixture(),
     first = await f.create();

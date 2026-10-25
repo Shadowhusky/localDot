@@ -19,7 +19,7 @@ import {
 } from "../../../cli/src/install/prepare-images.ts";
 import { privateRecordStore } from "../../../cli/src/install/private-record.ts";
 import { SetupFailure } from "../../../cli/src/install/setup-failure.ts";
-import { dockerSocketPath } from "../cells/docker.ts";
+import { findDockerSocket } from "../doctor-socket.ts";
 import { freeBytes } from "../recorder/disk.ts";
 import { AppUpdater } from "./app-updater.ts";
 import { runPreparation } from "./progress.ts";
@@ -30,14 +30,16 @@ const exec = promisify(execFile);
 export const IMAGE_ROOM = 10 * 1024 ** 3;
 type Pins = Record<(typeof IMAGE_ROLES)[number], PlatformImagePin>;
 const ARCHITECTURE = process.arch === "arm64" ? "arm64" : "amd64";
-const pullImages = (
+// The engine the daemon runs computers on: a Docker context, Docker Desktop's user socket or rootless
+// Docker may be the only one, with nothing at /var/run/docker.sock.
+export const pullImages = (
   pins: Pins,
   signal: AbortSignal,
   report: (p: ImagePreparationProgress) => void,
 ) =>
   prepareImages(
     pins,
-    installImageClient(dockerSocketPath(), ARCHITECTURE, { anyEngine: true }),
+    installImageClient(findDockerSocket().path, ARCHITECTURE, { anyEngine: true }),
     signal,
     report,
   );
