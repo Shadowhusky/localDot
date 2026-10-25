@@ -218,7 +218,13 @@ export class AppUpdater {
     void this.host.install(version).catch(async () => {
       await this.host?.attempts?.save(null).catch(() => {});
       this.#phase = (await this.host?.prepared(version).catch(() => false)) ? "ready" : "idle";
+      // An installer refuses a version its channel has moved past, and a ready download offers
+      // only Install, so look for the release that replaced it.
+      const progress = this.#progress;
+      await this.check();
+      if (this.#record.availableVersion !== version) return;
       this.#error = `localDot ${shown(version)} couldn't be installed, so nothing has changed.`;
+      this.#progress = progress;
     });
   }
   async check(manual = true): Promise<void> {

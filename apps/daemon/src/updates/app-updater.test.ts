@@ -32,7 +32,7 @@ function fixture(record: AppUpdateRecord | null = null) {
         return undefined;
       },
     ),
-    prepared: vi.fn(async () => ready),
+    prepared: vi.fn(async (_version: string) => ready),
     install: vi.fn(async () => {}),
     installWait: vi.fn((): string | null | Promise<string | null> => null),
     notes: vi.fn(async (_after: string | null, upTo: string) => [
@@ -242,6 +242,27 @@ it("keeps a download installable after its installer fails while localDot runs",
     }),
   );
   expect(await f.host.attempts.read()).toBeNull();
+});
+it("replaces a download the channel has moved past once its installer refuses it", async () => {
+  const f = fixture(),
+    downloaded = new Set<string>();
+  f.host.prepare.mockImplementation(async (version) => {
+    downloaded.add(version);
+    return undefined;
+  });
+  f.host.prepared.mockImplementation(async (version) => downloaded.has(version));
+  await f.updater.check();
+  f.host.latest.mockResolvedValue("1.2.0");
+  f.host.install.mockRejectedValue(new Error("The update channel changed."));
+  await f.updater.install();
+  await vi.waitFor(async () =>
+    expect(await f.updater.status()).toMatchObject({
+      phase: "ready",
+      availableVersion: "1.2.0",
+      error: null,
+    }),
+  );
+  expect(f.host.prepare).toHaveBeenLastCalledWith("1.2.0", expect.anything(), expect.anything());
 });
 it("refuses installation while work is active, and shuts down independently only after explicit install", async () => {
   const f = fixture();
