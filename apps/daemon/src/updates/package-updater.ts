@@ -19,7 +19,7 @@ import {
 } from "../../../cli/src/install/prepare-images.ts";
 import { privateRecordStore } from "../../../cli/src/install/private-record.ts";
 import { SetupFailure } from "../../../cli/src/install/setup-failure.ts";
-import { dockerSocketPath } from "../cells/docker.ts";
+import { findDockerSocket } from "../doctor-socket.ts";
 import { freeBytes } from "../recorder/disk.ts";
 import { AppUpdater } from "./app-updater.ts";
 import { runPreparation } from "./progress.ts";
@@ -30,22 +30,30 @@ const exec = promisify(execFile);
 export const IMAGE_ROOM = 10 * 1024 ** 3;
 type Pins = Record<(typeof IMAGE_ROLES)[number], PlatformImagePin>;
 const ARCHITECTURE = process.arch === "arm64" ? "arm64" : "amd64";
-const pullImages = (
+// The engine the daemon runs computers on: a Docker context, Docker Desktop's user socket or rootless
+// Docker may be the only one, with nothing at /var/run/docker.sock.
+export const pullImages = (
   pins: Pins,
   signal: AbortSignal,
   report: (p: ImagePreparationProgress) => void,
 ) =>
   prepareImages(
     pins,
-    installImageClient(dockerSocketPath(), ARCHITECTURE, { anyEngine: true }),
+    installImageClient(findDockerSocket().path, ARCHITECTURE, { anyEngine: true }),
     signal,
     report,
   );
 
+// systemd-run --user reaches the user manager through the runtime directory systemd makes for this
+// UID; an installer's replaced environment would otherwise drop it and every Linux update fails.
+export function userManagerEnvironment(): { XDG_RUNTIME_DIR: string } {
+  return { XDG_RUNTIME_DIR: `/run/user/${process.getuid?.()}` };
+}
+
 export async function packageAppUpdater(
   home: string,
   prefix: string,
-  installWait: () => string | null,
+  installWait: () => string | null | Promise<string | null>,
   settled: () => void,
   deps = { exec, spawn, platform: process.platform, freeBytes, images: pullImages },
 ): Promise<AppUpdater> {
@@ -275,7 +283,10 @@ export async function packageAppUpdater(
               detached: true,
               cwd: "/",
               stdio: ["ignore", logFd, logFd],
-              env: environment,
+              env:
+                deps.platform === "linux"
+                  ? { ...environment, ...userManagerEnvironment() }
+                  : environment,
             });
             child.unref();
             child.once("error", reject);

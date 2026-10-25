@@ -98,6 +98,7 @@ import { summarizeSession, writeSummary } from "./sessions/summary.ts";
 import { Thumbnails } from "./sessions/thumbs.ts";
 import { webDir } from "./static-ui.ts";
 import { loadOrCreateToken } from "./token.ts";
+import { installRefusal } from "./updates/install-wait.ts";
 import { installedAppUpdater } from "./updates/installed-updater.ts";
 import { sourceAppUpdater } from "./updates/source-updater.ts";
 import { attachUpgradeRouter } from "./upgrade-router.ts";
@@ -577,13 +578,9 @@ const exportJobs = new ExportJobs({
 shutdown.push({ name: "video exports", stop: () => exportJobs.close() });
 const installCodes = new InstallCodes(token, port);
 const remoteAccess = new RemoteAccess(home, port, configuredRemoteDomain(home), installCodes);
-const installWait = () => {
-  if (
-    orchestrator
-      .list()
-      .some((cell) => live.get(cell.id) || live.idleOperationPending(cell.id) || cell.operation)
-  )
-    return "Finish or stop the task before updating localDot.";
+const installWait = async () => {
+  const refusal = await installRefusal({ cells: orchestrator, live, runner: agent.runner });
+  if (refusal) return refusal;
   appInstalling = true;
   return null;
 };

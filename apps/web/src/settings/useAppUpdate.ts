@@ -99,8 +99,14 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
       setError(null);
       void work()
         .then(refresh)
-        .catch(() => {
-          if (mounted.current) setError("That update action couldn't complete. Try again.");
+        .catch((err: unknown) => {
+          if (!mounted.current) return;
+          // A refusal is a sentence saying what to do first, such as finishing the current task.
+          setError(
+            err instanceof ApiError && (err.status === 400 || err.status === 409) && err.message
+              ? err.message
+              : "That update action couldn't complete. Try again.",
+          );
         })
         .finally(() => {
           pending.current = false;

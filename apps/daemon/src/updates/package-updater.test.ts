@@ -15,7 +15,18 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, expect, it, vi } from "vitest";
 import { SetupFailure } from "../../../cli/src/install/setup-failure.ts";
-import { IMAGE_ROOM, packageAppUpdater } from "./package-updater.ts";
+import { IMAGE_ROOM, packageAppUpdater, pullImages } from "./package-updater.ts";
+
+const docker = vi.hoisted(() => ({
+  socket: vi.fn(() => ({ path: "/home/me/.docker/desktop/docker.sock", source: "a context" })),
+  client: vi.fn(() => ({
+    engine: async () => {
+      throw new Error("engine checked");
+    },
+  })),
+}));
+vi.mock("../doctor-socket.ts", () => ({ findDockerSocket: docker.socket }));
+vi.mock("../../../cli/src/install/image-client.ts", () => ({ installImageClient: docker.client }));
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -103,6 +114,16 @@ async function fixture(platform: NodeJS.Platform = "linux") {
     create: () => packageAppUpdater(home, prefix, installWait, settled, deps),
   };
 }
+it("fetches images from the Docker engine the daemon uses, not only the default socket", async () => {
+  await expect(pullImages({} as never, new AbortController().signal, () => {})).rejects.toThrow(
+    "engine checked",
+  );
+  expect(docker.client).toHaveBeenCalledWith(
+    "/home/me/.docker/desktop/docker.sock",
+    expect.any(String),
+    { anyEngine: true },
+  );
+});
 it("keeps a verified download ready after the app restarts", async () => {
   const f = await fixture(),
     first = await f.create();
@@ -183,13 +204,17 @@ it.each(["darwin", "linux"] as const)(
     const [executable, args, options] = f.installs()[0] as unknown as [
       string,
       string[],
-      { detached: boolean },
+      { detached: boolean; env: Record<string, string> },
     ];
     expect(executable).toBe(platform === "linux" ? "/usr/bin/systemd-run" : "/bin/bash");
     expect(args).toContain("--package-version");
     expect(args).toContain("0.1.0-rc.2");
     expect(options.detached).toBe(true);
-    if (platform === "linux") expect(args).toContain("--wait");
+    if (platform === "linux") {
+      expect(args).toContain("--wait");
+      // systemd-run --user refuses to start without the user manager's runtime directory.
+      expect(options.env.XDG_RUNTIME_DIR).toBe(`/run/user/${process.getuid?.()}`);
+    }
     f.child.emit("close", 1);
     await vi.waitFor(() => expect(f.settled).toHaveBeenCalledOnce());
     await vi.waitFor(async () =>

@@ -17,7 +17,7 @@ import { readReleaseNotes, versionsBetween } from "./release-notes.ts";
 export function installedAppUpdater(
   home: string,
   identity: ManagedServiceIdentity | null,
-  installWait: () => string | null,
+  installWait: () => string | null | Promise<string | null>,
   installSettled: () => void,
   deps = { spawn },
 ) {

@@ -34,7 +34,7 @@ export interface AppUpdaterHost {
   ): Promise<PreparedUpdate | undefined>;
   prepared(version: string): Promise<boolean>;
   install?(version: string): Promise<void>;
-  installWait?(): string | null;
+  installWait?(): string | null | Promise<string | null>;
   // Newest first: notes after `after` up to `upTo`, or `upTo`'s own when `after` is unknown.
   notes?(after: string | null, upTo: string): Promise<ReleaseNote[]>;
   attempts?: {
@@ -58,6 +58,7 @@ export class AppUpdater {
     dismissedVersion: null,
   };
   #phase: AppUpdateStatus["phase"] = "idle";
+  #admitting = false;
   #error: string | null = null;
   #progress: AppUpdateProgress | null = null;
   #readyDetail = READY;
@@ -194,7 +195,16 @@ export class AppUpdater {
     const version = this.#record.availableVersion;
     if (!version || this.#phase !== "ready" || this.#flight || !this.host?.install)
       throw new Error("Download the update first.");
-    const wait = this.host.installWait?.();
+    // Admission may first end a finished task's wait; a second request meanwhile must not start
+    // another installer. Nothing below may throw once admitted: localDot then refuses all work.
+    if (this.#admitting) throw new Error("The update is already starting.");
+    this.#admitting = true;
+    let wait: string | null | undefined;
+    try {
+      wait = await this.host.installWait?.();
+    } finally {
+      this.#admitting = false;
+    }
     if (wait) throw new Error(wait);
     this.#phase = "installing";
     this.#error = null;
@@ -208,7 +218,13 @@ export class AppUpdater {
     void this.host.install(version).catch(async () => {
       await this.host?.attempts?.save(null).catch(() => {});
       this.#phase = (await this.host?.prepared(version).catch(() => false)) ? "ready" : "idle";
+      // An installer refuses a version its channel has moved past, and a ready download offers
+      // only Install, so look for the release that replaced it.
+      const progress = this.#progress;
+      await this.check();
+      if (this.#record.availableVersion !== version) return;
       this.#error = `localDot ${shown(version)} couldn't be installed, so nothing has changed.`;
+      this.#progress = progress;
     });
   }
   async check(manual = true): Promise<void> {

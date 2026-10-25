@@ -7,7 +7,7 @@ import { AppUpdateAttempt, AppUpdateRecord } from "../../../../packages/protocol
 import { RELEASE_VERSION } from "../../../../packages/protocol/src/release.ts";
 import { privateRecordStore } from "../../../cli/src/install/private-record.ts";
 import { AppUpdater } from "./app-updater.ts";
-import { packageAppUpdater } from "./package-updater.ts";
+import { packageAppUpdater, userManagerEnvironment } from "./package-updater.ts";
 import { pickNotes, releaseNote } from "./release-notes.ts";
 
 const exec = promisify(execFile);
@@ -22,7 +22,7 @@ const Prepared = z.strictObject({
 export async function sourceAppUpdater(
   home: string,
   prefix: string | undefined,
-  installWait: () => string | null,
+  installWait: () => string | null | Promise<string | null>,
   settled: () => void,
   deps = { exec, spawn, platform: process.platform },
 ): Promise<AppUpdater> {
@@ -196,6 +196,7 @@ export async function sourceAppUpdater(
                 PATH: process.env.PATH ?? "/usr/bin:/bin",
                 LOCALDOT_UPDATE_COMMIT: Commit.parse(candidate),
                 LOCALDOT_UPDATE_SHUTDOWN: "1",
+                ...(deps.platform === "linux" ? userManagerEnvironment() : {}),
               },
             });
             child.unref();

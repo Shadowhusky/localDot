@@ -98,6 +98,7 @@ it.each(["linux", "darwin"] as const)(
     if (platform === "linux") {
       expect(command).toBe("/usr/bin/systemd-run");
       expect(args).toContain("--wait");
+      expect(options.env.XDG_RUNTIME_DIR).toBe(`/run/user/${process.getuid?.()}`);
     } else expect(command).toBe(join(f.prefix, "bin/localdot"));
   },
 );
