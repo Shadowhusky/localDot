@@ -12,6 +12,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
     "test:remote": "pnpm --filter @localdot/remote build && pnpm --filter @localdot/remote test",
+    "test:reports": "pnpm --filter @localdot/reports build && pnpm --filter @localdot/reports test",
     "test:docker": "vitest run --config vitest.docker.config.ts",
     "test:eval": "vitest run --config vitest.eval.config.ts",
     "hygiene": "node scripts/check-hygiene.mjs",
@@ -26,7 +27,8 @@
     "test:codex": "vitest run --config vitest.codex.config.ts",
     "test:codex-signin": "vitest run --config vitest.codex-signin.config.ts",
     "check:codex-release": "node --experimental-transform-types scripts/check-codex-release.mjs",
-    "images:cleanup": "node scripts/cleanup-images.mjs"
+    "images:cleanup": "node scripts/cleanup-images.mjs",
+    "dots": "pnpm --dir apps/daemon exec node --import tsx ../cli/src/main.ts dots"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

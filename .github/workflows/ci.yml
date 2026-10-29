@@ -39,6 +39,7 @@ jobs:
       - run: pnpm --filter @localdot/web build
       # The complete app suite exercises macOS signing/launchd; native-macos runs it.
       - run: pnpm test:remote
+      - run: pnpm test:reports
       - run: pnpm hygiene
       - run: pnpm --filter @localdot/protocol schema && git diff --exit-code packages/protocol/schema
   keyd:

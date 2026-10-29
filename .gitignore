@@ -20,3 +20,4 @@ __pycache__/
 .wrangler/
 .dev.vars*
 apps/remote/worker-configuration.d.ts
+apps/reports/worker-configuration.d.ts
