@@ -105,6 +105,8 @@ export const STALL = {
   keyReenter: "key needs re-entering",
   // The detail names the key changed outside localDot, which the user removes and adds again.
   keyRebound: "key changed outside localDot",
+  // The model's key is in the passphrase vault, which is locked; unlocking it resumes the task.
+  keysLocked: "keys locked",
 } as const;
 export const Heartbeat = event(
   "heartbeat",
@@ -311,6 +313,9 @@ export const KeyUse = event(
     decision: z.enum(["allow", "deny", "ask"]),
   }),
 );
+// The task needs saved keys or passwords while their vault is locked: the conversation offers to
+// unlock them until it opens again, which wakes dot.
+export const KeysLock = event("keys.lock", z.object({ locked: z.boolean() }));
 export const BudgetExceeded = event(
   "budget.exceeded",
   z.object({
@@ -469,6 +474,24 @@ export const TaskResult = event(
       .max(32),
   }),
 );
+// Why a delegated agent stopped before it finished. After a usage limit, an error, a restart or the
+// user taking the computer it resumes when dot continues the task; a stopped task, or dot stopping
+// it, leaves it stopped.
+export const SubagentStop = z.enum([
+  "limit",
+  "error",
+  "restarted",
+  "control",
+  "stopped",
+  "cancelled",
+]);
+export type SubagentStop = z.infer<typeof SubagentStop>;
+export const RESUMABLE_STOPS: ReadonlySet<SubagentStop> = new Set([
+  "limit",
+  "error",
+  "restarted",
+  "control",
+]);
 // Runtime-owned child lifecycle, never a claim that the user's whole task is done.
 export const SubagentState = event(
   "subagent.state",
@@ -477,6 +500,9 @@ export const SubagentState = event(
     runId: z.string().min(1).max(128),
     label: z.string().max(200),
     state: z.enum(["running", "completed", "interrupted", "failed"]),
+    reason: SubagentStop.optional(),
+    // This run continues the work an interrupted run left unfinished.
+    resumed: z.literal(true).optional(),
     summary: z.string().max(5000).optional(),
   }),
 );
@@ -578,6 +604,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   PauseChange,
   MemoryChange,
   KeyUse,
+  KeysLock,
   BudgetExceeded,
   CameraHint,
   MessageUser,

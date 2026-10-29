@@ -149,6 +149,9 @@ export const SessionCard = z.object({
   // Older sessions and clients expose the desktop-only `recording` field.
   recordings: z.object({ desktop: RecordingSummary, browser: RecordingSummary }).optional(),
   origin: SessionOrigin.optional(),
+  // Everything the task keeps on this computer (videos, screenshots, history, saved files): what
+  // deleting it frees. Older daemons leave it out.
+  diskBytes: z.number().int().nonnegative().optional(),
 });
 export type SessionCard = z.infer<typeof SessionCard>;
 
@@ -157,6 +160,21 @@ export const SessionIndexPage = z.object({
   next: z.string().nullable(),
 });
 export type SessionIndexPage = z.infer<typeof SessionIndexPage>;
+
+export const DELETE_SESSIONS_MAX = 100;
+export const DeleteSessionsRequest = z.strictObject({
+  ids: z.array(Ulid).min(1).max(DELETE_SESSIONS_MAX),
+});
+export type DeleteSessionsRequest = z.infer<typeof DeleteSessionsRequest>;
+
+// Each id lands in one list. A task already gone counts as deleted, so a retry is harmless; a
+// running task is never deleted.
+export const DeleteSessionsResult = z.object({
+  deleted: z.array(Ulid),
+  live: z.array(Ulid),
+  failed: z.array(Ulid),
+});
+export type DeleteSessionsResult = z.infer<typeof DeleteSessionsResult>;
 
 export const RecordingInfo = z.object({
   manifest: RecordingManifest,

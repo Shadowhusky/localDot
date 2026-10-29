@@ -8,6 +8,9 @@ export const EARLIER_CHARS = 16_000;
 export const EARLIER_TURNS = 400;
 export const EARLIER_LEFT_OUT = "(Earlier messages are left out.)";
 
+// The most messages a snapshot names as taken back after Stop, the newest kept.
+export const CONVERSATION_WITHDRAWN = 256;
+
 const SessionId = z.string().regex(ULID_PATTERN);
 // The conversation the next task continues: its tasks oldest first, the latest last. A new
 // conversation has none yet.
@@ -15,6 +18,9 @@ export const ConversationSnapshot = z.strictObject({
   sessions: z.array(SessionId).max(CONVERSATION_TASKS),
   // Older tasks of the conversation are left out.
   more: z.boolean(),
+  // Messages of these tasks that Stop left unsent and the user then took back to edit, which the
+  // thread leaves out.
+  withdrawn: z.array(z.string().regex(ULID_PATTERN)).max(CONVERSATION_WITHDRAWN).optional(),
 });
 export type ConversationSnapshot = z.infer<typeof ConversationSnapshot>;
 

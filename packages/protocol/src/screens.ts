@@ -5,7 +5,11 @@ export const SCREEN_NAMES = ["desktop", "browser"] as const;
 export const ScreenName = schema.enum(SCREEN_NAMES);
 export type ScreenName = schema.infer<typeof ScreenName>;
 
-export const SwitchScreenInput = schema.strictObject({ screen: ScreenName });
+export const SwitchScreenInput = schema.strictObject({
+  screen: ScreenName,
+  // Start a stuck web browser again first, keeping its sign-ins.
+  restart: schema.boolean().optional(),
+});
 export type SwitchScreenInput = schema.infer<typeof SwitchScreenInput>;
 
 export const ScreenGeometry = schema.strictObject({

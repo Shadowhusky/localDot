@@ -14,6 +14,9 @@ export const KEYD_REENTER = "secret-reenter";
 // keyd's refusal of a request that needs a key whose destination was changed outside localDot after
 // its value was stored; X-Keyd-Secret names the key, which the user removes and adds again.
 export const KEYD_REBOUND = "secret-rebound";
+// keyd's refusal of a request that needs a saved key or password while the passphrase vault is
+// locked; its admin API answers 423 with the same code.
+export const KEYD_VAULT_LOCKED = "vault-locked";
 export const SURROGATE_PATTERN = /^ld_[a-z0-9]{2,12}_[0-9A-Za-z]{22}_[0-9A-Za-z]{6}$/;
 export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 export const LLM_PROVIDERS = [
@@ -175,6 +178,9 @@ export const KeydVault = z.object({
 });
 export type KeydVault = z.infer<typeof KeydVault>;
 
+// The page seals the vault's passphrase to keyd's boot key, so the daemon relays only ciphertext.
+export const VaultUnlock = z.strictObject({ sealed: Sealed });
+
 export const KeydStatus = z.object({
   service: ServiceProcessIdentity.nullish(),
   bootId: z.string().min(1),
@@ -194,8 +200,17 @@ export const KeydStatus = z.object({
   // keyd takes a desktop gate's capture token; one from before capture refuses it.
   capture: z.boolean().optional(),
   generalSecrets: z.boolean().optional(),
+  // keyd copies its keys to another dot's key service, and forgets them all when a dot goes.
+  keyCopy: z.boolean().optional(),
+  vaultForget: z.boolean().optional(),
 });
 export type KeydStatus = z.infer<typeof KeydStatus>;
+
+const Count = z.number().int().nonnegative();
+export const KeydKeyCopy = z.object({ secrets: Count, logins: Count, skipped: Count });
+export type KeydKeyCopy = z.infer<typeof KeydKeyCopy>;
+export const KeydForgotten = z.object({ secrets: Count, logins: Count });
+export type KeydForgotten = z.infer<typeof KeydForgotten>;
 
 // keyd's Web Push egress (POST /v1/push/send): the daemon hands over ciphertext, keyd signs and
 // sends it to the browser vendor's push service and answers with that service's status.
