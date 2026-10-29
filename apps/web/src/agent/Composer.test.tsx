@@ -22,8 +22,19 @@ vi.mock("../ui/Announcer.tsx", async (importOriginal) => ({
 const said = () =>
   spoken.announce.mock.calls.flatMap(([channel, text]) => (channel === "composer" ? [text] : []));
 
-// How often the message field itself renders, and how often a key scan runs.
-const counts = vi.hoisted(() => ({ field: 0, scans: 0 }));
+// How often the message field itself renders, how often a key scan runs, and how often the composer
+// draws (it reads the voice hook once a draw).
+const counts = vi.hoisted(() => ({ field: 0, scans: 0, composer: 0 }));
+vi.mock("../voice/useVoice.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../voice/useVoice.ts")>();
+  return {
+    ...actual,
+    useVoice: (...args: Parameters<typeof actual.useVoice>) => {
+      counts.composer += 1;
+      return actual.useVoice(...args);
+    },
+  };
+});
 vi.mock("../ui/TextArea.tsx", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../ui/TextArea.tsx")>();
   return {
@@ -1193,6 +1204,39 @@ describe("typing", () => {
     expect(counts.field).toBe(renders);
     expect(field.value).toBe("Add a chart of the monthly totals");
   });
+  it("draws again for what it reads of the task, not for dot's words or heartbeats", () => {
+    const props: ComposerProps = {
+      api: createApi("fixture", { origin: "http://127.0.0.1:4790" }),
+      cell,
+      agent,
+      known: true,
+      pending: false,
+      keysOpen: false,
+      receiveKey: vi.fn(() => false),
+    };
+    const view = render(<Composer {...props} />);
+    const draws = counts.composer;
+    const working: AgentSessionView = {
+      ...agent,
+      model: {
+        ...agent.model,
+        messages: new Map([
+          ["m1", { id: "m1", seq: 1, at: 1, role: "assistant", text: "Checking", final: false }],
+        ]),
+        lastHeartbeat: { t: 1, everyMs: 500, ongoing: true, receivedAt: 1 },
+      },
+    };
+    view.rerender(<Composer {...props} agent={working} cell={{ ...cell }} />);
+    expect(counts.composer).toBe(draws);
+    const asked = {
+      ...working,
+      model: { ...working.model, pendingAsk: "01JXYZ00000000000000000ASK" },
+    };
+    view.rerender(<Composer {...props} agent={asked} cell={{ ...cell }} />);
+    expect(counts.composer).toBe(draws + 1);
+    view.rerender(<Composer {...props} agent={asked} cell={{ ...cell, paused: true }} />);
+    expect(counts.composer).toBeGreaterThan(draws + 1);
+  });
   it("checks typed text for keys once typing pauses, and at once on Send or leaving", async () => {
     const f = setup();
     const key = `sk-ant-api03-${"x".repeat(40)}`;
@@ -1405,7 +1449,7 @@ describe("a queued message taken back to edit", () => {
   const path = "~/Downloads/Uploads/0f0f1558-d8b6-478a-8daf-eadc6dc3725f/totals.csv";
   const edit = `/api/agent/sessions/${sessionId}/messages/${messageId}/edit`;
   // The edit route answers with the words dot gave back; anything sent is accepted.
-  function editing(reply: () => Response | Promise<Response>) {
+  function editing(reply: () => Response | Promise<Response>, route = edit) {
     const calls: { method: string; path: string; body?: unknown }[] = [];
     const api = createApi("fixture", {
       origin: "http://127.0.0.1:4790",
@@ -1417,7 +1461,7 @@ describe("a queued message taken back to edit", () => {
           path: at,
           body: init?.body ? JSON.parse(String(init.body)) : undefined,
         });
-        return at === edit ? reply() : new Response(null, { status: 202 });
+        return at === route ? reply() : new Response(null, { status: 202 });
       },
     });
     return { calls, f: setup(undefined, { api }) };
@@ -1467,17 +1511,22 @@ describe("a queued message taken back to edit", () => {
     expect(calls.some((call) => call.method === "DELETE")).toBe(false);
   });
 
-  it("takes back a message Stop left unsent from its own words, without asking dot", async () => {
-    const { calls, f } = editing(() => new Response(null, { status: 409 }));
+  it("takes back a message Stop left unsent in any task, through the task's record", async () => {
+    const stopped = `/api/agent/sessions/${otherSession}/messages/${messageId}/edit`;
+    const { calls, f } = editing(
+      () => Response.json({ text: withAttachments("Original words", [path]) }),
+      stopped,
+    );
     f.input("My newer draft");
-    const taking = editQueued(otherSession, messageId, withAttachments("Original words", [path]));
+    const taking = editQueued(otherSession, messageId, true);
     expect(document.activeElement).toBe(f.field);
     await act(async () => expect(await taking).toBe(true));
     expect(f.field.value).toBe("My newer draft\n\nOriginal words");
     expect(screen.getByRole("list", { name: "Attached files" }).textContent).toContain(
       "totals.csv",
     );
-    expect(calls).toEqual([]);
+    // dot keeps that it was taken back, so it stays out of the thread after a reload.
+    expect(calls).toEqual([{ method: "POST", path: stopped, body: undefined }]);
   });
 
   it("keeps the draft and says why when the message has already started", async () => {
@@ -1487,6 +1536,16 @@ describe("a queued message taken back to edit", () => {
     expect(f.field.value).toBe("Keep me");
     expect(screen.getByRole("alert").textContent).toBe(
       "Couldn't move your queued message here. It may have started already.",
+    );
+  });
+
+  it("keeps the draft and says so when a message Stop left unsent can't come back", async () => {
+    const { f } = editing(() => new Response("message is no longer queued", { status: 409 }));
+    f.input("Keep me");
+    await act(async () => expect(await editQueued(sessionId, messageId, true)).toBe(false));
+    expect(f.field.value).toBe("Keep me");
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Couldn't move your message here. Try again.",
     );
   });
 

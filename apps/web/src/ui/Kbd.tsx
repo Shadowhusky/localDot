@@ -55,9 +55,15 @@ function spell(key: string, mac: boolean): Spelling {
   return { label, spoken: label, aria: key };
 }
 
+// Every shortcut a tooltip names asks again on each render: the answer is kept for the platform.
+let seen: { platform: string; apple: boolean } | undefined;
+
 export function isApple(): boolean {
   const nav = navigator as Navigator & { userAgentData?: { platform: string } };
-  return /mac|iphone|ipad|ipod/i.test(nav.userAgentData?.platform || nav.platform);
+  const platform = nav.userAgentData?.platform || nav.platform;
+  if (seen?.platform !== platform)
+    seen = { platform, apple: /mac|iphone|ipad|ipod/i.test(platform) };
+  return seen.apple;
 }
 
 export function formatKeys(keys: readonly string[], mac = isApple()): Spelling {

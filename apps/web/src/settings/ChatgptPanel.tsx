@@ -1,5 +1,6 @@
 import { CHATGPT_DEVICE_CODE_OFF } from "@localdot/protocol";
 import { useRef, useState } from "react";
+import { limitName } from "../agent/plan-usage.ts";
 import { resetTime } from "../agent/UsageFooter.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -17,12 +18,6 @@ import { TextField } from "../ui/TextField.tsx";
 import { chatgptSteps, megabytes } from "./chatgpt-steps.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
 
-function limitName(minutes: number | undefined, fallback: string): string {
-  if (minutes === 10_080) return "Weekly limit";
-  if (minutes !== undefined && minutes % 60 === 0) return `${minutes / 60}-hour limit`;
-  return fallback;
-}
-
 function checkedAt(value: number | undefined): string {
   const time = value === undefined ? undefined : new Date(value);
   return time && Number.isFinite(time.getTime())
@@ -30,7 +25,7 @@ function checkedAt(value: number | undefined): string {
     : "Not checked yet";
 }
 
-export function ChatgptPanel({ account }: { account: ChatgptControls }) {
+export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: string }) {
   const more = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false);
   const [confirm, setConfirm] = useState<"refresh" | "logout" | null>(null);
@@ -54,7 +49,7 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
   const cancelReason =
     account.blocked || account.busy?.startsWith("cancel_") ? "Cancelling…" : undefined;
   return (
-    <section className="settings-chatgpt" aria-labelledby="chatgpt-title">
+    <section id={id} className="settings-chatgpt" aria-labelledby="chatgpt-title">
       <header className="settings-card-head">
         <div>
           <h4 id="chatgpt-title" className="settings-card-title">

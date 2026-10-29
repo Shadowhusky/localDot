@@ -1,9 +1,10 @@
-import type { AgentRoleChoice } from "@localdot/protocol";
+import { type AgentRoleChoice, PlanProvider } from "@localdot/protocol";
 import { sameModelOptions } from "@localdot/providers";
-import { type RefObject, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { premiumSpeed, SPEED_NAMES } from "../settings/choices.ts";
 import { ModelOptionsFields, optionsLabel } from "../settings/ModelOptionsFields.tsx";
 import type { ModelGroup, ModelOption } from "../settings/model-options.ts";
+import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -14,6 +15,8 @@ import type { Align, Side } from "../ui/position.ts";
 import { Select } from "../ui/Select.tsx";
 import { SpeedMark } from "../ui/SpeedMark.tsx";
 import { useTooltip } from "../ui/Tooltip.tsx";
+import { PlanUsageList, planAlert, useNow } from "./PlanUsage.tsx";
+import type { PlanUsageFeed } from "./usePlanUsage.ts";
 
 export interface ModelMenuProps {
   open: boolean;
@@ -31,11 +34,15 @@ export interface ModelMenuProps {
   onChoose(option: ModelOption): void;
   // Given what the menu opened from, which takes the focus back when Settings closes.
   onManage(trigger: HTMLElement): void;
+  // How much of each subscription plan is used, shown for the plans the menu offers.
+  usage?: PlanUsageFeed;
 }
 
 // Model and thinking settings share one panel. Edits are local until Apply; Escape discards
 // them. Catalog/account refreshes never remount the slider or steal the user's focus.
 export function ModelMenu(props: ModelMenuProps) {
+  const watch = props.usage?.watch;
+  useEffect(() => (props.open ? watch?.() : undefined), [props.open, watch]);
   return (
     <Popover
       open={props.open}
@@ -58,6 +65,7 @@ function ModelMenuBody({
   onChoose,
   onManage,
   outputLimit,
+  usage,
   ...props
 }: ModelMenuProps) {
   const choices = groups.flatMap((group) => group.options);
@@ -65,6 +73,10 @@ function ModelMenuBody({
   const [draft, setDraft] = useState<ModelOption | undefined>(() =>
     selected ? { ...selected, choice: choice ?? selected.choice } : undefined,
   );
+  // The plans on offer, the one the chosen model runs on first.
+  const plans = PlanProvider.options
+    .filter((provider) => choices.some((option) => option.choice.provider === provider))
+    .sort((a, b) => Number(b === draft?.choice.provider) - Number(a === draft?.choice.provider));
   const dirty =
     draft &&
     (draft.id !== current ||
@@ -107,6 +119,7 @@ function ModelMenuBody({
           onChange={(choice) => setDraft({ ...draft, choice })}
         />
       )}
+      {usage?.reply && plans.length > 0 && <PlanUsageList reply={usage.reply} providers={plans} />}
       <div className="model-config-actions">
         <Button
           variant="quiet"
@@ -158,7 +171,9 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
   const label = name.replace(/^Claude (?=[A-Za-z])/, "");
   const effort = menu.choice?.options && optionsLabel(menu.choice.options);
   const speed = premiumSpeed(menu.choice?.options);
-  const said = [name, effort, speed && SPEED_NAMES[speed]].filter(Boolean).join(", ");
+  const now = useNow(60_000);
+  const alert = planAlert(menu.usage?.reply, menu.choice?.provider, now);
+  const said = [name, effort, speed && SPEED_NAMES[speed], alert?.words].filter(Boolean).join(", ");
   return (
     <>
       <Button
@@ -179,6 +194,13 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
         <MiddleTruncate text={label} tail={Math.max(0, label.length - label.lastIndexOf(" "))} />
         {effort && <span className="composer-effort">{effort}</span>}
         {speed && <SpeedMark speed={speed} className="composer-speed" />}
+        {alert && (
+          <Badge
+            kind="dot"
+            tone={alert.tone === "limit" ? "danger" : "attention"}
+            label={alert.words}
+          />
+        )}
         <Icon name="chevron-down" size={12} className="composer-model-chevron" />
       </Button>
       {tooltip}

@@ -2,7 +2,7 @@ import { ULID_PATTERN } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { openSocket } from "../lib/socket.ts";
-import { describeRequestError } from "./errors.ts";
+import { describeRequestError, MEMORY_ADVICE } from "./errors.ts";
 import type { CellStatus, CellView, Pending } from "./hud-state.ts";
 import { followOperation, type OperationClock } from "./operation-clock.ts";
 import { parseCell, parseCells } from "./parse.ts";
@@ -17,7 +17,9 @@ export interface CellController extends CellView {
   reconnects: number;
   // The start, update or stop going on, anchored when its summary arrived.
   operation: OperationClock | null;
-  start(): void;
+  // The last start was held back by Docker's memory, whose advice is the error: it may start anyway.
+  startAnyway: boolean;
+  start(anyway?: boolean): void;
   stop(): void;
   resume(): void;
   retry(): void;
@@ -46,6 +48,7 @@ export function useCell(api: ApiClient): CellController {
   const [status, setStatus] = useState<CellStatus>("listing");
   const [pending, setPending] = useState<Pending | null>("list");
   const [error, setError] = useState<string | null>(null);
+  const [startAnyway, setStartAnyway] = useState(false);
   const [reconnects, setReconnects] = useState(0);
   const cellId = cell?.id ?? null;
   const streamed = useStreamed(cell);
@@ -182,11 +185,15 @@ export function useCell(api: ApiClient): CellController {
       if (pendingRef.current !== null) return;
       wait(kind);
       setError(null);
+      setStartAnyway(false);
       try {
         await action();
       } catch (err) {
         if (!mounted.current) return;
         setError(describeRequestError(err, kind === "resume" ? "resume" : undefined));
+        setStartAnyway(
+          err instanceof ApiError && err.status === 409 && MEMORY_ADVICE.test(err.message),
+        );
         // No answer: the daemon may have acted (a create may have saved its record). A 404: the
         // computer is gone. Either way the daemon's list says what is there now.
         if (!(err instanceof ApiError) || err.status === 404) {
@@ -200,23 +207,29 @@ export function useCell(api: ApiClient): CellController {
     [relist, wait],
   );
 
-  const start = useCallback(() => {
-    if (cell?.fenced || cell?.replacementPending) return;
-    if (cellId) {
-      void run("start", async () => {
-        await api.post(`${CELLS}/${cellId}/start`);
-      });
-    } else {
-      void run("create", async () => {
-        const created = await api.post<CellSummary>(CELLS, { scale: 2 });
-        if (mounted.current) {
-          const next = parseCell(created);
-          selectedId.current = next.id;
-          show(next);
-        }
-      });
-    }
-  }, [api, cellId, cell?.fenced, cell?.replacementPending, run, show]);
+  const start = useCallback(
+    (anyway = false) => {
+      if (cell?.fenced || cell?.replacementPending) return;
+      if (cellId) {
+        void run("start", async () => {
+          await api.post(`${CELLS}/${cellId}/start`, anyway ? { force: true } : undefined);
+        });
+      } else {
+        void run("create", async () => {
+          const created = await api.post<CellSummary>(CELLS, {
+            scale: 2,
+            ...(anyway ? { force: true } : {}),
+          });
+          if (mounted.current) {
+            const next = parseCell(created);
+            selectedId.current = next.id;
+            show(next);
+          }
+        });
+      }
+    },
+    [api, cellId, cell?.fenced, cell?.replacementPending, run, show],
+  );
 
   const stop = useCallback(() => {
     if (!cellId) return;
@@ -289,6 +302,7 @@ export function useCell(api: ApiClient): CellController {
     pending,
     streamed,
     error,
+    startAnyway,
     listed,
     reconnects,
     operation,

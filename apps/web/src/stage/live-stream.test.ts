@@ -87,6 +87,25 @@ it("asks again for a ticket the daemon refused, less often each time", async () 
   expect(clients()).toHaveLength(0);
 });
 
+it("asks for a ticket at once when the viewer tries again, and drops a client that never showed", async () => {
+  const { api, minted } = daemon((n) =>
+    n <= 2 ? new Response("not ready", { status: 409 }) : Response.json({ path: ticket(n) }),
+  );
+  const { stream } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
+  stream.connect(() => {});
+  await vi.advanceTimersByTimeAsync(2_250);
+  expect(minted()).toBe(2);
+  // The next try would wait four seconds.
+  stream.retry();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(minted()).toBe(3);
+  expect(clients().map((frame) => frame.getAttribute("src"))).toEqual([`${ticket(3)}#shared`]);
+  stream.retry();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(minted()).toBe(4);
+  expect(clients().map((frame) => frame.getAttribute("src"))).toEqual([`${ticket(4)}#shared`]);
+});
+
 it("tells its relay each second what this viewer can take, from the round trip the relay reports, and that a hidden page asks for nothing", async () => {
   const restore = fakeChromium();
   let visibility: DocumentVisibilityState = "visible";
@@ -208,7 +227,36 @@ it("tells its relay it asks for nothing once no stage shows it, unless a stage t
   }
 });
 
-it("releases hidden clients even when the visibility event was missed, and resumes once", async () => {
+it("keeps a hidden page's client with its video stopped, even when the visibility event was missed, and resumes it", async () => {
+  let visibility: DocumentVisibilityState = "visible";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  const { stream, minted, send, transport, restore } = await relayClient();
+  const close = vi.fn();
+  Object.assign(transport, { close });
+  try {
+    visibility = "hidden";
+    await vi.advanceTimersByTimeAsync(250);
+    expect(send).toHaveBeenCalledWith("STOP_VIDEO");
+    expect(close).not.toHaveBeenCalled();
+    expect(clients()).toHaveLength(1);
+    expect(stream.picture).toBe("suspended");
+    await vi.advanceTimersByTimeAsync(KEEP_MS / 2);
+    expect(minted()).toBe(1);
+    send.mockClear();
+    visibility = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(250);
+    expect(send).toHaveBeenCalledWith("START_VIDEO");
+    expect(send).toHaveBeenCalledWith("REQUEST_KEYFRAME");
+    expect(minted()).toBe(1);
+    expect(clients()).toHaveLength(1);
+  } finally {
+    Reflect.deleteProperty(document, "visibilityState");
+    restore();
+  }
+});
+
+it("lets a hidden page's client go after a minute, or as the page freezes, and takes a fresh one on return", async () => {
   let visibility: DocumentVisibilityState = "visible";
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
   const { stream, minted, transport, restore } = await relayClient();
@@ -216,18 +264,64 @@ it("releases hidden clients even when the visibility event was missed, and resum
   Object.assign(transport, { close });
   try {
     visibility = "hidden";
-    await vi.advanceTimersByTimeAsync(250);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(KEEP_MS);
     expect(close).toHaveBeenCalledOnce();
     expect(clients()).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(STALE_MS * 3);
-    expect(minted()).toBe(1);
     expect(vi.getTimerCount()).toBe(0);
     visibility = "visible";
-    stream.refresh();
+    document.dispatchEvent(new Event("visibilitychange"));
     await vi.advanceTimersByTimeAsync(500);
     expect(minted()).toBe(2);
+    const fresh = clients()[0];
+    if (!fresh) throw new Error("no fresh client");
+    playInClient(fresh, "after-freeze");
+    Object.assign(fresh.contentWindow as Window, {
+      selkiesTransport: { readyState: 1, send() {} },
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    stream.presented(1);
+    visibility = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(clients()).toHaveLength(1);
+    document.dispatchEvent(new Event("freeze"));
+    expect(clients()).toHaveLength(0);
   } finally {
     Reflect.deleteProperty(document, "visibilityState");
+    restore();
+  }
+});
+
+it("stops its video while its stage is out of sight and resumes it without a new client", async () => {
+  const { stream, minted, send, reports, restore } = await relayClient();
+  try {
+    await vi.advanceTimersByTimeAsync(1_000);
+    send.mockClear();
+    stream.show(false);
+    expect(send.mock.calls).toEqual([[qualityMessage({ visible: false })], ["STOP_VIDEO"]]);
+    await vi.advanceTimersByTimeAsync(STALE_MS * 2);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(stream.picture).not.toBe("held");
+    stream.show(true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(send).toHaveBeenCalledWith("START_VIDEO");
+    expect(reports().at(-1)).toBe(qualityMessage({ visible: true, framerate: 60, crf: 25 }));
+    expect(minted()).toBe(1);
+  } finally {
+    restore();
+  }
+});
+
+it("asks for no more than its stage's frame rate, and the full rate again once the stage allows it", async () => {
+  const { stream, second, reports, restore } = await relayClient();
+  try {
+    stream.cap(30);
+    await second();
+    expect(reports().at(-1)).toBe(qualityMessage({ visible: true, framerate: 30, crf: 25 }));
+    stream.cap(60);
+    await second();
+    expect(reports().at(-1)).toBe(qualityMessage({ visible: true, framerate: 60, crf: 25 }));
+  } finally {
     restore();
   }
 });
@@ -428,6 +522,27 @@ it("recovers a silent open stream, and closes each retired viewer during repeate
       expect(clients()).toHaveLength(2);
     }
     expect(close).toHaveBeenCalledOnce();
+  } finally {
+    restore();
+  }
+});
+
+it("keeps a still screen live while a slow link brings the answer to its keyframe probe", async () => {
+  const { stream, send, minted, restore } = await relayClient();
+  try {
+    const view = clients()[0]?.contentWindow;
+    if (!view) throw new Error("no client");
+    await vi.advanceTimersByTimeAsync(250);
+    stream.presented(1);
+    await vi.advanceTimersByTimeAsync(STALE_MS);
+    expect(send).toHaveBeenCalledWith("REQUEST_KEYFRAME");
+    await vi.advanceTimersByTimeAsync(TAP_STALL_MS - 1_000);
+    expect(stream.picture).toBe("live");
+    Object.assign(view, { videoChunksReceived: 1 });
+    stream.presented(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(stream.picture).toBe("live");
+    expect(minted()).toBe(1);
   } finally {
     restore();
   }

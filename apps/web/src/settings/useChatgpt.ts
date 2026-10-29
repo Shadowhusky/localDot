@@ -32,6 +32,9 @@ const preparing = (status: Pick<ChatgptSummary, "available" | "install" | "sandb
   status.available &&
   status.install.state === "ready" &&
   (status.sandbox === "unchecked" || status.sandbox === "checking");
+// One empty list, so a page that renders often sees the same models until they change.
+const NO_MODELS: readonly never[] = [];
+
 export function useChatgpt(api: ApiClient, visible: boolean) {
   const [summary, setSummary] = useState<ChatgptSummary | null>(null);
   const [verified, setVerified] = useState(false);
@@ -499,7 +502,7 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
     notice,
     code: attachCode,
     link: attachLink,
-    models: summary?.state === "signed_in" && verified ? (summary.models ?? []) : [],
+    models: summary?.state === "signed_in" && verified ? (summary.models ?? NO_MODELS) : NO_MODELS,
     canStart:
       verified &&
       !busy &&

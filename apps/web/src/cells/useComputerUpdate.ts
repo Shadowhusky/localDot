@@ -9,12 +9,14 @@ const UPDATE_WAIT_MS = 180_000;
 const FAILED = "computer-update-failed";
 const READY = "computer-update-ready";
 export const UPDATE_READY = "A new version of your computer is ready";
+export const UPDATE_BLOCKED =
+  "An installed app changed files this update needs, so it can't be applied automatically. Your computer is unchanged; you can keep using it. To get the new version, Start fresh in Settings; it erases your computer's files.";
 
 // The daemon's own answers that are already plain words (apps/daemon/src/cells/computer-update.ts
 // and orchestrator.ts); anything else stays out of sight.
 const PLAIN = new Set([
   "The previous system image is missing from Docker. Restore it before updating this computer. Your apps and files are unchanged.",
-  "An installed app changed files needed by this update. Nothing was replaced.",
+  UPDATE_BLOCKED,
   "This computer has installed apps or system changes that this update cannot preserve yet. Your computer is unchanged; you can keep using it. Updating localDot itself is separate.",
   "This computer can't be updated right now.",
   "Your computer is already updating.",
@@ -84,7 +86,8 @@ export function useComputerUpdate(api: ApiClient, cell: CellSummary | null): Com
           return;
         }
         const message = describeUpdateError(status, text);
-        showToast({ id: FAILED, title: message, tone: "danger" });
+        // The computer now says its update is blocked, and the notice says so once.
+        if (message !== UPDATE_BLOCKED) showToast({ id: FAILED, title: message, tone: "danger" });
         if (mounted.current) setError(message);
       })
       .finally(() => {
@@ -130,47 +133,62 @@ async function requestUpdate(api: ApiClient, id: string): Promise<void> {
 
 const noticeKey = (id: string) => `localdot-update-notice:${id}`;
 
-function noticed(id: string): boolean {
+// What the notice last said about a computer: "1" that a new version is ready, or "blocked".
+type Said = "1" | "blocked";
+
+function noticed(id: string): string | null {
   try {
-    return localStorage.getItem(noticeKey(id)) !== null;
+    return localStorage.getItem(noticeKey(id));
   } catch {
-    return false;
+    return null;
   }
 }
 
-function notice(id: string, on: boolean): void {
+function notice(id: string, said: Said | null): void {
   try {
-    if (on) localStorage.setItem(noticeKey(id), "1");
+    if (said) localStorage.setItem(noticeKey(id), said);
     else localStorage.removeItem(noticeKey(id));
   } catch {}
 }
 
-// Says once, quietly from the island, that a new version is ready, and only while dot is not at
-// work. It can say so again after the computer has been brought up to date.
+// Says once, quietly from the island, that a new version is ready, or that it can't be applied,
+// and only while dot is not at work. It can say so again after the computer has been brought up
+// to date.
 export function useUpdateNotice(cell: CellSummary | null, idle: boolean, update: ComputerUpdate) {
   const run = useRef(update.run);
   run.current = update.run;
   const id = cell?.id ?? null;
-  const ready = !!cell?.updateAvailable && !update.busy;
-  const current = cell?.state === "ready" && !cell.updateAvailable && !update.busy;
+  const said: Said | null = update.busy
+    ? null
+    : cell?.updateAvailable
+      ? "1"
+      : cell?.updateBlocked
+        ? "blocked"
+        : null;
+  const current =
+    cell?.state === "ready" && !cell.updateAvailable && !cell.updateBlocked && !update.busy;
   const shown = useRef<string | null>(null);
   useEffect(() => {
     if (!id) return;
     if (current) {
-      notice(id, false);
+      notice(id, null);
       shown.current = null;
     }
-    if (!ready || !idle) {
+    if (!said || !idle) {
       dismissToast(READY);
       return;
     }
-    if (shown.current === id || noticed(id)) return;
-    shown.current = id;
-    notice(id, true);
-    showToast({
-      id: READY,
-      title: UPDATE_READY,
-      action: { label: "Update", onAction: () => run.current() },
-    });
-  }, [id, ready, current, idle]);
+    if (shown.current === `${id} ${said}` || noticed(id) === said) return;
+    shown.current = `${id} ${said}`;
+    notice(id, said);
+    showToast(
+      said === "1"
+        ? {
+            id: READY,
+            title: UPDATE_READY,
+            action: { label: "Update", onAction: () => run.current() },
+          }
+        : { id: READY, title: UPDATE_BLOCKED },
+    );
+  }, [id, said, current, idle]);
 }

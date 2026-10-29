@@ -14,6 +14,8 @@ export interface DialogProps {
   description?: ReactNode;
   // What the choice is about, as label and value pairs under the description.
   facts?: readonly (readonly [string, ReactNode])[];
+  // A control the choice depends on, such as a checkbox, between the text and the choices.
+  body?: ReactNode;
   // The control that asked. The dialog grows out of it, and on a wide screen opens beside it.
   anchor?: RefObject<HTMLElement | null>;
   // The choices, the safe one first: it takes focus, so Enter never confirms by accident.
@@ -59,6 +61,7 @@ function DialogLayer({
   title,
   description,
   facts,
+  body,
   anchor,
   children,
   root,
@@ -138,6 +141,7 @@ function DialogLayer({
             ))}
           </dl>
         )}
+        {body && <div className="ui-dialog-body">{body}</div>}
         <div className="ui-dialog-actions">{children}</div>
       </section>
     </LayerPortal>

@@ -1,5 +1,6 @@
+import type { AwayCause, AwayLevel } from "../stage/connection.ts";
 import type { StreamPicture } from "../stage/live-stream.ts";
-import { DOCKER_DOWN } from "./errors.ts";
+import { DOCKER_DOWN, MEMORY_ADVICE } from "./errors.ts";
 import type { CellSummary } from "./types.ts";
 
 // What useCell knows: "listing" until the daemon first answers the list, "unknown" once a list has
@@ -22,6 +23,8 @@ export interface CellView {
   streamed?: boolean;
   // The displayed stage requires its own painted frame, not another viewer's relay health.
   viewer?: boolean;
+  // The picture this view has shown is away (stage/connection.ts).
+  away?: { cause: AwayCause; level: AwayLevel } | null;
 }
 
 export type HudActionKind = "start" | "stop" | "retry" | "resume";
@@ -72,6 +75,7 @@ export function hudFor({
   picture = "none",
   streamed = false,
   viewer = false,
+  away = null,
 }: CellView): HudState {
   const idle = pending === null;
   const hud = (
@@ -100,6 +104,20 @@ export function hudFor({
           : "Startup recovery needs attention. Restart localDot to retry; your files are retained.",
       "retry",
     );
+  // A screen this page has shown keeps its last picture through any gap, whatever the screen's own
+  // status meanwhile: a blip changes nothing and the stage tells of a switch, while a longer gap
+  // reads as reconnecting, never as the computer coming up.
+  if (away)
+    return away.level === "blip" || away.cause === "switch"
+      ? hud("live", "Ready", "Your computer is live.", "stop")
+      : hud(
+          "reconnecting",
+          "Reconnecting…",
+          away.cause === "browser"
+            ? "The web browser is starting again."
+            : "The stream paused. Reconnecting.",
+          "stop",
+        );
   if (status === "listing")
     return hud("checking", "Checking…", "Looking for your computer.", "start", false);
   if (status === "unknown") {
@@ -160,10 +178,13 @@ export function hudFor({
         );
       const restart = cell.error ? RESTART_NOTE.exec(cell.error) : null;
       if (restart) {
+        const memory = outOfMemory(cell.error);
         return hud(
           "restarting",
           "Reconnecting…",
-          `Your computer stopped unexpectedly. Restarting it (attempt ${restart[1]} of ${restart[2]}).`,
+          memory
+            ? `Your computer ran out of memory. Restarting it (attempt ${restart[1]} of ${restart[2]}).${memory.advice ? ` ${memory.advice}` : ""}`
+            : `Your computer stopped unexpectedly. Restarting it (attempt ${restart[1]} of ${restart[2]}).`,
           "stop",
         );
       }
@@ -214,9 +235,12 @@ export function hudFor({
     : hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
 }
 
+const SCREEN_PHASES = new Set<ComputerPhase>(["live", "connecting", "reconnecting", "suspended"]);
+
 // A separate browser owns the picture's health, while lifecycle actions still target its
 // desktop. Only the desktop's stream states yield to that screen: failures, containment,
-// pause and lifecycle operations always remain authoritative.
+// pause and lifecycle operations always remain authoritative. The browser's own stop and start
+// (it starts again in place) are only its picture on the way, never the computer's lifecycle.
 export function withScreenHud(parent: HudState, screen?: HudState): HudState {
   if (
     !screen ||
@@ -227,7 +251,23 @@ export function withScreenHud(parent: HudState, screen?: HudState): HudState {
       parent.phase !== "suspended")
   )
     return parent;
-  return { ...screen, action: parent.action };
+  if (SCREEN_PHASES.has(screen.phase)) return { ...screen, action: parent.action };
+  return {
+    phase: "connecting",
+    label: "Connecting…",
+    caption: "Waiting for this screen's first picture.",
+    action: parent.action,
+    live: false,
+  };
+}
+
+// Docker stopped the computer for memory; with several running, the daemon says what to raise.
+const OUT_OF_MEMORY = /^(desktop|gate) container ran out of memory\b/;
+
+function outOfMemory(error: string | undefined): { advice?: string } | undefined {
+  if (!error || !OUT_OF_MEMORY.test(error)) return undefined;
+  const advice = MEMORY_ADVICE.exec(error)?.[0];
+  return advice ? { advice } : {};
 }
 
 const STOP_FAILED = "stop failed: ";
@@ -238,6 +278,8 @@ const DOCKER_ERROR = /^docker (unreachable|\d+) on /;
 // carry Docker's own text, which stays out of the caption.
 function describeCellError(error: string | undefined): string {
   if (!error) return "Your computer could not start.";
+  const memory = outOfMemory(error);
+  if (memory) return `Your computer ran out of memory. ${memory.advice ?? "Turn it on again."}`;
   if (error.startsWith(UPDATE_UNFINISHED))
     return "The update didn't finish. Turn on your computer to finish it.";
   if (error.startsWith(UPDATE_RECORDS_UNREADABLE))

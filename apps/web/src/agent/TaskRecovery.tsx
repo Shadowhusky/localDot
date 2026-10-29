@@ -2,9 +2,12 @@ import { BudgetRaiseRequest, STALL } from "@localdot/protocol";
 import { useState } from "react";
 import { dollars } from "../copy/format.ts";
 import { ownedPause } from "../session/status.ts";
+import type { ReportAbout } from "../settings/reports-api.ts";
+import type { SettingsTip } from "../settings/settings-link.ts";
 import { Button } from "../ui/Button.tsx";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
+import type { IconName } from "../ui/icons.ts";
 import { Meter } from "../ui/Meter.tsx";
 import { MoneyField } from "../ui/MoneyField.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
@@ -67,7 +70,7 @@ function knownReason(
   if (reason === "chatgpt sign-in expired" || reason === "chatgpt account changed")
     return {
       title: "Sign in to ChatGPT again",
-      text: "Repair the ChatGPT account in Settings, then continue this task.",
+      text: "Sign in to your ChatGPT account again, then continue this task.",
     };
   if (reason === "chatgpt plan limit reached")
     return {
@@ -77,7 +80,12 @@ function knownReason(
   if (reason === "claude code sign-in expired")
     return {
       title: "Sign in to Claude Code again",
-      text: "Claude Code on this Mac isn't signed in. Run claude auth login in Terminal, then continue this task.",
+      text: "Claude Code on this Mac isn't signed in. Run claude auth login in Terminal (its setup shows the command too), then continue this task.",
+    };
+  if (reason === STALL.keysLocked)
+    return {
+      title: "Your saved keys are unlocked",
+      text: "Continue, and I'll pick up where I stopped.",
     };
   if (reason === "claude code plan limit reached")
     return {
@@ -93,6 +101,29 @@ function knownReason(
     };
   return undefined;
 }
+// The one place that unblocks a reason, opened with what to do there lit up.
+const FIXES: Record<
+  string,
+  { label: string; icon?: IconName; section: "models" | "keys"; tip?: SettingsTip }
+> = {
+  "chatgpt sign-in expired": {
+    label: "Sign in to ChatGPT",
+    section: "models",
+    tip: "models-chatgpt",
+  },
+  "chatgpt account changed": {
+    label: "Sign in to ChatGPT",
+    section: "models",
+    tip: "models-chatgpt",
+  },
+  "claude code sign-in expired": {
+    label: "Open Claude Code setup",
+    section: "models",
+    tip: "models-claude-code",
+  },
+  [STALL.keyd]: { label: "Open Keys", icon: "key-round", section: "keys", tip: "keys-protection" },
+  [STALL.keyRebound]: { label: "Open Keys", icon: "key-round", section: "keys" },
+};
 // What a step adds to the limit. Two are offered: the smallest that covers what the next request
 // needs, and the one after it.
 const RAISES = [2, 5, 10, 25, 50] as const;
@@ -154,10 +185,11 @@ export function TaskRecovery({
   onCarryOn,
   onResumeSelected,
   resumeBlocked,
+  onReport,
 }: {
   agent: AgentSessionView;
   controls: TaskControls;
-  onSettings(trigger: HTMLButtonElement, section?: "models" | "keys"): void;
+  onSettings(trigger: HTMLButtonElement, section?: "models" | "keys", tip?: SettingsTip): void;
   // Opens Keys at the form that stores this key's value again.
   onReenterKey?(trigger: HTMLButtonElement, id: string): void;
   // Sends a follow-up that carries on a task the user's action limit stopped.
@@ -167,6 +199,8 @@ export function TaskRecovery({
   onCarryOn?(): Promise<boolean>;
   onResumeSelected?(): Promise<boolean>;
   resumeBlocked?: string;
+  // Opens Report a problem about this task.
+  onReport?(trigger: HTMLElement, about: ReportAbout): void;
 }) {
   const budget = agent.model.budget;
   const need = budget?.data.needUSD;
@@ -211,6 +245,41 @@ export function TaskRecovery({
         )}
       </section>
     );
+  const report = (trigger: HTMLElement, title: string, reason?: string) =>
+    onReport?.(trigger, {
+      context: {
+        kind: "task",
+        ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
+        ...(reason ? { reason } : {}),
+      },
+      title,
+    });
+  if (agent.model.ended?.reason === "error" && agent.sessionId && onReport && !controls.fenced) {
+    const why = state?.state === "error" ? state.reason : undefined;
+    return (
+      <section className="thread-recovery" aria-label="Task recovery">
+        <h3 className="thread-recovery-title">The task ended with an error</h3>
+        <p className="thread-recovery-text">
+          If it keeps happening, send a report so the localDot team can see what went wrong. You see
+          everything in it before it goes.
+        </p>
+        <div className="thread-recovery-actions">
+          <Button
+            variant="secondary"
+            onClick={(event) =>
+              report(
+                event.currentTarget,
+                why ? `The task ended: ${why}` : "The task ended with an error.",
+                why,
+              )
+            }
+          >
+            Report this problem
+          </Button>
+        </div>
+      </section>
+    );
+  }
   // While a Pause holds the task, only a spending limit that still holds it needs this panel.
   const hold = agent.snapshot?.pause ? agent.snapshot.budgetHold : undefined;
   const limited = state?.state === "idle" && state.reason === STALL.actionLimit;
@@ -267,6 +336,7 @@ export function TaskRecovery({
   // The key to enter again, or to remove and add again, when keyd named one.
   const reentry = !hold && reason === STALL.keyReenter ? (state.detail ?? "") : undefined;
   const changed = !hold && reason === STALL.keyRebound ? (state.detail ?? "") : undefined;
+  const fix = hold ? undefined : FIXES[reason ?? ""];
   const resume = limited ? (
     <Button
       variant="primary"
@@ -278,7 +348,7 @@ export function TaskRecovery({
     </Button>
   ) : (
     <Button
-      variant={raising || reentry !== undefined || changed !== undefined ? "secondary" : "primary"}
+      variant={raising || reentry !== undefined || fix ? "secondary" : "primary"}
       disabledReason={
         resumeBlocked ?? (controls.canResumeTask ? undefined : "The task can't continue right now.")
       }
@@ -399,13 +469,13 @@ export function TaskRecovery({
                 Re-enter key
               </Button>
             )}
-            {changed !== undefined && (
+            {fix && (
               <Button
                 variant="primary"
-                icon="key-round"
-                onClick={(event) => onSettings(event.currentTarget, "keys")}
+                icon={fix.icon}
+                onClick={(event) => onSettings(event.currentTarget, fix.section, fix.tip)}
               >
-                Open Keys
+                {fix.label}
               </Button>
             )}
             {resume}
@@ -437,6 +507,16 @@ export function TaskRecovery({
           <Button variant="quiet" onClick={controls.recheck}>
             Check task state
           </Button>
+          {onReport && (
+            <Button
+              variant="quiet"
+              onClick={(event) =>
+                report(event.currentTarget, known?.title ?? "The task needs attention", reason)
+              }
+            >
+              Report this problem
+            </Button>
+          )}
         </div>
         <p className="thread-note">
           {onResumeSelected

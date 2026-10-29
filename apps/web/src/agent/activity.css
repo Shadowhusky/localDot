@@ -39,14 +39,15 @@
 
 /* The plan over the steps: "Plan" and how far dot is, a hairline of progress, then the item dot is
    on and the one after it. Open, the strip lifts into one card whose list takes those lines' place;
-   the card keeps its closed height in the rail, so the steps under it stay put. */
+   the card keeps its closed height in the rail until the list has folded away again, so the steps
+   under it stay put. */
 .plan-card {
   position: relative;
   flex: none;
   min-height: var(--_closed, 0);
 }
 
-.plan-strip[data-open] {
+.plan-card[data-lifted] > .plan-strip {
   position: absolute;
   inset-inline: 0;
   top: 0;
@@ -60,7 +61,7 @@
   padding-inline: calc(var(--spacing) * 2 - 1px);
 }
 
-.plan-strip[data-open] > .ui-disclosure-trigger {
+.plan-card[data-lifted] > .plan-strip > .ui-disclosure-trigger {
   border-radius: var(--radius-group) var(--radius-group) 0 0;
 }
 
@@ -604,10 +605,6 @@ button.activity-row-head[data-pressed] {
   font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
-.activity-content > .activity-empty:first-child {
-  padding-top: 0;
-}
-
 .activity-note {
   margin-top: calc(var(--spacing) * 2);
   color: var(--color-fg-3);
@@ -926,6 +923,7 @@ button.activity-usage-trigger:active {
   z-index: 4;
   flex: none;
   min-height: 0;
+  margin-top: calc(var(--spacing) * 2);
 }
 .activity-plan .plan-list {
   max-height: min(320px, 45dvh);
@@ -1111,6 +1109,13 @@ button.activity-usage-trigger:active {
 }
 .subagent-heading > span:last-child {
   flex: none;
+  color: var(--color-fg-3);
+  font-size: var(--text-footnote);
+}
+/* Under the label, past the glyph and its gap. */
+.subagent-reason {
+  margin: calc(var(--spacing) * 1) 0 0;
+  padding-inline-start: calc(var(--spacing) * 6);
   color: var(--color-fg-3);
   font-size: var(--text-footnote);
 }

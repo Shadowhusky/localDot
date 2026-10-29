@@ -16,6 +16,7 @@ export const CellSummarySchema = z.strictObject({
   fenced: ComputerFence.optional(),
   replacementPending: z.literal(true).optional(),
   updateAvailable: z.literal(true).optional(),
+  updateBlocked: z.literal(true).optional(),
   updating: z.literal(true).optional(),
   needsFreshStart: z.literal(true).optional(),
   operation: ComputerOperation.optional(),

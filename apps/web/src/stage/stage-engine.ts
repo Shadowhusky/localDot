@@ -54,6 +54,17 @@ interface Pending {
 
 const reducedMotionQuery = () => window.matchMedia("(prefers-reduced-motion: reduce)");
 
+// The canvas keeps at most this many pixels for each CSS pixel: beyond it a stage-sized picture
+// shows little more, and every frame costs the GPU for each pixel.
+export const MAX_BACKING_SCALE = 1.5;
+
+// Whether some of the canvas is in the viewport with a size, and the share of the viewport it
+// covers.
+export interface StageView {
+  onScreen: boolean;
+  share: number;
+}
+
 // The stage's canvas and the worker that owns it. It lives apart from React, so a stage that moves
 // to another container or remounts keeps its picture, its overlays and its frame pump.
 export class StageEngine implements StageCanvasHandle {
@@ -77,6 +88,8 @@ export class StageEngine implements StageCanvasHandle {
   #replayListeners = new Set<(message: ReplayMessage) => void>();
   #statsListeners = new Set<(stats: PumpStats) => void>();
   #flipListeners = new Set<(flip: Flip) => void>();
+  #viewListeners = new Set<(view: StageView) => void>();
+  #view: StageView = { onScreen: true, share: 0 };
   #teardown: () => void = () => {};
 
   constructor() {
@@ -123,6 +136,20 @@ export class StageEngine implements StageCanvasHandle {
     return () => this.#flipListeners.delete(listener);
   }
 
+  // Tells `listener` the canvas's view now, then whenever it changes.
+  onView(listener: (view: StageView) => void): () => void {
+    this.#viewListeners.add(listener);
+    listener(this.#view);
+    return () => this.#viewListeners.delete(listener);
+  }
+
+  #viewed(view: StageView): void {
+    if (view.onScreen === this.#view.onScreen && Math.abs(view.share - this.#view.share) < 0.01)
+      return;
+    this.#view = view;
+    for (const listener of this.#viewListeners) listener(view);
+  }
+
   // Shows the canvas just before `anchor`. The first placement starts the worker at the size the
   // canvas has there; the worker owns the canvas from then on.
   place(anchor: Element): void {
@@ -148,7 +175,7 @@ export class StageEngine implements StageCanvasHandle {
   #start(): void {
     const canvas = this.canvas;
     const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_BACKING_SCALE);
     const motion = reducedMotionQuery();
     const worker = new Worker(new URL("./render-worker.ts", import.meta.url), { type: "module" });
     const offscreen = canvas.transferControlToOffscreen();
@@ -170,18 +197,43 @@ export class StageEngine implements StageCanvasHandle {
     worker.onmessage = (e: MessageEvent<WorkerOut>) => this.#receive(e.data);
     const onMotion = () => this.#post({ type: "view", view: { reducedMotion: motion.matches } });
     motion.addEventListener("change", onMotion);
+    // The observers' first reports, after the canvas is laid out, say where it is: a stage that is
+    // still being placed has no size yet.
+    let box = { w: rect.width, h: rect.height };
+    let inView = true;
+    const view = () =>
+      this.#viewed({
+        onScreen: inView && box.w > 0 && box.h > 0,
+        share: (box.w * box.h) / Math.max(1, window.innerWidth * window.innerHeight),
+      });
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
+      box = { w: entry?.contentRect.width ?? 0, h: entry?.contentRect.height ?? 0 };
+      view();
       // Explicit DPR also respects Chromium's emulated HiDPI: its devicePixelContentBoxSize
       // describes native display pixels and can disagree with the page's devicePixelRatio.
-      const w = Math.round((entry?.contentRect.width ?? 0) * dpr);
-      const h = Math.round((entry?.contentRect.height ?? 0) * dpr);
+      const w = Math.round(box.w * dpr);
+      const h = Math.round(box.h * dpr);
       if (w > 0 && h > 0) {
         this.#viewport = { w, h };
         this.#post({ type: "resize", width: w, height: h });
       }
     });
     observer.observe(canvas);
+    // Clipped away counts as out of sight: a folded phone screen keeps its size at no height.
+    const sight =
+      typeof IntersectionObserver === "function"
+        ? new IntersectionObserver(
+            (entries) => {
+              const entry = entries.at(-1);
+              inView = !!entry?.isIntersecting && entry.intersectionRatio > 0;
+              view();
+            },
+            { threshold: [0, 0.01] },
+          )
+        : null;
+    sight?.observe(canvas);
+    window.addEventListener("resize", view);
     // A kept stage that is not on the page reads the appearance when it is placed again.
     const onAppearance = () => {
       if (this.#anchor) this.#readTheme();
@@ -191,8 +243,10 @@ export class StageEngine implements StageCanvasHandle {
     this.#worker = worker;
     this.#teardown = () => {
       window.removeEventListener(APPEARANCE_EVENT, onAppearance);
+      window.removeEventListener("resize", view);
       motion.removeEventListener("change", onMotion);
       observer.disconnect();
+      sight?.disconnect();
       this.#source?.stop();
       this.#source = null;
       for (const pending of [...this.#pendingOracle.values(), ...this.#pendingReplay.values()]) {
@@ -204,6 +258,7 @@ export class StageEngine implements StageCanvasHandle {
       this.#replayListeners.clear();
       this.#statsListeners.clear();
       this.#flipListeners.clear();
+      this.#viewListeners.clear();
       worker.postMessage({ type: "replay-close" } satisfies WorkerIn);
       worker.terminate();
       this.#worker = null;

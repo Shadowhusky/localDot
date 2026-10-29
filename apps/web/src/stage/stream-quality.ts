@@ -22,6 +22,11 @@ export interface QualitySample {
 export const FRAMERATES = [60, 45, 30, 24, 18, 12] as const;
 // A touch device shows the stream a few inches wide and runs on a battery: it asks for no more.
 export const HANDHELD_FRAMERATE = 30;
+// dot's work watched in part of the window shows every step at 30 fps. A stage that covers this
+// share of the window or more (full screen, the chat hidden), or a computer in the user's own
+// hands, gets the device's full rate.
+export const WATCHING_FRAMERATE = 30;
+export const LARGE_STAGE_SHARE = 0.6;
 // x264 CRF: each step up saves about a fifth of the bit rate, and the picture softens. Still
 // screens are sharpened again by Selkies' paint-over whatever the step.
 export const CRFS = [25, 28, 31, 34, 37, 41] as const;
@@ -64,10 +69,26 @@ export function framerateCeiling(
   return matches("(pointer: coarse)") ? HANDHELD_FRAMERATE : FRAMERATES[0];
 }
 
+// The most a stage asks for: the device's ceiling for a large stage or the user's control, and the
+// watching rate otherwise.
+export function stageFramerate(
+  stage: { share: number; control: boolean },
+  ceiling = framerateCeiling(),
+): number {
+  return stage.control || stage.share >= LARGE_STAGE_SHARE
+    ? ceiling
+    : Math.min(ceiling, WATCHING_FRAMERATE);
+}
+
+const topStep = (maxFramerate: number) => {
+  const top = FRAMERATES.findIndex((fps) => fps <= maxFramerate);
+  return top < 0 ? FRAMERATES.length - 1 : top;
+};
+
 export class QualityController {
   #preference: StreamPreference;
   // The step the frame rate starts from and never rises above.
-  readonly #top: number;
+  #top: number;
   #framerate: number;
   #crf = 0;
   // The steps down, latest last, each with its cause: a step comes back once its cause has cleared,
@@ -83,9 +104,18 @@ export class QualityController {
 
   constructor(preference: StreamPreference = "auto", maxFramerate: number = FRAMERATES[0]) {
     this.#preference = preference;
-    const top = FRAMERATES.findIndex((fps) => fps <= maxFramerate);
-    this.#top = top < 0 ? FRAMERATES.length - 1 : top;
+    this.#top = topStep(maxFramerate);
     this.#framerate = this.#top;
+  }
+
+  // A new ceiling, as the stage grows, shrinks or changes hands. Steps a slow device or link took
+  // stay taken, counted down from the new ceiling.
+  cap(maxFramerate: number): void {
+    const top = topStep(maxFramerate);
+    if (top === this.#top) return;
+    const lowered = this.#lowered.filter((step) => step.knob === "framerate").length;
+    this.#top = top;
+    this.#framerate = Math.min(FRAMERATES.length - 1, top + lowered);
   }
 
   // A new choice starts again from full quality, giving what it prefers to give as needed.

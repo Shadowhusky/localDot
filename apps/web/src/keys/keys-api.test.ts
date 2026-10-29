@@ -190,9 +190,7 @@ describe("problemText", () => {
       JSON.stringify({ error: "vault-locked", message: "anything the daemon says" }),
     );
     expect(lockedVaultError(locked)).toBe(true);
-    expect(problemText(locked)).toBe(
-      "Saved keys are locked. On that computer, run: localdot unlock",
-    );
+    expect(problemText(locked)).toBe("Saved keys are locked. Unlock them first.");
     expect(lockedVaultError(new ApiError(423, "{}"))).toBe(false);
   });
 });
@@ -242,7 +240,7 @@ describe("protectionOf", () => {
   const row = (health: Parameters<typeof protectionOf>[0]) =>
     protectionOf(health).find((status) => status.name === "Saved keys");
 
-  it("adds saved keys off macOS, with the command that unlocks them", () => {
+  it("adds saved keys off macOS, pointing at the form above and the command that unlocks them", () => {
     expect(row({ online: true, hairpin: active })).toBeUndefined();
     expect(
       row({ online: true, hairpin: active, vault: { backend: "file", state: "locked" } }),
@@ -250,8 +248,8 @@ describe("protectionOf", () => {
       name: "Saved keys",
       state: "Locked",
       tone: "bad",
-      problem: "Saved keys are locked.",
-      fix: { lead: "On that computer, run:", command: "localdot unlock" },
+      problem: "Saved keys are locked. Unlock them above with your passphrase.",
+      fix: { lead: "Or, on the computer running localDot, run:", command: "localdot unlock" },
     });
     expect(
       row({ online: true, hairpin: active, vault: { backend: "file", state: "setup" } })?.state,

@@ -19,13 +19,13 @@ function before(sessions: readonly string[], sessionId: string | null): readonly
   return at < 0 ? sessions : sessions.slice(0, at);
 }
 
-// Results of an earlier task download that task's files.
+// Results of an earlier task download that task's files, and its steps unfold what it recorded.
 function owned(items: readonly ThreadItem[], sessionId: string): ThreadItem[] {
   return items.map((item) =>
     item.kind === "result" && item.result.sessionId !== sessionId
       ? { ...item, result: { ...item.result, sessionId } }
       : item.kind === "work"
-        ? { ...item, earlier: true as const }
+        ? { ...item, sessionId }
         : item,
   );
 }

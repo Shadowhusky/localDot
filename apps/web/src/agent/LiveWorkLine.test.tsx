@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { createApi } from "../lib/api.ts";
+import { SessionNowContext } from "../session/useNowMs.ts";
 import { HOLD_MS, type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
-import type { WorkStep } from "./thread.ts";
+import { type AgentStep, emptyAgentModel } from "./model.ts";
+import { StepPreviewScope } from "./StepPreview.tsx";
+import { appendTerminal, emptyTerminal } from "./terminal-text.ts";
+import { type WorkStep, workSteps } from "./thread.ts";
 
 afterEach(() => {
   cleanup();
@@ -11,6 +16,8 @@ afterEach(() => {
 });
 const step = (key: string, startT: number, state: WorkStep["state"] = "done"): WorkStep => ({
   key,
+  entry: { key, row: { kind: "step", id: key, startT }, keys: [] },
+  changes: [],
   testId: "step-row",
   title: `Step ${key}`,
   meta: "",
@@ -37,6 +44,29 @@ it("says what dot is doing while it works, with the turn's steps and time under 
   expect(
     screen.getAllByRole("listitem").map((item) => item.textContent?.replace(/\s+/g, " ")),
   ).toEqual(["Step a 0:01", "Step b 0:01", "Step c 0:01"]);
+});
+
+it("counts a running turn's time by itself from the page's clock", () => {
+  vi.useFakeTimers();
+  let now = 43_000;
+  const view = render(
+    <SessionNowContext.Provider value={() => now}>
+      <LiveWorkLine steps={steps} startMs={1000} live={live("Typing", { nowMs: undefined })} />
+    </SessionNowContext.Provider>,
+  );
+  expect(summary()).toBe("Working · 3 steps · 1 failed · 0:42");
+  now = 44_000;
+  act(() => vi.advanceTimersByTime(1_100));
+  expect(summary()).toBe("Working · 3 steps · 1 failed · 0:43");
+  view.rerender(
+    <SessionNowContext.Provider value={() => now}>
+      <LiveWorkLine steps={steps} startMs={1000} live={null} ended="done" />
+    </SessionNowContext.Provider>,
+  );
+  expect(summary()).toBe("Worked for 0:06 · 3 steps · 1 failed");
+  now = 50_000;
+  act(() => vi.advanceTimersByTime(2_000));
+  expect(summary()).toBe("Worked for 0:06 · 3 steps · 1 failed");
 });
 
 it("holds each line at least a second, so quick steps never flicker past", () => {
@@ -186,14 +216,65 @@ it("windows thousands of Chat steps while more steps arrive", () => {
   expect(mounted()).toBeLessThan(40);
 });
 
-it("shows a step in Activity when its row is chosen, and only for the task Activity shows", () => {
-  const open = vi.fn();
-  const view = render(<LiveWorkLine steps={steps} startMs={1000} live={null} onOpenStep={open} />);
-  fireEvent.click(screen.getByRole("button", { expanded: false }));
-  fireEvent.click(screen.getByRole("button", { name: /Step b/ }));
-  expect(open).toHaveBeenCalledWith("b");
-  view.unmount();
-  render(<LiveWorkLine steps={steps} startMs={1000} live={null} />);
-  fireEvent.click(screen.getByRole("button", { expanded: false }));
-  expect(screen.queryByRole("button", { name: /Step b/ })).toBeNull();
+const tool = (id: string, at: number, extra: Partial<AgentStep> = {}): [string, AgentStep] => [
+  id,
+  {
+    id,
+    kind: "shell",
+    startedAt: at * 1000,
+    endedAt: at * 1000 + 500_000,
+    status: "ok",
+    tool: { name: "shell", title: `Run ${id}`, ok: true, exitCode: 0 },
+    output: [],
+    outputTruncated: false,
+    ...extra,
+  },
+];
+const toolSteps = () =>
+  workSteps([], {
+    ...emptyAgentModel(),
+    steps: new Map([
+      tool("a", 1000),
+      tool("b", 2000, {
+        terminal: appendTerminal(emptyTerminal(), "stderr", "no such file"),
+        status: "failed",
+        tool: { name: "shell", title: "Run b", ok: false, exitCode: 2 },
+      }),
+      tool("c", 3000, { tool: { name: "shell", title: "Run c" } }),
+    ]),
+  });
+const api = createApi("test", { origin: "http://localhost" });
+
+it("unfolds a step's details in place in the chat, one at a time, and Escape folds it", () => {
+  render(
+    <StepPreviewScope api={api} sessionId="one" results={[]}>
+      <LiveWorkLine steps={toolSteps()} startMs={0} live={null} ended="done" />
+    </StepPreviewScope>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Worked/ }));
+  const first = screen.getByRole("button", { name: /Run a/ });
+  const second = screen.getByRole("button", { name: /Run b/ });
+  expect(first.getAttribute("aria-expanded")).toBe("false");
+  expect(document.getElementById(first.getAttribute("aria-controls") ?? "")).toBeTruthy();
+  fireEvent.click(first);
+  expect(first.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(second);
+  expect(first.getAttribute("aria-expanded")).toBe("false");
+  expect(second.getAttribute("aria-expanded")).toBe("true");
+  const output = screen.getByLabelText("Standard error text");
+  expect(output.textContent).toBe("no such file");
+  expect(output.closest(".thread-work-list")).toBeTruthy();
+  fireEvent.keyDown(output, { key: "Escape" });
+  expect(second.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(second);
+  // A step with nothing more to show is a plain row.
+  expect(screen.queryByRole("button", { name: /Run c/ })).toBeNull();
+  expect(screen.getByText("Run c")).toBeTruthy();
+});
+
+it("keeps steps as plain rows where there is no task to read their details from", () => {
+  render(<LiveWorkLine steps={toolSteps()} startMs={0} live={null} ended="done" />);
+  fireEvent.click(screen.getByRole("button", { name: /Worked/ }));
+  expect(screen.getByText("Run a")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Run a/ })).toBeNull();
 });

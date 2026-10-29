@@ -12,8 +12,10 @@ import { ReplayControls } from "../replay/ReplayControls.tsx";
 import { useReplay } from "../replay/useReplay.ts";
 import { useLiveSession } from "../session/useLiveSession.ts";
 import type { ShareLink } from "../settings/ShareLinkControls.tsx";
-import type { StreamPicture } from "../stage/live-stream.ts";
+import { type ScreenName, useStageConnection, useStagePicture } from "../stage/connection.ts";
 import { Stage, type StageHandle } from "../stage/Stage.tsx";
+import { awayWords } from "../stage/StageNotice.tsx";
+import { Announcer } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Select } from "../ui/Select.tsx";
@@ -32,7 +34,6 @@ export function SharedApp({ api }: { api: ApiClient }) {
   const [recordings, setRecordings] = useState<SessionIndexPage | null>(null);
   const [replayId, setReplayId] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
-  const [picture, setPicture] = useState<StreamPicture>("none");
   const computer = useCell(api);
   const stage = useRef<StageHandle>(null);
   const conversation = useConversation(api);
@@ -48,6 +49,21 @@ export function SharedApp({ api }: { api: ApiClient }) {
   const browser = useBrowserScreen(api, computer.cell, selection);
   const watchingBrowser = selection?.screen === "browser";
   const shown = watchingBrowser ? browser.cell : computer.cell;
+  const screenName: ScreenName = watchingBrowser ? "browser" : "desktop";
+  const parent = computer.cell;
+  const { picture, onPicture } = useStagePicture(screenName, shown?.state === "ready");
+  const connection = useStageConnection({
+    computer:
+      parent?.state === "ready" && !parent.fenced && !parent.replacementPending ? parent.id : null,
+    screen: screenName,
+    picture,
+    screenUp: !shown || shown.state === "ready",
+    resting: !!replayId || !!parent?.paused,
+  });
+  const away =
+    connection.phase === "away" && connection.level !== "blip" && connection.cause !== "switch"
+      ? awayWords(connection.cause, connection.screen).brief
+      : null;
   const status = agent.snapshot?.status;
   const owns = !!live.sessionId && !!grant?.ownedSessions.includes(live.sessionId);
   const working = status === "running" || status === "starting";
@@ -160,9 +176,10 @@ export function SharedApp({ api }: { api: ApiClient }) {
               selection={watchingBrowser ? selection : undefined}
               reconnects={watchingBrowser ? browser.reconnects : computer.reconnects}
               listed={computer.listed}
-              onPicture={setPicture}
+              onPicture={onPicture}
+              connection={connection}
             />
-            {picture === "none" && (
+            {connection.phase === "first" && (
               <div className="shared-screen-loading">
                 <DotLoader
                   label={
@@ -184,9 +201,8 @@ export function SharedApp({ api }: { api: ApiClient }) {
                   ? computer.cell.state === "starting"
                     ? "Starting your computer…"
                     : "Waiting for the owner to turn on the computer"
-                  : watchingBrowser
-                    ? "Browser"
-                    : "Computer"}
+                  : (away ??
+                    (parent?.paused ? "Paused" : watchingBrowser ? "Browser" : "Computer"))}
             </div>
           </>
         )}
@@ -334,6 +350,7 @@ export function SharedApp({ api }: { api: ApiClient }) {
           {recordings?.sessions.length === 0 && <p>No recordings yet.</p>}
         </div>
       </Sheet>
+      <Announcer />
     </main>
   );
 }

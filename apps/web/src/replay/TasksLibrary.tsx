@@ -1,6 +1,7 @@
 import { type SearchHit, type SessionCard, SessionIndexPage } from "@localdot/protocol";
 import {
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   type Ref,
   type RefObject,
@@ -11,6 +12,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { bytes } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { dayLabel } from "../settings/memory/memory-copy.ts";
@@ -24,10 +26,12 @@ import { Skeleton } from "../ui/Skeleton.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
+import { deletable, deleteBody, deleteTitle } from "./cleanup.ts";
 import { Highlight } from "./Highlight.tsx";
 import { ReplayImage } from "./ReplayImage.tsx";
 import {
   byDay,
+  cardBytes,
   inFilter,
   type LibraryFilter,
   matchesSearch,
@@ -54,9 +58,13 @@ export interface TaskIndex {
   more: boolean;
   loading: boolean;
   failed: boolean;
+  // Deleted rows still folding away.
+  folding: ReadonlySet<string>;
   loadMore(): void;
   retry(): void;
   forget(id: string): void;
+  // Folds deleted rows away, then lets them go.
+  fold(ids: readonly string[]): void;
 }
 
 // The recorded tasks, newest first, a page at a time.
@@ -66,7 +74,17 @@ export function useTaskIndex(api: ApiClient): TaskIndex {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [folding, setFolding] = useState<ReadonlySet<string>>(new Set());
   const loadMore = useRef<() => void>(() => {});
+  useEffect(() => {
+    if (folding.size === 0) return;
+    const timer = setTimeout(() => {
+      setCards((previous) => previous.filter((card) => !folding.has(card.id)));
+      setFolding(new Set());
+      setRevision((value) => value + 1);
+    }, FOLD_MS);
+    return () => clearTimeout(timer);
+  }, [folding]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new revision reads the list again from its first page.
   useEffect(() => {
     const controller = new AbortController();
@@ -111,12 +129,17 @@ export function useTaskIndex(api: ApiClient): TaskIndex {
     more,
     loading,
     failed,
+    folding,
     loadMore: useCallback(() => loadMore.current(), []),
     retry: useCallback(() => setRevision((value) => value + 1), []),
     forget: useCallback((id: string) => {
       setCards((previous) => previous.filter((card) => card.id !== id));
       setRevision((value) => value + 1);
     }, []),
+    fold: useCallback(
+      (ids: readonly string[]) => setFolding((was) => new Set([...was, ...ids])),
+      [],
+    ),
   };
 }
 
@@ -182,6 +205,21 @@ function rowButtons(list: HTMLElement): HTMLElement[] {
   return [...list.querySelectorAll<HTMLElement>(".ui-list-row-select")];
 }
 
+// Reads every page while `wanted`, as a search, a selection or a count of the whole library needs.
+// A page that failed waits for Try again.
+export function useWholeIndex(index: TaskIndex, wanted: boolean) {
+  const { more, loading, failed, loadMore } = index;
+  useEffect(() => {
+    if (wanted && more && !loading && !failed) loadMore();
+  }, [wanted, more, loading, failed, loadMore]);
+}
+
+// Select mode: a press picks a row for deleting instead of opening it.
+export interface Picking {
+  chosen: ReadonlySet<string>;
+  onPick(id: string, range: boolean): void;
+}
+
 export function TaskList({
   api,
   index,
@@ -192,6 +230,8 @@ export function TaskList({
   onDeleted,
   continueTask,
   matches,
+  picking,
+  reveal,
   variant = "library",
 }: {
   api: ApiClient;
@@ -204,6 +244,9 @@ export function TaskList({
   onSelect(id: string): void;
   onDeleted(id: string): void;
   continueTask?: ContinueTask;
+  picking?: Picking;
+  // A row to bring into view, such as the first one a Free up space choice picked.
+  reveal?: { id: string };
   // The library's wide rows; a phone's, with the length in the meta line, Continue always shown and
   // a swipe to delete; or the player's rail, where a row only opens its recording.
   variant?: "library" | "phone" | "rail";
@@ -212,7 +255,6 @@ export function TaskList({
   const sentinel = useRef<HTMLDivElement>(null);
   const anchor = useRef<HTMLElement | null>(null);
   const [deleting, setDeleting] = useState<SessionCard | null>(null);
-  const [folding, setFolding] = useState<ReadonlySet<string>>(new Set());
   const now = useMemo(() => new Date(), []);
   const searching = search.trim() !== "" || filter !== "all";
   const shown = useMemo(
@@ -220,7 +262,7 @@ export function TaskList({
     [index.cards, search, filter, matches],
   );
   const notes = search.trim() && filter === "all" ? (matches?.notes ?? []) : [];
-  const { more, loading, failed, loadMore, forget } = index;
+  const { more, loading, loadMore, folding, fold } = index;
   const flat = useMemo(
     () =>
       byDay(shown, now).flatMap(({ day, cards }) => [
@@ -246,11 +288,18 @@ export function TaskList({
     }
   });
 
-  // A search looks through every task, so it reads the pages a scroll has not reached yet. A page
-  // that failed waits for Try again.
+  // A search looks through every task, so it reads the pages a scroll has not reached yet.
+  useWholeIndex(index, searching);
+
+  // Each request scrolls once, as soon as its row is listed, to the top with the line above it.
+  const revealed = useRef<{ id: string }>(undefined);
   useEffect(() => {
-    if (searching && more && !loading && !failed) loadMore();
-  }, [searching, more, loading, failed, loadMore]);
+    if (!reveal || revealed.current === reveal) return;
+    const at = flat.findIndex((row) => row.key === reveal.id);
+    if (at < 0) return;
+    revealed.current = reveal;
+    windowed.scrollTo(Math.max(0, at - 1), "start");
+  });
 
   useEffect(() => {
     const target = sentinel.current;
@@ -262,15 +311,6 @@ export function TaskList({
     return () => observer.disconnect();
   }, [more, loadMore]);
 
-  useEffect(() => {
-    if (folding.size === 0) return;
-    const timer = setTimeout(() => {
-      for (const id of folding) forget(id);
-      setFolding(new Set());
-    }, FOLD_MS);
-    return () => clearTimeout(timer);
-  }, [folding, forget]);
-
   const ask = (card: SessionCard, from: HTMLElement | null) => {
     anchor.current = from;
     setDeleting(card);
@@ -279,20 +319,22 @@ export function TaskList({
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     if (!target.matches(".ui-list-row-select")) return;
-    const at = shown.findIndex(
+    // A running row has no button while picking, so the keys pass over it.
+    const rows = picking ? shown.filter(deletable) : shown;
+    const at = rows.findIndex(
       (item) => item.id === target.closest<HTMLElement>("[data-task]")?.dataset.task,
     );
     if (at < 0) return;
-    const go = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: shown.length - 1 }[event.key];
+    const go = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: rows.length - 1 }[event.key];
     if (go !== undefined) {
       event.preventDefault();
-      const next = shown[Math.max(0, Math.min(shown.length - 1, go))];
+      const next = rows[Math.max(0, Math.min(rows.length - 1, go))];
       if (next) {
         windowed.scrollTo(flat.findIndex((row) => row.key === next.id));
         setFocusKey(next.id);
       }
-    } else if (event.key === "Backspace" || event.key === "Delete") {
-      const card = shown[at];
+    } else if (!picking && (event.key === "Backspace" || event.key === "Delete")) {
+      const card = rows[at];
       if (!card) return;
       event.preventDefault();
       ask(card, target);
@@ -352,11 +394,18 @@ export function TaskList({
               api={api}
               card={card}
               variant={variant}
-              selected={variant !== "phone" && card.id === selectedId}
+              picking={!!picking}
+              selected={
+                picking
+                  ? picking.chosen.has(card.id)
+                  : variant !== "phone" && card.id === selectedId
+              }
               folding={folding.has(card.id)}
               continueTask={variant === "rail" ? undefined : continueTask}
               match={matchesSearch(card, search) ? undefined : matches?.tasks.get(card.id)}
-              onSelect={() => onSelect(card.id)}
+              onSelect={(event) =>
+                picking ? picking.onPick(card.id, event.shiftKey) : onSelect(card.id)
+              }
               onDelete={(trigger) => ask(card, trigger)}
             />
           );
@@ -393,7 +442,7 @@ export function TaskList({
           const at = rows.findIndex((row) => row.closest("li")?.dataset.task === card.id);
           anchor.current = rows[at + 1] ?? rows[at - 1] ?? null;
           setDeleting(null);
-          setFolding((was) => new Set([...was, card.id]));
+          fold([card.id]);
           onDeleted(card.id);
         }}
       />
@@ -440,6 +489,7 @@ function TaskRow({
   api,
   card,
   variant,
+  picking,
   selected,
   folding,
   continueTask,
@@ -452,18 +502,21 @@ function TaskRow({
   api: ApiClient;
   card: SessionCard;
   variant: "library" | "phone" | "rail";
+  // In select mode the row picks itself, says its size and has no actions; a running one sits out.
+  picking: boolean;
   selected: boolean;
   folding: boolean;
   continueTask?: ContinueTask;
   // What the task said that a search found, when its title alone did not match.
   match?: SearchHit;
-  onSelect(): void;
+  onSelect(event: MouseEvent<HTMLButtonElement>): void;
   onDelete(trigger: HTMLElement): void;
 }) {
   const title = taskTitle(card);
   const verdict = verdictGlyph(card.verdict);
   const phone = variant === "phone";
   const wide = variant === "library";
+  const locked = picking && !deletable(card);
   return (
     <li
       ref={measure}
@@ -471,14 +524,24 @@ function TaskRow({
       className="replay-task"
       data-task={card.id}
       data-folding={folding ? "" : undefined}
+      data-locked={locked ? "" : undefined}
     >
       <div className="replay-task-fold">
         <ListRow
-          title={title}
+          title={<span title={title}>{title}</span>}
           compact={variant === "rail"}
           selected={selected}
-          onSelect={onSelect}
-          thumbnail={<ReplayImage api={api} sessionId={card.id} frameId={card.coverFrameId} />}
+          onSelect={locked ? undefined : onSelect}
+          thumbnail={
+            <>
+              <ReplayImage api={api} sessionId={card.id} frameId={card.coverFrameId} />
+              {picking && !locked && (
+                <span className="replay-task-check" data-checked={selected ? "" : undefined}>
+                  <Icon name="check" size={12} />
+                </span>
+              )}
+            </>
+          }
           meta={
             <>
               <StatusGlyph state={verdict.state} label={verdict.label} />
@@ -493,8 +556,15 @@ function TaskRow({
               )}
             </>
           }
-          trailing={wide && card.durationMs !== null ? timeLabel(card.durationMs) : undefined}
+          trailing={
+            picking
+              ? bytes(cardBytes(card))
+              : wide && card.durationMs !== null
+                ? timeLabel(card.durationMs)
+                : undefined
+          }
           actions={
+            !picking &&
             variant !== "rail" && (
               <>
                 {continueTask && (
@@ -521,7 +591,7 @@ function TaskRow({
             )
           }
           swipe={
-            phone
+            phone && !picking
               ? { label: "Delete", accessibleLabel: `Delete ${title}`, onAction: onDelete }
               : undefined
           }
@@ -593,14 +663,8 @@ export function DeleteTask({
         if (!busy) onClose();
       }}
       anchor={anchor}
-      title="Delete this recording?"
-      description={
-        error ? (
-          <span role="alert">{error}</span>
-        ) : (
-          "Its video, screenshots and steps are removed from this Mac. You can't undo this."
-        )
-      }
+      title={deleteTitle(1)}
+      description={error ? <span role="alert">{error}</span> : deleteBody(1)}
     >
       <Button
         variant="quiet"

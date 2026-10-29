@@ -33,6 +33,54 @@ it("reads the appearance of a kept stage when it is placed again, not while it i
   }
 });
 
+it("tells its stage when the canvas is clipped away or has no size, and how much of the window it covers", () => {
+  const restore = fakeChromium();
+  const sizes: ((entries: { contentRect: { width: number; height: number } }[]) => void)[] = [];
+  const sights: ((entries: { isIntersecting: boolean; intersectionRatio: number }[]) => void)[] =
+    [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(report: (typeof sizes)[number]) {
+        sizes.push(report);
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(report: (typeof sights)[number]) {
+        sights.push(report);
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const anchor = document.createElement("template");
+  document.body.append(anchor);
+  try {
+    const held = holdEngine(null);
+    held.engine.place(anchor);
+    const views: { onScreen: boolean; share: number }[] = [];
+    held.engine.onView((view) => views.push(view));
+    const area = window.innerWidth * window.innerHeight;
+    sizes[0]?.([{ contentRect: { width: area / 1000, height: 500 } }]);
+    expect(views.at(-1)).toEqual({ onScreen: true, share: 0.5 });
+    sights[0]?.([{ isIntersecting: true, intersectionRatio: 0 }]);
+    expect(views.at(-1)?.onScreen).toBe(false);
+    sights[0]?.([{ isIntersecting: true, intersectionRatio: 0.4 }]);
+    expect(views.at(-1)?.onScreen).toBe(true);
+    sizes[0]?.([{ contentRect: { width: 0, height: 0 } }]);
+    expect(views.at(-1)).toEqual({ onScreen: false, share: 0 });
+    held.engine.close();
+  } finally {
+    anchor.remove();
+    restore();
+  }
+});
+
 describe("the frames of a tap that carries a track", () => {
   function setup() {
     const restore = fakeChromium();

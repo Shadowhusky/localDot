@@ -1,4 +1,5 @@
 import { type ReactNode, useMemo } from "react";
+import { PreviewChips } from "../previews/PreviewChip.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import type { AgentStep } from "./model.ts";
 import { OutputCopy } from "./OutputCopy.tsx";
@@ -59,6 +60,7 @@ export function TerminalViewer({ step, children }: { step: AgentStep; children?:
             .filter(Boolean)
             .join("\n")}
         />
+        <PreviewChips text={`${display.stdout.text}\n${display.stderr.text}`} />
         {children}
         {!streams.length && !children && <p className="terminal-empty">No output.</p>}
       </div>

@@ -21,6 +21,12 @@ const message = id(10000),
   ask = id(20000),
   takeover = id(20001);
 describe("bounded agent projection", () => {
+  it("holds the Unlock card up from saved keys meeting a lock until they open again", () => {
+    const locked = reduce([ev(0, "keys.lock", { locked: true })]);
+    expect(locked.keysLocked).toBe(true);
+    expect(projectAgentEvent(locked, ev(1, "keys.lock", { locked: false })).keysLocked).toBe(false);
+    expect(emptyAgentModel().keysLocked).toBe(false);
+  });
   it("correlates interleaved messages by ID; finals replace deltas and ignore later deltas/replay", () => {
     const events = [
       ev(0, "message.delta", { messageId: message, text: "pre" }),
@@ -452,6 +458,25 @@ describe("single event feed boundary", () => {
     );
     expect(calls).toBe(2);
   });
+  it("reads the status again when dot starts or stops working, not as it moves between steps", () => {
+    const feed = createAgentFeed();
+    feed.reset(id(1), id(2));
+    let calls = 0;
+    feed.subscribe(() => calls++);
+    const state = (seq: number, data: Record<string, string>) =>
+      feed.accept(JSON.stringify(ev(seq, "agent.state", data)));
+    state(0, { state: "thinking" });
+    expect(calls).toBe(1);
+    state(1, { state: "acting" });
+    state(2, { state: "observing" });
+    state(3, { state: "thinking" });
+    expect(calls).toBe(1);
+    expect(feed.read().model.state?.state).toBe("thinking");
+    state(4, { state: "thinking", reason: "model busy" });
+    state(5, { state: "waiting_user" });
+    state(6, { state: "acting" });
+    expect(calls).toBe(4);
+  });
   it("rejects malformed, oversized or unbounded-identity events with fixed errors and no partial projection", () => {
     for (const data of [
       "not-json",
@@ -666,4 +691,27 @@ it("keeps one row per child, led by its latest run, with the runs before kept in
   ).reduce(projectAgentEvent, emptyAgentModel());
   expect(many.subagents.get("child-a")?.earlier).toHaveLength(L.subagentRuns);
   expect(many.historyTruncated).toBe(true);
+});
+
+it("keeps why a child stopped on its run, and starts its resumed run afresh", () => {
+  const child = { id: "child-a", label: "Research" };
+  const model = [
+    ev(0, "subagent.state", { ...child, runId: "run-1", state: "running" }),
+    ev(1, "subagent.state", { ...child, runId: "run-1", state: "interrupted", reason: "limit" }),
+    ev(2, "subagent.state", { ...child, runId: "run-2", state: "running", resumed: true }),
+    ev(3, "subagent.state", { ...child, id: "child-b", runId: "run-3", state: "running" }),
+  ].reduce(projectAgentEvent, emptyAgentModel());
+  expect(model.subagents.get("child-a")).toMatchObject({
+    runId: "run-2",
+    state: "running",
+    resumed: true,
+    earlier: [{ runId: "run-1", state: "interrupted", reason: "limit" }],
+  });
+  expect(model.subagents.get("child-a")).not.toHaveProperty("reason");
+  // A stopped task stops what still ran.
+  const stopped = projectAgentEvent(model, ev(4, "session.end", { reason: "stopped" }));
+  expect([...stopped.subagents.values()].map((c) => [c.id, c.state, c.reason])).toEqual([
+    ["child-a", "interrupted", "stopped"],
+    ["child-b", "interrupted", "stopped"],
+  ]);
 });

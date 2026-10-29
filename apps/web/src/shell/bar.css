@@ -9,11 +9,14 @@
   padding: 0 var(--gutter);
 }
 
+/* A container, so what follows the title can leave when the side is narrow, whatever the page's
+   width. */
 .bar-l {
   display: flex;
   align-items: center;
   gap: calc(var(--spacing) * 2.5);
   min-width: 0;
+  container-type: inline-size;
 }
 
 .bar-wordmark {
@@ -62,14 +65,34 @@
   margin-right: calc(var(--spacing) * 2);
 }
 
-/* The wordmark as the localDots menu: this localDot's name after it, quieter. */
+/* The wordmark as the localDots menu: this localDot's name after it, quieter. The title gives way
+   first; a long name then ends in an ellipsis rather than take more than half the bar's side, so
+   it never reaches the modes. The wordmark and chevron keep their size. */
+.bar-brand-slot {
+  display: flex;
+  flex: none;
+  max-width: 50%;
+}
+
+.bar-brand {
+  max-width: 100%;
+}
+
+.bar-brand > .ui-button-content {
+  min-width: 0;
+}
+
 .bar-brand-name {
+  min-width: 0;
   margin-left: calc(var(--spacing) * 1.5);
+  overflow: hidden;
   color: var(--color-fg-2);
   font-weight: var(--font-weight-normal);
+  text-overflow: ellipsis;
 }
 
 .bar-brand-chevron {
+  flex: none;
   margin-left: var(--spacing);
   color: var(--color-fg-3);
 }

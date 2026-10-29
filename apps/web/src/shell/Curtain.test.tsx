@@ -51,6 +51,31 @@ const stuck = (freshStart: FreshStartAction, onAction = () => {}) =>
     />,
   );
 
+it("offers to start anyway once Docker's memory advice is shown", () => {
+  const advice =
+    "Two running computers need about 10 GB for Docker; it has 8 GB. Raise it in Docker Desktop → Settings → Resources.";
+  const onAction = vi.fn();
+  const startAnyway = vi.fn();
+  render(
+    <Curtain
+      phase="stopped"
+      first={false}
+      waking={false}
+      caption=""
+      notice={advice}
+      action={{ kind: "start", enabled: true }}
+      onAction={onAction}
+      startAnyway={startAnyway}
+      showDot={false}
+    />,
+  );
+  expect(screen.getByText(advice)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Start anyway" }));
+  expect(startAnyway).toHaveBeenCalledOnce();
+  expect(onAction).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+});
+
 it("names Start fresh as the way out of an update that can't be finished", () => {
   stuck({ busy: false, run: () => {} });
   expect(screen.getByRole("heading").textContent).toBe("Your computer needs a fresh start");

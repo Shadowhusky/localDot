@@ -25,6 +25,8 @@ export interface CellSummary {
   paused?: true;
   // A newer build of the computer is ready; Update restarts it on that build.
   updateAvailable?: true;
+  // A newer build is here, but installed apps changed files it needs; Update can't apply it.
+  updateBlocked?: true;
   updating?: true;
   // Its update can't be finished; only a fresh start brings the computer back.
   needsFreshStart?: true;

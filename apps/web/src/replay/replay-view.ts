@@ -325,16 +325,17 @@ export function inFilter(card: Pick<SessionCard, "verdict">, filter: LibraryFilt
   if (filter === "stopped") return card.verdict !== "done" && card.verdict !== "live";
   return true;
 }
-// How many recordings the library holds and the room their videos take.
+// The room a recording takes: everything deleting it frees, or its videos where an older daemon
+// does not say.
+export function cardBytes(card: SessionCard): number {
+  if (card.diskBytes !== undefined) return card.diskBytes;
+  return card.recordings
+    ? card.recordings.desktop.bytes + card.recordings.browser.bytes
+    : card.recording.bytes;
+}
+// How many recordings the library holds and the room they take.
 export function libraryTotal(cards: readonly SessionCard[], more: boolean): string {
-  const size = cards.reduce(
-    (sum, card) =>
-      sum +
-      (card.recordings
-        ? card.recordings.desktop.bytes + card.recordings.browser.bytes
-        : card.recording.bytes),
-    0,
-  );
+  const size = cards.reduce((sum, card) => sum + cardBytes(card), 0);
   const shown = more
     ? `${cards.length.toLocaleString()}+ recordings`
     : count(cards.length, "recording", "recordings");

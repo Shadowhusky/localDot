@@ -235,6 +235,25 @@ describe("hudFor", () => {
     );
   });
 
+  it("says when Docker stopped the computer for memory, with what to raise when there is advice", () => {
+    const advice =
+      "Two running computers need about 10 GB for Docker; it has 8 GB. Raise it in Docker Desktop → Settings → Resources.";
+    const oom = `desktop container ran out of memory — ${advice}`;
+    expect(
+      hudFor(known(cell("starting", "none", `${oom}; restarting (attempt 1 of 3)`))).caption,
+    ).toBe(`Your computer ran out of memory. Restarting it (attempt 1 of 3). ${advice}`);
+    expect(hudFor(known(cell("failed", "none", `${oom}; gave up after 3 restarts`))).caption).toBe(
+      `Your computer ran out of memory. ${advice}`,
+    );
+    expect(
+      hudFor(
+        known(
+          cell("failed", "none", "desktop container ran out of memory; gave up after 3 restarts"),
+        ),
+      ).caption,
+    ).toBe("Your computer ran out of memory. Turn it on again.");
+  });
+
   it("names the computer's phase on every branch, live only when the stream is", () => {
     const paused = { paused: true as const };
     const cases: [CellView, ComputerPhase][] = [
@@ -327,6 +346,21 @@ describe("selected screen HUD", () => {
     expect(withScreenHud(parent)).toBe(parent);
   });
 
+  it("never lets the web browser starting again read as the computer being off", () => {
+    const parent = hudFor(known(cell("ready", "live"), "stop"));
+    for (const screen of [
+      hudFor({ ...known({ ...cell("stopped"), id: "browser" }), viewer: true }),
+      hudFor({ cell: null, status: "listing", pending: null, viewer: true }),
+    ])
+      expect(withScreenHud(parent, screen)).toEqual({
+        phase: "connecting",
+        label: "Connecting…",
+        caption: "Waiting for this screen's first picture.",
+        action: parent.action,
+        live: false,
+      });
+  });
+
   it("reports a browser stream failure even if the desktop stream stays live", () => {
     const parent = hudFor(known(cell("ready", "live"), "stop"));
     const browser = hudFor(known({ ...cell("ready", "stalled"), id: "browser" }));
@@ -367,4 +401,34 @@ it("requires this viewer's first painted frame, but holds it through reconnectio
     );
   }
   expect(hudFor({ ...view, cell: cell("stopped"), picture: "held" }).phase).toBe("stopped");
+});
+
+it("keeps a picture this view has shown through any gap, never as the computer coming up", () => {
+  const view = { ...known(cell("ready", "none")), viewer: true };
+  // A blip, and dot moving to the other screen, leave the HUD as it was: the stage tells.
+  for (const away of [
+    { cause: "stream", level: "blip" },
+    { cause: "browser", level: "blip" },
+    { cause: "switch", level: "brief" },
+    { cause: "switch", level: "long" },
+  ] as const)
+    expect(hudFor({ ...view, away })).toMatchObject({ phase: "live", label: "Ready" });
+  expect(hudFor({ ...view, away: { cause: "stream", level: "brief" } })).toMatchObject({
+    phase: "reconnecting",
+    caption: "The stream paused. Reconnecting.",
+    action: { kind: "stop", enabled: true },
+  });
+  // The web browser starting again: its status says stopped, or nothing yet.
+  for (const screen of [
+    { ...view, cell: { ...cell("stopped"), id: "browser" } },
+    { cell: null, status: "listing" as const, pending: null, viewer: true },
+  ])
+    expect(hudFor({ ...screen, away: { cause: "browser", level: "long" } })).toMatchObject({
+      phase: "reconnecting",
+      caption: "The web browser is starting again.",
+    });
+  // Docker going away is still said as it is.
+  expect(
+    hudFor({ ...view, runtimeProblem: "docker", away: { cause: "stream", level: "long" } }).phase,
+  ).toBe("unavailable");
 });

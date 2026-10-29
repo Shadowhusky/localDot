@@ -245,7 +245,46 @@ const ComposerField = memo(function ComposerField({
   );
 });
 
-export function Composer(props: ComposerProps) {
+// What the composer reads of the task and the computer. The rest of the task (dot's words, steps,
+// usage and heartbeats) changes many times a second while dot works and leaves the composer as
+// drawn, so a read of anything else from `agent` or `cell` belongs here too.
+function sameTask(was: AgentSessionView, now: AgentSessionView): boolean {
+  if (was === now) return true;
+  const yours = (task: AgentSessionView) =>
+    [...task.model.messages.values()].filter((message) => message.role === "user");
+  const before = yours(was);
+  const after = yours(now);
+  return (
+    was.sessionId === now.sessionId &&
+    was.snapshot === now.snapshot &&
+    was.fresh === now.fresh &&
+    was.reconcile === now.reconcile &&
+    was.model.ended === now.model.ended &&
+    was.model.pendingAsk === now.model.pendingAsk &&
+    was.model.pendingTakeover === now.model.pendingTakeover &&
+    was.model.state?.reason === now.model.state?.reason &&
+    before.length === after.length &&
+    before.every((message, index) => message === after[index])
+  );
+}
+const sameCell = (was: CellSummary | null, now: CellSummary | null) =>
+  was === now ||
+  (!!was && !!now && was.id === now.id && was.state === now.state && was.paused === now.paused);
+function sameComposerProps(was: ComposerProps, now: ComposerProps): boolean {
+  const keys = new Set([...Object.keys(was), ...Object.keys(now)]) as Set<keyof ComposerProps>;
+  for (const key of keys)
+    if (
+      key === "agent"
+        ? !sameTask(was.agent, now.agent)
+        : key === "cell"
+          ? !sameCell(was.cell, now.cell)
+          : was[key] !== now[key]
+    )
+      return false;
+  return true;
+}
+
+export const Composer = memo(function Composer(props: ComposerProps) {
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [voiceSubmitting, setVoiceSubmitting] = useState(false);
@@ -500,25 +539,21 @@ export function Composer(props: ComposerProps) {
     [measure],
   );
   // Edit on a message that never reached dot: its words and files come back into the draft, after
-  // anything already written there. One still queued, dot gives back first.
+  // anything already written there, once dot has given them back.
   const takenBack = useRef(new Set<string>());
   const restoreFiles = useRef(uploads.restore);
   restoreFiles.current = uploads.restore;
   useEffect(() => {
     const lifetime = new AbortController();
-    const unsubscribe = onQueuedEdit((sessionId, messageId, unsent) => {
+    const unsubscribe = onQueuedEdit((sessionId, messageId, stopped) => {
       const now = current.current;
       const input = form.current?.querySelector("textarea");
-      if (!input || (unsent === undefined && sessionId !== now.agent.sessionId)) return null;
+      if (!input || (!stopped && sessionId !== now.agent.sessionId)) return null;
       // In the press itself, so a phone raises its keyboard for the words on their way.
       input.focus();
       const key = `${sessionId}:${messageId}`;
       if (takenBack.current.has(key)) return Promise.resolve(true);
-      const words =
-        unsent === undefined
-          ? editQueuedMessage(now.api, sessionId, messageId, lifetime.signal)
-          : Promise.resolve(unsent);
-      return words.then(
+      return editQueuedMessage(now.api, sessionId, messageId, lifetime.signal).then(
         (text) => {
           const box = form.current?.querySelector("textarea");
           if (!box || takenBack.current.has(key)) return !!box;
@@ -538,7 +573,11 @@ export function Composer(props: ComposerProps) {
         },
         () => {
           if (!lifetime.signal.aborted)
-            setProblem("Couldn't move your queued message here. It may have started already.");
+            setProblem(
+              stopped
+                ? "Couldn't move your message here. Try again."
+                : "Couldn't move your queued message here. It may have started already.",
+            );
           return false;
         },
       );
@@ -1231,4 +1270,4 @@ export function Composer(props: ComposerProps) {
       )}
     </div>
   );
-}
+}, sameComposerProps);

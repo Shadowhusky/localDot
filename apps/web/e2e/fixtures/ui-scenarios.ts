@@ -15,6 +15,7 @@ export type ScenarioStep =
   | "ask"
   | "takeover"
   | "budget"
+  | "keys-locked"
   | "finish"
   | `cell/${Exclude<CellKind, "none">}`;
 
@@ -57,7 +58,24 @@ export const UI_SCENARIOS = {
     boot: { QA_SESSION: "0", QA_SETTINGS: "chatgpt", QA_CHATGPT: "signed_in" },
     step: "cell/live",
   },
+  "plan-usage": {
+    about:
+      "Claude Code and ChatGPT plans are signed in, with their usage known; the computer is on",
+    boot: {
+      QA_SESSION: "0",
+      QA_SETTINGS: "claude-code",
+      QA_CLAUDE_CODE: "signed_in",
+      QA_CHATGPT: "signed_in",
+      QA_PLAN_USAGE: "normal",
+    },
+    step: "cell/live",
+  },
   running: { about: "dot is working on the sample task" },
+  library: {
+    about:
+      "dot is working while Replay holds four months of recordings: long titles, every ending, videos up to gigabytes",
+    boot: { QA_LIBRARY: "40", QA_DOT_NAME: "Studio workstation upstairs" },
+  },
   approval: {
     about: "dot waits for a decision before sending",
     step: "approval",
@@ -66,6 +84,11 @@ export const UI_SCENARIOS = {
   ask: { about: "dot asks a question", step: "ask", stepAtBoot: true },
   takeover: { about: "dot hands control over for a sign-in", step: "takeover", stepAtBoot: true },
   budget: { about: "The task stopped at its spending limit", step: "budget", stepAtBoot: true },
+  "keys-locked": {
+    about: "dot met the saved keys locked behind their passphrase, as after a restart",
+    step: "keys-locked",
+    stepAtBoot: true,
+  },
   "image-output": {
     about: "A finished image read with a saved preview",
     boot: { QA_PHASE: "finished", QA_STEP_IMAGE: "1" },

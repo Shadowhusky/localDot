@@ -54,16 +54,22 @@ it("does not let a background reload invalidate a pending new conversation", asy
 });
 
 it("reads which conversation is current, and the choice of a new or an older one", async () => {
+  const taken = "01JXYZ0000000000000000AAA3";
   const f = setup(async (method, path, body) => {
-    if (method === "GET") return Response.json({ sessions: [OLD, LATEST], more: false });
+    if (method === "GET")
+      return Response.json({ sessions: [OLD, LATEST], more: false, withdrawn: [taken] });
     if (path.endsWith("/new")) return Response.json({ sessions: [], more: false });
     return Response.json({ sessions: [(body as { sessionId: string }).sessionId], more: true });
   });
   expect(f.view.result.current.known).toBe(false);
   await settle();
-  expect(f.view.result.current).toMatchObject({ known: true, sessions: [OLD, LATEST] });
+  expect(f.view.result.current).toMatchObject({
+    known: true,
+    sessions: [OLD, LATEST],
+    withdrawn: [taken],
+  });
   await act(async () => expect(await f.view.result.current.startNew()).toBe(true));
-  expect(f.view.result.current.sessions).toEqual([]);
+  expect(f.view.result.current).toMatchObject({ sessions: [], withdrawn: [] });
   await act(async () => expect(await f.view.result.current.continueFrom(OLD)).toBe(true));
   expect(f.view.result.current).toMatchObject({ sessions: [OLD], more: true });
   expect(f.asked).toEqual([

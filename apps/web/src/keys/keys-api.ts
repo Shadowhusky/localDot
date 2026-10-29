@@ -7,6 +7,7 @@ import {
   SECRET_ID_PATTERN,
   type Sealed,
   SecretBinding,
+  sealPassphrase,
   sealSecret,
 } from "@localdot/protocol";
 import { z } from "zod";
@@ -24,13 +25,13 @@ export interface KeydHealth {
   reenter?: number;
   // How many keys were changed outside localDot.
   rebound?: number;
-  // Off macOS: where saved keys live, and whether they wait for localdot unlock.
+  // Off macOS: where saved keys live, and whether they wait for their passphrase.
   vault?: KeydVault;
   error?: string;
 }
 
 export const UNLOCK = "localdot unlock";
-export const VAULT_LOCKED = `Saved keys are locked. On that computer, run: ${UNLOCK}`;
+export const VAULT_LOCKED = "Saved keys are locked. Unlock them first.";
 
 // Where saved keys live: the Keychain only for the signed Mac release; otherwise keyd's own vault
 // on the computer running localDot, which may not be the one showing this page.
@@ -147,6 +148,47 @@ export async function saveKey(
   }
 }
 
+// Seals the passphrase to keyd's current boot key in this page, so the daemon relays only
+// ciphertext; keyd answers bad-seal when it restarted after the key was read, and it is sealed again.
+export async function unlockKeys(
+  api: ApiClient,
+  passphrase: string,
+  seal: typeof sealPassphrase = sealPassphrase,
+): Promise<KeydVault | null> {
+  const send = async () => {
+    const health = await loadHealth(api);
+    if (!health.online || !health.sealKey) throw new KeyProblem(UNLOCK_OFFLINE);
+    const sealed = await seal(health.sealKey, passphrase);
+    return (await api.post<{ vault: KeydVault | null }>("/api/keyd/unlock", { sealed })).vault;
+  };
+  try {
+    return await send();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409 && errorCode(err) === "bad-seal")
+      return send();
+    throw err;
+  }
+}
+
+const UNLOCK_OFFLINE = "Key protection is off, so your keys can't be unlocked right now.";
+
+export function unlockProblem(err: unknown): string {
+  if (err instanceof KeyProblem) return err.message;
+  if (err instanceof ApiError) {
+    const body = parse(err.message);
+    if (body?.error === "wrong-passphrase")
+      return "That passphrase doesn't unlock your saved keys.";
+    if (body?.error === "too-many-tries") {
+      const minutes = Math.max(1, Math.ceil((body.retryAfter ?? 60) / 60));
+      return `Too many wrong passphrases. Try again in ${minutes === 1 ? "a minute" : `${minutes} minutes`}.`;
+    }
+    if (body?.error === "owner-only") return "Only the owner of this localDot can unlock its keys.";
+    if (err.status === 503) return UNLOCK_OFFLINE;
+    if (body?.message) return sentence(body.message);
+  }
+  return "Your keys couldn't be unlocked. Try again.";
+}
+
 export const deleteKey = (api: ApiClient, id: string) =>
   api.del(`/api/keys/${encodeURIComponent(id)}`);
 
@@ -169,7 +211,9 @@ function errorCode(err: unknown): string | undefined {
   return err instanceof ApiError ? parse(err.message)?.error : undefined;
 }
 
-function parse(text: string): { error?: string; message?: string } | undefined {
+function parse(
+  text: string,
+): { error?: string; message?: string; retryAfter?: number } | undefined {
   try {
     const body = JSON.parse(text) as unknown;
     if (typeof body !== "object" || body === null || Array.isArray(body)) return undefined;
@@ -177,6 +221,7 @@ function parse(text: string): { error?: string; message?: string } | undefined {
     return {
       error: typeof fields.error === "string" ? fields.error : undefined,
       message: typeof fields.message === "string" ? fields.message : undefined,
+      retryAfter: typeof fields.retryAfter === "number" ? fields.retryAfter : undefined,
     };
   } catch {
     return undefined;

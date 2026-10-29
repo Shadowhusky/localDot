@@ -1,6 +1,7 @@
 import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
 import { emptyModel, foldEvents } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
+import { timelineRows } from "./key-uses.ts";
 import { stepRows } from "./session-view.ts";
 
 let seq = 0;
@@ -90,6 +91,17 @@ describe("stepRows", () => {
       durationMs: 990,
     });
     expect(rows[1]).toMatchObject({ id: "s2", label: 'Typing "B2"', status: "doing" });
+  });
+
+  it("keeps the view of a step that has not changed, so what is built from it can be kept", () => {
+    const model = foldEvents(emptyModel(), log);
+    const [first, second] = stepRows(model);
+    foldEvents(model, [ev("action.result", 1200, { ok: true }, "s2")]);
+    const [firstAgain, secondAgain] = stepRows(model);
+    expect(firstAgain).toBe(first);
+    expect(secondAgain).not.toBe(second);
+    expect(secondAgain).toMatchObject({ id: "s2", status: "ok" });
+    expect(timelineRows(stepRows(model), [])[0]).toBe(timelineRows(stepRows(model), [])[0]);
   });
 });
 

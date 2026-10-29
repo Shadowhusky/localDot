@@ -667,9 +667,11 @@
     opacity: 0.25;
   }
 
+  /* A transform rather than `rotate`: Chromium runs an svg's turn on the compositor only as a
+     transform, and every spinner here is an svg. */
   @keyframes ui-spin {
     to {
-      rotate: 1turn;
+      transform: rotate(1turn);
     }
   }
 

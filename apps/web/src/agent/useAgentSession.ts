@@ -171,7 +171,8 @@ export function useAgentSession(
         ? {
             ...current.model,
             ended: CUT_SHORT,
-            subagents: interruptRunning(current.model.subagents),
+            // A task cut short without its end went down with the daemon.
+            subagents: interruptRunning(current.model.subagents, undefined, "restarted"),
           }
         : current.model,
     [atRest, current.model],
@@ -227,34 +228,60 @@ export function useAgentSession(
       (current.connection === "live" ||
         (current.connection === "ended" && current.model.ended && snapshot?.status === "ended")),
   );
-  return {
-    sessionId,
-    model: matches ? model : EMPTY_AGENT_MODEL,
-    snapshot,
-    watchScreen,
-    availability: owned ? view.availability : "loading",
-    error: current.streamError ?? (owned ? view.error : null),
-    authorityEpoch: owned ? view.epoch : null,
-    history: matches && current.history,
-    interrupted: matches && atRest && current.history && !current.model.ended,
-    readFresh,
-    fresh: Boolean(
-      matches &&
-        owned &&
-        view.availability === "ready" &&
-        view.epoch === current.epoch &&
-        current.connection === "live" &&
-        current.replayed &&
-        ownershipAligned &&
-        snapshot?.status !== "ended" &&
-        !current.streamError &&
-        !current.model.ended &&
-        cell?.state === "ready" &&
-        !cell.paused &&
-        !cell.fenced &&
-        !cell.replacementPending,
-    ),
-    connection: matches ? current.connection : "connecting",
-    reconcile,
-  };
+  const fresh = Boolean(
+    matches &&
+      owned &&
+      view.availability === "ready" &&
+      view.epoch === current.epoch &&
+      current.connection === "live" &&
+      current.replayed &&
+      ownershipAligned &&
+      snapshot?.status !== "ended" &&
+      !current.streamError &&
+      !current.model.ended &&
+      cell?.state === "ready" &&
+      !cell.paused &&
+      !cell.fenced &&
+      !cell.replacementPending,
+  );
+  const shownModel = matches ? model : EMPTY_AGENT_MODEL;
+  const availability = owned ? view.availability : "loading";
+  const error = current.streamError ?? (owned ? view.error : null);
+  const authorityEpoch = owned ? view.epoch : null;
+  const history = matches && current.history;
+  const interrupted = matches && atRest && current.history && !current.model.ended;
+  const connection = matches ? current.connection : "connecting";
+  // The same view while nothing in it changed, so what is drawn from it alone need not draw again.
+  return useMemo(
+    () => ({
+      sessionId,
+      model: shownModel,
+      snapshot,
+      watchScreen,
+      availability,
+      error,
+      authorityEpoch,
+      history,
+      interrupted,
+      readFresh,
+      fresh,
+      connection,
+      reconcile,
+    }),
+    [
+      sessionId,
+      shownModel,
+      snapshot,
+      watchScreen,
+      availability,
+      error,
+      authorityEpoch,
+      history,
+      interrupted,
+      readFresh,
+      fresh,
+      connection,
+      reconcile,
+    ],
+  );
 }

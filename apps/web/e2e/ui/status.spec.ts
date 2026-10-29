@@ -24,7 +24,9 @@ const STATUS: Record<
   "slow-keys": { shape: "ready", control: /^Take control$/, label: "Ready" },
   conversations: { shape: "ready", control: /^Take control$/, label: "Done" },
   "chatgpt-plan": { shape: "ready", control: /^Take control$/, label: "Ready" },
+  "plan-usage": { shape: "ready", control: /^Take control$/, label: "Ready" },
   running: { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
+  library: { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
   // dot keeps the computer while it waits on an OK or an answer, so the rim keeps its light.
   approval: { shape: "task", control: /^Stop$/, label: "Needs your OK", light: "dot" },
   ask: { shape: "task", control: /^Stop$/, label: "Needs your answer", light: "dot" },
@@ -37,6 +39,12 @@ const STATUS: Record<
     light: "you",
   },
   budget: { shape: "task", control: /^(Stop|Continue)$/, label: "Spending limit reached" },
+  "keys-locked": {
+    shape: "task",
+    control: /^Stop$/,
+    label: "Select the Net total cell",
+    light: "dot",
+  },
   "image-output": { shape: "ready", control: /^Take control$/, label: "Done" },
   done: { shape: "ready", control: /^Take control$/, label: "Done" },
   continued: { shape: "ready", control: /^Take control$/, label: "Done" },

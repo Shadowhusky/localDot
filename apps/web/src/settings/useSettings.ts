@@ -1,7 +1,7 @@
 import type { AgentSettingsDocument, PersonaId } from "@localdot/protocol";
 import { AutonomyPolicy } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyRecord } from "../keys/keys-api.ts";
 import type { ApiClient } from "../lib/api.ts";
 import {
@@ -36,9 +36,11 @@ import { useChatgpt } from "./useChatgpt.ts";
 import { useClaudeCode } from "./useClaudeCode.ts";
 
 type Phase = "loading" | "ready" | "refreshing" | "error";
+const NO_MODELS: readonly SubscriptionModel[] = [];
+
 export function useSettings(
   api: ApiClient,
-  providedModels: readonly SubscriptionModel[] = [],
+  providedModels: readonly SubscriptionModel[] = NO_MODELS,
   accountVisible = true,
 ) {
   const [open, setOpen] = useState(false);
@@ -670,9 +672,15 @@ export function useSettings(
         );
     }
   };
-  const validation = draft && saved ? validateForm(draft, saved, index, subscriptionModels) : null;
-  const accepted =
-    saved && index ? validateForm(formOf(saved), saved, index, subscriptionModels) : null;
+  // The page renders many times a second while dot works; the forms change only when edited.
+  const validation = useMemo(
+    () => (draft && saved ? validateForm(draft, saved, index, subscriptionModels) : null),
+    [draft, saved, index, subscriptionModels],
+  );
+  const accepted = useMemo(
+    () => (saved && index ? validateForm(formOf(saved), saved, index, subscriptionModels) : null),
+    [saved, index, subscriptionModels],
+  );
   return {
     open,
     show,

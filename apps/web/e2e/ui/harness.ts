@@ -35,7 +35,12 @@ export interface Harness {
   // Hides what moves on its own before a screenshot: the live dot, which blinks. The gallery
   // compares the dot itself, on a paused clock.
   still(): Promise<void>;
+  // Before an action that takes the page to another address: WebKit reports the page's own
+  // requests that the navigation cuts off as errors, which are not the page's fault.
+  leaving(): void;
 }
+
+const CUT_OFF = /due to access control checks|^Load failed$/;
 
 declare global {
   interface Window {
@@ -52,7 +57,10 @@ export const test = base.extend<{ ui: Harness; fixedClock: boolean }>({
     const probe: Probe = { errors: [], csp: [], external: [] };
     let fixture: UiFixture | undefined;
     let paused = false;
-    page.on("pageerror", (error) => probe.errors.push(error.message));
+    let leaving = false;
+    page.on("pageerror", (error) => {
+      if (!leaving || !CUT_OFF.test(error.message)) probe.errors.push(error.message);
+    });
     await page.exposeFunction("recordCspViolation", (text: string) => probe.csp.push(text));
     await skipSetup(page);
     await page.addInitScript(() => {
@@ -113,6 +121,9 @@ export const test = base.extend<{ ui: Harness; fixedClock: boolean }>({
         await page.locator(".presence-frame .dot, .sign-in .dot").evaluateAll((dots) => {
           for (const dot of dots) (dot as HTMLElement).style.visibility = "hidden";
         });
+      },
+      leaving() {
+        leaving = true;
       },
     });
     // Taken before the fixture stops: requests cut off by the shutdown are not the page's fault.

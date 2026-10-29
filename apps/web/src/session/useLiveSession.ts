@@ -1,6 +1,14 @@
 import { type LocalDotEvent, ULID_PATTERN } from "@localdot/protocol";
 import { emptyModel, foldEvents, type SessionModel } from "@localdot/stage";
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type RefObject,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { AgentFeed, AgentWords } from "../agent/model.ts";
 import { createAgentFeed } from "../agent/reducer.ts";
 import type { CellSummary } from "../cells/types.ts";
@@ -31,6 +39,10 @@ const POLL_MS = 1000;
 const IDLE_POLL_MS = 5000;
 const QUICK_POLLS = 5;
 const REACT_HZ_MS = 100;
+// A phone, or a page whose user is typing to dot, is redrawn at most four times a second; words
+// for a message on show still arrive ten times a second.
+const CALM_HZ_MS = 250;
+const COMPOSER = ".composer textarea";
 const CLOCK_EVERY_MS = 20_000;
 const NO_MODEL = emptyModel();
 
@@ -67,7 +79,8 @@ function wordsOnly(
 const saidLines = (model: SessionModel, id: string) =>
   model.said.findLast((entry) => entry.id === id)?.lines.length ?? 0;
 
-// The worker gets every event at once; React sees the model at most ten times a second.
+// The worker gets every event at once; React sees the model at most ten times a second, as a
+// transition that typing can interrupt.
 // The computer's live task is shown while there is one. Otherwise the conversation's latest task,
 // `resting` (undefined until known), stays on show as ended, so a refresh, a stopped computer or a
 // restarted daemon reopens the conversation rather than an empty page. `choice` counts the
@@ -271,12 +284,18 @@ export function useLiveSession(
     };
     let clockTimer: ReturnType<typeof setInterval> | undefined;
     let flush: ReturnType<typeof setInterval> | undefined;
+    const handheld =
+      typeof matchMedia === "function" ? matchMedia("(pointer: coarse)") : { matches: false };
+    let drawnAt = Number.NEGATIVE_INFINITY;
     const flushNow = () => {
       if (document.visibilityState === "hidden") return;
-      if (dirty.current) {
+      const now = performance.now();
+      const calm = handheld.matches || !!document.activeElement?.matches(COMPOSER);
+      if (dirty.current && now - drawnAt >= (calm ? CALM_HZ_MS : REACT_HZ_MS) - 1) {
         dirty.current = false;
         words.current = false;
-        setVersion((v) => v + 1);
+        drawnAt = now;
+        startTransition(() => setVersion((v) => v + 1));
       } else if (words.current) {
         words.current = false;
         agentFeed.words();
@@ -342,9 +361,11 @@ export function useLiveSession(
                 : 0;
             foldEvents(modelRef.current, [event]);
             stage.current?.pushEvents([event]);
-            // dot's thoughts change nothing the page shows.
+            // dot's thoughts and heartbeats change nothing the page shows: a heartbeat's arrival is
+            // read by the stalled check on the page's next render.
             if (wordsOnly(event, known, modelRef.current, lines)) words.current = true;
-            else if (event.type !== "thought.delta") dirty.current = true;
+            else if (event.type !== "thought.delta" && event.type !== "heartbeat")
+              dirty.current = true;
             if (event.type === "session.end") end();
           },
         },

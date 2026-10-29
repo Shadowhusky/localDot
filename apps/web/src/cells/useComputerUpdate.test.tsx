@@ -169,6 +169,41 @@ it("updates from the notice", async () => {
   expect(calls).toHaveLength(1);
 });
 
+it("says once that an update can't be applied, without offering it", async () => {
+  const { api } = control();
+  expect(kit.describeUpdateError(409, kit.UPDATE_BLOCKED)).toBe(kit.UPDATE_BLOCKED);
+  const view = render(<Shell api={api} computer={cell({ updateBlocked: true })} />);
+  await settle();
+  expect(toasts()).toEqual([kit.UPDATE_BLOCKED]);
+  expect(within(screen.getByRole("listitem")).queryByRole("button", { name: "Update" })).toBeNull();
+  view.unmount();
+
+  vi.resetModules();
+  kit = { ...(await import("../ui/Toast.tsx")), ...(await import("./useComputerUpdate.ts")) };
+  const again = render(<Shell api={api} computer={cell({ updateBlocked: true })} />);
+  await settle(10_000);
+  expect(toasts()).toEqual([]);
+  // A different new version is offered as usual.
+  again.rerender(<Shell api={api} computer={cell({ updateAvailable: true })} />);
+  await settle();
+  expect(toasts()[0]).toContain(kit.UPDATE_READY);
+});
+
+it("tells a refused update once, when the computer says it is blocked", async () => {
+  const { api, answer } = control();
+  const view = render(<Shell api={api} computer={cell({ updateAvailable: true })} idle={false} />);
+  fireEvent.click(screen.getByRole("button", { name: "Update" }));
+  view.rerender(<Shell api={api} computer={cell({ updateBlocked: true })} idle={false} />);
+  await act(async () => answer(new Response(kit.UPDATE_BLOCKED, { status: 409 })));
+  expect(screen.getByTestId("error").textContent).toBe(kit.UPDATE_BLOCKED);
+  view.rerender(<Shell api={api} computer={cell({ updateBlocked: true })} />);
+  await settle();
+  expect(toasts()).toEqual([kit.UPDATE_BLOCKED]);
+  expect(screen.getByRole("listitem").dataset.tone).toBe("neutral");
+  await settle(10_000);
+  expect(toasts()).toEqual([]);
+});
+
 it("keeps a confirmed update busy when a remote proxy times out", async () => {
   const { api, answer } = control();
   const view = render(<Shell api={api} computer={cell({ updateAvailable: true })} idle={false} />);

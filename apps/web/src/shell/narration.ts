@@ -36,6 +36,12 @@ export function narrationLine(
   return workLine(model, t);
 }
 
+// When a thought dot is still on turns into the line it says while it ponders.
+export function longThinkAt(model: SessionModel): number | null {
+  const state = model.agentStates.at(-1);
+  return state?.state === "thinking" ? state.t + LONG_THINK_MS : null;
+}
+
 function workLine(model: SessionModel, t: number): string {
   const from = turnAt(model, t);
   const own = ownLine(model, t, from);

@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { REDUCED_MOTION } from "./media.ts";
 import { attachRowSwipe } from "./row-swipe.ts";
 
@@ -21,7 +21,7 @@ export interface ListRowProps {
   actions?: ReactNode;
   selected?: boolean;
   // Makes the whole row choose this item. The actions stay their own buttons above it.
-  onSelect?(): void;
+  onSelect?(event: MouseEvent<HTMLButtonElement>): void;
   // On a touch screen the row slides left to show this action's face behind it.
   swipe?: RowSwipeAction;
   // A narrower list's row: shorter, with a smaller thumbnail, as on a phone.

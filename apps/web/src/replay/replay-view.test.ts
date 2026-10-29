@@ -226,6 +226,10 @@ describe("the task library's words", () => {
     expect(libraryTotal([card({ recording: { state: "none", bytes: 0 } })], true)).toBe(
       "1+ recordings",
     );
+    // Once the daemon measures a task's folder, its screenshots and history count too.
+    expect(libraryTotal([{ ...big, diskBytes: 3 * 1024 ** 3 }, card({})], false)).toBe(
+      "2 recordings · 3.0 GB",
+    );
   });
   it("draws every verdict as a glyph with words", () => {
     expect(

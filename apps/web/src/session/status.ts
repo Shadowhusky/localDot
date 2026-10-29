@@ -66,6 +66,10 @@ export type TaskRow =
   | "interrupted"
   | "failed";
 
+// What the HUD's time counts, for a part of the page that keeps it going by itself: the time since
+// `from` once `after` ms of it have passed, or the seconds left until `to`.
+export type TaskTimer = { readonly from: number; readonly after: number } | { readonly to: number };
+
 export interface TaskHud {
   readonly row: TaskRow;
   // running: dot is working and the clock counts; waiting: the task waits and keeps its Stop;
@@ -76,6 +80,7 @@ export interface TaskHud {
   readonly elapsedS: number | null;
   // Seconds until dot tries again, while it waits on a busy model.
   readonly countdownS: number | null;
+  readonly timer?: TaskTimer | null;
   readonly control: boolean;
 }
 
@@ -236,6 +241,11 @@ const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> 
     label: "Key changed elsewhere",
     caption: "A key was changed outside localDot. The chat says which one.",
   },
+  [STALL.keysLocked]: {
+    row: "recovery",
+    label: "Saved keys are locked",
+    caption: "My saved keys are locked. Unlock them in the chat and I'll carry on.",
+  },
 };
 
 // A wait for the user counts from dot's request, so the island shows how long dot has waited.
@@ -254,15 +264,27 @@ const YOUR_TURN: Record<TakeoverReason | "user", string> = {
   payment: "Your turn. I'll wait here and pick up after you enter the payment details.",
   other: "Your turn. I'll wait here until you hand back.",
 };
-function waitedS(model: SessionModel, row: TaskRow, nowMs: number): number | null {
+function waitedFrom(model: SessionModel, row: TaskRow, nowMs: number): number | null {
   const type = REQUEST[row];
   if (!type) return null;
   for (let i = model.marks.length - 1; i >= 0; i--) {
     const mark = model.marks[i];
-    if (mark?.type === type && mark.t <= nowMs)
-      return Math.floor(msToSeconds(Math.max(0, nowMs - mark.t)));
+    if (mark?.type === type && mark.t <= nowMs) return mark.t;
   }
   return null;
+}
+
+// What a timer shows at `nowMs`: the seconds left, or the time counted so far.
+export function timerSeconds(
+  timer: TaskTimer,
+  nowMs: number,
+): { left: number } | { counted: number } | null {
+  if ("to" in timer) {
+    const left = Math.ceil((timer.to - nowMs) / 1000);
+    return left > 0 ? { left } : null;
+  }
+  const ms = nowMs - timer.from;
+  return ms >= timer.after ? { counted: Math.floor(msToSeconds(Math.max(0, ms))) } : null;
 }
 
 // Captions that only name dot's state. The band never says them: dot's pose and the island do.
@@ -289,8 +311,11 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   const first = screenAt(model, nowMs)?.firstAction ?? 0;
   const current = n > first ? model.actions[n - 1] : undefined;
   const acting = current !== undefined && !ended(current, nowMs);
-  const elapsedMs = model.startT === null ? 0 : Math.max(0, nowMs - model.startT);
-  const elapsedS = elapsedMs >= 5000 ? Math.floor(msToSeconds(elapsedMs)) : null;
+  // The task's time shows once it has run five seconds.
+  const counting: TaskTimer | null =
+    model.startT === null ? null : { from: model.startT, after: 5000 };
+  const elapsed = counting && timerSeconds(counting, nowMs);
+  const elapsedS = elapsed && "counted" in elapsed ? elapsed.counted : null;
   const finished = (row: TaskRow, label: string, caption: string): TaskHud => ({
     row,
     phase: "finished",
@@ -298,17 +323,22 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     caption,
     elapsedS: null,
     countdownS: null,
+    timer: null,
     control: false,
   });
-  const waiting = (row: TaskRow, label: string, caption: string, control = false): TaskHud => ({
-    row,
-    phase: "waiting",
-    label,
-    caption,
-    elapsedS: waitedS(model, row, nowMs),
-    countdownS: null,
-    control,
-  });
+  const waiting = (row: TaskRow, label: string, caption: string, control = false): TaskHud => {
+    const from = waitedFrom(model, row, nowMs);
+    return {
+      row,
+      phase: "waiting",
+      label,
+      caption,
+      elapsedS: from === null ? null : Math.floor(msToSeconds(Math.max(0, nowMs - from))),
+      countdownS: null,
+      timer: from === null ? null : { from, after: 0 },
+      control,
+    };
+  };
   // dot holds the computer for as long as the task runs, between steps and through a retry too.
   const running = (row: TaskRow, label: string, caption: string): TaskHud => ({
     row,
@@ -317,6 +347,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     caption,
     elapsedS,
     countdownS: null,
+    timer: counting,
     control: true,
   });
 
@@ -375,6 +406,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
       ),
       elapsedS: null,
       countdownS: leftS > 0 ? leftS : null,
+      timer: leftS > 0 ? { to: facts.retry.atMs } : null,
     };
   }
   if (state === "waiting_user") return waiting("waiting", "Waiting for you", "Waiting for you.");
@@ -443,6 +475,7 @@ export interface Status {
   readonly caption: { readonly speaker: "dot" | "system"; readonly text: string };
   readonly elapsedS: number | null;
   readonly countdownS: number | null;
+  readonly timer?: TaskTimer | null;
   // The HUD's controls, in order; never empty.
   readonly actions: readonly HudAction[];
   // dot has control: the xenon rim.
@@ -618,6 +651,7 @@ export function statusFor({
           },
     elapsedS: running?.elapsedS ?? null,
     countdownS: halting ? null : (running?.countdownS ?? null),
+    timer: halting && running?.timer && "to" in running.timer ? null : (running?.timer ?? null),
     actions,
     control: !!running?.control && !lost && !letGo,
     dotPose:

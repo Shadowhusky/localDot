@@ -25,6 +25,7 @@ import { KeyList } from "./KeyList.tsx";
 import { KeyMetadataEditor } from "./KeyMetadataEditor.tsx";
 import { type KeydHealth, type KeyRecord, keyHome, vaultLocked } from "./keys-api.ts";
 import { Protection } from "./Protection.tsx";
+import { UNLOCK_PRIVACY, UnlockKeys } from "./UnlockKeys.tsx";
 import type { KeysController } from "./useKeys.ts";
 import "./keys.css";
 
@@ -32,7 +33,13 @@ export const keysDescription = (health: KeydHealth | null) =>
   `dot finds keys by name and purpose. Provider and custom API keys can be used when a task needs them; general keys are encrypted storage. The values stay ${keyHome(health)}. Service API charges follow the provider’s limits.`;
 
 const HELD = "Keys are held until the audit log works again";
-const LOCKED = "Saved keys are locked until you unlock them on the computer running localDot";
+const LOCKED = "Saved keys are locked until you unlock them";
+
+// What a passphrase vault is, said where it asks for its passphrase.
+export const LOCKED_TEXT =
+  "Your saved keys and passwords are kept in a file only your passphrase opens. They lock each time the computer running localDot restarts, and dot can't use them until you unlock them. Sites already signed in keep working.";
+export const SETUP_TEXT =
+  "The computer running localDot has no keyring, so your keys and passwords go in a file only this passphrase opens. You'll enter it after each restart; if you forget it, you'll add your keys again.";
 
 export interface KeysPanelProps {
   active: boolean;
@@ -223,9 +230,27 @@ export function KeysPanel({
     </Button>
   );
 
+  const setup = health?.vault?.state === "setup";
   return (
     <div id="keys-sheet" className="keys-body">
       <p className="settings-lede">{keysDescription(health)}</p>
+      {locked && keys.unlock && (
+        <section className="keys-section" aria-labelledby="keys-unlock-title">
+          <GroupHead
+            id="keys-unlock-title"
+            title={setup ? "Choose a passphrase" : "Unlock your saved keys"}
+          />
+          <Card id="keys-unlock" className="keys-unlock">
+            <p className="keys-unlock-text">{setup ? SETUP_TEXT : LOCKED_TEXT}</p>
+            <UnlockKeys
+              setup={setup}
+              unlock={keys.unlock}
+              label={setup ? "Choose a passphrase" : "Unlock saved keys"}
+            />
+            <p className="keys-unlock-note">{UNLOCK_PRIVACY}</p>
+          </Card>
+        </section>
+      )}
       <Protection health={health} />
       <section className="keys-section" aria-labelledby="keys-yours">
         <GroupHead id="keys-yours" title="Your keys" aside={!phone && !formShown && add(false)} />

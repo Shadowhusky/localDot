@@ -78,7 +78,8 @@ export class PixiPresenter implements Presenter {
       resolution: 1,
       autoDensity: false,
       preference: "webgl",
-      antialias: true,
+      // Multisampling the whole canvas costs the GPU on every frame, for the overlays' edges only.
+      antialias: false,
       background: opts.theme.void.color,
       backgroundAlpha: 1,
       autoStart: false,

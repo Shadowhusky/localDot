@@ -49,7 +49,7 @@ function windowName(minutes?: number): string {
 // A plan's own app does the work: its usage is the plan's, not money.
 const planApp = (selection?: TaskModelSelection) =>
   selection?.kind === "chatgpt" || selection?.kind === "claude-code" ? selection : undefined;
-const PLAN_NAMES = { chatgpt: "ChatGPT plan", "claude-code": "Claude plan" } as const;
+export const PLAN_NAMES = { chatgpt: "ChatGPT plan", "claude-code": "Claude plan" } as const;
 
 // Money is shown only where a task is billed per call: never for a plan.
 export const billedPerCall = (selection?: TaskModelSelection) =>

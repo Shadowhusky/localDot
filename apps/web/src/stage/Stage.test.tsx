@@ -803,21 +803,82 @@ describe("Stage in a Chromium browser", () => {
     const { api } = daemon();
     const onPicture = vi.fn();
     await streaming(api, { onPicture });
-    expect(onPicture).toHaveBeenLastCalledWith("live");
+    expect(onPicture).toHaveBeenLastCalledWith("live", "desktop");
     const frame = client() as HTMLIFrameElement;
     // Selkies reloads its page to reconnect: its video goes, then comes back with a new track.
     frame.contentDocument?.getElementById("videoStream")?.remove();
     await act(async () => vi.advanceTimersByTime(HELD_AFTER_MS - 250));
-    expect(onPicture).toHaveBeenLastCalledWith("live");
+    expect(onPicture).toHaveBeenLastCalledWith("live", "desktop");
     await act(async () => vi.advanceTimersByTime(500));
-    expect(onPicture).toHaveBeenLastCalledWith("held");
+    expect(onPicture).toHaveBeenLastCalledWith("held", "desktop");
     expect(document.querySelector(".stage-veil")).toBeNull();
     expect(stops()).toHaveLength(1);
     playInClient(frame, "t2");
     await act(async () => vi.advanceTimersByTime(250));
     expect(framesSent()).toHaveLength(2);
     present();
-    expect(onPicture).toHaveBeenLastCalledWith("live");
+    expect(onPicture).toHaveBeenLastCalledWith("live", "desktop");
+  });
+
+  it("says which screen each picture is of, so a switch never borrows the last one", async () => {
+    const browserId = "01JXYZ0000000000000000ABCE";
+    const api = createApi("a".repeat(43), {
+      fetchImpl: async () => new Response("not yet", { status: 409 }),
+    });
+    const onPicture = vi.fn();
+    const view = render(
+      <Stage cell={ready} api={api} reconnects={0} listed={[CELL]} onPicture={onPicture} />,
+    );
+    expect(onPicture).toHaveBeenLastCalledWith("none", "desktop");
+    view.rerender(
+      <Stage
+        cell={{ ...ready, id: browserId }}
+        parentId={CELL}
+        selection={{
+          screen: "browser",
+          cellId: browserId,
+          revision: 2,
+          geometry: { w: 2560, h: 1600, scale: 2 },
+        }}
+        api={api}
+        reconnects={0}
+        listed={[CELL]}
+        onPicture={onPicture}
+      />,
+    );
+    expect(onPicture).toHaveBeenLastCalledWith("none", "browser");
+  });
+
+  it("holds the last picture under a word while it is away, and Try again asks for a ticket at once", async () => {
+    const { api, calls } = daemon();
+    const away = { phase: "away", cause: "stream", screen: "desktop" } as const;
+    const view = await streaming(api, { connection: { ...away, level: "blip" } });
+    expect(document.querySelector(".stage-away")).toBeNull();
+    view.rerender(
+      <Stage
+        cell={ready}
+        api={api}
+        reconnects={0}
+        listed={[CELL]}
+        connection={{ ...away, level: "brief" }}
+      />,
+    );
+    expect(document.querySelector(".stage-away")?.textContent).toBe("Reconnecting…");
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    view.rerender(
+      <Stage
+        cell={ready}
+        api={api}
+        reconnects={0}
+        listed={[CELL]}
+        connection={{ ...away, level: "long" }}
+      />,
+    );
+    const minted = calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(calls).toHaveLength(minted + 1));
+    expect(calls.at(-1)).toBe(`POST /api/cells/${CELL}/stream-ticket`);
+    await waitFor(() => expect(clients()).toHaveLength(2));
   });
 
   it("removes the client and stops the frames when the cell leaves ready", async () => {

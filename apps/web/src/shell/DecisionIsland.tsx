@@ -14,7 +14,7 @@ import {
 import { flushSync } from "react-dom";
 import { ApprovalValue } from "../agent/ApprovalValue.tsx";
 import { type DecisionScope, decisionWords, defaultScope, ONCE } from "../copy/decision.ts";
-import { clock } from "../copy/format.ts";
+import type { TaskTimer } from "../session/status.ts";
 import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -26,6 +26,7 @@ import { Select } from "../ui/Select.tsx";
 import { attachSheetDrag } from "../ui/sheet-drag.ts";
 import "./decision.css";
 import { useKeyboardInset } from "./layout.ts";
+import { TaskTime } from "./TaskTime.tsx";
 
 class Mismatch extends Error {}
 
@@ -311,6 +312,7 @@ function UploadFacts({ upload }: { upload: NonNullable<ApprovalCard["upload"]> }
 interface DecisionSheetProps {
   label: string;
   elapsedS: number | null;
+  timer?: TaskTimer | null;
   children: ReactNode;
 }
 
@@ -328,7 +330,7 @@ export function DecisionSheetPresence({ show, ...sheet }: DecisionSheetProps & {
   );
 }
 
-export function DecisionSheet({ label, elapsedS, children }: DecisionSheetProps) {
+export function DecisionSheet({ label, elapsedS, timer, children }: DecisionSheetProps) {
   const keyboard = useKeyboardInset();
   // Read as a drag lets go: the keyboard coming or going never drops a drag under way.
   const typing = useRef(keyboard);
@@ -374,7 +376,7 @@ export function DecisionSheet({ label, elapsedS, children }: DecisionSheetProps)
         <span className="decision-attention" aria-hidden="true" />
         <span>{label}</span>
         <span className="decision-sheet-elapsed num">
-          {elapsedS === null ? "" : clock(elapsedS)}
+          <TaskTime timer={timer} elapsedS={elapsedS} />
         </span>
       </div>
       <IconButton

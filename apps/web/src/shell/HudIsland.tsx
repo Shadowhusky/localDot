@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { clock } from "../copy/format.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import type { HudAction, Status } from "../session/status.ts";
 import { targetRingBox } from "../stage/geometry.ts";
@@ -27,6 +26,7 @@ import {
   type TakeSlot,
 } from "./island.ts";
 import { HANDHELD } from "./layout.ts";
+import { TaskTime } from "./TaskTime.tsx";
 import "./hud.css";
 
 type ComputerKind = Exclude<HudAction["kind"], "stop-task">;
@@ -188,7 +188,12 @@ export function HudIsland({
   const handSlot = !(yours && phone);
   const declining = yours ? decline : undefined;
   return (
-    <div className="island-anchor" ref={anchor} data-full={full || undefined}>
+    <div
+      className="island-anchor"
+      ref={anchor}
+      data-full={full || undefined}
+      data-live={status.computer === "live" || undefined}
+    >
       <div
         className="island"
         data-shape={shape}
@@ -204,11 +209,11 @@ export function HudIsland({
           </span>
           {task && (
             <span className="island-elapsed num" data-testid="hud-elapsed" aria-live="off">
-              {status.countdownS !== null
-                ? `in ${status.countdownS} s`
-                : status.elapsedS === null
-                  ? ""
-                  : clock(status.elapsedS)}
+              <TaskTime
+                timer={status.timer}
+                elapsedS={status.elapsedS}
+                countdownS={status.countdownS}
+              />
             </span>
           )}
           <span className="island-controls">

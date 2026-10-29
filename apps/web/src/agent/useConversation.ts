@@ -10,6 +10,8 @@ export interface Conversation {
   readonly sessions: readonly string[];
   // Older tasks of the conversation are left out.
   readonly more: boolean;
+  // Messages of its tasks that Stop left unsent and the user took back to edit.
+  readonly withdrawn: readonly string[];
   // The daemon has said which conversation is current.
   readonly known: boolean;
   readonly busy: boolean;
@@ -21,6 +23,7 @@ export interface Conversation {
 }
 
 const NONE: ConversationSnapshot = { sessions: [], more: false };
+const NOTHING_WITHDRAWN: readonly string[] = [];
 const RETRY_MS = 1000;
 const RETRY_MAX_MS = 30_000;
 
@@ -103,6 +106,7 @@ export function useConversation(api: ApiClient): Conversation {
   return {
     sessions: state.snapshot.sessions,
     more: state.snapshot.more,
+    withdrawn: state.snapshot.withdrawn ?? NOTHING_WITHDRAWN,
     known: state.known,
     busy,
     choice,

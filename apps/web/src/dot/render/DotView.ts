@@ -71,6 +71,7 @@ export class DotView implements Frameable {
   private size: number;
   private lod: Lod;
   private detail: LodDetail;
+  private fullRate = false;
   private readonly cache: Cache = {};
   private lastFrame: number;
   private lastRender = Number.NEGATIVE_INFINITY;
@@ -226,6 +227,13 @@ export class DotView implements Frameable {
     kick();
   }
 
+  // Replay plays a recording's dot, whose loops keep their full rate at every size.
+  setFullRate(on: boolean): void {
+    if (on === this.fullRate) return;
+    this.fullRate = on;
+    kick();
+  }
+
   react(name: Reaction): void {
     this.engine.react(name, now());
     kick();
@@ -310,7 +318,7 @@ export class DotView implements Frameable {
       return 0;
     }
     const gap = this.engine.looping(t)
-      ? Math.min(LOOP_GAP_MS, this.detail.calmGapMs)
+      ? Math.min(this.fullRate ? LOOP_GAP_MS : this.detail.loopGapMs, this.detail.calmGapMs)
       : this.detail.calmGapMs;
     if (t - this.lastRender >= gap) this.render(t);
     return Math.max(0, Math.min(this.lastRender + gap, this.engine.nextEventAt()) - t);

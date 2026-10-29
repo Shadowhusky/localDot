@@ -177,16 +177,20 @@
     }
   }
 
-  /* At 320px, keep full touch targets by moving Attach beside the text field. */
+  /* At 320px, keep full touch targets by moving Attach beside the text field, level with its last
+     line. It is held from the bottom, over the 44 px bar, so files or a notice opening above the
+     field never slide under it; one line sits in the middle of the field's 44 px, inside its 1 px
+     border. */
   @container (max-width: 260px) {
     .composer-card[data-layout="pill"] > .composer-field {
       min-height: 44px;
+      padding-block: calc((var(--spacing) * 11 - 1lh) / 2 - 1px);
       padding-inline-start: calc(var(--spacing) * 12);
     }
 
     .composer-card[data-layout="pill"] .composer-bar > .ui-icon-button:first-child {
       position: absolute;
-      top: calc(var(--spacing) * 2);
+      bottom: calc(var(--spacing) * 2 + 44px);
       left: calc(var(--spacing) * 2);
     }
   }
@@ -227,6 +231,18 @@
   @media (pointer: coarse) {
     .composer-model {
       min-width: 44px;
+    }
+  }
+
+  /* The plan's near or reached limit, a point beside the model's name. */
+  .composer-model .ui-badge {
+    margin-inline-start: var(--spacing);
+  }
+
+  /* A used-up window draws in danger, as its words say; forced colours keep the kit's own. */
+  @media not (forced-colors: active) {
+    .plan-usage-window[data-tone="limit"] .ui-meter-fill {
+      background-color: var(--color-danger-fg);
     }
   }
 
@@ -284,6 +300,60 @@
   }
   .model-config-actions .model-config-manage {
     margin-inline-start: 0;
+  }
+  /* Each plan's limits, under the model's settings: a name, a bar and when it resets. */
+  .plan-usage-list {
+    display: grid;
+    gap: calc(var(--spacing) * 4);
+    padding-top: calc(var(--spacing) * 3);
+    border-top: 1px solid var(--color-hairline);
+  }
+  .plan-usage {
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+  }
+  .plan-usage-head {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 1.5);
+    min-width: 0;
+  }
+  .plan-usage-title {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-fg-1);
+    font:
+      var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height)
+      var(--font-ui);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .plan-usage-age {
+    flex-shrink: 0;
+    margin-inline-start: auto;
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+  }
+  .plan-usage-window {
+    display: grid;
+    gap: var(--spacing);
+  }
+  .plan-usage-line,
+  .plan-usage-limit {
+    margin: 0;
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+    font-variant-numeric: tabular-nums;
+  }
+  /* fg-3 is too faint on the overlay surface, as the kit's menu notes. */
+  .plan-usage-line {
+    color: var(--color-fg-2);
+  }
+  .plan-usage-limit {
+    color: var(--color-danger-fg);
+    font-weight: var(--font-weight-medium);
   }
   .model-effort-slider {
     display: grid;

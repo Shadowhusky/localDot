@@ -22,6 +22,18 @@ describe("describeRequestError", () => {
     }
   });
 
+  it("says plainly what several dots' computers lack on one Docker", () => {
+    for (const answer of [
+      "Two running computers need about 10 GB for Docker; it has 8 GB. Raise it in Docker Desktop → Settings → Resources.",
+      "Docker has no network addresses left for another computer. Remove a computer you no longer use, on any dot on this computer, then try again.",
+      "The computer copied from another dot couldn't be set up. Start again for a new computer.",
+    ])
+      expect(describeRequestError(new ApiError(409, answer))).toBe(answer);
+    expect(
+      describeRequestError(new ApiError(409, "Two running computers need /etc/x")),
+    ).not.toContain("/etc");
+  });
+
   it("maps each status to a plain sentence and keeps the daemon's text out", () => {
     expect(describeRequestError(new ApiError(502, DOCKER_DOWN))).toBe(
       "Docker isn't answering. Check that Docker Desktop is running, then try again.",

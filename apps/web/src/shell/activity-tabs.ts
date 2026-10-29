@@ -1,4 +1,4 @@
-type Tab = "steps" | "files" | "sources" | "agents";
+type Tab = "steps" | "files" | "sources" | "agents" | "previews";
 const KEY = "localdot.activity-tabs.v1";
 const KEEP = 100;
 
@@ -14,7 +14,7 @@ function read(): Map<string, Tab> {
             Array.isArray(entry) &&
             entry.length === 2 &&
             typeof entry[0] === "string" &&
-            ["steps", "files", "sources", "agents"].includes(entry[1]),
+            ["steps", "files", "sources", "agents", "previews"].includes(entry[1]),
         ),
     );
   } catch {

@@ -9,6 +9,7 @@ import type {
   RuleChange,
   ScreenSelectionSnapshot,
   SessionOrigin,
+  SubagentStop,
 } from "@localdot/protocol";
 import type { TerminalText } from "./terminal-text.ts";
 
@@ -178,6 +179,8 @@ export interface ApprovalOutcome {
 export interface AgentRun {
   readonly runId: string;
   readonly state: EventOf<"subagent.state">["data"]["state"];
+  readonly reason?: SubagentStop;
+  readonly resumed?: true;
   readonly summary?: string;
   readonly startedAt: number;
   readonly endedAt?: number;
@@ -229,6 +232,8 @@ export interface AgentModel {
   readonly retrying: boolean;
   readonly subscription: Reported<EventOf<"subscription.usage">["data"]> | null;
   readonly budget: Reported<EventOf<"budget.exceeded">["data"]> | null;
+  // The task met locked saved keys, and they haven't opened since.
+  readonly keysLocked: boolean;
   readonly spend: AgentSpend | null;
   readonly spendCalls: readonly SpendCall[];
   // Older material can be fetched from the event log by the later history UI. Never imply that
@@ -244,13 +249,19 @@ export function heldByUser(model: AgentModel): AgentTakeover | undefined {
 export function interruptRunning(
   children: ReadonlyMap<string, AgentChild>,
   endedAt?: number,
+  reason?: SubagentStop,
 ): ReadonlyMap<string, AgentChild> {
   if (![...children.values()].some((child) => child.state === "running")) return children;
   return new Map(
     [...children].map(([id, child]) => [
       id,
       child.state === "running"
-        ? { ...child, state: "interrupted", ...(endedAt === undefined ? {} : { endedAt }) }
+        ? {
+            ...child,
+            state: "interrupted",
+            ...(endedAt === undefined ? {} : { endedAt }),
+            ...(reason ? { reason } : {}),
+          }
         : child,
     ]),
   );
@@ -281,6 +292,7 @@ export function emptyAgentModel(): AgentModel {
     retrying: false,
     subscription: null,
     budget: null,
+    keysLocked: false,
     spend: null,
     spendCalls: [],
     historyTruncated: false,

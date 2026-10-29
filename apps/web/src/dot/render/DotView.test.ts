@@ -312,7 +312,7 @@ describe("DotView", () => {
     expect(Math.max(...steps(slopes))).toBeLessThan(0.15);
   });
 
-  it("keeps a speaking dot near its calm frame rate: no talk-bob on a badge, 30 fps above", () => {
+  it("keeps a speaking dot near its calm frame rate: no talk-bob on a badge, about 9 fps above", () => {
     const pose = vi.spyOn(DotEngine.prototype, "pose");
     const badge = mount({ state: "speaking" });
     const body = badge.root.querySelector(".dot-body") as HTMLElement;
@@ -326,7 +326,7 @@ describe("DotView", () => {
     pose.mockClear();
     const hero = mount({ state: "speaking", size: 224 }).view;
     drive(hero, clock, clock + 20_000);
-    expect(pose.mock.calls.length / 20).toBeLessThan(40);
+    expect(pose.mock.calls.length / 20).toBeLessThan(20);
   });
 
   it("jumps ahead instead of replaying a gap of more than 10 s", () => {
@@ -347,13 +347,29 @@ describe("DotView", () => {
     expect(root.dataset.skin).toBeUndefined();
   });
 
+  it("draws a prop's loops at 20 fps at the dock's size, and at 30 fps while Replay plays it", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const { view } = mount({ size: 56 });
+    view.setTool("typing");
+    drive(view, T0, T0 + 2000);
+    const gaps = () => {
+      const waits: number[] = [];
+      drive(view, clock, clock + 500, (t) => waits.push(view.frame(t)));
+      return Math.max(...waits);
+    };
+    expect(gaps()).toBeGreaterThan(33);
+    expect(gaps()).toBeLessThanOrEqual(50);
+    view.setFullRate(true);
+    expect(gaps()).toBeLessThanOrEqual(33);
+  });
+
   it("tells the loop how long a calm dot can wait, and draws a prop's loops at half rate", () => {
     const { view } = mount({ size: 96 });
     const waits: number[] = [];
     drive(view, T0, T0 + 4000);
     drive(view, clock, clock + 1000, (t) => waits.push(view.frame(t)));
-    expect(Math.max(...waits)).toBeGreaterThan(16);
-    expect(Math.max(...waits)).toBeLessThanOrEqual(33);
+    expect(Math.max(...waits)).toBeGreaterThan(33);
+    expect(Math.max(...waits)).toBeLessThanOrEqual(110);
 
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
     view.setTool("typing");

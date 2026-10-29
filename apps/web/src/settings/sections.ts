@@ -18,7 +18,8 @@ export type SettingsSection =
   | "accounts"
   | "connectors"
   | "keys"
-  | "computer";
+  | "computer"
+  | "report";
 
 export interface SectionInfo {
   id: SettingsSection;
@@ -41,6 +42,7 @@ export const SECTIONS: readonly SectionInfo[] = [
   { id: "connectors", title: "Connectors", icon: "plug" },
   { id: "keys", title: "Keys", icon: "key-round" },
   { id: "computer", title: "Your computer", icon: "power" },
+  { id: "report", title: "Report a problem", icon: "circle-alert" },
 ];
 
 export const sectionTitle = (id: SettingsSection) =>

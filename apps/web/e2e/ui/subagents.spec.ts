@@ -1,18 +1,29 @@
 import type { Locator, Page } from "@playwright/test";
-import { TOKEN } from "../fixtures/start-ui-fixture.ts";
 import { expect, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
 
-async function agentsTab(page: Page) {
-  if (isPhone(page)) await page.getByRole("button", { name: "Activity", exact: true }).click();
-  else
+// While the user holds the computer, a phone's toolbar has its controls in Activity's place, and
+// More has Activity instead.
+async function agentsTab(page: Page, holding = false) {
+  if (!isPhone(page))
     await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
+  else if (!holding) await page.getByRole("button", { name: "Activity", exact: true }).click();
+  else {
+    await page.getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Activity", exact: true }).click();
+  }
   await page.getByRole("tab", { name: /Agents/ }).click();
   return page.getByRole("tabpanel", { name: /Agents/ });
 }
 
 const row = (panel: Locator, label: string) => panel.locator(".subagent-row", { hasText: label });
+
+// WebKit reports a request that a reload cuts off as a page error, so the page settles first.
+async function reload(page: Page) {
+  await page.waitForLoadState("networkidle");
+  await page.reload();
+}
 
 test("Activity shows persisted running and finished child agents with expandable linked results", async ({
   page,
@@ -31,7 +42,7 @@ test("Activity shows persisted running and finished child agents with expandable
     "https://example.test/reference",
   );
   await page.screenshot({ path: test.info().outputPath("agents.png") });
-  await page.reload();
+  await reload(page);
   await expect(await agentsTab(page)).toContainText("Research official sources");
 });
 
@@ -59,32 +70,62 @@ test("an agent dot wakes again keeps one row, led by its new run, its earlier re
   await page.screenshot({ path: test.info().outputPath("agents-earlier.png") });
 });
 
+test("an agent a usage limit stopped says why, then reads Resumed with that run kept", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("running");
+  await page.request.post(`${fixture.origin}/__qa/agents`);
+  await page.request.post(`${fixture.origin}/__qa/agents/limit`);
+  const panel = await agentsTab(page);
+  const research = row(panel, "Research official sources");
+  await expect(research.locator(".subagent-heading")).toContainText("Interrupted");
+  await expect(research.locator(".subagent-reason")).toHaveText("Usage limit reached");
+  await page.screenshot({ path: test.info().outputPath("agents-limit.png") });
+  await page.request.post(`${fixture.origin}/__qa/agents/resume`);
+  await expect(research.locator(".subagent-heading")).toContainText("Resumed");
+  await expect(research.locator(".subagent-reason")).toHaveCount(0);
+  await research.getByRole("button", { name: /^Earlier runs/ }).click();
+  await expect(research.locator(".subagent-runs")).toContainText(
+    "Interrupted · Usage limit reached",
+  );
+  const { scrollWidth, clientWidth } = await panel.evaluate((el) => ({
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+  }));
+  expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+  await page.screenshot({ path: test.info().outputPath("agents-resumed.png") });
+  await reload(page);
+  await expect(
+    row(await agentsTab(page), "Research official sources").locator(".subagent-heading"),
+  ).toContainText("Resumed");
+});
+
 test("a child agent cut off when the user takes the computer reads Interrupted, never Running", async ({
   page,
   ui,
 }) => {
   const fixture = await ui.open("running");
   await page.request.post(`${fixture.origin}/__qa/agents`);
-  const panel = await agentsTab(page);
+  let panel = await agentsTab(page);
   await expect(row(panel, "Research official sources")).toContainText("Running");
-  // A phone's Agents sheet covers the island, so there the request its Take control sends is made
-  // directly.
-  if (isPhone(page)) {
-    const took = await page.request.post(
-      `${fixture.origin}/api/agent/sessions/${fixture.sessionId}/takeover`,
-      { headers: { authorization: `Bearer ${TOKEN}` } },
-    );
-    expect(took.status(), await took.text()).toBe(202);
-  } else await page.locator(".island").getByRole("button", { name: "Take control" }).click();
+  // A phone's Activity sheet covers the island, so it is closed to reach Take control.
+  if (isPhone(page))
+    await page
+      .getByRole("dialog", { name: "Activity" })
+      .getByRole("button", { name: "Done" })
+      .click();
+  await page.locator(".island").getByRole("button", { name: "Take control" }).click();
   await expect(page.getByTestId("hud-status")).toHaveText("You're in control");
+  if (isPhone(page)) panel = await agentsTab(page, true);
   await expect(row(panel, "Research official sources")).toContainText("Interrupted");
+  await expect(row(panel, "Research official sources")).toContainText("You took the computer");
   await expect(row(panel, "Review implementation")).toContainText("Finished");
   await expect(panel).not.toContainText("Running");
   await page.screenshot({ path: test.info().outputPath("agents-interrupted.png") });
-  // While the user holds the computer, a phone's clicks and taps never land (at 4c0960a9 too).
-  if (isPhone(page)) return;
-  await page.reload();
-  await expect(row(await agentsTab(page), "Research official sources")).toContainText(
+  await reload(page);
+  await expect(page.getByTestId("hud-status")).toHaveText("You're in control");
+  await expect(row(await agentsTab(page, true), "Research official sources")).toContainText(
     "Interrupted",
   );
 });

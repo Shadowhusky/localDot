@@ -1,6 +1,7 @@
 import { type CSSProperties, useEffect, useId, useMemo, useRef, useState } from "react";
 import { count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { useSessionNow } from "../session/useNowMs.ts";
 import { Button } from "../ui/Button.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { ControlFailure, changeResearch } from "./control-api.ts";
@@ -13,7 +14,7 @@ const estimateSource = () => 52;
 
 export interface ResearchSourcesProps {
   research: AgentResearch;
-  // The session's now, for the minutes used.
+  // The session's now, for the minutes used; without it they count by themselves while dot works.
   nowMs?: number;
   // dot is still working: the user can wrap up or keep going.
   working: boolean;
@@ -33,6 +34,8 @@ export function ResearchSources({
   sessionId,
 }: ResearchSourcesProps) {
   const id = useId();
+  const counted = useSessionNow(nowMs === undefined && working, research.startMs);
+  const at = nowMs ?? counted ?? undefined;
   const [all, setAll] = useState(false);
   const [sending, setSending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -73,12 +76,12 @@ export function ResearchSources({
         <h3 id={`${id}-head`} className="ui-visually-hidden">
           Sources
         </h3>
-        <span className="activity-section-meta num">{researchMeta(research, nowMs)}</span>
+        <span className="activity-section-meta num">{researchMeta(research, at)}</span>
       </div>
       <div
         className="research-track"
         aria-hidden="true"
-        style={{ "--_used": researchUsed(research, nowMs) } as CSSProperties}
+        style={{ "--_used": researchUsed(research, at) } as CSSProperties}
       />
       {sources.length ? (
         <ol ref={list} className="research-sources" aria-label="Sources dot read">

@@ -30,6 +30,11 @@ export interface BandScene {
   covered: boolean;
 }
 
+// The computer is up and only this viewer's picture is on its way, as after Replay: no task came
+// between, so dot keeps its line for when the picture is back.
+export const pictureAway = (computer: ComputerPhase) =>
+  computer === "connecting" || computer === "reconnecting" || computer === "suspended";
+
 // dot greets and gives tips only while no task runs and nothing needs the user.
 export const restingBand = (scene: BandScene) =>
   scene.computer === "live" &&
@@ -104,7 +109,8 @@ export interface IdleLine {
 
 export interface IdleInput {
   resting: boolean;
-  // Another panel covers Watch; preserve its line without rotating tips.
+  // Another panel covers Watch, or the picture is on its way back; preserve its line without
+  // rotating tips.
   suspended?: boolean;
   // The rotation waits: the page is hidden or the pointer is over the band.
   held: boolean;
