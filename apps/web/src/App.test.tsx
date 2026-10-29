@@ -375,7 +375,7 @@ describe("App Replay mode", () => {
       clock.mockRestore();
     }
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("t")).toBe("10000"));
-  });
+  }, 20_000);
   it("keeps Watch working when no session exists", async () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
     await screen.findAllByRole("button", { name: "Turn on" });

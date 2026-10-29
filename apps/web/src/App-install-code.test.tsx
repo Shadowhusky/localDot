@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, configure, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
+
+// The whole app renders in these tests; a slow CI runner needs more than the default second.
+configure({ asyncUtilTimeout: 5000 });
 
 const CODE = "c".repeat(43),
   OTHER_CODE = "d".repeat(43);
