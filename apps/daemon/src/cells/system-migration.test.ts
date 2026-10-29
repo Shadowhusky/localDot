@@ -1,7 +1,23 @@
 import { expect, it, vi } from "vitest";
 import { DockerError, type DockerRequest } from "./docker.ts";
+import {
+  AUTO_INSTALLED,
+  contentHash,
+  PACKAGE_STATUS,
+  READ_PACKAGE_DATABASES,
+} from "./package-status.ts";
 import { retireMigrationScratch, SYSTEM_BASE, SystemMigration } from "./system-migration.ts";
-import { SystemBaseMissing } from "./system-migration-plan.ts";
+import {
+  ARCHIVE_SYSTEM,
+  LIBRARY_CACHE,
+  LIBRARY_ID_CACHE,
+  type Manifest,
+  PREPARE_SYSTEM,
+  SCAN_SYSTEM,
+  SystemBaseMissing,
+  SystemMigrationConflict,
+} from "./system-migration-plan.ts";
+import { tar } from "./tar.ts";
 import type { CellRecord } from "./types.ts";
 
 const base = `sha256:${"a".repeat(64)}`;
@@ -169,6 +185,168 @@ it("commits the update's backup and new system with no stream password or deskto
   expect(images.get(result)).toEqual(
     expect.arrayContaining(["PATH=/usr/bin", "LANG=C.UTF-8", "PUID=1000"]),
   );
+});
+
+// A stopped computer whose user and new image both installed packages and libraries. The fake
+// clone does what the helpers it is sent would do.
+function migrating({ marks = "", ldconfigMode = 0o600 } = {}) {
+  const file = (hash: string, mode = 0o644): Manifest[string] => ["f", mode, 0, 0, hash];
+  const installed = (name: string) =>
+    `Package: ${name}\nStatus: install ok installed\nArchitecture: arm64\nVersion: 1\n\n`;
+  const auto = (name: string) => `Package: ${name}\nArchitecture: arm64\nAuto-Installed: 1\n\n`;
+  const texts: Record<string, Record<string, string>> = {
+    [base]: { [PACKAGE_STATUS]: installed("libc6"), [AUTO_INSTALLED]: auto("libbase") },
+    [target]: {
+      [PACKAGE_STATUS]: installed("libc6") + installed("fonts"),
+      [AUTO_INSTALLED]: auto("libbase") + auto("libfont") + marks,
+    },
+    saved: {
+      [PACKAGE_STATUS]: installed("libc6") + installed("app"),
+      [AUTO_INSTALLED]: auto("libbase") + auto("libapp") + marks.replace("image", "user"),
+    },
+  };
+  const databases = (side: Record<string, string>): Manifest =>
+    Object.fromEntries(Object.entries(side).map(([path, text]) => [path, file(contentHash(text))]));
+  const manifests: Record<string, Manifest> = {
+    [base]: {
+      ...databases(texts[base] ?? {}),
+      [LIBRARY_CACHE]: file("index"),
+      [LIBRARY_ID_CACHE]: file("ids", 0o600),
+    },
+    [target]: {
+      ...databases(texts[target] ?? {}),
+      [LIBRARY_CACHE]: file("index with font"),
+      [LIBRARY_ID_CACHE]: file("image ids", 0o600),
+      "/usr/lib/libfont.so.1": file("font"),
+    },
+    saved: {
+      ...databases(texts.saved ?? {}),
+      [LIBRARY_CACHE]: file("index with app"),
+      [LIBRARY_ID_CACHE]: file("user ids", 0o600),
+      "/usr/local/lib/libapp.so.1": file("app"),
+    },
+  };
+  const helpers = new Map<string, { image: string; script: string; plans: unknown[] }>();
+  const events: string[] = [];
+  const commits: string[] = [];
+  let serial = 0;
+  const planOf = (data: Buffer) =>
+    JSON.parse(data.subarray(512).toString("utf8").replace(/\0+$/, ""));
+  const find = (script: string) => [...helpers.values()].filter((h) => h.script === script);
+  // What the clone holds once its helpers ran: the saved system plus what they were sent.
+  const result = (): Manifest => {
+    const [clone] = find(PREPARE_SYSTEM);
+    const [prepared, rebuilt] = (clone?.plans ?? []) as {
+      packageDatabases?: Record<string, { entry: Manifest[string] }>;
+      ldconfig?: boolean;
+    }[];
+    const copied = (find(ARCHIVE_SYSTEM)[0]?.plans[0] ?? []) as string[];
+    const out = { ...manifests.saved };
+    for (const [path, merged] of Object.entries(prepared?.packageDatabases ?? {}))
+      out[path] = merged.entry;
+    for (const path of copied) out[path] = manifests[target]?.[path] as Manifest[string];
+    if (rebuilt?.ldconfig) {
+      out[LIBRARY_CACHE] = file("index with both");
+      out[LIBRARY_ID_CACHE] = file("rebuilt ids", ldconfigMode);
+    }
+    return out;
+  };
+  const request = vi.fn(async (req: DockerRequest): Promise<unknown> => {
+    const [, kind, id = "", action] = req.path.split("/");
+    if (req.method === "GET" && req.path === "/containers/owned/json")
+      return {
+        Id: "owned",
+        Image: system,
+        State: { Running: false, Paused: false },
+        Config: {
+          Labels: { "localdot.cell": "cell", "localdot.role": "desktop", [SYSTEM_BASE]: base },
+        },
+      };
+    if (req.method === "GET" && kind === "images") {
+      const image = decodeURIComponent(id);
+      if (image === system) return { Config: { Labels: { [SYSTEM_BASE]: base } } };
+      return { Id: image, Architecture: "arm64", Config: { Labels: {} } };
+    }
+    if (req.method === "POST" && req.path === "/commit") {
+      const image = `sha256:${String(++serial).padStart(64, "0")}`;
+      manifests[image] = req.query?.container === "owned" ? (manifests.saved ?? {}) : result();
+      if (req.query?.container === "owned") texts[image] = texts.saved ?? {};
+      commits.push(image);
+      return { Id: image };
+    }
+    if (req.method === "POST" && req.path === "/containers/create") {
+      const body = req.body as { Image: string; Entrypoint: string[] };
+      const helper = `helper-${++serial}`;
+      helpers.set(helper, { image: body.Image, script: body.Entrypoint[5] ?? "", plans: [] });
+      return { Id: helper };
+    }
+    const helper = helpers.get(decodeURIComponent(id));
+    const clone = helper?.script === PREPARE_SYSTEM;
+    if (req.method === "PUT" && action === "archive") {
+      if (req.query?.path === "/tmp") helper?.plans.push(planOf(req.raw?.data ?? Buffer.alloc(0)));
+      if (clone) events.push(req.query?.path === "/tmp" ? "plan" : "copy");
+      return undefined;
+    }
+    if (action === "start") {
+      if (clone) events.push("run");
+      return undefined;
+    }
+    if (action === "wait") return { StatusCode: 0 };
+    if (action === "logs") {
+      const output =
+        helper?.script === SCAN_SYSTEM
+          ? JSON.stringify(manifests[helper.image])
+          : helper?.script === READ_PACKAGE_DATABASES
+            ? JSON.stringify(texts[helper.image])
+            : "done";
+      return stdout(output);
+    }
+    if (req.method === "GET" && action === "archive")
+      return tar([{ name: "localdot-update.tar", data: "files" }]);
+    if (action === "tag" || req.method === "DELETE") return undefined;
+    throw new Error(`Unexpected request: ${req.method} ${req.path}`);
+  });
+  return { request, events, commits, find };
+}
+
+it("merges both package databases and rebuilds the loader's index once the new files are in", async () => {
+  const f = migrating();
+  const result = await new SystemMigration({ request: f.request } as never, "/unused").prepare(
+    record,
+    target,
+  );
+  expect(result).toBe(f.commits.at(-1));
+  expect(f.find(READ_PACKAGE_DATABASES).map((h) => h.image)).toEqual([base, target, f.commits[0]]);
+  const [prepared, rebuild] = (f.find(PREPARE_SYSTEM)[0]?.plans ?? []) as {
+    packageDatabases: Record<string, { text: string }>;
+  }[];
+  expect(Object.keys(prepared?.packageDatabases ?? {}).sort()).toEqual(
+    [AUTO_INSTALLED, PACKAGE_STATUS].sort(),
+  );
+  expect(prepared?.packageDatabases[AUTO_INSTALLED]?.text).toBe(
+    `${["libbase", "libapp", "libfont"].map((name) => `Package: ${name}\nArchitecture: arm64\nAuto-Installed: 1\n\n`).join("")}`,
+  );
+  // Only the new library is copied; the databases are merged and ldconfig writes its caches.
+  expect(f.find(ARCHIVE_SYSTEM)[0]?.plans).toEqual([["/usr/lib/libfont.so.1"]]);
+  expect(rebuild).toEqual({ remove: [], directories: [], ldconfig: true });
+  expect(f.events).toEqual(["plan", "run", "copy", "plan", "run"]);
+});
+
+it("refuses before touching a clone when both sides marked a package differently", async () => {
+  const f = migrating({
+    marks: "Package: libshared\nArchitecture: arm64\nAuto-Installed: 1\nX-From: image\n\n",
+  });
+  await expect(
+    new SystemMigration({ request: f.request } as never, "/unused").prepare(record, target),
+  ).rejects.toBeInstanceOf(SystemMigrationConflict);
+  expect(f.find(PREPARE_SYSTEM)).toEqual([]);
+});
+
+it("keeps the original when ldconfig's caches come out unlike ldconfig writes them", async () => {
+  const f = migrating({ ldconfigMode: 0o644 });
+  await expect(
+    new SystemMigration({ request: f.request } as never, "/unused").prepare(record, target),
+  ).rejects.toThrow("verification failed");
 });
 
 function scratch() {

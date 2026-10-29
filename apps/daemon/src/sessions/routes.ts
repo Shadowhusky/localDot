@@ -1,13 +1,17 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  DeleteSessionsRequest,
+  type DeleteSessionsResult,
   emptyManifest,
   recordingDirectory,
   type ScreenName,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import type { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { Conversations } from "../agent/conversation.ts";
+import { errorCode } from "../error-code.ts";
 import { type EventLog, UnknownSessionError } from "../event-log.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import type { Recorder } from "../recorder/recorder.ts";
@@ -291,11 +295,31 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
     if (current && sessions.includes(current)) conversations.begin();
     return c.body(null, 204);
   });
-  app.delete("/api/sessions/:id", (c) => {
-    const id = c.req.param("id");
-    if (deps.recorder.isLive(id) || deps.live?.cellOf(id)) return c.text("session is live", 409);
-    deps.eventLog.forget(id);
+  // No await separates the live check from the deletion, so a run cannot start between them.
+  const remove = (id: string): "deleted" | "live" => {
+    if (deps.recorder.isLive(id) || deps.live?.cellOf(id)) return "live";
+    if (deps.eventLog.hasSession(id) || deps.eventLog.hasPendingDeletion(id))
+      deps.eventLog.forget(id);
     deps.index.invalidate(id);
-    return c.body(null, 204);
+    return "deleted";
+  };
+  app.delete("/api/sessions/:id", (c) =>
+    remove(c.req.param("id")) === "live" ? c.text("session is live", 409) : c.body(null, 204),
+  );
+  app.post("/api/session-index/delete", bodyLimit({ maxSize: 8 * 1024 }), async (c) => {
+    const parsed = DeleteSessionsRequest.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text("invalid session ids", 400);
+    const result: DeleteSessionsResult = { deleted: [], live: [], failed: [] };
+    for (const id of new Set(parsed.data.ids)) {
+      try {
+        result[remove(id)].push(id);
+      } catch (error) {
+        console.error(`deleting a task failed (${errorCode(error)})`);
+        result.failed.push(id);
+      }
+      // Each task's folder goes in a turn of its own, so streams and other requests keep moving.
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    return c.json(result);
   });
 }

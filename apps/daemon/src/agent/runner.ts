@@ -25,6 +25,7 @@ import {
   SessionRun,
   type SkillSummary,
   STALL,
+  type SubagentResume,
   type TakeComputerReply,
   type TaskModelSelection,
   type TaskPricing,
@@ -38,7 +39,7 @@ import type { EventLog } from "../event-log.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
-import type { KeydHealth } from "../keyd/monitor.ts";
+import { type KeydHealth, vaultLocked } from "../keyd/monitor.ts";
 import {
   activeRoles,
   BindingError,
@@ -82,6 +83,7 @@ import { visualNavigation } from "./safety/visual-target.ts";
 import { AgentSession, abortable, SessionStoppedError } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
+import { resumable, unfinishedIn } from "./subagents.ts";
 import type { TranscriptStore } from "./transcript.ts";
 
 export const BRAIN_DONE = 0;
@@ -153,7 +155,7 @@ export class AgentError extends Error {
 export interface AgentRunnerDeps {
   home: string;
   fences?: ComputerFences;
-  eventLog: Pick<EventLog, "createSession" | "append" | "subscribe">;
+  eventLog: Pick<EventLog, "createSession" | "append" | "subscribe" | "logFile">;
   live: Pick<
     LiveSessions,
     "start" | "get" | "alias" | "unalias" | "settled" | "stop" | "idleOperationPending"
@@ -268,7 +270,7 @@ interface Runtime {
   completion?: "complete" | "blocked";
   providerNotice?: string;
   serial: Promise<void>;
-  pause?: "budget" | "keyd" | "model" | "auth";
+  pause?: "budget" | "keyd" | "model" | "auth" | "keys";
   budgetScope?: "task" | "day";
   authResumeAfter?: number;
   authGeneration?: number;
@@ -322,6 +324,9 @@ export class AgentRunner {
         rt.budgetScope = event.data.scope;
       }
       if (event.type === "task.result") rt.completion = event.data.outcome ?? "complete";
+      // keyd refused a saved key the task's computer asked for while the vault is locked.
+      if (event.type === "key.use" && event.data.decision === "deny" && vaultLocked(this.#health))
+        rt.session.lockKeys();
       if (event.type !== "agent.state") return;
       if (event.data.state === "error") rt.failure = event.data;
       else if (["thinking", "acting", "observing", "done"].includes(event.data.state))
@@ -340,6 +345,9 @@ export class AgentRunner {
             rt.pause = "auth";
             rt.idleWait?.abort();
           }
+        } else if (event.data.reason === STALL.keysLocked) {
+          rt.pause = "keys";
+          rt.session.lockKeys(false);
         } else if (!SESSION_PAUSES.has(event.data.reason))
           rt.pause =
             event.data.reason === "budget" ? "budget" : this.#health.online ? "model" : "keyd";
@@ -566,6 +574,14 @@ export class AgentRunner {
         } catch {
           console.error("recent activity could not be read");
         }
+      let inherited: SubagentResume[] = [];
+      if (continues)
+        try {
+          const left = unfinishedIn(this.deps.eventLog.logFile(continues));
+          inherited = left.length ? resumable(left, this.deps.transcripts.briefs(continues)) : [];
+        } catch {
+          console.error("the earlier task's delegated agents could not be read");
+        }
       const title = (
         origin?.success && origin.data.kind === "routine" ? origin.data.name : task
       ).slice(0, 200);
@@ -583,6 +599,7 @@ export class AgentRunner {
         },
       );
       session.earlier = earlier;
+      session.inherited = inherited;
       session.permissionMode = () => {
         // A routine set to ask first or only read keeps its own policy whatever the chat's mode.
         if (session.run && session.run.profile !== "act_within_rules") return "custom";
@@ -1181,7 +1198,8 @@ export class AgentRunner {
       if (session.safetyPause && (!now.online || changedBoot)) rt.safety?.invalidate();
       if (changedBoot && (session.generation || session.status !== "idle")) {
         rt.epoch += 1;
-        if (session.generation) session.retireBrain(session.generation); // Fence before yielding.
+        // Fence before yielding.
+        if (session.generation) session.retireBrain(session.generation, "restarted");
         rt.backoff?.abort();
       } else if (
         now.online &&
@@ -1192,13 +1210,21 @@ export class AgentRunner {
         rt.pause = undefined;
         session.post("resume", "");
       } else if (!now.online && rt.pause === "model") rt.pause = "keyd";
+      if (now.online && !vaultLocked(now) && session.keysLocked) {
+        // dot hears the keys are open; a model that stopped on its own key also resumes.
+        session.keysUnlocked();
+        if (rt.pause === "keys" && session.status === "paused" && !session.controlHeld) {
+          rt.pause = undefined;
+          session.post("resume", "");
+        }
+      }
     }
     this.#changed();
   }
   // A service restart retires task execution, but does not retire the computer identity.
   // Only an unconfirmed stop needs the durable failure fence.
   async stopForShutdown(session: AgentSession): Promise<void> {
-    session.cancel();
+    session.cancel("restarted");
     try {
       const outcome = await this.deps.stopSession(session.id);
       if (outcome && (!outcome.revoked || !(outcome.paused || (outcome.closed && outcome.stopped))))
@@ -1334,7 +1360,7 @@ export class AgentRunner {
       this.#closing = true;
       this.#unsubscribe();
       for (const rt of this.#runtime.values()) {
-        rt.session.cancel();
+        rt.session.cancel("restarted");
         this.deps.live.stop(rt.session.id);
       }
       this.#changed();
@@ -1464,9 +1490,10 @@ export class AgentRunner {
         if (heldOnExit || rt.authResumeAfter !== undefined) continue;
         if (code === BRAIN_GAVE_UP && rt.failure) {
           reason = "error";
+          const why = `${rt.failure.reason ?? "The task failed."}${rt.failure.detail ? ` ${rt.failure.detail}` : ""}`;
           session.append("message.assistant", {
             messageId: ulid(),
-            text: `I couldn't continue: ${rt.failure.reason ?? "The task failed."}${rt.failure.detail ? ` ${rt.failure.detail}` : ""} Check Settings or choose another model, then send your message again.`,
+            text: `I couldn't continue: ${why}${/[.!?]$/.test(why) ? "" : "."} Check Settings or choose another model, then send your message again.`,
           });
           break;
         }
@@ -1558,11 +1585,13 @@ export class AgentRunner {
       // Cleanup uncertainty launches containment above. Retain ownership even when closing the
       // brain failed and skipped its ordinary drain; containment independently bounds its wait.
       await session.toolsSettled();
+      let doubt = false;
       if (rt.selection.kind === "chatgpt") {
         try {
           await this.deps.codex?.ended?.(session.id);
         } catch {
           reason = "error";
+          doubt = true;
           this.#blockedCells.add(session.cellId);
           this.deps.fences?.capture(session.cellId, session.id, "native");
         }
@@ -1577,7 +1606,10 @@ export class AgentRunner {
         if (reason === "done") {
           if (!(await session.finish())) reason = "stopped";
         } else {
-          session.stop();
+          // A task that ended on its own, even in an error, leaves the computer on; only doubt
+          // about its cleanup stops the computer. Its delegated agents may resume in a later task.
+          if (doubt) session.stop();
+          else session.cancel("error");
           await session.screensSettled();
         }
       } catch {
@@ -1663,6 +1695,12 @@ export class AgentRunner {
         ) as Record<Role, ModelBinding>;
         const memory = this.deps.memory.bootMemory(session.task, models.main.contextTokens);
         taintMemory(session.taint, memory);
+        let subagents: SubagentResume[] = [];
+        try {
+          subagents = session.unfinishedAgents(this.deps.transcripts);
+        } catch {
+          console.error("the task's delegated agents could not be read");
+        }
         const boot = BootConfig.parse({
           sessionId: session.id,
           task: session.task,
@@ -1683,6 +1721,7 @@ export class AgentRunner {
           ...(session.connectors.specs.length ? { connectors: [...session.connectors.specs] } : {}),
           ...(session.research ? { research: session.research.budget } : {}),
           ...(this.roleOf(session.id) ? { role: this.roleOf(session.id) } : {}),
+          ...(subagents.length ? { subagents } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,

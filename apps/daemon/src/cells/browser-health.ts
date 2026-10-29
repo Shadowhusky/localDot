@@ -1,7 +1,10 @@
 import { request } from "node:http";
 import { ULID_PATTERN } from "@localdot/protocol";
 import { z } from "zod";
-import { BrowserSignInState } from "../../../../packages/protocol/src/browser-control.ts";
+import {
+  BrowserSignInState,
+  type BrowserSupervisorState,
+} from "../../../../packages/protocol/src/browser-control.ts";
 import { BrowserLifecycleError } from "./browser-ledger.ts";
 import type { BrowserCellRecord } from "./types.ts";
 
@@ -54,6 +57,46 @@ export function readBrowserHealth(
   token: string,
   signal: AbortSignal,
 ): Promise<unknown> {
+  return readBrowserd(port, token, signal, "/health");
+}
+
+// browserd's account of its Chromium: restarted in place, and what last failed. A browser image
+// from before this report answers 404.
+export function readBrowserSupervisor(
+  port: number,
+  token: string,
+  signal: AbortSignal,
+): Promise<unknown> {
+  return readBrowserd(port, token, signal, "/supervisor");
+}
+
+// The last failure browserd reported, in words for the user, the log and the agent.
+export function describeBrowserFailure(
+  failure: NonNullable<BrowserSupervisorState["lastFailure"]>,
+): string {
+  const restarted = failure.recovered
+    ? " and was restarted"
+    : " and could not be restarted in place";
+  switch (failure.kind) {
+    case "tab_crashed":
+      return failure.recovered
+        ? `A tab crashed (${failure.detail}) and was reloaded`
+        : `A tab keeps crashing (${failure.detail}) and was left on its error page`;
+    case "browser_exited":
+      return `The browser process ended (${failure.detail})${restarted}`;
+    case "unresponsive":
+      return `The browser stopped responding (${failure.detail})${restarted}`;
+    case "control_lost":
+      return `localDot lost its connection to the browser (${failure.detail})${restarted}`;
+  }
+}
+
+function readBrowserd(
+  port: number,
+  token: string,
+  signal: AbortSignal,
+  path: "/health" | "/supervisor",
+): Promise<unknown> {
   if (!Number.isInteger(port) || port < 1024 || port > 65535 || !/^[A-Za-z0-9_-]{43}$/u.test(token))
     return Promise.reject(new BrowserLifecycleError());
   return new Promise((resolve, reject) => {
@@ -63,7 +106,7 @@ export function readBrowserHealth(
         host: "127.0.0.1",
         port,
         method: "GET",
-        path: "/health",
+        path,
         agent: false,
         signal: AbortSignal.any([signal, AbortSignal.timeout(2000)]),
         headers: { authorization: `Bearer ${token}`, connection: "close" },

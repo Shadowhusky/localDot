@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SELFTEST_CHECKS, ulid } from "@localdot/protocol";
@@ -7,6 +7,7 @@ import {
   ComputerUpdateRefused,
   ComputerUpdateStore,
   ComputerUpdates,
+  type ComputerUpdatesDeps,
   UPDATE_LABEL,
   updateComputer,
 } from "./computer-update.ts";
@@ -16,13 +17,18 @@ import {
   CellControlConflict,
   CellOrchestrator,
   type OrchestratorDeps,
+  UPDATE_BLOCKED,
   UPDATE_NEEDS_FRESH_START,
   UPDATE_RECORDS_UNREADABLE,
   UPDATE_UNFINISHED,
 } from "./orchestrator.ts";
 import { desktopSpec, gateSpec } from "./spec.ts";
 import { CellStore } from "./store.ts";
-import { SYSTEM_BASE_MISSING, SystemBaseMissing } from "./system-migration-plan.ts";
+import {
+  SYSTEM_BASE_MISSING,
+  SystemBaseMissing,
+  SystemMigrationConflict,
+} from "./system-migration-plan.ts";
 import { type FakeDocker, startFakeDocker } from "./testing/fake-docker.ts";
 import type { CellRecord, CellSummary, DesktopdHealth } from "./types.ts";
 
@@ -71,7 +77,10 @@ const waitUntil = (pred: () => boolean, ms = 2000) =>
     check();
   });
 
-async function setup(deps: Partial<OrchestratorDeps> = {}) {
+async function setup(
+  deps: Partial<OrchestratorDeps> = {},
+  system: Pick<ComputerUpdatesDeps, "migrateSystem"> = {},
+) {
   fake = await startFakeDocker();
   const home = mkdtempSync(join(tmpdir(), "local dot's update-"));
   homes.push(home);
@@ -86,6 +95,7 @@ async function setup(deps: Partial<OrchestratorDeps> = {}) {
       images,
       stream: { fullcolor: false },
       ...(deps.relay ? { relay: deps.relay } : {}),
+      ...system,
     });
     const orchestrator = new CellOrchestrator({
       docker,
@@ -734,6 +744,94 @@ describe("an update that can't be finished", () => {
   });
 });
 
+describe("an update that met files an installed app changed", () => {
+  const NEWER = `sha256:${"d".repeat(64)}`;
+  const conflicting = () =>
+    vi.fn(async (_record: CellRecord, _target: string): Promise<string> => {
+      throw new SystemMigrationConflict(["/etc/app.conf"]);
+    });
+  const refusalFile = (home: string, id: string) =>
+    join(home, "safety", "computer-update-refusals", `${id}.json`);
+  const quietly = async <T>(run: () => Promise<T>) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      return await run();
+    } finally {
+      log.mockRestore();
+    }
+  };
+
+  it("says so instead of offering it again, until a different new version arrives", async () => {
+    const migrateSystem = conflicting();
+    const { updates, orchestrator, boot, home, id, record } = await setup({}, { migrateSystem });
+    rebuild();
+    await updates.check(record);
+    expect(orchestrator.get(id)?.updateAvailable).toBe(true);
+    await quietly(() => expect(orchestrator.update(id)).rejects.toThrow(UPDATE_BLOCKED));
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    expect(orchestrator.get(id)).toMatchObject({ state: "ready", updateBlocked: true });
+    expect(orchestrator.get(id)).not.toHaveProperty("updateAvailable");
+    expect(fake.state.containers.get(record.docker.desktop)?.id).toBe(record.ownership?.desktop);
+    expect(migrateSystem).toHaveBeenCalledWith(expect.objectContaining({ id }), NEW_DESKTOP);
+
+    // A restarted daemon remembers, and refuses before the computer is stopped.
+    orchestrator.dispose();
+    const restarted = boot();
+    await restarted.orchestrator.reconcile();
+    expect(await restarted.updates.check(record)).toBe(true);
+    expect(restarted.orchestrator.get(id)).toMatchObject({ updateBlocked: true });
+    expect(restarted.orchestrator.get(id)).not.toHaveProperty("updateAvailable");
+    const before = fake.state.calls.length;
+    await expect(restarted.orchestrator.update(id)).rejects.toThrow(UPDATE_BLOCKED);
+    expect(fake.state.calls.slice(before).filter((c) => c.method !== "GET")).toEqual([]);
+    expect(migrateSystem).toHaveBeenCalledTimes(1);
+
+    fake.state.imageIds.set(images.desktop, NEWER);
+    expect(await restarted.updates.check(record)).toBe(true);
+    expect(restarted.orchestrator.get(id)?.updateAvailable).toBe(true);
+    expect(restarted.orchestrator.get(id)).not.toHaveProperty("updateBlocked");
+    expect(existsSync(refusalFile(home, id))).toBe(false);
+  });
+
+  it("is still refused when only the gate's new version changes", async () => {
+    const { updates, orchestrator, id, record } = await setup({}, { migrateSystem: conflicting() });
+    rebuild();
+    await updates.check(record);
+    await quietly(() => expect(orchestrator.update(id)).rejects.toThrow(UPDATE_BLOCKED));
+    fake.state.imageIds.set(images.gate, `sha256:${"e".repeat(64)}`);
+    await updates.check(record);
+    expect(orchestrator.get(id)).toMatchObject({ updateBlocked: true });
+  });
+
+  it("is forgotten with the computer", async () => {
+    const { updates, orchestrator, home, id, record } = await setup(
+      {},
+      { migrateSystem: conflicting() },
+    );
+    rebuild();
+    await updates.check(record);
+    await quietly(() => expect(orchestrator.update(id)).rejects.toThrow(UPDATE_BLOCKED));
+    expect(existsSync(refusalFile(home, id))).toBe(true);
+    await orchestrator.remove(id, { purgeHome: true });
+    expect(existsSync(refusalFile(home, id))).toBe(false);
+    expect(updates.blocked(id)).toBe(false);
+  });
+
+  it("is not remembered when the update fails for another reason", async () => {
+    const migrateSystem = vi.fn(async (): Promise<string> => {
+      throw new SystemBaseMissing(OLD);
+    });
+    const { updates, orchestrator, home, id, record } = await setup({}, { migrateSystem });
+    rebuild();
+    await updates.check(record);
+    await quietly(() => expect(orchestrator.update(id)).rejects.toThrow(SYSTEM_BASE_MISSING));
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    expect(orchestrator.get(id)?.updateAvailable).toBe(true);
+    expect(orchestrator.get(id)).not.toHaveProperty("updateBlocked");
+    expect(existsSync(refusalFile(home, id))).toBe(false);
+  });
+});
+
 describe("unreadable update records", () => {
   it("say so instead of offering an update, and keep Remove working", async () => {
     const { orchestrator, boot, home, id, record } = await setup();
@@ -912,6 +1010,7 @@ describe("updateComputer admission", () => {
       [summary(), { status: "idle", controlHeld: false, hold: true }, "Hand back the computer"],
       [summary({ fenced: { revision: 1 } }), undefined, "can't be updated right now"],
       [summary({ updateAvailable: undefined }), undefined, "up to date"],
+      [summary({ updateAvailable: undefined, updateBlocked: true }), undefined, UPDATE_BLOCKED],
     ] as const) {
       const { d } = deps(cell, session);
       const refusal = await updateComputer(d, ID).catch((error: unknown) => error);

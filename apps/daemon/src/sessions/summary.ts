@@ -1,5 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  type Dirent,
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   parseEvent,
@@ -30,6 +40,21 @@ export function recordingCard(
 }
 export function recordingCards(home: string, id: string): NonNullable<SessionCard["recordings"]> {
   return { desktop: recordingCard(home, id), browser: recordingCard(home, id, "browser") };
+}
+// The bytes of every file in a task's folder, links counted as links. A file removed while the
+// folder is read counts as gone.
+export function folderBytes(dir: string): number {
+  let total = 0;
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true, recursive: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries)
+    if (!entry.isDirectory())
+      total += lstatSync(join(entry.parentPath, entry.name), { throwIfNoEntry: false })?.size ?? 0;
+  return total;
 }
 export async function summarizeSession(
   home: string,

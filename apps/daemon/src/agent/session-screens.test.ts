@@ -22,6 +22,7 @@ import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import type { NativeScreenBinding } from "../gateway/gateway.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
+import { VaultLockedError } from "../keyd/client.ts";
 import { ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { redactor } from "./redact.ts";
 import { AgentSession, ControlHeldError } from "./session.ts";
@@ -382,6 +383,42 @@ describe("session-owned screen authority", () => {
       );
     },
   );
+
+  it("points dot at the Unlock card when saved sign-ins are locked, asking for nothing", async () => {
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    f.client.lookup.mockImplementation((async () => ({
+      target: {
+        point: { x: 400, y: 300 },
+        source: "dom",
+        role: "textbox",
+        name: "Password",
+        url: "https://identity.example.org/signin",
+        secret: true,
+      },
+      window: 0,
+      ms: 1,
+    })) as never);
+    h.tools.logins = {
+      login: vi.fn(async () => {
+        throw new VaultLockedError();
+      }),
+      saveLogin: vi.fn(async () => {}),
+    };
+    const reply = await h.callTool("ask_user", {
+      question: "Sign in",
+      fields: [
+        { id: "username", kind: "text", label: "Account" },
+        { id: "password", kind: "secret", label: "Password", target: [400, 300] },
+      ],
+    });
+    expect(reply.result.ok).toBe(false);
+    expect(JSON.stringify(reply)).toContain("Unlock card");
+    expect(f.log.read(f.id).filter((e) => e.type === "ask.request")).toHaveLength(0);
+    expect(f.log.read(f.id).filter((e) => e.type === "keys.lock")).toHaveLength(1);
+    expect(f.session.keysLocked).toBe(true);
+  });
 
   it.each([false, true])(
     "cancels the task without shutting down its computer (user control: %s)",
@@ -1164,13 +1201,14 @@ describe("session-owned screen authority", () => {
     const f = fixture();
     await f.ready();
     const h = tools(f);
+    Object.assign(f.deps.browser, { status: async () => ({ state: "ready" }) });
     const context = await h.callTool("work_context", { goal: "app" });
     const inventory = context.result.content
       .map((c) => (c.type === "text" ? c.text : ""))
       .join(" ");
     expect(inventory).toContain('"available":true');
     expect(inventory).toContain('"state":"not_open"');
-    expect(inventory).toContain('"health":"not_checked"');
+    expect(inventory).toContain('"health":{"state":"ready"}');
     expect(inventory).toContain('"page":"not_inspected"');
     await h.callTool("switch_screen", { screen: "browser" });
     f.client.read.mockResolvedValueOnce({
@@ -1645,6 +1683,23 @@ describe("session-owned screen authority", () => {
       expect((await h.callTool("switch_screen", { screen: "browser" })).result.ok).toBe(true);
     },
   );
+
+  it("lets dot start a stuck web browser again through switch_screen", async () => {
+    const f = fixture(true);
+    await f.ready();
+    const h = tools(f);
+    const restarted = await h.callTool("switch_screen", { screen: "browser", restart: true });
+    expect(restarted.result.ok).toBe(true);
+    expect(f.deps.browser.stop).toHaveBeenCalledExactlyOnceWith(f.session.cellId);
+    expect(restarted.result.content).toContainEqual(
+      expect.objectContaining({ text: expect.stringContaining("saved sign-ins are kept") }),
+    );
+    expect(f.screens.selection.screen).toBe("browser");
+    expect(
+      (await h.callTool("switch_screen", { screen: "desktop", restart: true })).result.ok,
+    ).toBe(true);
+    expect(f.deps.browser.stop).toHaveBeenCalledOnce();
+  });
 
   it("waits for a settling browser tab before switching instead of handing the task back", async () => {
     const f = fixture(true);

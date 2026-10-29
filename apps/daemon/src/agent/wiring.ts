@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   query as claudeQuery,
+  type Query,
   type SDKUserMessage,
   type SpawnedProcess,
   type SpawnOptions,
@@ -75,9 +76,11 @@ import {
   type ClaudeCodeLaunch,
   type ClaudeCodeModel,
   ClaudeCodeSetup,
+  ClaudeCodeUnavailable,
   findClaudeCode,
   runFile,
 } from "./claude-code/setup.ts";
+import { claudePlanUsage } from "./claude-code/usage.ts";
 import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexDriver } from "./codex/driver.ts";
 import { codexInstructions } from "./codex/instructions.ts";
@@ -90,6 +93,7 @@ import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
 import { OutputStore } from "./output-store.ts";
 import { PeopleStore } from "./people.ts";
+import { PlanUsageStore } from "./plan-usage.ts";
 import type { ToolPolicy } from "./policy.ts";
 import { PrivateFiles } from "./private-files.ts";
 import { RecentActivity } from "./recent-activity.ts";
@@ -129,6 +133,8 @@ export interface AgentWiringDeps {
   keyd: KeydClient;
   monitor: Pick<KeydMonitor, "health">;
   killSwitch: Pick<KillSwitch, "stopSession" | "isBusy">;
+  // Remembers the computers a service stop froze, so the next start thaws them.
+  shutdownFreezes?: Pick<import("../cells/shutdown-freezes.ts").ShutdownFreezes, "record">;
   keydPorts: PortRange;
   policy?: ToolPolicy;
   routines?: RoutineToolPort;
@@ -594,11 +600,12 @@ export function createAgent(d: AgentWiringDeps) {
       signal: options.signal,
       stdio: ["pipe", "pipe", "ignore"],
     });
-  // Starts the user's Claude Code without a prompt, only to read the models it offers.
-  const claudeModels = async (
+  // Starts the user's Claude Code without a prompt, only to ask it something that needs no model.
+  const askClaudeCode = async <T>(
     launch: ClaudeCodeLaunch,
     signal: AbortSignal,
-  ): Promise<ClaudeCodeModel[]> => {
+    ask: (query: Query) => Promise<T>,
+  ): Promise<T> => {
     const abort = new AbortController();
     const stop = () => abort.abort();
     signal.addEventListener("abort", stop, { once: true });
@@ -607,7 +614,7 @@ export function createAgent(d: AgentWiringDeps) {
         await new Promise((resolve) => abort.signal.addEventListener("abort", resolve));
       },
     };
-    const listing = claudeQuery({
+    const query = claudeQuery({
       prompt: idle,
       options: claudeCodeOptions({
         launch,
@@ -619,26 +626,33 @@ export function createAgent(d: AgentWiringDeps) {
     });
     const timer = setTimeout(stop, 15_000);
     try {
-      return (await listing.supportedModels()).map((model) => ({
-        id: model.value,
-        name: model.displayName,
-        ...(model.resolvedModel && CLAUDE_CODE_MODEL.test(model.resolvedModel)
-          ? { resolvedModel: model.resolvedModel }
-          : {}),
-        ...(model.supportedEffortLevels
-          ? { efforts: model.supportedEffortLevels }
-          : model.supportsEffort === false
-            ? { efforts: [] }
-            : {}),
-        ...(model.supportsFastMode !== undefined ? { fast: model.supportsFastMode } : {}),
-      }));
+      return await ask(query);
     } finally {
       clearTimeout(timer);
       signal.removeEventListener("abort", stop);
-      listing.close();
+      query.close();
       stop();
     }
   };
+  const claudeModels = (launch: ClaudeCodeLaunch, signal: AbortSignal) =>
+    askClaudeCode(
+      launch,
+      signal,
+      async (query): Promise<ClaudeCodeModel[]> =>
+        (await query.supportedModels()).map((model) => ({
+          id: model.value,
+          name: model.displayName,
+          ...(model.resolvedModel && CLAUDE_CODE_MODEL.test(model.resolvedModel)
+            ? { resolvedModel: model.resolvedModel }
+            : {}),
+          ...(model.supportedEffortLevels
+            ? { efforts: model.supportedEffortLevels }
+            : model.supportsEffort === false
+              ? { efforts: [] }
+              : {}),
+          ...(model.supportsFastMode !== undefined ? { fast: model.supportsFastMode } : {}),
+        })),
+    );
   const claudeHome = d.claudeCode?.realHome;
   const claudeSetup = claudeHome
     ? new ClaudeCodeSetup({
@@ -650,6 +664,51 @@ export function createAgent(d: AgentWiringDeps) {
         listModels: claudeModels,
       })
     : undefined;
+  // How much of each subscription plan is used, from any task's reports, and read from the plan's
+  // own app when the model menu opens: Codex's account read and Claude Code's /usage data, neither
+  // of which takes a model turn.
+  const planUsage = new PlanUsageStore({
+    home: d.home,
+    read: {
+      ...(auth
+        ? {
+            chatgpt: async () => {
+              const status = await auth.status();
+              if (status.state === "signed_out" || status.state === "expired") return "signed_out";
+              // A failed check keeps the last figures under a new time, so they are no reading.
+              if (status.lastError || !status.usage || status.checkedAt === undefined) return;
+              return { usage: status.usage, observedAt: status.checkedAt };
+            },
+          }
+        : {}),
+      ...(claudeSetup
+        ? {
+            "claude-code": async (signal) => {
+              let launch: ClaudeCodeLaunch;
+              try {
+                launch = await claudeSetup.launch();
+              } catch (error) {
+                if (error instanceof ClaudeCodeUnavailable && error.status.state === "signed_out")
+                  return "signed_out";
+                throw error;
+              }
+              const usage = claudePlanUsage(
+                await askClaudeCode(launch, signal, (query) =>
+                  query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({
+                    skipBehaviors: true,
+                  }),
+                ),
+                launch.plan,
+              );
+              return usage && { usage, observedAt: Date.now() };
+            },
+          }
+        : {}),
+    },
+  });
+  const stopPlanUsageFeed = d.eventLog.subscribe((_, event) => {
+    if (event.type === "subscription.usage") planUsage.record(event.data, Date.now());
+  });
   const claudeDriver = claudeSetup
     ? new ClaudeCodeDriver({
         onRetired: nativeRetired,
@@ -1011,6 +1070,7 @@ export function createAgent(d: AgentWiringDeps) {
       ? { chatgpt: { account: auth, installer, availability: platform, setup } }
       : {}),
     ...(claudeSetup ? { claudeCode: claudeSetup } : {}),
+    planUsage,
     redactUserText: (text, id, cellId) =>
       forText(
         id ? runner.get(id) : undefined,
@@ -1155,14 +1215,25 @@ export function createAgent(d: AgentWiringDeps) {
       ready = false;
       unsubscribe();
       stopExperienceFeed();
+      stopPlanUsageFeed();
+      planUsage.close();
       transfers.close();
       installer?.cancel();
       claudeSetup?.close();
       const setupClosed = setup?.close();
       const authClosed = auth?.close();
       const containments = [...runner.sessions.values()].map((session) =>
-        runner.stopForShutdown(session),
+        runner.stopForShutdown(session).then(() => session.cellId),
       );
+      const frozen = Promise.allSettled(containments).then((results) => {
+        try {
+          d.shutdownFreezes?.record(
+            results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : [])),
+          );
+        } catch {
+          console.error("frozen computers could not be remembered for the next start");
+        }
+      });
       const activeClients = [...clients.values()];
       clients.clear();
       closePromise = (async () => {
@@ -1186,6 +1257,7 @@ export function createAgent(d: AgentWiringDeps) {
             }),
           ),
           ...containments,
+          frozen,
           runner.close(),
           judgeCell.close(),
           webCell.close(),

@@ -102,6 +102,14 @@ describe("DockerClient", () => {
       name: "DockerError",
       status: 0,
       path: "/info",
+      timedOut: true,
+    });
+  });
+  it("tells a refused socket apart from a late reply", async () => {
+    await expect(new DockerClient(missingSocket()).checkReady(50)).rejects.toMatchObject({
+      name: "DockerError",
+      status: 0,
+      timedOut: false,
     });
   });
   it("uploads exact binary tar bytes with an encoded target directory and container", async () => {

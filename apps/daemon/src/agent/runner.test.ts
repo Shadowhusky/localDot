@@ -475,6 +475,7 @@ describe("signing in to a site from Settings", () => {
   function screens(f: ReturnType<typeof setup>, fail = false) {
     const opened: string[] = [];
     const closed = vi.fn(async () => {});
+    const cancelled = vi.fn(async () => {});
     f.deps.installSession = (session) =>
       session.attachScreens({
         openForUser: vi.fn(async (url: string) => {
@@ -483,10 +484,11 @@ describe("signing in to a site from Settings", () => {
         }),
         takeOver: vi.fn(async () => {}),
         finish: vi.fn(async () => {}),
+        cancel: cancelled,
         close: closed,
         selection: { screen: "browser" },
       } as never);
-    return { opened, closed };
+    return { opened, closed, cancelled };
   }
   // The real session screens, with the web browser's cell and browserd faked at their edges.
   function webBrowser(f: ReturnType<typeof setup>) {
@@ -740,6 +742,40 @@ describe("signing in to a site from Settings", () => {
     expect(f.live.get(f.cellId)).toBe(next.id);
     next.stop();
     await f.live.settled(next.id);
+  });
+
+  it("ends a task its model stopped without stopping the computer", async () => {
+    const f = setup();
+    const { closed, cancelled } = screens(f);
+    f.run.mockImplementationOnce(async (session) => {
+      session.append("agent.state", {
+        state: "error",
+        reason: "Claude Code used a tool that is not localDot's; localDot stopped the task",
+      });
+      return 3;
+    });
+    const session = await f.runner.start(f.cellId, "Say hello");
+    await f.live.settled(session.id);
+    const events = f.log.read(session.id);
+    expect(events.find((e) => e.type === "message.assistant")?.data).toMatchObject({
+      text: expect.stringContaining("localDot stopped the task. Check Settings"),
+    });
+    expect(events.at(-1)?.data).toEqual({ reason: "error" });
+    expect(cancelled).toHaveBeenCalled();
+    expect(closed).not.toHaveBeenCalled();
+    expect(f.containment).not.toHaveBeenCalled();
+  });
+
+  it("ends a task that gave up and got no follow-up without stopping the computer", async () => {
+    const f = setup(1);
+    const { closed, cancelled } = screens(f);
+    f.run.mockImplementationOnce(async () => 3);
+    const session = await f.runner.start(f.cellId, "Say hello");
+    await f.live.settled(session.id);
+    expect(f.log.read(session.id).at(-1)?.data).toEqual({ reason: "stopped" });
+    expect(cancelled).toHaveBeenCalled();
+    expect(closed).not.toHaveBeenCalled();
+    expect(f.containment).not.toHaveBeenCalled();
   });
 
   it("ends the hold without stopping the computer when the web browser can't open", async () => {
@@ -1645,6 +1681,109 @@ describe("ChatGPT runner lifecycle", () => {
     expect(f.containment).toHaveBeenCalledExactlyOnceWith(s.id);
     expect(f.sleep).not.toHaveBeenCalled();
     await expect(f.runner.start(f.cellId, "Another task")).rejects.toMatchObject({ status: 409 });
+  });
+  it("offers to unlock saved keys a task met locked, and wakes it once they open", async () => {
+    const f = setup();
+    const locked = {
+      online: true,
+      bootId: "fixture-boot",
+      vault: { backend: "file", state: "locked" as const, key: "passphrase" as const },
+    };
+    const open = { ...locked, vault: { ...locked.vault, state: "ready" as const } };
+    await f.runner.keydChanged(locked, { online: true, bootId: "fixture-boot" });
+    const s = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => s.status === "idle");
+    const refused = {
+      type: "key.use",
+      agent: "keyd",
+      data: {
+        secretId: "github",
+        host: "api.github.com",
+        method: "GET",
+        path: "/",
+        decision: "deny",
+      },
+    } as const;
+    const locks = () =>
+      f.log
+        .read(s.id)
+        .filter((event) => event.type === "keys.lock")
+        .map((event) => event.data);
+    const seq = s.inboxSequence;
+    f.log.append(s.id, refused);
+    f.log.append(s.id, refused);
+    expect(locks()).toEqual([{ locked: true }]);
+    expect(s.keysLocked).toBe(true);
+    // dot hears the card is up, but the note alone never wakes a finished turn.
+    expect(s.inboxSequence).toBe(seq + 1);
+    await new Promise<void>((r) => setImmediate(r));
+    expect(f.run).toHaveBeenCalledTimes(1);
+    await f.runner.keydChanged(open, locked);
+    expect(locks()).toEqual([{ locked: true }, { locked: false }]);
+    await until(() => f.run.mock.calls.length === 2);
+    expect(s.keysLocked).toBe(false);
+  });
+  it("leaves a key refused while the keys are open to the task", async () => {
+    const f = setup();
+    const s = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => s.status === "idle");
+    f.log.append(s.id, {
+      type: "key.use",
+      agent: "keyd",
+      data: {
+        secretId: "github",
+        host: "evil.example",
+        method: "GET",
+        path: "/",
+        decision: "deny",
+      },
+    });
+    expect(f.log.read(s.id).some((event) => event.type === "keys.lock")).toBe(false);
+  });
+  it("resumes a task paused on its model's locked key once the keys open, telling only a told dot", async () => {
+    const f = setup();
+    const locked = {
+      online: true,
+      bootId: "fixture-boot",
+      vault: { backend: "file", state: "setup" as const },
+    };
+    await f.runner.keydChanged(locked, { online: true, bootId: "fixture-boot" });
+    const s = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => s.status === "idle");
+    s.setStatus("paused");
+    s.append("agent.state", { state: "paused", reason: "keys locked" });
+    expect(s.keysLocked).toBe(true);
+    const seq = s.inboxSequence;
+    await f.runner.keydChanged(
+      { ...locked, vault: { backend: "file", state: "ready", key: "passphrase" } },
+      locked,
+    );
+    // Only the Resume: the model retries the call that met the lock.
+    expect(s.inboxSequence).toBe(seq + 1);
+    expect(
+      f.log
+        .read(s.id)
+        .filter((event) => event.type === "keys.lock")
+        .map((event) => event.data),
+    ).toEqual([{ locked: true }, { locked: false }]);
+    // keyd's refusal of the model call can reach the log first; dot, told then, is told again.
+    await f.runner.keydChanged(locked, {
+      ...locked,
+      vault: { backend: "file", state: "ready", key: "passphrase" },
+    });
+    f.log.append(s.id, {
+      type: "key.use",
+      agent: "keyd",
+      data: { secretId: "deepseek", host: "llm.ldot", method: "POST", path: "/", decision: "deny" },
+    });
+    s.setStatus("paused");
+    s.append("agent.state", { state: "paused", reason: "keys locked" });
+    const told = s.inboxSequence;
+    await f.runner.keydChanged(
+      { ...locked, vault: { backend: "file", state: "ready", key: "passphrase" } },
+      locked,
+    );
+    expect(s.inboxSequence).toBe(told + 2);
   });
   it("keeps an idle task paused after account change until explicit Resume", async () => {
     const f = setup(),

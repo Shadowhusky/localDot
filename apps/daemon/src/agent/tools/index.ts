@@ -15,6 +15,7 @@ import {
   ulid,
   webUrl,
 } from "@localdot/protocol";
+import { BrowserClientError } from "../../browser/client.ts";
 import { ScreenUnavailableError } from "../../browser/screen-controller.ts";
 import type { TaskConnectorTool } from "../../connectors/hub.ts";
 import { splitIntent } from "../../connectors/intent.ts";
@@ -361,7 +362,9 @@ async function dispatchAdmitted(
           result: {
             recovery: { kind: "unavailable", surface: "browser", retry: "after_change" },
             ...fail(
-              "The browser is temporarily unavailable. Saved sign-ins are still kept. Retry browser_navigate once it is ready; do not open a second browser or ask for credentials again.",
+              error.status
+                ? `${error.message} Then open the page again with browser_navigate; don't ask for credentials again.`
+                : `The browser is temporarily unavailable${error.problem ? ` (${error.problem.replace(/\.$/u, "")})` : ""}. Saved sign-ins are still kept. Retry browser_navigate once it is ready; do not open a second browser or ask for credentials again.`,
             ),
           },
         };
@@ -589,7 +592,9 @@ async function dispatchAdmitted(
       status: 200,
       result: {
         ...fail(message),
-        ...(error instanceof ScreenUnavailableError
+        ...(error instanceof ScreenUnavailableError ||
+        (error instanceof BrowserClientError &&
+          (error.code === "restarting" || error.code === "unavailable"))
           ? {
               recovery: {
                 kind: "unavailable" as const,

@@ -80,6 +80,10 @@ export async function workContextTool(
     ];
   });
   const screens = ctx.session.screens?.availability();
+  const browserStatus = await ctx.session.screens?.browserStatus().catch(() => undefined);
+  ctx.check();
+  const browserScreen = Boolean(screens) && screens?.browser !== "unavailable";
+  const browserState = browserStatus?.state;
   const snapshot = {
     observedAt: new Date().toISOString(),
     desktop: {
@@ -94,15 +98,17 @@ export async function workContextTool(
         "The inventory checks the service PATH only; shell-profile additions may differ. For the CLI you need, check its own auth status through shell. Installed does not mean signed in.",
     },
     browser: {
-      available: Boolean(screens) && screens?.browser !== "unavailable",
+      available: browserScreen && browserState === "ready",
       state: screens?.browser ?? "unavailable",
       selected: screens?.selected ?? "desktop",
-      health: "not_checked",
+      health: browserStatus ?? "not_checked",
+      recovery:
+        "localDot restarts a failed web browser by itself and keeps its sign-ins; health.problem says what failed. If it stays stuck, switch_screen with restart: true starts it again (open pages are lost).",
       page: "not_inspected",
       navigation:
         "browser_navigate opens the task URL and selects its screen: localhost previews use desktop Chromium, public sites use the separate web browser. Local preview ports (including Portless 1355) and *.localhost names are supported. Preserve the project preview origin for OAuth callbacks. Diagnose the reported certificate, connection, DNS, or unsafe-port error; do not infer a port policy from a generic failure. If application configuration or a test account is missing, request the specific required input and report the UI flow as blocked until verified. switch_screen only selects a screen; it does not open a site.",
       readiness:
-        "Available means a browser can be opened, not that a target page has loaded. not_open is not a failure. A successful read of about:blank means the browser answered but no target page is loaded; navigate to the task URL before diagnosing a blocker.",
+        "available is true only while the web browser is running and answering. Otherwise health.reason and health.problem say why, health.clears what makes it usable again, health.retryAt when localDot starts it again by itself and health.readyBy when a start under way is done; localDot sends you a note once it runs, so don't keep retrying it. health.reason keys-locked with available true: it browses with its sign-ins, but saved passwords and sites that use a saved key are refused until the user unlocks Keys. Available doesn't mean a target page has loaded. not_open is not a failure. A successful read of about:blank means the browser answered but no target page is loaded; navigate to the task URL before diagnosing a blocker.",
       websiteAuthentication: "not_checked",
       verification:
         "Open the requested site in the visible browser and inspect the existing session before requesting sign-in.",
@@ -126,7 +132,8 @@ export async function workContextTool(
     preferredRoutes: chooseRoute(
       input.goal,
       Boolean(desktop) && reachable !== false,
-      Boolean(screens) && screens?.browser !== "unavailable",
+      browserScreen &&
+        (browserState === "ready" || browserState === "starting" || browserState === "restarting"),
       apps.length,
     ),
     rules:

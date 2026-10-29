@@ -81,6 +81,7 @@ import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./do
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore, type StoredEntry } from "./memory.ts";
 import { PeopleError, type PeopleStore, type StoredPerson } from "./people.ts";
+import type { PlanUsageStore } from "./plan-usage.ts";
 import { AgentError, type AgentRunner, CLAUDE_CODE_OFF, RAISE_BUDGET_FIRST } from "./runner.ts";
 import type { PurposeService } from "./safety/purpose-service.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
@@ -118,7 +119,10 @@ export interface AgentRoutesDeps {
         | "signIn"
       >
     >;
-  conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has" | "list">;
+  conversations?: Pick<
+    Conversations,
+    "current" | "snapshot" | "begin" | "select" | "has" | "list" | "withdrawStopped"
+  >;
   settings: Pick<SettingsStore, "get" | "put">;
   purpose?: Pick<PurposeService, "status" | "test">;
   catalog: Pick<CatalogStore, "get" | "refresh" | "fresh" | "freshness">;
@@ -153,6 +157,7 @@ export interface AgentRoutesDeps {
     setup: ChatgptSetupControl;
   };
   claudeCode?: Pick<ClaudeCodeSetup, "status" | "check">;
+  planUsage?: Pick<PlanUsageStore, "reply" | "refresh">;
 }
 
 const JSON_BYTES = 64 * 1024;
@@ -428,6 +433,16 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       }),
     );
   }
+  const planUsage = deps.planUsage;
+  if (planUsage)
+    // `fresh=1` also reads plans whose figures are not fresh from their own apps, in the background.
+    app.get(
+      "/api/agent/plan-usage",
+      route(async (c) => {
+        if (c.req.query("fresh") === "1") void planUsage.refresh();
+        return c.json(planUsage.reply());
+      }),
+    );
   const session = (id: string) => {
     const value = ULID_PATTERN.test(id) ? deps.runner.get(id) : undefined;
     if (!value) throw new RouteError(404, "no such live task");
@@ -755,13 +770,18 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   app.post(
     "/api/agent/sessions/:id/messages/:messageId/edit",
     route(async (c) => {
-      const s = active(c.req.param("id") ?? "");
+      const id = c.req.param("id") ?? "";
       const messageId = c.req.param("messageId") ?? "";
       if (!ULID_PATTERN.test(messageId)) throw new RouteError(400, "invalid message id");
       check(c.req.raw.signal);
-      const text = s.withdrawQueued(messageId);
-      if (text === undefined) throw new RouteError(409, "message is no longer queued");
-      return c.json({ text });
+      const live = ULID_PATTERN.test(id) ? deps.runner.get(id) : undefined;
+      let text = live?.withdrawQueued(messageId);
+      // One Stop left unsent comes back from the task's record, after a restart too.
+      if (text === undefined && (!live || live.stopped))
+        text = deps.conversations?.withdrawStopped(id, messageId);
+      if (text !== undefined) return c.json({ text });
+      if (!live && !deps.conversations?.has(id)) throw new RouteError(404, "no such task");
+      throw new RouteError(409, "message is no longer queued");
     }),
   );
   app.post(

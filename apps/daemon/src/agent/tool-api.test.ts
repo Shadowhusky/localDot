@@ -728,9 +728,14 @@ describe("delegated runs", () => {
     ]);
     expect(started.status).toBe(204);
     h.session.takeControl();
-    expect(children(h).slice(3)).toEqual([{ ...research, state: "interrupted" }]);
+    expect(children(h).slice(3)).toEqual([
+      { ...research, state: "interrupted", reason: "control" },
+    ]);
+    // Stopping the task keeps the child from resuming later; a finished one is left as it was.
     h.session.stop();
-    expect(children(h)).toHaveLength(4);
+    expect(children(h).slice(4)).toEqual([
+      { ...research, state: "interrupted", reason: "stopped" },
+    ]);
   });
 
   it("ends a child whose brain stopped, and lets the restarted brain run it again", async () => {
@@ -741,15 +746,69 @@ describe("delegated runs", () => {
     h.session.toolToken = TOOL_TOKEN;
     const again = { ...research, runId: "run-3" };
     await post(h, [
-      { type: "subagent.state", data: { ...again, state: "running" } },
+      { type: "subagent.state", data: { ...again, state: "running", resumed: true } },
       { type: "subagent.state", data: { ...again, state: "completed", summary: "Three sources." } },
     ]);
     h.session.retireBrain(h.session.generation as BrainGeneration);
-    expect(children(h).map(({ runId, state }) => `${runId} ${state}`)).toEqual([
-      "run-1 running",
-      "run-1 interrupted",
-      "run-3 running",
-      "run-3 completed",
+    expect(children(h).map(({ runId, state, reason }) => `${runId} ${state} ${reason}`)).toEqual([
+      "run-1 running undefined",
+      "run-1 interrupted error",
+      "run-3 running undefined",
+      "run-3 completed undefined",
     ]);
+  });
+
+  it("names the restart that replaces a brain and lists what the next brain resumes", async () => {
+    const h = toolHarness();
+    await post(h, [
+      { type: "subagent.state", data: { ...research, state: "running" } },
+      { type: "subagent.state", data: { ...review, state: "running" } },
+    ]);
+    h.transcripts.saveBrief(h.session.id, {
+      id: research.id,
+      label: research.label,
+      instructions: "Find three sources",
+      progress: "",
+    });
+    h.session.beginBrain();
+    expect(
+      children(h)
+        .slice(2)
+        .map((c) => `${c.id} ${c.reason}`),
+    ).toEqual(["child-a restarted", "child-b restarted"]);
+    expect(h.session.unfinishedAgents(h.transcripts)).toEqual([
+      {
+        ...research,
+        instructions: "Find three sources",
+        progress: "",
+        reason: "restarted",
+      },
+    ]);
+    // A completed task settles what its agents left unfinished.
+    h.session.append("task.result", { summary: "Done", files: [] });
+    expect(h.session.unfinishedAgents(h.transcripts)).toEqual([]);
+  });
+
+  it("keeps each child's brief with the task, redacted and bounded", async () => {
+    const h = toolHarness();
+    const brief = (id: string, progress = "") =>
+      h.app.request("/v1/subagents", {
+        method: "POST",
+        headers: h.auth,
+        body: JSON.stringify({
+          brief: { id, label: "Research", instructions: "Find the sources", progress },
+        }),
+      });
+    expect((await brief("child-a", `Used ${SURROGATE} and ${PROXY_TOKEN}`)).status).toBe(204);
+    expect((await brief("child-a", "x".repeat(5001))).status).toBe(400);
+    const [kept] = h.transcripts.briefs(h.session.id);
+    expect(kept?.progress).toContain("[redacted]");
+    expect(JSON.stringify(kept)).not.toContain(SURROGATE);
+    expect(JSON.stringify(kept)).not.toContain(PROXY_TOKEN);
+    for (let i = 0; i < 20; i++) expect((await brief(`child-${i}`)).status).toBe(204);
+    expect((await brief("child-5", "Again")).status).toBe(204);
+    const briefs = h.transcripts.briefs(h.session.id);
+    expect(briefs).toHaveLength(16);
+    expect(briefs.map((b) => b.id).slice(-2)).toEqual(["child-19", "child-5"]);
   });
 });

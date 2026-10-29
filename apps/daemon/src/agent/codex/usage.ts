@@ -24,10 +24,19 @@ export function subscriptionUsage(snapshot: RateLimitSnapshot): SubscriptionUsag
       ...(value.resetsAt != null ? { resetsAt: value.resetsAt } : {}),
     });
   }
+  // The limit lifts when every window that reached it resets, if each said when.
+  const reached = windows.filter(
+    (w) => w.usedPercent === 100 || w.window === s.rateLimitReachedType,
+  );
+  const lifts = reached.flatMap((w) => w.resetsAt ?? []);
+  const limitReached = Boolean(s.rateLimitReachedType) || reached.length > 0;
   return {
     provider: "chatgpt",
     ...(s.planType && plans.has(s.planType) ? { plan: s.planType } : {}),
     windows,
-    limitReached: Boolean(s.rateLimitReachedType) || windows.some((w) => w.usedPercent === 100),
+    limitReached,
+    ...(limitReached && lifts.length && lifts.length === reached.length
+      ? { limitResetsAt: Math.max(...lifts) }
+      : {}),
   };
 }

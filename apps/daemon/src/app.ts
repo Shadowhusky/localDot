@@ -6,9 +6,10 @@ import { ServiceReadinessReply } from "../../../packages/protocol/src/install-se
 import type { AccessLinks } from "./access-links.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./agent/routes.ts";
 import { type AccountsDeps, accountsRoutes } from "./browser/accounts.ts";
+import { type BrowserStatusDeps, browserStatusRoutes } from "./browser/status-routes.ts";
 import { type BrowserViewerDeps, browserViewerApi } from "./browser/viewer.ts";
 import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
-import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
+import { clientAssetRoutes, desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
 import {
   type ConnectorRoutesDeps,
   connectorCallbackRoute,
@@ -16,6 +17,7 @@ import {
 } from "./connectors/routes.ts";
 import { type DeliverablesDeps, deliverableRoutes } from "./deliverables/routes.ts";
 import { type DoctorSelfTestsDeps, doctorSelfTestRoutes } from "./doctor-selftests.ts";
+import { type DotsRoutesDeps, dotsRoutes } from "./dots/routes.ts";
 import { errorCode } from "./error-code.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
 import type { ExportJobs } from "./exports/jobs.ts";
@@ -26,10 +28,13 @@ import { installCodeRoutes } from "./install-code-routes.ts";
 import type { InstallCodes } from "./install-codes.ts";
 import { type KeyRoutesDeps, keyRoutes } from "./keyd/routes.ts";
 import { type NotifyRoutesDeps, notifyRoutes } from "./notify/routes.ts";
+import type { Previews } from "./previews/previews.ts";
+import { previewRoutes } from "./previews/routes.ts";
 import type { Recorder } from "./recorder/recorder.ts";
 import { publicGrant } from "./remote/links.ts";
 import { type RemoteAccess, remoteRoutes } from "./remote/manager.ts";
 import { revocableResponse } from "./remote/response.ts";
+import { type ReportRoutesDeps, reportRoutes } from "./reports/routes.ts";
 import { type RoutineRoutesDeps, routineRoutes } from "./routines/routes.ts";
 import { type SearchRoutesDeps, searchRoutes } from "./search/routes.ts";
 import type { ManagedServiceReadiness } from "./service-readiness.ts";
@@ -49,6 +54,7 @@ export interface AppOptions {
   desktop?: StreamProxyDeps;
   browser?: BrowserViewerDeps;
   accounts?: AccountsDeps;
+  browserStatus?: BrowserStatusDeps;
   ui?: { dir: string };
   gateway?: GatewayRoutesDeps;
   keys?: KeyRoutesDeps;
@@ -66,9 +72,12 @@ export interface AppOptions {
   routines?: RoutineRoutesDeps;
   connectors?: Omit<ConnectorRoutesDeps, "port">;
   voice?: VoiceRoutesDeps;
+  previews?: Pick<Previews, "status" | "open" | "stop">;
   appUpdater?: AppUpdater;
   remoteAccess?: RemoteAccess;
   appInstalling?(): boolean;
+  dots?: DotsRoutesDeps;
+  reports?: ReportRoutesDeps;
 }
 
 export function createApp({
@@ -79,6 +88,7 @@ export function createApp({
   desktop,
   browser,
   accounts,
+  browserStatus,
   ui,
   gateway,
   keys,
@@ -95,9 +105,12 @@ export function createApp({
   routines,
   connectors,
   voice,
+  previews,
   appUpdater,
   remoteAccess,
   appInstalling,
+  dots,
+  reports,
 }: AppOptions): Hono {
   if (installCodes && !installCodes.belongsTo(token, port)) {
     throw new Error("install codes belong to another daemon");
@@ -146,6 +159,8 @@ export function createApp({
   // The Selkies iframe can carry no install token: its routes authorise themselves by ticket.
   if (desktop) desktopRoutes(app, desktop);
   if (browser) desktopRoutes(app, browser, "browser");
+  const client = desktop ?? browser;
+  if (client) clientAssetRoutes(app, client.vendorDir);
 
   if (remoteAccess)
     remoteAccess.links.onRevoke((id) => {
@@ -218,6 +233,7 @@ export function createApp({
     );
   if (browser) browserViewerApi(app, browser);
   if (accounts) accountsRoutes(app, accounts);
+  if (browserStatus) browserStatusRoutes(app, browserStatus);
 
   app.get("/api/sessions", (c) => c.json(eventLog.listSessions()));
 
@@ -263,6 +279,7 @@ export function createApp({
   });
 
   if (cells) cellRoutes(app, cells);
+  if (previews) previewRoutes(app, previews);
   if (keys) keyRoutes(app, keys);
   if (agent) agentRoutes(app, { ...agent, remoteLinks: remoteAccess?.links });
   if (search) searchRoutes(app, search);
@@ -274,5 +291,7 @@ export function createApp({
   if (voice) voiceRoutes(app, voice);
   if (exports) exportRoutes(app, exports, new ExportLinks());
   if (connectors) connectorRoutes(app, { ...connectors, port });
+  if (dots) dotsRoutes(app, dots);
+  if (reports) reportRoutes(app, reports);
   return app;
 }

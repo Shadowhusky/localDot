@@ -357,6 +357,7 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
     inbox: api.inbox.bind(api),
     appendTranscript: api.appendTranscript.bind(api),
     control: api.control.bind(api),
+    brief: api.brief.bind(api),
   };
   const sink = new EventSink({ send: (events, signal) => api.events(events, signal) });
   const started = performance.now();

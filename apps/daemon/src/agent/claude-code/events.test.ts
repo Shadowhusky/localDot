@@ -131,6 +131,70 @@ describe("Claude Code events", () => {
     });
     expect(f.map.limitReached).toBe(false);
   });
+  it("reads utilization as a fraction that passes 1 at the limit, and says when it lifts", () => {
+    const f = mapper();
+    f.map.handle({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        rateLimitType: "five_hour",
+        utilization: 1.07,
+        resetsAt: 1_900_000_000,
+      },
+    });
+    f.map.handle({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", rateLimitType: "seven_day", utilization: 0.005 },
+    });
+    expect(f.events.at(-1)?.data).toEqual({
+      provider: "claude-code",
+      windows: [
+        { window: "primary", usedPercent: 100, windowMinutes: 300, resetsAt: 1_900_000_000 },
+        { window: "secondary", usedPercent: 0.5, windowMinutes: 10_080 },
+      ],
+      limitReached: false,
+    });
+    expect(f.events.at(-2)?.data).toMatchObject({
+      limitReached: true,
+      limitResetsAt: 1_900_000_000,
+    });
+  });
+  it("never shows a model's own weekly limit as the weekly limit", () => {
+    const f = mapper();
+    f.map.handle({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", rateLimitType: "seven_day", utilization: 0.3 },
+    });
+    f.map.handle({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        rateLimitType: "seven_day_opus",
+        utilization: 1,
+        resetsAt: 1_900_000_000,
+      },
+    });
+    expect(f.events.at(-1)?.data).toEqual({
+      provider: "claude-code",
+      windows: [{ window: "secondary", usedPercent: 30, windowMinutes: 10_080 }],
+      limitReached: true,
+      limitResetsAt: 1_900_000_000,
+    });
+  });
+  it("ignores a negative or missing utilization rather than inventing a figure", () => {
+    const f = mapper();
+    f.map.handle({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: -0.2 },
+    });
+    f.map.handle({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day" },
+    });
+    expect(f.events.map((event) => event.data)).toEqual([
+      { provider: "claude-code", windows: [], limitReached: false },
+    ]);
+  });
   it("tells the driver about any tool that is not localDot's", () => {
     const f = mapper();
     expect(
@@ -146,5 +210,34 @@ describe("Claude Code events", () => {
     expect(
       f.map.handle({ type: "system", subtype: "init", tools: ["mcp__localdot__computer"] }),
     ).toEqual([{ kind: "started" }]);
+  });
+  it("accepts the connected apps' tools that localDot's own server offers", () => {
+    const f = mapper();
+    const app = "mcp__localdot__github__add_comment_to_pending_review";
+    expect(
+      f.map.handle({ type: "system", subtype: "init", tools: ["mcp__localdot__computer", app] }),
+    ).toEqual([{ kind: "started" }]);
+    expect(
+      f.stream({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "tool_use", name: app },
+      }),
+    ).toEqual([]);
+    expect(
+      f.map.handle({
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "tool_use", name: app }] },
+      }),
+    ).toEqual([]);
+    for (const tools of [
+      ["mcp__github__add_comment_to_pending_review"],
+      ["mcp__localdot__not_a_tool"],
+      ["mcp__other__github__list_issues"],
+    ])
+      expect(f.map.handle({ type: "system", subtype: "init", tools })).toEqual([
+        { kind: "violation", what: "foreign_tool" },
+      ]);
   });
 });

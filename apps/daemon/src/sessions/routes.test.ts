@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DeleteSessionsResult,
   emptyManifest,
   type LocalDotEvent,
   RecordingInfo,
@@ -9,7 +10,7 @@ import {
   ulid,
 } from "@localdot/protocol";
 import { SYNTH_CODEC, synthFrame } from "@localdot/stage/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Conversations } from "../agent/conversation.ts";
 import { createApp } from "../app.ts";
 import { monotonicClock } from "../clock.ts";
@@ -92,6 +93,7 @@ async function setup(withBrowser = true) {
   return { home, seed, log, index, request, liveIds, controlledIds, liveWriters };
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const writer of writers.splice(0)) writer.close();
   for (const index of indexes.splice(0)) index.close();
   for (const log of logs.splice(0)) log.close();
@@ -329,6 +331,86 @@ describe("replay APIs", () => {
     expect(
       SessionIndexPage.parse(await (await request("/api/session-index")).json()).sessions,
     ).toEqual([]);
+  });
+
+  it("deletes many tasks at once, keeps running ones and counts a repeat as done", async () => {
+    const { home, seed, log, request, liveIds, controlledIds } = await setup();
+    const ended = [log.createSession("first"), log.createSession("second")];
+    const recording = log.createSession("recording");
+    const controlled = log.createSession("controlled");
+    liveIds.add(recording);
+    controlledIds.add(controlled);
+    const remove = (ids: string[]) =>
+      request("/api/session-index/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+    const first = await remove([...ended, recording, controlled, seed.sessionId, ended[0] ?? ""]);
+    expect(first.status).toBe(200);
+    expect(DeleteSessionsResult.parse(await first.json())).toEqual({
+      deleted: [...ended, seed.sessionId],
+      live: [recording, controlled],
+      failed: [],
+    });
+    for (const id of [...ended, seed.sessionId]) {
+      expect(log.hasSession(id)).toBe(false);
+      expect(existsSync(join(home, "sessions", id))).toBe(false);
+    }
+    expect(log.hasSession(recording)).toBe(true);
+    expect(log.hasSession(controlled)).toBe(true);
+    expect(
+      SessionIndexPage.parse(await (await request("/api/session-index")).json())
+        .sessions.map((card) => card.id)
+        .sort(),
+    ).toEqual([recording, controlled].sort());
+    expect(await (await remove(ended)).json()).toEqual({ deleted: ended, live: [], failed: [] });
+  });
+
+  it("reports a task it couldn't delete and still deletes the rest", async () => {
+    const { seed, log, request } = await setup();
+    const stuck = log.createSession("stuck");
+    const forget = log.forget.bind(log);
+    vi.spyOn(log, "forget").mockImplementation((id) => {
+      if (id === stuck) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+      forget(id);
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const reply = await request("/api/session-index/delete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: [stuck, seed.sessionId] }),
+    });
+    expect(await reply.json()).toEqual({ deleted: [seed.sessionId], live: [], failed: [stuck] });
+    expect(log.hasSession(stuck)).toBe(true);
+    expect(log.hasSession(seed.sessionId)).toBe(false);
+    expect(logged).toHaveBeenCalledWith("deleting a task failed (EBUSY)");
+  });
+
+  it("refuses a bulk delete that names anything but up to 100 task ids", async () => {
+    const { home, seed, log, request } = await setup();
+    const post = (body: string) =>
+      request("/api/session-index/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+    for (const body of [
+      "not json",
+      "{}",
+      JSON.stringify({ ids: [] }),
+      JSON.stringify({ ids: [seed.sessionId, "../../daemon-token"] }),
+      JSON.stringify({ ids: [seed.sessionId, ".deleting"] }),
+      JSON.stringify({ ids: [seed.sessionId.toLowerCase()] }),
+      JSON.stringify({ ids: seed.sessionId }),
+      JSON.stringify({ ids: [seed.sessionId], all: true }),
+      JSON.stringify({ ids: Array.from({ length: 101 }, () => ulid()) }),
+    ])
+      expect((await post(body)).status, body.slice(0, 40)).toBe(400);
+    const padded = JSON.stringify({ ids: [seed.sessionId], pad: "x".repeat(9000) });
+    expect((await post(padded)).status).toBe(413);
+    expect(log.hasSession(seed.sessionId)).toBe(true);
+    expect(existsSync(join(home, "sessions", seed.sessionId))).toBe(true);
   });
 
   it("returns no recording for a session without video and serves its history card", async () => {

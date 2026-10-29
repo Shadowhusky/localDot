@@ -8,6 +8,8 @@ import type {
   PauseSnapshot,
   RecentLine,
   RuleChange,
+  SubagentResume,
+  SubagentStop,
 } from "@localdot/protocol";
 import {
   APPROVAL_TIMEOUT_MS,
@@ -22,10 +24,12 @@ import {
   InboxItem,
   type InboxReply,
   isOwnWords,
+  MAX_SUBAGENT_BRIEFS,
   SessionRun,
   type TranscriptAppend,
   ulid,
 } from "@localdot/protocol";
+import { KEYS_LOCKED_NOTE, KEYS_UNLOCKED_NOTE } from "@localdot/protocol/guidance";
 import type { ScreenName, ScreenSwitchData } from "../../../../packages/protocol/src/screens.ts";
 import type { ScreenController, ScreenLease, ScreenScope } from "../browser/screen-controller.ts";
 import { NO_CONNECTORS as NO_TASK_CONNECTORS, type TaskConnectors } from "../connectors/hub.ts";
@@ -46,6 +50,7 @@ import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
 import { TaskTaint } from "./safety/taint.ts";
 import { TaskAutonomy } from "./safety/task-autonomy.ts";
 import { SecretAnswers } from "./secret-answers.ts";
+import { resumable, SubagentLedger } from "./subagents.ts";
 import type { TranscriptStore } from "./transcript.ts";
 import { WorkProgress } from "./work-progress.ts";
 
@@ -258,6 +263,8 @@ export class AgentSession {
     | undefined;
   // What was said earlier in the conversation this task continues.
   earlier: readonly string[] = [];
+  // The delegated agents the task this one continues left unfinished.
+  inherited: readonly SubagentResume[] = [];
   // Research mode: the task's numbered sources and its budget.
   research: ResearchLog | undefined;
   // The user's last few tasks when this one started.
@@ -281,6 +288,10 @@ export class AgentSession {
   readonly #notes = new Set<number>();
   // dot's next input waits for a fresh look at the screen, which the user has had.
   #lookFirst = false;
+  // The task met locked saved keys; the conversation offers to unlock them until they open.
+  #keysLocked = false;
+  // dot was told they were locked, so it is told when they open.
+  #keysTold = false;
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
   readonly #manual = new Map<ManualLease, ManualCall>();
@@ -292,8 +303,7 @@ export class AgentSession {
     notify(): void;
   }>();
   readonly #fetched = new Map<number, InboxItem>();
-  // Delegated runs the brain has started and not ended, by run id.
-  readonly #childRuns = new Map<string, { id: string; label: string }>();
+  readonly #delegates = new SubagentLedger();
   #seq = 0;
   #generationId = 0;
   #brain: { generation: BrainGeneration; abort: AbortController } | undefined;
@@ -729,7 +739,11 @@ export class AgentSession {
       throw new SessionStoppedError();
     return this.#screens.lease(this.#screenScope(lease.generation, lease.signal));
   }
-  async switchScreen(screen: ScreenName, lease: ToolLease): Promise<ScreenSwitchData> {
+  async switchScreen(
+    screen: ScreenName,
+    lease: ToolLease,
+    options: { restart?: boolean } = {},
+  ): Promise<ScreenSwitchData> {
     lease.check();
     if (!this.#active.has(lease) || !this.#screens || this.#screenReady !== lease.generation)
       throw new SessionStoppedError();
@@ -741,6 +755,7 @@ export class AgentSession {
     const result = await this.#screens.switchTo(
       screen,
       this.#screenScope(lease.generation, lease.signal),
+      options,
     );
     lease.check();
     this.lastFrameId = undefined;
@@ -759,7 +774,7 @@ export class AgentSession {
   beginBrain(): BrainGeneration {
     if (this.stopped) throw new SessionStoppedError();
     if (this.#control) throw new ControlHeldError();
-    if (this.#brain) this.retireBrain(this.#brain.generation);
+    if (this.#brain) this.retireBrain(this.#brain.generation, "restarted");
     const abort = new AbortController();
     const generation = Object.freeze({ id: ++this.#generationId, signal: abort.signal });
     this.#brain = { generation, abort };
@@ -769,7 +784,8 @@ export class AgentSession {
   isCurrent(generation: BrainGeneration): boolean {
     return !this.stopped && this.#brain?.generation === generation && !generation.signal.aborted;
   }
-  retireBrain(generation: BrainGeneration): void {
+  // `why` is what its delegated agents still at work are told stopped them.
+  retireBrain(generation: BrainGeneration, why: SubagentStop = "error"): void {
     if (this.#brain?.generation !== generation) return;
     const previous = this.#brain;
     this.#approvals.cancel(this.id);
@@ -783,14 +799,7 @@ export class AgentSession {
     previous.abort.abort(new SessionStoppedError());
     // Children run inside their brain and end with it. Their own end can no longer arrive, so it is
     // journaled here; a viewer would otherwise show them running for the rest of the task.
-    const orphans = [...this.#childRuns];
-    this.#childRuns.clear();
-    for (const [runId, { id, label }] of orphans)
-      try {
-        this.append("subagent.state", { id, runId, label, state: "interrupted" });
-      } catch {
-        /* Retirement must finish whether or not the journal takes the note. */
-      }
+    this.#interruptDelegates(this.#delegates.running(), why);
     void this.releaseInput();
     this.#screenReady = undefined;
     if (this.#screens && !this.stopped) {
@@ -974,11 +983,24 @@ export class AgentSession {
       ...(step ? { step } : {}),
       data,
     } as unknown as EventDraft);
-    if (type === "subagent.state") {
-      const { id, runId, label, state } = data as EventOf<"subagent.state">["data"];
-      if (state === "running") this.#childRuns.set(runId, { id, label });
-      else this.#childRuns.delete(runId);
-    }
+    this.#delegates.fold(type, data);
+  }
+  #interruptDelegates(runs: readonly EventOf<"subagent.state">["data"][], reason: SubagentStop) {
+    for (const { id, runId, label } of runs)
+      try {
+        this.append("subagent.state", { id, runId, label, state: "interrupted", reason });
+      } catch {
+        /* Retirement must finish whether or not the journal takes the note. */
+      }
+  }
+  // The delegated agents a brain wakes as it continues this task: its own, then those of the task
+  // it continues that it has not taken up yet.
+  unfinishedAgents(store: TranscriptStore): SubagentResume[] {
+    const own = this.#delegates.unfinished();
+    return [
+      ...(own.length ? resumable(own, store.briefs(this.id)) : []),
+      ...this.inherited.filter((agent) => !this.#delegates.has(agent.id)),
+    ].slice(0, MAX_SUBAGENT_BRIEFS);
   }
   post(kind: InboxItem["kind"], text: string): InboxItem {
     return this.#deliverInbox(kind, text, ulid(), true);
@@ -1061,15 +1083,38 @@ export class AgentSession {
     }
   }
   // Reaches the model with the next fetch of the inbox, as a steer it did not hear from the user:
-  // nothing journals it as the user's message.
-  #note(text: string): void {
+  // nothing journals it as the user's message. A note that wakes ends a wait for the user too.
+  #note(text: string, wakes = false): void {
     const item = Object.freeze(
       InboxItem.parse({ seq: this.#seq + 1, messageId: ulid(), kind: "steer", text }),
     );
     this.#seq = item.seq;
     this.#inbox.push(item);
-    this.#notes.add(item.seq);
+    if (!wakes) this.#notes.add(item.seq);
     this.#wake();
+  }
+  get keysLocked(): boolean {
+    return this.#keysLocked;
+  }
+  // Once per lock: the conversation shows the Unlock card, and dot hears not to ask for the
+  // passphrase. A task paused on its own model key needs no word; unlocking resumes it.
+  lockKeys(tell = true): void {
+    if (this.stopped) return;
+    if (!this.#keysLocked) this.append("keys.lock", { locked: true });
+    this.#keysLocked = true;
+    if (!tell || this.#keysTold) return;
+    this.#keysTold = true;
+    this.#note(KEYS_LOCKED_NOTE);
+  }
+  // The vault opened: the card goes, and dot, if it was told, hears it, even from a turn it had
+  // ended.
+  keysUnlocked(): void {
+    if (this.stopped || !this.#keysLocked) return;
+    this.#keysLocked = false;
+    this.append("keys.lock", { locked: false });
+    if (!this.#keysTold) return;
+    this.#keysTold = false;
+    this.#note(KEYS_UNLOCKED_NOTE, true);
   }
   // A word to dot from localDot rather than the user, heard with dot's next look at its inbox.
   remind(text: string): void {
@@ -1476,7 +1521,7 @@ export class AgentSession {
           } catch {
             // The generation is retired below whatever an observer does.
           }
-      if (this.isCurrent(generation)) this.retireBrain(generation);
+      if (this.isCurrent(generation)) this.retireBrain(generation, "control");
     }
     for (const call of this.#active.values()) {
       draining.push(call.settled);
@@ -1687,7 +1732,7 @@ export class AgentSession {
       throw new SessionStoppedError();
     this.#finishing = true;
     try {
-      this.#end(false);
+      this.#end(false, "error");
       if (!this.#finishInterrupted) this.#screenClosing = this.#screens?.finish();
       await this.screensSettled();
       return !this.#finishInterrupted;
@@ -1699,10 +1744,11 @@ export class AgentSession {
       this.#finishing = false;
     }
   }
-  // User Stop ends the run, not the computer. Emergency callers retain stop().
-  cancel(): void {
+  // User Stop ends the run, not the computer. Emergency callers retain stop(). `why` says what
+  // ended the task: only "stopped" keeps its delegated agents from resuming in a later task.
+  cancel(why: SubagentStop = "stopped"): void {
     if (this.stopped) return;
-    this.#end(false);
+    this.#end(false, why);
     this.#screenClosing = this.#screens?.cancel();
     void this.#screenClosing?.catch(() => {});
   }
@@ -1714,9 +1760,9 @@ export class AgentSession {
       void this.#screenClosing?.catch(() => {});
       return;
     }
-    this.#end(true);
+    this.#end(true, "stopped");
   }
-  #end(contain: boolean): void {
+  #end(contain: boolean, why: SubagentStop): void {
     this.#steps.stop();
     if (this.stopped) return;
     this.#stopping = true;
@@ -1732,7 +1778,9 @@ export class AgentSession {
     this.#approvals.cancel(this.id);
     this.connections.cancel("The task ended, so the connection stays closed.");
     const generation = this.generation;
-    if (generation) this.retireBrain(generation);
+    if (generation) this.retireBrain(generation, why);
+    // Agents a limit or an error had already stopped stay stopped with the task.
+    if (why === "stopped") this.#interruptDelegates(this.#delegates.unfinished(), why);
     this.abort.abort(new SessionStoppedError());
     this.#screenReady = undefined;
     if (this.#screens && contain) {

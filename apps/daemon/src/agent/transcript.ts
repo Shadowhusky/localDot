@@ -9,15 +9,28 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { TranscriptMessage, ULID_PATTERN } from "@localdot/protocol";
+import {
+  MAX_SUBAGENT_BRIEFS,
+  SubagentBrief,
+  TranscriptMessage,
+  ULID_PATTERN,
+} from "@localdot/protocol";
 import { z } from "zod";
 
 export const MAX_TRANSCRIPT_MESSAGE = 512 * 1024;
 const MAX_TRANSCRIPT_BYTES = 128 * 1024 * 1024;
+const BRIEFS = "subagents.json";
+const MAX_BRIEFS_BYTES = 1024 * 1024;
+const Briefs = z.strictObject({
+  v: z.literal(1),
+  briefs: z.array(SubagentBrief).max(MAX_SUBAGENT_BRIEFS),
+});
 const Record = z.discriminatedUnion("kind", [
   z.strictObject({ v: z.literal(1), kind: z.literal("message"), message: TranscriptMessage }),
   z.strictObject({
@@ -42,7 +55,7 @@ export interface TranscriptState {
 // line is ignored and removed before the next append. Corruption in a completed line fails closed.
 export class TranscriptStore {
   constructor(private readonly home: string) {}
-  #file(sessionId: string): string {
+  #file(sessionId: string, name = "transcript.jsonl"): string {
     if (!ULID_PATTERN.test(sessionId)) throw new TranscriptError("invalid session id");
     let dir = resolve(this.home);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -57,7 +70,42 @@ export class TranscriptStore {
       if (!stat.isDirectory() || stat.isSymbolicLink())
         throw new TranscriptError("unsafe transcript directory");
     }
-    return join(dir, "transcript.jsonl");
+    return join(dir, name);
+  }
+  // What each delegated agent was asked and had done, newest last, so that a later task in the
+  // conversation can hand the work one left unfinished to a fresh agent.
+  briefs(sessionId: string): SubagentBrief[] {
+    const file = this.#file(sessionId, BRIEFS);
+    if (!existsSync(file)) return [];
+    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const stat = fstatSync(fd);
+      if (!stat.isFile() || stat.size > MAX_BRIEFS_BYTES)
+        throw new TranscriptError("invalid subagent briefs");
+      return Briefs.parse(JSON.parse(readFileSync(fd, "utf8"))).briefs;
+    } finally {
+      closeSync(fd);
+    }
+  }
+  saveBrief(sessionId: string, brief: SubagentBrief): void {
+    const briefs = [...this.briefs(sessionId).filter((b) => b.id !== brief.id), brief].slice(
+      -MAX_SUBAGENT_BRIEFS,
+    );
+    const file = this.#file(sessionId, BRIEFS);
+    const temp = `${file}.tmp`;
+    const fd = openSync(
+      temp,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      if (!fstatSync(fd).isFile()) throw new TranscriptError("invalid subagent briefs");
+      writeFileSync(fd, `${JSON.stringify({ v: 1, briefs })}\n`);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(temp, file);
   }
   #load(sessionId: string): TranscriptState & { bytes: number; file: string } {
     const file = this.#file(sessionId);

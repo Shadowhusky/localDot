@@ -17,6 +17,8 @@ export interface KeydEventRouterDeps {
   ask?(cellId: string, ask: KeydAsk): void;
   // Some events, held connections among them perhaps, were dropped; their owner lists them again.
   asksMissed?(): void;
+  // The computer a web browser's cell belongs to.
+  parentOf?(cellId: string): string | undefined;
   perCellPerSecond?: number;
   retryMs?: { min: number; max: number };
   now?: () => number;
@@ -110,7 +112,13 @@ export class KeydEventRouter {
       this.deps.ask?.(event.cell, event.data);
       return;
     }
-    const sessionId = this.deps.live.get(event.cell);
+    // The browser is the user's too, so its task hears only what it was refused, such as a saved
+    // password while the vault is locked.
+    const parent =
+      event.type === "key.use" && event.data.decision === "deny"
+        ? this.deps.parentOf?.(event.cell)
+        : undefined;
+    const sessionId = this.deps.live.get(event.cell) ?? (parent && this.deps.live.get(parent));
     if (!sessionId || (event.type === "model.spend" && event.data.taskId !== sessionId)) return;
     let window = this.#window.get(event.cell);
     if (!window) {

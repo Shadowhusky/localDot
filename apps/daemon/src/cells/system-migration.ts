@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { isDeepStrictEqual as equal } from "node:util";
 import { z } from "zod";
 import { type DockerClient, DockerError } from "./docker.ts";
-import { mergedStatusEntry, PACKAGE_STATUS, READ_PACKAGE_STATUS } from "./package-status.ts";
+import {
+  changedDatabases,
+  mergePackageDatabases,
+  READ_PACKAGE_DATABASES,
+} from "./package-status.ts";
 import {
   ARCHIVE_SYSTEM,
   Manifest,
@@ -18,6 +21,7 @@ import type { CellRecord } from "./types.ts";
 
 type Docker = Pick<DockerClient, "request">;
 const imageId = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+const PackageTexts = z.record(z.string(), z.string().nullable());
 const route = (id: string) => `/containers/${encodeURIComponent(id)}`;
 export const SYSTEM_BASE = "localdot.system-base";
 export const SYSTEM_SOURCE = "localdot.system-source";
@@ -126,35 +130,25 @@ export class SystemMigration {
       const original = await scan(base);
       const fresh = await scan(target);
       const saved = await scan(checkpoint.Id);
+      const manifests: [Manifest, Manifest, Manifest] = [
+        original.manifest,
+        fresh.manifest,
+        saved.manifest,
+      ];
       const before = { ...original.manifest },
         after = { ...fresh.manifest };
-      const oldStatus = before[PACKAGE_STATUS],
-        newStatus = after[PACKAGE_STATUS],
-        savedStatus = saved.manifest[PACKAGE_STATUS];
-      let mergedStatus: ReturnType<typeof mergedStatusEntry> | undefined;
-      if (
-        oldStatus &&
-        newStatus &&
-        savedStatus &&
-        !equal(oldStatus, newStatus) &&
-        !equal(oldStatus, savedStatus) &&
-        !equal(newStatus, savedStatus)
-      ) {
-        const texts: string[] = [];
-        for (const image of [base, target, checkpoint.Id])
-          texts.push(
-            z
-              .string()
-              .parse(
-                JSON.parse((await run(await helper(image, READ_PACKAGE_STATUS))).toString("utf8")),
-              ),
-          );
-        mergedStatus = mergedStatusEntry(
-          [oldStatus, newStatus, savedStatus],
-          texts as [string, string, string],
+      const changed = changedDatabases(manifests);
+      const texts: z.infer<typeof PackageTexts>[] = [];
+      for (const image of changed.length ? [base, target, checkpoint.Id] : [])
+        texts.push(
+          PackageTexts.parse(
+            JSON.parse((await run(await helper(image, READ_PACKAGE_DATABASES))).toString("utf8")),
+          ),
         );
-        before[PACKAGE_STATUS] = savedStatus;
-        after[PACKAGE_STATUS] = mergedStatus.entry;
+      const merged = mergePackageDatabases(changed, manifests, texts);
+      for (const [path, { entry }] of merged) {
+        before[path] = saved.manifest[path] as Manifest[string];
+        after[path] = entry;
       }
       const plan = migrationPlan(before, after, saved.manifest);
       const clone = await helper(
@@ -163,14 +157,15 @@ export class SystemMigration {
         JSON.stringify({
           remove: plan.remove,
           directories: plan.directories.map((p) => [p, after[p]]),
-          packageStatus:
-            mergedStatus && plan.copy.includes(PACKAGE_STATUS) ? mergedStatus : undefined,
+          packageDatabases: Object.fromEntries(
+            [...merged].filter(([path]) => plan.copy.includes(path)),
+          ),
         }),
         false,
       );
       await run(clone);
       // Batch exact files into one archive; never copy a parent tree over user additions.
-      const copy = plan.copy.filter((path) => !mergedStatus || path !== PACKAGE_STATUS);
+      const copy = plan.copy.filter((path) => !merged.has(path));
       if (copy.length) {
         const exporter = await helper(target, ARCHIVE_SYSTEM, JSON.stringify(copy), false);
         await run(exporter);
@@ -188,6 +183,10 @@ export class SystemMigration {
           raw: { contentType: "application/x-tar", data: archivePayload(envelope) },
           timeoutMs: 120000,
         });
+      }
+      if (plan.ldconfig) {
+        await put(clone, JSON.stringify({ remove: [], directories: [], ldconfig: true }));
+        await run(clone);
       }
       const committed = await this.docker.request<{ Id: string }>({
         method: "POST",
@@ -276,17 +275,19 @@ export class SystemMigration {
       });
       if (!made.Id) throw failure();
       helpers.push(made.Id);
-      if (argument)
-        await docker.request({
-          method: "PUT",
-          path: `${route(made.Id)}/archive`,
-          query: { path: "/tmp" },
-          raw: {
-            contentType: "application/x-tar",
-            data: tar([{ name: "localdot-system-plan.json", data: argument, mode: 0o600 }]),
-          },
-        });
+      if (argument) await put(made.Id, argument);
       return made.Id;
+    }
+    async function put(id: string, argument: string): Promise<void> {
+      await docker.request({
+        method: "PUT",
+        path: `${route(id)}/archive`,
+        query: { path: "/tmp" },
+        raw: {
+          contentType: "application/x-tar",
+          data: tar([{ name: "localdot-system-plan.json", data: argument, mode: 0o600 }]),
+        },
+      });
     }
     async function run(id: string): Promise<Buffer> {
       await docker.request({ method: "POST", path: `${route(id)}/start` });

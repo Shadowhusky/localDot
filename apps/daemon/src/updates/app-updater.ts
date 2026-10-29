@@ -34,7 +34,7 @@ export interface AppUpdaterHost {
   ): Promise<PreparedUpdate | undefined>;
   prepared(version: string): Promise<boolean>;
   install?(version: string): Promise<void>;
-  installWait?(): string | null;
+  installWait?(): string | null | Promise<string | null>;
   // Newest first: notes after `after` up to `upTo`, or `upTo`'s own when `after` is unknown.
   notes?(after: string | null, upTo: string): Promise<ReleaseNote[]>;
   attempts?: {
@@ -194,8 +194,9 @@ export class AppUpdater {
     const version = this.#record.availableVersion;
     if (!version || this.#phase !== "ready" || this.#flight || !this.host?.install)
       throw new Error("Download the update first.");
-    const wait = this.host.installWait?.();
+    const wait = await this.host.installWait?.();
     if (wait) throw new Error(wait);
+    if (this.#phase !== "ready") throw new Error("Download the update first.");
     this.#phase = "installing";
     this.#error = null;
     this.#progress = {

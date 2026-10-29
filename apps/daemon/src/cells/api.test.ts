@@ -412,3 +412,99 @@ it("reports runtime availability without exposing diagnostic secrets or allowing
   expect(response.status).toBe(502);
   expect(cells.list()).toHaveLength(0);
 });
+
+describe("several dots' computers on one Docker", () => {
+  const create = (app: Hono) =>
+    app.request(url("/api/cells"), {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ scale: 2 }),
+    });
+
+  it("warns, in plain words, before one more computer than Docker's memory holds, and starts it anyway when asked", async () => {
+    const cells = new FakeOrchestrator();
+    const advice =
+      "Two running computers need about 10 GB for Docker; it has 8 GB. Raise it in Docker Desktop → Settings → Resources.";
+    const capacity = vi.fn(async (starting?: string) => (starting === "ok" ? undefined : advice));
+    const app = createApp({
+      token: TOKEN,
+      port: PORT,
+      eventLog,
+      cells: { cells, tickets: new TicketRegistry(), capacity },
+    });
+    const refused = await create(app);
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toBe(advice);
+    expect(cells.list()).toEqual([]);
+    const cell = await cells.create({ scale: 2 });
+    const start = await app.request(url(`/api/cells/${cell.id}/start`), {
+      method: "POST",
+      headers: bearer,
+    });
+    expect(start.status).toBe(409);
+    expect(capacity).toHaveBeenLastCalledWith(cell.id);
+    const anyway = await app.request(url(`/api/cells/${cell.id}/start`), {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    });
+    expect(anyway.status).toBe(202);
+    const made = await app.request(url("/api/cells"), {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ scale: 2, force: true }),
+    });
+    expect(made.status).toBe(202);
+    expect(capacity).toHaveBeenCalledTimes(2);
+  });
+
+  it("makes the first computer from one copied from another dot, once", async () => {
+    const cells = new FakeOrchestrator();
+    const created = vi.spyOn(cells, "create");
+    const snapshot = "01JXYZ00000000000000000042";
+    let waiting: string | undefined = snapshot;
+    const done = vi.fn(async () => {});
+    const app = createApp({
+      token: TOKEN,
+      port: PORT,
+      eventLog,
+      cells: {
+        cells,
+        tickets: new TicketRegistry(),
+        importComputer: {
+          take: () => {
+            const taken = waiting;
+            waiting = undefined;
+            return taken;
+          },
+          done,
+        },
+      },
+    });
+    expect((await create(app)).status).toBe(202);
+    expect(created).toHaveBeenLastCalledWith({ scale: 2, restoreFrom: snapshot });
+    expect(done).toHaveBeenCalledWith(snapshot);
+    expect((await create(app)).status).toBe(202);
+    expect(created).toHaveBeenLastCalledWith({ scale: 2 });
+  });
+
+  it("explains Docker running out of network addresses", async () => {
+    const cells = new FakeOrchestrator();
+    vi.spyOn(cells, "create").mockRejectedValue(
+      new DockerError(
+        400,
+        "could not find an available, non-overlapping IPv4 address pool among the defaults to assign to the network",
+        "/networks/create",
+      ),
+    );
+    const app = createApp({
+      token: TOKEN,
+      port: PORT,
+      eventLog,
+      cells: { cells, tickets: new TicketRegistry() },
+    });
+    const refused = await create(app);
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toContain("no network addresses left");
+  });
+});

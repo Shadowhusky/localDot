@@ -66,12 +66,14 @@ describe("gateSpec", () => {
       CapDrop: ["ALL"],
       ReadonlyRootfs: true,
       SecurityOpt: ["no-new-privileges"],
-      PidsLimit: 256,
+      PidsLimit: 320,
       PortBindings: {
         "8081/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
         "8082/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
+        "8083/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
       },
     });
+    expect(Object.keys(spec.ExposedPorts)).toEqual(["8081/tcp", "8082/tcp", "8083/tcp"]);
     expect("Binds" in spec.HostConfig).toBe(false);
     expect("RestartPolicy" in spec.HostConfig).toBe(false);
     expect(spec.NetworkingConfig.EndpointsConfig[record.docker.egressNetwork]).toEqual({
@@ -85,6 +87,7 @@ describe("gateSpec", () => {
       "LD_EGRESS_ADDR=172.25.0.10",
       "LD_DESKTOP_ADDR=172.24.0.11",
       "LD_KEYD_PORT=4760",
+      "LD_PREVIEWS=1",
     ]);
   });
 });

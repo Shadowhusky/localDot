@@ -23,6 +23,17 @@ export class SystemMigrationConflict extends Error {
   }
 }
 
+// ldconfig's private record of the libraries it has read, keyed by each file's identity. It checks
+// every entry against the file it names and reads changed files again, so the user's copy stays.
+export const LIBRARY_ID_CACHE = "/var/cache/ldconfig/aux-cache";
+// The loader's index of the libraries present, which ldconfig derives from them alone.
+export const LIBRARY_CACHE = "/etc/ld.so.cache";
+// What ldconfig writes as root, with the modes it gives them.
+const LDCONFIG_OUTPUT: Record<string, number> = {
+  [LIBRARY_CACHE]: 0o644,
+  [LIBRARY_ID_CACHE]: 0o600,
+};
+
 // Start from the user's whole system. Apply only upstream changes whose previous contents are
 // still intact. User additions/deletions outside that delta never need to be reconstructed.
 export function migrationPlan(base: Manifest, target: Manifest, current: Manifest) {
@@ -30,6 +41,7 @@ export function migrationPlan(base: Manifest, target: Manifest, current: Manifes
     remove: string[] = [],
     directories: string[] = [],
     conflicts: string[] = [];
+  let ldconfig = false;
   for (const path of new Set([...Object.keys(base), ...Object.keys(target)])) {
     if (!safePath(path)) throw new Error("Invalid migration path");
     const before = base[path],
@@ -40,7 +52,11 @@ export function migrationPlan(base: Manifest, target: Manifest, current: Manifes
       // Directory contents are represented by their own entries; the directory's metadata can
       // stay user-owned without losing new children. File/type conflicts must be resolved first.
       if (before?.[0] === "d" && next?.[0] === "d" && now?.[0] === "d") continue;
-      conflicts.push(path);
+      if (path === LIBRARY_ID_CACHE) continue;
+      // Neither side's index lists the other's libraries; rebuild it from both once they are in.
+      if (path === LIBRARY_CACHE && [before, next, now].every((entry) => entry?.[0] === "f"))
+        ldconfig = true;
+      else conflicts.push(path);
     } else if (!next) remove.push(path);
     else if (next[0] === "d") directories.push(path);
     else copy.push(path);
@@ -57,10 +73,12 @@ export function migrationPlan(base: Manifest, target: Manifest, current: Manifes
         throw new SystemMigrationConflict([parent]);
     }
   }
+  const rebuilt = (path: string) => ldconfig && path in LDCONFIG_OUTPUT;
   return {
-    copy,
-    remove: remove.sort((a, b) => b.length - a.length),
+    copy: copy.filter((path) => !rebuilt(path)),
+    remove: remove.filter((path) => !rebuilt(path)).sort((a, b) => b.length - a.length),
     directories: directories.sort((a, b) => a.length - b.length),
+    ldconfig,
   };
 }
 // Check the committed candidate against the complete saved system, including files unrelated
@@ -84,9 +102,18 @@ export function verifyMigration(
     if (!entry) throw new Error("Missing migration source");
     expected[path] = entry;
   }
-  if (!equal(expected, actual))
-    throw new Error("Computer update verification failed; the original computer was kept");
+  // ldconfig's output depends on the merged libraries, so only how it was written can be checked.
+  if (plan.ldconfig)
+    for (const [path, mode] of Object.entries(LDCONFIG_OUTPUT)) {
+      const entry = actual[path];
+      if (entry?.[0] !== "f" || entry[1] !== mode || entry[2] !== 0 || entry[3] !== 0)
+        throw unverified();
+      expected[path] = entry;
+    }
+  if (!equal(expected, actual)) throw unverified();
 }
+const unverified = () =>
+  new Error("Computer update verification failed; the original computer was kept");
 
 export function safePath(path: string): boolean {
   return (
@@ -121,8 +148,27 @@ walk('/')
 print(json.dumps(result, separators=(',',':')))
 `;
 
+// Opens a regular file from the root without following a symlink substituted for any part of it.
+export const OPEN_FILE = `
+def open_file(path, flags):
+    parts = path.strip('/').split('/')
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in parts[:-1]:
+            fd, parent = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd), fd
+            os.close(parent)
+        if not stat.S_ISREG(os.stat(parts[-1], dir_fd=fd, follow_symlinks=False).st_mode):
+            raise OSError(errno.EINVAL, 'not a regular file', path)
+        return os.open(parts[-1], flags | os.O_NOFOLLOW, dir_fd=fd)
+    finally:
+        os.close(fd)
+`;
+
+// Runs in the private clone only. A second run, once the new files are in, rebuilds the loader's
+// index without touching library links.
 export const PREPARE_SYSTEM = `
-import os, sys, json, stat
+import os, sys, json, stat, errno, subprocess
+${OPEN_FILE}
 with open(sys.argv[1]) as f: plan = json.load(f)
 os.unlink(sys.argv[1])
 for p in plan['remove']:
@@ -134,15 +180,13 @@ for p, meta in plan['directories']:
     if os.path.lexists(p) and not os.path.isdir(p): os.unlink(p)
     os.makedirs(p, exist_ok=True)
     os.chown(p, meta[2], meta[3]); os.chmod(p, meta[1])
-if plan.get('packageStatus'):
-    p = '/var/lib/dpkg/status'
-    merged = plan['packageStatus']
-    # Modify the private clone only, without following a substituted final symlink.
-    fd = os.open(p, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
-    with os.fdopen(fd, 'wb') as f:
+for p, merged in plan.get('packageDatabases', {}).items():
+    with os.fdopen(open_file(p, os.O_WRONLY | os.O_TRUNC), 'wb') as f:
         f.write(merged['text'].encode('utf-8'))
         os.fchown(f.fileno(), merged['entry'][2], merged['entry'][3])
         os.fchmod(f.fileno(), merged['entry'][1])
+if plan.get('ldconfig'):
+    subprocess.run(['/sbin/ldconfig', '-X'], check=True, stdout=subprocess.DEVNULL)
 print('prepared')
 `;
 

@@ -21,6 +21,8 @@ export interface CellSummary {
   paused?: true;
   // Its images have newer builds under the same tags; Update moves it onto them.
   updateAvailable?: true;
+  // A newer build is here, but updating to it met files an installed app changed; it isn't offered.
+  updateBlocked?: true;
   updating?: true;
   // Its update can't be finished; a fresh start is the way back.
   needsFreshStart?: true;
@@ -109,9 +111,17 @@ export interface StreamEndpoint {
   authorization: string;
 }
 
+// desktopd's preview forwarder through the gate's third relay (previews/tunnel.ts). Gates made
+// before previews have no such relay.
+export interface PreviewEndpoint {
+  port: number;
+  token: string;
+}
+
 export interface CellEndpoints {
   desktopd: DesktopdEndpoint;
   stream: StreamEndpoint;
+  preview?: PreviewEndpoint;
 }
 
 // What desktopd's GET /healthz returns (cells/desktop/desktopd/src/app.ts).

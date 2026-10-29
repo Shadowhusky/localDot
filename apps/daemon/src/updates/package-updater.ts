@@ -45,7 +45,7 @@ const pullImages = (
 export async function packageAppUpdater(
   home: string,
   prefix: string,
-  installWait: () => string | null,
+  installWait: () => string | null | Promise<string | null>,
   settled: () => void,
   deps = { exec, spawn, platform: process.platform, freeBytes, images: pullImages },
 ): Promise<AppUpdater> {

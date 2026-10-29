@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { ulid } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
-import type { BrowserControlRequest } from "../../../../packages/protocol/src/browser-control.ts";
+import type {
+  BrowserControlRequest,
+  BrowserStatus,
+} from "../../../../packages/protocol/src/browser-control.ts";
 import type { BrowserDownloadBinding } from "../../../../packages/protocol/src/browser-downloads.ts";
+import { BrowserStartCancelled } from "../cells/browser-ledger.ts";
 import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { BrowserClientError, type BrowserScope } from "./client.ts";
 import {
+  browserUnavailableText,
   ScreenControlError,
   ScreenController,
   type ScreenControllerDeps,
@@ -1087,6 +1092,67 @@ describe("a web browser that stopped working", () => {
     await controller.close();
   });
 
+  it("waits for a browser restarting in place instead of replacing it", async () => {
+    const f = fixture();
+    const health = vi.fn(async () => "restarting" as const);
+    const controller = new ScreenController({
+      ...f.deps,
+      browser: { ...f.deps.browser, health },
+    });
+    f.client.health
+      .mockRejectedValueOnce(new BrowserClientError("restarting"))
+      .mockRejectedValueOnce(new BrowserClientError("restarting"));
+    const result = await controller.switchTo("browser", f.scope);
+    expect(result.screen).toBe("browser");
+    expect(health).toHaveBeenCalledTimes(2);
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    await controller.close();
+  });
+
+  it("starts a stuck browser again when dot asks, once a minute, and says why", async () => {
+    const f = fixture();
+    const report = vi.fn();
+    const noteProblem = vi.fn();
+    const failure = vi.fn(
+      async () => "The browser stopped responding (control timeout) and was restarted",
+    );
+    const controller = new ScreenController({
+      ...f.deps,
+      browser: { ...f.deps.browser, failure, noteProblem },
+      report,
+    });
+    f.deps.browser.stop.mockImplementation(async () => f.replace());
+    await controller.switchTo("browser", f.scope, { restart: true });
+    expect(f.deps.browser.stop).toHaveBeenCalledOnce();
+    expect(report).toHaveBeenCalledWith(
+      "dot restarted the web browser: The browser stopped responding (control timeout) and was restarted",
+    );
+    expect(noteProblem).toHaveBeenCalledWith(
+      f.deps.parentCellId,
+      "dot restarted the web browser (The browser stopped responding (control timeout) and was restarted).",
+    );
+    await controller.switchTo("browser", f.scope, { restart: true });
+    expect(f.deps.browser.stop).toHaveBeenCalledOnce();
+    expect(controller.selection.screen).toBe("browser");
+    await controller.close();
+  });
+
+  it("says what went wrong when it cannot open", async () => {
+    const f = fixture();
+    const controller = new ScreenController({
+      ...f.deps,
+      browser: {
+        ...f.deps.browser,
+        problem: () => "The web browser couldn't start: not ready within 90 seconds.",
+      },
+    });
+    f.deps.browser.start.mockRejectedValue(new Error("synthetic start failure"));
+    await expect(controller.switchTo("browser", f.scope)).rejects.toThrow(
+      "The web browser couldn't open. What went wrong: The web browser couldn't start: not ready within 90 seconds.",
+    );
+    await controller.close();
+  });
+
   it("leaves running a browser started since it failed", async () => {
     const f = fixture();
     const health = vi.fn(async () => {
@@ -1250,4 +1316,92 @@ it("keeps the user's browser and control when sign-in mode cannot yet quit", asy
   expect(await held.signIn(false)).toMatchObject({ available: true, mode: "signin" });
   held.finish();
   await f.controller.close();
+});
+
+describe("what dot hears when the web browser can't open", () => {
+  it("is the daemon's own account: why, what clears it, and that a note follows", async () => {
+    const f = fixture();
+    vi.mocked(f.deps.browser.start).mockRejectedValue(new BrowserStartCancelled());
+    const status = vi.fn(
+      async (): Promise<BrowserStatus> => ({
+        state: "off",
+        reason: "key-service-offline",
+        problem: "localDot's key service isn't answering.",
+        clears: "The key service running again.",
+      }),
+    );
+    const noteOutage = vi.fn();
+    const controller = new ScreenController({
+      ...f.deps,
+      browser: { ...f.deps.browser, status, noteOutage },
+    });
+    const refusal = () =>
+      controller.switchTo("browser", f.scope).then(
+        () => "",
+        (error: unknown) => {
+          expect(error).toBeInstanceOf(ScreenUnavailableError);
+          return (error as Error).message;
+        },
+      );
+    expect(await refusal()).toMatch(
+      /^The web browser couldn't open \(key-service-offline\): localDot's key service isn't answering\. The key service running again\. You'll get a note from localDot when it is running; until then don't retry it/u,
+    );
+    expect(noteOutage).toHaveBeenCalledWith(f.deps.parentCellId);
+    status.mockResolvedValue({
+      state: "failed",
+      reason: "failed",
+      problem: "The web browser couldn't start: Browser start failed during readiness.",
+      clears: "Restart the web browser.",
+    });
+    expect(await refusal()).toMatch(
+      /failed during readiness\. localDot has stopped starting it by itself: switch_screen with restart: true tries once more/u,
+    );
+    await controller.close();
+  });
+
+  it("says when localDot tries again or a start is done", () => {
+    const now = Date.parse("2026-10-29T08:00:00.000Z");
+    expect(
+      browserUnavailableText(
+        {
+          state: "failed",
+          reason: "failed",
+          problem: "The web browser couldn't start: Docker busy.",
+          retryAt: "2026-10-29T08:00:15.000Z",
+          clears: "Nothing: localDot starts it again by itself.",
+        },
+        now,
+      ),
+    ).toMatch(
+      /starts it again by itself\. localDot tries again in about 15 seconds\. You'll get a note/u,
+    );
+    expect(
+      browserUnavailableText(
+        { state: "starting", reason: "starting", readyBy: "2026-10-29T08:03:00.000Z" },
+        now,
+      ),
+    ).toMatch(
+      /^The web browser is still starting; it is ready, or has failed, within 180 seconds\./u,
+    );
+  });
+
+  it("keeps its own words when the daemon reports the browser running", async () => {
+    const f = fixture();
+    vi.mocked(f.deps.browser.start).mockRejectedValue(new Error("synthetic start failure"));
+    const controller = new ScreenController({
+      ...f.deps,
+      browser: {
+        ...f.deps.browser,
+        status: async () => ({
+          state: "ready",
+          reason: "keys-locked",
+          problem: "Saved keys are locked.",
+        }),
+      },
+    });
+    await expect(controller.switchTo("browser", f.scope)).rejects.toThrow(
+      /^The web browser couldn't open\. localDot restarts it by itself/u,
+    );
+    await controller.close();
+  });
 });

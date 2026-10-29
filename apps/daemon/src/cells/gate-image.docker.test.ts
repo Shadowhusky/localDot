@@ -23,7 +23,7 @@ const GATE_IMAGE = process.env.LOCALDOT_GATE_IMAGE || "localdot/gate:dev";
 const PROBE_IMAGE = "localdot/probe:test";
 const PROBE_DOCKERFILE = `FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
 RUN apk add --no-cache curl busybox-extras && mkdir -p /www && echo cell-ok > /www/index.html
-CMD ["sh", "-c", "httpd -f -p 3000 -h /www & exec httpd -f -p 7700 -h /www"]
+CMD ["sh", "-c", "httpd -f -p 3000 -h /www & httpd -f -p 7701 -h /www & exec httpd -f -p 7700 -h /www"]
 `;
 const names = {
   containers: ["localdot-test-cell", "localdot-test-gate", "localdot-test-egressprobe"],
@@ -47,6 +47,7 @@ let gateEgress = "";
 let cell = "";
 let desktopdPort = 0;
 let streamPort = 0;
+let previewPort = 0;
 
 const curl = (container: string, url: string) =>
   dockerExec(container, "curl", "-sS", "-m", "5", url);
@@ -118,6 +119,8 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
       "127.0.0.1:0:8081",
       "-p",
       "127.0.0.1:0:8082",
+      "-p",
+      "127.0.0.1:0:8083",
       "--cap-drop",
       "ALL",
       "--read-only",
@@ -131,6 +134,8 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
       `LD_DESKTOP_ADDR=${cell}`,
       "-e",
       `LD_KEYD_PORT=${KEYD_PORT}`,
+      "-e",
+      "LD_PREVIEWS=1",
       ...gateRelayEnv(relay, KEYD_PORT, false).flatMap((value) => ["-e", value]),
       ...(gateRelayMounts(relay, false).Mounts ?? []).flatMap((mount) => [
         "--mount",
@@ -150,6 +155,7 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
     );
     desktopdPort = publishedPort("localdot-test-gate", "8081");
     streamPort = publishedPort("localdot-test-gate", "8082");
+    previewPort = publishedPort("localdot-test-gate", "8083");
     sleepSync(2000);
   });
 
@@ -166,6 +172,8 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
   it("publishes the inbound relays on 127.0.0.1 only", async () => {
     expect(await (await fetch(`http://127.0.0.1:${desktopdPort}/`)).text()).toContain("cell-ok");
     expect(await (await fetch(`http://127.0.0.1:${streamPort}/`)).text()).toContain("cell-ok");
+    expect(await (await fetch(`http://127.0.0.1:${previewPort}/`)).text()).toContain("cell-ok");
+    expect(docker("port", "localdot-test-gate", "8083")).toMatch(/^127\.0\.0\.1:/);
     expect(docker("port", "localdot-test-gate", "8081")).toMatch(/^127\.0\.0\.1:/);
   });
 
@@ -179,6 +187,7 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
   it("does not expose the inbound relays on the internal network", () => {
     expect(curl("localdot-test-cell", `http://${gateInternal}:8081/`).status).not.toBe(0);
     expect(curl("localdot-test-cell", `http://${gateInternal}:8082/`).status).not.toBe(0);
+    expect(curl("localdot-test-cell", `http://${gateInternal}:8083/`).status).not.toBe(0);
   });
 
   it("keeps the cell off the internet and the host", () => {

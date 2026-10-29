@@ -161,6 +161,8 @@ const REFUSALS = {
   stale: "The web browser or the selected screen changed during the request.",
   aborted: "The browser request timed out or was cancelled; the page may still have loaded.",
   unavailable: "The browser control connection is unavailable; the page may still be responsive.",
+  restarting:
+    "The web browser failed and is restarting by itself; saved sign-ins are kept but open pages are not. Wait about 10 seconds, then read the page again and open your page anew if it is blank. Do not open another browser.",
   reply: "The web browser sent a reply that could not be read.",
 } as const;
 
@@ -1028,6 +1030,9 @@ export class BrowserClient {
         throw new BrowserClientError("secret_refused");
       if (response.statusCode === 423) throw new BrowserClientError("protected_input");
       if (response.statusCode === 409) throw new BrowserClientError("refused");
+      // browserd restarting its Chromium in place says when to ask again.
+      if (response.statusCode === 503 && response.headers["retry-after"] !== undefined)
+        throw new BrowserClientError("restarting");
       if (response.statusCode !== 200 || response.headers["content-encoding"] !== undefined)
         throw new BrowserClientError("unavailable");
       return { response, signal, check, close };

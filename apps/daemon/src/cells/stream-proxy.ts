@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { ULID_PATTERN } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import { WebSocket, WebSocketServer } from "ws";
@@ -75,6 +76,10 @@ const CLIENT_POLICY = {
   ].join(", "),
 };
 const UNDER_TICKET = /^\/cells\/[^/]+\/(?:desktop|browser)\/[^/]+(\/.*)$/;
+// The client's own files carry content hashes, so they are served once from one address every
+// ticket's page shares, and kept. Only the page, its cell API and its socket sit under the ticket.
+export const CLIENT_ASSETS = "/selkies/assets";
+const ASSETS_LINK = /(["'])\.\/assets\//g;
 
 export interface StreamProxyDeps {
   cells: StreamCells;
@@ -123,10 +128,36 @@ export function desktopRoutes(
   app.all(`/cells/:id/${surface}/:ticket/*`, (c) => c.text("method not allowed", 405, NOSNIFF));
 }
 
+// Rooted at the client's assets, so an encoded separator can't reach its page.
+export function clientAssetRoutes(app: Hono, vendorDir: string): void {
+  app.get(`${CLIENT_ASSETS}/*`, (c) => {
+    let rel: string;
+    try {
+      rel = decodeURIComponent(new URL(c.req.url).pathname).slice(CLIENT_ASSETS.length);
+    } catch {
+      return c.text("bad path", 400, NOSNIFF);
+    }
+    const file = readStatic(join(vendorDir, "assets"), rel);
+    if (!file) return c.text("not found", 404, NOSNIFF);
+    return c.body(file.body, 200, {
+      ...NOSNIFF,
+      ...CLIENT_POLICY,
+      "content-type": file.type,
+      "cache-control": "public, max-age=31536000, immutable",
+    });
+  });
+}
+
 function vendored(dir: string, rel: string): StaticFile | undefined {
   try {
     const path = decodeURIComponent(rel);
-    return readStatic(dir, path === "/" ? "/index.html" : path);
+    if (path !== "/" && path !== "/index.html") return readStatic(dir, path);
+    const page = readStatic(dir, "/index.html");
+    if (!page) return undefined;
+    const html = Buffer.from(page.body)
+      .toString("utf8")
+      .replace(ASSETS_LINK, `$1${CLIENT_ASSETS}/`);
+    return { ...page, body: new Uint8Array(Buffer.from(html)) };
   } catch {
     return undefined;
   }

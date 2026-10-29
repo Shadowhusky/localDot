@@ -12,6 +12,7 @@ const WINDOWS_TAILSCALE = "/mnt/c/Program Files/Tailscale/tailscale.exe";
 const TAILNET_HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net(?::\d{1,5})?$/i;
 const READ_MS = 10_000;
 const ENABLE_MS = 90_000;
+const SERVE_MS = 20_000;
 const FRESH_MS = 5_000;
 const RECHECK_MS = 15_000;
 const OUTPUT_LIMIT = 256 * 1024;
@@ -495,6 +496,14 @@ export class AccessLinks {
       answer(await this.read(true));
     });
     return enabling.first;
+  }
+
+  // Runs the Tailscale that answered as connected, for the Serve entries previews add and remove
+  // for the ports they hold.
+  async runTailscale(args: readonly string[]): Promise<CommandResult | undefined> {
+    if (!this.command) await this.read(true).catch(() => undefined);
+    const command = this.command;
+    return command && !this.closed ? run(command, args, SERVE_MS).done : undefined;
   }
 
   close(): void {

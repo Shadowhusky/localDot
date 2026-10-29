@@ -1,14 +1,30 @@
 import { randomUUID } from "node:crypto";
 import { ULID_PATTERN, ulid } from "@localdot/protocol";
+import {
+  type BrowserStatus,
+  BrowserSupervisorState,
+} from "../../../../packages/protocol/src/browser-control.ts";
 import type { ComputerResetSource } from "../../../../packages/protocol/src/computer-reset.ts";
 import {
   type BrowserKeydClient,
   closeBrowserKeyd,
   openBrowserKeyd,
 } from "../keyd/browser-wiring.ts";
+import { KeydError } from "../keyd/client.ts";
 import { AccountsProfile } from "./accounts-profile.ts";
-import { answersReady, readBrowserHealth, validateBrowserHealth } from "./browser-health.ts";
-import { type BrowserLedger, BrowserLedgerStore, BrowserLifecycleError } from "./browser-ledger.ts";
+import {
+  answersReady,
+  describeBrowserFailure,
+  readBrowserHealth,
+  readBrowserSupervisor,
+  validateBrowserHealth,
+} from "./browser-health.ts";
+import {
+  type BrowserLedger,
+  BrowserLedgerStore,
+  BrowserLifecycleError,
+  BrowserStartCancelled,
+} from "./browser-ledger.ts";
 import {
   browserLabels,
   browserObjectPath,
@@ -18,7 +34,7 @@ import {
   retireBrowserResources,
 } from "./browser-resources.ts";
 import { browserNames, browserNetworkSpec, browserSpec } from "./browser-spec.ts";
-import type { DockerClient } from "./docker.ts";
+import { type DockerClient, DockerError } from "./docker.ts";
 import type { BrowserImages } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
 import { allocateKeydPort } from "./ports.ts";
@@ -39,6 +55,28 @@ import type { BrowserCellRecord, CellState } from "./types.ts";
 
 type Docker = Pick<DockerClient, "request" | "socketPath">;
 const HEALTH_TIMEOUT_MS = 3000;
+// As long as a computer gets to become ready: under load Chromium can take minutes to come up, and a
+// start that times out is begun again from nothing.
+const READY_TIMEOUT_MS = 180_000;
+
+// Why a browser can't run now, for the app, the CLI and dot.
+export type BrowserBlock = Required<Pick<BrowserStatus, "reason" | "problem" | "clears">> &
+  Pick<BrowserStatus, "retryAt">;
+
+const COMPUTER_STOPPED: BrowserBlock = {
+  reason: "computer-stopped",
+  problem: "The computer is not running.",
+  clears: "Start the computer; the web browser starts with it.",
+};
+const KEYS_LOCKED = {
+  reason: "keys-locked",
+  problem:
+    "Saved keys are locked. The web browser works and keeps its sign-ins, but saved passwords and sites that use a saved key are refused until they are unlocked.",
+  clears: "Unlock saved keys in localDot (Keys).",
+} as const;
+// What dot hears when its web browser runs again after it could not have it.
+export const BROWSER_BACK =
+  "localDot: the web browser is running again (its saved sign-ins are kept; pages that were open are closed). If you were waiting for it, go on: open the page again with browser_navigate.";
 type Raw = Record<string, unknown>;
 const raw = (value: unknown): value is Raw =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -72,7 +110,46 @@ export interface BrowserOrchestratorDeps {
   namePrefix?: string;
   readyTimeoutMs?: number;
   probe?: typeof readBrowserHealth;
+  supervisor?: typeof readBrowserSupervisor;
   sendInput?: typeof sendContainerInput;
+  // Why a computer's browser cannot run now, when it cannot: its computer is off, or keyd is.
+  unavailable?(parentCellId: string): BrowserBlock | undefined;
+  // keyd's saved-keys vault waits for its passphrase.
+  keysLocked?(): boolean;
+  // A word to the task running on this computer.
+  notify?(parentCellId: string, text: string): void;
+}
+
+// browserd's own lines in the container log: the reasons it stopped, never page data.
+const BROWSERD_LOG = /^browserd: [^\n]{1,300}$/u;
+
+// What made a start fail, in fixed words: no paths, ids or replies.
+function startCause(error: unknown): string | undefined {
+  if (error instanceof BrowserLifecycleError)
+    return error.message === new BrowserLifecycleError().message ? undefined : error.message;
+  if (error instanceof KeydError)
+    return error.status
+      ? `the key service refused it (${error.status} ${error.code})`
+      : "the key service didn't answer";
+  if (error instanceof DockerError)
+    return error.timedOut
+      ? "Docker didn't answer in time"
+      : error.status
+        ? `Docker refused it (${error.status})`
+        : "Docker didn't answer";
+  return undefined;
+}
+
+// Docker's non-TTY log stream: eight-byte frame headers, then the text. A malformed frame ends it.
+function containerLog(buffer: Buffer): string[] {
+  const text: string[] = [];
+  for (let offset = 0; offset + 8 <= buffer.length; ) {
+    const length = buffer.readUInt32BE(offset + 4);
+    if (offset + 8 + length > buffer.length) break;
+    text.push(buffer.subarray(offset + 8, offset + 8 + length).toString("utf8"));
+    offset += 8 + length;
+  }
+  return text.join("").split("\n").filter(Boolean);
 }
 
 export class BrowserOrchestrator {
@@ -85,6 +162,13 @@ export class BrowserOrchestrator {
   // A Replace computer waiting for the saved sign-ins; any later fence of its computer cancels it.
   readonly #resets = new Map<string, AbortController>();
   readonly #listeners = new Set<(parentCellId: string) => void>();
+  // Why each computer's browser last failed or was restarted, for status and the agent.
+  readonly #problems = new Map<string, { text: string; at: string }>();
+  // When a failed browser is started again by itself; no time once that has been given up.
+  readonly #retries = new Map<string, { at?: string }>();
+  // Computers whose browser someone could not have since it last ran: told when it runs again.
+  readonly #outages = new Set<string>();
+  readonly #startedAt = new Map<string, number>();
   readonly #accounts: AccountsProfile;
   #attaching: Promise<void> = Promise.resolve();
 
@@ -156,6 +240,14 @@ export class BrowserOrchestrator {
     ];
   }
 
+  parentOf(browserCellId: string): string | undefined {
+    try {
+      return this.#ledger.list().find((record) => record.id === browserCellId)?.parentCellId;
+    } catch {
+      return undefined;
+    }
+  }
+
   get(parentCellId: string): { id: string; parentCellId: string; state: CellState } | undefined {
     const record = this.#ledger.forParent(parentCellId);
     return record
@@ -176,9 +268,12 @@ export class BrowserOrchestrator {
     return structuredClone(ready);
   }
 
-  // How the running browser answers now: "silent" when it doesn't, "unready" when it can no
-  // longer be controlled; undefined when none is running.
-  async health(parentCellId: string): Promise<"ready" | "unready" | "silent" | undefined> {
+  // How the running browser answers now: "silent" when it doesn't, "restarting" while browserd
+  // starts its Chromium again in place, "unready" when it can no longer be controlled; undefined
+  // when none is running.
+  async health(
+    parentCellId: string,
+  ): Promise<"ready" | "restarting" | "unready" | "silent" | undefined> {
     const ready = this.#ready.get(parentCellId);
     if (!ready) return undefined;
     let value: unknown;
@@ -191,13 +286,121 @@ export class BrowserOrchestrator {
     } catch {
       return "silent";
     }
-    return answersReady(value, ready) ? "ready" : "unready";
+    if (answersReady(value, ready)) return "ready";
+    return (await this.supervisor(parentCellId))?.state === "restarting" ? "restarting" : "unready";
+  }
+
+  // browserd's report on its Chromium; undefined from an older image or a browser not running.
+  async supervisor(parentCellId: string): Promise<BrowserSupervisorState | undefined> {
+    const ready = this.#ready.get(parentCellId);
+    if (!ready) return undefined;
+    try {
+      return BrowserSupervisorState.parse(
+        await (this.deps.supervisor ?? readBrowserSupervisor)(
+          Number(new URL(ready.browserd.baseUrl).port),
+          ready.browserd.token,
+          AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+        ),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  // Records why the browser failed or was restarted, in words for the user and the agent.
+  noteProblem(parentCellId: string, text: string): void {
+    this.#problems.set(parentCellId, { text: text.slice(0, 600), at: new Date().toISOString() });
+  }
+
+  problem(parentCellId: string): string | undefined {
+    return this.#problems.get(parentCellId)?.text;
+  }
+
+  // When the failed browser is started again by itself; `undefined` once that was given up.
+  noteRetry(parentCellId: string, at: Date | undefined): void {
+    this.#retries.set(parentCellId, at ? { at: at.toISOString() } : {});
+  }
+
+  // Someone could not have the browser; when it runs again, the task is told.
+  noteOutage(parentCellId: string): void {
+    this.#outages.add(parentCellId);
+  }
+
+  async status(parentCellId: string): Promise<BrowserStatus> {
+    const noted = this.#problems.get(parentCellId);
+    const problem = noted ? { problem: noted.text, problemAt: noted.at } : {};
+    const blocked =
+      this.deps.unavailable?.(parentCellId) ??
+      (this.deps.parentAvailable(parentCellId) ? undefined : COMPUTER_STOPPED);
+    if (blocked) return { state: "off", ...blocked };
+    const locked = this.deps.keysLocked?.() ? KEYS_LOCKED : undefined;
+    if (this.#ready.has(parentCellId)) {
+      const supervisor = await this.supervisor(parentCellId);
+      const failure = supervisor?.lastFailure;
+      const restarting = supervisor?.state === "restarting";
+      return {
+        state: restarting ? "restarting" : "ready",
+        restarts: supervisor?.restarts ?? 0,
+        ...(failure && (!noted || failure.at > noted.at)
+          ? { problem: `${describeBrowserFailure(failure)}.`, problemAt: failure.at }
+          : problem),
+        ...(locked ??
+          (restarting
+            ? {
+                reason: "restarting" as const,
+                clears: "Nothing: it restarts by itself within seconds and keeps its sign-ins.",
+              }
+            : {})),
+      };
+    }
+    const state = this.get(parentCellId)?.state;
+    if (state === "failed") {
+      const retry = this.#retries.get(parentCellId);
+      return {
+        state: "failed",
+        reason: "failed",
+        problem: noted?.text ?? "The web browser couldn't start.",
+        ...(noted ? { problemAt: noted.at } : {}),
+        ...(retry?.at
+          ? { retryAt: retry.at, clears: "Nothing: localDot starts it again by itself." }
+          : {
+              clears: retry
+                ? "Restart the web browser (Settings → Accounts, or localdot browser restart); dot can restart it once with switch_screen restart."
+                : "Nothing: localDot starts it again by itself.",
+            }),
+      };
+    }
+    const startedAt = this.#startedAt.get(parentCellId);
+    return {
+      state: state === "starting" ? "starting" : state === "stopping" ? "restarting" : "stopped",
+      ...problem,
+      ...(locked ?? {
+        reason: state === "stopping" ? ("restarting" as const) : ("starting" as const),
+        clears: "Nothing: localDot starts it by itself.",
+      }),
+      ...(state === "starting" && startedAt !== undefined
+        ? {
+            readyBy: new Date(
+              startedAt + (this.deps.readyTimeoutMs ?? READY_TIMEOUT_MS),
+            ).toISOString(),
+          }
+        : {}),
+    };
+  }
+
+  // Stops this computer's browser and starts it again on the same profile.
+  async restart(parentCellId: string, reason: string): Promise<ReadyBrowser> {
+    this.noteProblem(parentCellId, reason);
+    await this.stop(parentCellId);
+    return this.start(parentCellId);
   }
 
   start(parentCellId: string, signal = new AbortController().signal): Promise<ReadyBrowser> {
     if (!ULID_PATTERN.test(parentCellId)) return Promise.reject(new BrowserLifecycleError());
     const epoch = this.#epochs.get(parentCellId) ?? 0;
-    return this.#queued(parentCellId, () => this.#start(parentCellId, epoch, signal));
+    const started = this.#queued(parentCellId, () => this.#start(parentCellId, epoch, signal));
+    void started.catch(() => this.#outages.add(parentCellId));
+    return started;
   }
 
   stop(parentCellId: string): Promise<void> {
@@ -316,6 +519,8 @@ export class BrowserOrchestrator {
       ...this.#queues.keys(),
       ...this.#state.keys(),
     ]);
+    // A task using a browser this stops hears when it runs again.
+    for (const parent of this.#ready.keys()) this.#outages.add(parent);
     for (const parent of current) this.#fence(parent);
     const records = this.#ledger.list();
     for (const record of records) this.#fence(record.parentCellId);
@@ -332,8 +537,17 @@ export class BrowserOrchestrator {
     const result = await Promise.allSettled(
       records.map((record) => this.stop(record.parentCellId)),
     );
-    if (unknown || result.some((entry) => entry.status === "rejected"))
-      throw new BrowserLifecycleError("Browser recovery needs attention");
+    const failed = result.find((entry) => entry.status === "rejected");
+    if (unknown || failed)
+      throw new BrowserLifecycleError(
+        `Browser recovery needs attention (${
+          unknown
+            ? "a browser record is unreadable or has no owner"
+            : failed?.reason instanceof BrowserLifecycleError
+              ? failed.reason.message
+              : "a browser could not be stopped"
+        })`,
+      );
   }
 
   // Replace computer deletes this computer's own old profile: copy it first if sign-ins were
@@ -359,7 +573,7 @@ export class BrowserOrchestrator {
     const turn = Promise.withResolvers<void>();
     this.#attaching = previous.then(() => turn.promise);
     const waited = new Promise<void>((resolve, reject) => {
-      const abort = () => reject(new BrowserLifecycleError("Browser start was cancelled"));
+      const abort = () => reject(new BrowserStartCancelled());
       signal.addEventListener("abort", abort, { once: true });
       void previous.then(() => {
         signal.removeEventListener("abort", abort);
@@ -411,7 +625,7 @@ export class BrowserOrchestrator {
       !this.deps.parentAvailable(parent) ||
       !this.deps.store.get(parent)
     )
-      throw new BrowserLifecycleError("Browser start was cancelled");
+      throw new BrowserStartCancelled();
   }
 
   #allocate(parent: string): BrowserLedger {
@@ -455,15 +669,21 @@ export class BrowserOrchestrator {
   async #contain(record: BrowserLedger, purge = false): Promise<void> {
     this.#ready.delete(record.parentCellId);
     this.#changed(record.parentCellId);
-    const results = await Promise.allSettled([
+    const [keyd, docker] = await Promise.allSettled([
       closeBrowserKeyd(this.deps.keyd, record),
       retireBrowserResources(this.deps.docker, record, purge),
     ]);
-    if (results.some((result) => result.status === "rejected")) {
+    if (keyd.status === "rejected" || docker.status === "rejected") {
       record.phase = "failed";
       this.#state.set(record.parentCellId, "failed");
       this.#ledger.save(record);
-      throw new BrowserLifecycleError("Browser shutdown could not be confirmed; retry Stop");
+      const unconfirmed = [
+        keyd.status === "rejected" ? "the key service did not confirm its connection closed" : "",
+        docker.status === "rejected" ? "Docker did not confirm its containers are gone" : "",
+      ];
+      throw new BrowserLifecycleError(
+        `Browser shutdown could not be confirmed (${unconfirmed.filter(Boolean).join("; ")}); retry Stop`,
+      );
     }
     record.resources = {};
     if (record.phase !== "retained") record.phase = "stopped";
@@ -476,7 +696,9 @@ export class BrowserOrchestrator {
     if (current) return current;
     const cancel = new AbortController();
     this.#starting.set(parent, cancel);
-    const timeout = AbortSignal.timeout(this.deps.readyTimeoutMs ?? 90000);
+    this.#startedAt.set(parent, Date.now());
+    const readyTimeoutMs = this.deps.readyTimeoutMs ?? READY_TIMEOUT_MS;
+    const timeout = AbortSignal.timeout(readyTimeoutMs);
     const signal = AbortSignal.any([caller, cancel.signal, timeout]);
     const check = () => this.#check(parent, epoch, signal);
     let record: BrowserLedger | undefined;
@@ -700,10 +922,36 @@ export class BrowserOrchestrator {
       };
       this.#ready.set(parent, ready);
       this.#state.set(parent, "ready");
+      this.#retries.delete(parent);
       this.#changed(parent);
+      if (this.#outages.delete(parent)) this.deps.notify?.(parent, BROWSER_BACK);
       return structuredClone(ready);
-    } catch {
+    } catch (error) {
       this.#ready.delete(parent);
+      if (
+        !timeout.aborted &&
+        (caller.aborted ||
+          cancel.signal.aborted ||
+          (this.#epochs.get(parent) ?? 0) !== epoch ||
+          !this.deps.parentAvailable(parent) ||
+          !this.deps.store.get(parent))
+      ) {
+        if (record)
+          try {
+            await this.#contain(record);
+          } catch {}
+        if (this.#state.get(parent) === "starting") this.#state.set(parent, "stopped");
+        this.#changed(parent);
+        throw new BrowserStartCancelled();
+      }
+      const cause = [
+        timeout.aborted
+          ? `not ready within ${Math.round(readyTimeoutMs / 1000)} seconds`
+          : startCause(error),
+        record ? await this.#evidence(record).catch(() => undefined) : undefined,
+      ]
+        .filter(Boolean)
+        .join("; ");
       if (record) {
         try {
           await this.#contain(record);
@@ -716,12 +964,50 @@ export class BrowserOrchestrator {
       this.#state.set(parent, "failed");
       this.#changed(parent);
       throw new BrowserLifecycleError(
-        `Browser start failed during ${stage}; its profile has been retained`,
+        `Browser start failed during ${stage}${cause ? ` (${cause})` : ""}; its profile has been retained`,
       );
     } finally {
       material?.fill(0);
-      if (this.#starting.get(parent) === cancel) this.#starting.delete(parent);
+      if (this.#starting.get(parent) === cancel) {
+        this.#starting.delete(parent);
+        this.#startedAt.delete(parent);
+      }
     }
+  }
+
+  // Why a running browser failed, as far as anything can tell: browserd's own report when it
+  // answers, else its container's.
+  async failure(parentCellId: string): Promise<string | undefined> {
+    const reported = (await this.supervisor(parentCellId))?.lastFailure;
+    if (reported) return describeBrowserFailure(reported);
+    const record = this.#ledger.forParent(parentCellId);
+    return record ? this.#evidence(record).catch(() => undefined) : undefined;
+  }
+
+  // What the browser container says about how it ended: its exit, an out-of-memory kill and
+  // browserd's last own log lines. Nothing from the page.
+  async #evidence(record: Pick<BrowserLedger, "resources">): Promise<string | undefined> {
+    const container = record.resources.browser;
+    if (!container) return undefined;
+    const facts: string[] = [];
+    const inspected = await this.deps.docker.request<Raw>({
+      method: "GET",
+      path: browserObjectPath("containers", container, "json"),
+    });
+    const state = raw(inspected?.State) ? inspected.State : undefined;
+    if (state?.Running === false && typeof state.ExitCode === "number")
+      facts.push(`the browser container exited with code ${state.ExitCode}`);
+    if (state?.OOMKilled === true) facts.push("it ran out of memory");
+    const logs = await this.deps.docker.request<Buffer>({
+      method: "GET",
+      path: browserObjectPath("containers", container, "logs"),
+      query: { stdout: "false", stderr: "true", tail: "20" },
+      response: "buffer",
+      timeoutMs: 5000,
+    });
+    const lines = Buffer.isBuffer(logs) ? containerLog(logs) : [];
+    facts.push(...lines.filter((line) => BROWSERD_LOG.test(line)).slice(-3));
+    return facts.length ? facts.join("; ") : undefined;
   }
 
   #subnet(network: Raw | undefined, kind: "internal" | "egress"): string {

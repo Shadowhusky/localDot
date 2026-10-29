@@ -45,6 +45,15 @@ export class BrowserLifecycleError extends Error {
   }
 }
 
+// A start given up because its computer, keyd or a newer stop or start took the browser over: not a
+// failure of the browser itself.
+export class BrowserStartCancelled extends BrowserLifecycleError {
+  constructor() {
+    super("Browser start was cancelled");
+    this.name = "BrowserStartCancelled";
+  }
+}
+
 export class BrowserLedgerStore {
   readonly #root: string;
   constructor(

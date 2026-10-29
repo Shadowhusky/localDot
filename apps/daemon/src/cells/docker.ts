@@ -12,6 +12,7 @@ export class DockerError extends Error {
     readonly status: number,
     message: string,
     readonly path: string,
+    readonly timedOut = false,
   ) {
     super(`docker ${status || "unreachable"} on ${path}: ${message}`);
     this.name = "DockerError";
@@ -100,6 +101,7 @@ export class DockerClient {
                 0,
                 `no reply within ${timeoutMs} ms; is ${DOCKER_APP} responding?`,
                 req.path,
+                true,
               )
             : new DockerError(0, `${err.code ?? err.message}; is ${DOCKER_APP} running?`, req.path),
         );

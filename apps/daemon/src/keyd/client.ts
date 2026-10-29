@@ -2,12 +2,15 @@ import { lstatSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { dirname, join } from "node:path";
 import {
+  KEYD_VAULT_LOCKED,
   type KeydAsk,
   KeydAsks,
   KeydBudget,
   KeydCellInfo,
   KeydErrorBody,
   KeydEvent,
+  KeydForgotten,
+  KeydKeyCopy,
   KeydMinted,
   KeydOpened,
   KeydPushKey,
@@ -42,6 +45,14 @@ export class KeydError extends Error {
   ) {
     super(`keyd ${status || "unreachable"} ${code} on ${path}: ${detail}`);
     this.name = "KeydError";
+  }
+}
+
+// keyd holds saved keys and passwords in a passphrase vault that is locked until the user unlocks it.
+export class VaultLockedError extends Error {
+  constructor() {
+    super("Saved keys and passwords are locked.");
+    this.name = "VaultLockedError";
   }
 }
 
@@ -120,6 +131,8 @@ export class KeydClient {
       );
     } catch (error) {
       if (error instanceof KeydError && error.status === 404) return undefined;
+      if (error instanceof KeydError && error.code === KEYD_VAULT_LOCKED)
+        throw new VaultLockedError();
       throw new Error("Saved sign-in is unavailable.");
     }
   }
@@ -132,7 +145,9 @@ export class KeydClient {
         { origin, username, password },
         z.strictObject({ ok: z.literal(true) }),
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof KeydError && error.code === KEYD_VAULT_LOCKED)
+        throw new VaultLockedError();
       throw new Error("The sign-in could not be saved.");
     }
   }
@@ -141,6 +156,17 @@ export class KeydClient {
   // first passphrase it receives as its own.
   unlockVault(sealed: Sealed): Promise<KeydVault> {
     return this.#json("POST", "/v1/vault/unlock", { sealed }, KeydVault);
+  }
+
+  // keyd copies its saved keys to the key service of the dot at home, after checking that it is a
+  // genuine keyd; neither this client nor its caller ever sees a key.
+  copyKeys(home: string): Promise<KeydKeyCopy> {
+    return this.#json("POST", "/v1/keys/copy", { home, logins: true }, KeydKeyCopy);
+  }
+
+  // Deletes every key, saved login and Keychain item this keyd holds, before its dot is removed.
+  forgetVault(): Promise<KeydForgotten> {
+    return this.#json("POST", "/v1/vault/forget", { confirm: "forget" }, KeydForgotten);
   }
 
   async secrets(): Promise<KeydRecord[]> {

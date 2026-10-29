@@ -6,7 +6,11 @@ export const GATE_OFFSET = 10;
 export const DESKTOP_OFFSET = 11;
 export const DESKTOPD_PORT = 7700;
 export const SELKIES_PORT = 3000;
-export const GATE_PORTS = { desktopd: "8081/tcp", stream: "8082/tcp" } as const;
+export const GATE_PORTS = {
+  desktopd: "8081/tcp",
+  stream: "8082/tcp",
+  preview: "8083/tcp",
+} as const;
 export const DESKTOP_LIMITS = {
   // Leave headroom in the default 8 GiB Docker VM for the browser, brain and engine.
   // Raising this alone shifts local OOMs into VM-wide stalls and lost control connections.
@@ -81,6 +85,16 @@ export const LINK = { gate: "192.0.0.1", desktop: "192.0.0.2" } as const;
 // the desktop's traffic (NET_ADMIN) and then become nobody with no capabilities at all.
 const CAPTURE_CAPS = ["NET_ADMIN", "SETUID", "SETGID", "SETPCAP"];
 
+// The relays a gate publishes on the host's loopback. Only a desktop runs servers to preview, so a
+// browser's gate keeps two.
+export function gatePorts(record: CellRecord | BrowserCellRecord): string[] {
+  return [
+    GATE_PORTS.desktopd,
+    GATE_PORTS.stream,
+    ...(record.kind === "desktop" ? [GATE_PORTS.preview] : []),
+  ];
+}
+
 export function gateSpec(
   record: CellRecord | BrowserCellRecord,
   image: string,
@@ -89,6 +103,7 @@ export function gateSpec(
   const d = record.docker;
   const address = record.kind === "browser" ? record.docker.browserIp : record.docker.desktopIp;
   const capture = record.kind === "desktop" ? record.tokens.capture : undefined;
+  const ports = gatePorts(record);
   return {
     Image: image,
     User: capture ? "root" : "nobody",
@@ -99,27 +114,28 @@ export function gateSpec(
       `LD_KEYD_PORT=${record.keydPort}`,
       ...gateRelayEnv(relay, record.keydPort, false),
       ...(capture ? [`LD_CAPTURE_TOKEN=${capture}`] : []),
+      ...(record.kind === "desktop" ? ["LD_PREVIEWS=1"] : []),
     ],
     Labels: {
       "localdot.cell": record.id,
       "localdot.role": "gate",
       ...(record.kind === "browser" ? { "localdot.parent": record.parentCellId } : {}),
     },
-    ExposedPorts: { [GATE_PORTS.desktopd]: {}, [GATE_PORTS.stream]: {} },
+    ExposedPorts: Object.fromEntries(ports.map((port) => [port, {}])),
     HostConfig: {
       NetworkMode: d.egressNetwork,
-      PortBindings: {
-        [GATE_PORTS.desktopd]: [{ HostIp: "127.0.0.1", HostPort: "" }],
-        [GATE_PORTS.stream]: [{ HostIp: "127.0.0.1", HostPort: "" }],
-      },
+      PortBindings: Object.fromEntries(
+        ports.map((port) => [port, [{ HostIp: "127.0.0.1", HostPort: "" }]]),
+      ),
       ...gateRelayMounts(relay, false),
       CapDrop: ["ALL"],
       ...(capture ? { CapAdd: CAPTURE_CAPS } : {}),
       ReadonlyRootfs: true,
       SecurityOpt: ["no-new-privileges"],
-      // Bounded relays use up to 96 children; leave room for ldgate runtime threads.
+      // Bounded relays use up to 96 children, a desktop's previews 64 more; leave room for
+      // ldgate runtime threads.
       Memory: 128 * 1024 ** 2,
-      PidsLimit: 256,
+      PidsLimit: record.kind === "desktop" ? 320 : 256,
       LogConfig: LOG_CONFIG,
     },
     NetworkingConfig: {

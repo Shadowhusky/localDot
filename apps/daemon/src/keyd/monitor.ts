@@ -133,8 +133,13 @@ function healthState(health: KeydHealth): string {
     health.audit?.error,
     health.error,
     hairpin,
+    health.vault?.state,
   ]);
 }
+
+// The passphrase vault waits for its passphrase: saved keys and sign-ins can't be used.
+export const vaultLocked = (health: KeydHealth): boolean =>
+  health.online && (health.vault?.state === "locked" || health.vault?.state === "setup");
 
 // keyd appeared, or came back as a new process: either way its cells must be checked.
 export function cameUp(now: KeydHealth, before: KeydHealth): boolean {

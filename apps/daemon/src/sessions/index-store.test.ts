@@ -1,10 +1,19 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emptyManifest } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventLog } from "../event-log.ts";
 import { writeManifest } from "../recorder/manifest.ts";
+import { DatabaseSync } from "../sqlite.ts";
 import { SessionIndex } from "./index-store.ts";
 import * as summaries from "./summary.ts";
 
@@ -113,6 +122,48 @@ describe("persistent session index", () => {
     writeManifest(recording, emptyManifest("expired"));
     expect((await index.card(sessionId)).recording.state).toBe("expired");
     expect(summarize).toHaveBeenCalledTimes(2);
+  });
+
+  it("measures everything a task keeps and measures again when its video goes", async () => {
+    const { home, log, index } = setup();
+    const sessionId = log.createSession("Sizes");
+    const folder = join(home, "sessions", sessionId);
+    const recording = join(folder, "recording");
+    mkdirSync(join(folder, "frames"));
+    writeFileSync(join(folder, "frames", "frame.webp"), Buffer.alloc(3000));
+    mkdirSync(join(folder, "out", "report"), { recursive: true });
+    writeFileSync(join(folder, "out", "report", "summary.md"), Buffer.alloc(500));
+    writeManifest(recording, { ...emptyManifest("complete"), bytes: 40_000, finalized: true });
+    writeFileSync(join(recording, "video.mp4"), Buffer.alloc(40_000));
+    const files = () =>
+      readdirSync(folder, { recursive: true, withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .reduce((sum, entry) => sum + statSync(join(entry.parentPath, entry.name)).size, 0);
+    const measured = (await index.card(sessionId)).diskBytes ?? 0;
+    expect(measured).toBe(files());
+    expect(measured).toBeGreaterThan(43_500);
+    rmSync(join(recording, "video.mp4"));
+    writeManifest(recording, emptyManifest("expired"));
+    utimesSync(join(recording, "manifest.json"), 100, 100);
+    const expired = (await index.page()).sessions[0]?.diskBytes ?? 0;
+    expect(expired).toBe(files());
+    expect(measured - expired).toBeGreaterThanOrEqual(40_000);
+  });
+
+  it("measures a row cached before cards carried their size", async () => {
+    const { home, log, index } = setup();
+    const sessionId = log.createSession("Older row");
+    const card = await index.card(sessionId);
+    const { diskBytes: _, ...older } = card;
+    const database = new DatabaseSync(join(home, "index.sqlite"));
+    try {
+      database
+        .prepare("UPDATE session_cards SET card = ? WHERE id = ?")
+        .run(JSON.stringify(older), sessionId);
+    } finally {
+      database.close();
+    }
+    expect((await index.card(sessionId)).diskBytes).toBe(card.diskBytes);
   });
 
   it("recomputes live cards and never reuses a live verdict after the session ends", async () => {

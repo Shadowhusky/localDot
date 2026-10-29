@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { ComputerResetRequest } from "../../../../packages/protocol/src/computer-reset.ts";
 import { ReplacementConflict } from "../agent/safety/replacement.ts";
 import type { createReplacementController } from "../agent/safety/replacement-controller.ts";
+import type { ComputerImportPort } from "../dots/computer-import.ts";
 import { DockerError } from "./docker.ts";
 import {
   type CellApi,
@@ -27,11 +28,24 @@ export interface CellApiDeps {
     docker: "ready" | "unavailable";
     startup: "waiting" | "recovering" | "ready" | "failed";
   }>;
+  // Plain advice when Docker lacks the memory to run one more computer; `force` starts it anyway.
+  capacity?(starting?: string): Promise<string | undefined>;
+  importComputer?: ComputerImportPort;
 }
 
 export function cellRoutes(
   app: Hono,
-  { cells, tickets, replacement, reset, update, checkRuntime, runtimeStatus }: CellApiDeps,
+  {
+    cells,
+    tickets,
+    replacement,
+    reset,
+    update,
+    checkRuntime,
+    runtimeStatus,
+    capacity,
+    importComputer,
+  }: CellApiDeps,
 ): void {
   // A stream ticket lives only while its cell is ready (P2-R2): stopping, failing or removing the
   // cell revokes it, so no stream path stays open for a computer that is off.
@@ -118,15 +132,32 @@ export function cellRoutes(
     }),
   );
 
-  // The only option is the scale, so anything near a kilobyte is not a create request.
+  // The options are the scale and force, so anything near a kilobyte is not a create request.
   app.post("/api/cells", bodyLimit({ maxSize: 1024 }), async (c) => {
-    const body = ((await c.req.json().catch(() => null)) ?? {}) as { scale?: unknown };
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as {
+      scale?: unknown;
+      force?: unknown;
+    };
     const scale =
       body.scale === undefined || body.scale === 2 ? 2 : body.scale === 1 ? 1 : undefined;
     if (scale === undefined) return c.text("scale must be 1 or 2", 400);
     return withDocker(c, async () => {
       await checkRuntime?.();
-      return c.json(await cells.create({ scale }), 202);
+      const advice = body.force === true ? undefined : await capacity?.();
+      if (advice) return c.text(advice, 409);
+      const restoreFrom = importComputer?.take();
+      if (!restoreFrom) return c.json(await cells.create({ scale }), 202);
+      try {
+        const made = await cells.create({ scale, restoreFrom });
+        await importComputer?.done(restoreFrom);
+        return c.json(made, 202);
+      } catch (error) {
+        console.error(`the copied computer couldn't be set up (${(error as Error).message})`);
+        return c.text(
+          "The computer copied from another dot couldn't be set up. Start again for a new computer.",
+          409,
+        );
+      }
     });
   });
 
@@ -137,10 +168,13 @@ export function cellRoutes(
     }),
   );
 
-  app.post("/api/cells/:id/start", (c) =>
+  app.post("/api/cells/:id/start", bodyLimit({ maxSize: 1024 }), (c) =>
     withCell(c, (id) =>
       withDocker(c, async () => {
         await checkRuntime?.();
+        const force = ((await c.req.json().catch(() => null)) as { force?: unknown } | null)?.force;
+        const advice = force === true ? undefined : await capacity?.(id);
+        if (advice) return c.text(advice, 409);
         await cells.start(id);
         return c.body(null, 202);
       }),
@@ -207,6 +241,9 @@ function withCell(
   return fn(id);
 }
 
+// Docker's words when its address pools are used up, which several dots' computers can do.
+const NO_ADDRESSES = /non-overlapping IPv4 address pool|address pools have been fully subnetted/i;
+
 async function withDocker(c: Context, fn: () => Promise<Response>): Promise<Response> {
   try {
     return await fn();
@@ -216,6 +253,11 @@ async function withDocker(c: Context, fn: () => Promise<Response>): Promise<Resp
     if (err instanceof CellControlConflict) return c.text(err.message, 409);
     if (err instanceof UnknownCellError) return c.text("unknown cell", 404);
     if (err instanceof SkippedCellsError) return c.text(err.message, 409);
+    if (err instanceof DockerError && NO_ADDRESSES.test(err.message))
+      return c.text(
+        "Docker has no network addresses left for another computer. Remove a computer you no longer use, on any dot on this computer, then try again.",
+        409,
+      );
     if (err instanceof DockerError) return c.text(err.message, 502);
     throw err;
   }

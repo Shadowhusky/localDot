@@ -225,3 +225,64 @@ it.skipIf(process.platform !== "darwin")(
     expect(await foreign.status()).toBe("unavailable");
   },
 );
+
+it.skipIf(process.platform !== "darwin")(
+  "lets another dot's development daemon change only its own two jobs",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "ld-source-login-"));
+    roots.push(root);
+    mkdirSync(join(root, "Library/LaunchAgents"), { recursive: true });
+    for (const name of ["daemon", "keyd"])
+      writeFileSync(join(root, `Library/LaunchAgents/dev.localdot.work.${name}.plist`), "fixture", {
+        mode: 0o600,
+      });
+    let disabled = false;
+    const execute = vi.fn(async (command: string, args: readonly string[]) => {
+      if (command.endsWith("plutil")) {
+        const daemon = args.at(-1)?.endsWith("daemon.plist");
+        return {
+          stdout: JSON.stringify({
+            Label: `dev.localdot.work.${daemon ? "daemon" : "keyd"}`,
+            RunAtLoad: true,
+            KeepAlive: true,
+            WorkingDirectory: "/source/daemon",
+            ProgramArguments: daemon
+              ? ["/runtime/node", "src/main.ts"]
+              : ["/keyd", "-home", "/private/work", "-ports", "5760-5789"],
+          }),
+          stderr: "",
+        };
+      }
+      if (args[0] === "disable") disabled = true;
+      return {
+        stdout: `disabled services = { "dev.localdot.work.daemon" => ${disabled ? "disabled" : "enabled"} }`,
+        stderr: "",
+      };
+    });
+    const labels = { keyd: "dev.localdot.work.keyd", daemon: "dev.localdot.work.daemon" };
+    const port = await sourceStartAtLoginPort(
+      "/private/work",
+      { HOME: root, XPC_SERVICE_NAME: "dev.localdot.work.daemon" },
+      "/runtime/node",
+      "/source/daemon",
+      execute as never,
+      labels,
+    );
+    expect(await port.set(false)).toBe("off");
+    expect(
+      execute.mock.calls.filter(([, args]) => args[0] === "disable").map(([, args]) => args[1]),
+    ).toEqual([
+      expect.stringMatching(/\/dev\.localdot\.work\.daemon$/),
+      expect.stringMatching(/\/dev\.localdot\.work\.keyd$/),
+    ]);
+    const main = await sourceStartAtLoginPort(
+      "/private/work",
+      { HOME: root, XPC_SERVICE_NAME: "dev.localdot.daemon" },
+      "/runtime/node",
+      "/source/daemon",
+      execute as never,
+      labels,
+    );
+    expect(await main.status()).toBe("unavailable");
+  },
+);

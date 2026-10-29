@@ -51,3 +51,23 @@ it("reports recovery failure without a restart loop or repeated side effects", a
   expect(await runtime.snapshot()).toEqual({ docker: "unavailable", startup: "failed" });
   expect(recover).toHaveBeenCalledOnce();
 });
+it("keeps a busy engine ready while its readiness reply is only late, then gives up", async () => {
+  let now = 0;
+  const late = Object.assign(new Error("no reply within 3000 ms"), { timedOut: true });
+  const check = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValue(late);
+  const runtime = new RuntimeStartup(check, () => now);
+  await runtime.run(async () => {}, { signal: new AbortController().signal });
+  now = 29_000;
+  expect(await runtime.snapshot()).toEqual({ docker: "ready", startup: "ready" });
+  now = 31_000;
+  expect(await runtime.snapshot()).toEqual({ docker: "unavailable", startup: "ready" });
+});
+it("reports a refused or missing socket as unavailable at once", async () => {
+  const check = vi
+    .fn()
+    .mockResolvedValueOnce(undefined)
+    .mockRejectedValue(new Error("connect ECONNREFUSED"));
+  const runtime = new RuntimeStartup(check, () => 0);
+  await runtime.run(async () => {}, { signal: new AbortController().signal });
+  expect(await runtime.snapshot()).toEqual({ docker: "unavailable", startup: "ready" });
+});

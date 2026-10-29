@@ -10,7 +10,13 @@ import {
 } from "@localdot/protocol";
 import { UnknownSessionError } from "../event-log.ts";
 import { DatabaseSync } from "../sqlite.ts";
-import { readSummary, recordingCards, summarizeSession, writeSummary } from "./summary.ts";
+import {
+  folderBytes,
+  readSummary,
+  recordingCards,
+  summarizeSession,
+  writeSummary,
+} from "./summary.ts";
 export const INDEX_PAGE_MAX = 100;
 interface Row {
   id: string;
@@ -76,19 +82,20 @@ export class SessionIndex {
     ) {
       try {
         const card = SessionCard.parse(JSON.parse(row.card));
-        if (card.verdict !== "live" && card.recordings) return card;
+        if (card.verdict !== "live" && card.recordings && card.diskBytes !== undefined) return card;
       } catch {
         /* regenerate a damaged cache row */
       }
     }
     const saved = live ? null : readSummary(this.#home, id);
     const recordings = recordingCards(this.#home, id);
-    const summary =
+    const { diskBytes: _, ...summary } =
       saved?.logBytes === bytes
         ? { ...saved, recording: recordings.desktop, recordings }
         : await summarizeSession(this.#home, id, { live });
-    const card = SessionCard.parse(summary);
     if (!live) writeSummary(this.#home, summary);
+    // Measured once the summary is written, as the folder then holds everything it will.
+    const card = SessionCard.parse({ ...summary, diskBytes: folderBytes(dir) });
     this.#db
       .prepare(
         "INSERT OR REPLACE INTO session_cards(id,started_at,card,log_bytes,manifest_mtime_ms,browser_manifest_mtime_ms) VALUES (?,?,?,?,?,?)",

@@ -33,6 +33,7 @@ export class PrivateRecords<T> {
       | "computer-reset-releases"
       | "computer-updates"
       | "computer-image-updates"
+      | "computer-update-refusals"
       | "computer-system-state",
     private readonly parse: (value: unknown, id: string) => T,
   ) {

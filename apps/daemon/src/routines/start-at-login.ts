@@ -4,10 +4,12 @@ import { type FileHandle, lstat, open, readFile, realpath } from "node:fs/promis
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { StartAtLoginState } from "@localdot/protocol";
+import { MAIN_DOT_ID } from "../../../../packages/protocol/src/dots.ts";
 import {
   type ManagedServiceIdentity,
   StartAtLoginRecord,
 } from "../../../../packages/protocol/src/install-services.ts";
+import { type DotServiceNames, launchdLabels } from "../dots/service-names.ts";
 
 export class StartAtLoginError extends Error {}
 export interface StartAtLoginPort {
@@ -162,21 +164,22 @@ export async function shellStartAtLoginPort(
   }
 }
 
-/** Development LaunchAgents have no installer receipt. Support only the two known jobs, after
- * verifying that their files belong to this user and actually launch this source daemon/home.
- * Changing disabled state affects the next login; it never stops the current task. */
+/** Development LaunchAgents have no installer receipt. Support only this dot's two known jobs,
+ * after verifying that their files belong to this user and actually launch this source
+ * daemon/home. Changing disabled state affects the next login; it never stops the current task. */
 export async function sourceStartAtLoginPort(
   home: string,
   env: NodeJS.ProcessEnv,
   node: string,
   cwd: string,
   execute = promisify(execFile),
+  dot: DotServiceNames = launchdLabels(MAIN_DOT_ID),
 ): Promise<StartAtLoginPort> {
-  if (process.platform !== "darwin" || env.XPC_SERVICE_NAME !== "dev.localdot.daemon" || !env.HOME)
+  if (process.platform !== "darwin" || env.XPC_SERVICE_NAME !== dot.daemon || !env.HOME)
     return unavailableStartAtLogin;
   const uid = process.getuid?.();
   if (uid === undefined) return unavailableStartAtLogin;
-  const labels = ["dev.localdot.daemon", "dev.localdot.keyd"];
+  const labels = [dot.daemon, dot.keyd];
   const verify = async () => {
     for (const label of labels) {
       const file = join(env.HOME ?? "", "Library/LaunchAgents", `${label}.plist`);

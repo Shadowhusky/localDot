@@ -63,10 +63,12 @@ export interface KeydProcess {
 export interface StartKeydOptions {
   home?: string;
   ports?: { from: number; to: number };
+  // "passphrase": a file vault under home that waits for its passphrase, as on a Linux server.
+  vault?: "memory" | "passphrase";
 }
 
-// A real keyd with an in-memory vault, as Part 4a's README runs one: it prints one ready line on
-// stderr, and SIGTERM closes every cell and removes the socket.
+// A real keyd, with an in-memory vault unless asked for a passphrase one, as Part 4a's README runs
+// one: it prints one ready line on stderr, and SIGTERM closes every cell and removes the socket.
 export async function startKeyd(opts: StartKeydOptions = {}): Promise<KeydProcess> {
   // Build before creating state, so a failed toolchain leaves no owned home behind.
   const binary = keydBinary();
@@ -114,7 +116,7 @@ export async function startKeyd(opts: StartKeydOptions = {}): Promise<KeydProces
         "-home",
         home,
         "-vault",
-        "memory",
+        opts.vault ?? "memory",
         "-ports",
         `${ports.from}-${ports.to}`,
         // Tests ask neither the router nor STUN for the public address: nothing leaves the Mac.

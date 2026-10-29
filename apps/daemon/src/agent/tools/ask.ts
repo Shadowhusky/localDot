@@ -7,6 +7,7 @@ import {
   type RequestTakeoverInput,
   type ToolResult,
 } from "@localdot/protocol";
+import { VaultLockedError } from "../../keyd/client.ts";
 import { addTaskSecret } from "../redact.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, AskAnswer, AskForm } from "../session.ts";
@@ -36,6 +37,15 @@ function siteOf(url: string | undefined): string | undefined {
 // A routine's question waits for its own window, so the run is Needs you until then.
 function askTimeoutMs(deps: ToolDeps, ctx: ToolCallContext): number {
   return deps.askTimeoutMs ?? ctx.session.approvalWindowMs ?? ASK_TIMEOUT_MS;
+}
+
+// Saved passwords live with the saved keys: while those are locked, the conversation's Unlock card
+// is the way on, never a password typed again.
+function keysLocked(ctx: ToolCallContext): ToolResult {
+  ctx.session.lockKeys();
+  return fail(
+    "Saved passwords are locked with the user's saved keys. The conversation shows the user an Unlock card; don't ask for the password or the passphrase. Wait until you're told they're unlocked, then sign in again.",
+  );
 }
 
 function unanswered(answer: AskAnswer, timeoutMs: number): ToolResult | undefined {
@@ -132,8 +142,9 @@ async function askFields(
       let saved: Awaited<ReturnType<NonNullable<ToolDeps["logins"]>["login"]>>;
       try {
         saved = await deps.logins.login(origin);
-      } catch {
+      } catch (error) {
         ctx.check();
+        if (error instanceof VaultLockedError) return keysLocked(ctx);
         return fail(
           "The saved sign-in store is temporarily unavailable. Do not request credentials again; explain the access problem.",
         );
@@ -187,8 +198,9 @@ async function askFields(
       let saved: Awaited<ReturnType<NonNullable<ToolDeps["logins"]>["login"]>>;
       try {
         saved = await deps.logins.login(origin);
-      } catch {
+      } catch (error) {
         ctx.check();
+        if (error instanceof VaultLockedError) return keysLocked(ctx);
         return fail(
           "The saved sign-in store is temporarily unavailable. Do not ask the user to enter credentials again or treat this as a rejected password. Explain that saved credentials could not be checked and retry after access is restored.",
         );
@@ -371,8 +383,9 @@ async function askFields(
         if (prior) prior.password = "";
         try {
           await deps.logins.saveLogin(field.loginOrigin, username ?? "", value);
-        } catch {
+        } catch (error) {
           saveFailed = true;
+          if (error instanceof VaultLockedError) ctx.session.lockKeys();
         }
         ctx.check();
       }

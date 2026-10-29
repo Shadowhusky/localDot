@@ -23,7 +23,7 @@ export interface StopIO {
   err(message: string): void;
   fetch?: typeof fetch;
 }
-function tokenAt(home: string): string {
+export function tokenAt(home: string): string {
   if (!isAbsolute(home)) throw new Error("Invalid home");
   const root = lstatSync(home),
     uid = process.getuid?.();
@@ -96,29 +96,19 @@ const Cell = z.strictObject({
     .optional(),
   replacementPending: z.literal(true).optional(),
   updateAvailable: z.literal(true).optional(),
+  updateBlocked: z.literal(true).optional(),
   updating: z.literal(true).optional(),
   needsFreshStart: z.literal(true).optional(),
   operation: ComputerOperation.optional(),
 });
-export async function runStop(options: StopOptions, io: StopIO): Promise<number> {
-  const { home, cellId, signal } = options,
-    port = options.port ?? 4750;
-  let token: string;
-  try {
-    signal.throwIfAborted();
-    if (cellId !== undefined && !ULID_PATTERN.test(cellId)) throw new Error("Invalid computer id");
-    if (options.all && cellId !== undefined) throw new Error("Choose --all or --cell");
-    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid port");
-    token = tokenAt(home);
-  } catch {
-    io.err("Stop could not start. Check the private installation home and computer ID.");
-    return signal.aborted ? 130 : 1;
-  }
-  const lifetime = new AbortController(),
-    timer = setTimeout(() => lifetime.abort(), 35000);
-  const owned = AbortSignal.any([signal, lifetime.signal]);
-  const fetchImpl = io.fetch ?? fetch;
-  const request = async (path: string, status: number, method: "GET" | "POST" = "GET") => {
+// An authenticated request to this computer's daemon on loopback, with a bounded JSON reply.
+export function daemonRequester(
+  port: number,
+  token: string,
+  owned: AbortSignal,
+  fetchImpl: typeof fetch,
+) {
+  return async (path: string, status: number, method: "GET" | "POST" = "GET") => {
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     const cancel = () => void reader?.cancel().catch(() => {});
     owned.addEventListener("abort", cancel, { once: true });
@@ -167,6 +157,26 @@ export async function runStop(options: StopOptions, io: StopIO): Promise<number>
       reader?.releaseLock();
     }
   };
+}
+
+export async function runStop(options: StopOptions, io: StopIO): Promise<number> {
+  const { home, cellId, signal } = options,
+    port = options.port ?? 4750;
+  let token: string;
+  try {
+    signal.throwIfAborted();
+    if (cellId !== undefined && !ULID_PATTERN.test(cellId)) throw new Error("Invalid computer id");
+    if (options.all && cellId !== undefined) throw new Error("Choose --all or --cell");
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid port");
+    token = tokenAt(home);
+  } catch {
+    io.err("Stop could not start. Check the private installation home and computer ID.");
+    return signal.aborted ? 130 : 1;
+  }
+  const lifetime = new AbortController(),
+    timer = setTimeout(() => lifetime.abort(), 35000);
+  const owned = AbortSignal.any([signal, lifetime.signal]);
+  const request = daemonRequester(port, token, owned, io.fetch ?? fetch);
   try {
     if (options.all) {
       const outcome = StopAllOutcome.parse(await request("/api/stop-all?by=cli", 202, "POST"));

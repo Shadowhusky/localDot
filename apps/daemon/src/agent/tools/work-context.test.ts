@@ -2,6 +2,8 @@ import { DesktopCapabilities, ToolResult, WORK_PROGRAMS } from "@localdot/protoc
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { binding } from "../../../../../cells/brain/src/testing/scripted.ts";
 import { toolSet } from "../../../../../cells/brain/src/tools.ts";
+import type { BrowserStatus } from "../../../../../packages/protocol/src/browser-control.ts";
+import type { ScreenController } from "../../browser/screen-controller.ts";
 import { DesktopdError } from "../../desktopd/client.ts";
 import { localdotTools } from "../claude-code/mcp-server.ts";
 import { codexTools } from "../codex/mcp-tools.ts";
@@ -84,6 +86,34 @@ describe("work context across agent backends", () => {
     expect(h.actions).toEqual([]);
     expect(h.launches).toEqual([]);
     expect(h.desktop.shellCalls).toEqual([]);
+  });
+  it("calls the web browser available only while it runs, and says why not otherwise", async () => {
+    const h = setup();
+    let status: BrowserStatus = {
+      state: "off",
+      reason: "key-service-offline",
+      problem: "localDot's key service isn't answering.",
+      clears: "The key service running again.",
+    };
+    vi.spyOn(h.session, "screens", "get").mockReturnValue({
+      selection: { screen: "desktop" },
+      availability: () => ({ desktop: true, browser: "not_open", selected: "desktop" }),
+      browserStatus: async () => status,
+    } as unknown as ScreenController);
+    const context = async () => data((await h.call("work_context", { goal: "web" })).body);
+    const off = await context();
+    expect(off.browser).toMatchObject({
+      available: false,
+      state: "not_open",
+      health: { state: "off", reason: "key-service-offline" },
+    });
+    expect(off.preferredRoutes).not.toContain("browser");
+    status = { state: "starting", reason: "starting" };
+    const starting = await context();
+    expect(starting.browser.available).toBe(false);
+    expect(starting.preferredRoutes).toContain("browser");
+    status = { state: "ready", reason: "keys-locked", problem: "Saved keys are locked." };
+    expect((await context()).browser.available).toBe(true);
   });
   it("reports an unavailable desktop as unavailable, not missing software or lost access", async () => {
     const h = setup();
