@@ -148,6 +148,8 @@ Run it from source: [development guide](docs/development.md).
 
 - [Open an issue](https://github.com/Shadowhusky/localdot/issues) with what you did and what
   `localdot doctor` says.
+- `localdot report`, or Settings › Report a problem, sends the team a redacted diagnostics report
+  and gives you its ID to quote ([what it holds](docs/diagnostics.md)).
 - Other devices: Tailscale, an SSH tunnel, or the optional relay in Settings
   ([remote access](docs/remote-access.md)).
 - `localdot uninstall` removes localDot and keeps your data in `~/.localdot`.

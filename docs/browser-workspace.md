@@ -19,10 +19,27 @@ browser. Retrying uses the same saved browser profile, so a connection failure d
 you to sign in again.
 
 The web browser starts with the computer and stays running between tasks, so switching to it is
-immediate. If it is still starting, dot's switch waits for it rather than failing. A web browser
-that stops answering, or can no longer be controlled, is started again: at once when dot switches
-to it, otherwise within about half a minute. Why a start failed goes to the daemon's log. A local
-address such as localhost opens on the desktop, and the screen switches back to it.
+immediate. If it is still starting, dot's switch waits for it rather than failing. A local address
+such as localhost opens on the desktop, and the screen switches back to it.
+
+The web browser recovers by itself and always keeps its saved sign-ins. A tab whose page crashes
+(for example, out of memory) is reloaded, up to three times a minute. If Chromium itself exits,
+hangs or loses its control connection, its container restarts it in place within a few seconds,
+blank, at most three times in five minutes; past that, or if the container stops answering, the
+daemon starts a new browser within about ten seconds. dot is told what happened and can restart a
+stuck browser itself (`switch_screen` with `restart: true`, once a minute). **Settings → Accounts**
+shows what last went wrong and has **Restart web browser**; `localdot browser status` and
+`localdot browser restart` do the same from a terminal. Each failure's reason (exit status, an
+out-of-memory kill, what browserd last said) goes to the daemon's log.
+
+The web browser is called available only while it runs. Otherwise Settings, the terminal and dot
+are told why (the key service is offline, the computer is stopped or frozen, localDot is still
+confirming that the previous browser stopped, it is starting, or it failed and with what), what
+clears it and when localDot tries again; dot gets a note once the browser runs again, so it waits
+instead of retrying. A failed start is tried again five times over about two minutes; then localDot
+stops, tells dot, and waits for **Restart web browser**, the computer or the key service to give it
+another round. Locked saved keys don't stop the web browser: it browses with its sign-ins, but saved
+passwords and sites that use a saved key are refused until you unlock them in **Keys**.
 
 ## Starting a page and checking the visible result
 
@@ -38,6 +55,14 @@ move windows. Stop and user control cancel the reveal along with the read.
 The status above the stage follows the selected screen's stream. A hidden desktop stream does
 not make a live web browser say **Reconnecting**. Computer lifecycle problems and Stop still
 have priority, and their controls continue to operate on the computer.
+
+**Connecting your screen** covers the stage only until a page has shown the computer's picture
+since the computer last came up. After that, any gap keeps the last picture on the stage, dimmed:
+under a second shows nothing, then a word in the middle of the picture says what is happening
+(**Reconnecting…**, **Switching to the web browser…**, **The web browser is restarting…**), and
+after ten seconds it says more and offers **Try again**, which asks for a fresh stream at once.
+A paused computer, Replay and a hidden tab say why themselves and start that clock afresh. Only
+what lasts is announced; the HUD and the screen toast already say a gap and a switch.
 
 A readable page establishes navigation, not that an application's interactive flow passed.
 dot must perform the requested interactions and inspect their visible result before claiming

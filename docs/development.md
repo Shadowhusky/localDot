@@ -48,6 +48,39 @@ runs old API handlers. A UI build alone does not activate backend changes. Stop 
 before restarting; then verify the updated controls against the running daemon, not only a test
 fixture. For a LaunchAgent, send `SIGTERM` to its loaded service and let its supervisor restart it.
 
+### Several dots
+
+`pnpm dots` runs `localdot dots` from this checkout. With the development LaunchAgents
+`dev.localdot.keyd` and `dev.localdot.daemon` loaded, `pnpm dots add Work` makes `~/.localdot-work`,
+gives it the next free ports and writes `dev.localdot.work.keyd` and `dev.localdot.work.daemon`
+from the first dot's agents: the same keyd binary, Node and working directory, with the new dot's
+`-home`, `-ports` and `-keychain-service` for keyd and its own `LOCALDOT_HOME`, `LOCALDOT_PORT`,
+`LOCALDOT_TOOL_PORT`, `LOCALDOT_KEYD_PORTS`, `LOCALDOT_PREVIEW_PORTS` and `LOCALDOT_PUBLIC_ORIGIN`
+for the daemon. `pnpm dots list`, `start`, `stop` and `remove` manage them, and the Settings and
+switcher controls run the same command. On Linux the units are `localdot-<id>-keyd.service` and
+`localdot-<id>-daemon.service`.
+
+| | App | Tool API | keyd listeners | Previews | Keychain service |
+| --- | --- | --- | --- | --- | --- |
+| First dot (no `instance.json`) | 4750 | 4751 | 4760–4789 | 4900–4915 | `localdot-keyd` |
+| Dot *n* | 4750 + 1000·*n* | +1 | +10 to +39 | +100 to +115 | `localdot-keyd.<id>` |
+
+To run another dot by hand, start its keyd with the instance's flags, then its daemon; the daemon
+takes any port its environment doesn't set from `<home>/instance.json`:
+
+```sh
+pnpm keyd -home ~/.localdot-work -ports 5760-5789 -keychain-service localdot-keyd.work
+LOCALDOT_HOME=~/.localdot-work pnpm --filter @localdot/daemon start
+```
+
+Each dot's keyd holds its own Keychain or keyring service, so the one-holder rule applies per dot.
+`POST /v1/keys/copy` with `{"home": …}` copies a keyd's keys and saved logins to the keyd of the dot
+at that home, sealed to its key, after checking that the peer is a genuine keyd: the same signing
+requirement through the peer's pid on macOS (the same executable for an unsigned development
+build), and the same executable through `SO_PEERCRED` and `/proc/<pid>/exe` on Linux.
+`POST /v1/vault/forget` empties the vault of a dot being removed. `pnpm images:cleanup` protects
+the images every registered dot refers to.
+
 ## Images and the live desktop
 
 - `cells/gate/build.sh` builds `localdot/gate:dev`; `cells/desktop/build.sh` bundles `desktopd`
@@ -148,7 +181,8 @@ In development, start keyd in its own terminal before the daemon. `pnpm keyd` bu
 login Keychain. `pnpm keyd -vault memory` keeps them in memory for that run. The daemon reaches it
 at `<home>/keyd/admin.sock` and refuses a socket other users could reach. Until keyd runs,
 computers do not start and the top bar says **Key layer offline**. The daemon's
-`LOCALDOT_KEYD_PORTS` (default `4760-4789`) must match keyd's `-ports`.
+`LOCALDOT_KEYD_PORTS` (default `4760-4789`) must match keyd's `-ports`, and `LOCALDOT_TOOL_PORT`
+(default 4751) moves the brain's tool API.
 
 Add keys with the Theatre's **Keys** button. The page seals each value to keyd's key for the
 current boot using WebCrypto; the daemon relays the sealed copy. Desktop shells receive scoped
@@ -312,6 +346,12 @@ Authorization header and JSON request bodies:
 
 - `GET /api/agent/providers` lists providers, catalog models, capabilities and available key IDs.
   `POST /api/agent/catalog/refresh` refreshes the models.dev catalog.
+- `GET /api/agent/plan-usage` gives each subscription plan's (`chatgpt`, `claude-code`) latest known
+  5-hour and weekly usage, each window with when it was read. Every task's `subscription.usage`
+  events feed it, and it is kept in `<home>/plan-usage.json`. `?fresh=1` also reads, in the
+  background, plans whose figures are over two minutes old from their own apps, at most once a minute
+  and with no model turn: Codex's `account/rateLimits/read` and Claude Code's `/usage` data through the
+  Agent SDK (an experimental call; when it fails, only the tasks' reports remain).
 - `GET` and `PUT /api/agent/settings` read or replace settings. `main` drives the task, optional
   `fast` writes summaries and answers the purpose check, and optional `local` provides a fallback. A role choice contains
   `provider`, `model`, and a stored `key` ID for remote providers. LM Studio and Ollama need no

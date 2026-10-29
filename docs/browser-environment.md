@@ -30,8 +30,41 @@ only fresh observations can follow the visible popup. User takeover and Stop can
 When a target closes, browserd retires that target's pending requests before aborting its reload
 or chooser. Late events from recently retired sessions are dropped. New/foreign session IDs,
 malformed replies and uncertain writes to live targets still retain their existing containment.
-This prevents ordinary iframe and popup teardown from closing every other tab. Existing browser
-health recovery remains responsible for an actual stopped browser process, preserving its profile.
+This prevents ordinary iframe and popup teardown from closing every other tab. Browser recovery
+below handles crashed renderers and a stopped browser process, preserving the profile.
+
+## Crash and hang recovery
+
+A renderer crash revokes only its tab's documents and reloads that tab (three times a minute at
+most); the rest of the browser keeps running. browserd supervises Chromium itself: a process exit,
+a lost CDP pipe, a control request that times out, or two missed liveness checks (a harmless window
+read every five seconds) retire the failed browser's authority, wait until its whole process group
+has exited, clear stale `Singleton*` profile locks and start Chromium again on the same profile,
+blank, keeping the display, stream, gate and keyd listener. It does so at most three times in five
+minutes; then it fences everything as before and the daemon replaces the browser cell. While it
+restarts, its HTTP service answers 503 with `Retry-After` and `GET /supervisor` reports
+`restarting`, so the daemon waits instead of recreating the cell. `GET /supervisor` also names the
+last failure (kind, exit status or crash status, and a new cgroup OOM kill), never page data.
+
+The daemon probes each running browser every five seconds. A browser that stops answering twice,
+or can no longer be controlled, is replaced; the reason from browserd, or from its container's exit
+status and log, is logged and shown to the user and to dot. A keyd health change restarts browsers
+only when keyd went offline, restarted or lost its audit log, not when its hairpin probe's error
+text changes. A locked passphrase vault is not such a change: keyd opens the browser's listener
+without it, so the browser runs and only hosts bound to saved keys and saved passwords wait for
+the unlock.
+
+`GET /api/cells/:id/browser` carries a machine-readable `reason` whenever the browser is not fully
+usable: `keys-locked` (with state `ready`), `key-service-offline`, `computer-paused`,
+`computer-stopped`, `recovering`, `starting`, `restarting`, `failed` or `shutting-down`, with
+`problem` (the cause), `clears` (what makes it usable), `retryAt` (the next automatic start) and
+`readyBy` (when a start under way is ready or has failed, at most 180 seconds). A failed start is
+tried again after 2, 5, 15, 30 and 60 seconds, then given up until the computer, keyd or a restart
+changes something; the running task gets a note when the browser is back or given up. A start
+cancelled by a stop, its computer or keyd is not counted as a failure. A browser recovery or stop
+that can't be confirmed because keyd or Docker didn't answer is tried again by itself (after 5
+seconds, up to once a minute) rather than keeping browsers closed until the daemon restarts, and a
+complete recovery also lifts the computers' own unconfirmed stops.
 
 Stopping a pointer glide drains the single already-dispatched native motion before releasing a
 held drag. It does not send another motion or replay input. The native command timeout remains

@@ -124,7 +124,13 @@ Limits must be positive finite numbers; invalid values use the defaults. Retenti
 startup and after recording completion. It removes the oldest eligible finalized videos and
 their fragment/journal files, marks their manifest expired, and preserves session events,
 screenshots, and thumbnails. Live or unfinished recordings are not retention candidates.
-**Delete session** in history removes the selected session; it is separate from video retention.
+Deleting from the library (a row's Delete, **Select**, or one of **Free up space**'s choices: older
+than 7, 30 or 90 days, stopped or failed, all but the newest 10) is separate from retention: it
+removes the whole task folder above and the task's history, so its messages leave its conversation
+too. Each choice says how many recordings it picks and what they take on disk before a
+confirmation; a running task is never picked or deleted. `POST /api/session-index/delete` with
+`{"ids": [...]}` (1–100 task ids) reports each id as `deleted` (also when already gone), `live` or
+`failed`.
 
 ## Acceptance commands
 

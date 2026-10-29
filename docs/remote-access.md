@@ -130,6 +130,31 @@ in Chromium and WebKit. A real cross-network desktop-stream check remains part o
 local tests do not prove production DNS, certificates, latency, or the estimated bill.
 
 
+## Previews
+
+Servers dot starts in its computer open as previews on the owner's tailnet only, never on this
+Mac's `localhost` and not through the localdot.dev relay (a later version). Each open preview is a
+loopback port from the daemon's block (`LOCALDOT_PREVIEW_PORTS`, default `4900-4915`; each
+localDot on a machine needs a block of its own) and a separate HTTPS origin on the tailnet; see
+[local development previews](local-development-previews.md#opening-previews-on-the-owners-devices)
+for the sign-in, the Host allowlist and the header rewrites.
+
+- **Tailscale Serve.** While Serve shares localDot (Settings › Your computer), the daemon runs
+  `tailscale serve --bg --https=<p> http://127.0.0.1:<p>` for each preview port it holds, through
+  the same Tailscale command line, and `tailscale serve --https=<p> off` when the preview ends or
+  localDot stops. Before its first entry it removes entries a previous run left in its own block
+  (`https=<p>` proxying to `127.0.0.1:<p>`); entries outside the block, and ones proxying elsewhere,
+  are never touched. Previews are HTTPS on the tailnet only: Funnel is never used.
+- **Fronts by address.** A front named by a tailnet address in `LOCALDOT_PUBLIC_ORIGIN` (this Mac's
+  `https://100.91.187.75:4744`, for an iPhone that can't resolve MagicDNS names) must also listen on
+  the preview block on that address, each port proxying to `127.0.0.1` on the same port, with the
+  same certificate. When one is configured, every preview link uses it, whichever address the owner
+  came in on, and Serve isn't registered for preview ports: both would take the same ports on the
+  same address.
+- **No Tailscale.** The app offers no preview and says how to turn Tailscale on.
+- **Shared links.** Guests can't list, open or stop previews: the routes are not on a link's list,
+  and the daemon refuses a link's grant on them as well.
+
 ## Shared links
 
 The owner can create named links in Settings → Your computer → Links for other people. Each link can expire in an hour, day, week or month, or last until revoked. Several links can coexist. The URL is displayed once; the daemon stores only its hash in a private file. Revocation or expiry disconnects its open streams and stops tasks started by that link. The owner's connection and other links remain active.
