@@ -28,12 +28,19 @@ const config = browserRuntimeConfig({
   LOCALDOT_SCALE: "2",
 });
 
-function fixture(options: { pending?: boolean; ignoreTerm?: boolean; ignoreKill?: boolean } = {}) {
+function fixture(
+  options: {
+    pending?: boolean;
+    ignoreTerm?: boolean;
+    ignoreKill?: boolean;
+    chromiumFailed?: () => boolean;
+  } = {},
+) {
   const groups: {
     spec: BrowserProcessSpec;
     handle: BrowserProcessHandle;
     startup: ReturnType<typeof Promise.withResolvers<void>>;
-    failure(): void;
+    failure(exit?: { code: number | null; signal: NodeJS.Signals | null }): void;
     finish(): void;
     leaderExit(): void;
     signals: string[];
@@ -45,6 +52,7 @@ function fixture(options: { pending?: boolean; ignoreTerm?: boolean; ignoreKill?
     fence,
     drain,
     writersExited,
+    ...(options.chromiumFailed ? { chromiumFailed: options.chromiumFailed } : {}),
     driver: (spec, failure) => {
       let alive = true;
       let closed = false;
@@ -501,6 +509,55 @@ describe("sign-in browser replacement", () => {
     expect(f.groups).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(BROWSER_PROCESS_STOP_MS + 40);
     await f.runtime.stop();
+  });
+});
+
+describe("failed browser recovery", () => {
+  it("leaves a failed Chromium to its supervisor and remembers how it ended, once", async () => {
+    const chromiumFailed = vi.fn(() => true);
+    const f = fixture({ chromiumFailed });
+    await f.runtime.start("display");
+    await f.runtime.start("chromium");
+    f.groups[1]?.failure({ code: null, signal: "SIGKILL" });
+    expect(chromiumFailed).toHaveBeenCalledOnce();
+    expect(f.runtime.closed).toBe(false);
+    expect(f.runtime.takeChromiumExit()).toEqual({ code: null, signal: "SIGKILL" });
+    expect(f.runtime.takeChromiumExit()).toBeUndefined();
+    f.groups[0]?.failure();
+    expect(f.runtime.closed).toBe(true);
+    await f.runtime.stop();
+  });
+
+  it("retires every process when the supervisor declines", async () => {
+    const f = fixture({ chromiumFailed: () => false });
+    await f.runtime.start("chromium");
+    f.groups[0]?.failure();
+    expect(f.runtime.closed).toBe(true);
+    await f.runtime.stop();
+  });
+
+  it("kills a group that ignores SIGTERM and releases the profile only after it exits", async () => {
+    vi.useFakeTimers();
+    const f = fixture({ ignoreTerm: true });
+    await f.runtime.start("chromium");
+    const previous = f.groups[0];
+    const beforeStart = vi.fn(async () => {
+      expect(previous?.handle.exists()).toBe(false);
+    });
+    const replaced = f.runtime.replaceChromium(
+      browserProcessSpecs(config).chromium,
+      () => false,
+      false,
+      { beforeStart },
+    );
+    await vi.advanceTimersByTimeAsync(BROWSER_PROCESS_TERM_MS + 40);
+    await replaced;
+    expect(previous?.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(beforeStart).toHaveBeenCalledOnce();
+    expect(f.groups).toHaveLength(2);
+    const stopped = f.runtime.stop();
+    await vi.advanceTimersByTimeAsync(BROWSER_PROCESS_TERM_MS + 40);
+    await stopped;
   });
 });
 

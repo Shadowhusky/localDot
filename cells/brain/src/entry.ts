@@ -22,6 +22,7 @@ type BrainApi = Pick<
   | "inbox"
   | "appendTranscript"
   | "control"
+  | "brief"
   | "close"
 >;
 

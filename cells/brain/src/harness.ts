@@ -31,15 +31,21 @@ import * as AgentControls from "@deepseek-ai/dsh-tool-subagent-control";
 import * as AgentList from "@deepseek-ai/dsh-tool-subagent-control/list-agents";
 import * as TodoTool from "@deepseek-ai/dsh-tool-todo";
 import ToolRuntime from "@deepseek-ai/dsh-tools";
-import type { EventOf, ToolResult } from "@localdot/protocol";
+import type { EventOf, SubagentBrief, SubagentResume, ToolResult } from "@localdot/protocol";
 import { desktopSkillProvider, type SkillComputer, skillChange } from "./harness-skills.ts";
 import { type HarnessJournal, HarnessStorage } from "./harness-storage.ts";
+import { Delegates, MAX_ACTIVE_SUBAGENTS } from "./harness-subagents.ts";
 
 const CONTINUE = "Continue with the updated localDot context.";
+const PERSONA =
+  "You are a localDot subagent working inside the same virtual Ubuntu computer. The parent owns the visible browser and user conversation. Research and work only on the delegated scope; coordinate shared files through the parent. Return concrete findings, verification and output paths to the parent. Do not claim to deliver files or complete the user's overall task.";
 
 export interface HarnessStep {
   text: string;
   calls: { id: string; name: string; input: unknown }[];
+  // The main agent went on after a pause (a limit, an error, a refused request): interrupted
+  // delegated agents wake with it.
+  continued?: boolean;
 }
 
 export interface HarnessRequest {
@@ -67,6 +73,11 @@ export interface HarnessHost {
   };
   journal?: HarnessJournal;
   onSubagent?(state: EventOf<"subagent.state">["data"]): void;
+  // Delegated agents an earlier stop interrupted, and where each child's brief is kept.
+  subagents?: {
+    resume: readonly SubagentResume[];
+    brief(brief: SubagentBrief): void;
+  };
   beforeNativeCall?(id: string, signal: AbortSignal): Promise<string | undefined>;
   request(signal: AbortSignal, request: HarnessRequest): Promise<HarnessStep | undefined>;
   execute(
@@ -113,8 +124,9 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
     await ctx.plugin(RepeatToolReminder, {});
     const nativeNames = new Set(["todo_write", "get_goal", "create_goal", "update_goal"]);
     const journal = host.journal ?? { records: [], append: async () => {} };
+    let storage: HarnessStorage | undefined;
     await ctx.plugin((scope) => {
-      new HarnessStorage(scope, journal);
+      storage = new HarnessStorage(scope, journal);
     });
     const flush = async () => {
       try {
@@ -169,7 +181,7 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
     if (host.delegation) {
       await ctx.plugin(Jobs, { maxConcurrentJobsPerOwner: 3 });
       await ctx.plugin(JobTools, { completionDelivery: "wakeup", maxConsecutiveWakes: 10 });
-      await ctx.plugin(Subagents, { maxActiveSubagents: 3, maxDepth: 1 });
+      await ctx.plugin(Subagents, { maxActiveSubagents: MAX_ACTIVE_SUBAGENTS, maxDepth: 1 });
       await ctx.plugin(Spawn, { providerName: "spawn" });
       await ctx.plugin(AgentControls);
       await ctx.plugin(AgentList);
@@ -222,41 +234,40 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
     // event, after delivering the parent's settlement notice. Agent.status alone
     // can retire the parent in that durability gap and lose its continuation.
     const unsettledChildren = new Set<string>();
-    const childLabels = new Map<string, string>();
+    const delegatedTools = [
+      ...(host.delegation?.tools.map((tool) => tool.name) ?? []),
+      "todo_write",
+      ...(skillComputer ? ["skill"] : []),
+    ];
+    const delegates = new Delegates(ctx, {
+      sessionId: host.sessionId,
+      signal: host.signal,
+      spawn: { persona: PERSONA, tools: delegatedTools },
+      events: (id) => storage?.events(id) ?? [],
+      ...(host.onSubagent ? { onSubagent: host.onSubagent } : {}),
+      ...(host.subagents ? { brief: host.subagents.brief } : {}),
+    });
+    delegates.restore(host.subagents?.resume ?? []);
     ctx.on("subagent/start", (info) => {
       unsettledChildren.add(info.runId);
-      const child = ctx.agents.get(info.id);
-      const identity =
-        child && ctx.sessionProjections.snapshot(child.session, ["subagent"]).values.subagent;
-      const label = (identity?.label || "Delegated task").slice(0, 200);
-      childLabels.set(info.runId, label);
-      host.onSubagent?.({ id: info.id, runId: info.runId, label, state: "running" });
+      delegates.started(info);
     });
     ctx.on("subagent/end", (info) => {
       unsettledChildren.delete(info.runId);
-      const label = childLabels.get(info.runId) || "Delegated task";
-      childLabels.delete(info.runId);
-      const summary = info.lastAssistantMessage
-        ?.filter((part) => part.type === "text")
-        .map((part) => part.text)
-        .join("\n")
-        .slice(0, 5000);
-      host.onSubagent?.({
-        id: info.id,
-        runId: info.runId,
-        label,
-        state:
-          info.stopReason === "completed"
-            ? "completed"
-            : info.stopReason === "aborted"
-              ? "interrupted"
-              : "failed",
-        ...(summary ? { summary } : {}),
-      });
+      delegates.ended(info);
+    });
+    ctx.on("session/event", (session, event) => {
+      if (session.id !== host.sessionId && ["agent/inbox/spliced", "step/end"].includes(event.type))
+        delegates.progressed(String(session.id));
+    });
+    ctx.on("tools/result", (exec) => {
+      if (exec.agent?.id === host.sessionId && exec.name === "interrupt_agent")
+        delegates.drop(String((exec.arguments as { agent_id?: unknown })?.agent_id));
     });
     const hasPendingWork = () =>
       !!host.delegation &&
       (unsettledChildren.size > 0 ||
+        delegates.waiting ||
         ctx.jobs
           .list(SessionId(host.sessionId))
           .some((job) => job.status === "running" || job.status === "stopping") ||
@@ -314,15 +325,15 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
             if (conclude) {
               const agent = ctx.agents.get(SessionId(host.sessionId));
               const goal = agent && ctx.goals.get(agent);
+              const complete =
+                name === "done" &&
+                result.ok &&
+                (args as { completion?: { status?: string } }).completion?.status !== "blocked";
               if (agent && goal && goal.phase !== "complete") {
-                if (
-                  name === "done" &&
-                  result.ok &&
-                  (args as { completion?: { status?: string } }).completion?.status !== "blocked"
-                )
-                  ctx.goals.complete(agent, goal);
+                if (complete) ctx.goals.complete(agent, goal);
                 else ctx.goals.disarm(agent);
               }
+              if (complete) delegates.clear();
               exec.concludeTurn();
             }
             // Frames stay in the host transcript. Do not retain a duplicate base64
@@ -359,15 +370,8 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
           maxDepth: 1,
           enableRunInBackground: true,
           backgroundMode,
-          toolFilter: {
-            allow: [
-              ...host.delegation.tools.map((tool) => tool.name),
-              "todo_write",
-              ...(skillComputer ? ["skill"] : []),
-            ],
-          },
-          persona:
-            "You are a localDot subagent working inside the same virtual Ubuntu computer. The parent owns the visible browser and user conversation. Research and work only on the delegated scope; coordinate shared files through the parent. Return concrete findings, verification and output paths to the parent. Do not claim to deliver files or complete the user's overall task.",
+          toolFilter: { allow: delegatedTools },
+          persona: PERSONA,
         });
     }
     class HostAdapter extends LlmAdapter {
@@ -390,9 +394,16 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
         const signal = AbortSignal.any([host.signal, options.signal ?? host.signal]);
         if (options.purpose || (options.sessionId && options.sessionId !== host.sessionId)) {
           if (!host.delegation) throw new Error("Delegation transport is unavailable");
-          yield* host.delegation.request({ ...options, signal });
+          try {
+            yield* host.delegation.request({ ...options, signal });
+          } catch (error) {
+            if (options.sessionId) delegates.failed(String(options.sessionId), error);
+            throw error;
+          }
           return;
         }
+        const root = ctx.agents.get(SessionId(host.sessionId));
+        if (root) await delegates.retry(root);
         const step = await host.request(signal, {
           // Trusted plugin policy belongs in the system prompt. File/skill bodies
           // remain user/tool context below and never gain system authority.
@@ -435,9 +446,9 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
         signal.throwIfAborted();
         if (!step) {
           hostFinished = true;
-          const agent = ctx.agents.get(SessionId(host.sessionId));
-          if (agent) ctx.goals.disarm(agent);
+          if (root) ctx.goals.disarm(root);
         }
+        if (step?.continued && root) await delegates.continue(root);
         let index = 0;
         if (step?.text) {
           yield { type: "block-start", index, blockType: "text" };
@@ -496,6 +507,8 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
     host.signal.addEventListener("abort", abort, { once: true });
     try {
       host.signal.throwIfAborted();
+      // Before the first step, so dot's first request already knows which children woke.
+      if (host.subagents?.resume.length) await delegates.continue(handle.agent);
       // A resumed session holds the task already: following it up again would repeat its
       // /skill gestures and what they inject.
       handle.agent.followup(
@@ -507,6 +520,7 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
       do {
         await handle.agent.whenIdle();
         await flush();
+        await delegates.retry(handle.agent);
         // The upstream goal driver admits its next round after a durability
         // checkpoint. Let that admission settle before treating idle as complete.
         await new Promise<void>((resolve) => setTimeout(resolve, 20));

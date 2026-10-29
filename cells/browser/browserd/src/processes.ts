@@ -17,6 +17,12 @@ export class BrowserProcessError extends Error {
   }
 }
 
+// How a process ended, for the log: never its output.
+export interface BrowserProcessExit {
+  readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
+}
+
 export interface BrowserProcessChannels {
   readonly input?: Writable;
   readonly output?: Readable;
@@ -32,7 +38,7 @@ export interface BrowserProcessHandle {
 
 export type BrowserProcessDriver = (
   spec: BrowserProcessSpec,
-  onFailure: () => void,
+  onFailure: (exit?: BrowserProcessExit) => void,
 ) => BrowserProcessHandle;
 
 export const nodeBrowserProcessDriver: BrowserProcessDriver = (spec, onFailure) => {
@@ -64,7 +70,7 @@ export const nodeBrowserProcessDriver: BrowserProcessDriver = (spec, onFailure) 
     startup.reject(new BrowserProcessError("start"));
     onFailure();
   });
-  child.once("exit", () => onFailure());
+  child.once("exit", (code, signal) => onFailure({ code, signal }));
   child.once("close", () => {
     closed = true;
     onFailure();
@@ -115,6 +121,9 @@ export interface BrowserProcessesOptions {
   fence(): void;
   drain(): Promise<void>;
   gracefulChromiumClose?(): boolean;
+  // Chromium ended or lost its pipe: true when the owner restarts it in place instead of
+  // retiring every process.
+  chromiumFailed?(): boolean;
   // Runs after successful physical group reaping, independently of the overall owner drain.
   writersExited?(): void;
   driver?: BrowserProcessDriver;
@@ -128,6 +137,7 @@ export class BrowserProcesses {
   readonly #owners = new Map<BrowserProcessName, { retiring: boolean }>();
   #closed = false;
   #stopping?: Promise<void>;
+  #chromiumExit?: BrowserProcessExit;
 
   constructor(
     config: BrowserRuntimeConfig,
@@ -139,6 +149,13 @@ export class BrowserProcesses {
 
   get closed(): boolean {
     return this.#closed;
+  }
+
+  // How the last Chromium ended, once: a retired browser's exit is reported too.
+  takeChromiumExit(): BrowserProcessExit | undefined {
+    const exit = this.#chromiumExit;
+    this.#chromiumExit = undefined;
+    return exit;
   }
 
   async start(name: BrowserProcessName): Promise<BrowserProcessChannels> {
@@ -156,9 +173,12 @@ export class BrowserProcesses {
     const owner = { retiring: false };
     this.#owners.set(name, owner);
     try {
-      const handle = this.#driver(spec, () => {
+      const handle = this.#driver(spec, (exit) => {
+        if (exit && name === "chromium") this.#chromiumExit = exit;
         // A late pipe/exit callback from the retired browser cannot kill its successor.
-        if (!owner.retiring && this.#owners.get(name) === owner) void this.stop().catch(() => {});
+        if (owner.retiring || this.#owners.get(name) !== owner) return;
+        if (name === "chromium" && this.options.chromiumFailed?.()) return;
+        void this.stop().catch(() => {});
       });
       this.#handles.set(name, handle);
       void handle.started.catch(() => {});
@@ -177,10 +197,13 @@ export class BrowserProcesses {
     }
   }
 
+  // In recovery a failed browser's group is killed once it ignores SIGTERM, and beforeStart runs
+  // only after its exit is confirmed.
   async replaceChromium(
     spec: BrowserProcessSpec,
     retire: () => boolean | Promise<boolean>,
     keepOpen = false,
+    recovery?: { beforeStart(): Promise<void> },
   ): Promise<BrowserProcessChannels> {
     const owner = this.#owners.get("chromium");
     const handle = this.#handles.get("chromium");
@@ -191,8 +214,13 @@ export class BrowserProcesses {
       const graceful = await retire();
       if (!graceful) handle.signal("SIGTERM");
       const start = performance.now();
+      let killed = false;
       while (!handle.closed || handle.exists()) {
         if (this.#closed) throw new BrowserProcessError("closed");
+        if (recovery && !killed && performance.now() - start >= BROWSER_PROCESS_TERM_MS) {
+          killed = true;
+          handle.signal("SIGKILL");
+        }
         // Never reuse a locked profile or report success after an unconfirmed exit.
         if (performance.now() - start >= BROWSER_PROCESS_STOP_MS) {
           // A user's beforeunload/download dialog may refuse Quit. Keep their
@@ -202,6 +230,8 @@ export class BrowserProcesses {
         }
         await new Promise<void>((resolve) => setTimeout(resolve, 20));
       }
+      if (this.#closed) throw new BrowserProcessError("closed");
+      await recovery?.beforeStart();
       if (this.#closed) throw new BrowserProcessError("closed");
       this.#handles.delete("chromium");
       return await this.#start("chromium", spec);

@@ -15,6 +15,10 @@ export const MAX_BROWSER_NODES = 32768;
 export const BROWSER_TARGET_START_TIMEOUT_MS = 30_000;
 export const BROWSER_RELOAD_TIMEOUT_MS = 3000;
 export const BROWSER_CHOOSER_TIMEOUT_MS = 5 * 60_000;
+// A crashed tab is reloaded at most this many times a minute; one that keeps crashing stays on
+// its error page.
+export const BROWSER_CRASH_RELOADS = 3;
+export const BROWSER_CRASH_WINDOW_MS = 60_000;
 
 const identifier = schema.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
 const nodeNumber = schema.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -58,9 +62,18 @@ export interface BrowserCookie {
 }
 
 export class BrowserTargetError extends Error {
-  constructor(readonly reason: "closed" | "protocol" | "busy" | "stale" | "unready") {
+  constructor(
+    readonly reason: "closed" | "protocol" | "busy" | "stale" | "unready",
+    // What ended the connection, for the log: a fixed phrase, never page data.
+    readonly cause?: string,
+  ) {
     super(`Browser target refused: ${reason}`);
   }
+}
+
+// Chromium's renderer termination status, which names no page.
+function crashStatus(status: string | undefined): string {
+  return status && /^[a-z][a-z ]{0,31}$/u.test(status) ? status : "unknown";
 }
 
 // A page that adds frames or rewrites its URL as it settles changes its document under a read, or
@@ -105,6 +118,7 @@ interface TargetRecord {
   revision: number;
   nodes: Set<number>;
   windowId?: number;
+  crashes?: number[];
 }
 
 interface DocumentRecord {
@@ -117,6 +131,7 @@ export interface BrowserTargetsOptions {
   readonly uploadDir: string;
   onFatal(reason: BrowserTargetError): void;
   onInvalidated?(): void;
+  onCrash?(crash: { readonly status: string; readonly reloaded: boolean }): void;
   readonly downloads?: {
     owns(guid: string): boolean;
     begin(params: Readonly<Record<string, unknown>>): void;
@@ -132,6 +147,7 @@ export class BrowserTargets {
   readonly #queue: TargetRecord[] = [];
   readonly #idle = new Set<() => void>();
   readonly #reloads = new Map<TargetRecord, () => void>();
+  readonly #recovering = new Map<TargetRecord, { status?: string; reloaded: boolean }>();
   readonly #fileChoosers = new WeakMap<BrowserFileChooser, FileChooserRecord>();
   #fileChooser?: FileChooserRecord;
   #chooserTimer?: ReturnType<typeof setTimeout>;
@@ -178,7 +194,7 @@ export class BrowserTargets {
           return true;
         },
       },
-      () => this.#fail("closed"),
+      (error) => this.#fail("closed", false, `control ${error.reason}`),
     );
     for (const event of ["Target.targetCreated", "Target.targetInfoChanged"]) {
       this.#broker.on(event, (params, sessionId) => {
@@ -220,11 +236,16 @@ export class BrowserTargets {
     });
     this.#broker.on("Target.targetCrashed", (params, sessionId) => {
       if (sessionId !== undefined) throw new BrowserTargetError("protocol");
-      const crashed = schema.object({ targetId: identifier }).parse(params);
-      if (!this.#targets.has(crashed.targetId)) throw new BrowserTargetError("protocol");
-      this.#fail("closed");
+      const crashed = schema
+        .object({ targetId: identifier, status: schema.string().max(64).optional() })
+        .parse(params);
+      const target = this.#targets.get(crashed.targetId);
+      if (!target) throw new BrowserTargetError("protocol");
+      this.#crashed(target, crashed.status);
     });
-    this.#broker.on("Inspector.targetCrashed", () => this.#fail("closed"));
+    this.#broker.on("Inspector.targetCrashed", (_params, sessionId) => {
+      this.#crashed(this.#ownedSession(sessionId));
+    });
     this.#broker.on("Inspector.detached", (_params, sessionId) => {
       this.#remove(this.#ownedSession(sessionId));
     });
@@ -618,7 +639,7 @@ export class BrowserTargets {
           this.#readyFamily(target);
           if (target.revision !== revision) throw new BrowserTargetError("stale");
         },
-        ambiguous: () => this.#fail("unready"),
+        ambiguous: () => this.#fail("unready", false, "navigation outcome unknown"),
       });
     } finally {
       this.#reloads.delete(target);
@@ -646,7 +667,7 @@ export class BrowserTargets {
       })
       .safeParse(result);
     if (!parsed.success) {
-      this.#fail("protocol");
+      this.#fail("protocol", false, "unexpected window reply");
       throw new BrowserTargetError("protocol");
     }
     target.windowId = parsed.data.windowId;
@@ -666,6 +687,15 @@ export class BrowserTargets {
 
   close(): void {
     this.#fail("closed");
+  }
+
+  // The browser process answers at all: a read of a tab's window that changes nothing, and whose
+  // unanswered request does not fence the connection.
+  async ping(signal: AbortSignal): Promise<void> {
+    this.#checkOpen();
+    const tab = [...this.#targets.values()].find((target) => target.type === "page");
+    if (!tab) return;
+    await this.#broker.send("Browser.getWindowForTarget", { targetId: tab.targetId }, { signal });
   }
 
   async downloadBehavior(enabled: boolean, signal?: AbortSignal): Promise<void> {
@@ -787,7 +817,7 @@ export class BrowserTargets {
         .catch(() => {
           // A sign-in frame may disappear while its initialization is in flight.
           // Removal already revoked that session; healthy tabs remain usable.
-          if (this.#current(target)) this.#fail("unready");
+          if (this.#current(target)) this.#fail("unready", false, "a tab could not be attached");
         })
         .finally(() => {
           this.#workers -= 1;
@@ -887,6 +917,7 @@ export class BrowserTargets {
     this.#revoke(affected);
     for (const member of removed) {
       this.#reloads.get(member)?.();
+      this.#recovering.delete(member);
       member.ready = false;
       member.nodes.clear();
       if (member.sessionId) {
@@ -900,6 +931,39 @@ export class BrowserTargets {
     }
     this.options.onInvalidated?.();
     this.#pump();
+  }
+
+  // A renderer crash takes down its tab, not the browser: the tab's documents are revoked and
+  // the tab reloaded, within a budget. A frame's crash reloads the tab that holds it.
+  #crashed(target: TargetRecord, status?: string): void {
+    let tab: TargetRecord | undefined = target;
+    while (tab?.type === "iframe")
+      tab = tab.parentSessionId ? this.#sessions.get(tab.parentSessionId) : undefined;
+    if (!tab?.sessionId || !this.#current(tab)) return;
+    // Chromium reports one crash twice, to the tab's session and to the browser, which names
+    // the termination status.
+    const reported = this.#recovering.get(tab);
+    if (reported) {
+      reported.status ??= status;
+      return;
+    }
+    this.#reloads.get(tab)?.();
+    this.#invalidate(tab);
+    const now = performance.now();
+    tab.crashes = [...(tab.crashes ?? []).filter((at) => now - at < BROWSER_CRASH_WINDOW_MS), now];
+    const crash = { status, reloaded: tab.crashes.length <= BROWSER_CRASH_RELOADS };
+    const recovering = tab;
+    this.#recovering.set(recovering, crash);
+    const reload = crash.reloaded
+      ? this.#broker.send("Page.reload", {}, { sessionId: recovering.sessionId }).catch(() => {})
+      : Promise.resolve();
+    void Promise.all([reload, new Promise((resolve) => setTimeout(resolve, 100))]).then(() => {
+      if (this.#recovering.get(recovering) !== crash) return;
+      this.#recovering.delete(recovering);
+      try {
+        this.options.onCrash?.({ status: crashStatus(crash.status), reloaded: crash.reloaded });
+      } catch {}
+    });
   }
 
   #document(document: BrowserDocument): TargetRecord {
@@ -949,7 +1013,7 @@ export class BrowserTargets {
     if (this.#closed) throw new BrowserTargetError("closed");
   }
 
-  #fail(reason: BrowserTargetError["reason"], retire = false): boolean {
+  #fail(reason: BrowserTargetError["reason"], retire = false, cause?: string): boolean {
     if (this.#closed) return false;
     this.#closed = true;
     // Retire the broker before cancelling pending reloads can hard-close its pipe.
@@ -957,12 +1021,13 @@ export class BrowserTargets {
     this.clearFileChooser();
     for (const cancel of this.#reloads.values()) cancel();
     this.#reloads.clear();
+    this.#recovering.clear();
     for (const target of this.#targets.values()) target.nodes.clear();
     this.#targets.clear();
     this.#sessions.clear();
     this.#queue.length = 0;
     try {
-      this.options.onFatal(new BrowserTargetError(reason));
+      this.options.onFatal(new BrowserTargetError(reason, cause));
     } catch {}
     if (!retire) this.#broker.close();
     for (const resolve of this.#idle) resolve();

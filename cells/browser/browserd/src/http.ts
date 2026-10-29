@@ -11,6 +11,7 @@ import {
   type BrowserSignInMode,
   BrowserSignInRequest,
   type BrowserSignInState,
+  type BrowserSupervisorState,
 } from "../../../../packages/protocol/src/browser-control.ts";
 import {
   BrowserDownloadAck,
@@ -65,6 +66,7 @@ const progressSchema = schema.strictObject({
 const routes = new Set([
   "POST /work-window",
   "GET /health",
+  "GET /supervisor",
   "GET /tabs",
   "PUT /control",
   "POST /input",
@@ -112,6 +114,7 @@ export interface BrowserHttpOptions {
     ): Promise<schema.infer<typeof BrowserSignInState>>;
   };
   ready(): boolean;
+  supervisor?(): BrowserSupervisorState;
   fence(): void;
   stop(): Promise<void>;
   retirement(): Promise<void> | undefined;
@@ -125,6 +128,7 @@ class HttpRefusal extends Error {
       | "request"
       | "busy"
       | "unavailable"
+      | "restarting"
       | "refused"
       | "login-form"
       | "protected-input",
@@ -359,12 +363,16 @@ export class BrowserHttp {
       if (!routes.has(route)) throw new HttpRefusal(404, "request");
       if (header(request, "origin") !== undefined) throw new HttpRefusal(400, "request");
       const signIn = this.#options.signIn?.state();
-      if (signIn?.changing && !["GET /health", "POST /stop", "PUT /control"].includes(route))
+      if (
+        signIn?.changing &&
+        !["GET /health", "GET /supervisor", "POST /stop", "PUT /control"].includes(route)
+      )
         throw new HttpRefusal(409, "busy");
       if (
         signIn?.mode === "signin" &&
         ![
           "GET /health",
+          "GET /supervisor",
           "POST /stop",
           "PUT /control",
           "POST /manual",
@@ -388,6 +396,12 @@ export class BrowserHttp {
             width: 1280,
             height: 800,
           });
+          return;
+        }
+        if (route === "GET /supervisor") {
+          const supervisor = this.#options.supervisor?.();
+          if (!supervisor) throw new HttpRefusal(404, "request");
+          send(response, 200, supervisor);
           return;
         }
         this.#available(signal);
@@ -658,7 +672,11 @@ export class BrowserHttp {
         }
         if (!response.destroyed && !response.writableEnded)
           response.end(`${JSON.stringify({ kind: "error", code: refusal.code })}\n`);
-      } else send(response, refusal.status, { error: refusal.code });
+      } else {
+        // A browser restarting in place answers again within seconds.
+        if (refusal.code === "restarting") response.setHeader("retry-after", "5");
+        send(response, refusal.status, { error: refusal.code });
+      }
     } finally {
       if (ownsSlot) this.#active = false;
       request.off("aborted", cancel);
@@ -668,6 +686,9 @@ export class BrowserHttp {
 
   #available(signal: AbortSignal): void {
     if (signal.aborted || this.#stopping || this.#options.retirement() || !this.#options.ready())
-      throw new HttpRefusal(503, "unavailable");
+      throw new HttpRefusal(
+        503,
+        this.#options.supervisor?.().state === "restarting" ? "restarting" : "unavailable",
+      );
   }
 }

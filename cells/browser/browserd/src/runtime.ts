@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { Server } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
 import type {
+  BrowserFailureKind,
   BrowserManualPermit,
   BrowserSignInMode,
+  BrowserSupervisorState,
 } from "../../../../packages/protocol/src/browser-control.ts";
 import { WorkWindow } from "../../../desktop/desktopd/src/work-window.ts";
 import { BrowserAccounts } from "./accounts.ts";
@@ -22,8 +25,10 @@ import {
   type BrowserProcessChannels,
   type BrowserProcessDriver,
   BrowserProcessError,
+  type BrowserProcessExit,
   BrowserProcesses,
 } from "./processes.ts";
+import { releaseProfileLocks } from "./profile-preferences.ts";
 import {
   type BrowserReadinessProbe,
   BrowserReadinessRetirementError,
@@ -32,16 +37,53 @@ import {
 } from "./readiness.ts";
 import {
   BROWSER_DOWNLOAD_DIR,
+  BROWSER_PROFILE_DIR,
   BROWSER_UPLOAD_DIR,
   type BrowserRuntimeConfig,
+  browserProcessSpecs,
   browserSignInSpec,
 } from "./runtime-config.ts";
 import { BrowserSecrets } from "./secrets.ts";
-import { BrowserTargets } from "./targets.ts";
+import { BrowserTargetError, BrowserTargets } from "./targets.ts";
 import { BrowserUploadService } from "./upload-service.ts";
 
 export const BROWSER_RUNTIME_START_MS = 60_000;
 export const BROWSER_READINESS_MS = 15_000;
+// A failed Chromium starts again in place, keeping the display, stream and profile, at most this
+// often; past that the runtime retires and the daemon replaces the whole browser.
+export const BROWSER_RESTARTS = 3;
+export const BROWSER_RESTART_WINDOW_MS = 5 * 60_000;
+const BROWSER_RESTART_PAUSE_MS = [0, 1000, 3000] as const;
+// The browser process must answer a request that changes nothing this often, within the
+// second figure; two misses in a row mean it hangs.
+export const BROWSER_LIVENESS_MS = 5000;
+const BROWSER_LIVENESS_ANSWER_MS = 4000;
+const BROWSER_LIVENESS_MISSES = 2;
+
+// Docker's memory limit for the cell: its OOM kills are counted here.
+async function cgroupOomKills(): Promise<number> {
+  const events = await readFile("/sys/fs/cgroup/memory.events", "utf8");
+  return Number(/^oom_kill (\d+)$/mu.exec(events)?.[1] ?? 0);
+}
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cancel = () => {
+      clearTimeout(timer);
+      reject(new BrowserRuntimeError("closed"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", cancel);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", cancel, { once: true });
+  });
+}
+
+function exitDetail(exit: BrowserProcessExit | undefined): string | undefined {
+  if (!exit) return undefined;
+  return exit.signal ? `exited on ${exit.signal}` : `exited with code ${exit.code ?? "unknown"}`;
+}
 
 export class BrowserRuntimeError extends Error {
   constructor(readonly reason: "closed" | "startup" | "shutdown") {
@@ -59,6 +101,10 @@ export interface BrowserRuntimeDependencies {
   readonly prepare?: typeof prepareBrowserRuntime;
   readonly probe?: BrowserReadinessProbe;
   readonly listen?: (server: Server, signal: AbortSignal) => Promise<void>;
+  readonly oomKills?: () => Promise<number>;
+  readonly releaseLocks?: (signal: AbortSignal) => Promise<void>;
+  // One line per supervision event, for the container log: never page data.
+  readonly log?: (line: string) => void;
 }
 
 function listen(server: Server, signal: AbortSignal): Promise<void> {
@@ -119,6 +165,11 @@ export class BrowserRuntime {
   #ready = false;
   #utilityRetirementUncertain = false;
   #gracefulBrowserClose = false;
+  #supervisor: BrowserSupervisorState = { state: "starting", restarts: 0 };
+  #restarts: number[] = [];
+  #restarting?: Promise<void>;
+  #oomKills = 0;
+  #liveness?: ReturnType<typeof setInterval>;
 
   constructor(config: BrowserRuntimeConfig, dependencies: BrowserRuntimeDependencies = {}) {
     this.#config = Object.freeze({ ...config });
@@ -128,6 +179,7 @@ export class BrowserRuntime {
       fence: () => this.#fence(),
       drain: () => this.#drain(),
       gracefulChromiumClose: () => this.#gracefulBrowserClose,
+      chromiumFailed: () => this.#browserFailed("browser_exited"),
       writersExited: () => {
         this.#downloads?.writersExited();
         this.#uploads?.readersExited();
@@ -138,6 +190,10 @@ export class BrowserRuntime {
 
   get ready(): boolean {
     return this.#ready && !this.#processes.closed && !this.#lifetime.signal.aborted;
+  }
+
+  get supervisor(): BrowserSupervisorState {
+    return structuredClone(this.#supervisor);
   }
 
   retirement(): Promise<void> | undefined {
@@ -226,19 +282,24 @@ export class BrowserRuntime {
     const fatal = () => {
       void this.stop().catch(() => {});
     };
+    let stage = "preparation";
     try {
       this.#check();
       await this.#step(() =>
         (this.#dependencies.prepare ?? prepareBrowserRuntime)(this.#config, this.#lifetime.signal),
       );
       const probe = this.#dependencies.probe ?? browserReadiness(this.#config);
+      stage = "the display";
       await this.#step(() => this.#processes.start("display"));
       await this.#wait("display", probe);
       await this.#wait("monitor", probe);
+      stage = "the session bus";
       await this.#step(() => this.#processes.start("dbus"));
       await this.#wait("dbus", probe);
+      stage = "the window manager";
       await this.#step(() => this.#processes.start("windowManager"));
       await this.#wait("windowManager", probe);
+      stage = "native input";
       const nativeChannels = await this.#step(() => this.#processes.start("xhelper"));
       if (!nativeChannels.input || !nativeChannels.output) throw new BrowserRuntimeError("startup");
       this.#native = new BrowserNative({
@@ -250,6 +311,7 @@ export class BrowserRuntime {
       const native = this.#native;
       await this.#step(() => native.ready);
       await this.#step(() => native.command("ping", {}, this.#lifetime.signal));
+      stage = "screen capture";
       const captureChannels = await this.#step(() => this.#processes.start("capture"));
       if (!captureChannels.input || !captureChannels.output)
         throw new BrowserRuntimeError("startup");
@@ -260,13 +322,17 @@ export class BrowserRuntime {
       });
       const capture = this.#capture;
       await this.#step(() => capture.ready);
+      stage = "the network forwarder";
       await this.#step(() => this.#processes.start("forwarder"));
       await this.#wait("forwarder", probe);
+      stage = "the stream";
       await this.#step(() => this.#processes.start("stream"));
       await this.#step(() => this.#processes.start("streamProxy"));
       await this.#wait("stream", probe);
+      stage = "Chromium";
       const chromium = await this.#step(() => this.#processes.start("chromium"));
       await this.#attachBrowser(chromium);
+      stage = "the control service";
       const runtime = this;
       this.#http = new BrowserHttp({
         workWindow: new WorkWindow({
@@ -304,6 +370,7 @@ export class BrowserRuntime {
           set: (permit, mode, signal) => this.#signIn(permit, mode, signal),
         },
         ready: () => this.ready,
+        supervisor: () => this.supervisor,
         fence: () => {
           void this.stop().catch(() => {});
         },
@@ -315,9 +382,13 @@ export class BrowserRuntime {
       await this.#step(() =>
         (this.#dependencies.listen ?? listen)(service.server, this.#lifetime.signal),
       );
+      this.#oomKills = await this.#countOomKills();
       this.#ready = true;
+      this.#supervisor = { ...this.#supervisor, state: "running" };
+      this.#watch();
       return service;
     } catch {
+      this.#log(`could not start ${stage}`);
       try {
         await this.stop();
       } finally {
@@ -331,8 +402,10 @@ export class BrowserRuntime {
 
   async #attachBrowser(chromium: BrowserProcessChannels, restoring = false): Promise<void> {
     const generation = ++this.#browserGeneration;
-    const fatal = () => {
-      if (generation === this.#browserGeneration) void this.stop().catch(() => {});
+    const fatal = (error?: unknown) => {
+      if (generation !== this.#browserGeneration) return;
+      const cause = error instanceof BrowserTargetError ? error.cause : undefined;
+      this.#browserFailed(cause === "control timeout" ? "unresponsive" : "control_lost", cause);
     };
     const native = required(this.#native);
     const capture = required(this.#capture);
@@ -341,6 +414,15 @@ export class BrowserRuntime {
       downloadDir: BROWSER_DOWNLOAD_DIR,
       uploadDir: BROWSER_UPLOAD_DIR,
       onFatal: fatal,
+      onCrash: (crash) => {
+        if (generation !== this.#browserGeneration) return;
+        void this.#failure("tab_crashed", `renderer ${crash.status}`, crash.reloaded).then(
+          (failure) =>
+            this.#log(
+              `a tab's renderer crashed (${failure.detail}); ${crash.reloaded ? "reloading the tab" : "it keeps crashing, left on its error page"}`,
+            ),
+        );
+      },
       downloads: {
         owns: (guid) =>
           generation === this.#browserGeneration && (this.#downloads?.owns(guid) ?? false),
@@ -427,6 +509,162 @@ export class BrowserRuntime {
     });
     this.#navigation = new BrowserNavigation(this.#control, targets);
     this.#accounts = new BrowserAccounts(required(this.#targets));
+  }
+
+  // The supervisor's one decision about a failed Chromium: restart it in place, or retire the
+  // runtime when it is not running normally or has failed too often. True while a restart owns it.
+  #browserFailed(kind: BrowserFailureKind, cause?: string): boolean {
+    if (this.#restarting) return true;
+    if (this.#processes.closed || this.#lifetime.signal.aborted) return false;
+    const now = performance.now();
+    this.#restarts = this.#restarts.filter((at) => now - at < BROWSER_RESTART_WINDOW_MS);
+    if (
+      !this.#ready ||
+      this.#signInMode !== "standard" ||
+      this.#signInChanging ||
+      this.#restarts.length >= BROWSER_RESTARTS
+    ) {
+      void this.#failure(kind, cause, false).then((failure) =>
+        this.#log(`the browser failed (${failure.detail}); stopping`),
+      );
+      void this.stop().catch(() => {});
+      return false;
+    }
+    this.#restarts.push(now);
+    const task = this.#restartBrowser(kind, cause, this.#restarts.length);
+    this.#restarting = task;
+    this.#pending.add(task);
+    void task.finally(() => this.#pending.delete(task));
+    return true;
+  }
+
+  // Revokes the failed browser's authority, waits until its whole process group has exited, then
+  // starts Chromium on the same profile, blank: a restored session leaves keyboard focus outside
+  // the page, and a page that crashed the browser must not open again by itself.
+  async #restartBrowser(kind: BrowserFailureKind, cause: string | undefined, attempt: number) {
+    this.#ready = false;
+    this.#browserGeneration++;
+    clearInterval(this.#liveness);
+    this.#supervisor = { ...this.#supervisor, state: "restarting" };
+    const downloads = this.#downloads;
+    const uploads = this.#uploads;
+    const armed = downloads?.binding;
+    try {
+      this.#targets?.close();
+    } catch {}
+    const draining = Promise.all([
+      this.#observation?.close(),
+      this.#navigation?.close(),
+      downloads?.close(),
+      uploads?.close(),
+      this.#input?.close(),
+    ]);
+    void draining.catch(() => {});
+    try {
+      await pause(BROWSER_RESTART_PAUSE_MS[attempt - 1] ?? 3000, this.#lifetime.signal);
+      const channels = await this.#processes.replaceChromium(
+        browserProcessSpecs(this.#config).chromium,
+        () => false,
+        false,
+        {
+          beforeStart: () =>
+            (
+              this.#dependencies.releaseLocks ??
+              ((signal) => releaseProfileLocks(BROWSER_PROFILE_DIR, signal))
+            )(this.#lifetime.signal),
+        },
+      );
+      downloads?.writersExited();
+      uploads?.readersExited();
+      const failure = await this.#failure(kind, cause, true);
+      this.#log(
+        `the browser failed (${failure.detail}); restarting it in place (${attempt} of ${BROWSER_RESTARTS})`,
+      );
+      await draining;
+      this.#check();
+      await this.#attachBrowser(channels);
+      this.#check();
+      // From here a failure is the new browser's own.
+      this.#restarting = undefined;
+      if (required(this.#targets).closed) throw new BrowserRuntimeError("startup");
+      this.#ready = true;
+      this.#supervisor = {
+        ...this.#supervisor,
+        state: "running",
+        restarts: this.#supervisor.restarts + 1,
+      };
+      this.#watch();
+      // The same grant collects downloads from the new browser; a refused grant leaves them off.
+      if (armed) void this.#downloads?.arm(armed, this.#lifetime.signal).catch(() => {});
+    } catch {
+      if (this.#lifetime.signal.aborted) return;
+      this.#log("the browser could not be restarted in place; stopping");
+      void this.stop().catch(() => {});
+    }
+  }
+
+  // A hung browser keeps its pipe open: ask it something harmless, and restart it when it
+  // misses twice in a row.
+  #watch(): void {
+    const generation = this.#browserGeneration;
+    const targets = this.#targets;
+    let misses = 0;
+    let asking = false;
+    clearInterval(this.#liveness);
+    this.#liveness = setInterval(() => {
+      if (asking || generation !== this.#browserGeneration || !targets || targets.closed) return;
+      asking = true;
+      const expiry = new AbortController();
+      const deadline = setTimeout(() => expiry.abort(), BROWSER_LIVENESS_ANSWER_MS);
+      targets
+        .ping(expiry.signal)
+        .then(
+          () => {
+            misses = 0;
+          },
+          () => {
+            if (generation !== this.#browserGeneration || targets.closed) return;
+            misses += 1;
+            if (misses >= BROWSER_LIVENESS_MISSES)
+              this.#browserFailed("unresponsive", "no answer to a liveness check");
+          },
+        )
+        .finally(() => {
+          clearTimeout(deadline);
+          asking = false;
+        });
+    }, BROWSER_LIVENESS_MS);
+    this.#liveness.unref?.();
+  }
+
+  // Records what failed, naming the exit status and a new out-of-memory kill when there was one.
+  async #failure(kind: BrowserFailureKind, cause: string | undefined, recovered: boolean) {
+    const oomKills = await this.#countOomKills();
+    const oom = oomKills > this.#oomKills;
+    this.#oomKills = Math.max(this.#oomKills, oomKills);
+    const exit =
+      kind === "tab_crashed" ? undefined : exitDetail(this.#processes.takeChromiumExit());
+    const detail =
+      [cause, exit, oom ? "out of memory" : undefined].filter(Boolean).join(", ") || kind;
+    const failure = { kind, detail, recovered, at: new Date().toISOString() };
+    this.#supervisor = { ...this.#supervisor, lastFailure: failure };
+    return failure;
+  }
+
+  async #countOomKills(): Promise<number> {
+    try {
+      return await (this.#dependencies.oomKills ?? cgroupOomKills)();
+    } catch {
+      return this.#oomKills;
+    }
+  }
+
+  #log(line: string): void {
+    try {
+      (this.#dependencies.log ?? ((text) => process.stderr.write(`${text}\n`)))(
+        `browserd: ${line}`,
+      );
+    } catch {}
   }
 
   async #signIn(permit: BrowserManualPermit, mode: BrowserSignInMode, signal: AbortSignal) {
@@ -529,6 +767,8 @@ export class BrowserRuntime {
 
   #fence(): void {
     this.#ready = false;
+    clearInterval(this.#liveness);
+    this.#supervisor = { ...this.#supervisor, state: "stopped" };
     // Revoke target/broker authority before aborting admitted requests. A single
     // terminal Browser.close may then flush the owned profile; no further input is admitted.
     let failed = false;

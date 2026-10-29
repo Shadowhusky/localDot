@@ -194,6 +194,7 @@ export function fakeApi(
       return { items: structuredClone(items), stopped };
     },
     control: (async () => ({ revision: 0 })) as ToolClient["control"],
+    brief: async () => {},
     appendTranscript: async (
       messages: TranscriptMessage[],
       inboxAfter?: number,
