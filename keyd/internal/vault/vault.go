@@ -409,6 +409,27 @@ func (v *Vault) Value(id string) ([]byte, error) {
 	return slices.Clone(r.value), nil
 }
 
+// Forget deletes every item the store keeps and every record, for a dot that is being removed: the
+// store's own items go too, saved logins, the push key and, on the Keychain, the bindings marker and
+// this keyd's claim, last. It reports how many records it removed.
+func (v *Vault) Forget() (int, error) {
+	store, ok := v.store.(interface{ forgetAll() error })
+	if !ok {
+		return 0, errors.New("vault: this store cannot be cleared")
+	}
+	v.change.Lock()
+	defer v.change.Unlock()
+	if err := store.forgetAll(); err != nil {
+		return 0, err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	n := len(v.records)
+	v.records = map[string]Record{}
+	v.cache, v.reads, v.failed, v.attention = map[string][]byte{}, map[string]*read{}, map[string]failure{}, map[string]Attention{}
+	return n, v.saveLocked()
+}
+
 // MigrateBindings runs the store's binding migration, if it has one, over every record, and keeps
 // which records need the user. keyd runs it once at start, before serving.
 func (v *Vault) MigrateBindings() Migration {

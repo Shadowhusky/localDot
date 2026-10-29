@@ -104,3 +104,10 @@ func (m *Memory) Delete(id string) error {
 	delete(m.values, id)
 	return nil
 }
+
+func (m *Memory) forgetAll() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	clear(m.values)
+	return nil
+}

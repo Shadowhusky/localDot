@@ -14,6 +14,17 @@ export interface KeyUseRowView {
 
 export type TimelineRow<S> = (S & { kind: "step" }) | KeyUseRowView;
 
+// A step's row, the same one for as long as the step's view is the same.
+const asRows = new WeakMap<object, unknown>();
+export function stepRow<S extends object>(step: S): S & { kind: "step" } {
+  let row = asRows.get(step) as (S & { kind: "step" }) | undefined;
+  if (!row) {
+    row = { ...step, kind: "step" };
+    asRows.set(step, row);
+  }
+  return row;
+}
+
 export function keyUseRow(k: KeyUseState): KeyUseRowView {
   const blocked = k.decision !== "allow";
   const key = k.secretId === "unknown" ? "an unknown key" : `${k.secretId} key`;
@@ -31,7 +42,7 @@ export function keyUseRow(k: KeyUseState): KeyUseRowView {
 // Stable time order: tied steps retain their input order, then tied key events retain theirs.
 // Only an uninterrupted run with the same actual key, host, and outcome is grouped. Labels
 // cannot identify a group: deny and ask share a label, and request text can contain separators.
-export function timelineRows<S extends { startT: number }>(
+export function timelineRows<S extends { startT: number } & object>(
   steps: readonly S[],
   keyUses: readonly KeyUseState[],
 ): TimelineRow<S>[] {
@@ -43,7 +54,7 @@ export function timelineRows<S extends { startT: number }>(
   let previousKey: KeyUseState | undefined;
   for (const item of items) {
     if (item.kind === "step") {
-      rows.push({ ...item.step, kind: "step" });
+      rows.push(stepRow(item.step));
       previousKey = undefined;
       continue;
     }

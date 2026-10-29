@@ -36,7 +36,7 @@ var errNoKeyring = errors.New("secret service: no unlocked keyring answers in th
 // Check stores, reads back and clears a probe item. A keyring that is locked, or that would ask on a
 // screen nobody is watching, fails at its deadline instead of waiting.
 func (s *SecretService) Check() error {
-	if s.tool.path == "" || !hasSessionBus(s.tool.env) || !validService(s.Service) {
+	if s.tool.path == "" || !hasSessionBus(s.tool.env) || !ValidService(s.Service) {
 		return errNoKeyring
 	}
 	ctx, cancel := s.tool.deadline()
@@ -70,7 +70,7 @@ func (s *SecretService) Put(id string, value []byte, binding string) error {
 	if len(value) == 0 || len(value) > maxValueLen {
 		return fmt.Errorf("secret service: store %s: want 1-%d bytes", id, maxValueLen)
 	}
-	if !bindingPattern.MatchString(binding) || !validService(s.Service) {
+	if !bindingPattern.MatchString(binding) || !ValidService(s.Service) {
 		return fmt.Errorf("secret service: store %s: invalid item (%w)", id, errUnchanged)
 	}
 	gen, err := newWriteID()
@@ -113,7 +113,7 @@ func (s *SecretService) abandon(ctx context.Context, id string) error {
 }
 
 func (s *SecretService) Get(id, binding string) ([]byte, error) {
-	if !idPattern.MatchString(id) || !bindingPattern.MatchString(binding) || !validService(s.Service) {
+	if !idPattern.MatchString(id) || !bindingPattern.MatchString(binding) || !ValidService(s.Service) {
 		return nil, errors.New("secret service: invalid secret id or binding")
 	}
 	ctx, cancel := s.tool.deadline()
@@ -173,7 +173,7 @@ func missing(r toolResult) bool {
 
 // Delete clears the head and every part, then makes sure the keyring no longer answers for either.
 func (s *SecretService) Delete(id string) error {
-	if !idPattern.MatchString(id) || !validService(s.Service) {
+	if !idPattern.MatchString(id) || !ValidService(s.Service) {
 		return errors.New("secret service: invalid secret id")
 	}
 	ctx, cancel := s.tool.deadline()
@@ -191,16 +191,25 @@ func (s *SecretService) Delete(id string) error {
 	return err
 }
 
+// forgetAll clears every item under the service at once: each value's head and parts and keyd's own.
+func (s *SecretService) forgetAll() error {
+	if !ValidService(s.Service) {
+		return errors.New("secret service: invalid service")
+	}
+	ctx, cancel := s.tool.deadline()
+	defer cancel()
+	if r := s.tool.run(ctx, nil, "clear", "service", s.Service); r.code != 0 && !missing(r) {
+		return errors.New("secret service: the keyring items could not all be cleared")
+	}
+	return nil
+}
+
 func (s *SecretService) attributes(id string) []string {
 	return []string{"service", s.Service, "account", id}
 }
 
 func (s *SecretService) part(id, part string) []string {
 	return append(s.attributes(id), "part", part)
-}
-
-func validService(service string) bool {
-	return service == "localdot-keyd" || service == "localdot-keyd-test"
 }
 
 func serviceHead(gen string, count int, binding string) string {

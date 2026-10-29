@@ -1,4 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
+import { TOKEN } from "../fixtures/start-ui-fixture.ts";
+import { skipSetup } from "../skip-setup.ts";
 import { attachFiles } from "./attach.ts";
 import { composer, expect, runAt, test } from "./harness.ts";
 
@@ -186,6 +188,65 @@ test("a message Stop left unsent waits for Edit to take it back", async ({ page,
   const chips = card.getByRole("list", { name: "Attached files" });
   await expect(chips.getByText("Uploaded to Downloads")).toHaveCount(1);
   await expect(chips).toContainText("notes.txt");
+});
+
+test("a message Stop left unsent stays out of the thread once taken back, on every device", async ({
+  page,
+  ui,
+  browser,
+}) => {
+  // The app opens three times: at first, read again, and on another device.
+  test.slow();
+  const fixture = await ui.open("running");
+  // The task's record, which Replay reads.
+  const record = async () =>
+    (
+      await (
+        await page.request.get(`${fixture.origin}/api/sessions/${fixture.sessionId}/events`, {
+          headers: { authorization: `Bearer ${TOKEN}`, accept: "application/x-ndjson" },
+        })
+      ).text()
+    )
+      .split("\n")
+      .filter(Boolean);
+  const card = await composer(page);
+  const field = card.getByRole("textbox", { name: "Message", exact: true });
+  await queue(page, card, "Then tidy up the sheet");
+  const queued = yours(page, "Then tidy up the sheet");
+  await card.getByRole("button", { name: "Stop task" }).click();
+  await expect(queued.getByText("Not sent")).toBeVisible();
+  const recorded = await record();
+  await queued.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(field).toHaveValue("Then tidy up the sheet");
+  expect(await record()).toEqual(recorded);
+
+  // Read again, the thread leaves it out, not even for a moment while it comes in, and the draft
+  // still has it.
+  await page.addInitScript(() => {
+    new MutationObserver(() => {
+      for (const tag of document.querySelectorAll(".thread-tag"))
+        if (tag.textContent === "Not sent") document.documentElement.dataset.notSent = "";
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+  });
+  // WebKit reports a request that a reload cuts off as a page error, so the page settles first.
+  await page.waitForLoadState("networkidle");
+  await page.reload();
+  await expect(yours(page, "Summarise the sample sales table")).toBeVisible();
+  await expect(yours(page, "Then tidy up the sheet")).toHaveCount(0);
+  await expect(page.locator("html")).not.toHaveAttribute("data-not-sent");
+  await expect(field).toHaveValue("Then tidy up the sheet");
+
+  const { viewport, deviceScaleFactor, isMobile, hasTouch } = test.info().project.use;
+  const other = await browser.newContext({ viewport, deviceScaleFactor, isMobile, hasTouch });
+  try {
+    const device = await other.newPage();
+    await skipSetup(device);
+    await device.goto(`${fixture.origin}/#token=${TOKEN}`);
+    await expect(yours(device, "Summarise the sample sales table")).toBeVisible();
+    await expect(yours(device, "Then tidy up the sheet")).toHaveCount(0);
+  } finally {
+    await other.close();
+  }
 });
 
 test("the files a message carried sit atop its bubble on one line that scrolls", async ({

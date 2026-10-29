@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AgentStep, emptyAgentModel } from "../agent/model.ts";
-import { showStep, wantedStep } from "../agent/step-focus.ts";
 import { appendTerminal, emptyTerminal } from "../agent/terminal-text.ts";
 import { createApi } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
@@ -171,26 +170,6 @@ describe("ActivityRail", () => {
     expect(row.textContent?.replace(/\s+/g, " ").trim()).toBe("summary.md Created · +1");
     fireEvent.click(within(row).getByRole("button"));
     expect(within(row).getByLabelText("Unified text diff").textContent).toBe("+# Report");
-  });
-
-  it("opens the step a chat row asks for, clearing a filter that hides it", () => {
-    const failing = {
-      terminal: appendTerminal(emptyTerminal(), "stderr", "no such file"),
-      status: "failed" as const,
-      tool: { name: "shell", title: "Run b", ok: false, exitCode: 2 },
-    };
-    const model = {
-      ...emptyAgentModel(),
-      steps: new Map([tool("a", "x", 1), tool("b", "x", 2, failing)]),
-    };
-    render(<ActivityRail rows={[]} sessionId="one" scale={1} api={api} agent={model} />);
-    const filter = within(screen.getByRole("radiogroup", { name: "Activity filter" }));
-    fireEvent.click(filter.getByRole("radio", { name: "Screen" }));
-    act(() => showStep("step-b"));
-    expect(screen.getByRole("button", { name: /Run b/ }).getAttribute("aria-expanded")).toBe(
-      "true",
-    );
-    expect(wantedStep()).toBeNull();
   });
 
   it("unfolds one step at a time in place, and Escape folds it and returns focus", () => {

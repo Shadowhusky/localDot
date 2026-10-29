@@ -25,6 +25,9 @@ export interface StageViewPatch {
   dim?: boolean;
   // The fields dot will type the user's answers into while it waits on them.
   fields?: readonly FieldMark[];
+  // The stream's frame rate, which caps how often the stage looks; and whether it is out of sight.
+  fps?: number;
+  hidden?: boolean;
 }
 
 // A field on one of the screens, in that screen's pixels.

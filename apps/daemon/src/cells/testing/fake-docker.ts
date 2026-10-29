@@ -18,9 +18,13 @@ export interface FakeContainer {
   };
   running: boolean;
   paused: boolean;
+  // Docker calls it paused while its runtime has thawed it, so unpause is refused (seen on Engine 29.8).
+  stuckPaused?: boolean;
   files: Map<string, Buffer>;
   changes?: { Path: string; Kind: number }[];
   exitCode: number;
+  // Docker stopped it for memory.
+  oomKilled?: boolean;
   starts: number;
   ports: Record<string, { HostIp: string; HostPort: string }[]>;
   networks: Record<string, unknown>;
@@ -133,7 +137,13 @@ export async function startFakeDocker(
     Id: idOf(c),
     Name: `/${c.name}`,
     Image: c.image ?? imageId(c.body.Image),
-    State: { Running: c.running, Paused: c.paused, ExitCode: c.exitCode, Error: "" },
+    State: {
+      Running: c.running,
+      Paused: c.paused,
+      ExitCode: c.exitCode,
+      Error: "",
+      OOMKilled: !!c.oomKilled,
+    },
     HostConfig: c.body.HostConfig,
     Config: { Image: c.body.Image, Labels: c.body.Labels ?? {} },
     NetworkSettings: { Ports: c.running ? c.ports : {}, Networks: c.networks },
@@ -404,6 +414,10 @@ export async function startFakeDocker(
         // Verified on Engine 29.2: unpause of a non-paused container is a 500, even if stopped.
         if (!pausing && !c.paused)
           return json(500, { message: `container ${c.name} is not paused` });
+        if (!pausing && c.stuckPaused)
+          return json(500, {
+            message: `Cannot unpause container ${c.name}: OCI runtime resume failed: container not paused`,
+          });
         if (!c.running || c.paused === pausing) {
           return json(409, { message: `container ${c.name} cannot ${action[2]} now` });
         }
@@ -416,6 +430,7 @@ export async function startFakeDocker(
         if (c.running) return { status: 304 };
         c.starts += 1;
         c.running = true;
+        c.oomKilled = false;
         c.ports = {};
         const bindings = (c.body.HostConfig.PortBindings as Record<string, unknown>) ?? {};
         for (const port of Object.keys(bindings)) {
@@ -426,6 +441,7 @@ export async function startFakeDocker(
       if (!c.running) return { status: 304 };
       c.running = false;
       c.paused = false;
+      c.stuckPaused = false;
       c.exitCode = 0;
       return { status: 204 };
     }

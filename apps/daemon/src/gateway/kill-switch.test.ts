@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SELFTEST_CHECKS, ulid } from "@localdot/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockerClient } from "../cells/docker.ts";
 import { CellOrchestrator, type OrchestratorDeps } from "../cells/orchestrator.ts";
 import { CellStore } from "../cells/store.ts";
@@ -150,6 +150,15 @@ describe("KillSwitch.stopSession", () => {
     expect(live.get(id)).toBeUndefined();
   });
 
+  it("says which computer it froze", async () => {
+    const { cells, live, wiring, id } = await readyCell();
+    const froze = vi.fn();
+    const killSwitch = new KillSwitch({ live, keyd: wiring, cells, settleMs: 50, froze });
+    live.start(id, SESSION, (signal) => new Promise((r) => signal.addEventListener("abort", r)));
+    expect(await killSwitch.stopSession(SESSION)).toMatchObject({ paused: true });
+    expect(froze).toHaveBeenCalledWith(id);
+  });
+
   it("freezes the desktop after a bounded wait even if the run never ends", async () => {
     const { live, killSwitch, id, desktop } = await readyCell(50);
     live.start(id, SESSION, () => new Promise(() => {}));
@@ -260,6 +269,19 @@ describe("KillSwitch.resume", () => {
     expect(desktop()?.files.get(`${CELL_FILES_DIR}/surrogates.sh`)?.toString()).toContain(
       `'${after}'`,
     );
+  });
+
+  it("restarts a computer Docker still calls paused after its runtime thawed it", async () => {
+    const { cells, live, killSwitch, id, desktop } = await readyCell();
+    live.start(id, SESSION, untilAborted);
+    await killSwitch.stopSession(SESSION);
+    const frozen = desktop();
+    if (!frozen) throw new Error("no desktop");
+    frozen.stuckPaused = true;
+    await killSwitch.resume(id);
+    await until(() => cells.get(id)?.state === "ready" && !cells.get(id)?.paused);
+    expect(desktop()).toMatchObject({ running: true, paused: false });
+    expect(desktop()?.starts).toBeGreaterThan(1);
   });
 
   it("revokes again before it mints, so a revoke Stop could not make still holds", async () => {

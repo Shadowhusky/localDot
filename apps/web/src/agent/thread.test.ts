@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { timelineRows } from "../session/key-uses.ts";
+import type { StepRowView } from "../session/session-view.ts";
 import {
   AGENT_LIMITS,
   type AgentMessage,
   type AgentQuestion,
   type AgentResult,
+  emptyAgentModel,
   type UsageCall,
 } from "./model.ts";
 import {
@@ -13,7 +16,9 @@ import {
   threadRows,
   timeLabel,
   type WorkStep,
+  type WorkStepCache,
   withWork,
+  workSteps,
 } from "./thread.ts";
 
 // ULIDs whose time part is a known wall-clock ms.
@@ -32,6 +37,8 @@ const message = (
 ): AgentMessage => ({ id, seq, at: seq * 1_000_000, role, text: id, final: true, ...extra });
 const step = (key: string, startT: number): WorkStep => ({
   key,
+  entry: { key, row: { kind: "step", id: key, startT }, keys: [] },
+  changes: [],
   testId: "step-row",
   title: key,
   meta: "",
@@ -487,4 +494,42 @@ describe("routines in the thread", () => {
     );
     expect(items.map((item) => item.kind)).toEqual(["origin", "message", "routine", "message"]);
   });
+});
+
+it("builds a work step again only when its row, its key uses or its file changes change", () => {
+  const view = (id: string, status: StepRowView["status"]): StepRowView => ({
+    id,
+    label: `Step ${id}`,
+    startT: id === "a" ? 1 : 2,
+    status,
+    durationMs: null,
+  });
+  const a = view("a", "ok");
+  const cache: WorkStepCache = new Map();
+  const model = emptyAgentModel();
+  const first = workSteps(timelineRows([a, view("b", "doing")], []), model, cache);
+  const again = workSteps(timelineRows([a, view("b", "ok")], []), model, cache);
+  expect(again[0]).toBe(first[0]);
+  expect(again[1]).not.toBe(first[1]);
+  expect(again[1]).toMatchObject({ key: "step-b", state: "done" });
+  const changed = {
+    ...model,
+    changes: [{ type: "file" as const, step: "a", path: "notes.md", op: "create" as const }],
+  } as unknown as typeof model;
+  expect(workSteps(timelineRows([a], []), changed, cache)[0]).not.toBe(first[0]);
+  const used = (t: number) => ({
+    id: `key-${t}`,
+    t,
+    secretId: "weather",
+    host: "api.weather.example",
+    method: "GET",
+    path: "/now",
+    decision: "allow" as const,
+  });
+  const once = workSteps(timelineRows([a], [used(1.5)]), model, cache)[0];
+  expect(once?.entry.keys.map((key) => key.count)).toEqual([1]);
+  const twice = workSteps(timelineRows([a], [used(1.5), used(1.6)]), model, cache)[0];
+  expect(twice).not.toBe(once);
+  expect(twice?.entry.keys.map((key) => key.count)).toEqual([2]);
+  expect(workSteps(timelineRows([a], [used(1.5), used(1.6)]), model, cache)[0]).toBe(twice);
 });

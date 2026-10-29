@@ -11,6 +11,7 @@ import type { DesktopdRegistry } from "../desktopd/registry.ts";
 import type { EventLog } from "../event-log.ts";
 import { KeyLayerError } from "../keyd/cell-wiring.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
+import { describeStartupError } from "../main-startup.ts";
 import { runPuppet } from "../puppet/runner.ts";
 import { PuppetScript } from "../puppet/script.ts";
 import type { FrameStore } from "./frames.ts";
@@ -170,6 +171,7 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
       if (err instanceof KeydUnavailableError || err instanceof KeyLayerError)
         return c.text("key protection is off: turn it back on, then resume the computer", 503);
       if (err instanceof CellControlConflict) return c.text(err.message, 409);
+      console.error(`computer ${id} could not resume: ${describeStartupError(err)}`);
       return c.text("the computer could not resume; try again", 502);
     }
     return c.body(null, 204);

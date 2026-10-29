@@ -28,6 +28,18 @@ const RESUME_ANSWERS: Record<string, string> = {
     "Key protection is off. Run localdot doctor in Terminal, then resume.",
 };
 
+// The daemon's advice when Docker's memory may not hold one more computer (dots/capacity.ts).
+export const MEMORY_ADVICE =
+  /\w+ running computers need about \d+ GB for Docker; it has \d+ GB\. [\w →,]+\./;
+
+// What the computers of every dot on this computer share: Docker's memory and network addresses.
+// These answers are already plain words, so they are shown as given.
+const SHARED_DOCKER = [
+  new RegExp(`^${MEMORY_ADVICE.source}$`),
+  /^Docker has no network addresses left for another computer\. /,
+  /^The computer copied from another dot couldn't be set up\. /,
+];
+
 // A refused request in plain words, by status: the daemon's and Docker's own text (paths, errno
 // codes, cell ids) stays out of the caption.
 export function describeRequestError(err: unknown, action?: "resume"): string {
@@ -43,6 +55,7 @@ export function describeRequestError(err: unknown, action?: "resume"): string {
     case 404:
       return GONE;
     case 409:
+      if (SHARED_DOCKER.some((answer) => answer.test(err.message))) return err.message;
       if (
         err.message.startsWith("cell records ") ||
         err.message === "unreadable cell records may retain keyd ports"

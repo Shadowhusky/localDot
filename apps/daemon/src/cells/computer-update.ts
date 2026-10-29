@@ -10,6 +10,7 @@ import {
   CellControlConflict,
   type CellOrchestrator,
   UnknownCellError,
+  UPDATE_BLOCKED,
   UPDATE_NEEDS_FRESH_START,
   UPDATE_RECORDS_UNREADABLE,
   UPDATE_UNFINISHED,
@@ -18,6 +19,7 @@ import { type GateRelay, HOST_RELAY } from "./relay.ts";
 import { newCellToken } from "./secrets.ts";
 import { desktopSpec, gateSpec, type StreamOptions } from "./spec.ts";
 import { SYSTEM_BASE, SYSTEM_SOURCE } from "./system-migration.ts";
+import { SystemMigrationConflict } from "./system-migration-plan.ts";
 import { requireUnmodifiedSystem } from "./system-state.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -110,6 +112,11 @@ class Lasting extends CellControlConflict {
 }
 const NOT_HERE = "The new version isn't on this Mac yet.";
 
+// The new desktop image an update was refused for because an installed app changed files it
+// needs. The same image would meet the same files again; a different one is offered afresh.
+const UpdateRefusal = z.strictObject({ v: z.literal(1), cellId: Id, image: ImageId });
+type UpdateRefusal = z.infer<typeof UpdateRefusal>;
+
 export interface ComputerUpdatesDeps {
   home: string;
   docker: Docker;
@@ -132,10 +139,12 @@ export class ComputerUpdates {
   readonly #relay: () => Promise<GateRelay>;
   readonly #stream: StreamOptions;
   readonly #everyMs: number;
-  readonly #available = new Map<string, boolean>();
+  readonly #offers = new Map<string, "available" | "blocked">();
   readonly #unfinished = new Set<string>();
   readonly #stuck = new Set<string>();
+  readonly #refused = new Map<string, string>();
   readonly #ledger: ComputerUpdateStore | undefined;
+  readonly #refusals: PrivateRecords<UpdateRefusal> | undefined;
 
   constructor(deps: ComputerUpdatesDeps) {
     this.#docker = deps.docker;
@@ -152,12 +161,29 @@ export class ComputerUpdates {
     } catch {
       console.error("computer update records are unreadable");
     }
+    // Without them a refused update is only offered once more.
+    try {
+      const refusals = new PrivateRecords(deps.home, "computer-update-refusals", (raw, id) => {
+        const refusal = UpdateRefusal.parse(raw);
+        if (refusal.cellId !== id) throw new Error("Computer update refusal owner mismatch");
+        return refusal;
+      });
+      for (const refusal of refusals.list()) this.#refused.set(refusal.cellId, refusal.image);
+      this.#refusals = refusals;
+    } catch {
+      console.error("computer update refusals are unreadable");
+    }
   }
 
   // A new version is ready, or an earlier update is waiting to be finished.
   available(id: string): boolean {
     if (this.#stuck.has(id)) return false;
-    return this.#available.get(id) === true || this.#unfinished.has(id);
+    return this.#offers.get(id) === "available" || this.#unfinished.has(id);
+  }
+
+  // A new version is here, but installed apps changed files it needs, so Update isn't offered.
+  blocked(id: string): boolean {
+    return this.#offers.get(id) === "blocked" && !this.#unfinished.has(id) && !this.#stuck.has(id);
   }
 
   // Its update can't be finished or rolled back, so only a fresh start brings it back.
@@ -172,15 +198,19 @@ export class ComputerUpdates {
 
   // Resolves whether the answer changed. A Docker that does not answer changes nothing.
   async check(record: CellRecord): Promise<boolean> {
-    let outdated: boolean;
+    let target: string | undefined;
     try {
-      outdated = await this.#outdated(record);
+      target = await this.#outdated(record);
     } catch {
       return false;
     }
-    const before = this.#available.get(record.id) === true;
-    this.#available.set(record.id, outdated);
-    return before !== outdated;
+    const refused = this.#refused.get(record.id);
+    if (target && refused && refused !== target) this.#forget(record.id);
+    const offer = !target ? undefined : refused === target ? "blocked" : "available";
+    const before = this.#offers.get(record.id);
+    if (offer) this.#offers.set(record.id, offer);
+    else this.#offers.delete(record.id);
+    return before !== offer;
   }
 
   // Checks every computer now and then at an interval, telling `changed` which ones changed.
@@ -212,6 +242,8 @@ export class ComputerUpdates {
     if (!this.#migrate) await requireUnmodifiedSystem(this.#docker, owned.desktop);
     const targets = await this.#targets();
     if (!targets) throw new CellControlConflict(NOT_HERE);
+    if (this.#refused.get(record.id) === targets.images.desktop)
+      throw new CellControlConflict(UPDATE_BLOCKED);
     await this.#preflight?.(record, targets.images.desktop);
   }
 
@@ -226,11 +258,16 @@ export class ComputerUpdates {
     if (old.some((raw) => raw?.State?.Running !== false))
       throw new CellControlConflict("Your computer has to be off to update.");
     if (ROLES.every((role, i) => old[i]?.Image === images[role])) {
-      this.#available.set(record.id, false);
+      this.#offers.delete(record.id);
       return record;
     }
-    if (this.#migrate) images.desktop = await this.#migrate(record, images.desktop);
-    else await requireUnmodifiedSystem(this.#docker, previous.desktop);
+    if (this.#migrate) {
+      const target = images.desktop;
+      images.desktop = await this.#migrate(record, target).catch((error: unknown) => {
+        if (error instanceof SystemMigrationConflict) this.#refuse(record.id, target);
+        throw error;
+      });
+    } else await requireUnmodifiedSystem(this.#docker, previous.desktop);
     // The gate's token follows the gate image: a computer made before the gate captured apps that
     // ignore the proxy gets one, and one going onto a gate image that can't capture gives it up.
     // It is kept before anything is made, so the new containers match it from their first start.
@@ -342,8 +379,9 @@ export class ComputerUpdates {
           [...ids].map((id) => ({ role, id })),
         );
     }
-    this.#available.delete(record.id);
+    this.#offers.delete(record.id);
     this.#stuck.delete(record.id);
+    this.#forget(record.id);
     if (entry) this.#settle(record.id);
   }
 
@@ -391,7 +429,8 @@ export class ComputerUpdates {
     const next: CellRecord = { ...record, ownership: { ...record.ownership, gate, desktop } };
     if (!equal(record.ownership, next.ownership)) save(next);
     this.#settle(record.id);
-    this.#available.set(record.id, false);
+    this.#offers.delete(record.id);
+    this.#forget(record.id);
     return next;
   }
 
@@ -417,6 +456,25 @@ export class ComputerUpdates {
     this.#unfinished.add(entry.cellId);
   }
 
+  #refuse(cellId: string, image: string): void {
+    this.#refused.set(cellId, image);
+    this.#offers.set(cellId, "blocked");
+    try {
+      this.#refusals?.write(cellId, { v: 1, cellId, image });
+    } catch {
+      console.error(`computer update refusal for ${cellId} could not be saved`);
+    }
+  }
+
+  #forget(cellId: string): void {
+    if (!this.#refused.delete(cellId)) return;
+    try {
+      this.#refusals?.remove(cellId);
+    } catch {
+      console.error(`computer update refusal for ${cellId} could not be cleared`);
+    }
+  }
+
   #settle(cellId: string): void {
     this.#store().remove(cellId);
     this.#unfinished.delete(cellId);
@@ -432,22 +490,23 @@ export class ComputerUpdates {
     return raw as ContainerInspect & { Id: string };
   }
 
-  async #outdated(record: CellRecord): Promise<boolean> {
-    if (!record.ownership || this.pending(record.id)) return false;
+  // The new desktop image, when the computer runs older images than its tags name now.
+  async #outdated(record: CellRecord): Promise<string | undefined> {
+    if (!record.ownership || this.pending(record.id)) return undefined;
     const images = (await this.#targets())?.images;
-    if (!images) return false;
+    if (!images) return undefined;
     for (const role of ROLES) {
       const raw = await this.#container(record.ownership[role]);
-      if (!raw || !ImageId.safeParse(raw.Image).success) return false;
+      if (!raw || !ImageId.safeParse(raw.Image).success) return undefined;
       if (raw.Image !== images[role]) {
-        if (role !== "desktop") return true;
+        if (role !== "desktop") return images.desktop;
         const image = await this.#read<{ Config?: { Labels?: Record<string, string> } }>(
           `/images/${encodeURIComponent(ImageId.parse(raw.Image))}/json`,
         );
-        if (image?.Config?.Labels?.[SYSTEM_BASE] !== images[role]) return true;
+        if (image?.Config?.Labels?.[SYSTEM_BASE] !== images[role]) return images.desktop;
       }
     }
-    return false;
+    return undefined;
   }
 
   async #targets(): Promise<{ images: Record<Role, string>; capture: boolean } | undefined> {
@@ -540,6 +599,7 @@ export async function updateComputer(
   // An Update already admitted holds the computer's one idle operation until it is done.
   if (cell.updating || d.live.idleOperationPending(id))
     throw new ComputerUpdateRefused("Your computer is already updating.");
+  if (cell.updateBlocked) throw new ComputerUpdateRefused(UPDATE_BLOCKED);
   if (!cell.updateAvailable) throw new ComputerUpdateRefused("Your computer is up to date.");
   const busy = () => new ComputerUpdateRefused("Wait for dot to finish, or stop the task first.");
   const sessionId = d.live.get(id);

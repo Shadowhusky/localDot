@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseEvent } from "./events.ts";
+import { PlanUsageReply } from "./subscription.ts";
 
 const envelope = { v: 1, id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", seq: 0, t: 0, agent: "main" } as const;
 const data = {
@@ -46,5 +47,44 @@ describe("subscription usage protocol", () => {
     expect(() =>
       parse({ ...data, windows: [{ window: "primary", usedPercent: 1, costUSD: 1 }] }),
     ).toThrow();
+  });
+  it("carries when a reached limit lifts", () => {
+    const reached = { ...data, limitReached: true, limitResetsAt: 1790900000 };
+    expect(parse(reached).data).toEqual(reached);
+    expect(() => parse({ ...reached, limitResetsAt: -1 })).toThrow();
+  });
+});
+
+describe("plan usage reply", () => {
+  const plan = {
+    provider: "claude-code",
+    plan: "max",
+    windows: [
+      {
+        window: "primary",
+        usedPercent: 42,
+        windowMinutes: 300,
+        resetsAt: 1790900000,
+        observedAt: 1,
+      },
+    ],
+    limitReached: false,
+    observedAt: 2,
+  };
+  it("keeps when each window was read", () => {
+    expect(PlanUsageReply.parse({ plans: [plan], checking: ["chatgpt"] })).toEqual({
+      plans: [plan],
+      checking: ["chatgpt"],
+    });
+  });
+  it("refuses a plan twice, a window twice or a window without its reading time", () => {
+    for (const reply of [
+      { plans: [plan, plan], checking: [] },
+      { plans: [{ ...plan, windows: [plan.windows[0], plan.windows[0]] }], checking: [] },
+      { plans: [{ ...plan, windows: [{ window: "primary", usedPercent: 1 }] }], checking: [] },
+      { plans: [{ ...plan, provider: "anthropic" }], checking: [] },
+      { plans: [], checking: ["anthropic"] },
+    ])
+      expect(PlanUsageReply.safeParse(reply).success).toBe(false);
   });
 });

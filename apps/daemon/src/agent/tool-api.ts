@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { serve } from "@hono/node-server";
 import {
   BrainEvent,
+  BriefPost,
   MAX_BRAIN_EVENTS,
   TOOL_API_PORT,
   ToolCallRequest,
@@ -241,6 +242,17 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
           session.setStatus("running");
       }
     }
+    return c.body(null, 204);
+  });
+  app.post("/v1/subagents", async (c) => {
+    const { session, generation } = c.var;
+    const signal = AbortSignal.any([session.abort.signal, generation.signal, c.req.raw.signal]);
+    const parsed = BriefPost.safeParse(await jsonBody(c.req.raw, signal));
+    session.check(generation, signal);
+    if (!parsed.success) return c.text("invalid subagent brief", 400);
+    const post = BriefPost.safeParse(redactValue(parsed.data, deps.redactorFor(session)));
+    if (!post.success) return c.text("invalid subagent brief", 400);
+    deps.transcripts.saveBrief(session.id, post.data.brief);
     return c.body(null, 204);
   });
   app.post("/v1/tools/:name", async (c) => {

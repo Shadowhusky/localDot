@@ -11,6 +11,7 @@ import {
   type AskFieldRecord,
   CONVERSATION_LIST,
   CONVERSATION_TASKS,
+  CONVERSATION_WITHDRAWN,
   type ConversationEntry,
   type ConversationSnapshot,
   EARLIER_CHARS,
@@ -32,6 +33,13 @@ const FILE = "conversation.json";
 const Stored = z.strictObject({
   v: z.literal(1),
   current: z.string().regex(ULID_PATTERN).nullable(),
+});
+// Beside a task's log: the messages Stop left unsent that the user took back to edit.
+const withdrawnFile = (sessionId: string) => `sessions/${sessionId}/withdrawn.json`;
+const WITHDRAWN_BYTES = 64 * 1024;
+const Withdrawn = z.strictObject({
+  v: z.literal(1),
+  messages: z.array(z.string().regex(ULID_PATTERN)),
 });
 // A session.start and the task's first message sit in the first lines of a task's log.
 const HEAD_BYTES = 16 * 1024;
@@ -120,7 +128,44 @@ export class Conversations {
 
   snapshot(): ConversationSnapshot {
     const current = this.current();
-    return current ? this.chain(current) : { sessions: [], more: false };
+    if (!current) return { sessions: [], more: false };
+    const chain = this.chain(current);
+    const withdrawn = chain.sessions.flatMap((id) => this.#withdrawn(id));
+    return withdrawn.length
+      ? { ...chain, withdrawn: withdrawn.slice(-CONVERSATION_WITHDRAWN) }
+      : chain;
+  }
+
+  // Edit on a message Stop left unsent: its words, once the task's log shows Stop left it so. That
+  // it was taken back is kept beside the log rather than in it, as Replay reads the log, and an
+  // ended task's record would grow for it.
+  withdrawStopped(sessionId: string, messageId: string): string | undefined {
+    if (!this.has(sessionId) || !ULID_PATTERN.test(messageId)) return undefined;
+    let text: string | undefined;
+    let stopped = false;
+    for (const event of this.#events(sessionId)) {
+      if (event.type === "message.user" && event.data.messageId === messageId)
+        text = event.data.text;
+      else if (event.type === "message.delivery" && event.data.messageId === messageId)
+        stopped = event.data.state === "cancelled" && event.data.reason === "stopped";
+    }
+    if (text === undefined || !stopped) return undefined;
+    const kept = this.#withdrawn(sessionId);
+    if (!kept.includes(messageId))
+      this.#files.write(
+        withdrawnFile(sessionId),
+        `${JSON.stringify({ v: 1, messages: [...kept, messageId] })}\n`,
+      );
+    return text;
+  }
+
+  #withdrawn(sessionId: string): string[] {
+    try {
+      const text = this.#files.text(withdrawnFile(sessionId), WITHDRAWN_BYTES);
+      return text === undefined ? [] : Withdrawn.parse(JSON.parse(text)).messages;
+    } catch {
+      return [];
+    }
   }
 
   // The tasks of the conversation that ends with this one, oldest first.

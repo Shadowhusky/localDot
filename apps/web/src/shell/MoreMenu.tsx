@@ -16,7 +16,14 @@ export interface MoreItem {
 
 // Where a phone keeps what a wider screen shows in its top bar: at the toolbar's trailing end, its
 // menu rising from the button.
-export function MoreMenu({ items }: { items: readonly MoreItem[] }) {
+export function MoreMenu({
+  items,
+  onOpen,
+}: {
+  items: readonly MoreItem[];
+  // Asked as it opens, so what it lists is fresh.
+  onOpen?(): void;
+}) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   return (
@@ -29,7 +36,10 @@ export function MoreMenu({ items }: { items: readonly MoreItem[] }) {
         icon="more-horizontal"
         label="More"
         {...triggerProps("menu", open)}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          onOpen?.();
+          setOpen(true);
+        }}
       />
       <Menu
         open={open}

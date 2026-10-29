@@ -44,15 +44,16 @@ export const BUILT_IN_TOOLS: readonly string[] = Object.freeze([
   "Write",
 ]);
 
-// Every tool call asks here: localDot's own in-process server is allowed, anything else refused.
 const PREFIX = `mcp__${LOCALDOT_SERVER}__`;
 // Connected apps' tools are served by the same in-process server, which checks each against the
 // task's own list.
+export const isLocaldotTool = (name: string): boolean =>
+  LOCALDOT_TOOLS.includes(name) ||
+  (name.startsWith(PREFIX) && isConnectorToolName(name.slice(PREFIX.length)));
+
+// Every tool call asks here: localDot's own in-process server is allowed, anything else refused.
 export const onlyLocaldot: CanUseTool = async (name, input, { mcpServer }) =>
-  (LOCALDOT_TOOLS.includes(name) ||
-    (name.startsWith(PREFIX) && isConnectorToolName(name.slice(PREFIX.length)))) &&
-  mcpServer?.source === "sdk" &&
-  mcpServer.name === LOCALDOT_SERVER
+  isLocaldotTool(name) && mcpServer?.source === "sdk" && mcpServer.name === LOCALDOT_SERVER
     ? { behavior: "allow", updatedInput: input }
     : { behavior: "deny", message: "Only localDot's tools are available." };
 

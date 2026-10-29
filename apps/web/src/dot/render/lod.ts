@@ -17,8 +17,12 @@ export interface LodDetail {
   // A soft reflection of the key light in each eye and a shaded eye fill.
   gloss: boolean;
   shadow: boolean;
-  // The longest a calm view waits between renders.
+  // The longest a calm view waits between renders. Breathing reads as still at about 9 fps, and a
+  // calm dot is on screen for the whole of a task.
   calmGapMs: number;
+  // The longest it waits between renders while a prop's loops (a caret, a sweep) run: 20 fps
+  // reads as smooth at the dock's size, and a task keeps a prop out most of the time.
+  loopGapMs: number;
 }
 
 const BADGE: LodDetail = {
@@ -28,6 +32,7 @@ const BADGE: LodDetail = {
   gloss: false,
   shadow: false,
   calmGapMs: 250,
+  loopGapMs: 33,
 };
 const GLANCE: LodDetail = {
   eyeScale: 1,
@@ -35,14 +40,15 @@ const GLANCE: LodDetail = {
   snap: false,
   gloss: true,
   shadow: true,
-  calmGapMs: 33,
+  calmGapMs: 110,
+  loopGapMs: 33,
 };
 
 // A glyph-sized live view draws like a badge; Dot shows the static Glyph there instead.
 export const LOD_DETAIL: Record<Lod, LodDetail> = {
   glyph: BADGE,
   badge: BADGE,
-  presence: { ...GLANCE, gloss: false, shadow: false },
+  presence: { ...GLANCE, gloss: false, shadow: false, loopGapMs: 50 },
   glance: GLANCE,
   hero: GLANCE,
 };

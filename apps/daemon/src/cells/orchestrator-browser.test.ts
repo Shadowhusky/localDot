@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockerClient } from "./docker.ts";
-import { CellOrchestrator } from "./orchestrator.ts";
+import { CellOrchestrator, type OrchestratorDeps } from "./orchestrator.ts";
 import { CellStore } from "./store.ts";
 import { startFakeDocker } from "./testing/fake-docker.ts";
 
@@ -18,7 +18,7 @@ async function waitFor(check: () => boolean) {
   expect(check()).toBe(true);
 }
 
-async function setup() {
+async function setup(extra: Partial<OrchestratorDeps> = {}) {
   const home = mkdtempSync(join(tmpdir(), "localdot-parent-browser-"));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
   const docker = await startFakeDocker();
@@ -47,6 +47,7 @@ async function setup() {
     watchEveryMs: 0,
     sleep: async () => {},
     readyTimeoutMs: 1000,
+    ...extra,
   });
   cleanup.push(() => cells.dispose());
   const created = await cells.create({ scale: 2 });
@@ -215,6 +216,74 @@ describe("parent computer owns its browser lifecycle", () => {
     expect(test.cells.browserAvailable(test.id)).toBe(false);
     test.stop.mockResolvedValue(undefined);
     await test.cells.reconcile();
+    await waitFor(() => test.cells.browserAvailable(test.id));
+  });
+});
+
+describe("a browser stop that could not be confirmed doesn't keep the browser closed for good", () => {
+  it("tries the computer's unconfirmed browser stop again until it is confirmed", async () => {
+    const test = await setup({ browserStopRetryMs: [10] });
+    test.stop.mockRejectedValueOnce(new Error("Docker busy"));
+    await expect(test.cells.withLifecycle(test.id, async () => {})).rejects.toThrow(
+      "browser shutdown",
+    );
+    expect(test.cells.browserPending(test.id)).toBe("unconfirmed");
+    await waitFor(() => test.cells.browserAvailable(test.id));
+    expect(test.stop).toHaveBeenCalledTimes(2);
+    expect(test.cells.browserPending(test.id)).toBeUndefined();
+  });
+
+  it("lets a complete browser recovery lift what a reconcile without keyd left closed", async () => {
+    const unconfirmed = vi.fn();
+    const test = await setup({ browsersUnconfirmed: unconfirmed, browserStopRetryMs: [60_000] });
+    // keyd is not up yet when the daemon reconciles its computers.
+    test.stop.mockRejectedValue(new Error("keyd offline"));
+    await expect(test.cells.reconcile()).rejects.toThrow("browser shutdown");
+    expect(unconfirmed).toHaveBeenCalledOnce();
+    await waitFor(() => test.cells.get(test.id)?.state === "ready");
+    expect(test.cells.browserAvailable(test.id)).toBe(false);
+    expect(test.cells.browserPending(test.id)).toBe("unconfirmed");
+    // keyd is back: a browser recovery confirms every browser stopped.
+    test.stop.mockResolvedValue(undefined);
+    const confirmed = test.cells.confirmBrowsers();
+    confirmed();
+    expect(test.cells.browserAvailable(test.id)).toBe(true);
+  });
+
+  it("keeps closed a browser whose stop failed after that recovery began", async () => {
+    const test = await setup({ browserStopRetryMs: [60_000] });
+    const confirmed = test.cells.confirmBrowsers();
+    test.stop.mockRejectedValueOnce(new Error("uncertain"));
+    await expect(test.cells.withLifecycle(test.id, async () => {})).rejects.toThrow(
+      "browser shutdown",
+    );
+    confirmed();
+    expect(test.cells.browserAvailable(test.id)).toBe(false);
+    test.cells.confirmBrowsers()();
+    expect(test.cells.browserAvailable(test.id)).toBe(true);
+  });
+
+  it("tells listeners as soon as the browser may start again after a lifecycle operation", async () => {
+    const test = await setup();
+    const seen: boolean[] = [];
+    test.cells.subscribe((cell) => {
+      if (cell.id === test.id) seen.push(test.cells.browserAvailable(test.id));
+    });
+    await test.cells.withLifecycle(test.id, async () => {});
+    expect(seen.at(-1)).toBe(true);
+  });
+
+  it("leaves to a reconcile under way what only it can confirm", async () => {
+    const test = await setup();
+    const drain = Promise.withResolvers<void>();
+    test.stop.mockImplementationOnce(() => drain.promise);
+    const confirmed = test.cells.confirmBrowsers();
+    const recovering = test.cells.reconcile();
+    confirmed();
+    expect(test.cells.browserAvailable(test.id)).toBe(false);
+    expect(test.cells.browserPending(test.id)).toBe("stopping");
+    drain.resolve();
+    await recovering;
     await waitFor(() => test.cells.browserAvailable(test.id));
   });
 });

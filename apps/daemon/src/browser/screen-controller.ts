@@ -3,6 +3,7 @@ import { type ManualInput, ULID_PATTERN, ulid } from "@localdot/protocol";
 import type {
   BrowserActionPermit,
   BrowserManualPermit,
+  BrowserStatus,
 } from "../../../../packages/protocol/src/browser-control.ts";
 import type { BrowserDownloadBinding } from "../../../../packages/protocol/src/browser-downloads.ts";
 import {
@@ -61,7 +62,12 @@ export interface ScreenControllerDeps {
   readonly desktopGeometry: ScreenGeometry;
   desktopReady(): boolean;
   browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get"> &
-    Partial<Pick<BrowserOrchestrator, "health">>;
+    Partial<
+      Pick<
+        BrowserOrchestrator,
+        "health" | "status" | "failure" | "noteProblem" | "noteOutage" | "problem"
+      >
+    >;
   // Why the web browser could not be shown, for the daemon's log.
   report?(message: string): void;
   // The browser outlives sessions, so its control revisions are counted across them.
@@ -89,17 +95,50 @@ export class ScreenControlError extends Error {
 class SignInStillHeldError extends ScreenControlError {}
 
 export class ScreenUnavailableError extends Error {
-  constructor(screen: ScreenName, starting = false) {
+  constructor(
+    screen: ScreenName,
+    starting = false,
+    readonly problem?: string,
+    readonly status?: BrowserStatus,
+  ) {
     super(
       screen === "desktop"
         ? "The desktop isn't ready right now. Try switching to it again in a moment."
-        : starting
-          ? "The web browser is still starting. Try switching to it again in a few seconds."
-          : "The web browser couldn't open. Don't sign in on the desktop's Chromium or launch another browser as a workaround. Retry the visible web browser once after recovery, then tell the user what you couldn't do if it still fails.",
+        : status
+          ? browserUnavailableText(status)
+          : starting
+            ? "The web browser is still starting. Try switching to it again in a few seconds."
+            : `The web browser couldn't open.${problem ? ` What went wrong: ${problem.replace(/\.$/u, "")}.` : ""} localDot restarts it by itself and keeps the saved sign-ins. Don't sign in on the desktop's Chromium or launch another browser as a workaround. Retry the visible web browser once after about 20 seconds (switch_screen with restart: true restarts it if it stays stuck), then tell the user what you couldn't do if it still fails.`,
     );
     this.name = "ScreenUnavailableError";
   }
 }
+
+const seconds = (iso: string, now: number) =>
+  `${Math.max(1, Math.round((Date.parse(iso) - now) / 1000))} seconds`;
+
+// What dot hears when the web browser can't be shown, from the daemon's own account of it: why,
+// what clears it and when localDot tries again, and that it will be told once the browser runs.
+export function browserUnavailableText(status: BrowserStatus, now = Date.now()): string {
+  const what =
+    status.state === "starting"
+      ? `The web browser is still starting${status.readyBy ? `; it is ready, or has failed, within ${seconds(status.readyBy, now)}` : ""}.`
+      : `The web browser couldn't open (${status.reason ?? status.state}): ${(status.problem ?? "it isn't running").replace(/\.$/u, "")}.`;
+  const next =
+    status.reason === "failed" && !status.retryAt
+      ? "localDot has stopped starting it by itself: switch_screen with restart: true tries once more (open pages are lost); if that fails too, tell the user what you couldn't do."
+      : status.state === "restarting"
+        ? "It restarts by itself within seconds; switch to it again in about 20 seconds."
+        : `${status.clears ? `${status.clears} ` : ""}${status.retryAt ? `localDot tries again in about ${seconds(status.retryAt, now)}. ` : ""}You'll get a note from localDot when it is running; until then don't retry it: do what doesn't need it, or wait.`;
+  return `${what} ${next} Its saved sign-ins are kept. Don't sign in on the desktop's Chromium or open another browser instead.`;
+}
+
+// dot may restart the web browser itself, once a minute at most; a request sooner reuses the
+// browser that restart started.
+export const BROWSER_RESTART_REQUEST_MS = 60_000;
+// While browserd restarts its Chromium in place, a switch waits this long for it.
+const RESTART_WAIT_MS = 500;
+const RESTART_WAITS = 40;
 
 // This object belongs to a session, not a model call. Display selection never grants
 // input: every operation needs a lease bound to this screen, generation and revision.
@@ -129,6 +168,7 @@ export class ScreenController {
   #finishing = false;
   #downloads: DownloadCollection | undefined;
   #downloadEpoch = 0;
+  #restartRequested = Number.NEGATIVE_INFINITY;
   readonly #downloadRetiring = new Set<Promise<void>>();
 
   constructor(private readonly deps: ScreenControllerDeps) {
@@ -246,9 +286,25 @@ export class ScreenController {
     this.#tabs.set(lease, tabId);
   }
 
-  async switchTo(screen: ScreenName, raw: ScreenScope): Promise<ScreenSwitchData> {
+  // restart: dot found the web browser stuck and asks for it to be started again first.
+  async switchTo(
+    screen: ScreenName,
+    raw: ScreenScope,
+    options: { restart?: boolean } = {},
+  ): Promise<ScreenSwitchData> {
     if (!ScreenName.safeParse(screen).success) return Promise.reject(new ScreenControlError());
-    return this.#switch(screen, this.#scope(raw), false);
+    return this.#switch(
+      screen,
+      this.#scope(raw),
+      false,
+      false,
+      screen === "browser" && options.restart === true,
+    );
+  }
+
+  // The web browser as the daemon sees it, for dot's work context.
+  async browserStatus() {
+    return this.deps.browser.status?.(this.deps.parentCellId);
   }
 
   // The user's own hold opens a page in the web browser for them before they take it. The grant
@@ -608,6 +664,7 @@ export class ScreenController {
     scope: ScreenScope,
     handback: boolean,
     forUser = false,
+    restart = false,
   ): Promise<ScreenSwitchData> {
     const epoch = this.#epoch;
     const guard = () => {
@@ -648,7 +705,7 @@ export class ScreenController {
           let cellId = this.deps.parentCellId;
           let geometry = this.#desktopGeometry;
           if (screen === "browser") {
-            const owner = await this.#prepare(operationScope);
+            const owner = await this.#prepare(operationScope, restart);
             guard();
             // A fresh physical user receipt owns profile restoration. Reconnect before
             // granting the agent anything, attaching recording, or inspecting the page.
@@ -768,10 +825,7 @@ export class ScreenController {
             this.#reportBrowser(error);
             const desktop = await this.#onDesktop(scope, operationScope, handback, recorded);
             if (handback && desktop) return desktop;
-            throw new ScreenUnavailableError(
-              screen,
-              this.deps.browser.get(this.deps.parentCellId)?.state === "starting",
-            );
+            throw await this.#browserUnavailable();
           } else if (handback || integrity) {
             // An unrecorded screen, an unjournaled selection or a daemon handback that cannot
             // complete is uncertainty the session cannot continue past.
@@ -783,6 +837,7 @@ export class ScreenController {
             throw new ScreenUnavailableError(
               screen,
               this.deps.browser.get(this.deps.parentCellId)?.state === "starting",
+              this.deps.browser.problem?.(this.deps.parentCellId),
             );
           }
           throw new ScreenControlError();
@@ -796,6 +851,21 @@ export class ScreenController {
       () => {},
     );
     return operation;
+  }
+
+  // A browser the daemon reports as running failed this switch for a reason of its own; anything
+  // else is described as the daemon sees it, and dot hears when it runs again.
+  async #browserUnavailable(): Promise<ScreenUnavailableError> {
+    const parent = this.deps.parentCellId;
+    const status = await this.deps.browser.status?.(parent).catch(() => undefined);
+    const unready = status?.state === "ready" ? undefined : status;
+    if (unready) this.deps.browser.noteOutage?.(parent);
+    return new ScreenUnavailableError(
+      "browser",
+      this.deps.browser.get(parent)?.state === "starting",
+      unready?.problem ?? this.deps.browser.problem?.(parent),
+      unready,
+    );
   }
 
   #reportBrowser(error: unknown): void {
@@ -892,7 +962,7 @@ export class ScreenController {
             // A background tab fails geometry admission with HTTP 409 (refused), not
             // 503 (unavailable). Continue to the visible popup. Only this read-only
             // probe is retried; input keeps its original tab and is never replayed.
-            if (error.code === "refused") settling = true;
+            if (error.code === "refused" || error.code === "restarting") settling = true;
             else if (error.code !== "unavailable") throw error;
           }
         }
@@ -905,8 +975,23 @@ export class ScreenController {
     }
   }
 
-  async #prepare(scope: BrowserScope): Promise<BrowserOwner> {
-    for (let restarted = false; ; restarted = true) {
+  async #prepare(scope: BrowserScope, restart = false): Promise<BrowserOwner> {
+    if (restart && performance.now() - this.#restartRequested >= BROWSER_RESTART_REQUEST_MS) {
+      this.#restartRequested = performance.now();
+      const why = await this.deps.browser.failure?.(this.deps.parentCellId).catch(() => undefined);
+      scope.check();
+      this.deps.report?.(`dot restarted the web browser${why ? `: ${why}` : ""}`);
+      this.deps.browser.noteProblem?.(
+        this.deps.parentCellId,
+        `dot restarted the web browser${why ? ` (${why})` : ""}.`,
+      );
+      this.#browser?.client.close();
+      this.#browser = undefined;
+      await this.deps.browser.stop(this.deps.parentCellId);
+      scope.check();
+    }
+    let stopped = false;
+    for (let waits = 0; ; ) {
       const endpoint = await this.deps.browser.start(this.deps.parentCellId);
       if (
         endpoint.parentCellId !== this.deps.parentCellId ||
@@ -929,13 +1014,29 @@ export class ScreenController {
         return owner;
       } catch (error) {
         scope.check();
-        // A running browser that no longer answers as ready is started again, once.
-        const answer = restarted
-          ? "ready"
-          : await this.deps.browser.health?.(this.deps.parentCellId);
+        // A browser restarting its Chromium in place is waited for; one that no longer answers as
+        // ready is started again, once.
+        const answer = await this.deps.browser.health?.(this.deps.parentCellId);
         scope.check();
-        if (answer !== "unready" && answer !== "silent") throw error;
-        this.deps.report?.("the web browser stopped working; starting it again");
+        if (answer === "restarting" && waits++ < RESTART_WAITS) {
+          await sleep(RESTART_WAIT_MS, undefined, { signal: scope.signal });
+          scope.check();
+          continue;
+        }
+        if (stopped || (answer !== "unready" && answer !== "silent" && answer !== "restarting"))
+          throw error;
+        stopped = true;
+        const why = await this.deps.browser
+          .failure?.(this.deps.parentCellId)
+          .catch(() => undefined);
+        scope.check();
+        this.deps.report?.(
+          `the web browser stopped working; starting it again${why ? `: ${why}` : ""}`,
+        );
+        this.deps.browser.noteProblem?.(
+          this.deps.parentCellId,
+          `The web browser stopped working${why ? ` (${why})` : ""}; localDot started it again.`,
+        );
         owner.client.close();
         if (this.#browser === owner) this.#browser = undefined;
         // Only the browser that failed is stopped, never one started since.

@@ -17,6 +17,7 @@ import {
   isToolName,
   KEYD_REBOUND,
   KEYD_REENTER,
+  KEYD_VAULT_LOCKED,
   RESUME_WAIT_REASON,
   SECRET_ID_PATTERN,
   STALL,
@@ -110,7 +111,7 @@ export interface AgentHooks {
 
 export interface AgentOptions {
   boot: BootConfig;
-  api: Pick<ToolClient, "tool" | "inbox" | "appendTranscript" | "control">;
+  api: Pick<ToolClient, "tool" | "inbox" | "appendTranscript" | "control" | "brief">;
   sink: EventSink;
   models: { main: LanguageModel; fast?: LanguageModel; local?: LanguageModel };
   history: ModelMessage[];
@@ -198,10 +199,12 @@ function responseHeader(error: APICallError, name: string): string | undefined {
 const KEY_STALLS: Record<string, string> = {
   [KEYD_REENTER]: STALL.keyReenter,
   [KEYD_REBOUND]: STALL.keyRebound,
+  [KEYD_VAULT_LOCKED]: STALL.keysLocked,
 };
 
 // A model call keyd refused for a key only the user can fix: its stored value has to be entered
-// again, or the key was changed outside localDot. The id is empty when keyd named no valid key.
+// again, the key was changed outside localDot, or the vault holding it is locked. The id is empty
+// when keyd named no valid key.
 export function keyToFix(error: unknown): { stall: string; id: string } | undefined {
   if (!APICallError.isInstance(error)) return undefined;
   const stall = KEY_STALLS[responseHeader(error, "x-keyd-reason") ?? ""];
@@ -259,6 +262,7 @@ export class Agent {
   #failed = 0;
   #nudges = 0;
   #compactFailedAt = 0;
+  #continued = false;
 
   constructor(o: AgentOptions) {
     this.#o = o;
@@ -391,6 +395,11 @@ export class Agent {
     );
     return driveHarness({
       onSubagent: (data) => sink.push({ type: "subagent.state", data }),
+      subagents: {
+        resume: boot.subagents ?? [],
+        // A brief that does not arrive leaves the last one; the child's next step sends another.
+        brief: (brief) => void this.#o.api.brief(brief, signal).catch(() => {}),
+      },
       sessionId: boot.sessionId,
       task: boot.task,
       signal,
@@ -530,6 +539,8 @@ export class Agent {
         sink.endText();
         batch = { step, done: [], failed: false, paused: false };
         if (step.calls.length) this.#nudges = 0;
+        const continued = this.#continued;
+        this.#continued = false;
         return {
           text: step.text,
           calls: step.calls.map((call) => ({
@@ -537,6 +548,7 @@ export class Agent {
             name: call.toolName,
             input: call.input,
           })),
+          ...(continued ? { continued } : {}),
         };
       },
       beforeNativeCall: async (id, toolSignal) => {
@@ -692,6 +704,7 @@ export class Agent {
       if (items.length) {
         await this.#deliverFollowUps(signal);
         this.#o.sink.state("thinking");
+        this.#continued = true;
         return true;
       }
     }

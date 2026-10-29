@@ -86,9 +86,11 @@ it.each([false, true])(
         posted.filter((m) => m.type === "stats" && m.sourceId === 2),
         "source stats are the manual-admission acknowledgement, so cannot precede the new canvas render",
       ).toHaveLength(0);
+      // The stage draws at most at 60 Hz, so each try comes a display frame or more after the last.
+      now = 17;
       if (failFirstRender) {
         state.failRender = true;
-        tick?.(8);
+        tick?.(now);
         expect(state.painted).toBe("old");
         expect(posted.some((m) => m.type === "stats" && m.sourceId === 2)).toBe(false);
         expect(posted.some((m) => m.type === "error")).toBe(true);
@@ -97,9 +99,9 @@ it.each([false, true])(
         now = 500;
         tick?.(now);
         expect(posted.some((m) => m.type === "stats" && m.sourceId === 2)).toBe(false);
-        now = 1000;
+        now = 1100;
       }
-      tick?.(16);
+      tick?.(now);
       expect(state.painted).toBe("new");
       expect(posted.some((m) => m.type === "stats" && m.sourceId === 2)).toBe(true);
     } finally {

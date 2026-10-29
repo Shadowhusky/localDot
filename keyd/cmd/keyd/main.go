@@ -44,10 +44,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/webpush"
 )
 
-const (
-	version         = "0.1.0"
-	keychainService = "localdot-keyd"
-)
+const version = "0.1.0"
 
 // Keep the managed lease reachable until os.Exit, beyond daemon cleanup and handler drainage.
 var managedLifetimeLease *os.File
@@ -56,6 +53,8 @@ type Config struct {
 	Home  string
 	Vault string
 	Ports egress.PortRange
+	// The Keychain and keyring service this dot's items live under; empty means the first dot's.
+	KeychainService string
 	// The zero value asks nobody, as the tests do.
 	Discovery netguard.Discovery
 	Service   *admin.ServiceIdentity
@@ -114,12 +113,13 @@ func run(args []string, stderr io.Writer) int {
 	ports := fs.String("ports", "4760-4789", "the listener ports the daemon may ask for")
 	natpmp := fs.String("natpmp", "on", "ask the router for the public address keyd denies: on or off")
 	stun := fs.String("stun", netguard.DefaultSTUN, "STUN server asked when the router gives no public address, or off")
+	keychainService := fs.String("keychain-service", vault.DefaultService, "the Keychain and keyring service for this dot's keys: localdot-keyd, or localdot-keyd.<id> for another dot on this machine")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	portRange, err := parsePorts(*ports)
-	if err != nil || !slices.Contains(vaultModes, *store) || (*natpmp != "on" && *natpmp != "off") || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "keyd: -ports wants MIN-MAX, -vault auto, keychain, secret-service, file, passphrase or memory, -natpmp on or off")
+	if err != nil || !slices.Contains(vaultModes, *store) || (*natpmp != "on" && *natpmp != "off") || fs.NArg() != 0 || !vault.DotService(*keychainService) {
+		fmt.Fprintln(stderr, "keyd: -ports wants MIN-MAX, -vault auto, keychain, secret-service, file, passphrase or memory, -natpmp on or off, -keychain-service localdot-keyd or localdot-keyd.<id>")
 		return 2
 	}
 	service, err := managedServiceFromEnv(os.LookupEnv)
@@ -145,7 +145,7 @@ func run(args []string, stderr io.Writer) int {
 			discovery.HTTPS = netguard.HTTPSPublicIPv4
 		}
 	}
-	d, err := start(Config{Home: *home, Vault: *store, Ports: portRange, Discovery: discovery, Service: service})
+	d, err := start(Config{Home: *home, Vault: *store, Ports: portRange, KeychainService: *keychainService, Discovery: discovery, Service: service})
 	if err != nil {
 		fmt.Fprintf(stderr, "keyd: %v\n", err)
 		return 1
@@ -207,7 +207,11 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if d.log, err = audit.Open(filepath.Join(dir, "audit.jsonl")); err != nil {
 		return err
 	}
-	host := systemVaultHost(runtime.GOOS)
+	keychainService := cfg.KeychainService
+	if keychainService == "" {
+		keychainService = vault.DefaultService
+	}
+	host := systemVaultHost(runtime.GOOS, keychainService)
 	if cfg.host != nil {
 		host = *cfg.host
 	}
@@ -273,7 +277,7 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	}
 	api := &admin.Server{Manager: d.manager, Vault: v, Logins: vault.NewLogins(store), Registry: registry, Opener: opener, Settings: settings,
 		Budget: budget, Audit: d.log, Events: hub, BootID: d.BootID, Version: version, Hairpin: d.public,
-		VaultState: backend.state, Unlock: backend.unlock}
+		VaultState: backend.state, Unlock: backend.unlock, Home: cfg.Home}
 	if cfg.Service != nil {
 		api.Service = &admin.ServiceProcessIdentity{ServiceIdentity: *cfg.Service, PID: os.Getpid()}
 	}

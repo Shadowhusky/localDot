@@ -13,7 +13,7 @@ import {
   desktopSpec,
   egressNetworkSpec,
   GATE_OFFSET,
-  GATE_PORTS,
+  gatePorts,
   gateSpec,
   ISOLATED_GATEWAY_OPTION,
   internalNetworkSpec,
@@ -300,12 +300,13 @@ export function inspectCanaryContainer(
         (!canaryObject(host.Tmpfs) || Object.keys(host.Tmpfs).length !== 0))
     )
       throw failure();
+    // Exactly the relays an installed computer's gate has, the previews' included.
     if (
       !canaryObject(host.PortBindings) ||
-      Object.keys(host.PortBindings).sort().join() !== Object.values(GATE_PORTS).sort().join()
+      Object.keys(host.PortBindings).sort().join() !== gatePorts(record).sort().join()
     )
       throw failure();
-    for (const key of Object.values(GATE_PORTS)) {
+    for (const key of gatePorts(record)) {
       const binding = host.PortBindings[key];
       if (
         !Array.isArray(binding) ||

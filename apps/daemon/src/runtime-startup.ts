@@ -1,11 +1,17 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 export type RuntimeState = "waiting" | "recovering" | "ready" | "failed";
+// Docker's /info waits on container locks, so it can stall while a container is stopping.
+const BUSY_GRACE_MS = 30_000;
 /** Wait outside recovery: missing Docker must not mutate persistent computer/fence records.
  * Recovery executes once, so key/agent subscriptions cannot be duplicated by a retry loop. */
 export class RuntimeStartup {
   state: RuntimeState = "waiting";
-  constructor(private readonly check: () => Promise<void>) {}
+  #readyAt = Number.NEGATIVE_INFINITY;
+  constructor(
+    private readonly check: () => Promise<void>,
+    private readonly now: () => number = Date.now,
+  ) {}
   async run(
     recover: () => Promise<void>,
     options: {
@@ -19,6 +25,7 @@ export class RuntimeStartup {
       options.signal.throwIfAborted();
       try {
         await this.check();
+        this.#readyAt = this.now();
         break;
       } catch {
         /* Engine not ready yet. */
@@ -43,9 +50,14 @@ export class RuntimeStartup {
   async snapshot(): Promise<{ docker: "ready" | "unavailable"; startup: RuntimeState }> {
     try {
       await this.check();
+      this.#readyAt = this.now();
       return { docker: "ready", startup: this.state };
-    } catch {
-      return { docker: "unavailable", startup: this.state };
+    } catch (error) {
+      // A refused or missing socket is gone; a reply that is only late is a busy engine.
+      const busy =
+        (error as { timedOut?: unknown })?.timedOut === true &&
+        this.now() - this.#readyAt < BUSY_GRACE_MS;
+      return { docker: busy ? "ready" : "unavailable", startup: this.state };
     }
   }
 }

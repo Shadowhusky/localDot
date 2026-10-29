@@ -1,8 +1,5 @@
-import { StepImage } from "./StepImage.tsx";
-import { useStepPreviewEnvironment } from "./StepPreview.tsx";
-import { TerminalViewer } from "./TerminalViewer.tsx";
 import "../ui/work-layout.css";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { count } from "../copy/format.ts";
 import type { TaskRow } from "../session/status.ts";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
@@ -10,8 +7,10 @@ import { GroupHeading } from "../ui/GroupHeading.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
-import { ActivityRow } from "./ActivityRow.tsx";
-import { clock, groupReadSteps } from "./activity.ts";
+import { ActivityDetail } from "./ActivityDetails.tsx";
+import { ActivityRow, RunningTime, revealOpened } from "./ActivityRow.tsx";
+import { clock, groupReadSteps, hasDetails } from "./activity.ts";
+import { useStepPreviewEnvironment } from "./StepPreview.tsx";
 import type { WorkStep } from "./thread.ts";
 import { useFollowScroll } from "./useFollowScroll.ts";
 
@@ -21,8 +20,8 @@ export interface LiveWork {
   row?: TaskRow;
   // What dot is doing now, as the HUD says it.
   label: string;
-  // Session ms, ticking while the task runs.
-  nowMs: number;
+  // Session ms, when the line is not to keep its own time while the task runs.
+  nowMs?: number;
 }
 
 const PAUSED = new Set<TaskRow | undefined>(["pausing", "paused", "resuming", "recovery"]);
@@ -58,13 +57,7 @@ function useHeldLines(text: string) {
   return { lines, retire };
 }
 
-export function LiveWorkLine({
-  steps,
-  startMs,
-  live,
-  ended,
-  onOpenStep,
-}: {
+interface LiveWorkLineProps {
   steps: readonly WorkStep[];
   startMs: number | null;
   // What the turn cost, said once its work is over.
@@ -72,9 +65,55 @@ export function LiveWorkLine({
   // Given for the latest turn while its task has not ended.
   live: LiveWork | null;
   ended?: "done" | "stopped" | "interrupted" | "error";
-  // Shows a step in Activity with its details; only for the task Activity is showing.
-  onOpenStep?(key: string): void;
-}) {
+  // The task an earlier turn's steps were recorded in; otherwise the task the thread shows.
+  sessionId?: string;
+}
+
+// A turn's steps are rebuilt with every event; they draw the same while what the line shows of
+// them is the same.
+export function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean {
+  return (
+    was === now ||
+    (was.length === now.length &&
+      was.every((step, index) => {
+        const other = now[index];
+        return (
+          step === other ||
+          (!!other &&
+            step.key === other.key &&
+            step.readGroup === other.readGroup &&
+            step.entry === other.entry &&
+            step.changes === other.changes &&
+            step.state === other.state &&
+            step.title === other.title &&
+            step.meta === other.meta &&
+            step.time === other.time &&
+            step.startT === other.startT &&
+            step.endT === other.endT)
+        );
+      }))
+  );
+}
+
+const sameLine = (was: LiveWorkLineProps, now: LiveWorkLineProps) =>
+  sameSteps(was.steps, now.steps) &&
+  was.startMs === now.startMs &&
+  was.spend?.usd === now.spend?.usd &&
+  was.spend?.estimated === now.spend?.estimated &&
+  was.live?.phase === now.live?.phase &&
+  was.live?.row === now.live?.row &&
+  was.live?.label === now.live?.label &&
+  was.live?.nowMs === now.live?.nowMs &&
+  was.ended === now.ended &&
+  was.sessionId === now.sessionId;
+
+export const LiveWorkLine = memo(function LiveWorkLine({
+  steps,
+  startMs,
+  live,
+  ended,
+  sessionId,
+}: LiveWorkLineProps) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -116,9 +155,8 @@ export function LiveWorkLine({
     (end, step) => Math.max(end ?? 0, step.endT ?? step.startT),
     null,
   );
-  // Only a running task's clock ticks; a wait or an end shows the time its steps took.
-  const endMs = running ? (live?.nowMs ?? null) : lastEnd;
-  const elapsed = startMs !== null && endMs !== null ? Math.max(0, endMs - startMs) : null;
+  // Only a running task's clock ticks (RunningTime); a wait or an end shows the time its steps took.
+  const elapsed = startMs !== null && lastEnd !== null ? Math.max(0, lastEnd - startMs) : null;
   const took = (verb: string, joiner: string) =>
     elapsed === null ? verb : `${verb} ${joiner} ${clock(elapsed)}`;
   const failed = steps.filter((step) => step.state === "failed").length;
@@ -140,13 +178,10 @@ export function LiveWorkLine({
           : ended === "error"
             ? took("Ended", "after")
             : took("Worked", "for");
-  const meta = [
-    count(steps.length, "step", "steps"),
-    failed ? `${failed} failed` : "",
-    running && elapsed !== null ? clock(elapsed) : "",
-  ]
+  const meta = [count(steps.length, "step", "steps"), failed ? `${failed} failed` : ""]
     .filter(Boolean)
     .join(" · ");
+  const counting = running && startMs !== null;
   return (
     <div ref={root} className="thread-work" data-running={running || undefined}>
       <Collapse open={running} className="thread-work-now">
@@ -162,6 +197,7 @@ export function LiveWorkLine({
               }}
             >
               {line.text}
+              <span className="thread-work-glint" data-text={line.text} aria-hidden="true" />
             </span>
           ))}
         </p>
@@ -188,7 +224,13 @@ export function LiveWorkLine({
             />
             <span>
               {summary}
-              {meta && <span className="thread-work-meta num"> · {meta}</span>}
+              {meta && (
+                <span className="thread-work-meta num">
+                  {" · "}
+                  {meta}
+                  {counting && <RunningTime from={startMs} nowMs={live?.nowMs} lead=" · " />}
+                </span>
+              )}
             </span>
           </>
         }
@@ -196,25 +238,25 @@ export function LiveWorkLine({
         onOpenChange={setOpen}
       >
         {steps.length ? (
-          <WorkHistory steps={steps} startMs={startMs} onOpenStep={onOpenStep} />
+          <WorkHistory steps={steps} startMs={startMs} sessionId={sessionId} />
         ) : (
           <p className="thread-note">No steps yet.</p>
         )}
       </Disclosure>
     </div>
   );
-}
+}, sameLine);
 
 const estimateWorkStep = () => 56;
 const readGroupOf = (step: WorkStep) => step.readGroup;
 function WorkHistory({
   steps,
   startMs,
-  onOpenStep,
+  sessionId,
 }: {
   steps: readonly WorkStep[];
   startMs: number | null;
-  onOpenStep?(key: string): void;
+  sessionId?: string;
 }) {
   const id = useId();
   const preview = useStepPreviewEnvironment();
@@ -258,12 +300,7 @@ function WorkHistory({
           if (!item) return null;
           const { step, group } = item;
           const open = !!group && expanded.has(group.key);
-          const output = step?.output;
-          const canPreview =
-            !!onOpenStep &&
-            !!preview &&
-            !!output &&
-            (!!output.output.length || !!output.images?.length);
+          const detail = !!preview && !!step && hasDetails(step.entry, step.changes);
           return (
             <li
               key={item.key}
@@ -280,27 +317,25 @@ function WorkHistory({
                   view={step.meta === step.title ? { ...step, meta: "" } : step}
                   open={opened === step.key}
                   onToggle={
-                    canPreview
+                    detail
                       ? (trigger) => {
                           follow.anchorTo(trigger);
-                          setOpened((was) => (was === step.key ? null : step.key));
+                          const opening = opened !== step.key;
+                          setOpened(opening ? step.key : null);
+                          if (opening) revealOpened(trigger.closest(".activity-row"));
                         }
                       : undefined
                   }
-                  onSelect={onOpenStep && (() => onOpenStep(step.key))}
-                  selectLabel="Show in Activity"
                 >
-                  {canPreview && output && preview && (
-                    <TerminalViewer step={output}>
-                      {output.images?.map((image) => (
-                        <StepImage
-                          key={image.name}
-                          api={preview.api}
-                          sessionId={preview.sessionId}
-                          image={image}
-                        />
-                      ))}
-                    </TerminalViewer>
+                  {detail && preview && (
+                    <ActivityDetail
+                      entry={step.entry}
+                      changes={step.changes}
+                      api={preview.api}
+                      sessionId={sessionId ?? preview.sessionId}
+                      scale={preview.scale}
+                      replay={false}
+                    />
                   )}
                 </ActivityRow>
               ) : (

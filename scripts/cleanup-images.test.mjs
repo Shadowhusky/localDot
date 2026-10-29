@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { cleanupImages, planImages, readReferences } from "./cleanup-images.mjs";
+import {
+  cleanupImages,
+  planImages,
+  readAllReferences,
+  readReferences,
+  registeredHomes,
+} from "./cleanup-images.mjs";
 
 const now = 2_000_000;
 const id = (n) => `sha256:${n.toString(16).padStart(64, "0")}`;
@@ -191,4 +197,41 @@ test("a labelled untagged build is eligible only outside retention", () => {
   expect(
     plan([image(1, [], { Labels: { "localdot.image-role": "brain" } })]).map((i) => i.id),
   ).toEqual([id(1)]);
+});
+
+test("protects what every registered dot still uses, and refuses an unreadable list", async () => {
+  const [main, work] = [await home(), await home()];
+  const config = await mkdtemp(join(tmpdir(), "localdot-image-cleanup-config-"));
+  dirs.push(config);
+  const env = { XDG_CONFIG_HOME: config };
+  expect(await registeredHomes(main, env)).toEqual([main]);
+  await mkdir(join(config, "localdot"));
+  const registry = join(config, "localdot", "dots.json");
+  await writeFile(
+    registry,
+    JSON.stringify({
+      v: 1,
+      dots: [
+        { id: "main", home: main },
+        { id: "work", home: work },
+      ],
+    }),
+  );
+  const homes = await registeredHomes(main, env);
+  expect(homes).toEqual([main, work]);
+  await writeFile(join(work, "safety", "snapshot.json"), JSON.stringify({ image: id(9) }));
+  const found = await readAllReferences(homes);
+  expect(found.references).toEqual([id(9)]);
+  expect(
+    planImages({
+      images: [image(9, ["localdot/system-state:01abc"])],
+      containers: [],
+      references: found.references,
+      now,
+    }),
+  ).toEqual([]);
+  await writeFile(registry, "{");
+  await expect(registeredHomes(main, env)).rejects.toThrow("can't be read");
+  await writeFile(registry, JSON.stringify({ v: 1, dots: [{ id: "x", home: "relative" }] }));
+  await expect(registeredHomes(main, env)).rejects.toThrow("isn't valid");
 });

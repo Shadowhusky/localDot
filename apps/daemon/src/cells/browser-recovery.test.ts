@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
-import { BrowserRecovery } from "./browser-recovery.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { KeydHealth } from "../keyd/monitor.ts";
+import { BrowserRecovery, credentialsChanged } from "./browser-recovery.ts";
 
 const healthy = { online: true, audit: { ok: true } };
 
@@ -115,5 +116,97 @@ describe("browser admission follows credential recovery", () => {
     drain.resolve();
     await closed;
     expect(owner.available).toBe(false);
+  });
+});
+
+describe("a recovery that fails while keyd is healthy", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is tried again by itself with backoff until it completes, and says so meanwhile", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-29T08:00:00.000Z") });
+    const reconcile = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("Docker did not answer"))
+      .mockRejectedValueOnce(new Error("Docker did not answer"))
+      .mockResolvedValue(undefined);
+    const recovered = vi.fn();
+    const report = vi.fn();
+    const owner = new BrowserRecovery({ reconcile }, { retryMs: [1000, 4000], recovered, report });
+    await expect(owner.recover(healthy)).rejects.toThrow("Docker did not answer");
+    expect(owner.available).toBe(false);
+    expect(owner.pending).toEqual({
+      failure: "Docker did not answer",
+      retryAt: new Date("2026-10-29T08:00:01.000Z"),
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(reconcile).toHaveBeenCalledTimes(2);
+    expect(owner.pending.retryAt).toEqual(new Date("2026-10-29T08:00:05.000Z"));
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(reconcile).toHaveBeenCalledTimes(3);
+    expect(owner.available).toBe(true);
+    expect(owner.pending).toEqual({});
+    expect(recovered).toHaveBeenCalledOnce();
+    expect(report.mock.calls).toEqual([
+      ["browser recovery could not complete (Docker did not answer); trying again by itself"],
+      ["browser recovery completed; the web browser may start again"],
+    ]);
+  });
+
+  it("waits for keyd instead when keyd is what failed, and a newer recovery replaces a retry", async () => {
+    vi.useFakeTimers();
+    const reconcile = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("keyd offline"))
+      .mockRejectedValueOnce(new Error("Docker busy"))
+      .mockResolvedValue(undefined);
+    const owner = new BrowserRecovery({ reconcile }, { retryMs: [1000] });
+    await expect(owner.recover({ online: false })).rejects.toThrow("keyd offline");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(reconcile).toHaveBeenCalledOnce();
+    await expect(owner.recover(healthy)).rejects.toThrow("Docker busy");
+    await owner.recover(healthy);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(reconcile).toHaveBeenCalledTimes(3);
+    expect(owner.available).toBe(true);
+  });
+
+  it("stops retrying once closed", async () => {
+    vi.useFakeTimers();
+    const reconcile = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("Docker busy"))
+      .mockResolvedValue(undefined);
+    const owner = new BrowserRecovery({ reconcile }, { retryMs: [1000] });
+    await expect(owner.recover(healthy)).rejects.toThrow("Docker busy");
+    await owner.close();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(reconcile).toHaveBeenCalledTimes(2);
+    expect(owner.available).toBe(false);
+  });
+});
+
+describe("which keyd changes restart the browser", () => {
+  const up: KeydHealth = { online: true, bootId: "one", audit: { ok: true } };
+  it("ignores the hairpin probe and error texts that change every discovery round", () => {
+    expect(
+      credentialsChanged(
+        { ...up, hairpin: { state: "unknown", addresses: 0, error: "read udp4 :49537" } },
+        { ...up, hairpin: { state: "unknown", addresses: 0, error: "read udp4 :51697" } },
+      ),
+    ).toBe(false);
+    expect(
+      credentialsChanged({ online: false, error: "timeout" }, { online: false, error: "refused" }),
+    ).toBe(false);
+  });
+  const changes: [string, KeydHealth][] = [
+    ["went offline", { online: false }],
+    ["restarted", { ...up, bootId: "two" }],
+    ["lost its audit log", { ...up, audit: { ok: false } }],
+  ];
+  it.each(changes)("restarts it when keyd %s", (_change, now) => {
+    expect(credentialsChanged(now, up)).toBe(true);
+    expect(credentialsChanged(up, now)).toBe(true);
   });
 });

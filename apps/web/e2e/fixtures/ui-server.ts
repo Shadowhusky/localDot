@@ -1,5 +1,5 @@
 import { createECDH, webcrypto } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
@@ -20,17 +20,24 @@ import {
   type ComputerOperationStep,
   DEFAULT_RESEARCH_BUDGET,
   EXPECTED_OPERATION_MS,
+  emptyManifest,
+  fromBase64url,
   type KeydRecord,
   microsToMs,
   msToMicros,
   type Point,
+  RECORDING_DIR,
+  RECORDING_VIDEO,
   type ResearchBudget,
   type ReviseLink,
+  SEAL_INFO,
+  type Sealed,
   type SessionOrigin,
   type TaskModelSelection,
   type ToolName,
   toBase64url,
   ulid,
+  VaultUnlock,
 } from "@localdot/protocol";
 import { normalizeCatalog, providerById } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
@@ -52,6 +59,7 @@ import { Conversations } from "../../../daemon/src/agent/conversation.ts";
 import { manualStreamRoute } from "../../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import { PeopleStore } from "../../../daemon/src/agent/people.ts";
+import { PlanUsageStore } from "../../../daemon/src/agent/plan-usage.ts";
 import { RecentActivity } from "../../../daemon/src/agent/recent-activity.ts";
 import { ResearchLog } from "../../../daemon/src/agent/research.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
@@ -73,6 +81,9 @@ import { plainForm } from "../../../daemon/src/agent/tools/ask.ts";
 import { createApp } from "../../../daemon/src/app.ts";
 import { AppEvents, appEventsRoute } from "../../../daemon/src/app-events.ts";
 import type { AccountsDeps } from "../../../daemon/src/browser/accounts.ts";
+import { BrowserStreams } from "../../../daemon/src/browser/streams.ts";
+import { browserViewerApi } from "../../../daemon/src/browser/viewer.ts";
+import type { ReadyBrowser } from "../../../daemon/src/cells/browser-orchestrator.ts";
 import { ComputerUpdateRefused } from "../../../daemon/src/cells/computer-update.ts";
 import type { CellControls } from "../../../daemon/src/cells/orchestrator.ts";
 import { TicketRegistry } from "../../../daemon/src/cells/secrets.ts";
@@ -107,6 +118,7 @@ import { LiveSessions } from "../../../daemon/src/gateway/live.ts";
 import { buttonLabel, dragLabel, keyLabel, moveLabel } from "../../../daemon/src/gateway/text.ts";
 import { setPublicOrigin } from "../../../daemon/src/guard.ts";
 import { createNotify } from "../../../daemon/src/notify/wiring.ts";
+import { writeManifest } from "../../../daemon/src/recorder/manifest.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
 import { nextDue } from "../../../daemon/src/routines/schedule.ts";
@@ -119,6 +131,7 @@ import { Thumbnails } from "../../../daemon/src/sessions/thumbs.ts";
 import { readStatic } from "../../../daemon/src/static-files.ts";
 import { UI_CSP } from "../../../daemon/src/static-ui.ts";
 import { attachUpgradeRouter } from "../../../daemon/src/upgrade-router.ts";
+import { fakeDots } from "./fake-dots.ts";
 import {
   bootStep,
   type CellKind,
@@ -189,7 +202,17 @@ let claudeCodeState = (env.QA_CLAUDE_CODE || undefined) as
   | "signed_out"
   | "signed_in"
   | undefined;
-let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard" | "locked";
+let keydMode = (env.QA_KEYD ?? "online") as
+  | "online"
+  | "offline"
+  | "audit"
+  | "guard"
+  | "locked"
+  | "setup";
+// The passphrase vault's own passphrase: QA_PASSPHRASE, or the first one chosen in setup.
+let vaultPassphrase: string | undefined = env.QA_PASSPHRASE ?? "correct horse battery";
+let passphraseVault = keydMode === "locked" || keydMode === "setup";
+if (keydMode === "setup") vaultPassphrase = undefined;
 const replays = Number(env.QA_REPLAYS ?? 2);
 const autonomy = env.QA_AUTONOMY === "careful" ? CAREFUL_AUTONOMY : undefined;
 
@@ -262,14 +285,33 @@ const SETTINGS: Record<string, AgentSettings> = {
   } as AgentSettings,
 };
 
-// The desktop repaints one still frame, so the picture is steady while the stream stays live.
-const DESKTOP_JS = `
+// A screen's client repaints one still frame, so the picture is steady while the stream stays
+// live. It asks the fixture whether its screen's picture is dropped (POST /__qa/picture/drop): then
+// its video goes, as Selkies' does while it reconnects, and comes back with a new track on resume.
+const clientJs = (paint: string) => `
 const canvas=document.createElement('canvas');canvas.width=2560;canvas.height=1600;
-const ctx=canvas.getContext('2d');const still=new Image();still.src='/owned-desktop.webp';
-setInterval(()=>{if(still.complete)ctx.drawImage(still,0,0,canvas.width,canvas.height)},100);
-const video=document.getElementById('videoStream');video.srcObject=canvas.captureStream(10);
-video.play().catch(()=>{});
+const ctx=canvas.getContext('2d');${paint}
+const screen=location.pathname.includes('/browser/')?'browser':'desktop';
+let video=document.getElementById('videoStream');
+const show=(down)=>{
+  if(down&&video){for(const t of video.srcObject?.getTracks()??[])t.stop();video.remove();video=null}
+  if(down||(video&&video.srcObject))return;
+  if(!video){video=document.createElement('video');video.id='videoStream';video.autoplay=true;video.muted=true;document.body.append(video)}
+  video.srcObject=canvas.captureStream(10);video.play().catch(()=>{});
+};
+const ask=()=>fetch('/__qa/picture',{cache:'no-store'}).then((r)=>r.json()).then((s)=>show(s[screen])).catch(()=>{});
+ask();setInterval(ask,1000);
 `;
+const DESKTOP_JS = clientJs(`const still=new Image();still.src='/owned-desktop.webp';
+setInterval(()=>{if(still.complete)ctx.drawImage(still,0,0,canvas.width,canvas.height)},100);`);
+// The web browser's screen: a plain page, so a switch shows at a glance.
+const BROWSER_JS = clientJs(`const page=()=>{
+ctx.fillStyle='#f4f5f7';ctx.fillRect(0,0,2560,1600);ctx.fillStyle='#dfe3e8';ctx.fillRect(0,0,2560,150);
+ctx.fillStyle='#ffffff';ctx.fillRect(320,40,1920,70);ctx.fillStyle='#5b6470';ctx.font='40px sans-serif';
+ctx.fillText('example.test/orders',360,90);ctx.fillStyle='#1f2a37';ctx.font='bold 96px sans-serif';
+ctx.fillText('Orders',320,400);ctx.fillStyle='#c7ccd3';
+for(let n=0;n<8;n++)ctx.fillRect(320,500+n*120,1400-(n%3)*240,56);
+};setInterval(page,100);`);
 
 let skew = 0;
 // While held, session time moves only by the seed's own steps, so a seeded task lasts the same
@@ -281,6 +323,37 @@ const log = new EventLog(HOME, clock);
 const conversations = new Conversations(HOME, log);
 const cells = new FakeOrchestrator();
 const tickets = new TicketRegistry();
+// The web browser of the computer: the daemon's own BrowserStreams over a browser that is either
+// running (an instance) or not; a restart is one instance stopping and the next starting.
+const browserCellId = ulid();
+let browserInstance: string | null = null;
+const browserChanged = new Set<(parentCellId: string) => void>();
+const browserStreams = new BrowserStreams({
+  parents: cells,
+  browser: {
+    endpoints: (parentCellId): ReadyBrowser | undefined =>
+      parentCellId === cellId && browserInstance
+        ? {
+            browserCellId,
+            parentCellId,
+            instance: browserInstance,
+            browserd: { baseUrl: "http://owned-browser.invalid", token: "" },
+            stream: { baseUrl: "http://owned-browser.invalid", authorization: "" },
+          }
+        : undefined,
+    subscribe(listener) {
+      browserChanged.add(listener);
+      return () => browserChanged.delete(listener);
+    },
+  },
+  tickets,
+});
+function runBrowser(on: boolean): void {
+  browserInstance = on ? ulid() : null;
+  for (const listener of browserChanged) listener(cellId);
+}
+// Which screens' pictures are dropped (POST /__qa/picture/drop).
+const pictureDown = { desktop: false, browser: false };
 const live = new LiveSessions();
 const frames = new FrameStore(HOME);
 let cellId = ulid();
@@ -423,7 +496,11 @@ async function updateCell(id: string): Promise<void> {
 
 let keys = SAMPLE_KEYS;
 const settingsStore = new SettingsStore(HOME);
-settingsStore.put(SETTINGS[settingsMode] ?? {});
+// QA_DOT_NAME names this localDot, as the user tells it apart from their others.
+settingsStore.put({
+  ...(SETTINGS[settingsMode] ?? {}),
+  ...(env.QA_DOT_NAME ? { name: env.QA_DOT_NAME } : {}),
+});
 const memory = new MemoryStore(HOME);
 const people = new PeopleStore(HOME);
 const recentActivity = new RecentActivity({ log, isLive: (id) => live.cellOf(id) !== undefined });
@@ -1141,6 +1218,60 @@ if (env.QA_PAST === "1")
     });
   }
 
+// QA_LIBRARY=<n> seeds n ended tasks over the last four months for Replay's library: long and short
+// titles, every ending, and videos from a few megabytes to gigabytes (sparse files, so nothing is
+// written). As retention would have, a video older than 30 days is gone and its screenshots stay.
+const LIBRARY_TITLES = [
+  "Compare the home insurance quotes from the three providers in my inbox and draft a summary table with the cheapest option highlighted",
+  "Tidy the Downloads folder",
+  "Research standing desks under £400 with good reviews and a ten-year warranty, then list the five best with links",
+  "Book a table for four on Friday at eight",
+  "Rename the holiday photos by the date they were taken",
+  "Fill in the council tax direct debit form with the details from my last statement and check every field before sending",
+  "Summarise the Q3 board deck",
+  "Find a plumber near me",
+];
+const LIBRARY_ENDINGS = ["done", "done", "stopped", "done", "error", "done", null, "done"] as const;
+const LIBRARY_SIZES = [1.9 * 1024 ** 3, 240 * 1024 ** 2, 12 * 1024 ** 2, 640 * 1024 ** 2];
+const DAY = 24 * HOUR;
+function sparse(file: string, size: number) {
+  mkdirSync(join(file, ".."), { recursive: true, mode: 0o700 });
+  writeFileSync(file, "", { mode: 0o600 });
+  truncateSync(file, size);
+}
+for (let n = 0; n < Number(env.QA_LIBRARY ?? 0); n++) {
+  const ago = 3 * HOUR + n * 3 * DAY + (n % 3) * HOUR;
+  backdated(ago, () => {
+    const title = LIBRARY_TITLES[n % LIBRARY_TITLES.length] ?? "Sample task";
+    heldAt = base.nowMicros();
+    const id = log.createSession(title);
+    const append = (type: string, data: Record<string, unknown>, step?: string) =>
+      log.append(id, { agent: "main", type, data, ...(step ? { step } : {}) } as never);
+    append("session.start", { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", title });
+    append("message.user", { messageId: ulid(), kind: "task", text: title });
+    for (let step = 1; step <= 3 + (n % 9) * 4; step++) {
+      append("step.start", { kind: "gui" }, `library-${step}`);
+      heldAt += 14_000_000;
+      append("step.end", { status: "ok" }, `library-${step}`);
+    }
+    append("message.assistant", { messageId: ulid(), text: "Done. Here is what I found." });
+    const ending = LIBRARY_ENDINGS[n % LIBRARY_ENDINGS.length];
+    if (ending) append("session.end", { reason: ending });
+    const folder = join(HOME, "sessions", id);
+    for (let frame = 0; frame < 4; frame++)
+      sparse(join(folder, "frames", `${ulid()}.webp`), 280_000);
+    const expired = ago > 30 * DAY;
+    const bytes = expired ? 0 : Math.round(LIBRARY_SIZES[n % LIBRARY_SIZES.length] ?? 0);
+    if (!expired) sparse(join(folder, RECORDING_DIR, RECORDING_VIDEO), bytes);
+    writeManifest(join(folder, RECORDING_DIR), {
+      ...emptyManifest(expired ? "expired" : "complete"),
+      bytes,
+      finalized: !expired,
+    });
+  });
+}
+heldAt = undefined;
+
 // QA_EARLIER earlier tasks of the same conversation come before the seeded one.
 let earlier: string | undefined;
 for (let n = 0; n < Number(env.QA_EARLIER ?? 0); n++)
@@ -1425,6 +1556,64 @@ const claudeCodeStatus = (): ClaudeCodeStatus => {
       };
   }
 };
+// What the plans used, as the model menu shows it: QA_PLAN_USAGE names one of these states.
+const planUsage = new PlanUsageStore({ home: HOME });
+const PLAN_USAGE = ["normal", "near", "limit", "stale", "reset", "unknown"] as const;
+function seedPlanUsage(state: (typeof PLAN_USAGE)[number]) {
+  planUsage.forget("claude-code");
+  planUsage.forget("chatgpt");
+  if (state === "unknown") return;
+  const now = Date.now();
+  const at = (ms: number) => Math.round((now + ms) / 1000);
+  const HOUR = 3_600_000;
+  const read = state === "stale" || state === "reset" ? now - 3 * HOUR : now;
+  const [session, week] = {
+    normal: [42, 18],
+    near: [93, 71],
+    limit: [100, 64],
+    stale: [58, 47],
+    reset: [97, 47],
+  }[state];
+  planUsage.record(
+    {
+      provider: "claude-code",
+      plan: "max",
+      windows: [
+        {
+          window: "primary",
+          usedPercent: session,
+          windowMinutes: 300,
+          resetsAt: at(
+            state === "reset" ? -HOUR : state === "limit" ? 91 * 60_000 : 2 * HOUR + 15 * 60_000,
+          ),
+        },
+        { window: "secondary", usedPercent: week, windowMinutes: 10_080, resetsAt: at(76 * HOUR) },
+      ],
+      limitReached: state === "limit",
+      ...(state === "limit" ? { limitResetsAt: at(91 * 60_000) } : {}),
+    },
+    read,
+  );
+  planUsage.record(
+    {
+      provider: "chatgpt",
+      plan: "plus",
+      windows: [
+        { window: "primary", usedPercent: 23, windowMinutes: 300, resetsAt: at(4 * HOUR) },
+        {
+          window: "secondary",
+          usedPercent: 61,
+          windowMinutes: 10_080,
+          resetsAt: at(5 * 24 * HOUR),
+        },
+      ],
+      limitReached: false,
+    },
+    now,
+  );
+}
+const planUsageState = env.QA_PLAN_USAGE as (typeof PLAN_USAGE)[number] | undefined;
+if (planUsageState) seedPlanUsage(planUsageState);
 // What the user's direct control delivered to the fake computer, in order, with when it arrived.
 const manualInputs: { at: number; input: unknown }[] = [];
 const agent: AgentRoutesDeps = {
@@ -1649,6 +1838,7 @@ const agent: AgentRoutesDeps = {
         },
       }
     : {}),
+  planUsage,
 };
 const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
   "deriveBits",
@@ -1656,6 +1846,7 @@ const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-2
 const sealKey = toBase64url(
   new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey)),
 );
+const dotsHere = fakeDots(sealKey);
 
 const recorder = new Recorder({
   home: HOME,
@@ -1769,6 +1960,7 @@ const exportJobs = new ExportJobs({
 attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
   exportsStreamRoute(exportJobs),
   cellStatusRoute(cells),
+  cellStatusRoute(browserStreams, "browsers"),
   sessionStreamRoute(log),
   manualStreamRoute({ session: (id) => agent.runner.get(id), manual: agent.manual }),
   appEventsRoute(appEvents, notify.presence),
@@ -1853,6 +2045,7 @@ const routes = createApp({
   token: TOKEN,
   port: PORT,
   eventLog: log,
+  dots: dotsHere.deps,
   connectors: {
     hub: connectorHub,
     keyd: {
@@ -1864,7 +2057,7 @@ const routes = createApp({
     },
     signIn: connectorSignIn,
   },
-  cells: { cells, tickets, update: updateCell },
+  cells: { cells, tickets, update: updateCell, capacity: dotsHere.capacity },
   desktop: realDesktop,
   accounts,
   gateway: { registry, clock, eventLog: log, live, killSwitch, frames },
@@ -1881,7 +2074,8 @@ const routes = createApp({
     live,
   },
   deliverables: deliverablesDeps(deliverablesFixture),
-  ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
+  // QA_UI_DIR serves another build of the app, such as an earlier one to measure against.
+  ui: { dir: env.QA_UI_DIR ?? fileURLToPath(new URL("../../dist", import.meta.url)) },
   notify: notify.routes,
   // No speech model on the fixture's computer: the browser's own speech, or none, is used.
   voice: { speech: () => null },
@@ -1918,6 +2112,7 @@ const routes = createApp({
   },
 });
 deliverableScenarios(routes, deliverablesFixture);
+dotsHere.qa(routes);
 // QA_SLOW_KEYS=<ms> answers the key layer that much later, as a key layer still waking up does.
 const slowKeys = Number(env.QA_SLOW_KEYS ?? 0);
 if (slowKeys > 0)
@@ -1954,21 +2149,90 @@ routes.get("/api/keyd", (c) =>
             : { state: "active", source: "router", addresses: 1 },
         reenter: keys.filter((k) => k.reenter).length,
         rebound: keys.filter((k) => k.rebound).length,
-        ...(keydMode === "locked"
-          ? { vault: { backend: "file", state: "locked", key: "passphrase" } }
-          : {}),
+        ...(passphraseVault ? { vault: fixtureVault() } : {}),
       }),
 );
+function fixtureVault() {
+  return keydMode === "setup"
+    ? { backend: "file", state: "setup" }
+    : { backend: "file", state: keydMode === "locked" ? "locked" : "ready", key: "passphrase" };
+}
+// As keyd: opens the passphrase the page sealed to this boot's key, under the vault's own AAD.
+async function openPassphrase(sealed: Sealed): Promise<string | undefined> {
+  const { subtle } = webcrypto;
+  const ephemeral = fromBase64url(sealed.epk);
+  try {
+    const shared = await subtle.deriveBits(
+      {
+        name: "ECDH",
+        public: await subtle.importKey(
+          "raw",
+          ephemeral,
+          { name: "ECDH", namedCurve: "P-256" },
+          false,
+          [],
+        ),
+      },
+      pair.privateKey,
+      256,
+    );
+    const key = await subtle.deriveKey(
+      {
+        name: "HKDF",
+        hash: "SHA-256",
+        salt: new Uint8Array([...ephemeral, ...fromBase64url(sealKey)]),
+        info: new TextEncoder().encode(SEAL_INFO),
+      },
+      await subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"]),
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["decrypt"],
+    );
+    const plain = await subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: fromBase64url(sealed.nonce),
+        additionalData: new TextEncoder().encode(`${SEAL_INFO}:vault-passphrase`),
+      },
+      key,
+      fromBase64url(sealed.ct),
+    );
+    return new TextDecoder().decode(plain);
+  } catch {
+    return undefined;
+  }
+}
+routes.post("/api/keyd/unlock", async (c) => {
+  const input = VaultUnlock.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: "bad-request", message: "send { sealed }" }, 400);
+  if (keydMode !== "locked" && keydMode !== "setup")
+    return c.json({ vault: passphraseVault ? fixtureVault() : null });
+  const passphrase = await openPassphrase(input.data.sealed);
+  if (passphrase === undefined)
+    return c.json({ error: "bad-seal", message: "seal the key again" }, 409);
+  if (keydMode === "locked" && passphrase !== vaultPassphrase) {
+    effects.push("unlock:wrong");
+    return c.json(
+      { error: "wrong-passphrase", message: "That passphrase doesn't unlock your saved keys" },
+      403,
+    );
+  }
+  vaultPassphrase = passphrase;
+  keydMode = "online";
+  effects.push("unlock:open");
+  session?.keysUnlocked();
+  return c.json({ vault: fixtureVault() });
+});
 routes.get("/api/cells/:id/quarantine", (c) => c.json({ items: [] }));
 routes.get("/api/keys", (c) =>
   keydMode === "offline" ? c.text("owned key layer offline", 503) : c.json({ keys }),
 );
 routes.post("/api/keys", async (c) => {
-  if (keydMode === "locked")
+  if (keydMode === "locked" || keydMode === "setup")
     return c.json(
       {
         error: "vault-locked",
-        message: "Saved keys are locked. On that computer, run: localdot unlock",
+        message: "Saved keys are locked. Unlock them in Keys, then try again.",
       },
       423,
     );
@@ -1992,6 +2256,22 @@ routes.get("/cells/:cell/desktop/:ticket/", (c) =>
 routes.get("/owned-preview.js", (c) =>
   c.body(DESKTOP_JS, 200, { "content-type": "text/javascript" }),
 );
+browserViewerApi(routes, {
+  cells: browserStreams,
+  tickets,
+  vendorDir: fileURLToPath(new URL("../../vendor/selkies", import.meta.url)),
+});
+routes.get("/cells/:cell/browser/:ticket/", (c) =>
+  tickets.resolve(c.req.param("ticket")) === c.req.param("cell")
+    ? c.html(
+        '<!doctype html><video id="videoStream" autoplay muted></video><script src="/owned-browser.js"></script>',
+      )
+    : c.text("unknown ticket", 404),
+);
+routes.get("/owned-browser.js", (c) =>
+  c.body(BROWSER_JS, 200, { "content-type": "text/javascript" }),
+);
+routes.get("/__qa/picture", (c) => c.json(pictureDown));
 routes.get("/owned-desktop.webp", (c) =>
   c.body(readFileSync(join(ASSETS, "frame-1.webp")), 200, { "content-type": "image/webp" }),
 );
@@ -2765,6 +3045,19 @@ function budget(scope: "task" | "day" = "task"): string | undefined {
   session.setStatus("paused");
   session.append("agent.state", { state: "paused", reason: "budget" });
 }
+// The task meets saved keys locked behind their passphrase, as after the computer restarted, and
+// says so as dot would; ?setup=1 has the vault wait for its first passphrase instead.
+function keysLocked(setup = false): string | undefined {
+  if (!session) return "no session";
+  keydMode = setup ? "setup" : "locked";
+  passphraseVault = true;
+  if (setup) vaultPassphrase = undefined;
+  session.append("message.assistant", {
+    messageId: ulid(),
+    text: "My saved keys and passwords are locked, so I can't read this week's changes in the code or use your saved password for app.thema.ai. I'll carry on once they're unlocked.",
+  });
+  session.lockKeys();
+}
 // The ways a task stalls that the app must never leave silent.
 function stall(kind: string): string | undefined {
   if (!session) return "no session";
@@ -2792,6 +3085,10 @@ function stall(kind: string): string | undefined {
       reason: kind === "key-rebound" ? "key changed outside localDot" : "key needs re-entering",
       detail: "anthropic-main",
     });
+  } else if (kind === "keyd") {
+    keydMode = "offline";
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "keyd unavailable" });
   } else if (kind === "action-limit") {
     endLiveStep();
     session.setStatus("idle");
@@ -2848,6 +3145,7 @@ const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | un
   ask: () => ask(),
   takeover: () => takeover(),
   budget: () => budget(),
+  "keys-locked": () => keysLocked(),
   finish,
   "cell/starting": () => setCell("starting"),
   "cell/connecting": () => setCell("connecting"),
@@ -2971,6 +3269,7 @@ routes.post("/__qa/takeover", (c) =>
 );
 routes.post("/__qa/budget", (c) => reply(budget(c.req.query("scope") === "day" ? "day" : "task")));
 routes.post("/__qa/stall/:kind", (c) => reply(stall(c.req.param("kind"))));
+routes.post("/__qa/keys-locked", (c) => reply(keysLocked(c.req.query("setup") === "1")));
 // keyd lists a key whose stored value has to be entered again (?id=, the main model's by default).
 routes.post("/__qa/reenter", (c) => {
   const id = c.req.query("id") ?? "anthropic-main";
@@ -3001,19 +3300,39 @@ routes.post("/__qa/pause-uncertain", (c) => {
   return c.json({ ok: true });
 });
 let screenRevision = 0;
-// dot selects the desktop again, as a new task, a screen switch and a hand-back each do.
+// dot selects the desktop again, as a new task, a screen switch and a hand-back each do; with
+// ?to=browser it moves to the web browser, which starts first as the daemon's does.
 routes.post("/__qa/screen", async (c) => {
   if (!session) return c.text("no session", 409);
   const retired = c.req.query("retired");
+  const browser = c.req.query("to") === "browser";
+  if (browser && !browserInstance) runBrowser(true);
   session.append("screen.switch", {
-    screen: retired === "browser" ? "browser" : "desktop",
-    cellId: retired ? ulid() : cellId,
+    screen: retired === "browser" || browser ? "browser" : "desktop",
+    cellId: retired ? ulid() : browser ? browserCellId : cellId,
     geometry: { w: 2560, h: 1600, scale: 2 },
-    by: "daemon",
+    by: browser ? "agent" : "daemon",
     revision: ++screenRevision,
   });
   if (retired) await endLive("done");
   return c.json({ ok: true });
+});
+// The web browser starts again in place: its screen goes, and the next instance is up after ?ms=.
+routes.post("/__qa/browser/restart", (c) => {
+  if (!browserInstance) return c.text("no web browser", 409);
+  runBrowser(false);
+  setTimeout(() => runBrowser(true), Number(c.req.query("ms") ?? 2000));
+  return c.json({ ok: true });
+});
+// A screen's picture drops, as when its stream goes, until resumed (?screen=desktop|browser, or
+// both).
+routes.post("/__qa/picture/:state", (c) => {
+  const state = c.req.param("state");
+  if (state !== "drop" && state !== "resume") return c.text("drop or resume", 400);
+  const screen = c.req.query("screen");
+  for (const name of ["desktop", "browser"] as const)
+    if (!screen || screen === name) pictureDown[name] = state === "drop";
+  return c.json(pictureDown);
 });
 routes.post("/__qa/step-end", (c) => {
   if (!session || !liveStep) return c.text("no open step", 409);
@@ -3138,6 +3457,28 @@ routes.post("/__qa/agents/again", (c) => {
   );
   return c.json({ ok: true });
 });
+// A usage limit stops the research agent; /resume wakes it again in a run of its own.
+const research = { id: "research-child", label: "Research official sources" };
+routes.post("/__qa/agents/limit", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("subagent.state", {
+    ...research,
+    runId: "research-run",
+    state: "interrupted",
+    reason: "limit",
+  });
+  return c.json({ ok: true });
+});
+routes.post("/__qa/agents/resume", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("subagent.state", {
+    ...research,
+    runId: "research-run-2",
+    state: "running",
+    resumed: true,
+  });
+  return c.json({ ok: true });
+});
 routes.post("/__qa/steps", (c) => {
   if (!session) return c.text("no session", 409);
   for (let n = Number(c.req.query("n") ?? 1); n > 0; n--)
@@ -3183,6 +3524,140 @@ routes.post("/__qa/turns", async (c) => {
     owned.append("agent.state", { state: n % 2 ? "acting" : "thinking" });
     await new Promise((resolve) => setTimeout(resolve, ms));
   }
+  return c.json({ ok: true });
+});
+// A task at work as a live run shows it, for `ms`: dot thinks and acts in turns of 300–600 ms,
+// streams a sentence every other turn, takes a step with a screenshot each turn (every third a
+// shell command), beats once a second and has two helpers at work. The turns repeat on every run.
+routes.post("/__qa/live-run", (c) => {
+  if (!session) return c.text("no session", 409);
+  const owned = session;
+  const ms = Number(c.req.query("ms") ?? 30_000);
+  const until = Date.now() + ms;
+  const now = () => Math.round(microsToMs(log.toSessionT(owned.id, clock.nowMicros())));
+  const later = (wait: number, run: () => void) =>
+    setTimeout(() => {
+      if (!teardown && session === owned) run();
+    }, wait).unref();
+  let seed = 11;
+  const between = () => {
+    seed = (seed * 48_271) % 2_147_483_647;
+    return 300 + (seed % 301);
+  };
+  let turn = 0;
+  let frameNo = 0;
+  let cursor: Point = { x: 1280, y: 800 };
+  const helper = (id: string, label: string, state: "running" | "completed", summary?: string) =>
+    owned.append("subagent.state", { id, runId: `${id}-run`, label, state, summary });
+  const say = (within: number) => {
+    const messageId = ulid();
+    const words = `Row ${turn} matches the receipts, so I'll fill in the next total and check it.`;
+    const each = words.split(" ");
+    for (const [i, word] of each.entries())
+      later((within * (i + 1)) / (each.length + 1), () =>
+        owned.append("message.delta", { messageId, text: `${i ? " " : ""}${word}` }),
+      );
+    later(within, () => owned.append("message.assistant", { messageId, text: words }));
+  };
+  const think = () => {
+    if (Date.now() > until) return;
+    owned.append("agent.state", { state: "thinking" });
+    owned.append("thought.delta", { text: "Checking what the last step changed." });
+    const wait = between();
+    if (turn % 2 === 0) say(wait - 40);
+    later(wait, act);
+  };
+  const act = () => {
+    owned.append("key.use", {
+      secretId: "anthropic-main",
+      host: "api.anthropic.com",
+      method: "POST",
+      path: "/v1/messages",
+      decision: "allow",
+    });
+    owned.append("model.usage", {
+      role: "main",
+      route: "anthropic",
+      model: "claude-sonnet-5-5",
+      inputTokens: 2_400,
+      outputTokens: 90,
+    });
+    owned.append("agent.state", { state: "acting" });
+    const step = ulid();
+    const wait = between();
+    turn++;
+    if (turn % 3 === 0) {
+      owned.append("step.start", { kind: "shell", planItem: "calc" }, step);
+      owned.append("tool.start", { tool: "shell", title: "Check the totals" }, step);
+      later(wait / 2, () =>
+        owned.append("tool.output", { stream: "stdout", chunk: `total,${12_000 + turn}\n` }, step),
+      );
+      later(wait, () => {
+        owned.append("tool.end", { ok: true, exitCode: 0 }, step);
+        owned.append("step.end", { status: "ok" }, step);
+        think();
+      });
+      return;
+    }
+    const point = { x: 600 + ((turn * 173) % 1400), y: 400 + ((turn * 97) % 800) };
+    owned.append("step.start", { kind: "gui", planItem: "calc" }, step);
+    owned.append(
+      "action.intent",
+      {
+        verb: "click",
+        label: `Select total ${turn}`,
+        risk: "none",
+        point,
+        pointer: {
+          from: cursor,
+          to: point,
+          startsAt: now() + 40,
+          durationMs: wait - 160,
+          seed: 5,
+          curve: "minjerk-bow-v1",
+        },
+      },
+      step,
+    );
+    cursor = point;
+    later(wait - 100, () => {
+      const pressT = msToMicros(now());
+      owned.append(
+        "action.dispatch",
+        {
+          input: { kind: "click", button: "left", count: 1, at: point },
+          pressT,
+          ringAt: pressT + 20_000,
+          injector: "xtest",
+        },
+        step,
+      );
+    });
+    later(wait, () => {
+      owned.append("action.result", { ok: true }, step);
+      const frameId = ulid();
+      frames.save(
+        owned.id,
+        frameId,
+        readFileSync(join(ASSETS, `frame-${(frameNo++ % 4) + 1}.webp`)),
+      );
+      owned.append("observe", { frameId, width: 2560, height: 1600 }, step);
+      owned.append("step.end", { status: "ok" }, step);
+      think();
+    });
+  };
+  endLiveStep();
+  helper("research", "Research official sources", "running");
+  helper("review", "Review implementation", "running");
+  later(ms / 3, () =>
+    helper("research", "Research official sources", "completed", "Found the 2026 rates."),
+  );
+  later(ms / 2, () => helper("totals", "Check the totals again", "running"));
+  const beat = setInterval(() => {
+    if (teardown || session !== owned || Date.now() > until) clearInterval(beat);
+    else owned.append("heartbeat", { ongoing: true, everyMs: 1000 });
+  }, 1000).unref();
+  think();
   return c.json({ ok: true });
 });
 // dot thinks: its thoughts are never the band's line, which holds dot's last line for the user.
@@ -3413,6 +3888,12 @@ routes.post("/__qa/claude-code/:state", (c) => {
   claudeCodeState = state as NonNullable<typeof claudeCodeState>;
   return c.json({ ok: true });
 });
+routes.post("/__qa/plan-usage/:state", (c) => {
+  const state = c.req.param("state") as (typeof PLAN_USAGE)[number];
+  if (!PLAN_USAGE.includes(state)) return c.text("unknown plan usage state", 400);
+  seedPlanUsage(state);
+  return c.json({ ok: true });
+});
 routes.post("/__qa/chatgpt/device-code/:mode", (c) => {
   const mode = c.req.param("mode");
   if (mode !== "on" && mode !== "off") return c.text("device code is on or off", 400);
@@ -3421,6 +3902,8 @@ routes.post("/__qa/chatgpt/device-code/:mode", (c) => {
 });
 routes.post("/__qa/keyd/:mode", (c) => {
   keydMode = c.req.param("mode") as typeof keydMode;
+  if (keydMode === "locked" || keydMode === "setup") passphraseVault = true;
+  if (keydMode === "setup") vaultPassphrase = undefined;
   return c.json({ ok: true });
 });
 routes.get("/__qa/scenarios", (c) =>

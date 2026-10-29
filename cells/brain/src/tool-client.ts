@@ -3,6 +3,7 @@ import {
   BootConfig,
   type BrainEvent,
   BrainEvents,
+  BriefPost,
   ComputerAction,
   computerWorkMs,
   DoneInput,
@@ -10,6 +11,7 @@ import {
   MODEL_SCREEN,
   PauseSnapshot,
   ShellInput,
+  type SubagentBrief,
   ToolCallRequest,
   ToolResult,
   TranscriptAppend,
@@ -232,6 +234,17 @@ export class ToolClient {
       "POST",
       "/v1/events",
       BrainEvents.parse({ events }),
+      () => undefined,
+      BASE_TIMEOUT_MS,
+      signal,
+    );
+  }
+
+  async brief(brief: SubagentBrief, signal?: AbortSignal): Promise<void> {
+    await this.#request(
+      "POST",
+      "/v1/subagents",
+      BriefPost.parse({ brief }),
       () => undefined,
       BASE_TIMEOUT_MS,
       signal,

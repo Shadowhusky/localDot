@@ -1,6 +1,7 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: Wide code and tables scroll sideways, so keyboard users can focus them.
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Immutable parsed text has no child state; source position identifies each text span.
-import { memo, type ReactNode, useEffect, useMemo, useState } from "react";
+import { Fragment, memo, type ReactNode, useEffect, useMemo, useState } from "react";
+import { LocalAddress, PreviewChips } from "../previews/PreviewChip.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { CopyButton } from "./CopyButton.tsx";
 import { type Block, type Inline, type List, parseMarkdown } from "./markdown.ts";
@@ -16,24 +17,32 @@ export function linkHost(href: string): string {
 function inlines(nodes: readonly Inline[]): ReactNode[] {
   return nodes.map((node, index) => {
     if (node.kind === "text") return node.text;
-    if (node.kind === "code") return <code key={index}>{node.text}</code>;
+    if (node.kind === "code")
+      return (
+        <Fragment key={index}>
+          <code>{node.text}</code>
+          <PreviewChips text={node.text} limit={1} inline />
+        </Fragment>
+      );
     if (node.kind === "link")
       return (
-        <span key={index} className="md-link">
-          <a
-            href={node.href}
-            title={node.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            referrerPolicy="no-referrer"
-          >
-            {node.text}
-          </a>
-          <span className="md-host">
-            <Icon name="share" size={12} />
-            {linkHost(node.href)}
+        <LocalAddress key={index} href={node.href} text={node.text}>
+          <span className="md-link">
+            <a
+              href={node.href}
+              title={node.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              referrerPolicy="no-referrer"
+            >
+              {node.text}
+            </a>
+            <span className="md-host">
+              <Icon name="share" size={12} />
+              {linkHost(node.href)}
+            </span>
           </span>
-        </span>
+        </LocalAddress>
       );
     if (node.kind === "image")
       return (
@@ -93,6 +102,7 @@ function BlockView({ node, announce }: { node: Block; announce?: (text: string) 
         <pre tabIndex={0}>
           <code>{node.text}</code>
         </pre>
+        <PreviewChips text={node.text} />
       </section>
     );
   if (node.kind === "list") return <ListView list={node} />;

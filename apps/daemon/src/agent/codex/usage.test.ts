@@ -47,8 +47,27 @@ describe("subscription usage event formatting", () => {
       provider: "chatgpt",
       windows: [{ window: "primary", usedPercent: 0, resetsAt: 0 }],
       limitReached: true,
+      limitResetsAt: 0,
     });
-    expect(subscriptionUsage({ secondary: { usedPercent: 100 } })?.limitReached).toBe(true);
+    expect(subscriptionUsage({ secondary: { usedPercent: 100 } })).toEqual({
+      provider: "chatgpt",
+      windows: [{ window: "secondary", usedPercent: 100 }],
+      limitReached: true,
+    });
+  });
+  it("says when a reached limit lifts only when every window that reached it said", () => {
+    const primary = { usedPercent: 100, windowDurationMins: 300, resetsAt: 1790900000 };
+    const secondary = { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1791400000 };
+    expect(subscriptionUsage({ primary, secondary })?.limitResetsAt).toBe(1791400000);
+    expect(
+      subscriptionUsage({ primary, secondary: { ...secondary, resetsAt: null } }),
+    ).not.toHaveProperty("limitResetsAt");
+    expect(
+      subscriptionUsage({ primary: { ...primary, usedPercent: 40 }, rateLimitReachedType: "plan" }),
+    ).toMatchObject({ limitReached: true });
+    expect(
+      subscriptionUsage({ primary: { ...primary, usedPercent: 40 }, rateLimitReachedType: "plan" }),
+    ).not.toHaveProperty("limitResetsAt");
   });
   it.each([NaN, Infinity, -1, 101])(
     "refuses invalid measured percentage %s rather than clamping it",

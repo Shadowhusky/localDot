@@ -243,6 +243,23 @@ describe("daemon browser client", () => {
     );
   });
 
+  it("tells a browser restarting in place from one whose connection is gone", async () => {
+    let retry = true;
+    const f = await fixture((_request, response) => {
+      response.writeHead(503, {
+        "content-type": "application/json",
+        ...(retry ? { "retry-after": "5" } : {}),
+      });
+      response.end(JSON.stringify({ error: retry ? "restarting" : "unavailable" }));
+    });
+    await expect(f.client.tabs(f.scope)).rejects.toMatchObject({
+      code: "restarting",
+      message: expect.stringContaining("restarting by itself"),
+    });
+    retry = false;
+    await expect(f.client.tabs(f.scope)).rejects.toMatchObject({ code: "unavailable" });
+  });
+
   it("never follows a service redirect or reflects its private error text", async () => {
     const f = await fixture((_request, response) => {
       response.writeHead(302, { location: "http://127.0.0.1:1/stolen" });

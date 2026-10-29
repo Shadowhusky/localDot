@@ -10,6 +10,7 @@ import {
   RECOVER_MAX_TICKS,
   RECOVER_TICKS,
   RoundTrips,
+  stageFramerate,
 } from "./stream-quality.ts";
 
 const BASE = 80;
@@ -219,6 +220,33 @@ describe("a handheld viewer", () => {
     );
     expect(controller.quality.framerate).toBe(30);
     controller.prefer("smooth");
+    expect(controller.quality.framerate).toBe(30);
+  });
+});
+
+describe("a stage's frame rate", () => {
+  it("is 30 fps for a stage in part of the window, the device's ceiling when large or in control", () => {
+    expect(stageFramerate({ share: 0.51, control: false }, 60)).toBe(30);
+    expect(stageFramerate({ share: 0.74, control: false }, 60)).toBe(60);
+    expect(stageFramerate({ share: 0.2, control: true }, 60)).toBe(60);
+    expect(stageFramerate({ share: 0.9, control: true }, HANDHELD_FRAMERATE)).toBe(30);
+  });
+
+  it("keeps a slow device's steps below a new ceiling, and climbs to a raised one", () => {
+    const controller = new QualityController("auto", 60);
+    controller.cap(30);
+    expect(controller.quality.framerate).toBe(30);
+    controller.cap(60);
+    expect(controller.quality.framerate).toBe(60);
+    run(controller, slowDevice, 4);
+    expect(controller.quality.framerate).toBe(45);
+    controller.cap(30);
+    expect(controller.quality.framerate).toBe(24);
+    run(
+      controller,
+      { ...clear, decodedFps: 24, presentedFps: 24 },
+      RECOVER_TICKS + PROBE_TICKS + 40,
+    );
     expect(controller.quality.framerate).toBe(30);
   });
 });

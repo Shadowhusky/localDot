@@ -7,7 +7,7 @@ import {
 import { servedSpeed } from "@localdot/providers";
 import { z } from "zod";
 import type { Redactor } from "../redact.ts";
-import { LOCALDOT_TOOLS } from "./options.ts";
+import { isLocaldotTool } from "./options.ts";
 
 export const CLAUDE_CODE_ROUTE = "claude-code";
 export type Violation = "foreign_tool" | "sub_agent";
@@ -105,12 +105,11 @@ const RateLimit = z.looseObject({
 });
 const AuthStatus = z.looseObject({ type: z.literal("auth_status"), error: z.string().optional() });
 
-// Claude Code's plan windows: the five-hour session and the weekly limits.
+// Claude Code's plan windows: the five-hour and the weekly limit. A model's own weekly limit is a
+// window of its own, so it never stands in for the weekly one.
 const WINDOWS: Record<string, { window: SubscriptionWindow["window"]; minutes: number }> = {
   five_hour: { window: "primary", minutes: 300 },
   seven_day: { window: "secondary", minutes: 10_080 },
-  seven_day_opus: { window: "secondary", minutes: 10_080 },
-  seven_day_sonnet: { window: "secondary", minutes: 10_080 },
 };
 
 function clip(text: string, max: number): string {
@@ -187,7 +186,7 @@ export class ClaudeCodeEventMapper {
     if (type === "system") {
       const init = Init.safeParse(message);
       if (init.success)
-        return init.data.tools.every((tool) => LOCALDOT_TOOLS.includes(tool))
+        return init.data.tools.every(isLocaldotTool)
           ? [{ kind: "started" }]
           : [{ kind: "violation", what: "foreign_tool" }];
       const retry = Retry.safeParse(message);
@@ -217,7 +216,7 @@ export class ClaudeCodeEventMapper {
       parsed.data.message.content.some(
         (block) =>
           (block.type === "tool_use" || block.type === "server_tool_use") &&
-          !LOCALDOT_TOOLS.includes(block.name ?? ""),
+          !isLocaldotTool(block.name ?? ""),
       )
     )
       return [{ kind: "violation", what: "foreign_tool" }];
@@ -267,7 +266,7 @@ export class ClaudeCodeEventMapper {
       if (!start.success) return [];
       const block = start.data.content_block;
       if (block.type === "tool_use" || block.type === "server_tool_use")
-        return LOCALDOT_TOOLS.includes(block.name ?? "")
+        return isLocaldotTool(block.name ?? "")
           ? []
           : [{ kind: "violation", what: "foreign_tool" }];
       if (block.type === "text" || block.type === "thinking")
@@ -348,22 +347,21 @@ export class ClaudeCodeEventMapper {
       info.resetsAt === undefined
         ? undefined
         : Math.round(info.resetsAt > 1e12 ? info.resetsAt / 1000 : info.resetsAt);
-    if (window && info.utilization !== undefined && Number.isFinite(info.utilization)) {
-      // Claude Code reports how much of the window is used as a fraction.
-      const used = info.utilization <= 1 ? info.utilization * 100 : info.utilization;
-      if (used >= 0 && used <= 100)
-        this.#windows.set(window.window, {
-          window: window.window,
-          usedPercent: Math.round(used * 10) / 10,
-          windowMinutes: window.minutes,
-          ...(resets !== undefined && Number.isSafeInteger(resets) ? { resetsAt: resets } : {}),
-        });
-    }
+    const resetsAt = Number.isSafeInteger(resets) ? resets : undefined;
+    // How much of the window is used, as a fraction that passes 1 once usage passes the limit.
+    if (window && info.utilization !== undefined && info.utilization >= 0)
+      this.#windows.set(window.window, {
+        window: window.window,
+        usedPercent: Math.round(Math.min(1, info.utilization) * 1000) / 10,
+        windowMinutes: window.minutes,
+        ...(resetsAt !== undefined ? { resetsAt } : {}),
+      });
     const data: SubscriptionUsageData = {
       provider: "claude-code",
       ...(this.plan ? { plan: this.plan } : {}),
       windows: [...this.#windows.values()].sort((a, b) => a.window.localeCompare(b.window)),
       limitReached: this.#limited,
+      ...(this.#limited && resetsAt !== undefined ? { limitResetsAt: resetsAt } : {}),
     };
     const key = JSON.stringify(data);
     if (key === this.#usage) return;

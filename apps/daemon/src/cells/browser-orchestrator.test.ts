@@ -5,9 +5,14 @@ import { join } from "node:path";
 import type { KeydCellInfo } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserKeydClient } from "../keyd/browser-wiring.ts";
+import { KeydError } from "../keyd/client.ts";
 import { AccountsProfile } from "./accounts-profile.ts";
-import { BrowserLedgerStore } from "./browser-ledger.ts";
-import { BrowserOrchestrator, type BrowserOrchestratorDeps } from "./browser-orchestrator.ts";
+import { BrowserLedgerStore, BrowserStartCancelled } from "./browser-ledger.ts";
+import {
+  BROWSER_BACK,
+  BrowserOrchestrator,
+  type BrowserOrchestratorDeps,
+} from "./browser-orchestrator.ts";
 import { CellStore } from "./store.ts";
 import { BrowserDocker } from "./testing/browser-docker.ts";
 import { sampleRecord } from "./testing/sample-record.ts";
@@ -77,6 +82,9 @@ function fixture() {
       const value = JSON.parse(material.toString());
       expect(store.browserFor(value.parentCellId)).toBeDefined();
       expect(value.proxyToken).toBe("p".repeat(43));
+    }),
+    supervisor: vi.fn(async (): Promise<unknown> => {
+      throw new Error("an older browser image has no supervisor report");
     }),
     probe: vi.fn(async (_port, token) => {
       const browser = store
@@ -198,6 +206,90 @@ describe("persistent browser lifecycle", () => {
     expect(await f.controller.health(f.parent.id)).toBe("unready");
     probe.mockRejectedValueOnce(new Error("connection refused"));
     expect(await f.controller.health(f.parent.id)).toBe("silent");
+  });
+
+  it("waits for a browser restarting its Chromium in place and says what failed", async () => {
+    const f = fixture();
+    const ready = await f.controller.start(f.parent.id);
+    const probe = vi.mocked(f.deps.probe);
+    const supervisor = vi.mocked(f.deps.supervisor);
+    if (!probe || !supervisor) throw new Error("the probes are missing");
+    const unready = {
+      browserCellId: ready.browserCellId,
+      parentCellId: ready.parentCellId,
+      instance: ready.instance,
+      ready: false,
+      holder: "user",
+      width: 1280,
+      height: 800,
+    };
+    const failure = {
+      kind: "browser_exited",
+      detail: "exited on SIGKILL, out of memory",
+      recovered: true,
+      at: "2026-10-26T12:00:00.000Z",
+    };
+    probe.mockResolvedValueOnce(unready);
+    supervisor.mockResolvedValueOnce({ state: "restarting", restarts: 0, lastFailure: failure });
+    expect(await f.controller.health(f.parent.id)).toBe("restarting");
+    probe.mockResolvedValueOnce(unready);
+    supervisor.mockResolvedValueOnce({
+      state: "stopped",
+      restarts: 3,
+      lastFailure: { ...failure, recovered: false },
+    });
+    expect(await f.controller.health(f.parent.id)).toBe("unready");
+    supervisor.mockResolvedValueOnce({ state: "running", restarts: 1, lastFailure: failure });
+    expect(await f.controller.status(f.parent.id)).toEqual({
+      state: "ready",
+      restarts: 1,
+      problem: "The browser process ended (exited on SIGKILL, out of memory) and was restarted.",
+      problemAt: failure.at,
+    });
+    f.controller.noteProblem(f.parent.id, "You restarted the web browser.");
+    expect(await f.controller.status(f.parent.id)).toMatchObject({
+      state: "ready",
+      restarts: 0,
+      problem: "You restarted the web browser.",
+    });
+    f.unavailable();
+    expect(await f.controller.status(f.parent.id)).toEqual({
+      state: "off",
+      reason: "computer-stopped",
+      problem: "The computer is not running.",
+      clears: "Start the computer; the web browser starts with it.",
+    });
+  });
+
+  it("names why a browser could not start: its exit, memory and browserd's own words", async () => {
+    const f = fixture();
+    const probe = vi.mocked(f.deps.probe);
+    if (!probe) throw new Error("the probe is missing");
+    probe.mockImplementationOnce(async () => {
+      const browser = [...f.docker.containers.values()].find(
+        (container) => container.Config.Labels["localdot.role"] === "browser",
+      );
+      if (!browser) throw new Error("the browser container is missing");
+      browser.State = { Running: false, Paused: false, ExitCode: 1, OOMKilled: true };
+      throw new Error("connection refused");
+    });
+    const original = f.docker.request.bind(f.docker);
+    const frame = (text: string) => {
+      const header = Buffer.alloc(8);
+      header[0] = 2;
+      header.writeUInt32BE(Buffer.byteLength(text), 4);
+      return Buffer.concat([header, Buffer.from(text)]);
+    };
+    f.docker.request = (async (request: Parameters<BrowserDocker["request"]>[0]) =>
+      request.path.endsWith("/logs")
+        ? Buffer.concat([
+            frame("Selkies: private-page-canary\n"),
+            frame("browserd: could not start Chromium\n"),
+          ])
+        : original(request)) as BrowserDocker["request"];
+    await expect(f.controller.start(f.parent.id)).rejects.toThrow(
+      "Browser start failed during readiness (Browser process exited during startup; the browser container exited with code 1; it ran out of memory; browserd: could not start Chromium); its profile has been retained",
+    );
   });
 
   it("serializes concurrent starts into one profile and one running browser", async () => {
@@ -365,7 +457,7 @@ describe("persistent browser lifecycle", () => {
       }
     };
     const start = f.controller.start(f.parent.id);
-    const rejected = expect(start).rejects.toThrow("start failed");
+    const rejected = expect(start).rejects.toThrow(BrowserStartCancelled);
     const queued = f.controller.start(f.parent.id);
     const queuedRejected = expect(queued).rejects.toThrow("cancelled");
     await entered.promise;
@@ -602,7 +694,7 @@ describe("persistent browser lifecycle", () => {
       );
     };
     const pending = f.controller.start(f.parent.id);
-    const rejected = expect(pending).rejects.toThrow("start failed");
+    const rejected = expect(pending).rejects.toThrow(BrowserStartCancelled);
     await entered.promise;
     await f.controller.stop(f.parent.id);
     await rejected;
@@ -623,7 +715,7 @@ describe("persistent browser lifecycle", () => {
       return reply;
     };
     const pending = f.controller.start(f.parent.id);
-    const rejected = expect(pending).rejects.toThrow("start failed");
+    const rejected = expect(pending).rejects.toThrow(BrowserStartCancelled);
     await entered.promise;
     const stopped = f.controller.stop(f.parent.id);
     release.resolve();
@@ -657,4 +749,169 @@ it("does not re-reserve a desktop port after verified retirement, but keeps brow
   expect(f.store.get(f.parent.id)).toBeDefined();
   retired.clear();
   expect(f.controller.reservedKeydPorts()).toContain(f.parent.keydPort);
+});
+
+describe("what the browser's status tells the app, the CLI and dot", () => {
+  it("names what keeps it off and what clears it", async () => {
+    const f = fixture();
+    const block = {
+      reason: "key-service-offline",
+      problem: "localDot's key service isn't answering.",
+      clears: "The key service running again.",
+    } as const;
+    const controller = new BrowserOrchestrator({ ...f.deps, unavailable: () => block });
+    expect(await controller.status(f.parent.id)).toEqual({ state: "off", ...block });
+  });
+
+  it("keeps a browser usable while saved keys are locked, saying what they refuse", async () => {
+    const f = fixture();
+    let locked = true;
+    const controller = new BrowserOrchestrator({ ...f.deps, keysLocked: () => locked });
+    await controller.start(f.parent.id);
+    expect(await controller.status(f.parent.id)).toMatchObject({
+      state: "ready",
+      reason: "keys-locked",
+      problem: expect.stringContaining(
+        "saved passwords and sites that use a saved key are refused",
+      ),
+      clears: "Unlock saved keys in localDot (Keys).",
+    });
+    locked = false;
+    const unlocked = await controller.status(f.parent.id);
+    expect(unlocked.state).toBe("ready");
+    expect(unlocked.reason).toBeUndefined();
+  });
+
+  it("says when a start under way is done", async () => {
+    const f = fixture();
+    const entered = deferred(),
+      resume = deferred();
+    f.docker.before = async (request) => {
+      if (request.path.endsWith("/start")) {
+        entered.resolve();
+        await resume.promise;
+      }
+    };
+    const controller = new BrowserOrchestrator({ ...f.deps, readyTimeoutMs: 60_000 });
+    const before = Date.now();
+    const started = controller.start(f.parent.id);
+    await entered.promise;
+    const status = await controller.status(f.parent.id);
+    expect(status).toMatchObject({ state: "starting", reason: "starting" });
+    const readyBy = Date.parse(status.readyBy ?? "");
+    expect(readyBy).toBeGreaterThanOrEqual(before + 60_000);
+    expect(readyBy).toBeLessThanOrEqual(Date.now() + 60_000);
+    resume.resolve();
+    await started;
+  });
+
+  it("says when a failed start is tried again, and what to do once that is given up", async () => {
+    const f = fixture();
+    f.keyd.openCell = async () => {
+      throw new Error("listener port in use");
+    };
+    await expect(f.controller.start(f.parent.id)).rejects.toThrow(
+      "start failed during key listener creation",
+    );
+    f.controller.noteProblem(f.parent.id, "The web browser couldn't start: listener.");
+    f.controller.noteRetry(f.parent.id, new Date("2026-10-29T08:00:05.000Z"));
+    expect(await f.controller.status(f.parent.id)).toEqual({
+      state: "failed",
+      reason: "failed",
+      problem: "The web browser couldn't start: listener.",
+      problemAt: expect.any(String),
+      retryAt: "2026-10-29T08:00:05.000Z",
+      clears: "Nothing: localDot starts it again by itself.",
+    });
+    f.controller.noteRetry(f.parent.id, undefined);
+    const given = await f.controller.status(f.parent.id);
+    expect(given.retryAt).toBeUndefined();
+    expect(given.clears).toMatch(/^Restart the web browser \(Settings → Accounts/u);
+  });
+
+  it("names a key service or Docker refusal without its paths or replies", async () => {
+    const f = fixture();
+    f.keyd.openCell = async () => {
+      throw new KeydError(409, "conflict", "port 4762 is in use", "/v1/cells");
+    };
+    const error = await f.controller.start(f.parent.id).catch((failed: unknown) => failed);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Browser start failed during key listener creation (the key service refused it (409 conflict)); its profile has been retained",
+    );
+  });
+
+  it("calls a start its computer gave up a cancellation, not a failure", async () => {
+    const f = fixture();
+    const entered = deferred(),
+      resume = deferred();
+    f.docker.before = async (request) => {
+      if (request.path.endsWith("/start")) {
+        entered.resolve();
+        await resume.promise;
+      }
+    };
+    const started = f.controller.start(f.parent.id);
+    const cancelled = expect(started).rejects.toThrow(BrowserStartCancelled);
+    await entered.promise;
+    f.unavailable();
+    resume.resolve();
+    await cancelled;
+    expect(f.controller.get(f.parent.id)?.state).toBe("stopped");
+    expect(f.controller.problem(f.parent.id)).toBeUndefined();
+    expect(f.listeners.size).toBe(0);
+    expect(f.docker.containers.size).toBe(0);
+  });
+
+  it("tells the task once when a browser someone couldn't have runs again", async () => {
+    const f = fixture();
+    const notify = vi.fn();
+    const controller = new BrowserOrchestrator({ ...f.deps, notify });
+    await controller.start(f.parent.id);
+    expect(notify).not.toHaveBeenCalled();
+    await controller.stop(f.parent.id);
+    const open = f.keyd.openCell;
+    f.keyd.openCell = async () => {
+      throw new Error("listener port in use");
+    };
+    await expect(controller.start(f.parent.id)).rejects.toThrow("start failed");
+    f.keyd.openCell = open;
+    f.nextInstance();
+    await controller.start(f.parent.id);
+    expect(notify.mock.calls).toEqual([[f.parent.id, BROWSER_BACK]]);
+    await controller.stop(f.parent.id);
+    f.nextInstance();
+    await controller.start(f.parent.id);
+    expect(notify).toHaveBeenCalledOnce();
+    controller.noteOutage(f.parent.id);
+    await controller.stop(f.parent.id);
+    f.nextInstance();
+    await controller.start(f.parent.id);
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it("tells the task its browser runs again after a recovery stopped it", async () => {
+    const f = fixture();
+    const notify = vi.fn();
+    const controller = new BrowserOrchestrator({ ...f.deps, notify });
+    await controller.start(f.parent.id);
+    await controller.reconcile();
+    f.nextInstance();
+    await controller.start(f.parent.id);
+    expect(notify.mock.calls).toEqual([[f.parent.id, BROWSER_BACK]]);
+  });
+
+  it("says which part of a stop could not be confirmed, up to a recovery", async () => {
+    const f = fixture();
+    await f.controller.start(f.parent.id);
+    f.keyd.closeCell = async () => {
+      throw new Error("key service offline");
+    };
+    await expect(f.controller.stop(f.parent.id)).rejects.toThrow(
+      "Browser shutdown could not be confirmed (the key service did not confirm its connection closed); retry Stop",
+    );
+    await expect(f.controller.reconcile()).rejects.toThrow(
+      "Browser recovery needs attention (Browser shutdown could not be confirmed (the key service did not confirm its connection closed); retry Stop)",
+    );
+  });
 });

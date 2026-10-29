@@ -318,6 +318,38 @@
   }
 }
 
+/* Unlocking saved keys: what the lock is, the passphrase, and who can read it. */
+.keys-unlock,
+.keys-unlock-form {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+
+.keys-unlock-text,
+.keys-unlock-note {
+  margin: 0;
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.keys-unlock-note {
+  color: var(--color-fg-3);
+}
+
+.keys-unlock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+}
+
+@media (width < 700px) {
+  .keys-unlock-actions > .ui-button {
+    flex: 1;
+  }
+}
+
 .keys-general-note {
   margin: 0;
   color: var(--color-fg-2);

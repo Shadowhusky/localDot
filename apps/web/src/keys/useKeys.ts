@@ -10,6 +10,7 @@ import {
   loadKeys,
   problemText,
   saveKey,
+  unlockKeys,
   vaultLocked,
 } from "./keys-api.ts";
 
@@ -28,6 +29,8 @@ export interface KeysController {
     metadata?: KeyMetadata,
   ): Promise<{ restart: boolean; key?: KeyRecord }>;
   remove(id: string): Promise<void>;
+  // Opens the passphrase vault, or gives a new one its passphrase.
+  unlock?(passphrase: string): Promise<void>;
 }
 
 export type KeyStatus = {
@@ -169,6 +172,16 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
     [api, change],
   );
 
+  // The open vault shows at once; the poll that follows lists the keys it now holds.
+  const unlock = useCallback(
+    async (passphrase: string) => {
+      const vault = await unlockKeys(api, passphrase);
+      if (vault) setHealth((now) => (now ? { ...now, vault } : now));
+      setVersion((v) => v + 1);
+    },
+    [api],
+  );
+
   const updateMetadata = useCallback(
     (id: string, metadata: KeyMetadata) =>
       change(async () => {
@@ -185,6 +198,7 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
     busy,
     save,
     remove,
+    unlock,
     updateMetadata,
     revision: version,
   };

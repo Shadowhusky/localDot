@@ -34,6 +34,8 @@ export interface CurtainProps {
   notice?: string | null;
   action?: ComputerAction;
   onAction(): void;
+  // The last Turn on was held back by Docker's memory, which the notice explains.
+  startAnyway?(): void;
   // A computer fenced after an unconfirmed step recovers on a fresh one.
   replace?: ReplaceAction;
   // A computer whose update can't be finished starts again clean, while that is going on too.
@@ -84,6 +86,7 @@ export function Curtain({
   notice,
   action,
   onAction,
+  startAnyway,
   replace,
   freshStart,
   operation,
@@ -124,6 +127,10 @@ export function Curtain({
           }
         : curtainCopy(phase, { first, waking, updating, caption, notice, action });
   const enabled = runtimeProblem ? true : recovering ? replace.enabled : action?.enabled;
+  const anyway =
+    !runtimeProblem && !recovering && !copy?.progress && action?.kind === "start"
+      ? startAnyway
+      : undefined;
   // A fresh start is its own long job, beside the old computer's stop and the new one's start.
   const timing = useTiming(!!copy?.progress, fresh ? null : operation, copy?.kind ?? "start");
   const now = useSecondTicks(timing?.since ?? 0, !!timing && !ready);
@@ -194,10 +201,10 @@ export function Curtain({
                       ? undefined
                       : recovering
                         ? replace.run
-                        : onAction
+                        : (anyway ?? onAction)
                 }
               >
-                {copy.button.label}
+                {anyway ? "Start anyway" : copy.button.label}
               </Button>
             )
           )}

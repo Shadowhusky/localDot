@@ -460,6 +460,20 @@
   }
 }
 
+/* Glass blurs again for every frame of a live picture near it, which costs a laptop's GPU too: while
+   the stream is live the island and its notes are solid. */
+.island-anchor[data-live] .island-plate,
+.island-anchor[data-live] .island-note {
+  background-color: var(--color-glass-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* A decision keeps its thick glass, unblurred. */
+.island-anchor[data-live] .island[data-open] .island-plate {
+  background-color: var(--color-thick-glass);
+}
+
 /* A phone blurs glass again for every frame of the picture under it: there the island, its notes
    and toasts are solid. */
 @media (pointer: coarse) {

@@ -89,7 +89,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Find the desktop's controls whose names contain text (role optional, such as push button, menu item or " +
     "check box), in every window top first. Returns each one's role, name, window and the point to click.",
   switch_screen:
-    "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Every sign-in happens here, never in the desktop's Chromium: switch here first and check the existing session before asking for missing details. Request a fresh screenshot after switching; shell and files remain on the desktop.",
+    "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Every sign-in happens here, never in the desktop's Chromium: switch here first and check the existing session before asking for missing details. Request a fresh screenshot after switching; shell and files remain on the desktop. restart: true starts a stuck web browser again first, keeping sign-ins.",
   update_plan:
     "Replace the task's plan: the whole list of steps, each todo, doing, done or skipped.",
   ask_user:

@@ -311,7 +311,7 @@ it("names a key changed outside localDot and opens Keys, never re-entry", () => 
   const keys = screen.getByRole("button", { name: "Open Keys" });
   expect(keys.getAttribute("data-variant")).toBe("primary");
   fireEvent.click(keys);
-  expect(onSettings).toHaveBeenCalledWith(keys, "keys");
+  expect(onSettings).toHaveBeenCalledWith(keys, "keys", undefined);
   expect(onReenterKey).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Continue" }).getAttribute("data-variant")).toBe(
     "secondary",
@@ -335,3 +335,81 @@ it.each(["provider limit reached", "chatgpt plan limit reached", "claude code pl
     expect(screen.getByRole("button", { name: "Change model" })).toBeTruthy();
   },
 );
+
+it("offers a report about a task that ended with an error, and about one that needs attention", () => {
+  const onReport = vi.fn();
+  const ended = agentWith("model refused");
+  render(
+    <TaskRecovery
+      agent={{
+        ...ended,
+        model: {
+          ...ended.model,
+          state: { state: "error", reason: "the brain kept crashing" },
+          ended: { reason: "error" },
+        },
+      }}
+      controls={controls}
+      onSettings={vi.fn()}
+      onReport={onReport}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Report this problem" }));
+  expect(onReport).toHaveBeenCalledWith(expect.anything(), {
+    context: { kind: "task", sessionId, reason: "the brain kept crashing" },
+    title: "The task ended: the brain kept crashing",
+  });
+  cleanup();
+  render(
+    <TaskRecovery
+      agent={agentWith("model refused")}
+      controls={controls}
+      onSettings={vi.fn()}
+      onReport={onReport}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Recovery options" }));
+  fireEvent.click(screen.getByRole("button", { name: "Report this problem" }));
+  expect(onReport).toHaveBeenLastCalledWith(expect.anything(), {
+    context: { kind: "task", sessionId, reason: "model refused" },
+    title: "The provider could not process my request",
+  });
+});
+
+// A plan's expired sign-in, or keys out of reach, opens the one place that fixes it, lit up there.
+it.each([
+  ["chatgpt sign-in expired", "Sign in to ChatGPT", "models", "models-chatgpt"],
+  ["chatgpt account changed", "Sign in to ChatGPT", "models", "models-chatgpt"],
+  ["claude code sign-in expired", "Open Claude Code setup", "models", "models-claude-code"],
+  ["keyd unavailable", "Open Keys", "keys", "keys-protection"],
+])("offers the fix for %s first, with Continue after it", (reason, label, section, tip) => {
+  const onSettings = vi.fn();
+  render(
+    <TaskRecovery
+      agent={agentWith(reason)}
+      controls={{ ...controls, canResumeTask: true }}
+      onSettings={onSettings}
+    />,
+  );
+  const fix = screen.getByRole("button", { name: label });
+  expect(fix.getAttribute("data-variant")).toBe("primary");
+  fireEvent.click(fix);
+  expect(onSettings).toHaveBeenCalledWith(fix, section, tip);
+  expect(screen.getByRole("button", { name: "Continue" }).getAttribute("data-variant")).toBe(
+    "secondary",
+  );
+});
+
+it("says saved keys unlocked meanwhile need only Continue", () => {
+  render(
+    <TaskRecovery
+      agent={agentWith("keys locked")}
+      controls={{ ...controls, canResumeTask: true }}
+      onSettings={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "Your saved keys are unlocked" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Continue" }).getAttribute("data-variant")).toBe(
+    "primary",
+  );
+});

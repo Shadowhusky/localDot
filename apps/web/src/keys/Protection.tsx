@@ -77,20 +77,27 @@ export function protectionOf(health: KeydHealth | null): Status[] {
     : [isolation, audit, network];
 }
 
-// Off macOS only: keyd's vault may wait for a passphrase that only localdot unlock gives it.
+// Off macOS only: keyd's vault may wait for its passphrase, which the form above this list takes,
+// or localdot unlock on the computer itself.
 function savedKeys(health: KeydHealth): Status {
   const name = "Saved keys";
-  const fix = { lead: "On that computer, run:", command: UNLOCK };
+  const fix = { lead: "Or, on the computer running localDot, run:", command: UNLOCK };
   if (vaultLocked(health))
     return health.vault?.state === "setup"
       ? {
           name,
           state: "Needs a passphrase",
           tone: "bad",
-          problem: "Choose a passphrase for saved keys before you add one.",
+          problem: "Choose a passphrase for saved keys above before you add one.",
           fix,
         }
-      : { name, state: "Locked", tone: "bad", problem: "Saved keys are locked.", fix };
+      : {
+          name,
+          state: "Locked",
+          tone: "bad",
+          problem: "Saved keys are locked. Unlock them above with your passphrase.",
+          fix,
+        };
   const vault = health.vault;
   const state =
     vault?.backend === "secret-service"
@@ -118,7 +125,7 @@ const TILE: Record<string, IconName> = {
 // What keeps keys safe, one row each, so a problem says what it means and how to fix it.
 export function Protection({ health }: { health: KeydHealth | null }) {
   return (
-    <Group>
+    <Group id="keys-protection">
       <ul className="keys-protection">
         {protectionOf(health).map((status) => (
           <li key={status.name} className="keys-status" data-tone={status.tone}>

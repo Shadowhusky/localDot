@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CodexInstallState, InstalledCodex } from "@localdot/codex-harness";
-import { type ChatgptSandbox, type KeydRecord, ulid } from "@localdot/protocol";
+import { type ChatgptSandbox, type KeydRecord, PlanUsageReply, ulid } from "@localdot/protocol";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +27,7 @@ import type { ChatgptStatus } from "./codex/account.ts";
 import { SANDBOX_REASONS } from "./codex/setup.ts";
 import { TRANSFER_BYTES } from "./download.ts";
 import { MemoryStore } from "./memory.ts";
+import { PlanUsageStore } from "./plan-usage.ts";
 import { ResearchLog } from "./research.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./routes.ts";
 import { AgentError, type TaskStartOptions } from "./runner.ts";
@@ -51,7 +52,9 @@ function deferred<T = void>() {
   });
   return { promise, resolve };
 }
-async function setup(options: Pick<AgentRoutesDeps, "chatgpt" | "harness" | "claudeCode"> = {}) {
+async function setup(
+  options: Pick<AgentRoutesDeps, "chatgpt" | "harness" | "claudeCode" | "planUsage"> = {},
+) {
   const home = mkdtempSync(join(tmpdir(), "localdot-agent-routes-"));
   const events: { type: string; data: unknown }[] = [];
   const session = new AgentSession(SESSION, CELL, "task", {
@@ -725,6 +728,37 @@ describe("research mode routes", () => {
       expect.stringContaining("The user asked you to wrap up."),
       expect.stringContaining("about 20 sources and 20 minutes"),
     ]);
+  });
+});
+
+describe("plan usage route", () => {
+  it("reports what each plan used, reading stale plans again only when asked", async () => {
+    const home = mkdtempSync(join(tmpdir(), "localdot-plan-usage-route-"));
+    try {
+      const read = vi.fn(async () => undefined);
+      const planUsage = new PlanUsageStore({ home, read: { "claude-code": read } });
+      planUsage.record(
+        {
+          provider: "claude-code",
+          windows: [{ window: "primary", usedPercent: 12, windowMinutes: 300 }],
+          limitReached: false,
+        },
+        Date.now() - 600_000,
+      );
+      const f = await setup({ planUsage });
+      const reply = await f.send("GET", "/api/agent/plan-usage");
+      expect(reply.status).toBe(200);
+      expect(PlanUsageReply.parse(await reply.json()).plans[0]?.windows[0]?.usedPercent).toBe(12);
+      expect(read).not.toHaveBeenCalled();
+      await f.send("GET", "/api/agent/plan-usage?fresh=1");
+      expect(read).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+  it("has no plan usage route where nothing keeps it", async () => {
+    const f = await setup();
+    expect((await f.send("GET", "/api/agent/plan-usage")).status).toBe(404);
   });
 });
 

@@ -1,21 +1,12 @@
 import type { TaskModelSelection } from "@localdot/protocol";
 import type { KeyUseState, PlanItemState } from "@localdot/stage";
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActivityDetail } from "../agent/ActivityDetails.tsx";
-import { ActivityRow } from "../agent/ActivityRow.tsx";
+import { ActivityRow, reveal, revealOpened } from "../agent/ActivityRow.tsx";
 import {
   type ActivityEntry,
   type ActivityFilter,
   activityRows,
-  clock,
   type EntryView,
   entryView,
   foldKeyUses,
@@ -30,20 +21,22 @@ import { planPhase } from "../agent/plan-state.ts";
 import { ResearchSources } from "../agent/ResearchSources.tsx";
 import { StepPreviewScope } from "../agent/StepPreview.tsx";
 import { SubagentList } from "../agent/SubagentList.tsx";
-import { onStepFocus, takeStep, wantedStep } from "../agent/step-focus.ts";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
-import { reducedMotion, useFollowScroll } from "../agent/useFollowScroll.ts";
+import { useFollowScroll } from "../agent/useFollowScroll.ts";
 import { useStepHistory } from "../agent/useStepHistory.ts";
 import { BrowserDownloads } from "../browser/BrowserDownloads.tsx";
 import { isLoopbackPage } from "../deliverables/api.ts";
 import { HandedOverFiles, latestFiles } from "../deliverables/HandedOverFiles.tsx";
 import type { ApiClient } from "../lib/api.ts";
+import { type Previews, PreviewsScope } from "../previews/PreviewsContext.tsx";
+import { PreviewsPanel } from "../previews/PreviewsPanel.tsx";
 import { timeLabel } from "../replay/replay-view.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { Button } from "../ui/Button.tsx";
 import { GroupHeading } from "../ui/GroupHeading.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import type { IconName } from "../ui/icons.ts";
 import { useMediaQuery } from "../ui/media.ts";
 import { pressHandlers } from "../ui/press.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
@@ -68,7 +61,8 @@ export interface ActivityRailProps {
   scale: number;
   api: ApiClient;
   asOfMs?: number;
-  // The session's now, for the clock on the step dot is taking.
+  // The session's now, for the clock on the step dot is taking; without it that clock counts by
+  // itself.
   nowMs?: number;
   // The task's history is in, so a file handed over from now on is new.
   historyLoaded?: boolean;
@@ -79,6 +73,8 @@ export interface ActivityRailProps {
   modelName?(provider: string, model: string): string | undefined;
   // Opens the spending limits from the usage popover.
   onSpending?(trigger: HTMLElement): void;
+  // The owner's previews of the servers dot starts in the computer; none in Replay.
+  previews?: Previews | null;
   memoryAction?: (change: AgentChange) => {
     status?: UndoStatus;
     onUndo?: (changeId: string) => void;
@@ -91,8 +87,6 @@ const FILTERS = [
   { value: "screen", label: "Screen" },
   { value: "tools", label: "Tools" },
 ] as const;
-// Long enough for a row's detail to finish opening before it is brought into view.
-const REVEAL_AFTER = 300;
 const estimateStep = () => 64;
 const entryKey = (entry: ActivityEntry) => entry.key;
 const changeKey = (change: AgentChange) => change.id;
@@ -100,13 +94,17 @@ const EMPTY = emptyAgentModel();
 // dot is still at the task, so the user can still change how far it reads.
 const WORKING = new Set(["thinking", "acting", "observing", "waiting_user", "paused"]);
 
-type RailTab = "steps" | "files" | "sources" | "agents";
+type RailTab = "steps" | "files" | "sources" | "agents" | "previews";
+// What each tab shows in place of its name while the names don't fit.
+const TAB_ICONS: Record<RailTab, IconName> = {
+  steps: "list",
+  files: "file",
+  sources: "library",
+  agents: "bot",
+  previews: "app-window",
+};
 // Seen indicators are transient; the selected tab is saved separately per task.
 const seenFiles = new Map<string, number>();
-
-function reveal(element: Element | null) {
-  element?.scrollIntoView?.({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
-}
 
 export function ActivityRail({
   rows,
@@ -127,6 +125,7 @@ export function ActivityRail({
   historyLoaded = false,
   onSelect,
   planSnapshot,
+  previews = null,
 }: ActivityRailProps) {
   const phone = useMediaQuery(HANDHELD);
   const replay = asOfMs !== undefined;
@@ -172,6 +171,7 @@ export function ActivityRail({
   const memoryChanges = model.changes.filter((change) => change.type === "memory");
   const files = (sessionId ? handed : 0) + downloads + model.changes.length;
   const research = sessionId ? model.research : undefined;
+  const showPreviews = !!previews && !replay && !!sessionId;
   const [picked, setPicked] = useState<{ owner: string; tab: RailTab } | null>(null);
   // A tab chosen before any task started stays chosen once one does.
   const lastOwner = useRef(owner);
@@ -186,6 +186,7 @@ export function ActivityRail({
   const tab: RailTab =
     (wanted === "files" && (files > 0 || localPick === "files")) ||
     (wanted === "sources" && research) ||
+    (wanted === "previews" && showPreviews) ||
     wanted === "agents"
       ? wanted
       : "steps";
@@ -198,12 +199,35 @@ export function ActivityRail({
   }, [historyLoaded, owner, tab, handed]);
   const fresh = tab !== "files" && handed > (seenFiles.get(owner) ?? handed);
   const tabs: SegmentItem[] = [
-    { value: "steps", label: "Steps", count: entries.length || undefined },
+    { value: "steps", label: "Steps", icon: TAB_ICONS.steps, count: entries.length || undefined },
     ...(tab === "files" || files > 0
-      ? [{ value: "files", label: "Files", count: files || undefined, fresh }]
+      ? [
+          {
+            value: "files",
+            label: "Files",
+            icon: TAB_ICONS.files,
+            count: files || undefined,
+            fresh,
+          },
+        ]
       : []),
-    ...(research ? [{ value: "sources", label: "Sources", count: research.sources.length }] : []),
-    { value: "agents", label: "Agents", count: model.subagents.size || undefined },
+    ...(research
+      ? [
+          {
+            value: "sources",
+            label: "Sources",
+            icon: TAB_ICONS.sources,
+            count: research.sources.length,
+          },
+        ]
+      : []),
+    {
+      value: "agents",
+      label: "Agents",
+      icon: TAB_ICONS.agents,
+      count: model.subagents.size || undefined,
+    },
+    ...(showPreviews ? [{ value: "previews", label: "Previews", icon: TAB_ICONS.previews }] : []),
   ];
   const tabKey = tabs.map((item) => item.value).join(",");
   const tabValues = useMemo(() => tabKey.split(","), [tabKey]);
@@ -262,33 +286,6 @@ export function ActivityRail({
     reveal(timeline.current?.querySelector("[data-current]") ?? null);
   }, [replay, currentKey, display, virtual.scrollTo]);
 
-  // A step a chat row asked for: bring it onto the list, then open it where the reader can see it.
-  const focus = useSyncExternalStore(onStepFocus, wantedStep);
-  useEffect(() => {
-    if (!focus || !entries.some((entry) => entry.key === focus.key)) return;
-    if (tab !== "steps") return choose("steps");
-    if (filter !== "all") return setFilter("all");
-    if (!history.rows.some((entry) => entry.key === focus.key))
-      return history.hasOlder ? history.older() : undefined;
-    const group = groups.find(
-      (each) => each.entries.length > 1 && each.entries.some((entry) => entry.key === focus.key),
-    );
-    if (group && !replay && !(expanded.owner === owner && expanded.keys.has(group.key)))
-      return setExpanded((previous) => ({
-        owner,
-        keys: new Set([...(previous.owner === owner ? previous.keys : []), group.key]),
-      }));
-    const index = display.findIndex((item) => item.key === focus.key);
-    if (index < 0) return;
-    takeStep(focus.serial);
-    setOpened({ owner, key: focus.key });
-    virtual.scrollTo(index);
-    window.setTimeout(
-      () => reveal(timeline.current?.querySelector(`[data-index="${index}"]`) ?? null),
-      REVEAL_AFTER,
-    );
-  });
-
   const older = () => {
     const pane = timeline.current?.closest<HTMLElement>(".activity-scroll");
     const top = pane?.getBoundingClientRect().top ?? 0;
@@ -319,7 +316,7 @@ export function ActivityRail({
     if (row instanceof HTMLElement) follow.anchorTo(row);
     const next = openKey === key ? null : key;
     setOpened(next ? { owner, key: next } : null);
-    if (next) window.setTimeout(() => reveal(row), REVEAL_AFTER);
+    if (next) revealOpened(row);
   };
   const toggle = (entry: ActivityEntry, trigger: HTMLButtonElement) => {
     toggleKey(entry.key, trigger);
@@ -327,17 +324,16 @@ export function ActivityRail({
   };
 
   const renderEntry = (entry: ActivityEntry) => {
-    const shown = viewOf(entry);
-    const view =
-      entry.key === currentKey && !shown.time && nowMs !== undefined && !replay
-        ? { ...shown, time: clock(Math.max(0, nowMs - shown.startT)) }
-        : shown;
+    const view = viewOf(entry);
+    const running = entry.key === currentKey && !view.time && !replay;
     const expandable = !!sessionId && hasDetails(entry, model.changes);
     return (
       <ActivityRow
         key={entry.key}
         id={`${domId}-${entry.key}`}
         view={view}
+        runningFrom={running ? view.startT : undefined}
+        nowMs={nowMs}
         current={entry.key === currentKey}
         future={asOfMs !== undefined && entry.row.kind === "step" && entry.row.startT > asOfMs}
         open={openKey === entry.key}
@@ -579,6 +575,15 @@ export function ActivityRail({
           <TabPanel tabsId={`${domId}-tabs`} value="agents" selected={tab} swipe={phone}>
             <SubagentList agents={model.subagents} />
           </TabPanel>
+          {showPreviews && (
+            <TabPanel tabsId={`${domId}-tabs`} value="previews" selected={tab} swipe={phone}>
+              <ScrollArea className="activity-scroll">
+                <div className="activity-content">
+                  <PreviewsPanel active={tab === "previews"} />
+                </div>
+              </ScrollArea>
+            </TabPanel>
+          )}
         </SwipePanels>
         {!replay && started && onSteps && (
           <button
@@ -606,9 +611,10 @@ export function ActivityRail({
       )}
     </aside>
   );
-  return (
-    <StepPreviewScope api={api} sessionId={owner} results={model.results}>
+  const scoped = (
+    <StepPreviewScope api={api} sessionId={owner} results={model.results} scale={scale}>
       {content}
     </StepPreviewScope>
   );
+  return <PreviewsScope value={replay ? null : previews}>{scoped}</PreviewsScope>;
 }

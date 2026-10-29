@@ -103,6 +103,8 @@ const PLANNED: IconName[] = [
   "mic",
   // Research: many sources.
   "library",
+  // Activity: the agents dot delegates to, on a tab too narrow for its name.
+  "bot",
 ];
 
 describe("Icon", () => {

@@ -234,7 +234,11 @@ test("tapping an already focused composer relocks the next keyboard transition",
   await expect(app).toHaveAttribute("data-composer-keyboard", "");
   // Focus pins the shell synchronously; wait for the viewport frame as well.
   await expect
-    .poll(() => app.evaluate((element) => element.style.getPropertyValue("--_composer-bottom")))
+    .poll(() =>
+      page
+        .locator(".thread-toolbar")
+        .evaluate((element) => element.style.getPropertyValue("--_composer-bottom")),
+    )
     .toBe("534px");
   await resize(844);
   await expect(app).not.toHaveAttribute("data-composer-keyboard");
@@ -273,7 +277,11 @@ test("keyboard recovery tolerates a stale pan and reopening without another focu
   await expect(app).toHaveAttribute("data-composer-keyboard", "");
   // Focus locks synchronously; wait until the first keyboard geometry has actually landed.
   await expect
-    .poll(() => app.evaluate((e) => e.style.getPropertyValue("--_composer-bottom")))
+    .poll(() =>
+      page
+        .locator(".thread-toolbar")
+        .evaluate((e) => e.style.getPropertyValue("--_composer-bottom")),
+    )
     .toBe("774px");
   // WebKit can retain the old pan after the keyboard has gone away.
   await viewport(844, 240);
@@ -297,7 +305,11 @@ test("keyboard recovery tolerates a stale pan and reopening without another focu
   // Ignore transient unusable geometry while the tab is suspended, then recover on pageshow.
   await viewport(0, 844);
   await expect
-    .poll(() => app.evaluate((e) => e.style.getPropertyValue("--_composer-bottom")))
+    .poll(() =>
+      page
+        .locator(".thread-toolbar")
+        .evaluate((e) => e.style.getPropertyValue("--_composer-bottom")),
+    )
     .toBe("534px");
   await page.evaluate(() => {
     const view = window.visualViewport;

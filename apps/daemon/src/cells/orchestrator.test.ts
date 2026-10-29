@@ -819,6 +819,44 @@ describe("CellOrchestrator restarts", () => {
     expect(desktop?.starts).toBe(2);
   });
 
+  it("says when Docker stopped a computer for memory, with what to raise when computers share it", async () => {
+    const { orchestrator, store, stateOf } = await setup({ restartBackoffMs: [0] });
+    fake.state.info = { MemTotal: 8 * 1024 ** 3, OperatingSystem: "Docker Desktop" };
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const desktop = fake.state.containers.get(store.get(cell.id)?.docker.desktop ?? "");
+    const other = { ...(desktop as NonNullable<typeof desktop>) };
+    fake.state.containers.set("another-dots-desktop", {
+      ...other,
+      name: "another-dots-desktop",
+      id: "id-another-dots-desktop",
+      body: {
+        ...other.body,
+        Labels: { "localdot.role": "desktop", "localdot.cell": "01JXYZ00000000000000000099" },
+      },
+      running: true,
+    });
+    const until = (pred: () => boolean) =>
+      new Promise<void>((resolve) => {
+        const check = () => (pred() ? resolve() : setTimeout(check, 5));
+        check();
+      });
+    const kill = () => {
+      if (desktop) {
+        desktop.running = false;
+        desktop.exitCode = 137;
+        desktop.oomKilled = true;
+      }
+    };
+    kill();
+    await until(() => desktop?.starts === 2 && orchestrator.get(cell.id)?.state === "ready");
+    kill();
+    await until(() => orchestrator.get(cell.id)?.state === "failed");
+    expect(orchestrator.get(cell.id)?.error).toBe(
+      "desktop container ran out of memory — Two running computers need about 10 GB for Docker; it has 8 GB. Raise it in Docker Desktop → Settings → Resources.; gave up after 1 restarts",
+    );
+  });
+
   it("keeps a cell stopped when the stop lands during the restart backoff", async () => {
     const backoff = Promise.withResolvers<void>();
     const { orchestrator, store, stateOf, changes } = await setup({
@@ -1463,6 +1501,7 @@ describe("shared desktop and brain keyd allocation", () => {
 it("updates a paused computer by thawing and stopping before swapping", async () => {
   const updates = {
     available: () => true,
+    blocked: () => false,
     needsFreshStart: () => false,
     pending: () => false,
     prepare: vi.fn(async () => {}),

@@ -48,6 +48,16 @@ const DROP_CANCEL_REASONS: Record<string, string> = {
   stale: "Another window was at the drop point. The drag was cancelled.",
 };
 
+// The views last listed for each task: a step that has not changed keeps its view, so what is built
+// from it can be kept as well.
+const listed = new WeakMap<SessionModel, Map<string, StepRowView>>();
+
+function sameView(a: StepRowView, b: StepRowView): boolean {
+  const keys = Object.keys(a) as (keyof StepRowView)[];
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => a[key] === b[key]);
+}
+
 export function stepRows(model: SessionModel): StepRowView[] {
   const rows = new Map<string, StepRowView>();
   const stepOf = (a: ActionState) => a.step ?? a.id;
@@ -118,17 +128,25 @@ export function stepRows(model: SessionModel): StepRowView[] {
   }
   // The frame a step ends with is the observe appended inside it; the model keeps observes by
   // step through the actions' order: the latest observe at or before the result belongs to it.
-  return [...rows.values()]
+  const before = listed.get(model);
+  const views = new Map<string, StepRowView>();
+  const list = [...rows.values()]
     .sort((a, b) => a.startT - b.startT)
     .map((row) => {
       const index = model.stepIndex.get(row.id);
       const intent = index === undefined ? undefined : model.steps[index]?.intent;
-      return {
+      const view: StepRowView = {
         ...row,
         ...(frameFor(model, row.id) ? { frameId: frameFor(model, row.id) } : {}),
         ...(intent ? { intent } : {}),
       };
+      const kept = before?.get(view.id);
+      const shown = kept && sameView(kept, view) ? kept : view;
+      views.set(view.id, shown);
+      return shown;
     });
+  listed.set(model, views);
+  return list;
 }
 
 function frameFor(model: SessionModel, step: string): string | undefined {

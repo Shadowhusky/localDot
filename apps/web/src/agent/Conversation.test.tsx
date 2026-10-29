@@ -611,7 +611,7 @@ it("asks the composer to take a queued message back, which then leaves the threa
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /^Edit$/ }));
-    expect(take).toHaveBeenCalledWith(sessionId, messageId, undefined);
+    expect(take).toHaveBeenCalledWith(sessionId, messageId, false);
     expect(fetch).not.toHaveBeenCalled();
     // dot gives it back before the composer has its words: the row goes, and the words still land.
     view.rerender(
@@ -657,11 +657,40 @@ it("shows a message Stop left unsent, and Edit moves it, files and all, out to t
     expect(within(row).getByText("Not sent")).toBeTruthy();
     expect(within(row).getByRole("list", { name: "Attached files" }).textContent).toBe("hat.png");
     fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
-    expect(take).toHaveBeenCalledWith(sessionId, messageId, text);
+    expect(take).toHaveBeenCalledWith(sessionId, messageId, true);
     await waitFor(() => expect(screen.queryByRole("article", { name: "You" })).toBeNull());
   } finally {
     unsubscribe();
   }
+});
+
+it("leaves out a message Stop left unsent once it was taken back, on whichever device", () => {
+  const stopped = (id: string, text: string) =>
+    ({
+      ...message(id, text),
+      sessionId: "01J00000000000000000000001",
+      kind: "followup",
+      delivery: "cancelled",
+      stopped: true,
+    }) as AgentMessage;
+  render(
+    <Conversation
+      items={items([
+        message("01J00000000000000000000009", "Draw a dog"),
+        stopped("01J00000000000000000000002", "Then add a hat"),
+        stopped("01J00000000000000000000003", "And a scarf"),
+      ])}
+      truncated={false}
+      ended="stopped"
+      withdrawn={["01J00000000000000000000002"]}
+    />,
+  );
+  const yours = screen.getAllByRole("article", { name: "You" });
+  expect(yours.map((row) => row.querySelector(".thread-bubble-text")?.textContent)).toEqual([
+    "Draw a dog",
+    "And a scarf",
+  ]);
+  expect(within(yours[1] as HTMLElement).getByText("Not sent")).toBeTruthy();
 });
 
 it("says so when no composer can take a queued message back", () => {

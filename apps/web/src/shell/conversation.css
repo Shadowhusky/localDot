@@ -194,6 +194,22 @@
   }
 }
 
+/* Hidden under another view, its loops wait: they would restyle what no one sees on every frame. */
+:is(
+  .thread-body:not([data-covered]) > .thread-cover,
+  .thread-body[data-covered] > .thread-scroll,
+  .thread-cover > :not([data-shown])
+) :is(.ui-skeleton-bone, .ui-status-glyph, .ui-spinner, .ui-progress-ring, .ui-progress-fill),
+:is(
+    .thread-body:not([data-covered]) > .thread-cover,
+    .thread-body[data-covered] > .thread-scroll,
+    .thread-cover > :not([data-shown])
+  )
+  .ui-skeleton-bone::before,
+.thread-body[data-covered] > .thread-scroll .thread-bone::after {
+  animation-play-state: paused;
+}
+
 .thread-newer {
   margin-top: calc(var(--spacing) * 5);
   text-align: center;
@@ -676,6 +692,7 @@
 }
 
 .thread-work-text {
+  position: relative;
   grid-area: 1 / 1;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -686,27 +703,40 @@
   animation: thread-line-out var(--dur-exit) var(--ease-exit) forwards;
 }
 
-.thread-work[data-running] .thread-work-text:not([data-leaving]) {
-  background-image: linear-gradient(
-    90deg,
-    var(--color-fg-2) 0%,
-    var(--color-fg-2) 35%,
-    var(--color-fg-1) 50%,
-    var(--color-fg-2) 65%,
-    var(--color-fg-2) 100%
-  );
-  background-size: 300% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  /* A few passes for each new line, then the text rests: a shimmer repaints it on every frame. */
-  animation:
-    thread-line-in var(--dur-default) var(--ease-spring),
-    thread-shimmer var(--loop-shimmer) linear 3;
+/* A few passes of light for each new line, then the text rests. The light is the line again in
+   the brighter colour, seen through a moving band while the copy under it moves back as far: both
+   are transforms, so the compositor runs the passes without restyling or repainting the page. */
+.thread-work-glint {
+  display: none;
+}
+
+.thread-work[data-running] .thread-work-text:not([data-leaving]) > .thread-work-glint {
+  display: block;
+  position: absolute;
+  inset: 0;
+  color: var(--color-fg-1);
+  pointer-events: none;
+  user-select: none;
+  mask-image: linear-gradient(90deg, transparent 5%, black 50%, transparent 95%);
+  animation: thread-glint var(--loop-shimmer) linear 3 both;
+}
+
+.thread-work-glint::before {
+  content: attr(data-text);
+  display: block;
+  animation: thread-glint-hold var(--loop-shimmer) linear 3 both;
+}
+
+/* In the dock the line keeps to one line (below), and its light ends as it does. */
+.thread-live .thread-work-glint::before {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The new line waits for the old one to leave, so the two never show over each other. */
-.thread-work .thread-work-text[data-leaving] + .thread-work-text {
+.thread-work .thread-work-text[data-leaving] + .thread-work-text,
+.thread-work .thread-work-text[data-leaving] + .thread-work-text > .thread-work-glint,
+.thread-work .thread-work-text[data-leaving] + .thread-work-text > .thread-work-glint::before {
   animation-delay: var(--dur-exit);
   animation-fill-mode: both;
 }
@@ -725,12 +755,21 @@
   }
 }
 
-@keyframes thread-shimmer {
+@keyframes thread-glint {
   from {
-    background-position: 100% 0;
+    transform: translateX(-100%);
   }
   to {
-    background-position: 0% 0;
+    transform: translateX(100%);
+  }
+}
+
+@keyframes thread-glint-hold {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
   }
 }
 
@@ -2022,9 +2061,11 @@
   }
 
   .thread-work[data-running] .thread-work-text:not([data-leaving]) {
-    background-image: none;
-    color: var(--color-fg-2);
     animation: thread-fade-in var(--dur-fade) var(--ease-standard);
+  }
+
+  .thread-work[data-running] .thread-work-text:not([data-leaving]) > .thread-work-glint {
+    display: none;
   }
 
   .thread-work .thread-work-text[data-leaving] + .thread-work-text {
@@ -2070,9 +2111,8 @@
     outline: var(--focus-width) solid Highlight;
   }
 
-  .thread-work[data-running] .thread-work-text:not([data-leaving]) {
-    background-image: none;
-    color: CanvasText;
+  .thread-work[data-running] .thread-work-text:not([data-leaving]) > .thread-work-glint {
+    display: none;
   }
 }
 

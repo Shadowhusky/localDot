@@ -13,7 +13,7 @@ import {
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { onForeground } from "../lib/foreground.ts";
-import { Button } from "../ui/Button.tsx";
+import type { ScreenName, StageConnection } from "./connection.ts";
 import type { ProbeApi } from "./debug-hooks.ts";
 import { frameTapSupport } from "./frame-source.ts";
 import {
@@ -27,7 +27,9 @@ import { ManualSurface, type ManualSurfaceHandle, type PointerMode } from "./Man
 import type { Flip } from "./probe.ts";
 import type { PumpStats } from "./pump.ts";
 import { StageCanvas } from "./StageCanvas.tsx";
-import type { ReplayHandle, StageCanvasHandle } from "./stage-engine.ts";
+import { StageNotice } from "./StageNotice.tsx";
+import type { ReplayHandle, StageCanvasHandle, StageView } from "./stage-engine.ts";
+import { stageFramerate } from "./stream-quality.ts";
 import type { FieldMark, OracleRequest, StageClock, StageViewPatch } from "./worker-protocol.ts";
 
 export interface StageHandle {
@@ -61,8 +63,14 @@ export interface StageProps {
     onTyping?(typing: boolean): void;
     onRefused?(message: string | null): void;
   };
-  // This viewer's picture, including deliberate background suspension versus a lost stream.
-  onPicture?(picture: StreamPicture): void;
+  // This viewer's picture of the screen it shows, including deliberate background suspension
+  // versus a lost stream.
+  onPicture?(picture: StreamPicture, screen: ScreenName): void;
+  // How the picture has fared in this view (useStageConnection): it is held, dimmed, while away.
+  connection?: StageConnection;
+  // Something the page shows covers the whole stage, or folds it away: its stream pauses, as it
+  // does by itself once the stage leaves the viewport.
+  covered?: boolean;
 }
 
 const quiet = () => () => {};
@@ -81,6 +89,8 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     dim = false,
     fields = NO_FIELDS,
     onPicture,
+    connection,
+    covered = false,
   },
   ref,
 ) {
@@ -179,18 +189,22 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   }, [reconnects, stream]);
 
   const picture = useSyncExternalStore(stream?.subscribe ?? quiet, () => stream?.picture ?? "none");
-  const shown: StreamPicture = mode === "live" ? picture : "none";
+  // Live once the stage has presented this screen's own frames, not merely its stream's.
+  const shown: StreamPicture =
+    mode !== "live" ? "none" : picture === "live" && displayOwner !== owner ? "none" : picture;
   useEffect(() => {
-    onPicture?.(shown);
-  }, [shown, onPicture]);
+    onPicture?.(shown, surface);
+  }, [shown, surface, onPicture]);
 
   // Overlays freeze while the stream is not live (spec, error handling); zoom comes from ?zoom= for tests.
+  const away = mode === "live" && connection?.phase === "away" && connection.level !== "blip";
   const reconnecting =
     mode === "live" &&
     !cell?.paused &&
     (cell?.stream.connection === "stalled" ||
       cell?.stream.connection === "disconnected" ||
-      shown === "held");
+      shown === "held" ||
+      away);
   const paused = mode === "live" && (!!cell?.paused || reconnecting || shown === "suspended");
   const manualActive = Boolean(manual);
   useEffect(() => {
@@ -228,6 +242,28 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   const onFlip = useCallback((flip: Flip) => {
     flips.current.push(flip);
   }, []);
+
+  // A small stage asks for fewer frames than a large one or the user's own control, and one out of
+  // sight asks for none and draws nothing.
+  const [view, setStageView] = useState<StageView>({ onScreen: true, share: 0 });
+  const control = !!manual?.enabled;
+  const framerate = useMemo(
+    () => stageFramerate({ share: view.share, control }),
+    [view.share, control],
+  );
+  const inSight = view.onScreen && !covered;
+  useEffect(() => {
+    canvas.current?.setView({ fps: framerate });
+  }, [framerate]);
+  useEffect(() => {
+    stream?.cap(framerate);
+  }, [stream, framerate]);
+  useEffect(() => {
+    canvas.current?.setView({ hidden: !inSight });
+  }, [inSight]);
+  useEffect(() => {
+    stream?.show(inSight);
+  }, [stream, inSight]);
 
   useEffect(() => {
     if (params.get("probe") !== "1") return;
@@ -290,15 +326,13 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   }
   return (
     <>
-      <StageCanvas ref={canvas} keep={keep} onFlip={onFlip} onStats={onStats} />
-      {mode === "live" && (shown === "held" || shown === "suspended") && ready && (
-        <div className="stage-reconnecting" role="status">
-          <span>Reconnecting screen… Last available frame shown.</span>
-          <Button size="sm" variant="quiet" onClick={() => stream?.replace()}>
-            Reconnect
-          </Button>
-        </div>
-      )}
+      <StageCanvas
+        ref={canvas}
+        keep={keep}
+        onFlip={onFlip}
+        onStats={onStats}
+        onView={setStageView}
+      />
       {mode === "live" && manual && (
         <ManualSurface
           ref={keyboard}
@@ -311,6 +345,9 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
           onTyping={manual.onTyping}
           onRefused={manual.onRefused}
         />
+      )}
+      {mode === "live" && connection && (
+        <StageNotice connection={connection} onRetry={stream ? () => stream.retry() : undefined} />
       )}
     </>
   );

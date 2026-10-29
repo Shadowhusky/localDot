@@ -18,6 +18,7 @@ import type { ApiClient } from "../lib/api.ts";
 import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
 import { PersonaPicker } from "../onboarding/PersonaPicker.tsx";
 import { FreshStartButton } from "../shell/FreshStartButton.tsx";
+import type { LocalDots } from "../shell/useLocalDots.ts";
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { STREAM_PREFERENCES } from "../stage/stream-quality.ts";
 import { Button } from "../ui/Button.tsx";
@@ -25,7 +26,7 @@ import { DetailLines } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
+import { matches, PHONE, REDUCED_MOTION, TOUCH, useMediaQuery } from "../ui/media.ts";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet, SheetNavItem, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
@@ -50,6 +51,7 @@ import {
   type SubscriptionModel,
 } from "./choices.ts";
 import { CHATGPT, CLAUDE_CODE, subscription } from "./chooser.ts";
+import { DotsOnThisComputer } from "./DotsOnThisComputer.tsx";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
 import { CheckIns, ResearchLimits, SpendingLimits } from "./Limits.tsx";
 import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
@@ -58,7 +60,9 @@ import { NotificationsSection } from "./NotificationsSection.tsx";
 import { OtherLocalDots } from "./OtherLocalDots.tsx";
 import { PurposeCheck, type PurposeCheckControl } from "./PurposeCheck.tsx";
 import { RemoteAccessSettings } from "./RemoteAccessSettings.tsx";
+import { ReportProblem } from "./ReportProblem.tsx";
 import { RoleCard } from "./RoleCard.tsx";
+import type { ReportControl } from "./reports-api.ts";
 import {
   autonomyValue,
   countValue,
@@ -71,6 +75,7 @@ import {
 import type { CheckInKey, CheckInsDraft, ResearchDraft, SpendingDraft } from "./settings-form.ts";
 import type { AccountsView } from "./useAccounts.ts";
 import type { AppUpdateControl } from "./useAppUpdate.ts";
+import type { BrowserStatusView } from "./useBrowserStatus.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
 import type { ClaudeCodeControls } from "./useClaudeCode.ts";
 import type { ConnectorsView } from "./useConnectors.ts";
@@ -94,6 +99,8 @@ export interface SettingsSheetProps {
   // With no section, a phone shows the list of sections and a wide screen starts at the top.
   section?: SettingsSection;
   sectionRequest?: number;
+  // The id of what to bring into view and light up there, such as Keys' unlock form.
+  tip?: string;
   appearance?: AppearanceControl;
   showDot?: ShowDotControl;
   // Which dot works the next task.
@@ -155,6 +162,7 @@ export interface SettingsSheetProps {
   onOpenTask?(sessionId: string): void;
   notifications?: NotificationsView;
   accounts?: AccountsView;
+  browser?: BrowserStatusView;
   // Sign in to a site: the web browser opens it with the user in control.
   signIn?: SignInView;
   // The user's connected apps and their tools.
@@ -176,6 +184,10 @@ export interface SettingsSheetProps {
   stopAll?: { run(): void; running: boolean };
   // Whether localDot starts when the user logs in to the Mac; undefined until known.
   startAtLogin?: { state: StartAtLoginState | undefined; busy: boolean; set(on: boolean): void };
+  // The dots on this computer, which Your computer lists, adds to and removes from.
+  dots?: LocalDots;
+  // Report a problem, and what a failure card asked to report.
+  report?: ReportControl;
 }
 
 function ago(at: string | undefined, now: number): string | null {
@@ -224,6 +236,13 @@ function bringToTop(element: HTMLElement, smooth = false) {
   if (smooth && !matches(REDUCED_MOTION) && typeof body.scrollTo === "function")
     body.scrollTo({ top, behavior: "smooth" });
   else body.scrollTop = top;
+}
+
+// Wholly inside the sheet body's visible part.
+function inView(element: HTMLElement): boolean {
+  const body = element.closest<HTMLElement>(".ui-sheet-body")?.getBoundingClientRect();
+  const box = element.getBoundingClientRect();
+  return !!body && box.top >= body.top && box.bottom <= body.bottom;
 }
 
 function Section({
@@ -320,6 +339,29 @@ export function SettingsSheet(props: SettingsSheetProps) {
         ?.querySelector<HTMLElement>(`#settings-${selected}-title`)
         ?.focus({ preventScroll: true });
   }, [props.open, props.sectionRequest, body, phone]);
+  // A tip may show after its section does (Keys' unlock form waits for key protection to answer),
+  // so it is looked for after each render until it is there.
+  const tipWanted = useRef<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each request looks for its tip again
+  useLayoutEffect(() => {
+    tipWanted.current = props.open ? (props.tip ?? null) : null;
+  }, [props.open, props.sectionRequest, props.tip]);
+  useLayoutEffect(() => {
+    const id = tipWanted.current;
+    const target = id ? body?.querySelector<HTMLElement>(`#${CSS.escape(id)}`) : null;
+    if (!target || target.closest("[hidden]")) return;
+    tipWanted.current = null;
+    target.removeAttribute("data-tip");
+    // Read the layout so a tip lit again starts its light again.
+    target.getBoundingClientRect();
+    target.setAttribute("data-tip", "");
+    if (!inView(target)) bringToTop(target, true);
+    target.addEventListener("animationend", () => target.removeAttribute("data-tip"), {
+      once: true,
+    });
+    if (!matches(TOUCH))
+      target.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true });
+  });
   const [revealIssue, setRevealIssue] = useState(0);
   useLayoutEffect(() => {
     if (!revealIssue || !body) return;
@@ -570,7 +612,9 @@ function shownSections(props: SettingsSheetProps, phone = false): SettingsSectio
       !!props.freshStart ||
       !!props.stream ||
       !!props.stopAll ||
-      !!props.startAtLogin,
+      !!props.startAtLogin ||
+      (!!props.dots && !!props.remoteApi),
+    report: !!props.report,
   };
   return SECTIONS.filter((section) => has[section.id]).map((section) => section.id);
 }
@@ -673,6 +717,7 @@ function SectionList({
           ] as const
         ).map(row)}
       </Group>
+      {shown.includes("report") && <Group>{row("report")}</Group>}
     </>
   );
 }
@@ -782,6 +827,9 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
       )}
       {props.remoteApi && <AccessLinksSettings api={props.remoteApi} />}
       {props.remoteApi && <RemoteAccessSettings api={props.remoteApi} />}
+      {props.remoteApi && props.dots && (
+        <DotsOnThisComputer api={props.remoteApi} dots={props.dots} />
+      )}
       {(login || stream) && (
         <div>
           <Group>
@@ -978,9 +1026,11 @@ function SectionContent({
             : undefined;
       return (
         <>
-          {main === CHATGPT && props.chatgpt && <ChatgptPanel account={props.chatgpt} />}
+          {main === CHATGPT && props.chatgpt && (
+            <ChatgptPanel id="models-chatgpt" account={props.chatgpt} />
+          )}
           {main === CLAUDE_CODE && props.claudeCode && (
-            <ClaudeCodePanel claude={props.claudeCode} />
+            <ClaudeCodePanel id="models-claude-code" claude={props.claudeCode} />
           )}
           {(["main", "fast", "local"] as const).map((role) => (
             <RoleCard
@@ -1124,7 +1174,12 @@ function SectionContent({
       ) : null;
     case "accounts":
       return props.accounts ? (
-        <AccountsSection accounts={props.accounts} signIn={props.signIn} />
+        <AccountsSection
+          accounts={props.accounts}
+          signIn={props.signIn}
+          browser={props.browser}
+          report={props.report}
+        />
       ) : null;
     case "connectors":
       return props.connectors ? <ConnectorsSection connectors={props.connectors} /> : null;
@@ -1132,6 +1187,8 @@ function SectionContent({
       return keysPanel;
     case "computer":
       return <ComputerControls props={props} />;
+    case "report":
+      return props.report ? <ReportProblem report={props.report} /> : null;
   }
 }
 

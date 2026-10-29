@@ -6,6 +6,7 @@ import {
   SignInSites,
   SignOutRequest,
 } from "../../../../packages/protocol/src/accounts.ts";
+import { BrowserStatus } from "../../../../packages/protocol/src/browser-control.ts";
 import { controlRequest } from "../agent/control-api.ts";
 import type { ApiClient } from "../lib/api.ts";
 
@@ -61,4 +62,22 @@ export async function desktopSignIn(
   if (!ULID_PATTERN.test(cellId)) throw new Error("Invalid computer.");
   return DesktopSignIn.parse(await api.get(`/api/cells/${cellId}/desktop-sign-in`, { signal }))
     .site;
+}
+
+function browserPath(cellId: string): string {
+  if (!ULID_PATTERN.test(cellId)) throw new Error("Invalid computer.");
+  return `/api/cells/${cellId}/browser`;
+}
+
+export async function readBrowserStatus(
+  api: ApiClient,
+  cellId: string,
+  signal: AbortSignal,
+): Promise<BrowserStatus> {
+  return BrowserStatus.parse(await api.get(browserPath(cellId), { signal }));
+}
+
+// Restarts dot's web browser on the same profile, so its sign-ins are kept.
+export async function restartBrowser(api: ApiClient, cellId: string): Promise<BrowserStatus> {
+  return BrowserStatus.parse(await api.post(`${browserPath(cellId)}/restart`));
 }

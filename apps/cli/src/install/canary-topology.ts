@@ -6,7 +6,12 @@ import {
 } from "../../../../packages/protocol/src/canary-operation.ts";
 import { CanaryReady } from "../../../../packages/protocol/src/canary-process.ts";
 import { hostAddress } from "../../../daemon/src/cells/ipv4.ts";
-import { DESKTOP_OFFSET, GATE_OFFSET, GATE_PORTS } from "../../../daemon/src/cells/spec.ts";
+import {
+  DESKTOP_OFFSET,
+  GATE_OFFSET,
+  GATE_PORTS,
+  gatePorts,
+} from "../../../daemon/src/cells/spec.ts";
 import type { CellRecord } from "../../../daemon/src/cells/types.ts";
 import { imageVerdict } from "../../../daemon/src/doctor-image.ts";
 import type { CanaryCleanupClient } from "./canary-cleanup.ts";
@@ -329,19 +334,22 @@ export async function inspectRunningCanaryTopology(
     )
       throw failure();
   }
-  const ports: Record<"desktopd" | "stream", number> = { desktopd: 0, stream: 0 };
   if (!canaryObject(gate.NetworkSettings) || !canaryObject(gate.NetworkSettings.Ports))
     throw failure();
-  const published = gate.NetworkSettings.Ports;
+  const published = gate.NetworkSettings.Ports,
+    relays = gatePorts(record);
   if (
     Object.keys(published)
       .filter((key) => published[key] !== null)
       .sort()
-      .join() !== Object.values(GATE_PORTS).sort().join()
+      .join() !== [...relays].sort().join()
   )
     throw failure();
-  for (const role of ["desktopd", "stream"] as const) {
-    const entry = published[GATE_PORTS[role]];
+  // Every relay an installed computer's gate has, the previews' included, is published once on
+  // loopback at a port of its own.
+  const hostPorts = new Map<string, number>();
+  for (const relay of relays) {
+    const entry = published[relay];
     if (
       !Array.isArray(entry) ||
       entry.length !== 1 ||
@@ -353,9 +361,13 @@ export async function inspectRunningCanaryTopology(
       throw failure();
     const port = Number(entry[0].HostPort);
     if (port < 1024 || port > 65535) throw failure();
-    ports[role] = port;
+    hostPorts.set(relay, port);
   }
-  if (ports.desktopd === ports.stream) throw failure();
+  if (new Set(hostPorts.values()).size !== relays.length) throw failure();
+  const ports = {
+    desktopd: hostPorts.get(GATE_PORTS.desktopd) as number,
+    stream: hostPorts.get(GATE_PORTS.stream) as number,
+  };
   await engine();
   signal.throwIfAborted();
   return ports;

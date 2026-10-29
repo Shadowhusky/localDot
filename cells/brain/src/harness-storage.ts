@@ -175,6 +175,9 @@ export class HarnessStorage extends SessionPersistence {
   async flush() {
     await this.writes;
   }
+  events(id: string): readonly SessionEvent[] {
+    return this.stored.get(id)?.events ?? [];
+  }
   async stat(id: SessionId, options?: { signal?: AbortSignal }) {
     options?.signal?.throwIfAborted();
     const stored = this.stored.get(id);

@@ -3,7 +3,13 @@ import { PassThrough, Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserProcessDriver } from "./processes.ts";
 import type { BrowserReadinessStage } from "./readiness.ts";
-import { BROWSER_READINESS_MS, BROWSER_RUNTIME_START_MS, BrowserRuntime } from "./runtime.ts";
+import {
+  BROWSER_LIVENESS_MS,
+  BROWSER_READINESS_MS,
+  BROWSER_RESTARTS,
+  BROWSER_RUNTIME_START_MS,
+  BrowserRuntime,
+} from "./runtime.ts";
 import {
   type BrowserProcessName,
   browserProcessSpecs,
@@ -39,6 +45,8 @@ interface FixtureOptions {
   prepare?: (signal: AbortSignal) => Promise<void>;
   listen?: (server: Server, signal: AbortSignal) => Promise<void>;
   blockProbe?: (signal: AbortSignal) => Promise<boolean>;
+  releaseLocks?: (signal: AbortSignal) => Promise<void>;
+  unanswered?: (method: string) => boolean;
 }
 
 function setup(options: FixtureOptions = {}) {
@@ -48,9 +56,11 @@ function setup(options: FixtureOptions = {}) {
   const probes: BrowserReadinessStage[] = [];
   const owners = new Map<
     BrowserProcessName,
-    { alive: boolean; failure: () => void; output: PassThrough }
+    { alive: boolean; failure: () => void; output: PassThrough; emit(value: unknown): void }
   >();
   const commands: string[] = [];
+  const logs: string[] = [];
+  const releaseLocks = vi.fn(async (signal: AbortSignal) => options.releaseLocks?.(signal));
   const prepare = vi.fn(async (_config, signal: AbortSignal) => options.prepare?.(signal));
   const driver: BrowserProcessDriver = (spec, failure) => {
     const name = order.find(
@@ -63,7 +73,8 @@ function setup(options: FixtureOptions = {}) {
     started.push(name);
     if (name === options.failStart) throw new Error("synthetic start failure");
     const output = new PassThrough();
-    const owner = { alive: true, failure, output };
+    const emit = (value: unknown) => output.write(`${JSON.stringify(value)}\0`);
+    const owner = { alive: true, failure, output, emit };
     owners.set(name, owner);
     const info = {
       targetId: "page",
@@ -72,7 +83,6 @@ function setup(options: FixtureOptions = {}) {
       url: "about:blank",
       attached: false,
     };
-    const emit = (value: unknown) => output.write(`${JSON.stringify(value)}\0`);
     const input = new Writable({
       write(chunk, _encoding, complete) {
         if (name === "xhelper") {
@@ -121,6 +131,10 @@ function setup(options: FixtureOptions = {}) {
             owner.alive = false;
             failure();
           }
+          if (options.unanswered?.(message.method)) {
+            complete();
+            return;
+          }
           queueMicrotask(() => {
             if (message.method === "Target.setDiscoverTargets")
               emit({ method: "Target.targetCreated", params: { targetInfo: info } });
@@ -164,6 +178,9 @@ function setup(options: FixtureOptions = {}) {
   const runtime = new BrowserRuntime(config, {
     driver,
     prepare,
+    releaseLocks,
+    oomKills: async () => 0,
+    log: (line) => logs.push(line),
     probe: async (stage, signal) => {
       probes.push(stage);
       if (options.blockProbe) return options.blockProbe(signal);
@@ -185,7 +202,7 @@ function setup(options: FixtureOptions = {}) {
         })),
   });
   runtimes.push(runtime);
-  return { runtime, started, signalled, probes, prepare, owners, commands };
+  return { runtime, started, signalled, probes, prepare, owners, commands, logs, releaseLocks };
 }
 
 function health(
@@ -314,7 +331,7 @@ describe("assembled browser runtime", () => {
     },
   );
 
-  it.each(["xhelper", "capture", "chromium"] as const)(
+  it.each(["xhelper", "capture"] as const)(
     "internal %s retirement is visible without calling Runtime.stop",
     async (name) => {
       const fixture = setup();
@@ -426,13 +443,150 @@ describe("assembled browser runtime", () => {
   });
 });
 
+describe("Chromium supervision", () => {
+  async function restarted(fixture: ReturnType<typeof setup>, count: number) {
+    for (let step = 0; step < 200; step += 1) {
+      if (
+        fixture.runtime.ready &&
+        fixture.started.filter((name) => name === "chromium").length === count + 1
+      )
+        return;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error("Chromium was not restarted");
+  }
+
+  it("restarts a failed Chromium in place, on the same profile, and says why", async () => {
+    const locks = Promise.withResolvers<void>();
+    const fixture = setup({ releaseLocks: () => locks.promise });
+    const service = await fixture.runtime.start();
+    const failed = fixture.owners.get("chromium");
+    if (!failed) throw new Error("missing browser");
+    failed.alive = false;
+    failed.failure();
+    failed.failure(); // the pipe and the exit both report the same failure
+    expect(fixture.runtime.ready).toBe(false);
+    expect(fixture.runtime.retirement()).toBeUndefined();
+    await settle();
+    expect(fixture.runtime.supervisor.state).toBe("restarting");
+    const refused = await fetch(`${address(service.server)}/tabs`, {
+      headers: { authorization: `Bearer ${config.serviceToken}` },
+    });
+    expect(refused.status).toBe(503);
+    expect(refused.headers.get("retry-after")).toBe("5");
+    expect(await refused.json()).toEqual({ error: "restarting" });
+    locks.resolve();
+    await restarted(fixture, 1);
+    expect(fixture.releaseLocks).toHaveBeenCalledOnce();
+    expect(fixture.signalled.filter((name) => name !== "chromium")).toEqual([]);
+    expect(await health(service.server)).toMatchObject({
+      status: 200,
+      body: { ready: true, instance: fixture.runtime.instance },
+    });
+    expect(fixture.runtime.supervisor).toEqual({
+      state: "running",
+      restarts: 1,
+      lastFailure: {
+        kind: "browser_exited",
+        detail: "browser_exited",
+        recovered: true,
+        at: expect.any(String),
+      },
+    });
+    expect(await browserRequest(service.server, "/supervisor", undefined, "GET")).toEqual({
+      status: 200,
+      body: fixture.runtime.supervisor,
+    });
+    expect(fixture.logs).toEqual([
+      "browserd: the browser failed (browser_exited); restarting it in place (1 of 3)",
+    ]);
+  });
+
+  it("retires the runtime once Chromium keeps failing", async () => {
+    vi.useFakeTimers();
+    const fixture = setup();
+    await fixture.runtime.start();
+    for (let restart = 0; restart < BROWSER_RESTARTS; restart += 1) {
+      const owner = fixture.owners.get("chromium");
+      if (!owner) throw new Error("missing browser");
+      owner.alive = false;
+      owner.failure();
+      await vi.advanceTimersByTimeAsync(3500);
+      expect(fixture.runtime.ready).toBe(true);
+      expect(fixture.started.filter((name) => name === "chromium")).toHaveLength(restart + 2);
+    }
+    const last = fixture.owners.get("chromium");
+    if (!last) throw new Error("missing browser");
+    last.alive = false;
+    last.failure();
+    await fixture.runtime.retired;
+    expect(fixture.runtime.ready).toBe(false);
+    expect(fixture.runtime.supervisor.state).toBe("stopped");
+    expect([...fixture.owners.values()].every((owner) => !owner.alive)).toBe(true);
+    await settle();
+    expect(fixture.logs.at(-1)).toBe("browserd: the browser failed (browser_exited); stopping");
+  });
+
+  it("restarts a browser that stops answering, without fencing a single slow answer", async () => {
+    vi.useFakeTimers();
+    let hung = false;
+    // Only the first browser hangs; its replacement answers.
+    const fixture: ReturnType<typeof setup> = setup({
+      unanswered: (method) =>
+        hung &&
+        method === "Browser.getWindowForTarget" &&
+        fixture.started.filter((name) => name === "chromium").length === 1,
+    });
+    await fixture.runtime.start();
+    hung = true;
+    await vi.advanceTimersByTimeAsync(BROWSER_LIVENESS_MS * 2 + 10);
+    expect(fixture.runtime.ready).toBe(true);
+    expect(fixture.runtime.supervisor.state).toBe("running");
+    await vi.advanceTimersByTimeAsync(BROWSER_LIVENESS_MS);
+    expect(fixture.signalled).toEqual(["chromium"]);
+    expect(fixture.runtime.ready).toBe(true);
+    expect(fixture.started.filter((name) => name === "chromium")).toHaveLength(2);
+    expect(fixture.runtime.supervisor.lastFailure).toMatchObject({
+      kind: "unresponsive",
+      detail: "no answer to a liveness check",
+    });
+  });
+
+  it("reloads a crashed tab and keeps the browser", async () => {
+    const fixture = setup();
+    await fixture.runtime.start();
+    fixture.owners.get("chromium")?.emit({
+      method: "Target.targetCrashed",
+      params: { targetId: "page", status: "oom", errorCode: 5 },
+    });
+    for (let step = 0; step < 50 && !fixture.logs.length; step += 1)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fixture.commands).toContain("Page.reload");
+    expect(fixture.runtime.ready).toBe(true);
+    expect(fixture.started.filter((name) => name === "chromium")).toHaveLength(1);
+    expect(fixture.logs).toEqual([
+      "browserd: a tab's renderer crashed (renderer oom); reloading the tab",
+    ]);
+    expect(fixture.runtime.supervisor.lastFailure).toMatchObject({
+      kind: "tab_crashed",
+      recovered: true,
+    });
+  });
+});
+
+function address(server: Server): string {
+  const bound = server.address();
+  if (!bound || typeof bound === "string") throw new Error("no server");
+  return `http://127.0.0.1:${bound.port}`;
+}
+
 async function browserRequest(server: Server, path: string, body: unknown, method = "POST") {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("no server");
   const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
     method,
     headers: { authorization: `Bearer ${config.serviceToken}`, "content-type": "application/json" },
-    body: JSON.stringify(body),
+    ...(method === "GET" ? {} : { body: JSON.stringify(body) }),
   });
   return { status: response.status, body: await response.json() };
 }

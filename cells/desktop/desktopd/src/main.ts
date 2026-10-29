@@ -1,5 +1,6 @@
 import { userInfo } from "node:os";
 import { serve } from "@hono/node-server";
+import { PREVIEW_FORWARDER_PORT } from "@localdot/protocol";
 import { createDesktopdApp, monoNow } from "./app.ts";
 import { MIN_TOKEN_LENGTH } from "./auth.ts";
 import { prepareDesktopBrowser } from "./browser-profile.ts";
@@ -11,6 +12,7 @@ import { CuaDriver } from "./perception/driver.ts";
 import { driverInjector } from "./perception/find.ts";
 import { frontChromium, listWindows, type PerceptionDeps } from "./perception/hit-test.ts";
 import { AtspiAccessibility } from "./perception/native.ts";
+import { createPreviewForwarder } from "./preview-forwarder.ts";
 import { cachedSelfTest, nodeProbes, runSelfTest, selfTestConfigFromEnv } from "./selftest.ts";
 import { PageBrowser } from "./tools/browser.ts";
 import { WorkWindow } from "./work-window.ts";
@@ -115,4 +117,7 @@ const app = createDesktopdApp({
 // 0.0.0.0 inside the cell: only the gate's relay on the isolated internal network can reach it.
 serve({ fetch: app.fetch, hostname: "0.0.0.0", port }, () => {
   console.log(`desktopd on 0.0.0.0:${port} (scale ${scale})`);
+});
+createPreviewForwarder({ token }).listen(PREVIEW_FORWARDER_PORT, "0.0.0.0", () => {
+  console.log(`preview forwarder on 0.0.0.0:${PREVIEW_FORWARDER_PORT}`);
 });

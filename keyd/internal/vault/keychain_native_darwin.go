@@ -10,6 +10,10 @@ package vault
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/ucred.h>
+#include <sys/un.h>
 #include "keychain_items_darwin.h"
 
 #define KEYD_SIGNED_BY \
@@ -80,6 +84,39 @@ static OSStatus keyd_authorized(int checkOnly, pid_t *parent) {
   SecRequirementRef requirement = NULL;
   OSStatus status = text ? SecRequirementCreateWithString(text, kSecCSDefaultFlags, &requirement) : errSecAllocate;
   if (status == errSecSuccess) status = keyd_identity_check(&keyd_process_checks, requirement, checkOnly, parent);
+  if (requirement) CFRelease(requirement);
+  if (text) CFRelease(text);
+  return status;
+}
+
+static int keyd_same_executable(pid_t pid) {
+  char mine[PROC_PIDPATHINFO_MAXSIZE], theirs[PROC_PIDPATHINFO_MAXSIZE];
+  struct stat a, b;
+  if (proc_pidpath(getpid(), mine, sizeof(mine)) <= 0 || proc_pidpath(pid, theirs, sizeof(theirs)) <= 0) return 0;
+  if (stat(mine, &a) != 0 || stat(theirs, &b) != 0) return 0;
+  return a.st_dev == b.st_dev && a.st_ino == b.st_ino;
+}
+
+// The process at the other end of a connected Unix socket is a keyd daemon of this user: signed as
+// keyd must be when this keyd is, or else, for an unsigned development build, this same executable.
+// macOS reports the peer socket's last user as its pid, so a check after the peer has answered
+// names the process that answered.
+static OSStatus keyd_verify_peer(int fd) {
+  pid_t pid = 0;
+  struct xucred cred;
+  socklen_t size = sizeof(pid);
+  if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) != 0 || size != sizeof(pid) || pid <= 1) return errSecAuthFailed;
+  size = sizeof(cred);
+  if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERCRED, &cred, &size) != 0 || size != sizeof(cred) ||
+      cred.cr_version != XUCRED_VERSION || cred.cr_uid != getuid()) return errSecAuthFailed;
+  CFStringRef text = CFStringCreateWithCString(NULL, keyd_requirement, kCFStringEncodingUTF8);
+  SecRequirementRef requirement = NULL;
+  OSStatus status = text ? SecRequirementCreateWithString(text, kSecCSDefaultFlags, &requirement) : errSecAllocate;
+  if (status == errSecSuccess) {
+    if (keyd_check_self(requirement) == errSecSuccess) status = keyd_check_process(pid, requirement);
+    else if (!keyd_same_executable(pid)) status = errSecAuthFailed;
+  }
+  if (status == errSecSuccess) status = keyd_check_mode(pid, 0);
   if (requirement) CFRelease(requirement);
   if (text) CFRelease(text);
   return status;
@@ -242,3 +279,12 @@ func nativeExit(status int32, mayHaveChanged bool) int {
 
 // DesignatedRequirement is what keyd must be signed with as its designated requirement.
 func DesignatedRequirement() string { return C.GoString(C.keyd_designated()) }
+
+// VerifyKeydPeer checks that the process at the other end of the connected Unix socket fd is a keyd
+// daemon (see keyd_verify_peer).
+func VerifyKeydPeer(fd int) error {
+	if C.keyd_verify_peer(C.int(fd)) != C.errSecSuccess {
+		return ErrNotKeyd
+	}
+	return nil
+}

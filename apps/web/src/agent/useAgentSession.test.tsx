@@ -574,10 +574,12 @@ it("shows a child agent left running in a task at rest as interrupted", async ()
   send(ev(2, "subagent.state", { ...child, id: "child-b", runId: "run-2", state: "completed" }));
   await advance(1000);
   expect(view.result.current.model.ended).toEqual({ reason: "stopped" });
-  expect([...view.result.current.model.subagents.values()].map((c) => c.state)).toEqual([
-    "interrupted",
-    "completed",
-  ]);
+  expect([...view.result.current.model.subagents.values()].map((c) => [c.state, c.reason])).toEqual(
+    [
+      ["interrupted", "restarted"],
+      ["completed", undefined],
+    ],
+  );
   view.unmount();
 });
 it("does not render the app again for a status poll that brings the same answer", async () => {

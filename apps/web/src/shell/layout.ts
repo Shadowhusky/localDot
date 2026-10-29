@@ -40,15 +40,46 @@ const onViewport = (onChange: () => void) => {
   };
 };
 
+// Whether a keyboard for the computer is up, read when the viewport, the focus or the composer's
+// keyboard lock changes rather than on each of the page's renders.
+let computerKeyboard = false;
+const readComputerKeyboard = () => {
+  computerKeyboard =
+    keyboardUp() &&
+    !document.activeElement?.matches(".composer-field") &&
+    !document.querySelector(".app[data-composer-keyboard]");
+};
+const onComputerKeyboard = (onChange: () => void) => {
+  const changed = () => {
+    const before = computerKeyboard;
+    readComputerKeyboard();
+    if (computerKeyboard !== before) onChange();
+  };
+  readComputerKeyboard();
+  const stop = onViewport(changed);
+  const lock = new MutationObserver(changed);
+  lock.observe(document.body, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-composer-keyboard"],
+  });
+  document.addEventListener("focusin", changed);
+  document.addEventListener("focusout", changed);
+  return () => {
+    stop();
+    lock.disconnect();
+    document.removeEventListener("focusin", changed);
+    document.removeEventListener("focusout", changed);
+  };
+};
+const noKeyboard = () => () => {};
+
 // Computer keyboard input can collapse the band. Composer typing keeps the background static.
 export function useKeyboardUp(): boolean {
   const handheld = useMediaQuery(HANDHELD);
   const up = useSyncExternalStore(
-    onViewport,
-    () =>
-      keyboardUp() &&
-      !document.activeElement?.matches(".composer-field") &&
-      !document.querySelector(".app[data-composer-keyboard]"),
+    handheld ? onComputerKeyboard : noKeyboard,
+    () => handheld && computerKeyboard,
     () => false,
   );
   return handheld && up;
@@ -85,12 +116,14 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
         dismissed = false;
       // Lock on focus, before the first keyboard frame, and keep the lock through
       // dismissal. The 120px detection threshold must never resize the background.
+      const toolbar = element.querySelector<HTMLElement>(".thread-toolbar");
       if (focused && !composing && !dismissed && focusedHeight !== undefined) {
-        const toolbar = element.querySelector(".thread-toolbar");
-        element.style.setProperty(
-          "--_composer-rest-height",
-          `${toolbar?.getBoundingClientRect().height ?? 0}px`,
-        );
+        element
+          .querySelector<HTMLElement>(".thread-dock")
+          ?.style.setProperty(
+            "--_composer-rest-height",
+            `${toolbar?.getBoundingClientRect().height ?? 0}px`,
+          );
         composing = true;
       }
       const covered = (focusedHeight ?? restingHeight) - view.height;
@@ -119,8 +152,8 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
       );
       const top = `${composing || keyboardUp() ? offset : 0}px`;
       const bottom = `${offset + view.height}px`;
-      if (element.style.getPropertyValue("--_composer-bottom") !== bottom)
-        element.style.setProperty("--_composer-bottom", bottom);
+      if (toolbar && toolbar.style.getPropertyValue("--_composer-bottom") !== bottom)
+        toolbar.style.setProperty("--_composer-bottom", bottom);
       if (element.style.getPropertyValue("--_visible-h") !== height)
         element.style.setProperty("--_visible-h", height);
       if (element.style.getPropertyValue("--_visible-top") !== top)
@@ -156,8 +189,12 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
       document.removeEventListener("focusout", schedule);
       document.removeEventListener("visibilitychange", schedule);
       element.removeAttribute("data-composer-keyboard");
-      element.style.removeProperty("--_composer-bottom");
-      element.style.removeProperty("--_composer-rest-height");
+      element
+        .querySelector<HTMLElement>(".thread-toolbar")
+        ?.style.removeProperty("--_composer-bottom");
+      element
+        .querySelector<HTMLElement>(".thread-dock")
+        ?.style.removeProperty("--_composer-rest-height");
       cancelAnimationFrame(frame);
       element.style.removeProperty("--_visible-h");
       element.style.removeProperty("--_visible-top");

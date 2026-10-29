@@ -14,12 +14,13 @@ export interface StreamTarget {
 }
 
 // A held picture means a connection needs recovery. Suspended means this viewer deliberately
-// released its stream while out of sight; the computer and its task keep running.
+// stopped or released its stream while its page is hidden; the computer and its task keep running.
 export type StreamPicture = "none" | "live" | "held" | "suspended";
 
 const POLL_MS = 250;
 export const STALE_MS = 10_000;
-// A stream outlives its stage this long, for a remount, a visit to Replay or the other screen.
+// A stream outlives its stage this long, for a remount, a visit to Replay or the other screen. A
+// hidden page keeps its client this long too, with the video stopped.
 export const KEEP_MS = 60_000;
 // A shorter reconnect says nothing.
 export const HELD_AFTER_MS = 1_000;
@@ -154,8 +155,14 @@ export class LiveStream {
   #presentedCount = 0;
   #counted: { client: Client; at: number; decoded: number; presented: number } | null = null;
   #reported: { client: Client; text: string; at: number } | null = null;
-  // The last poll found the page hidden: the gap before the next is the page's, not a suspension.
+  // Polling stopped while this viewer is out of sight: the gap before the next poll is the page's,
+  // not a suspension.
   #away = false;
+  // The stage is out of sight on a visible page: scrolled away, folded or covered.
+  #hidden = false;
+  // When the page was hidden, and the timer that lets its kept client go.
+  #hiddenAt: number | null = null;
+  #release: ReturnType<typeof setTimeout> | undefined;
   #foreground: { client: Client; decoded: number; at: number } | null = null;
   #leaving: ReturnType<typeof setTimeout> | undefined;
   #quietProbe: { client: Client; decoded: number; at: number } | null = null;
@@ -163,17 +170,58 @@ export class LiveStream {
   constructor(target: StreamTarget) {
     this.target = target;
     document.addEventListener("visibilitychange", this.#visibility);
+    document.addEventListener("freeze", this.#frozen);
   }
 
   readonly #visibility = () => {
-    if (document.visibilityState === "hidden") this.#suspend();
-    else if (this.#away && this.#sink && !this.#closed) {
-      this.#polledAt = Date.now();
-      this.#mintAt = 0;
-      this.#startPolling();
-      this.refresh();
-    }
+    if (document.visibilityState === "hidden") this.#hide();
+    else this.#back();
   };
+
+  // A page the browser freezes may lose its socket before it runs again.
+  readonly #frozen = () => {
+    if (document.visibilityState === "hidden") this.#suspend();
+  };
+
+  // A hidden page stops its video and keeps its client for a short spell away; a long one, or one
+  // whose timers never ran (iOS suspends the page), takes a fresh client on return.
+  #hide(): void {
+    this.#hiddenAt ??= Date.now();
+    if (!this.#away) this.#pause(true);
+    clearTimeout(this.#release);
+    if (this.#current || this.#next) this.#release = setTimeout(() => this.#suspend(), KEEP_MS);
+  }
+
+  #back(): void {
+    clearTimeout(this.#release);
+    const away = this.#hiddenAt === null ? 0 : Date.now() - this.#hiddenAt;
+    this.#hiddenAt = null;
+    if (away >= KEEP_MS) this.#suspend();
+    if (!this.#hidden) this.#resume();
+  }
+
+  #resume(): void {
+    if (!this.#away || !this.#sink || this.#closed) return;
+    this.#polledAt = Date.now();
+    this.#mintAt = 0;
+    this.#startPolling();
+    this.refresh();
+  }
+
+  // Whether this stream's stage is in sight. Out of sight its video stops and its frames are no
+  // longer tapped, but its client stays, so the picture returns with a key frame.
+  show(shown: boolean): void {
+    if (this.#hidden === !shown || this.#closed) return;
+    this.#hidden = !shown;
+    if (!shown) {
+      if (!this.#away) this.#pause(false);
+    } else if (document.visibilityState !== "hidden") this.#resume();
+  }
+
+  // The most frames a second the stage asks for, as it grows, shrinks or changes hands.
+  cap(framerate: number): void {
+    this.#quality.cap(framerate);
+  }
 
   #startPolling(): void {
     clearInterval(this.#timer);
@@ -182,9 +230,40 @@ export class LiveStream {
       this.#timer = setInterval(() => this.#poll(), POLL_MS);
   }
 
+  // Stops this viewer's video and frame tap but keeps its client and socket. A client with no open
+  // socket yet has nothing to keep, and goes.
+  #pause(suspended: boolean): void {
+    const { transport } = look(this.#current);
+    if (transport?.readyState !== OPEN) {
+      this.#suspend(suspended);
+      return;
+    }
+    clearInterval(this.#timer);
+    this.#timer = undefined;
+    this.#source?.stop();
+    this.#source = null;
+    if (this.#current) this.#current.tapped = null;
+    this.#report(this.#current, { visible: false }, Date.now());
+    try {
+      transport.send?.("STOP_VIDEO");
+    } catch {}
+    this.#drop(this.#next);
+    this.#next = null;
+    this.#counted = null;
+    this.#foreground = null;
+    this.#quietProbe = null;
+    this.#awaiting = false;
+    this.#away = true;
+    this.#mintAt = 0;
+    this.#troubleSince = null;
+    if (suspended) this.#show("suspended");
+  }
+
   // Retain the stage's last picture, but release the viewer's decoder, transport and frame tap.
-  // This affects this viewer only; tasks, recordings and other viewers keep running.
-  #suspend(): void {
+  // This affects this viewer only; tasks, recordings and other viewers keep running. A stage out of
+  // sight on a visible page keeps the picture's state, which it shows nobody.
+  #suspend(suspended = true): void {
+    clearTimeout(this.#release);
     clearInterval(this.#timer);
     this.#timer = undefined;
     this.#source?.stop();
@@ -199,7 +278,7 @@ export class LiveStream {
     this.#away = true;
     this.#mintAt = 0;
     this.#troubleSince = null;
-    this.#show("suspended");
+    if (suspended) this.#show("suspended");
   }
 
   get picture(): StreamPicture {
@@ -255,7 +334,8 @@ export class LiveStream {
   // Resume capture explicitly: the iframe's own visibility event may never have arrived.
   // A fresh decoded frame must prove recovery, even if its socket still claims to be OPEN.
   refresh(): void {
-    if (this.#closed || !this.#sink || document.visibilityState === "hidden") return;
+    if (this.#closed || !this.#sink || this.#hidden || document.visibilityState === "hidden")
+      return;
     this.#startPolling();
     this.#polledAt = Date.now();
     if (this.#current) this.#current.tapped = null;
@@ -273,11 +353,22 @@ export class LiveStream {
     this.#poll();
   }
 
+  // The viewer asked to try again: a ticket waiting out its backoff is asked for now, and a fresh
+  // client that never showed a frame makes way for another.
+  retry(): void {
+    if (this.#closed) return;
+    this.#mintFailures = 0;
+    this.#drop(this.#next);
+    this.#next = null;
+    this.replace();
+  }
+
   // A thawed page can hold an obsolete backlog: a fresh client takes over once it streams.
   replace(): void {
     if (
       this.#closed ||
       !this.#sink ||
+      this.#hidden ||
       document.visibilityState === "hidden" ||
       this.#replacing ||
       this.#next
@@ -307,6 +398,8 @@ export class LiveStream {
   close(): void {
     this.#closed = true;
     document.removeEventListener("visibilitychange", this.#visibility);
+    document.removeEventListener("freeze", this.#frozen);
+    clearTimeout(this.#release);
     this.#source?.stop();
     this.#source = null;
     this.#sink = null;
@@ -347,7 +440,8 @@ export class LiveStream {
   }
 
   #prepare(path: string): void {
-    if (this.#closed || !this.#sink || document.visibilityState === "hidden") return;
+    if (this.#closed || !this.#sink || this.#hidden || document.visibilityState === "hidden")
+      return;
     this.#drop(this.#next);
     const frame = document.createElement("iframe");
     frame.className = "desktop-frame";
@@ -371,7 +465,11 @@ export class LiveStream {
     const now = Date.now();
     // A hidden page shows nothing, and its throttled timers are not a suspension.
     if (document.visibilityState === "hidden") {
-      this.#suspend();
+      this.#hide();
+      return;
+    }
+    if (this.#hidden) {
+      if (!this.#away) this.#pause(false);
       return;
     }
     // Timers that stopped this long on a visible page mean it was suspended, and its socket may
@@ -412,6 +510,8 @@ export class LiveStream {
         }
       }
     }
+    // A key frame asked of a still screen above is a check, not trouble: over a slow link its
+    // answer can take a second, and a screen that never answers is replaced.
     let delivering = false;
     if (client && !video) {
       // An error page, or a client that never loaded; one that keeps failing is given longer.
@@ -446,7 +546,7 @@ export class LiveStream {
       } else if (track && stalled && now - this.#presentedAt >= STALE_MS) {
         this.#presentedAt = now;
         this.replace();
-      } else delivering = !!track && !stalled && !this.#awaiting && !this.#quietProbe;
+      } else delivering = !!track && !stalled && !this.#awaiting;
     }
     if (transport && transport.readyState !== OPEN) delivering = false;
     if (client && video && now - this.#tunedAt >= TUNE_MS) this.#tune(client, now);

@@ -1,33 +1,69 @@
 import {
+  KEYD_VAULT_LOCKED,
   KeyMetadata,
   SECRET_ID_PATTERN,
   SealedSecret,
   scanKeyLike,
   surrogateEnvClash,
   surrogateEnvName,
+  VaultUnlock,
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type KeydClient, KeydError, KeydUnavailableError } from "./client.ts";
-import type { KeydMonitor } from "./monitor.ts";
+import { type KeydMonitor, vaultLocked } from "./monitor.ts";
+import type { PassphraseRecord } from "./passphrase-record.ts";
 
 export interface KeyRoutesDeps {
   keyd: KeydClient;
   monitor: KeydMonitor;
   // Hands running computers their new surrogates once a key is saved or deleted.
   afterChange?: (secretId: string) => Promise<{ restart: boolean }>;
+  // Notes the vault whose passphrase was chosen or entered here, as localdot unlock does.
+  passphrases?: Pick<PassphraseRecord, "remember">;
+  now?: () => number;
 }
 
-export const VAULT_LOCKED = "Saved keys are locked. On that computer, run: localdot unlock";
+export const VAULT_LOCKED = "Saved keys are locked. Unlock them in Keys, then try again.";
 
 // A sealed v1 blob of the largest value keyd takes is about 11 KB; nothing a browser sends here
 // is legitimately bigger.
 const MAX_BODY = 64 * 1024;
+// A passphrase is at most 1024 bytes, which seals to under 1.5 KB.
+const MAX_UNLOCK_BODY = 4 * 1024;
+
+// Wrong passphrases from the app: five tries, then a wait that doubles from 30 s up to 15 min, so
+// a page left open or a stolen owner link can't guess at keyd's pace. A right one clears it.
+const FREE_TRIES = 5;
+const FIRST_WAIT_MS = 30_000;
+const MAX_WAIT_MS = 15 * 60_000;
+
+class UnlockThrottle {
+  #failures = 0;
+  #until = 0;
+  constructor(private readonly now: () => number) {}
+  waitMs(): number {
+    return Math.max(0, this.#until - this.now());
+  }
+  failed(): void {
+    this.#failures++;
+    if (this.#failures >= FREE_TRIES)
+      this.#until =
+        this.now() + Math.min(MAX_WAIT_MS, FIRST_WAIT_MS * 2 ** (this.#failures - FREE_TRIES));
+  }
+  passed(): void {
+    this.#failures = 0;
+    this.#until = 0;
+  }
+}
 
 // The key form's API. The browser seals each key to keyd's per-boot key before it leaves the page,
 // so these routes carry only a binding and ciphertext: a body with any other field (a plaintext
 // "value" above all) is refused, and the daemon relays the rest to keyd without changing a byte.
-export function keyRoutes(app: Hono, { keyd, monitor, afterChange }: KeyRoutesDeps): void {
+export function keyRoutes(
+  app: Hono,
+  { keyd, monitor, afterChange, passphrases, now = Date.now }: KeyRoutesDeps,
+): void {
   // Checking names, storing/deleting, and updating computers form one ordered change. Two
   // concurrent saves must not both reserve the same environment variable (a-b versus a_b).
   let pending: Promise<unknown> = Promise.resolve();
@@ -49,6 +85,57 @@ export function keyRoutes(app: Hono, { keyd, monitor, afterChange }: KeyRoutesDe
   app.get("/api/keyd", async (c) => c.json(await monitor.refresh()));
 
   app.get("/api/keys", (c) => withKeyd(c, async () => c.json({ keys: await keyd.secrets() })));
+
+  // The passphrase vault's unlock, and its first passphrase. The page seals the passphrase to
+  // keyd's boot key, so this daemon relays ciphertext it cannot open, and never logs or keeps it.
+  const throttle = new UnlockThrottle(now);
+  const unlockLimit = bodyLimit({
+    maxSize: MAX_UNLOCK_BODY,
+    onError: (c) => refuse(c, 413, "too-large", "the request is too large"),
+  });
+  app.post("/api/keyd/unlock", unlockLimit, async (c) => {
+    // A shared link is someone else's view of this localDot; only the owner's own token unlocks.
+    if (c.get("remoteGrant"))
+      return refuse(c, 403, "owner-only", "Only the owner of this localDot can unlock its keys");
+    const input = VaultUnlock.safeParse(await c.req.json().catch(() => null));
+    if (!input.success)
+      return refuse(
+        c,
+        400,
+        "bad-request",
+        "send the sealed passphrase: { sealed } and nothing else",
+      );
+    return withKeyd(c, () =>
+      mutate(async () => {
+        const wait = throttle.waitMs();
+        if (wait > 0) return tooManyTries(c, wait);
+        const { vault } = await keyd.status();
+        if (!vault || vault.state === "ready") return c.json({ vault: vault ?? null });
+        let opened: Awaited<ReturnType<KeydClient["unlockVault"]>>;
+        try {
+          opened = await keyd.unlockVault(input.data.sealed);
+        } catch (err) {
+          if (!(err instanceof KeydError) || err.status !== 403) throw err;
+          throttle.failed();
+          return refuse(
+            c,
+            403,
+            "wrong-passphrase",
+            "That passphrase doesn't unlock your saved keys",
+          );
+        }
+        throttle.passed();
+        try {
+          if (opened.fingerprint) passphrases?.remember(opened.fingerprint);
+        } catch {
+          console.error("the unlocked vault could not be noted as chosen here");
+        }
+        // A poll begun before the unlock would still read the vault locked.
+        if (vaultLocked(await monitor.refresh())) await monitor.refresh();
+        return c.json({ vault: opened });
+      }),
+    );
+  });
 
   const limit = bodyLimit({
     maxSize: MAX_BODY,
@@ -133,7 +220,7 @@ async function withKeyd(c: Context, fn: () => Promise<Response>): Promise<Respon
       // bad-seal: keyd restarted with a new seal key, or the binding changed after sealing; the UI
       // fetches /api/keyd again and seals once more.
       if (err.code === "bad-seal") return refuse(c, 409, "bad-seal", "seal the key again");
-      if (err.code === "vault-locked") return refuse(c, 423, "vault-locked", VAULT_LOCKED);
+      if (err.code === KEYD_VAULT_LOCKED) return refuse(c, 423, KEYD_VAULT_LOCKED, VAULT_LOCKED);
       if (err.code === "vault")
         return refuse(c, 502, "vault", "key protection could not store the key");
       if (err.status === 404) return refuse(c, 404, "not-found", "no such key");
@@ -146,11 +233,24 @@ async function withKeyd(c: Context, fn: () => Promise<Response>): Promise<Respon
 
 function refuse(
   c: Context,
-  status: 400 | 404 | 409 | 413 | 423 | 502 | 503,
+  status: 400 | 403 | 404 | 409 | 413 | 423 | 502 | 503,
   error: string,
   message: string,
 ): Response {
   return c.json({ error, message }, status);
+}
+
+function tooManyTries(c: Context, waitMs: number): Response {
+  const retryAfter = Math.ceil(waitMs / 1000);
+  c.header("Retry-After", String(retryAfter));
+  return c.json(
+    {
+      error: "too-many-tries",
+      message: "Too many wrong passphrases. Wait a little, then try again",
+      retryAfter,
+    },
+    429,
+  );
 }
 
 function hasKey(metadata: Record<string, string | undefined>): boolean {

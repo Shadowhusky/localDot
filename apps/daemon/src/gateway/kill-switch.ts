@@ -1,3 +1,4 @@
+import { DockerError } from "../cells/docker.ts";
 import { CellControlConflict, type CellOrchestrator } from "../cells/orchestrator.ts";
 import type { CellKeyd } from "../keyd/cell-wiring.ts";
 import type { LiveSessions } from "./live.ts";
@@ -7,7 +8,13 @@ export interface KillSwitchDeps {
   keyd: Pick<CellKeyd, "revoke" | "refresh" | "isWired" | "close">;
   cells: Pick<CellOrchestrator, "get" | "record" | "withLifecycle">;
   settleMs?: number;
+  froze?(cellId: string): void;
 }
+
+const thawedUnderDocker = (error: unknown) =>
+  error instanceof DockerError &&
+  error.status === 500 &&
+  /OCI runtime resume failed: container not paused/.test(error.message);
 
 export interface StopOutcome {
   revoked: boolean;
@@ -100,6 +107,7 @@ export class KillSwitch {
       if (controls.waitedForOperation) revoked = await attempt("keyd", () => keyd.revoke(cellId));
       if (settled) await settleWithin(settled, this.#settleMs);
       const paused = await attempt("pause", () => controls.pause());
+      if (paused) this.deps.froze?.(cellId);
       const closed = !paused && (await attempt("keyd close", () => keyd.close(cellId)));
       const stopped = !paused && (await attempt("stop", () => controls.stop()));
       return { revoked, paused, closed, stopped, errors };
@@ -124,7 +132,12 @@ export class KillSwitch {
         await keyd.revoke(cellId);
         if (await keyd.isWired(record)) {
           await keyd.refresh(record);
-          await controls.unpause();
+          await controls.unpause().catch(async (error: unknown) => {
+            // Docker can go on calling a desktop paused after its runtime has thawed it, and then
+            // refuses to unpause it. Starting it again stops it first, which Docker still allows.
+            if (!thawedUnderDocker(error)) throw error;
+            await controls.start();
+          });
         } else {
           // Start stops the old frozen desktop before wiring a new listener/CA.
           // Never briefly thaw old processes with obsolete key material.

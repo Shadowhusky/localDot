@@ -30,6 +30,7 @@ export type StepResource =
 const Context = createContext<{
   api: ApiClient | null;
   sessionId: string | null;
+  scale: number;
   open(resource: StepResource, trigger: HTMLElement): void;
   files: readonly ViewerEntry[];
 } | null>(null);
@@ -47,11 +48,14 @@ export function StepPreviewScope({
   api,
   sessionId,
   results,
+  scale = 1,
   children,
 }: {
   api: ApiClient | null;
   sessionId: string | null;
   results: readonly AgentResult[];
+  // Device px to a CSS px on the computer's display, which recorded targets are measured in.
+  scale?: number;
   children: ReactNode;
 }) {
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -123,7 +127,10 @@ export function StepPreviewScope({
     },
     [sessionId],
   );
-  const context = useMemo(() => ({ files, api, sessionId, open }), [files, api, sessionId, open]);
+  const context = useMemo(
+    () => ({ files, api, sessionId, scale, open }),
+    [files, api, sessionId, scale, open],
+  );
   return (
     <Context.Provider value={context}>
       {children}

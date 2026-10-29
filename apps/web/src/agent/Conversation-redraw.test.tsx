@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, render } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { Conversation } from "./Conversation.tsx";
 import type { LiveWork } from "./LiveWorkLine.tsx";
@@ -10,12 +11,13 @@ const drawn = vi.hoisted(() => ({ work: 0, results: 0 }));
 
 vi.mock("./LiveWorkLine.tsx", async (load) => {
   const real = await load<typeof import("./LiveWorkLine.tsx")>();
+  const Line = real.LiveWorkLine;
   return {
     ...real,
-    LiveWorkLine(props: Parameters<typeof real.LiveWorkLine>[0]) {
+    LiveWorkLine(props: ComponentProps<typeof Line>) {
       // The foot's line is the live one; the thread's rows are earlier turns.
       if (!props.live) drawn.work += 1;
-      return real.LiveWorkLine(props);
+      return <Line {...props} />;
     },
   };
 });

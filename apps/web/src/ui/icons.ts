@@ -333,6 +333,14 @@ export const ICONS = {
     ["circle", { cx: "12", cy: "12", r: "9.5" }],
     ["path", { d: "M12 17.5a5.5 5.5 0 0 0 0-11z", ...FILLED }],
   ],
+  bot: [
+    ["path", { d: "M12 8V4H8" }],
+    ["rect", { x: "4", y: "8", width: "16", height: "12", rx: "2" }],
+    ["path", { d: "M2 14h2" }],
+    ["path", { d: "M20 14h2" }],
+    ["path", { d: "M15 13v2" }],
+    ["path", { d: "M9 13v2" }],
+  ],
   cpu: [
     ["rect", { x: "4", y: "4", width: "16", height: "16", rx: "2.5" }],
     ["rect", { x: "9", y: "9", width: "6", height: "6", rx: "1" }],

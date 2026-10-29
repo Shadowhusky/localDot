@@ -1,8 +1,9 @@
 import type { PremiumSpeed, SessionOrigin } from "@localdot/protocol";
 import { microsToMs, ULID_PATTERN, ulidTime } from "@localdot/protocol";
-import type { TimelineRow } from "../session/key-uses.ts";
+import type { KeyUseRowView, TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import {
+  type ActivityEntry,
   activityReadGroup,
   activityRows,
   type EntryView,
@@ -16,7 +17,6 @@ import {
   type AgentModel,
   type AgentQuestion,
   type AgentResult,
-  type AgentStep,
   type AgentTakeover,
   fastest,
   type RoutineProposal,
@@ -25,7 +25,13 @@ import {
 } from "./model.ts";
 
 export type Speaker = "user" | "dot";
-export type WorkStep = EntryView & { key: string; readGroup?: string; output?: AgentStep };
+// A step as a work line shows it, with the step itself and the changes it made for its details.
+export type WorkStep = EntryView & {
+  key: string;
+  readGroup?: string;
+  entry: ActivityEntry;
+  changes: readonly AgentChange[];
+};
 export interface ModelRef {
   readonly route: string;
   readonly model: string;
@@ -64,8 +70,8 @@ export type ThreadItem =
       turn: string;
       steps: readonly WorkStep[];
       startMs: number | null;
-      // An earlier task's turn, which Activity doesn't show.
-      earlier?: true;
+      // An earlier task's turn: the task its steps were recorded in.
+      sessionId?: string;
       // What the turn's model calls cost, when any cost something.
       spend?: { usd: number; estimated: boolean };
     })
@@ -218,10 +224,29 @@ export function threadItems(
     : sorted;
 }
 
+// The work steps last drawn for one thread, by key, with what each was built from: a step whose
+// row, key uses, file changes and ending are the same is not built again.
+export type WorkStepCache = Map<
+  string,
+  {
+    row: object;
+    keys: readonly KeyUseRowView[];
+    changes: readonly AgentChange[];
+    ended: boolean;
+    step: WorkStep;
+  }
+>;
+const NO_CHANGES: readonly AgentChange[] = [];
+// Key uses fold into the step before them after its row is drawn, and a run of them grows in place.
+const sameKeys = (was: readonly KeyUseRowView[], now: readonly KeyUseRowView[]) =>
+  was.length === now.length &&
+  was.every((key, index) => key.id === now[index]?.id && key.count === now[index]?.count);
+
 // A task's steps, as the work lines of its turns show them.
 export function workSteps(
   rows: readonly TimelineRow<StepRowView>[],
   model: AgentModel,
+  cache?: WorkStepCache,
 ): WorkStep[] {
   const changes = new Map<string, AgentChange[]>();
   for (const change of model.changes) {
@@ -230,14 +255,36 @@ export function workSteps(
     own.push(change);
     changes.set(change.step, own);
   }
-  return foldKeyUses(activityRows(rows, model))
+  const ended = !!model.ended;
+  const built: WorkStepCache = new Map();
+  const steps = foldKeyUses(activityRows(rows, model))
     .filter((entry) => entry.row.kind === "step")
-    .map((entry) => ({
-      key: entry.key,
-      readGroup: activityReadGroup(entry),
-      output: entry.row.kind === "step" ? entry.row.agent : undefined,
-      ...entryView(entry, changes.get(entry.row.id) ?? [], !!model.ended),
-    }));
+    .map((entry) => {
+      const own = changes.get(entry.row.id) ?? NO_CHANGES;
+      const kept = cache?.get(entry.key);
+      const step =
+        kept &&
+        kept.row === entry.row &&
+        sameKeys(kept.keys, entry.keys) &&
+        kept.ended === ended &&
+        kept.changes.length === own.length &&
+        kept.changes.every((change, index) => change === own[index])
+          ? kept.step
+          : {
+              key: entry.key,
+              readGroup: activityReadGroup(entry),
+              entry,
+              changes: own,
+              ...entryView(entry, own, ended),
+            };
+      built.set(entry.key, { row: entry.row, keys: entry.keys, changes: own, ended, step });
+      return step;
+    });
+  if (cache) {
+    cache.clear();
+    for (const [key, value] of built) cache.set(key, value);
+  }
+  return steps;
 }
 
 // A turn starts at each task or follow-up dot receives; steering a running task stays in its turn.
@@ -438,14 +485,22 @@ export function withWork(
 const PAUSE_MS = 10 * 60_000;
 const DAY_MS = 86_400_000;
 
+// Made once: a formatter costs far more to make than to use, and the thread labels its rows each
+// time it changes.
+let formats: Record<"clock" | "weekday" | "day", Intl.DateTimeFormat> | undefined;
+
 export function timeLabel(time: number, now = Date.now()): string {
+  formats ??= {
+    clock: new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }),
+    weekday: new Intl.DateTimeFormat(undefined, { weekday: "short" }),
+    day: new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }),
+  };
   const at = new Date(time);
-  const clock = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const clock = formats.clock.format(at);
   const today = new Date(now);
   if (at.toDateString() === today.toDateString()) return clock;
-  if (now - time < 6 * DAY_MS)
-    return `${at.toLocaleDateString(undefined, { weekday: "short" })} ${clock}`;
-  return `${at.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${clock}`;
+  if (now - time < 6 * DAY_MS) return `${formats.weekday.format(at)} ${clock}`;
+  return `${formats.day.format(at)}, ${clock}`;
 }
 
 export function threadRows(items: readonly ThreadItem[], now = Date.now()): ThreadRow[] {

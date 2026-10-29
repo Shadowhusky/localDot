@@ -169,6 +169,36 @@ describe("settings inspector", () => {
     expect(document.activeElement).toBe(button);
     button.remove();
   });
+  it("brings a tip asked for into view once it shows, lights it and focuses its field", () => {
+    const locked = keysPanel();
+    const unlocking = {
+      keysPanel: {
+        keys: {
+          ...locked.keys,
+          health: { ...locked.keys.health, vault: { backend: "file", state: "locked" as const } },
+          unlock: vi.fn(async () => {}),
+        },
+      },
+    };
+    const p = { ...props(), keysPanel: keysPanel() };
+    const view = render(
+      <SettingsSheet {...p} section="keys" sectionRequest={1} tip="keys-unlock" />,
+    );
+    expect(document.getElementById("keys-unlock")).toBeNull();
+    // Key protection answers after Keys opened: the form shows, and the tip with it.
+    view.rerender(
+      <SettingsSheet {...p} {...unlocking} section="keys" sectionRequest={1} tip="keys-unlock" />,
+    );
+    const tip = document.getElementById("keys-unlock");
+    expect(tip?.hasAttribute("data-tip")).toBe(true);
+    expect(document.activeElement).toBe(screen.getByLabelText("Passphrase"));
+    tip?.dispatchEvent(new Event("animationend"));
+    expect(tip?.hasAttribute("data-tip")).toBe(false);
+    view.rerender(
+      <SettingsSheet {...p} {...unlocking} section="keys" sectionRequest={1} tip="keys-unlock" />,
+    );
+    expect(tip?.hasAttribute("data-tip")).toBe(false);
+  });
   it("opens on what dot knows when asked", () => {
     const knowledge = {
       skills: [],

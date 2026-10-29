@@ -1,6 +1,12 @@
-import { microsToMs, type SessionCard, type SessionVerdict } from "@localdot/protocol";
+import {
+  type DeleteSessionsResult,
+  microsToMs,
+  type SessionCard,
+  type SessionVerdict,
+} from "@localdot/protocol";
 import { chapters, planAt, stepAt } from "@localdot/stage";
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { bytes, count } from "../copy/format.ts";
 import { isLoopbackPage } from "../deliverables/api.ts";
 import { RecordingFiles } from "../deliverables/RecordingFiles.tsx";
 import { exportRequest, withinRecording } from "../deliverables/replay-link.ts";
@@ -26,8 +32,10 @@ import { NarratorBand } from "../shell/NarratorBand.tsx";
 import { RailPanel } from "../shell/RailPanel.tsx";
 import { StageFrame } from "../shell/StageFrame.tsx";
 import { Stage, type StageHandle } from "../stage/Stage.tsx";
+import { announce } from "../ui/Announcer.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { Checkbox } from "../ui/Checkbox.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -38,6 +46,8 @@ import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select } from "../ui/Select.tsx";
 import { WorkView } from "../work/WorkView.tsx";
 import { CompareView } from "./CompareView.tsx";
+import { type Cleanup, deletable, pick, totalBytes } from "./cleanup.ts";
+import { DeleteRecordings, FreeUpSpace } from "./FreeUpSpace.tsx";
 import { GapCard, type GapKind } from "./GapCard.tsx";
 import { LOADING, ReplayControls } from "./ReplayControls.tsx";
 import { ReplayImage } from "./ReplayImage.tsx";
@@ -61,6 +71,7 @@ import {
   TaskList,
   TasksSearch,
   useTaskIndex,
+  useWholeIndex,
 } from "./TasksLibrary.tsx";
 import { useReplay } from "./useReplay.ts";
 import "./replay.css";
@@ -70,6 +81,9 @@ import "./replay.css";
 export const PREVIEW_ROOM = "(width >= 1100px)";
 // A recording with no video says so on the picture for this long, then as a chip in the transport.
 const CONTINUE_LABEL = "Continue working";
+// What was deleted and freed shows in place of the library's total for this long.
+const FREED_MS = 5000;
+const PICK_PROMPT = "Choose recordings to delete";
 const NOTICE_MS = 3000;
 // The transport fades this long into playback without the pointer moving over the picture.
 const TRANSPORT_STILL_MS = 2000;
@@ -286,10 +300,47 @@ function Library({
     (tasks.loading && tasks.cards.length === 0) || exportState.loading === true;
   const shown = shownCards(tasks.cards, search, filter, matches);
   const card = shown.find((entry) => entry.id === chosen) ?? shown[0] ?? null;
-  useEscape(visible, onGoLive);
+  // Select mode, and what it has picked. Only the picked rows the search and filter show count, so
+  // what is ticked is what goes.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const lastPick = useRef<string | null>(null);
+  const [confirming, setConfirming] = useState<{ cleanup?: Cleanup } | null>(null);
+  // Select, or Delete while selecting: where the confirmation opens and where focus goes after.
+  const barAction = useRef<HTMLButtonElement>(null);
+  const [counting, setCounting] = useState(false);
+  const [reveal, setReveal] = useState<{ id: string }>();
+  const [freed, setFreed] = useState<string | null>(null);
+  useWholeIndex(tasks, picking || counting);
+  const pickable = shown.filter((entry) => deletable(entry) && !tasks.folding.has(entry.id));
+  const pickedCards = pickable.filter((entry) => picked.has(entry.id));
+  const stopPicking = () => {
+    setPicking(false);
+    setPicked(new Set());
+    lastPick.current = null;
+  };
+  useEscape(visible && !confirming, picking ? stopPicking : onGoLive);
   useEffect(() => {
     if (!roomy || !card) setReplayPresence({ feed: RESTING, line: "" });
   }, [roomy, card]);
+  useEffect(() => {
+    if (!freed) return;
+    const timer = setTimeout(() => setFreed(null), FREED_MS);
+    return () => clearTimeout(timer);
+  }, [freed]);
+  const deleted = (result: DeleteSessionsResult) => {
+    if (result.deleted.length === 0) return;
+    const gone = new Set(result.deleted);
+    const freedBytes = totalBytes(tasks.cards.filter((entry) => gone.has(entry.id)));
+    const line = `Deleted ${count(gone.size, "recording", "recordings")} · freed ${bytes(freedBytes)}`;
+    tasks.fold(result.deleted);
+    setPicked((was) => new Set([...was].filter((id) => !gone.has(id))));
+    for (const id of result.deleted) onDeleted(id);
+    setFreed(line);
+    announce("replay-delete", line);
+    if (result.live.length === 0 && result.failed.length === 0) setPicking(false);
+  };
+  const all = pickable.length > 0 && pickedCards.length === pickable.length;
   return (
     <div className="replay" data-view="library">
       <main className="replay-library" aria-label="Replay">
@@ -314,18 +365,80 @@ function Library({
               onValueChange={(value) => setFilter(value as LibraryFilter)}
             />
           )}
-          {!phone && tasks.cards.length > 0 && (
-            <span className="replay-library-total num">
-              {libraryTotal(tasks.cards, tasks.more)}
-            </span>
-          )}
         </div>
+        {tasks.cards.length > 0 && (
+          <div className="replay-library-bar" data-picking={picking ? "" : undefined}>
+            {picking ? (
+              <>
+                <Checkbox
+                  className="replay-pick-all"
+                  label="Select all"
+                  checked={all}
+                  indeterminate={!all && pickedCards.length > 0}
+                  onCheckedChange={(on) =>
+                    setPicked(on ? new Set(pickable.map((entry) => entry.id)) : new Set())
+                  }
+                />
+                <span className="replay-library-total num">
+                  {pickedCards.length > 0
+                    ? `${pickedCards.length.toLocaleString()}${phone ? "" : " selected"} · ${bytes(totalBytes(pickedCards))}`
+                    : PICK_PROMPT}
+                </span>
+                <span className="replay-library-tools">
+                  <Button variant="quiet" size="sm" onClick={stopPicking}>
+                    Cancel
+                  </Button>
+                  <Button
+                    ref={barAction}
+                    variant="destructive"
+                    size="sm"
+                    icon="trash"
+                    disabledReason={pickedCards.length > 0 ? undefined : PICK_PROMPT}
+                    onClick={() => setConfirming({})}
+                  >
+                    Delete…
+                  </Button>
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="replay-library-total num">
+                  {freed ?? libraryTotal(tasks.cards, tasks.more)}
+                </span>
+                <span className="replay-library-tools">
+                  <FreeUpSpace
+                    cards={tasks.cards}
+                    counting={tasks.more && !tasks.failed}
+                    onOpen={() => setCounting(true)}
+                    onChoose={(cleanup, picks) => {
+                      setSearch("");
+                      setFilter("all");
+                      setPicking(true);
+                      setPicked(new Set(picks.map((entry) => entry.id)));
+                      lastPick.current = null;
+                      if (picks[0]) setReveal({ id: picks[0].id });
+                      setConfirming({ cleanup });
+                    }}
+                  />
+                  <Button
+                    ref={barAction}
+                    variant="quiet"
+                    size="sm"
+                    onClick={() => setPicking(true)}
+                  >
+                    Select
+                  </Button>
+                </span>
+              </>
+            )}
+          </div>
+        )}
         <ScrollArea className="replay-library-scroll" fade="bottom" aria-busy={libraryLoading}>
           {libraryLoading ? (
             <DotLoader className="replay-loading" label="Loading your recordings" />
           ) : (
             <>
-              {search.trim() === "" && filter === "all" && (
+              {search.trim() === "" && filter === "all" && !picking && (
                 <ExportsList
                   api={api}
                   host={hostExports}
@@ -342,11 +455,32 @@ function Library({
                 onSelect={roomy ? onChoose : onOpen}
                 onDeleted={onDeleted}
                 continueTask={continueTask}
+                picking={
+                  picking
+                    ? {
+                        chosen: picked,
+                        onPick: (id, range) => {
+                          const from = range ? lastPick.current : null;
+                          setPicked((was) => pick(was, shown, id, from));
+                          lastPick.current = id;
+                        },
+                      }
+                    : undefined
+                }
+                reveal={reveal}
                 variant={phone ? "phone" : "library"}
               />
             </>
           )}
         </ScrollArea>
+        <DeleteRecordings
+          api={api}
+          cards={confirming ? pickedCards : null}
+          cleanup={confirming?.cleanup}
+          anchor={barAction}
+          onClose={() => setConfirming(null)}
+          onDeleted={deleted}
+        />
       </main>
       {roomy && (
         <RailPanel label="Chosen recording" className="replay-rail">

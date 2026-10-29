@@ -56,6 +56,16 @@ let animationFrame: number | null = null;
 let idleLook: ReturnType<typeof setTimeout> | null = null;
 let renderRetryAt = 0;
 let renderError: string | null = null;
+// The stage looks at most at the stream's frame rate, and never above 60 Hz, however fast the
+// display refreshes; a frame waiting to be drawn needs only 60 Hz to allow it. A wait ends a little
+// early, so the display frame after it lands on time.
+const MAX_HZ = 60;
+let lookEveryMs = 1000 / MAX_HZ;
+let lookedAt = Number.NEGATIVE_INFINITY;
+const SLACK_MS = 2;
+const VSYNC_MS = 8;
+let paced = false;
+let hidden = false;
 
 // The rings on the fields dot will fill, on the screen shown.
 function showFields(): void {
@@ -66,10 +76,13 @@ function showFields(): void {
   );
 }
 
-// Looks at the stage on the next display frame, sooner than an idle look would.
+// Looks at the stage on the next display frame, sooner than an idle look would; a look the frame
+// rate holds back waits its turn unless a frame does.
 function wake(): void {
+  if (idleLook !== null && paced && !presenter?.hasFrame) return;
   if (idleLook !== null) clearTimeout(idleLook);
   idleLook = null;
+  paced = false;
   if (animationFrame === null) animationFrame = requestAnimationFrame(tick);
 }
 
@@ -113,6 +126,8 @@ function probing(inner: Presenter): Presenter {
 
 function tick(): void {
   animationFrame = null;
+  // Out of sight, the stage draws nothing until it is shown again.
+  if (hidden && !replay) return;
   const now = performance.now();
   if (now < renderRetryAt) {
     idleLook = setTimeout(wake, renderRetryAt - now);
@@ -124,6 +139,19 @@ function tick(): void {
     return;
   }
   if (presenter) {
+    const early = (presenter.hasFrame ? 1000 / MAX_HZ : lookEveryMs) - (now - lookedAt);
+    if (early > SLACK_MS) {
+      paced = true;
+      idleLook = setTimeout(
+        () => {
+          idleLook = null;
+          wake();
+        },
+        Math.max(0, early - VSYNC_MS),
+      );
+      return;
+    }
+    lookedAt = now;
     const screen = screenNow();
     presenter.setScreen(selection || model.screen ? screen : null);
     // A frozen stage keeps the time it froze at; overlays never animate over a dead picture.
@@ -247,6 +275,9 @@ async function handle(m: WorkerIn): Promise<void> {
         if (m.view.freeze !== undefined) freeze = m.view.freeze;
         if (m.view.reducedMotion !== undefined)
           view = { ...view, reducedMotion: m.view.reducedMotion };
+        if (m.view.fps !== undefined)
+          lookEveryMs = 1000 / Math.min(MAX_HZ, Math.max(1, m.view.fps));
+        if (m.view.hidden !== undefined) hidden = m.view.hidden;
         if (m.view.dim !== undefined) presenter?.setDim(m.view.dim, view.reducedMotion);
         if (m.view.fields !== undefined) fields = m.view.fields;
         if (m.view.selection !== undefined) {

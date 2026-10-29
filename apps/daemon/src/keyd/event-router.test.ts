@@ -107,6 +107,21 @@ describe("KeydEventRouter", () => {
       },
     ]);
   });
+  it("gives the task on a browser's computer the keys its browser was refused, and only those", () => {
+    const BROWSER = "01JXYZ0000000000000000BRWS";
+    router = new KeydEventRouter({
+      keyd: new KeydClient(keyd.socketPath),
+      live,
+      eventLog,
+      parentOf: (id) => (id === BROWSER ? CELL : undefined),
+    });
+    router.route(use({ decision: "deny", secretId: "thema" }, BROWSER));
+    router.route(use({ decision: "allow", secretId: "github" }, BROWSER));
+    router.route(use({ decision: "deny", secretId: "other" }, "01JXYZ0000000000000000NONE"));
+    expect(keyEvents().map((e) => e.data)).toEqual([
+      expect.objectContaining({ secretId: "thema", decision: "deny" }),
+    ]);
+  });
   it("appends key use to the cell's live session as keyd, cutting what a cell chose", () => {
     router = new KeydEventRouter({ keyd: new KeydClient(keyd.socketPath), live, eventLog });
     router.route(

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CdpTransport } from "./pipe.ts";
 import {
+  BROWSER_CRASH_RELOADS,
   BROWSER_RELOAD_TIMEOUT_MS,
   type BrowserDocument,
   BrowserTargets,
@@ -33,6 +34,7 @@ function setup() {
   const writes: WireCommand[] = [];
   const fatal = vi.fn();
   const invalidated = vi.fn();
+  const crashed = vi.fn();
   const close = vi.fn();
   const reply = (command: WireCommand, result: unknown = {}) => {
     receive(
@@ -93,6 +95,7 @@ function setup() {
     uploadDir: "/tmp/uploads",
     onFatal: fatal,
     onInvalidated: invalidated,
+    onCrash: crashed,
   });
   return {
     targets,
@@ -102,6 +105,7 @@ function setup() {
     attach,
     fatal,
     invalidated,
+    crashed,
     close,
     disconnect: () => disconnect(),
     intercept: (handler: (command: WireCommand) => boolean) => {
@@ -630,19 +634,73 @@ describe("private browser target ownership", () => {
     },
   );
 
-  it.each([
-    [
-      "Target.targetCrashed",
-      { targetId: "page-1", status: "private-canary", errorCode: 1 },
-      undefined,
-    ],
-    ["Inspector.targetCrashed", {}, "session-1"],
-  ])("fences capabilities on %s", async (method, params, sessionId) => {
+  it("revokes and reloads a crashed tab without closing the browser", async () => {
+    vi.useFakeTimers();
     const fixture = await started();
-    fixture.event(method, params, sessionId);
+    fixture.attach("page-other", "session-other");
+    await vi.advanceTimersByTimeAsync(0);
+    const other = fixture.targets.tabs().find((tab) => tab.id !== fixture.tabId);
+    // Chromium reports one crash to the tab's session and, with its status, to the browser.
+    fixture.event("Inspector.targetCrashed", {}, "session-1");
+    fixture.event("Target.targetCrashed", { targetId: "page-1", status: "oom", errorCode: 9 });
+    expect(fixture.targets.closed).toBe(false);
+    expect(fixture.fatal).not.toHaveBeenCalled();
+    expect(() => fixture.targets.check(fixture.document)).toThrow("stale");
+    expect(other && fixture.targets.documents(other.id)).toHaveLength(1);
+    const reloads = fixture.writes.filter((write) => write.method === "Page.reload");
+    expect(reloads).toEqual([
+      { id: expect.any(Number), method: "Page.reload", params: {}, sessionId: "session-1" },
+    ]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fixture.crashed.mock.calls).toEqual([[{ status: "oom", reloaded: true }]]);
+    expect(fixture.targets.documents(fixture.tabId)).toHaveLength(1);
+    fixture.targets.close();
+  });
+
+  it("leaves a tab that keeps crashing on its error page", async () => {
+    vi.useFakeTimers();
+    const fixture = await started();
+    for (let crash = 0; crash <= BROWSER_CRASH_RELOADS; crash += 1) {
+      fixture.event("Target.targetCrashed", { targetId: "page-1", status: "crashed" });
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(fixture.writes.filter((write) => write.method === "Page.reload")).toHaveLength(
+      BROWSER_CRASH_RELOADS,
+    );
+    expect(fixture.crashed.mock.calls.at(-1)).toEqual([{ status: "crashed", reloaded: false }]);
+    expect(fixture.targets.closed).toBe(false);
+    fixture.targets.close();
+  });
+
+  it("reloads the tab that holds a crashed frame and names no page data", async () => {
+    vi.useFakeTimers();
+    const fixture = await started();
+    fixture.attach("frame-1", "frame-session", "session-1", "iframe");
+    await vi.advanceTimersByTimeAsync(0);
+    fixture.event("Inspector.targetCrashed", {}, "frame-session");
+    fixture.event("Target.targetCrashed", { targetId: "frame-1", status: "private-canary" });
+    expect(fixture.writes.filter((write) => write.method === "Page.reload")).toEqual([
+      expect.objectContaining({ sessionId: "session-1" }),
+    ]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fixture.crashed.mock.calls).toEqual([[{ status: "unknown", reloaded: true }]]);
+    fixture.targets.close();
+  });
+
+  it("fences a crash report for a target it does not own", async () => {
+    const fixture = await started();
+    fixture.event("Target.targetCrashed", { targetId: "foreign-page", status: "crashed" });
     expect(fixture.targets.closed).toBe(true);
     expect(fixture.fatal).toHaveBeenCalledTimes(1);
-    expect(fixture.fatal.mock.calls[0]?.[0].message).toBe("Browser target refused: closed");
+  });
+
+  it("names a lost control connection for the supervisor", async () => {
+    const fixture = await started();
+    fixture.disconnect();
+    expect(fixture.fatal.mock.calls[0]?.[0]).toMatchObject({
+      reason: "closed",
+      cause: "control closed",
+    });
   });
 
   it("revokes ordinary inspector detachment without closing another healthy tab", async () => {

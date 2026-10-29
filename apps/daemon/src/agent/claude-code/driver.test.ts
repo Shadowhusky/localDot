@@ -565,6 +565,7 @@ describe("Claude Code driver", () => {
         { window: "primary", usedPercent: 100, windowMinutes: 300, resetsAt: 1_900_000_000 },
       ],
       limitReached: true,
+      limitResetsAt: 1_900_000_000,
     });
     expect(f.events.some((e) => e.type === "model.spend")).toBe(false);
     f.session.stop();

@@ -1,5 +1,7 @@
 import { localdotHome } from "../../daemon/src/paths.ts";
-import { HELP, parseArgs } from "./args.ts";
+import { HELP, parseArgs, usageHint } from "./args.ts";
+import { DotsCommandError } from "./dots/commands.ts";
+import { CommandError } from "./local-dot.ts";
 import type { ConsoleIO, Runtime } from "./runtime.ts";
 
 export interface CliOptions {
@@ -10,14 +12,15 @@ export interface CliOptions {
 }
 
 export async function runCli(
-  options: CliOptions,
+  cliOptions: CliOptions,
   io: ConsoleIO,
   runtime: Runtime,
 ): Promise<number> {
+  let options = cliOptions;
   const command = parseArgs(options.args);
   if (!command) {
     // Invalid arguments may contain a pasted credential. Do not echo them.
-    io.err("Invalid command. Run localdot --help for usage.");
+    io.err(`Invalid command. ${usageHint(options.args)}`);
     return 2;
   }
   if (command.kind === "help") {
@@ -30,6 +33,25 @@ export async function runCli(
   }
   try {
     options.signal.throwIfAborted();
+    if (command.kind === "dots")
+      return await runtime.dots(
+        { home: localdotHome(options.env), env: options.env, signal: options.signal },
+        command.dots,
+        io,
+      );
+    if (command.dot) {
+      const main = { home: localdotHome(options.env), env: options.env, signal: options.signal };
+      if (command.kind === "up" || command.kind === "down")
+        return await runtime.dots(
+          main,
+          { operation: command.kind === "up" ? "start" : "stop", dot: command.dot },
+          io,
+        );
+      options = {
+        ...options,
+        env: { ...options.env, ...(await runtime.dotEnvironment(main, command.dot)) },
+      };
+    }
     if (command.kind === "reset-computer" && command.operation === "preview") {
       io.out(
         `Reset erases computer ${command.cellId}'s home and browser profile and creates a fresh computer.`,
@@ -39,6 +61,34 @@ export async function runCli(
         `To confirm: localdot reset-computer --cell ${command.cellId} --erase-computer${command.requestId ? ` --request ${command.requestId}` : ""}`,
       );
       return 0;
+    }
+    const input = { home: localdotHome(options.env), env: options.env, signal: options.signal };
+    switch (command.kind) {
+      case "restart":
+        return await runtime.restart(input, io);
+      case "status":
+        return await runtime.status(input, io, { json: !!command.json, version: options.version });
+      case "link":
+        return await runtime.link(input, io, {
+          ...(command.only ? { only: command.only } : {}),
+          qr: !!command.qr,
+          json: !!command.json,
+        });
+      case "remote":
+        return await runtime.remote(input, io, {
+          operation: command.operation,
+          json: !!command.json,
+        });
+      case "tailscale":
+        return await runtime.tailscale(input, io, command.operation);
+      case "computer":
+        return await runtime.computer(input, io, {
+          operation: command.operation,
+          ...(command.cellId ? { cellId: command.cellId } : {}),
+          json: !!command.json,
+        });
+      case "report":
+        return await runtime.report(input, io, command.report, options.version);
     }
     if (command.kind === "default")
       return await runtime.default(
@@ -51,10 +101,7 @@ export async function runCli(
         io,
       );
     if (command.kind === "logs")
-      return await runtime.logs(
-        { home: localdotHome(options.env), signal: options.signal, follow: command.follow },
-        io,
-      );
+      return await runtime.logs({ ...input, follow: command.follow }, io);
     if (command.kind === "update")
       return await runtime.update(
         {
@@ -66,29 +113,22 @@ export async function runCli(
         },
         io,
       );
-    if (command.kind === "down")
-      return await runtime.down({ home: localdotHome(options.env), signal: options.signal }, io);
+    if (command.kind === "down") return await runtime.down(input, io);
     if (command.kind === "up") {
-      const context = { home: localdotHome(options.env), signal: options.signal };
-      if (command.atLogin) return await runtime.up(context, io, { atLogin: true });
-      if (command.fromLogin) return await runtime.up(context, io, { fromLogin: true });
-      return await runtime.up(context, io);
+      if (command.atLogin) return await runtime.up(input, io, { atLogin: true });
+      if (command.fromLogin) return await runtime.up(input, io, { fromLogin: true });
+      return await runtime.up(input, io);
     }
     if (command.kind === "unlock")
       return await runtime.unlock({ home: localdotHome(options.env), signal: options.signal }, io);
     if (command.kind === "start-at-login")
-      return await runtime.startAtLogin(
-        { home: localdotHome(options.env), signal: options.signal },
-        command.operation,
-        io,
-      );
+      return await runtime.startAtLogin(input, command.operation, io);
     if (command.kind === "doctor" && command.fix) {
       io.out("Restarting localDot and checking its computers. Saved apps and files are kept.");
-      const service = { home: localdotHome(options.env), signal: options.signal };
-      const stopped = await runtime.down(service, io);
+      const stopped = await runtime.down(input, io);
       if (stopped !== 0) return stopped;
       options.signal.throwIfAborted();
-      const started = await runtime.up(service, io);
+      const started = await runtime.up(input, io);
       if (started !== 0) return started;
     }
     const context = await runtime.context({
@@ -126,6 +166,15 @@ export async function runCli(
         },
         io,
       );
+    if (command.kind === "browser")
+      return await runtime.browser(
+        {
+          ...context,
+          operation: command.operation,
+          ...(command.cellId ? { cellId: command.cellId } : {}),
+        },
+        io,
+      );
     if (command.kind === "recover")
       return await runtime.recover(
         {
@@ -136,7 +185,14 @@ export async function runCli(
         io,
       );
     return await runtime.doctor(context, io);
-  } catch {
+  } catch (error) {
+    if (
+      (error instanceof DotsCommandError || error instanceof CommandError) &&
+      !options.signal.aborted
+    ) {
+      io.err(error.message);
+      return 1;
+    }
     io.err(
       options.signal.aborted
         ? "Command interrupted."

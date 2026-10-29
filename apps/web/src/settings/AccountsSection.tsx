@@ -1,5 +1,6 @@
 import { type FormEvent, useRef, useState } from "react";
 import { KNOWN_SIGN_INS, type SignInSite } from "../../../../packages/protocol/src/accounts.ts";
+import type { BrowserStatus } from "../../../../packages/protocol/src/browser-control.ts";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -9,10 +10,14 @@ import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import type { ReportControl } from "./reports-api.ts";
 import type { AccountsView } from "./useAccounts.ts";
+import type { BrowserStatusView } from "./useBrowserStatus.ts";
 import type { SignInView } from "./useSignIn.ts";
 
 const PLACEHOLDER_ROWS = 3;
+// A problem the browser recovered from stays in view this long.
+const RECENT_PROBLEM_MS = 15 * 60_000;
 const COMMON_SITES = KNOWN_SIGN_INS.slice(0, 4);
 
 const otherHosts = (entry: SignInSite) => entry.hosts.filter((host) => host !== entry.site);
@@ -90,17 +95,53 @@ function SignInToSite({ signIn, off }: { signIn: SignInView; off: boolean }) {
   );
 }
 
+// What the web browser is doing, or what last went wrong with it: nothing while it simply works.
+function browserLine(status: BrowserStatus | null | undefined): string {
+  const explained = (problem: string) => (status?.clears ? `${problem} ${status.clears}` : problem);
+  if (status?.reason === "keys-locked" && status.problem) return explained(status.problem);
+  switch (status?.state) {
+    case "off":
+      // A computer that is off says so above.
+      return status.problem && status.reason !== "computer-stopped"
+        ? explained(status.problem)
+        : "";
+    case "starting":
+      return "dot's web browser is starting. This takes a few seconds.";
+    case "restarting":
+      return "dot's web browser is restarting. Your sign-ins are kept.";
+    case "failed":
+      return status.retryAt
+        ? `${status.problem ?? "dot's web browser couldn't start."} localDot keeps trying.`
+        : explained(status.problem ?? "dot's web browser couldn't start.");
+    case "stopped":
+      return "dot's web browser is stopped.";
+    case "ready":
+      return status.problem &&
+        status.problemAt &&
+        Date.now() - Date.parse(status.problemAt) < RECENT_PROBLEM_MS
+        ? status.problem
+        : "";
+    default:
+      return "";
+  }
+}
+
 // The sites with sign-ins in dot's web browser, which keeps them between tasks and restarts.
 export function AccountsSection({
   accounts,
   signIn,
+  browser,
+  report,
 }: {
   accounts: AccountsView;
   signIn?: SignInView;
+  browser?: BrowserStatusView;
+  report?: Pick<ReportControl, "start">;
 }) {
   const clearTrigger = useRef<HTMLButtonElement>(null);
   const [confirming, setConfirming] = useState(false);
   const { phase, sites, pending } = accounts;
+  const browserState = browser?.status?.state;
   return (
     <div className="settings-accounts">
       <p className="settings-lede">
@@ -191,10 +232,46 @@ export function AccountsSection({
       <div className="settings-inline settings-accounts-footer">
         <p className="settings-lede" role="status">
           {accounts.failure ??
-            (phase === "starting"
-              ? "dot's web browser is starting. This takes a few seconds."
-              : "")}
+            browser?.failure ??
+            (browserLine(browser?.status) ||
+              (phase === "starting"
+                ? "dot's web browser is starting. This takes a few seconds."
+                : ""))}
         </p>
+        {browser && (
+          <Button
+            variant="quiet"
+            size="sm"
+            busy={
+              browser.requesting || browserState === "restarting" || browserState === "starting"
+            }
+            disabledReason={
+              phase === "off" || browser.status?.reason === "computer-stopped"
+                ? "Turn on your computer first"
+                : browserState === "off"
+                  ? "It starts by itself once it can"
+                  : undefined
+            }
+            onClick={browser.restart}
+          >
+            Restart web browser
+          </Button>
+        )}
+        {report && browserState === "failed" && (
+          <Button
+            variant="quiet"
+            size="sm"
+            onClick={(event) => {
+              const problem = browser?.status?.problem;
+              report.start(event.currentTarget, {
+                context: { kind: "browser", ...(problem ? { reason: problem } : {}) },
+                title: problem ?? "dot's web browser couldn't start.",
+              });
+            }}
+          >
+            Report this problem
+          </Button>
+        )}
         <Button
           ref={clearTrigger}
           variant="destructive"

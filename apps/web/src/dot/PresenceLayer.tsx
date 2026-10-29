@@ -26,7 +26,8 @@ export interface PresenceLayerProps {
 // keeps room for it: the hero on the curtain, the dock beside the stage or the island's badge. While
 // Replay is open it plays the recording's dot instead of the live one.
 export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
-  const { feed, line } = useReplayPresence() ?? now;
+  const replayed = useReplayPresence();
+  const { feed, line } = replayed ?? now;
   const reduced = useMediaQuery(REDUCED_MOTION);
   const frame = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLSpanElement>(null);
@@ -47,6 +48,8 @@ export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
   }, []);
 
   useEffect(() => presence.current?.setReducedMotion(reduced), [reduced]);
+  const replaying = replayed !== null;
+  useEffect(() => presence.current?.view.setFullRate(replaying), [replaying]);
   useEffect(() => presence.current?.view.setState(state), [state]);
   // Listening to the user talk, dot looks at where the words go.
   useEffect(() => {
@@ -98,12 +101,25 @@ export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
     if (!p) return;
     p.goTo(place);
     const again = () => p.goTo(place);
-    const resized = () => p.follow(true);
-    const moved = () => p.follow(false);
+    // Transitions end and the window resizes in bursts: dot measures its place once a frame.
+    let frame = 0;
+    let resizing = false;
+    const follow = (resized: boolean) => {
+      resizing ||= resized;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        p.follow(resizing);
+        resizing = false;
+      });
+    };
+    const resized = () => follow(true);
+    const moved = () => follow(false);
     const unsubscribe = onPlaces(again);
     window.addEventListener("resize", resized);
     document.addEventListener("transitionend", moved);
     return () => {
+      cancelAnimationFrame(frame);
       unsubscribe();
       window.removeEventListener("resize", resized);
       document.removeEventListener("transitionend", moved);
@@ -162,6 +178,13 @@ function useIdle(active: boolean, presence: { current: Presence | null }): Idle 
       }, RESTING_MS);
     };
     let last = 0;
+    // A key press sends keydown and input: the composer is measured once a frame, not for each.
+    let frame = 0;
+    const settle = () => {
+      frame = 0;
+      setPhase(typing() ? "listening" : "idle");
+      schedule();
+    };
     const input = (event: Event) => {
       const asleep = current.current === "resting" || current.current === "dozing";
       const t = Date.now();
@@ -169,8 +192,7 @@ function useIdle(active: boolean, presence: { current: Presence | null }): Idle 
       if (event.type === "pointermove" && !asleep && t - last < 1000) return;
       last = t;
       if (asleep) presence.current?.view.react("acknowledged");
-      setPhase(typing() ? "listening" : "idle");
-      schedule();
+      if (!frame) frame = requestAnimationFrame(settle);
     };
     const visibility = () => {
       if (document.hidden) {
@@ -196,6 +218,7 @@ function useIdle(active: boolean, presence: { current: Presence | null }): Idle 
     schedule();
     return () => {
       clearTimeout(timer);
+      cancelAnimationFrame(frame);
       for (const name of events) document.removeEventListener(name, input);
       document.removeEventListener("visibilitychange", visibility);
     };

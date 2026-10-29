@@ -94,7 +94,8 @@ localdot open
 ```
 
 **On Windows, `localdot` works in PowerShell and Ubuntu/WSL after installation.** Open the resulting
-link in your Windows browser. If your saved keys are locked, run `localdot unlock`.
+link in your Windows browser. If your saved keys are locked, unlock them in the app or run
+`localdot unlock`.
 
 ## Choose where localDot installs
 
@@ -174,7 +175,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 | A folder `doesn't keep file permissions`, or `you can't write to` it | Choose a folder you own on a drive formatted for macOS or Linux, or connect the drive it is on. See [Choose where localDot installs](#choose-where-localdot-installs). |
 | `localdot: command not found` | Open a new terminal. On macOS/Linux/WSL, you can also run `~/.local/bin/localdot open`. On Windows, rerun setup if the PowerShell command is missing. |
 | Sign-in link expired | Run `localdot open` for a fresh link. |
-| Saved keys are locked | Run `localdot unlock`. |
+| Saved keys are locked | Unlock them in the app (Settings → Keys, or the card in the chat), or run `localdot unlock`. |
 | Something else failed | Run `localdot doctor`; use `localdot logs --follow` for details. |
 
 For your phone or a remote server, see [remote access](#servers-without-a-screen).
@@ -237,12 +238,21 @@ catch your passphrase, and on some Linux systems it can read the unlocked key se
 Install with `--passphrase-vault` (or run `localdot update --passphrase-vault`) to use one. It
 starts empty, so add your keys again afterwards.
 
-When a passphrase protects your keys, run `localdot unlock` after the computer restarts, or after
-an upgrade that changed the key service. The installer asks for it when you run it in a terminal.
-Until then the app says the keys are locked and keeps them unused.
+When a passphrase protects your keys, unlock them after the computer restarts, or after an upgrade
+that changed the key service: in the app's Settings → Keys, or with `localdot unlock`. The
+installer asks for it when you run it in a terminal. Until then the app says the keys are locked
+and keeps them and saved passwords unused; sites already signed in keep working. When a task needs
+them, the chat shows an Unlock card, and dot carries on once they open. The link
+`<your localDot address>/#settings=keys&tip=unlock` opens Keys at the passphrase field.
 
-The first passphrase the key service receives becomes the vault's. If `localdot unlock` says your
-keys already have a passphrase you didn't set, start over: `localdot down`, delete
+The app seals the passphrase in the page to the key service's own key, so localDot's app server
+relays only ciphertext and never reads it; dot never sees it. Only the owner's own link can unlock
+(a shared link can't), and after five wrong passphrases each further try waits longer, from 30
+seconds up to 15 minutes.
+
+The first passphrase the key service receives becomes the vault's, whether from the app or
+`localdot unlock`; both note which vault it opens. If `localdot unlock` says your keys already have
+a passphrase you didn't set, start over: `localdot down`, delete
 `~/.localdot/keyd/vault.json` (or `vault-passphrase.json` for a passphrase vault) and
 `~/.localdot/passphrase-chosen`, `localdot up`, run `localdot unlock` to choose your own
 passphrase, then add your keys again.
@@ -291,6 +301,56 @@ release only after services have stopped; opening another tab or an idle convers
 restart. Failed activation uses the existing rollback transaction and does not repeat each launch.
 Packaged publication/signing/installed acceptance gates remain in [release packaging](release-packaging.md).
 
+## Several dots on one computer
+
+Each dot has its own data folder, address, saved keys and computer, and one installation runs them
+all. Add one from **Settings → Your computer → Add a dot on this computer…**, or in Terminal:
+
+```sh
+localdot dots add Work
+localdot dots add "Home Mac" --from work --copy settings,keys,conversations
+```
+
+Give it a name and choose the dot to copy from. Under **Advanced** (`--copy`), choose what it takes:
+
+| Copied unless you turn it off | Copied only when you turn it on |
+| --- | --- |
+| Settings: models, autonomy, budgets, persona and accessory | Conversations, which can be large (on a Mac's own disk the copies share space until they change) |
+| Keys and saved passwords | dot's computer: its system and home folder. Stop that dot's computer first |
+| Memory, skills and connectors | Browser sign-ins. Copied sign-ins can sign each other out |
+
+A dot's own identity and sign-in token, remote access, phone notifications, ChatGPT sign-in and the
+key service's audit and spending records are never copied. Claude Code's sign-in lives in your own
+`~/.claude`, so every dot shares it. Keys go from one key service straight to the other, which
+first checks that it is talking to localDot's own key service; neither the app nor the command
+sees them. If your keys use a passphrase, you choose one for the new dot as it is added.
+
+The new dot starts right away with the next free set of ports: the second dot answers at
+`http://127.0.0.1:5750`, the third at 6750. Its data folder sits beside the first one's
+(`~/.localdot-work`); `--home` chooses another. It starts at login when the first dot does.
+
+- **Switching:** the localDot menu at the top left lists every dot on this computer under **On this
+  computer**. Choosing one signs you in there, starting it first if it is stopped; there is no link
+  to paste. From Terminal: `localdot open --dot work`.
+- **Your phone:** when Tailscale serves the dot it copies from, a new dot is served at its own
+  port, such as `https://your-mac.your-tailnet.ts.net:5750`. Remote access through localdot.dev
+  stays off for a new dot until you turn it on in its Settings.
+- **Computers:** every dot's computer can run at the same time. Each may use up to 4 GB, so before
+  another one starts, localDot checks Docker's memory and says when to raise it (Docker Desktop →
+  Settings → Resources); **Start anyway** starts it regardless. If Docker later stops a computer
+  for memory, its message says the same. Stopping a dot also stops its computers.
+- **Updates:** every dot runs the same installation, so an update installs for all of them and
+  restarts them together. Settings waits while a dot is working and says which one.
+- **Removing:** Settings → Your computer → **Remove this dot**, or `localdot dots remove work`,
+  stops the dot and removes its services, saved keys, computers and Tailscale address. Its data
+  folder stays unless you tick **Also delete its data** (`--delete-data`). The first dot stays;
+  `localdot uninstall` removes every dot's services and keeps every dot's data.
+
+`~/.config/localdot/dots.json` lists the dots; each data folder's `instance.json` holds that dot's
+name, ports and key service name. A data folder without one is the first dot, as every installation
+from before several dots is. On Windows, every dot runs in the same Ubuntu, which the one localDot
+task keeps running.
+
 ## Upgrade, change settings, uninstall
 
 - `localdot update` gets the latest version of your package channel (or your branch for a source
@@ -310,8 +370,13 @@ Packaged publication/signing/installed acceptance gates remain in [release packa
 | `localdot up` | Start localDot and print a sign-in link |
 | `localdot down` | Stop localDot services and its computers; keep installed apps, sign-ins and files |
 | `localdot start-at-login on` / `off` | Choose whether localDot starts when you sign in; does not interrupt current work |
-| `localdot restart` | Restart localDot |
+| `localdot restart` | Restart localDot from any state (stopped, crashed, not answering, a stale lock) and print a sign-in link. Its key service restarts only when it isn't answering. Refuses during an update and names a program holding the port. A running task stops; computers keep running, and data and task history are kept |
+| `localdot status [--json]` | Show the app, its services, key service, Docker, computers and their tasks, remote access, Tailscale and updates; exits 1 when localDot isn't answering |
 | `localdot open [--qr]` | Print a fresh, single-use sign-in link; `--qr` also draws it for your phone |
+| `localdot link [local\|network\|remote] [--qr \| --json]` | Print one-use sign-in links for this computer, your network (Tailscale and other HTTPS addresses) and remote access, each with its own code that expires within a minute; says how to set up any that are missing |
+| `localdot remote on` / `off` / `status` | Turn remote access through the localDot relay on or off, or show it |
+| `localdot tailscale on` / `status` | Share localDot with your devices on Tailscale (prints the page that allows HTTPS when Tailscale asks), or show its state |
+| `localdot computer list` / `start` / `stop` / `restart` / `resume [--cell ID]` | List computers and their tasks, start, stop or restart one (refused while a task runs on it), or resume one that `localdot stop` froze |
 | `localdot doctor` | Check Docker, computer container states, task recovery, and the app |
 | `localdot recover --cell ID` | Show the confirmation command for an older interrupted native task |
 | `localdot doctor --fix` | Stop localDot services and containers, preserve their data, restart the app, and check again. Interrupts running tasks; does not restart Docker. |
@@ -320,6 +385,10 @@ Packaged publication/signing/installed acceptance gates remain in [release packa
 | `localdot stop [--all]` | Stop dot's actions (`--all`: every task and computer) |
 | `localdot update` | Upgrade and keep your data |
 | `localdot uninstall` | Remove localDot and keep your data |
+| `localdot dots list` | List the dots on this computer, with their addresses and folders |
+| `localdot dots add <name> [--from <dot>] [--copy …]` | Add a dot; see [Several dots on one computer](#several-dots-on-one-computer) |
+| `localdot dots remove <dot> [--delete-data]` | Remove a dot; its data stays unless `--delete-data` |
+| `localdot up`, `down`, `restart`, `status`, `doctor`, `open`, `link`, `remote`, `tailscale`, `computer`, `unlock` or `logs` with `--dot <dot>` | Run the command for that dot |
 
 The command lives in `~/.local/bin`. If your shell doesn't find it, open a new terminal or add
 that folder to your `PATH`.

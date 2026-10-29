@@ -142,14 +142,15 @@ export function vaultCheck(vault: KeydVault): DoctorCheck {
       ok: false,
       pendingAction: "unlock-vault",
       detail:
-        "No keyring here, so saved keys go in an encrypted file. Choose its passphrase: localdot unlock",
+        "No keyring here, so saved keys go in an encrypted file. Choose its passphrase in the app's Keys, or run: localdot unlock",
     };
   if (vault.state === "locked")
     return {
       name,
       ok: false,
       pendingAction: "unlock-vault",
-      detail: "Saved keys are locked since this machine restarted. Unlock them: localdot unlock",
+      detail:
+        "Saved keys are locked since this machine restarted. Unlock them in the app's Keys, or run: localdot unlock",
     };
   if (vault.backend === "memory")
     return { name, ok: true, detail: "Saved keys are kept in memory only, until keyd stops." };

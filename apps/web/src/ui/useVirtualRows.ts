@@ -65,9 +65,10 @@ export function useVirtualRows(
   virtual.shouldAdjustScrollPositionOnItemSizeChange = anchored ? () => false : undefined;
   const items = virtual.getVirtualItems();
   const active = enabled && !!scroll;
+  // "auto" scrolls only as far as brings the row into view; "start" puts it at the top.
   const scrollTo = useCallback(
-    (index: number) => {
-      if (enabled) virtual.scrollToIndex(index, { align: "auto" });
+    (index: number, align: "auto" | "start" = "auto") => {
+      if (enabled) virtual.scrollToIndex(index, { align });
     },
     [enabled, virtual],
   );

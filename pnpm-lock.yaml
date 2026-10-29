@@ -124,6 +124,15 @@ importers:
         specifier: 8.22.0
         version: 8.22.0
 
+  apps/reports:
+    devDependencies:
+      miniflare:
+        specifier: 5.20261006.1-alpha
+        version: 5.20261006.1-alpha(@types/node@24.19.0)
+      wrangler:
+        specifier: 4.149.0
+        version: 4.149.0(@types/node@24.19.0)
+
   apps/web:
     dependencies:
       '@base-ui/react':

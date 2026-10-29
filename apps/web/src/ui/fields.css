@@ -710,8 +710,11 @@
     opacity: 0;
   }
 
+  /* Line tabs are each as wide as their name and share what is left, so a short name gives room to
+     a long one; the underline is placed from the chosen tab as laid out. */
   .ui-segmented[data-variant="line"] {
     display: grid;
+    grid-auto-columns: auto;
     width: 100%;
     border-radius: 0;
     background-color: transparent;
@@ -722,12 +725,17 @@
     top: auto;
     bottom: 0;
     left: 0;
-    width: calc(100% / var(--_count));
+    width: var(--_thumb-w, calc(100% / var(--_count)));
     height: 2px;
     border-radius: var(--radius-full);
     background-color: var(--color-fg-1);
     box-shadow: none;
-    translate: calc(var(--_index) * 100%) 0;
+    translate: var(--_thumb-x, calc(var(--_index) * 100%)) 0;
+    transition:
+      translate var(--dur-snappy) var(--ease-spring),
+      scale var(--dur-snappy) var(--ease-spring),
+      opacity var(--dur-fade) var(--ease-standard),
+      width var(--dur-snappy) var(--ease-spring);
   }
 
   .ui-segmented[data-variant="quiet"] {
@@ -799,6 +807,7 @@
 
   .ui-segmented[data-variant="line"] > .ui-segment {
     min-width: 0;
+    padding-inline: calc(var(--spacing) * 2);
   }
 
   /* The chosen label brightens as the thumb arrives under it, not before. */
@@ -858,6 +867,25 @@
     height: 6px;
     border-radius: var(--radius-full);
     background-color: var(--color-attention);
+  }
+
+  /* A line tab shows its name; its icon stands in only while the names don't fit. */
+  .ui-segmented[data-variant="line"]:is(:not([data-iconic]), [data-measuring])
+    > .ui-segment
+    > .ui-icon {
+    display: none;
+  }
+
+  .ui-segmented[data-iconic]:not([data-measuring]) > .ui-segment {
+    padding-inline: calc(var(--spacing) * 1.5);
+  }
+
+  .ui-segmented[data-iconic]:not([data-measuring]) > .ui-segment > .ui-segment-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
 
   @media (--coarse) {
@@ -957,6 +985,10 @@
     .ui-checkbox > :checked:not([data-indeterminate]) ~ .ui-checkbox-mark .ui-checkbox-check,
     .ui-checkbox > [data-indeterminate] ~ .ui-checkbox-mark .ui-checkbox-dash {
       transition: none;
+    }
+
+    .ui-segmented[data-variant="line"] > .ui-segmented-thumb {
+      transition-property: background-color, opacity;
     }
   }
 

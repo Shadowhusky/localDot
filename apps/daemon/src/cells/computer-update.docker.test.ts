@@ -36,16 +36,28 @@ const tag = (role: (typeof ROLES)[number], build: string) => `localdot/${role}:l
 const images = { desktop: tag("desktop", "cur"), gate: tag("gate", "cur") };
 const PROOF = "/config/l9-update-proof.txt";
 
-// The new desktop and the user independently install the same package; the user
-// also installs another app. The shared package database must retain both records.
+const STATUS = "/var/lib/dpkg/status";
+const MARKS = "/var/lib/apt/extended_states";
+const LIBRARY_IDS = "/var/cache/ldconfig/aux-cache";
+const markAuto = (name: string) =>
+  `printf 'Package: ${name}\\nArchitecture: arm64\\nAuto-Installed: 1\\n\\n' >> ${MARKS}`;
+// A library in a folder of its own, listed for the loader the way a package's would be.
+const addLibrary = (name: string) =>
+  `mkdir /usr/local/lib/${name} && cp -L /lib/*-linux-gnu/libz.so.1 /usr/local/lib/${name}/ && echo /usr/local/lib/${name} > /etc/ld.so.conf.d/${name}.conf && ldconfig`;
+
+// Each new desktop installs packages and libraries the way apt would, rewriting the package
+// databases and ldconfig's caches; so does the user, independently, in between. The user and
+// the first new desktop also install the same package.
 function buildImages(): void {
-  for (const role of ROLES)
-    for (const build of ["a", "b"]) {
-      const packageChange =
-        role === "desktop" && build === "b"
-          ? "RUN printf '\\nPackage: localdot-test-shared\\nStatus: install ok installed\\nArchitecture: all\\nVersion: 1\\n\\n' >> /var/lib/dpkg/status\n"
-          : "";
-      const dockerfile = `FROM localdot/${role}:dev\n${packageChange}LABEL dev.localdot.test=l9 dev.localdot.l9.build=${build}\n`;
+  const desktop: Record<string, string> = {
+    a: "FROM localdot/desktop:dev\n",
+    b: `FROM localdot/desktop:dev\nRUN printf '\\nPackage: localdot-test-shared\\nStatus: install ok installed\\nArchitecture: all\\nVersion: 1\\n\\n' >> ${STATUS}\nRUN ${markAuto("localdot-test-image-dep")} && ${addLibrary("l9-image")}\n`,
+    c: `FROM ${tag("desktop", "b")}\nRUN ${markAuto("localdot-test-later-dep")} && ldconfig\n`,
+  };
+  for (const build of ["a", "b", "c"])
+    for (const role of ROLES) {
+      const from = role === "desktop" ? desktop[build] : "FROM localdot/gate:dev\n";
+      const dockerfile = `${from}LABEL dev.localdot.test=l9 dev.localdot.l9.build=${build}\n`;
       const made = spawnSync("docker", ["build", "-q", "-t", tag(role, build), "-"], {
         input: dockerfile,
         encoding: "utf8",
@@ -65,9 +77,16 @@ function removeLabelled(): void {
     spawnSync("docker", ["network", "rm", id], { stdio: "ignore" });
   for (const name of listed("volume", "ls", "-q"))
     spawnSync("docker", ["volume", "rm", "-f", name], { stdio: "ignore" });
+  // Updates also tag this suite's images as migration bases, backups and updated systems.
   for (const ref of listed("image", "ls", "--format", "{{.Repository}}:{{.Tag}}"))
-    if (/^localdot\/(desktop|gate):l9-[a-z]+$/.test(ref))
+    if (
+      /^localdot\/(desktop|gate):l9-[a-z]+$/.test(ref) ||
+      /^localdot\/(system-base|update-backup|updated-system):[a-z0-9-]+$/.test(ref)
+    )
       spawnSync("docker", ["rmi", ref], { stdio: "ignore" });
+  spawnSync("docker", ["image", "prune", "-f", "--filter", "label=dev.localdot.test=l9"], {
+    stdio: "ignore",
+  });
 }
 
 const imageId = (ref: string) => docker("image", "inspect", "-f", "{{.Id}}", ref);
@@ -202,7 +221,7 @@ describe.skipIf(!DOCKER_TESTS)("Update computer against Docker Desktop", () => {
         desktop,
         "sh",
         "-c",
-        "printf '\\nPackage: localdot-test-shared\\nStatus: install ok installed\\nArchitecture: all\\nVersion: 1\\n\\nPackage: localdot-test-user-app\\nStatus: install ok installed\\nArchitecture: all\\nVersion: 1\\n\\n' >> /var/lib/dpkg/status",
+        `printf '\\nPackage: localdot-test-shared\\nStatus: install ok installed\\nArchitecture: all\\nVersion: 1\\n\\nPackage: localdot-test-user-app\\nStatus: install ok installed\\nArchitecture: all\\nVersion: 1\\n\\n' >> ${STATUS} && ${markAuto("localdot-test-user-dep")} && ${addLibrary("l9-user")}`,
       ).status,
     ).toBe(0);
     expect(await updates.check(record)).toBe(false);
@@ -238,9 +257,56 @@ describe.skipIf(!DOCKER_TESTS)("Update computer against Docker Desktop", () => {
       record.docker.homeVolume,
     );
     expect(dockerExec(desktop, "cat", PROOF).out.trim()).toBe("kept");
-    const status = dockerExec(desktop, "cat", "/var/lib/dpkg/status").out;
+    const status = dockerExec(desktop, "cat", STATUS).out;
     expect(status.match(/Package: localdot-test-shared/g)).toHaveLength(1);
     expect(status).toContain("Package: localdot-test-user-app");
+    const marks = dockerExec(desktop, "cat", MARKS).out;
+    for (const name of ["localdot-test-image-dep", "localdot-test-user-dep"])
+      expect(marks.match(new RegExp(`Package: ${name}\\n`, "g"))).toHaveLength(1);
+    // The loader's index was rebuilt from both sides' libraries.
+    const loader = dockerExec(desktop, "/sbin/ldconfig", "-p").out;
+    for (const folder of ["l9-image", "l9-user"])
+      expect(loader).toContain(`/usr/local/lib/${folder}/libz.so.1`);
     expect(running.get(id)).not.toHaveProperty("updateAvailable");
+  });
+
+  // The update that failed on the user's Mac: the new desktop only installed packages, and so did
+  // the user, so both rewrote APT's marks and ldconfig's library identity cache.
+  it("updates again when both sides changed only package marks and library caches", async () => {
+    const id = record.id;
+    const running = orchestrator as CellOrchestrator;
+    const desktop = record.docker.desktop;
+    expect(
+      dockerExec(desktop, "sh", "-c", `${markAuto("localdot-test-user-later-dep")} && ldconfig`)
+        .status,
+    ).toBe(0);
+    const ids = dockerExec(desktop, "sha256sum", LIBRARY_IDS).out;
+    for (const role of ROLES) docker("tag", tag(role, "c"), tag(role, "cur"));
+    expect(await updates.check(store.get(id) as CellRecord)).toBe(true);
+    const updated = readyAgain(id);
+    await running.update(id);
+    await updated;
+
+    expect(
+      docker(
+        "image",
+        "inspect",
+        "-f",
+        '{{index .Config.Labels "localdot.system-base"}}',
+        docker("inspect", "-f", "{{.Image}}", desktop),
+      ),
+    ).toBe(imageId(tag("desktop", "c")));
+    expect(dockerExec(desktop, "sha256sum", LIBRARY_IDS).out).toBe(ids);
+    const marks = dockerExec(desktop, "cat", MARKS).out;
+    for (const name of [
+      "localdot-test-image-dep",
+      "localdot-test-user-dep",
+      "localdot-test-later-dep",
+      "localdot-test-user-later-dep",
+    ])
+      expect(marks.match(new RegExp(`Package: ${name}\\n`, "g"))).toHaveLength(1);
+    expect(dockerExec(desktop, "cat", PROOF).out.trim()).toBe("kept");
+    expect(running.get(id)).not.toHaveProperty("updateAvailable");
+    expect(running.get(id)).not.toHaveProperty("updateBlocked");
   });
 });

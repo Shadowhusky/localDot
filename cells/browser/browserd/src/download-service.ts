@@ -29,6 +29,11 @@ export class BrowserDownloadService {
 
   constructor(private readonly deps: BrowserDownloadServiceDeps) {}
 
+  // The grant downloads are armed for, which a browser restarted in place arms again.
+  get binding(): BrowserDownloadBinding | undefined {
+    return this.#binding;
+  }
+
   owns(guid: string): boolean {
     return this.#owner?.owns(guid) ?? false;
   }

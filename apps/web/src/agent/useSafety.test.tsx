@@ -13,7 +13,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { ApprovalDecision } from "../shell/DecisionIsland.tsx";
-import { taskStalled } from "./heartbeat.ts";
+import { taskStalled, useTaskStalled } from "./heartbeat.ts";
 import { type AgentFeed, type AgentFeedState, emptyAgentModel } from "./model.ts";
 import { projectAgentEvent } from "./reducer.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
@@ -536,6 +536,42 @@ it("heartbeat uses local monotonic receipt time, with exact threshold and held-s
     { ...agent.model, lastHeartbeat: { ...agent.model.lastHeartbeat, ongoing: false } },
   ])
     expect(taskStalled({ ...agent, model }, 10000)).toBe(false);
+});
+it("draws the stall when its moment comes, without looking on a timer, and only while watched", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "performance"] });
+  const f = fixture(vi.fn<typeof fetch>(), null);
+  const at = performance.now();
+  const agent = {
+    ...f.props.agent,
+    model: {
+      ...f.props.agent.model,
+      state: { state: "acting" as const },
+      lastHeartbeat: { t: 999999999, everyMs: 500, ongoing: true, receivedAt: at },
+    },
+  };
+  let draws = 0;
+  const { result, rerender } = renderHook(
+    ({ watching }) => {
+      draws++;
+      return useTaskStalled(agent, watching);
+    },
+    { initialProps: { watching: true } },
+  );
+  expect(result.current).toBe(false);
+  expect(vi.getTimerCount()).toBe(1);
+  act(() => {
+    vi.advanceTimersByTime(1_400);
+  });
+  expect(draws).toBe(1);
+  act(() => {
+    vi.advanceTimersByTime(200);
+  });
+  expect(result.current).toBe(true);
+  expect(draws).toBe(2);
+  expect(vi.getTimerCount()).toBe(0);
+  rerender({ watching: false });
+  expect(result.current).toBe(false);
+  vi.useRealTimers();
 });
 it("heartbeat warns during the work that follows a settled wait, but not during a recovery pause", () => {
   const f = fixture(vi.fn<typeof fetch>(), null);

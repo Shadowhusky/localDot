@@ -15,6 +15,7 @@ import { EventLog } from "../event-log.ts";
 import { Conversations } from "./conversation.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./routes.ts";
 import { AgentError } from "./runner.ts";
+import { AgentSession } from "./session.ts";
 
 const owned: { home: string; log: EventLog }[] = [];
 afterEach(() => {
@@ -307,14 +308,93 @@ describe("what was said earlier", () => {
   });
 });
 
+describe("a message Stop left unsent", () => {
+  // A task stopped while the user's messages waited for it: the first was left unsent, the user
+  // cancelled the second, and the third reached dot.
+  async function stopped() {
+    const f = setup();
+    const id = await f.task("Draw a dog");
+    const queue = (text: string, state: "cancelled" | "sent", reason?: "stopped") => {
+      const messageId = ulid();
+      f.log.append(id, {
+        type: "message.user",
+        agent: "main",
+        data: { messageId, text, kind: "followup", queued: true, sessionId: id },
+      });
+      f.log.append(id, {
+        type: "message.delivery",
+        agent: "main",
+        data: { messageId, state, ...(reason ? { reason } : {}) },
+      });
+      return messageId;
+    };
+    const unsent = queue("Then add a hat", "cancelled", "stopped");
+    const cancelled = queue("Paint it red", "cancelled");
+    const sent = queue("Make it brown", "sent");
+    f.end(id, "stopped");
+    return { ...f, id, unsent, cancelled, sent };
+  }
+
+  it("gives back its words and keeps that it was taken back beside the task's log, not in it", async () => {
+    const f = await stopped();
+    const conversations = f.open();
+    conversations.adopt(f.id);
+    const recorded = f.log.read(f.id);
+    expect(conversations.withdrawStopped(f.id, f.unsent)).toBe("Then add a hat");
+    // Replay reads the log: it neither grows nor moves its end.
+    expect(f.log.read(f.id)).toEqual(recorded);
+    expect(conversations.snapshot()).toEqual({
+      sessions: [f.id],
+      more: false,
+      withdrawn: [f.unsent],
+    });
+    // A lost reply is asked for again; a restart, or another device, reads the same.
+    expect(conversations.withdrawStopped(f.id, f.unsent)).toBe("Then add a hat");
+    expect(f.open().snapshot().withdrawn).toEqual([f.unsent]);
+  });
+
+  it("gives back nothing that Stop did not leave unsent", async () => {
+    const f = await stopped();
+    const conversations = f.open();
+    for (const messageId of [f.cancelled, f.sent, ulid(), "nope"])
+      expect(conversations.withdrawStopped(f.id, messageId)).toBeUndefined();
+    expect(conversations.withdrawStopped(ulid(), f.unsent)).toBeUndefined();
+    expect(conversations.withdrawStopped("../escape", f.unsent)).toBeUndefined();
+    conversations.adopt(f.id);
+    expect(conversations.snapshot()).toEqual({ sessions: [f.id], more: false });
+  });
+
+  it("names those of every task the thread shows, and none once a task is deleted", async () => {
+    const f = await stopped();
+    const later = await f.task("Make it bigger", f.id);
+    const conversations = f.open();
+    conversations.adopt(later);
+    conversations.withdrawStopped(f.id, f.unsent);
+    expect(conversations.snapshot()).toEqual({
+      sessions: [f.id, later],
+      more: false,
+      withdrawn: [f.unsent],
+    });
+    f.log.forget(f.id);
+    expect(conversations.snapshot()).toEqual({ sessions: [later], more: false });
+  });
+});
+
 describe("conversation routes", () => {
   function routes(release: () => Promise<void> = async () => {}) {
     const f = setup();
     const conversations = f.open();
     const app = new Hono();
     const releases = vi.fn(release);
+    // The tasks the runner still holds.
+    const live = new Map<string, AgentSession>();
     agentRoutes(app, {
-      runner: { start: vi.fn(), get: () => undefined, raiseBudget: vi.fn(), release: releases },
+      runner: {
+        start: vi.fn(),
+        get: (id: string) => live.get(id),
+        raiseBudget: vi.fn(),
+        release: releases,
+      },
       conversations,
     } as unknown as AgentRoutesDeps);
     const send = (method: string, path: string, body?: unknown) =>
@@ -323,7 +403,7 @@ describe("conversation routes", () => {
         headers: { "content-type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-    return { ...f, conversations, releases, send };
+    return { ...f, conversations, releases, live, send };
   }
 
   it("shows the current conversation, starts a new one and continues an older one", async () => {
@@ -383,6 +463,38 @@ describe("conversation routes", () => {
     const invalid = await f.send("POST", "/api/conversation/continue", { sessionId: "nope" });
     expect(invalid.status).toBe(400);
     expect(f.releases).not.toHaveBeenCalled();
+  });
+
+  it("takes back a message Stop left unsent, while its task is held and after, and says so on every read", async () => {
+    const f = routes();
+    const id = await f.task("Draw a dog");
+    const session = new AgentSession(id, ulid(), "Draw a dog", f.log);
+    f.live.set(id, session);
+    session.setStatus("running");
+    session.enqueue("Then add a hat");
+    session.enqueue("And a scarf");
+    const [hat, scarf] = f.log
+      .read(id)
+      .flatMap((event) => (event.type === "message.user" && event.data.queued ? [event] : []));
+    const edit = (messageId: string, sessionId = id) =>
+      f.send("POST", `/api/agent/sessions/${sessionId}/messages/${messageId}/edit`);
+    session.stop();
+    const recorded = f.log.read(id).length;
+    const held = await edit(String(hat?.data.messageId));
+    expect(held.status).toBe(200);
+    expect(await held.json()).toEqual({ text: "Then add a hat" });
+    // A restart: the runner holds the task no more.
+    f.live.clear();
+    const after = await edit(String(scarf?.data.messageId));
+    expect(await after.json()).toEqual({ text: "And a scarf" });
+    expect(f.log.read(id)).toHaveLength(recorded);
+    const shown = ConversationSnapshot.parse(
+      await (await f.send("GET", "/api/conversation")).json(),
+    );
+    expect(shown.withdrawn).toEqual([hat?.data.messageId, scarf?.data.messageId]);
+    expect((await edit(ulid())).status).toBe(409);
+    expect((await edit(String(hat?.data.messageId), ulid())).status).toBe(404);
+    expect((await edit("nope")).status).toBe(400);
   });
 });
 

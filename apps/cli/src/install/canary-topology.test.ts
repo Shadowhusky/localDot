@@ -177,10 +177,13 @@ function fixture() {
       raw.State = { Running: true, Paused: false, Restarting: false, Dead: false };
       if (role === "gate") {
         attach("gate", "egress", captured.docker.gateEgressIp);
-        (raw.NetworkSettings as Record<string, unknown>).Ports = {
-          "8081/tcp": [{ HostIp: "127.0.0.1", HostPort: "51001" }],
-          "8082/tcp": [{ HostIp: "127.0.0.1", HostPort: "51002" }],
-        };
+        // As Docker does: each binding the gate was made with, on its own host port.
+        const bindings = (raw.HostConfig as { PortBindings: Record<string, unknown> }).PortBindings;
+        (raw.NetworkSettings as Record<string, unknown>).Ports = Object.fromEntries(
+          Object.keys(bindings)
+            .sort()
+            .map((key, i) => [key, [{ HostIp: "127.0.0.1", HostPort: String(51001 + i) }]]),
+        );
       } else attach("desktop", "internal", captured.docker.desktopIp);
     },
     connect: async (net, gate, address) => {
@@ -222,6 +225,26 @@ it("provisions the normal hardened topology with durable IDs before every depend
   });
   expect(JSON.stringify([...f.resources.values()])).not.toContain(f.ready.syntheticSecret);
   expect(result.record.keydPort).toBe(49123);
+});
+
+it("carries the preview relay like every installed desktop computer", async () => {
+  const f = fixture(),
+    result = await createCanaryTopology(f.journal, f.ready, f.client, signal());
+  const gate = f.resources.get("gate") as {
+    Config: { Env: string[] };
+    HostConfig: { PortBindings: Record<string, unknown> };
+    NetworkSettings: { Ports: Record<string, unknown> };
+  };
+  expect(gate.Config.Env).toContain("LD_PREVIEWS=1");
+  expect(Object.keys(gate.HostConfig.PortBindings).sort()).toEqual([
+    "8081/tcp",
+    "8082/tcp",
+    "8083/tcp",
+  ]);
+  expect(gate.NetworkSettings.Ports["8083/tcp"]).toEqual([
+    { HostIp: "127.0.0.1", HostPort: "51003" },
+  ]);
+  expect(result.ports).toEqual({ desktopd: 51001, stream: 51002 });
 });
 
 it("streams the diagnostic desktop in 4:2:0 like every installed computer", async () => {
@@ -300,6 +323,8 @@ it.each([
   "gate-mount",
   "restart",
   "public-bind",
+  "no-preview-relay",
+  "public-preview-bind",
 ])("refuses %s container before starting", async (fault) => {
   const f = fixture(),
     original = f.client.createContainer;
@@ -324,6 +349,13 @@ it.each([
     if (fault === "restart") host.RestartPolicy = { Name: "always" };
     if (fault === "public-bind")
       host.PortBindings = { "8081/tcp": [{ HostIp: "0.0.0.0", HostPort: "" }] };
+    const bindings = host.PortBindings as Record<string, unknown>;
+    if (args[0] === "gate" && fault === "no-preview-relay") {
+      delete bindings["8083/tcp"];
+      config.Env = (config.Env as string[]).filter((e) => e !== "LD_PREVIEWS=1");
+    }
+    if (args[0] === "gate" && fault === "public-preview-bind")
+      bindings["8083/tcp"] = [{ HostIp: "0.0.0.0", HostPort: "" }];
     return result;
   };
   await expect(createCanaryTopology(f.journal, f.ready, f.client, signal())).rejects.toThrow();
@@ -335,6 +367,9 @@ it.each([
   "network-id",
   "address",
   "public-port",
+  "public-preview-port",
+  "missing-preview-port",
+  "shared-port",
   "extra-port",
   "endpoint",
   "image-change",
@@ -362,6 +397,11 @@ it.each([
     }
     if (fault === "public-port")
       settings.Ports["8081/tcp"] = [{ HostIp: "0.0.0.0", HostPort: "51001" }];
+    if (fault === "public-preview-port")
+      settings.Ports["8083/tcp"] = [{ HostIp: "0.0.0.0", HostPort: "51003" }];
+    if (fault === "missing-preview-port") delete settings.Ports["8083/tcp"];
+    if (fault === "shared-port")
+      settings.Ports["8083/tcp"] = [{ HostIp: "127.0.0.1", HostPort: "51001" }];
     if (fault === "extra-port")
       settings.Ports["9999/tcp"] = [{ HostIp: "127.0.0.1", HostPort: "51003" }];
     if (fault === "endpoint") {

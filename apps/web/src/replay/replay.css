@@ -1,7 +1,7 @@
 /* Replay (design-v2 §11 H): the library of recordings in the stage's column with the chosen one in
    the rail, or a recording on the stage with its transport, dot's band and the steps in the rail.
-   Its parts take Watch's own places in the page grid, so nothing moves between the two. */
-@custom-media --wide (width >= 1880px);
+   Its parts take Watch's own places in the page grid, so nothing moves between the two: the rail
+   has the chat's column at every width, as the page keeps it while Replay shows. */
 @custom-media --tablet (700px <= width < 1100px);
 @custom-media --phone (width < 700px),
   (pointer: coarse) and (orientation: landscape) and (height < 500px);
@@ -15,16 +15,6 @@
   margin-block: var(--rail-inset);
 }
 
-@media (--wide) {
-  .replay > :is(.replay-library, .replay-main) {
-    grid-column: 1 / 3;
-  }
-
-  .replay-rail {
-    grid-area: 1 / 3 / 3 / 4;
-  }
-}
-
 @media (--tablet) {
   .replay-library {
     grid-row: 2 / 4;
@@ -36,7 +26,9 @@
   }
 }
 
-/* The library: a search, the filters and the count over one list of grid rows. */
+/* The library: a search and the filters, then what the library holds with Free up space and
+   Select (or, while selecting, what is picked and Delete), over one list of grid rows. Each line
+   keeps to one row: the search gives way first, then the count, which ends in an ellipsis. */
 .replay-library {
   grid-area: 2 / 1;
   display: flex;
@@ -55,13 +47,53 @@
 }
 
 .replay-library-head > .replay-search {
-  width: 320px;
+  flex: 0 1 320px;
+  min-width: 0;
+}
+
+.replay-library-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  height: 36px;
+  margin-top: var(--spacing);
 }
 
 .replay-library-total {
-  margin-left: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
   color: var(--color-fg-3);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replay-library-bar[data-picking] > .replay-library-total {
+  color: var(--color-fg-2);
+}
+
+.replay-library-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--spacing);
+}
+
+.replay-pick-all {
+  flex: none;
+}
+
+/* A Free up space choice, with what it would delete and free under it. */
+.replay-cleanup {
+  display: grid;
+}
+
+.replay-cleanup-amount {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
 }
 
 /* The scrollbar takes the column's margin, so the rows reach the same edge as the count above. */
@@ -165,6 +197,34 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* While selecting, a tick on the picture says whether the row is picked; a running task sits out. */
+.replay-task-check {
+  position: absolute;
+  top: calc(var(--spacing) * 1.5);
+  left: calc(var(--spacing) * 1.5);
+  display: grid;
+  place-items: center;
+  width: var(--size-checkbox);
+  height: var(--size-checkbox);
+  border-radius: var(--radius-xs);
+  background-color: var(--color-glass-solid);
+  box-shadow: inset 0 0 0 var(--stroke-ring) var(--color-fg-2);
+  color: transparent;
+  transition:
+    background-color var(--dur-hover) var(--ease-standard),
+    color var(--dur-hover) var(--ease-standard);
+}
+
+.replay-task-check[data-checked] {
+  background-color: var(--color-fg-1);
+  box-shadow: 0 0 0 var(--stroke-ring) var(--color-glass-solid);
+  color: var(--color-void);
+}
+
+.replay-task[data-locked] .ui-list-row {
+  opacity: var(--opacity-disabled);
 }
 
 .replay-skeleton-row {
@@ -917,7 +977,7 @@
   content: "· ";
 }
 
-@media (width < 1100px) {
+@container (width < 640px) {
   .bar .title-note {
     display: none;
   }
@@ -1003,7 +1063,11 @@
 
   .replay-library-head > .replay-search {
     flex: 1;
-    width: auto;
+  }
+
+  .replay-library-bar {
+    margin-top: 0;
+    padding: 0 calc(var(--spacing) * 2);
   }
 
   .replay-library-scroll {

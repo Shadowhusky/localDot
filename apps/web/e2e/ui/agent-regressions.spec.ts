@@ -2,6 +2,8 @@ import { expect, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w14", "w39");
 
+// At 320 px the bar can't hold five 44 px targets, so Attach sits beside the field instead, level
+// with its last line.
 test("phone composer icons share a center on the last line", async ({ page, ui }) => {
   test.skip(!isPhone(page), "Phone pill layout");
   await ui.open("running");
@@ -11,20 +13,33 @@ test("phone composer icons share a center on the last line", async ({ page, ui }
     for (const draft of ["", "Please check this", "First line\nSecond line\nThird line"]) {
       await form.getByRole("textbox", { name: "Message" }).fill(draft);
       await ui.settle();
-      const centers = await form.evaluate((element) => {
-        return [
-          ".composer-bar > .ui-icon-button:first-child > svg",
-          ".composer-permissions > svg",
-          ...(element.querySelector("textarea")?.value ? [] : [".voice-mic > button > svg"]),
-          ".composer-send > svg",
-        ].map((selector) => {
+      const { attach, bar, lastLine } = await form.evaluate((element) => {
+        const center = (selector: string) => {
           const icon = element.querySelector(selector);
           if (!icon) throw new Error(`Missing icon: ${selector}`);
           const box = icon.getBoundingClientRect();
           return box.top + box.height / 2;
-        });
+        };
+        const field = element.querySelector("textarea");
+        if (!field) throw new Error("Missing field");
+        const style = getComputedStyle(field);
+        return {
+          attach: center(".composer-bar > .ui-icon-button:first-child > svg"),
+          bar: [
+            ".composer-permissions > svg",
+            ...(field.value ? [] : [".voice-mic > button > svg"]),
+            ".composer-send > svg",
+          ].map(center),
+          lastLine:
+            field.getBoundingClientRect().bottom -
+            Number.parseFloat(style.borderBottomWidth) -
+            Number.parseFloat(style.paddingBottom) -
+            Number.parseFloat(style.lineHeight) / 2,
+        };
       });
-      expect(Math.max(...centers) - Math.min(...centers), `${width}px, ${draft}`).toBeLessThan(1);
+      const where = `${width}px, ${draft}`;
+      expect(Math.max(...bar) - Math.min(...bar), where).toBeLessThan(1);
+      expect(Math.abs(attach - (width === 320 ? lastLine : (bar[0] ?? 0))), where).toBeLessThan(1);
     }
     await page.screenshot({ path: test.info().outputPath(`phone-composer-${width}.png`) });
   }
@@ -131,14 +146,21 @@ for (const state of ["running", "done"] as const) {
           const buttons = [...element.querySelectorAll<HTMLButtonElement>(".composer-bar button")]
             .map((button) => ({ button, box: button.getBoundingClientRect() }))
             .filter(({ button, box }) => box.width && box.height && !button.closest("[inert]"));
+          // A phone composer this narrow keeps Attach beside the field, level with its last line.
+          const beside =
+            !!element.querySelector('[data-layout="pill"]') &&
+            element.getBoundingClientRect().width <= 260;
           const problems: string[] = [];
           for (const { button, box } of buttons) {
             const name = button.getAttribute("aria-label") || button.textContent;
             if (box.left < form.left - 1 || box.right > form.right + 1)
               problems.push(`outside: ${name}`);
-            const primary = element.querySelector(".composer-send")?.getBoundingClientRect();
-            if (primary && Math.abs(box.bottom - primary.bottom) > 12)
-              problems.push(`wrapped: ${name}`);
+            const row = element
+              .querySelector(
+                beside && name === "Attach files" ? ".composer-field" : ".composer-send",
+              )
+              ?.getBoundingClientRect();
+            if (row && Math.abs(box.bottom - row.bottom) > 12) problems.push(`wrapped: ${name}`);
             const center = document.elementFromPoint(
               box.left + box.width / 2,
               box.top + box.height / 2,

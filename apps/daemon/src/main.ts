@@ -3,7 +3,7 @@ import { constants, userInfo } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
-import { DEFAULT_AUTONOMY } from "@localdot/protocol";
+import { DEFAULT_AUTONOMY, TOOL_API_PORT } from "@localdot/protocol";
 import { AccessLinks } from "./access-links.ts";
 import { manualStreamRoute } from "./agent/manual-stream.ts";
 import { MemoryStore } from "./agent/memory.ts";
@@ -14,13 +14,14 @@ import { Transfers } from "./agent/transfers.ts";
 import { createAgent } from "./agent/wiring.ts";
 import { createApp } from "./app.ts";
 import { AppEvents, appEventsRoute } from "./app-events.ts";
+import { browserBlock } from "./browser/availability.ts";
 import { BrowserDownloadCollector } from "./browser/download-collector.ts";
 import { QuarantineStore } from "./browser/quarantine.ts";
 import { SessionScreens } from "./browser/session-screens.ts";
 import { BrowserStreams } from "./browser/streams.ts";
 import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
-import { BrowserRecovery } from "./cells/browser-recovery.ts";
+import { BrowserRecovery, credentialsChanged } from "./cells/browser-recovery.ts";
 import { ComputerUpdates, updateComputer } from "./cells/computer-update.ts";
 import { DockerClient } from "./cells/docker.ts";
 import { browserImagesFromEnv, imagesFromEnv } from "./cells/images.ts";
@@ -34,6 +35,7 @@ import { verifyDesktopRuntimeImages } from "./cells/runtime-image-check.ts";
 import { RuntimeUpdateAdmission } from "./cells/runtime-update-admission.ts";
 import { RuntimeImages } from "./cells/runtime-update-store.ts";
 import { TicketRegistry } from "./cells/secrets.ts";
+import { ShutdownFreezes } from "./cells/shutdown-freezes.ts";
 import { streamOptions } from "./cells/spec.ts";
 import { cellStatusRoute } from "./cells/status-stream.ts";
 import { CellStore } from "./cells/store.ts";
@@ -44,7 +46,14 @@ import { monotonicClock } from "./clock.ts";
 import { timestampLogs } from "./daemon-log.ts";
 import { deliverablesFor } from "./deliverables/wiring.ts";
 import { DesktopdRegistry } from "./desktopd/registry.ts";
+import { runDoctor } from "./doctor.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
+import { computerCapacity } from "./dots/capacity.ts";
+import { computerImport } from "./dots/computer-import.ts";
+import { applyInstanceEnvironment, instanceOf } from "./dots/instance.ts";
+import { DotsRegistry, registryPath } from "./dots/registry.ts";
+import { DotsService, dotsCli } from "./dots/service.ts";
+import { launchdLabels } from "./dots/service-names.ts";
 import { EventLog } from "./event-log.ts";
 import { sessionStreamRoute } from "./event-stream.ts";
 import { ChromeRenderer } from "./exports/chrome.ts";
@@ -57,21 +66,28 @@ import { KillSwitch } from "./gateway/kill-switch.ts";
 import { LiveSessions } from "./gateway/live.ts";
 import { loadOnsetTable } from "./gateway/onset-table.ts";
 import { policyFromEnv } from "./gateway/ring-onset.ts";
-import { setPublicOrigin } from "./guard.ts";
+import { configuredAccessOrigins, setPublicOrigin } from "./guard.ts";
 import { InstallCodes } from "./install-codes.ts";
 import { CellKeydWiring, refreshRunningCells } from "./keyd/cell-wiring.ts";
 import { KeydClient, keydSocketPath } from "./keyd/client.ts";
 import { KeydEventRouter } from "./keyd/event-router.ts";
 import { cameUp, KeydMonitor } from "./keyd/monitor.ts";
+import { passphraseRecord } from "./keyd/passphrase-record.ts";
 import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
 import { describeStartupError, runDaemonStartup } from "./main-startup.ts";
 import { createNotify } from "./notify/wiring.ts";
 import { localdotHome, secureHome } from "./paths.ts";
 import { startDockerDesktop } from "./platform/docker-start.ts";
 import { parsePort } from "./port.ts";
+import { previewPortRange } from "./previews/config.ts";
+import { previewFronts } from "./previews/fronts.ts";
+import { Previews } from "./previews/previews.ts";
+import { PreviewServe } from "./previews/serve.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
 import { ScreenRecordings } from "./recorder/screen-recordings.ts";
 import { configuredRemoteDomain, RemoteAccess } from "./remote/manager.ts";
+import { type LiveSources, liveFacts } from "./reports/routes.ts";
+import { ReportStore } from "./reports/store.ts";
 import { AbsenceGuard } from "./routines/absence.ts";
 import { RoutineLauncher } from "./routines/launch.ts";
 import { ExpiredRuns, routinePolicy } from "./routines/policy.ts";
@@ -104,11 +120,15 @@ import { attachUpgradeRouter } from "./upgrade-router.ts";
 import { installedSpeech } from "./voice/speech.ts";
 
 timestampLogs();
-const port = portFromEnv();
-publicOriginFromEnv();
-const keydPorts = keydPortsFromEnv();
 const home = localdotHome();
 secureHomeOrFail(home);
+const instance = instanceOrFail(home);
+applyInstanceEnvironment(process.env, instance);
+const port = portFromEnv();
+const toolPort = toolPortFromEnv();
+publicOriginFromEnv();
+const keydPorts = keydPortsFromEnv();
+const previewPorts = previewPortsFromEnv();
 const serviceIdentity = managedServiceFromEnv(process.env);
 if (serviceIdentity) retainManagedDaemonLease(process.env, serviceIdentity);
 let serviceReadiness: ManagedServiceReadiness | undefined;
@@ -165,9 +185,17 @@ const loginPort = serviceIdentity
   ? startAtLoginPort({ home, identity: serviceIdentity, node: process.execPath, env: process.env })
   : process.env.LOCALDOT_INSTALL_PREFIX
     ? await shellStartAtLoginPort(home, process.env.LOCALDOT_INSTALL_PREFIX, process.env)
-    : await sourceStartAtLoginPort(home, process.env, process.execPath, process.cwd());
+    : await sourceStartAtLoginPort(
+        home,
+        process.env,
+        process.execPath,
+        process.cwd(),
+        undefined,
+        launchdLabels(instance.id),
+      );
 const relay = gateRelaySource(docker, home);
 const keyd = new KeydClient(keydSocketPath(home));
+const keydMonitor = new KeydMonitor(keyd);
 serviceReadiness = serviceIdentity
   ? new ManagedServiceReadiness(
       serviceIdentity,
@@ -202,6 +230,9 @@ const orchestrator = new CellOrchestrator({
     stop: (id) => browser?.stop(id) ?? Promise.resolve(),
     remove: (id, options) => browser?.remove(id, options) ?? Promise.resolve(),
     reservedKeydPorts: () => browser?.reservedKeydPorts() ?? [],
+  },
+  browsersUnconfirmed: () => {
+    void browserRecovery.recover().catch(() => {});
   },
   permanentFence: (id) =>
     fences.record(id) ? { revision: fences.record(id)?.revision ?? 1 } : fences.isFenced(id),
@@ -253,16 +284,51 @@ browser = new BrowserOrchestrator({
   relay,
   streamFullcolor: stream.fullcolor,
   parentAvailable: browserAvailable,
+  unavailable: (id) =>
+    browserBlock(
+      {
+        shuttingDown: () => shuttingDown,
+        keyd: () => keydMonitor.health,
+        recovery: browserRecovery,
+        cells: orchestrator,
+      },
+      id,
+    ),
+  keysLocked: () => keydMonitor.health.online && keydMonitor.health.vault?.state === "locked",
+  notify: (id, text) => browserNotice(id, text),
   retiredDesktopPortOwner: (id) => orchestrator.retiredPortOwner(id),
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],
 });
-const browserRecovery = new BrowserRecovery(browser);
+const owned = browser;
+// A browser recovery confirms every browser stopped, so it also lifts the computers' fences of
+// stops they could not confirm themselves.
+const browserRecovery = new BrowserRecovery(
+  {
+    reconcile: async () => {
+      const confirmed = orchestrator.confirmBrowsers();
+      await owned.reconcile();
+      confirmed();
+    },
+  },
+  {
+    recovered: () => browserWarmer.reset(),
+    report: (message) => console.error(message),
+  },
+);
 const browserWarmer = new BrowserWarmer({
   cells: orchestrator,
   browser,
   available: browserAvailable,
   report: (message) => console.error(message),
+  notify: (id, text) => browserNotice(id, text),
 });
+// Tells the task running on a computer about its web browser; a finished or idle one hears nothing.
+const browserNotice = (parentCellId: string, text: string) => {
+  const sessionId = live.get(parentCellId);
+  const session = sessionId ? agent?.runner.get(sessionId) : undefined;
+  if (session && !session.stopped && session.status !== "idle" && session.status !== "ended")
+    session.remind(text);
+};
 const browserTickets = new TicketRegistry();
 const browserStreams = new BrowserStreams({
   parents: orchestrator,
@@ -329,12 +395,23 @@ live.addHooks({
   beforeRun: (cell, session) => recorder.start(cell, session),
   afterRun: (_cell, session) => recorder.stop(session),
 });
-const killSwitch = new KillSwitch({ live, keyd: keydWiring, cells: orchestrator });
-const keydMonitor = new KeydMonitor(keyd);
+const shutdownFreezes = new ShutdownFreezes(home);
+shutdownFreezes.load();
+const killSwitch = new KillSwitch({
+  live,
+  keyd: keydWiring,
+  cells: orchestrator,
+  froze: (id) => shutdownFreezes.forget(id),
+});
 keydMonitor.subscribe((now, before) => {
-  void browserRecovery
-    .recover(now)
-    .catch(() => console.error("browser credential recovery could not complete"));
+  if (credentialsChanged(now, before)) {
+    console.error(
+      `the key service ${now.online ? (before.online ? "changed" : "is back") : "is offline"}; the web browser restarts with it`,
+    );
+    void browserRecovery
+      .recover(now)
+      .catch(() => console.error("browser credential recovery could not complete"));
+  }
   void agent?.runner.keydChanged(now, before).catch(() => console.error("agent recovery failed"));
   if (!cameUp(now, before)) return;
   for (const cell of orchestrator.list()) {
@@ -420,7 +497,9 @@ agent = createAgent({
   keyd,
   monitor: keydMonitor,
   killSwitch,
+  shutdownFreezes,
   keydPorts,
+  toolPort,
   relay,
   ...(process.platform === "linux"
     ? { toolSocket: join(relayDirs(home).toolDir, TOOL_SOCKET) }
@@ -526,6 +605,16 @@ void (serviceReadiness ? serviceReadiness.runStartup(readyStartup) : readyStartu
   // Routines start once computers are reconciled, even when an unrelated startup step failed.
   .finally(() => {
     if (shuttingDown) return;
+    // A restart froze these with their tasks; the tasks are gone, so the computers carry on.
+    for (const id of shutdownFreezes.take())
+      void killSwitch
+        .resume(id)
+        .then(() => console.error(`computer ${id} was frozen by the last restart; it runs again`))
+        .catch((error) =>
+          console.error(
+            `computer ${id} stays frozen after the restart (${describeStartupError(error)}); resume it`,
+          ),
+        );
     routineScheduler.start();
     const records = () => orchestrator.list().flatMap((cell) => orchestrator.record(cell.id) ?? []);
     shutdown.unshift({
@@ -539,6 +628,7 @@ const keydEvents = new KeydEventRouter({
   eventLog,
   ask: (cellId, held) => void agent.connections.ask(cellId, held),
   asksMissed: () => void agent.connections.sweep(),
+  parentOf: (cellId) => browser.parentOf(cellId),
 });
 // keyd holds a connection for two minutes; a missed event is picked up well within that.
 const sweepAsks = setInterval(() => void agent.connections.sweep(), 15_000);
@@ -577,13 +667,24 @@ const exportJobs = new ExportJobs({
 shutdown.push({ name: "video exports", stop: () => exportJobs.close() });
 const installCodes = new InstallCodes(token, port);
 const remoteAccess = new RemoteAccess(home, port, configuredRemoteDomain(home), installCodes);
-const installWait = () => {
-  if (
-    orchestrator
-      .list()
-      .some((cell) => live.get(cell.id) || live.idleOperationPending(cell.id) || cell.operation)
-  )
-    return "Finish or stop the task before updating localDot.";
+const working = () =>
+  orchestrator
+    .list()
+    .some((cell) => live.get(cell.id) || live.idleOperationPending(cell.id) || cell.operation);
+const dots = new DotsService({
+  self: instance.id,
+  registry: new DotsRegistry(registryPath(), home),
+  cli: serviceIdentity ? undefined : dotsCli(process.env, import.meta.url.endsWith(".ts")),
+  env: process.env,
+  busy: working,
+  origins: configuredAccessOrigins,
+});
+// One installation runs every dot on this computer, so an update restarts them all together.
+const installWait = async () => {
+  const busy = await dots.busyOthers();
+  if (busy.length)
+    return `Finish or stop the tasks on ${busy.join(" and ")} before updating localDot.`;
+  if (working()) return "Finish or stop the task before updating localDot.";
   appInstalling = true;
   return null;
 };
@@ -597,7 +698,41 @@ appUpdater.start();
 shutdown.unshift({ name: "app updater", stop: () => appUpdater.close() });
 const accessLinks = new AccessLinks(port, home);
 void accessLinks.read().catch(() => {});
-shutdown.push({ name: "access links", stop: () => accessLinks.close() });
+const previews = new Previews({
+  range: previewPorts,
+  cells: orchestrator,
+  // A task from before this daemon started is known only by its log; it ran on the one computer.
+  cellOf: (id) =>
+    live.cellOf(id) ??
+    running.runner.get(id)?.cellId ??
+    running.runner.terminalOf(id)?.cellId ??
+    (eventLog.hasSession(id) && orchestrator.list().length === 1
+      ? orchestrator.list()[0]?.id
+      : undefined),
+  fronts: async () =>
+    previewFronts(
+      configuredAccessOrigins(),
+      await accessLinks.read().then(
+        (status) => status.tailscale,
+        () => undefined,
+      ),
+    ),
+  serve: new PreviewServe((args) => accessLinks.runTailscale(args), previewPorts),
+});
+shutdown.push(
+  { name: "previews", stop: () => previews.close() },
+  { name: "access links", stop: () => accessLinks.close() },
+);
+const reportSources: LiveSources = {
+  install: serviceIdentity ? "managed" : "source",
+  updater: appUpdater,
+  keyd,
+  cells: orchestrator,
+  browser,
+  remote: () => remoteAccess.snapshot(),
+  doctor: (signal) =>
+    runDoctor({ docker, socket: findDockerSocket(), images, port, signal, keyd, home }),
+};
 const app = createApp({
   remoteAccess,
   appUpdater,
@@ -635,6 +770,8 @@ const app = createApp({
     tickets,
     replacement,
     reset,
+    capacity: (starting) => computerCapacity(docker, starting),
+    importComputer: computerImport(home, docker),
     checkRuntime: () => docker.checkReady(),
     runtimeStatus: () => runtimeStartup.snapshot(),
     update: (id, signal) =>
@@ -643,6 +780,7 @@ const app = createApp({
   desktop,
   browser: browserViewer,
   accounts: { cells: orchestrator, browser },
+  browserStatus: { cells: orchestrator, browser, report: (message) => console.error(message) },
   ui: { dir: webDir("dist") },
   gateway: {
     registry,
@@ -657,6 +795,7 @@ const app = createApp({
   keys: {
     keyd,
     monitor: keydMonitor,
+    passphrases: passphraseRecord(join(home, "passphrase-chosen")),
     afterChange: async (id) => {
       await agent.connectors.afterKeyChange(id);
       return refreshRunningCells(orchestrator, id);
@@ -665,6 +804,14 @@ const app = createApp({
   connectors: { hub: agent.connectors, keyd, signIn: agent.connectorSignIn },
   notify: notify.routes,
   voice: { speech: installedSpeech() },
+  previews,
+  dots,
+  reports: {
+    home,
+    store: new ReportStore(home),
+    env: process.env,
+    facts: (signal) => liveFacts(reportSources, signal),
+  },
   routines: {
     store: routineStore,
     scheduler: routineScheduler,
@@ -740,6 +887,24 @@ function portFromEnv(): number {
   }
 }
 
+function toolPortFromEnv(): number {
+  try {
+    const tool = parsePort(process.env.LOCALDOT_TOOL_PORT ?? String(TOOL_API_PORT));
+    if (tool === port) throw new RangeError("must differ from LOCALDOT_PORT");
+    return tool;
+  } catch (err) {
+    return fail(`LOCALDOT_TOOL_PORT: ${(err as Error).message}`);
+  }
+}
+
+function instanceOrFail(dir: string) {
+  try {
+    return instanceOf(dir);
+  } catch (err) {
+    return fail((err as Error).message);
+  }
+}
+
 function secureHomeOrFail(dir: string): void {
   try {
     if (secureHome(dir).tightened)
@@ -762,6 +927,14 @@ function keydPortsFromEnv() {
     return parsePortRange(process.env.LOCALDOT_KEYD_PORTS);
   } catch (err) {
     return fail(`LOCALDOT_KEYD_PORTS: ${(err as Error).message}`);
+  }
+}
+
+function previewPortsFromEnv() {
+  try {
+    return previewPortRange(process.env.LOCALDOT_PREVIEW_PORTS);
+  } catch (err) {
+    return fail(`LOCALDOT_PREVIEW_PORTS: ${(err as Error).message}`);
   }
 }
 

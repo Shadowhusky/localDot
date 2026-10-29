@@ -4,7 +4,7 @@ import { LINGER_MS } from "./render-gate.ts";
 import type { WorkerIn, WorkerOut } from "./worker-protocol.ts";
 
 // A still stage costs no rendering: the worker draws once, then only when a frame arrives.
-const state = vi.hoisted(() => ({ renders: 0, pending: false, fail: false }));
+const state = vi.hoisted(() => ({ renders: 0, pending: false, fail: false, fade: 0 }));
 vi.mock("./pixi-presenter.ts", () => ({
   PixiPresenter: {
     create: async () => ({
@@ -13,7 +13,7 @@ vi.mock("./pixi-presenter.ts", () => ({
       get hasFrame() {
         return state.pending;
       },
-      fades: () => [255, 0],
+      fades: () => [255, state.fade],
       present(frame: VideoFrame) {
         frame.close();
         state.pending = true;
@@ -34,6 +34,7 @@ beforeEach(() => {
   state.fail = false;
   state.renders = 0;
   state.pending = false;
+  state.fade = 0;
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -166,4 +167,26 @@ it("backs off repeated renderer failures and resumes when rendering works", asyn
   step(1000);
   expect(state.renders).toBe(5);
   expect(frames).toHaveLength(1);
+});
+
+it("draws a changing stage at most at the stream's frame rate, and never above 60 Hz", async () => {
+  const { send, step, timers } = await worker();
+  // A 120 Hz display, with something moving on every one of its frames.
+  const second = () => {
+    const before = state.renders;
+    for (let frame = 0; frame < 120; frame++) {
+      state.fade++;
+      for (const look of timers.splice(0)) look();
+      step(1000 / 120);
+    }
+    return state.renders - before;
+  };
+  expect(second()).toBeLessThanOrEqual(61);
+  expect(second()).toBeGreaterThan(50);
+  await send({ type: "view", view: { fps: 30 } });
+  expect(second()).toBeLessThanOrEqual(31);
+  await send({ type: "view", view: { hidden: true } });
+  expect(second()).toBe(0);
+  await send({ type: "view", view: { hidden: false } });
+  expect(second()).toBeGreaterThan(20);
 });

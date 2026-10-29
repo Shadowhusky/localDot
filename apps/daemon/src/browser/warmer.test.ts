@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { BrowserSupervisorState } from "../../../../packages/protocol/src/browser-control.ts";
+import { BrowserStartCancelled } from "../cells/browser-ledger.ts";
 import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import type { CellState, CellSummary } from "../cells/types.ts";
-import { BrowserWarmer, type BrowserWarmerDeps, SILENT_SWEEPS, WARM_SWEEP_MS } from "./warmer.ts";
+import {
+  BrowserWarmer,
+  type BrowserWarmerDeps,
+  RESTARTING_SWEEPS,
+  RETRY_MS,
+  SILENT_SWEEPS,
+  WARM_SWEEP_MS,
+} from "./warmer.ts";
 
 const A = "01JXYZ0000000000000000000A",
   B = "01JXYZ0000000000000000000B";
@@ -34,8 +43,16 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
     return { parentCellId: parent } as ReadyBrowser;
   });
   const health = vi.fn(
-    async (parent: string): Promise<"ready" | "unready" | "silent" | undefined> =>
+    async (parent: string): Promise<"ready" | "restarting" | "unready" | "silent" | undefined> =>
       running.has(parent) ? "ready" : undefined,
+  );
+  const failure = vi.fn(async (_parent: string): Promise<string | undefined> => undefined);
+  const noteProblem = vi.fn();
+  const noteRetry = vi.fn();
+  const noteOutage = vi.fn();
+  const notify = vi.fn();
+  const supervisor = vi.fn(
+    async (_parent: string): Promise<BrowserSupervisorState | undefined> => undefined,
   );
   const stop = vi.fn(async (parent: string) => {
     running.delete(parent);
@@ -56,6 +73,11 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
       start,
       stop,
       health,
+      failure,
+      noteProblem,
+      noteRetry,
+      noteOutage,
+      supervisor,
       endpoints: (parent) => {
         const instance = running.get(parent);
         return instance ? ({ parentCellId: parent, instance } as ReadyBrowser) : undefined;
@@ -72,12 +94,19 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
     },
     available: () => true,
     report,
+    notify,
   };
   return {
     deps,
     start,
     stop,
     health,
+    failure,
+    noteProblem,
+    noteRetry,
+    noteOutage,
+    notify,
+    supervisor,
     report,
     set(entry: CellSummary) {
       table.set(entry.id, entry);
@@ -238,6 +267,145 @@ describe("a running web browser that stops working starts again", () => {
       expect(f.report).toHaveBeenCalledWith(
         "the web browser couldn't start: Browser start failed during readiness",
       ),
+    );
+    expect(f.noteProblem).toHaveBeenCalledWith(
+      A,
+      "The web browser couldn't start: Browser start failed during readiness.",
+    );
+  });
+
+  it("says why it started a browser again", async () => {
+    const f = fixture();
+    warm(f.deps);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(1));
+    f.health.mockResolvedValueOnce("unready");
+    f.failure.mockResolvedValueOnce("The browser process ended (exited on SIGKILL, out of memory)");
+    await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2));
+    expect(f.report).toHaveBeenCalledWith(
+      "the web browser can no longer be controlled; starting it again: The browser process ended (exited on SIGKILL, out of memory)",
+    );
+    expect(f.noteProblem).toHaveBeenCalledWith(
+      A,
+      "The web browser can no longer be controlled (The browser process ended (exited on SIGKILL, out of memory)); localDot started it again.",
+    );
+  });
+
+  it("logs once what a browser recovered from by itself", async () => {
+    const f = fixture();
+    warm(f.deps);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(1));
+    f.supervisor.mockResolvedValue({
+      state: "running",
+      restarts: 1,
+      lastFailure: {
+        kind: "browser_exited",
+        detail: "exited on SIGKILL, out of memory",
+        recovered: true,
+        at: "2026-10-26T12:00:00.000Z",
+      },
+    });
+    await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS * 3);
+    expect(f.report.mock.calls).toEqual([
+      [
+        "the web browser recovered by itself: The browser process ended (exited on SIGKILL, out of memory) and was restarted",
+      ],
+    ]);
+    expect(f.noteProblem).toHaveBeenCalledOnce();
+    expect(f.stop).not.toHaveBeenCalled();
+  });
+
+  it("waits for a browser restarting its Chromium in place, within a bound", async () => {
+    const f = fixture();
+    warm(f.deps);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(1));
+    f.health.mockResolvedValue("restarting");
+    for (let sweep = 1; sweep < RESTARTING_SWEEPS; sweep++)
+      await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    expect(f.stop).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    await vi.waitFor(() => expect(f.stop).toHaveBeenCalledWith(A));
+    expect(f.report).toHaveBeenCalledWith(
+      "the web browser did not finish restarting; starting it again",
+    );
+  });
+});
+
+describe("a web browser that keeps failing to start", () => {
+  const attempts = RETRY_MS.length + 1;
+  const giveUp = async (f: ReturnType<typeof fixture>) => {
+    f.start.mockRejectedValue(new Error("Browser start failed during readiness"));
+    warm(f.deps);
+    for (const delay of RETRY_MS) await vi.advanceTimersByTimeAsync(delay);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(attempts));
+  };
+
+  it("is given up after a bounded number of attempts, and the task is told once", async () => {
+    vi.setSystemTime(Date.parse("2026-10-29T08:00:00.000Z"));
+    const f = fixture();
+    await giveUp(f);
+    await vi.waitFor(() => expect(f.notify).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(f.start).toHaveBeenCalledTimes(attempts);
+    expect(f.notify).toHaveBeenCalledOnce();
+    expect(f.notify.mock.calls[0]?.[0]).toBe(A);
+    expect(f.notify.mock.calls[0]?.[1]).toMatch(
+      /could not be started after 6 attempts over about 2 minutes \(Browser start failed during readiness\).*stopped trying by itself.*restart: true/u,
+    );
+    expect(f.noteRetry.mock.calls.slice(0, 2)).toEqual([
+      [A, new Date(Date.parse("2026-10-29T08:00:00.000Z") + 2000)],
+      [A, new Date(Date.parse("2026-10-29T08:00:02.000Z") + 5000)],
+    ]);
+    expect(f.noteRetry).toHaveBeenLastCalledWith(A, undefined);
+    expect(f.report).toHaveBeenLastCalledWith(
+      "the web browser couldn't start: Browser start failed during readiness; gave up after 6 attempts",
+    );
+  });
+
+  it("gets a fresh round when what stopped it changes", async () => {
+    const f = fixture();
+    f.start.mockRejectedValue(new Error("docker busy"));
+    const warmer = warm(f.deps);
+    for (const delay of RETRY_MS) await vi.advanceTimersByTimeAsync(delay);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(attempts));
+    f.start.mockClear();
+    warmer.reset();
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledOnce());
+    f.start.mockClear();
+    for (const delay of RETRY_MS) await vi.advanceTimersByTimeAsync(delay);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(RETRY_MS.length));
+    f.set(cell(A, { state: "stopped" }));
+    f.start.mockClear();
+    f.start.mockImplementation(async (parent: string) => {
+      f.restartBrowser(parent);
+      return { parentCellId: parent } as ReadyBrowser;
+    });
+    f.set(cell(A));
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledOnce());
+  });
+
+  it("doesn't count a start that something else took over", async () => {
+    const f = fixture();
+    f.start.mockRejectedValueOnce(new BrowserStartCancelled());
+    warm(f.deps);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2));
+    expect(f.noteProblem).not.toHaveBeenCalled();
+    expect(f.noteRetry).not.toHaveBeenCalled();
+    expect(f.report).not.toHaveBeenCalled();
+  });
+
+  it("marks a browser it restarts as missed, so the task hears when it is back", async () => {
+    const f = fixture();
+    warm(f.deps);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(1));
+    f.health.mockResolvedValueOnce("unready");
+    await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2));
+    expect(f.noteOutage).toHaveBeenCalledWith(A);
+    expect(f.noteOutage.mock.invocationCallOrder[0]).toBeLessThan(
+      f.stop.mock.invocationCallOrder[0] ?? 0,
     );
   });
 });

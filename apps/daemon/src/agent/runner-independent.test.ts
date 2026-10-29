@@ -14,6 +14,7 @@ import { PeopleStore } from "./people.ts";
 import { actPolicy } from "./policy.ts";
 import { redactor } from "./redact.ts";
 import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import type { AgentSession } from "./session.ts";
 import type { AgentSettings } from "./settings.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import type { ToolDeps } from "./tools/deps.ts";
@@ -402,6 +403,88 @@ describe("conversation continuity", () => {
     } finally {
       await restarted.close();
     }
+  });
+
+  describe("delegated agents", () => {
+    const brief = (id: string) => ({
+      id,
+      label: `Part ${id}`,
+      instructions: `Write part ${id}`,
+      progress: `Its plan:\n[completed] Outline ${id}`,
+    });
+    const running = (session: AgentSession, id: string) => {
+      session.append("subagent.state", {
+        id,
+        runId: `run-${id}`,
+        label: `Part ${id}`,
+        state: "running",
+      });
+    };
+    const reasons = (log: EventLog, id: string) =>
+      log
+        .read(id)
+        .flatMap((e) =>
+          e.type === "subagent.state" && e.data.state === "interrupted"
+            ? [`${e.data.id} ${e.data.reason}`]
+            : [],
+        );
+
+    it("hands a brain restarted from saved history the agents its crash stopped", async () => {
+      const h = conversing();
+      const session = await h.runner.start(h.cellId, "Write the report");
+      await h.ready();
+      running(session, "a");
+      running(session, "b");
+      h.deps.transcripts.saveBrief(session.id, brief("a"));
+      h.exit(0, 1);
+      await h.ready(2);
+      expect(reasons(h.log, session.id)).toEqual(["a error", "b error"]);
+      expect(h.boots[1]).toMatchObject({ resume: true });
+      // Only an agent with a brief can be handed on; a one-shot child keeps none.
+      expect(h.boots[1]?.subagents).toEqual([{ ...brief("a"), runId: "run-a", reason: "error" }]);
+      expect(h.boots[0]).not.toHaveProperty("subagents");
+    });
+
+    it("continues a restarted daemon's agents in the next task, but not a stopped task's", async () => {
+      const h = conversing();
+      const first = await h.runner.start(h.cellId, "Write the report");
+      await h.ready();
+      running(first, "a");
+      h.deps.transcripts.saveBrief(first.id, brief("a"));
+      await h.runner.close();
+      expect(reasons(h.log, first.id)).toEqual(["a restarted"]);
+      const restarted = new AgentRunner({
+        ...h.deps,
+        conversations: new Conversations(h.home, h.log),
+      });
+      const boots: BootConfig[] = [];
+      h.deps.brains.start = async (brain) => {
+        boots.push(structuredClone(required(restarted.get(brain.sessionId)?.boot)));
+      };
+      try {
+        const second = await restarted.start(h.cellId, "Carry on");
+        await until(() => boots.length === 1);
+        expect(boots[0]?.subagents).toEqual([
+          { ...brief("a"), runId: "run-a", reason: "restarted" },
+        ]);
+        // The user stops the second task before it took the agent up again: it stays stopped.
+        restarted.get(second.id)?.append("subagent.state", {
+          id: "b",
+          runId: "run-b",
+          label: "Part b",
+          state: "interrupted",
+          reason: "limit",
+        });
+        h.deps.transcripts.saveBrief(second.id, brief("b"));
+        await restarted.stopRun(second.id);
+        expect(reasons(h.log, second.id)).toEqual(["b limit", "b stopped"]);
+        await restarted.start(h.cellId, "Try again");
+        await until(() => boots.length === 2);
+        expect(boots[1]).not.toHaveProperty("subagents");
+      } finally {
+        await restarted.close();
+      }
+    });
   });
 
   it("starts the next task afresh in a new conversation", async () => {

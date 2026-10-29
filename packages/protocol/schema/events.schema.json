@@ -3430,6 +3430,63 @@
         },
         "type": {
           "type": "string",
+          "const": "keys.lock"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "locked": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "locked"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
           "const": "budget.exceeded"
         },
         "data": {
@@ -4911,6 +4968,21 @@
                 "failed"
               ]
             },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "limit",
+                "error",
+                "restarted",
+                "control",
+                "stopped",
+                "cancelled"
+              ]
+            },
+            "resumed": {
+              "type": "boolean",
+              "const": true
+            },
             "summary": {
               "type": "string",
               "maxLength": 5000
@@ -5301,6 +5373,11 @@
             },
             "limitReached": {
               "type": "boolean"
+            },
+            "limitResetsAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": [

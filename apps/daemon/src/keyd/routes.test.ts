@@ -2,11 +2,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setImmediate as nextTurn } from "node:timers/promises";
+import { type Sealed, sealPassphrase } from "@localdot/protocol";
+import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
+import { type RemoteGrant, RemoteLinks } from "../remote/links.ts";
+import type { RemoteAccess } from "../remote/manager.ts";
 import { KeydClient } from "./client.ts";
-import { KeydMonitor } from "./monitor.ts";
+import { cameUp, KeydMonitor } from "./monitor.ts";
+import { keyRoutes } from "./routes.ts";
 import { FAKE_SEAL_KEY, type FakeKeyd, startFakeKeyd } from "./testing/fake-keyd.ts";
 
 const PORT = 4750;
@@ -67,6 +72,7 @@ describe("key routes", () => {
       ["GET", "/api/keyd"],
       ["GET", "/api/keys"],
       ["POST", "/api/keys"],
+      ["POST", "/api/keyd/unlock"],
       ["DELETE", "/api/keys/weather"],
     ] as const) {
       expect((await app.request(url(path), { method })).status).toBe(401);
@@ -254,7 +260,7 @@ describe("key routes", () => {
     expect(locked.status).toBe(423);
     expect(await locked.json()).toEqual({
       error: "vault-locked",
-      message: "Saved keys are locked. On that computer, run: localdot unlock",
+      message: "Saved keys are locked. Unlock them in Keys, then try again.",
     });
   });
 
@@ -319,6 +325,164 @@ describe("key routes", () => {
   });
 });
 
+describe("unlocking saved keys from the app", () => {
+  const LOCKED = { backend: "file", state: "locked", key: "passphrase" } as const;
+  let clock: number;
+  let remembered: string[];
+  let unlockApp: ReturnType<typeof createApp>;
+  let right: Sealed;
+  let wrong: Sealed;
+  beforeEach(async () => {
+    clock = 0;
+    remembered = [];
+    keyd.vault = LOCKED;
+    right = await sealPassphrase(FAKE_SEAL_KEY, "correct horse battery");
+    wrong = await sealPassphrase(FAKE_SEAL_KEY, "wrong horse battery!");
+    keyd.wrongPassphrase = wrong;
+    unlockApp = createApp({
+      token: TOKEN,
+      port: PORT,
+      eventLog: new EventLog(home),
+      keys: {
+        keyd: client,
+        monitor: new KeydMonitor(client),
+        passphrases: { remember: (fingerprint) => remembered.push(fingerprint) },
+        now: () => clock,
+      },
+    });
+  });
+  const unlock = (body: unknown, target = unlockApp) =>
+    target.request(url("/api/keyd/unlock"), {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify(body),
+    });
+  const unlocks = () => keyd.calls.filter((call) => call.path === "/v1/vault/unlock");
+
+  it("relays the sealed passphrase unchanged, notes the vault and reports it open", async () => {
+    const logged = [
+      vi.spyOn(console, "log"),
+      vi.spyOn(console, "error"),
+      vi.spyOn(console, "warn"),
+    ];
+    const res = await unlock({ sealed: right });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      vault: {
+        backend: "file",
+        state: "ready",
+        key: "passphrase",
+        fingerprint: "0123456789abcdef0123456789abcdef",
+      },
+    });
+    expect(unlocks().map((call) => call.body)).toEqual([{ sealed: right }]);
+    expect(remembered).toEqual(["0123456789abcdef0123456789abcdef"]);
+    const health = await unlockApp.request(url("/api/keyd"), { headers: json });
+    expect(await health.json()).toMatchObject({ vault: { state: "ready" } });
+    expect(JSON.stringify(logged.map((spy) => spy.mock.calls))).not.toContain(right.ct);
+  });
+
+  it("takes the first passphrase of a vault waiting for one", async () => {
+    keyd.vault = { backend: "file", state: "setup" };
+    const res = await unlock({ sealed: right });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ vault: { state: "ready", key: "passphrase" } });
+  });
+
+  it("refuses anything but one sealed passphrase before keyd hears it", async () => {
+    for (const body of [
+      { passphrase: "correct horse battery" },
+      { sealed: right, passphrase: "correct horse battery" },
+      { sealed: { ...right, plain: "correct horse battery" } },
+      {},
+    ])
+      expect((await unlock(body)).status).toBe(400);
+    const huge = await unlockApp.request(url("/api/keyd/unlock"), {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ sealed: { ...right, ct: "a".repeat(8000) } }),
+    });
+    expect(huge.status).toBe(413);
+    expect(unlocks()).toHaveLength(0);
+  });
+
+  it("asks keyd nothing when the keys are already open or use no passphrase", async () => {
+    keyd.vault = { backend: "file", state: "ready", key: "passphrase" };
+    expect(await (await unlock({ sealed: right })).json()).toMatchObject({
+      vault: { state: "ready" },
+    });
+    keyd.vault = undefined;
+    expect(await (await unlock({ sealed: right })).json()).toEqual({ vault: null });
+    expect(unlocks()).toHaveLength(0);
+  });
+
+  it("says a wrong passphrase plainly, and after five makes each next try wait longer", async () => {
+    for (let i = 0; i < 5; i++) {
+      const res = await unlock({ sealed: wrong });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        error: "wrong-passphrase",
+        message: "That passphrase doesn't unlock your saved keys",
+      });
+    }
+    const held = await unlock({ sealed: right });
+    expect(held.status).toBe(429);
+    expect(held.headers.get("retry-after")).toBe("30");
+    expect(await held.json()).toMatchObject({ error: "too-many-tries", retryAfter: 30 });
+    expect(unlocks()).toHaveLength(5);
+    clock += 30_000;
+    expect((await unlock({ sealed: wrong })).status).toBe(403);
+    expect((await unlock({ sealed: right })).headers.get("retry-after")).toBe("60");
+    clock += 60_000;
+    expect((await unlock({ sealed: right })).status).toBe(200);
+    keyd.vault = LOCKED;
+    for (let i = 0; i < 4; i++) await unlock({ sealed: wrong });
+    expect((await unlock({ sealed: right })).status).toBe(200);
+  });
+
+  it("is the owner's alone: a shared link never reaches it", async () => {
+    const links = new RemoteLinks(home);
+    const guest = links.create({
+      label: "Guest",
+      expiresInHours: null,
+      maxTasks: 1,
+      model: { provider: "openai", model: "gpt-6.1-sol" },
+    }).token;
+    const shared = createApp({
+      token: TOKEN,
+      port: PORT,
+      eventLog: new EventLog(home),
+      remoteAccess: {
+        links,
+        authenticate: (token?: string) => links.authenticate(token),
+      } as unknown as RemoteAccess,
+      keys: { keyd: client, monitor: new KeydMonitor(client) },
+    });
+    const res = await shared.request(url("/api/keyd/unlock"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${guest}`, "content-type": "application/json" },
+      body: JSON.stringify({ sealed: right }),
+    });
+    expect(res.status).toBe(403);
+    links.close();
+    // Should the allowlist ever let it through, the route itself still refuses a grant.
+    const granted = new Hono();
+    granted.use(async (c, next) => {
+      c.set("remoteGrant", { id: "a".repeat(24) } as RemoteGrant);
+      await next();
+    });
+    keyRoutes(granted, { keyd: client, monitor: new KeydMonitor(client) });
+    const refused = await granted.request(url("/api/keyd/unlock"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sealed: right }),
+    });
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ error: "owner-only" });
+    expect(unlocks()).toHaveLength(0);
+  });
+});
+
 describe("KeydMonitor", () => {
   it("tells listeners when keyd goes away and comes back with a new boot", async () => {
     const client = new KeydClient(keyd.socketPath, 500);
@@ -337,5 +501,19 @@ describe("KeydMonitor", () => {
     await monitor.refresh();
     expect(seen).toEqual([`false->true:${first}`, "true->false:-", `false->true:${keyd.bootId}`]);
     expect(keyd.bootId).not.toBe(first);
+  });
+
+  it("tells listeners when the vault locks or opens, which is no new keyd", async () => {
+    const monitor = new KeydMonitor(new KeydClient(keyd.socketPath, 500));
+    const seen: string[] = [];
+    monitor.subscribe((now, before) =>
+      seen.push(`${before.vault?.state ?? "-"}->${now.vault?.state}:${cameUp(now, before)}`),
+    );
+    keyd.vault = { backend: "file", state: "locked", key: "passphrase" };
+    await monitor.refresh();
+    await monitor.refresh();
+    keyd.vault = { ...keyd.vault, state: "ready" };
+    await monitor.refresh();
+    expect(seen).toEqual(["-->locked:true", "locked->ready:false"]);
   });
 });

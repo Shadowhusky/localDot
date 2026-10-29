@@ -889,6 +889,10 @@
     overflow-wrap: anywhere;
   }
 
+  .ui-dialog-body {
+    margin-top: calc(var(--spacing) * 3);
+  }
+
   .ui-dialog-actions {
     display: flex;
     flex-wrap: wrap;

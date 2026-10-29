@@ -1,0 +1,85 @@
+@layer utilities {
+  .md-local-address {
+    overflow-wrap: anywhere;
+  }
+
+  /* Set in a line of dot's words, the chip keeps to the line's height and, on a touch screen,
+     reaches 44 px past its face, as an inline button does. */
+  .preview-chip[data-inline] {
+    position: relative;
+    gap: var(--spacing);
+    height: calc(var(--spacing) * 5);
+    margin-inline-start: var(--spacing);
+    padding: 0 calc(var(--spacing) * 2);
+    font:
+      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+    vertical-align: 1px;
+  }
+
+  .preview-chip[aria-busy="true"] {
+    cursor: progress;
+  }
+
+  @media (pointer: coarse) {
+    .preview-chip[data-inline]::after {
+      content: "";
+      position: absolute;
+      inset: calc(var(--spacing) * -3) calc(var(--spacing) * -1);
+    }
+  }
+
+  .preview-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+  }
+
+  .preview-chips[data-inline] {
+    display: inline;
+  }
+
+  .terminal-well > .preview-chips {
+    padding: 0 calc(var(--spacing) * 3);
+  }
+
+  .md-code > .preview-chips {
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+    box-shadow: inset 0 1px 0 var(--color-hairline);
+  }
+
+  .preview-notice-text {
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    text-wrap: pretty;
+  }
+
+  .preview-notice-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: calc(var(--spacing) * 3);
+    margin-top: calc(var(--spacing) * 3);
+  }
+
+  .preview-notice-actions:empty {
+    display: none;
+  }
+
+  .preview-notice-link {
+    color: var(--color-fg-1);
+    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    text-decoration: underline;
+    text-decoration-color: var(--color-link-line);
+    text-underline-offset: 2px;
+  }
+
+  .previews-panel {
+    display: grid;
+    gap: calc(var(--spacing) * 4);
+    padding-top: calc(var(--spacing) * 2);
+  }
+}

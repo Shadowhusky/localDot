@@ -65,6 +65,58 @@ export const BrowserSignInState = schema.strictObject({
   mode: BrowserSignInMode,
   changing: schema.boolean(),
 });
+// browserd's supervision of its Chromium: what last failed and whether it restarts in place.
+// Details are fixed phrases such as an exit status, never page data.
+export const BrowserFailureKind = schema.enum([
+  "tab_crashed",
+  "browser_exited",
+  "control_lost",
+  "unresponsive",
+]);
+export type BrowserFailureKind = schema.infer<typeof BrowserFailureKind>;
+export const BrowserSupervisorState = schema.strictObject({
+  state: schema.enum(["starting", "running", "restarting", "stopped"]),
+  restarts: schema.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  lastFailure: schema
+    .strictObject({
+      kind: BrowserFailureKind,
+      detail: schema.string().max(200),
+      recovered: schema.boolean(),
+      at: schema.iso.datetime(),
+    })
+    .optional(),
+});
+export type BrowserSupervisorState = schema.infer<typeof BrowserSupervisorState>;
+// Why the web browser is not fully usable. Every state but "ready" carries one; a ready browser
+// carries only "keys-locked": it browses, but saved passwords and sites bound to saved keys are
+// refused until the user unlocks the saved keys.
+export const BrowserStatusReason = schema.enum([
+  "keys-locked",
+  "key-service-offline",
+  "computer-paused",
+  "computer-stopped",
+  "recovering",
+  "starting",
+  "restarting",
+  "failed",
+  "shutting-down",
+]);
+export type BrowserStatusReason = schema.infer<typeof BrowserStatusReason>;
+// The web browser as the daemon reports it to the app, the CLI and dot: "off" while its computer or
+// key service is unavailable, "failed" after a start that failed. `clears` says what makes it usable
+// again; `retryAt` is when localDot next starts it by itself (none once it has given up), and
+// `readyBy` when a start under way is ready or has failed.
+export const BrowserStatus = schema.strictObject({
+  state: schema.enum(["off", "starting", "ready", "restarting", "failed", "stopped"]),
+  reason: BrowserStatusReason.optional(),
+  problem: schema.string().max(600).optional(),
+  problemAt: schema.iso.datetime().optional(),
+  clears: schema.string().max(300).optional(),
+  retryAt: schema.iso.datetime().optional(),
+  readyBy: schema.iso.datetime().optional(),
+  restarts: schema.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+});
+export type BrowserStatus = schema.infer<typeof BrowserStatus>;
 export const BrowserSignInRequest = schema.strictObject({
   permit: BrowserManualPermit,
   mode: BrowserSignInMode,

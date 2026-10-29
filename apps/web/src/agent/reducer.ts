@@ -25,6 +25,16 @@ import { appendTerminal, emptyTerminal, finishTerminal } from "./terminal-text.t
 
 // While dot is in one of these, a follow-up waits for the task to finish.
 const WORKING = new Set(["thinking", "acting", "observing", "waiting_user", "paused"]);
+// dot moving between thinking, acting and observing changes nothing the daemon's status holds, and
+// does it several times a second: the status is not read again for it.
+const BUSY = new Set(["thinking", "acting", "observing"]);
+const busyStep = (before: AgentModel["state"], event: LocalDotEvent) =>
+  event.type === "agent.state" &&
+  !!before &&
+  BUSY.has(before.state) &&
+  BUSY.has(event.data.state) &&
+  before.reason === event.data.reason &&
+  before.detail === event.data.detail;
 const STREAM_ERROR = "Activity could not be verified. Reconnect to load it again.";
 const GAP_ERROR = "Some activity is missing. Reconnect to load it again.";
 const RELEVANT = new Set<LocalDotEvent["type"]>([
@@ -99,10 +109,12 @@ function output(row: AgentStep, stream: "stdout" | "stderr", chunk: string): Age
 
 // A child's run that a newer one replaced. One still running then has ended unheard.
 function replaced(child: AgentChild, t: number): AgentRun {
-  const { runId, state, summary, startedAt, endedAt } = child;
+  const { runId, state, reason, resumed, summary, startedAt, endedAt } = child;
   return {
     runId,
     state: state === "running" ? "interrupted" : state,
+    ...(reason && state !== "running" ? { reason } : {}),
+    ...(resumed ? { resumed } : {}),
     ...(summary ? { summary } : {}),
     startedAt,
     endedAt: endedAt ?? t,
@@ -178,7 +190,11 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         ended: { ...e.data },
         pendingAsk: null,
         pendingTakeover: null,
-        subagents: interruptRunning(model.subagents, e.t),
+        subagents: interruptRunning(
+          model.subagents,
+          e.t,
+          e.data.reason === "stopped" ? "stopped" : undefined,
+        ),
       };
       break;
     case "approval.request": {
@@ -301,6 +317,9 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       break;
     case "budget.exceeded":
       next = { ...next, budget: { id: e.id, at: e.t, data: { ...e.data } } };
+      break;
+    case "keys.lock":
+      next = { ...next, keysLocked: e.data.locked };
       break;
     case "model.spend": {
       const estimated = e.data.basis === "estimated";
@@ -777,6 +796,7 @@ export function createAgentFeed(now: () => number = () => performance.now()): Ag
         invalidate();
         return null;
       }
+      const before = value.model.state;
       value = { ...value, model: projectAgentEvent(value.model, event) };
       if (event.type === "heartbeat" && value.model.lastHeartbeat)
         value = {
@@ -794,7 +814,8 @@ export function createAgentFeed(now: () => number = () => performance.now()): Ag
       }
       const firstReplay = value.connection === "live" && !value.streamError && !value.replayed;
       if (firstReplay) value = { ...value, replayed: true, history: true };
-      if (RELEVANT.has(event.type) || recovered || firstReplay) invalidate();
+      if ((RELEVANT.has(event.type) && !busyStep(before, event)) || recovered || firstReplay)
+        invalidate();
       return event;
     },
     load(events) {

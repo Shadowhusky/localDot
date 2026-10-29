@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ComputerPhase } from "../cells/hud-state.ts";
 import type { StatusRow } from "../session/status.ts";
 import {
   type BandScene,
@@ -8,6 +9,7 @@ import {
   greeting,
   type IdleInput,
   nextTip,
+  pictureAway,
   rankTips,
   restingBand,
   seenTips,
@@ -92,6 +94,12 @@ describe("when dot rests", () => {
     expect(restingBand(scene({ attention: "needs_you" }))).toBe(false);
     expect(restingBand(scene({ computer: "reconnecting" }))).toBe(false);
     expect(restingBand(scene({ computer: "none" }))).toBe(false);
+  });
+
+  it("keeps its line, not a turn of silence, while only this viewer's picture is on its way", () => {
+    const away = (phases: ComputerPhase[]) => phases.map(pictureAway);
+    expect(away(["connecting", "reconnecting", "suspended"])).toEqual([true, true, true]);
+    expect(away(["live", "starting", "stopped", "failed"])).toEqual([false, false, false, false]);
   });
 
   it("says nothing of its own once a task, a question or an approval starts", () => {

@@ -1,7 +1,12 @@
 import { microsToMs } from "@localdot/protocol";
 import { type KeyUseState, plainText } from "@localdot/stage";
 import { clock as runningClock } from "../copy/format.ts";
-import { type KeyUseRowView, type TimelineRow, timelineRows } from "../session/key-uses.ts";
+import {
+  type KeyUseRowView,
+  stepRow,
+  type TimelineRow,
+  timelineRows,
+} from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import type { IconName } from "../ui/icons.ts";
 import type { GlyphState } from "../ui/StatusGlyph.tsx";
@@ -16,6 +21,10 @@ export interface ActivityStep {
   agent?: AgentStep;
 }
 
+// A step joined from both projections, the same one while neither side changes.
+const joinedSteps = new WeakMap<object, { agent: AgentStep | undefined; step: ActivityStep }>();
+const toolOnly = new WeakMap<AgentStep, ActivityStep>();
+
 // Both event projections describe the same GUI step. Join by envelope ID, never by title.
 // The raw audit events allow grouping only after tools have joined the ordered history.
 export function activityRows(
@@ -25,26 +34,33 @@ export function activityRows(
 ): TimelineRow<ActivityStep>[] {
   const steps = new Map<string, ActivityStep>();
   for (const row of rows) {
-    if (row.kind === "step")
-      steps.set(row.id, {
-        id: row.id,
-        startT: row.startT,
-        computer: row,
-        agent: model?.steps.get(row.id),
-      });
+    if (row.kind !== "step") continue;
+    const agent = model?.steps.get(row.id);
+    const kept = joinedSteps.get(row);
+    const step =
+      kept && kept.agent === agent
+        ? kept.step
+        : { id: row.id, startT: row.startT, computer: row, agent };
+    if (step !== kept?.step) joinedSteps.set(row, { agent, step });
+    steps.set(row.id, step);
   }
   for (const row of model?.steps.values() ?? []) {
     if (steps.has(row.id)) continue;
-    const at = row.startedAt ?? row.firstSeenAt;
-    steps.set(row.id, {
-      id: row.id,
-      startT: at === undefined ? Number.POSITIVE_INFINITY : microsToMs(at),
-      agent: row,
-    });
+    let step = toolOnly.get(row);
+    if (!step) {
+      const at = row.startedAt ?? row.firstSeenAt;
+      step = {
+        id: row.id,
+        startT: at === undefined ? Number.POSITIVE_INFINITY : microsToMs(at),
+        agent: row,
+      };
+      toolOnly.set(row, step);
+    }
+    steps.set(row.id, step);
   }
   if (keyUses) return timelineRows([...steps.values()], keyUses);
   return [
-    ...[...steps.values()].map((row) => ({ ...row, kind: "step" as const })),
+    ...[...steps.values()].map((row) => stepRow(row)),
     ...rows.filter((row) => row.kind === "key"),
   ].sort((a, b) => (a.kind === "key" ? a.t : a.startT) - (b.kind === "key" ? b.t : b.startT));
 }

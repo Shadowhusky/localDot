@@ -55,6 +55,15 @@ async function daemon(handler) {
   await once(server, "listening");
   return server.address().port;
 }
+async function freePort() {
+  const server = createServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const { port } = server.address();
+  server.close();
+  await once(server, "close");
+  return port;
+}
 function cli(args, extra = {}) {
   const child = spawn(process.execPath, [join(output, "bin/localdot.mjs"), ...args], {
     cwd: root,
@@ -132,20 +141,28 @@ it("compiled reset explains erasure without an installation and refuses an uncon
   expect(confirmed.stderr).toContain("Reset could not start");
   expect(await readdir(root)).toEqual(before);
 });
-it("compiled down refuses an unmanaged home without creating state or requiring a port", async () => {
-  const unmanaged = await mkdtemp(join(root, "unmanaged-"));
+// Neither an installation's journal nor launchd/systemd services run this home.
+it.each(["down", "up", "restart"])(
+  "compiled %s refuses a home nothing manages, without creating state or downloading",
+  async (command) => {
+    const unmanaged = await mkdtemp(join(root, `unmanaged-${command}-`));
+    const result = await cli([command], {
+      LOCALDOT_HOME: unmanaged,
+      LOCALDOT_PORT: String(await freePort()),
+    }).done;
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("aren't set up on this computer");
+    expect(result.stderr).toContain("rerun the localDot installer");
+    expect(await readdir(unmanaged)).toEqual([]);
+  },
+);
+it("compiled down refuses an invalid port for a home nothing manages", async () => {
+  const unmanaged = await mkdtemp(join(root, "unmanaged-port-"));
   const result = await cli(["down"], { LOCALDOT_HOME: unmanaged, LOCALDOT_PORT: "invalid" }).done;
   expect(result.status).toBe(1);
   expect(result.stdout).toBe("");
-  expect(result.stderr).toContain("Shutdown is unconfirmed");
-  expect(await readdir(unmanaged)).toEqual([]);
-});
-it("compiled up refuses an unmanaged home without downloading or creating state", async () => {
-  const unmanaged = await mkdtemp(join(root, "unmanaged-up-"));
-  const result = await cli(["up"], { LOCALDOT_HOME: unmanaged, LOCALDOT_PORT: "invalid" }).done;
-  expect(result.status).toBe(1);
-  expect(result.stdout).toBe("");
-  expect(result.stderr).toContain("Startup could not be confirmed");
+  expect(result.stderr).not.toContain("invalid");
   expect(await readdir(unmanaged)).toEqual([]);
 });
 it("compiled update refuses an unmanaged home before registry access or directory creation", async () => {

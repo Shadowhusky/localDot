@@ -166,6 +166,37 @@ export async function readReferences(home) {
   return { references: [...refs], fingerprint: hash.digest("hex") };
 }
 
+// Every dot of this user shares the Docker engine, so an image one dot still needs is never
+// another dot's to delete: references come from every registered home.
+export async function registeredHomes(home, env = process.env) {
+  const file = join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "localdot", "dots.json");
+  let registry;
+  try {
+    registry = JSON.parse(await readFile(file, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") return [home];
+    throw new Error("The list of dots can't be read; cleanup refused");
+  }
+  const homes =
+    registry?.v === 1 && Array.isArray(registry.dots)
+      ? registry.dots.map((dot) => dot?.home)
+      : null;
+  if (!homes?.length || !homes.every((path) => typeof path === "string" && path.startsWith("/")))
+    throw new Error("The list of dots isn't valid; cleanup refused");
+  return [...new Set([home, ...homes.map((path) => resolve(path))])];
+}
+
+export async function readAllReferences(homes) {
+  const references = new Set();
+  const hash = createHash("sha256");
+  for (const home of homes) {
+    const found = await readReferences(home);
+    for (const reference of found.references) references.add(reference);
+    hash.update(home).update(found.fingerprint);
+  }
+  return { references: [...references], fingerprint: hash.digest("hex") };
+}
+
 export function dockerApi(socketPath) {
   return (method, path) =>
     new Promise((resolve, reject) => {
@@ -268,11 +299,12 @@ async function main() {
   const home = resolve(process.env.LOCALDOT_HOME || join(homedir(), ".localdot"));
   const socket = process.env.LOCALDOT_DOCKER_SOCKET || "/var/run/docker.sock";
   const lock = join(home, "image-cleanup.lock");
+  const homes = await registeredHomes(home);
   await mkdir(lock, { mode: 0o700 });
   try {
     const result = await cleanupImages({
       api: dockerApi(socket),
-      metadata: () => readReferences(home),
+      metadata: () => readAllReferences(homes),
       apply: args[0] === "--apply",
       report: (event) => console.log(JSON.stringify(event)),
     });

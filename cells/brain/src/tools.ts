@@ -139,7 +139,7 @@ export function toolSet(
     }),
     switch_screen: tool({
       description:
-        "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Every sign-in happens here, never in the desktop's Chromium: switch here first and check the existing session before asking for missing details. After switching, request a screenshot before GUI input. Shell and files always remain on the desktop.",
+        "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Every sign-in happens here, never in the desktop's Chromium: switch here first and check the existing session before asking for missing details. After switching, request a screenshot before GUI input. Shell and files always remain on the desktop. restart: true starts a stuck web browser again first, keeping sign-ins.",
       inputSchema: SwitchScreenInput,
     }),
     ask_user: tool({

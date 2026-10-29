@@ -314,15 +314,23 @@ describe("desktop stream proxy over HTTP", () => {
     const html = await index.text();
     expect(html).toContain('<div id="app"></div>');
     expect(html).not.toContain('rel="manifest"');
-    const linked = [...html.matchAll(/="\.\/assets\/([^"]+)"/g)].map((m) => m[1]);
+    // Every ticket's page links the client's hashed files at one address, which keeps them.
+    expect(html).not.toContain('"./assets/');
+    const linked = [...html.matchAll(/="\/selkies\/assets\/([^"]+)"/g)].map((m) => m[1]);
     const shipped = readdirSync(join(dir, "assets"));
     expect(linked).toHaveLength(2);
     expect(shipped).toEqual(
       expect.arrayContaining([...linked, expect.stringMatching(/^selkies-core-/)]),
     );
     for (const asset of shipped) {
+      const kept = await d.fetch(`/selkies/assets/${asset}`);
+      expect(kept.status, asset).toBe(200);
+      expect(kept.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      expect(kept.headers.get("x-content-type-options")).toBe("nosniff");
       expect((await d.fetch(`${d.prefix}/assets/${asset}`)).status, asset).toBe(200);
     }
+    expect((await d.fetch("/selkies/assets/..%2findex.html")).status).toBe(404);
+    expect((await d.fetch("/selkies/assets/missing.js")).status).toBe(404);
   });
 
   it("proxies only GET api/status and api/websockets and answers 404 to the rest without dialing the cell", async () => {

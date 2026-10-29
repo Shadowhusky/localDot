@@ -8,6 +8,7 @@ import {
   type KeydOpened,
   KeydPushRequest,
   type KeydRecord,
+  type KeydVault,
   pushServiceOf,
 } from "@localdot/protocol";
 
@@ -54,6 +55,9 @@ export class FakeKeyd {
   hairpin: HairpinGuard = { state: "active", source: "nat-pmp", addresses: 1 };
   // false: a keyd from before capture, which neither says it takes a capture token nor accepts one.
   capture = true;
+  // A passphrase vault: unlocking it takes any sealed passphrase but `wrongPassphrase`'s seal.
+  vault: KeydVault | undefined;
+  wrongPassphrase: unknown;
   // Answers the next request whose "METHOD /path" starts with the key with this error.
   readonly failures = new Map<string, { status: number; code: string }>();
   // Answers the next request whose "METHOD /path" starts with the key 200 with this body as is.
@@ -222,7 +226,22 @@ export class FakeKeyd {
         audit: this.auditOk ? { ok: true } : { ok: false, error: "disk full" },
         hairpin: this.hairpin,
         ...(this.capture ? { capture: true } : {}),
+        ...(this.vault ? { vault: this.vault } : {}),
       });
+    }
+    if (method === "POST" && path === "/v1/vault/unlock") {
+      if (!this.vault)
+        return reply(res, 409, { error: { code: "no-passphrase", message: "fake: no vault" } });
+      const { sealed } = body as { sealed: unknown };
+      if (JSON.stringify(sealed) === JSON.stringify(this.wrongPassphrase))
+        return reply(res, 403, { error: { code: "wrong-passphrase", message: "fake: wrong" } });
+      this.vault = {
+        backend: "file",
+        state: "ready",
+        key: "passphrase",
+        fingerprint: this.vault.fingerprint ?? "0123456789abcdef0123456789abcdef",
+      };
+      return reply(res, 200, this.vault);
     }
     if (method === "GET" && path === "/v1/push/key")
       return reply(res, 200, { publicKey: this.pushPublicKey });

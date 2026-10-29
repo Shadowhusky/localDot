@@ -3,10 +3,12 @@ import {
   DEFAULT_PERSONA,
   isJevKey,
   LLM_PROVIDERS,
+  type LocalDotLink,
   outfit,
   personaOf,
   type QuestionAnswerRequest,
   SessionIndexPage,
+  STALL,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { providerById, sameModelOptions } from "@localdot/providers";
@@ -19,7 +21,8 @@ import { BrowserSignIn } from "./agent/BrowserSignIn.tsx";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { endTaskRun } from "./agent/control-api.ts";
 import { conversationBlockReason } from "./agent/conversation-state.ts";
-import { taskStalled } from "./agent/heartbeat.ts";
+import { useTaskStalled } from "./agent/heartbeat.ts";
+import { KeysLockedCard } from "./agent/KeysLockedCard.tsx";
 import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
 import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
@@ -27,7 +30,6 @@ import { PermissionChip } from "./agent/PermissionChip.tsx";
 import { requestResearch, researchWait } from "./agent/research.ts";
 import { uploadFile } from "./agent/resumable-upload.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
-import { onStepFocus, wantedStep } from "./agent/step-focus.ts";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
@@ -36,6 +38,7 @@ import { useHandBack } from "./agent/useHandBack.ts";
 import { useHandOff } from "./agent/useHandOff.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useManualChannel } from "./agent/useManualChannel.ts";
+import { usePlanUsage } from "./agent/usePlanUsage.ts";
 import { useSafety } from "./agent/useSafety.ts";
 import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { stopNotice, stoppedOff, useStopToast } from "./agent/useStopToast.ts";
@@ -51,7 +54,7 @@ import { useRuntime } from "./cells/useRuntime.ts";
 import { presetOf } from "./copy/autonomy.ts";
 import { decisionWords } from "./copy/decision.ts";
 import { dotFeed } from "./dot/dot-feed.ts";
-import { restingBand, useIdleLine, usePageHidden } from "./dot/idle-line.ts";
+import { pictureAway, restingBand, useIdleLine, usePageHidden } from "./dot/idle-line.ts";
 import { PresenceLayer } from "./dot/PresenceLayer.tsx";
 import { presencePlace } from "./dot/presence-rules.ts";
 import { useShowDot } from "./dot/show-dot.ts";
@@ -64,7 +67,7 @@ import { createExportJob } from "./export/job.ts";
 import { useExportToast } from "./export/useExportToast.tsx";
 import { JEV_KEY } from "./keys/binding.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
-import type { KeyRecord } from "./keys/keys-api.ts";
+import { type KeyRecord, vaultLocked } from "./keys/keys-api.ts";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
 import {
@@ -91,6 +94,8 @@ import { Onboarding } from "./onboarding/Onboarding.tsx";
 import { setupSteps } from "./onboarding/setup.ts";
 import { useOnboarding } from "./onboarding/useOnboarding.ts";
 import { STEP_DOT } from "./onboarding/wizard.ts";
+import { PreviewNotice } from "./previews/PreviewNotice.tsx";
+import { usePreviewsState } from "./previews/PreviewsContext.tsx";
 import {
   PREVIEW_ROOM,
   RECORDED_TASK,
@@ -113,7 +118,7 @@ import {
   withSending,
 } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
-import { useNowMs } from "./session/useNowMs.ts";
+import { nextChange, SessionNowContext, useNowMs } from "./session/useNowMs.ts";
 import { useSeenReporting } from "./session/useSeenReporting.ts";
 import { matchingKeys } from "./settings/choices.ts";
 import { subscription } from "./settings/chooser.ts";
@@ -121,10 +126,13 @@ import { useWhatDotKnows } from "./settings/memory/useWhatDotKnows.ts";
 import { modelNames } from "./settings/model-names.ts";
 import { currentOption, type ModelOption, modelGroups } from "./settings/model-options.ts";
 import { purposeJudge } from "./settings/PurposeCheck.tsx";
+import type { ReportAbout, ReportControl } from "./settings/reports-api.ts";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
+import { listenForSettingsLinks, type SettingsTip } from "./settings/settings-link.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
 import { useAppUpdate } from "./settings/useAppUpdate.ts";
+import { useBrowserStatus } from "./settings/useBrowserStatus.ts";
 import { useConnectors } from "./settings/useConnectors.ts";
 import { useDesktopSignIn } from "./settings/useDesktopSignIn.ts";
 import { useNotifications } from "./settings/useNotifications.ts";
@@ -143,6 +151,7 @@ import { DotChooser } from "./shell/DotChooser.tsx";
 import { FocusControls } from "./shell/FocusControls.tsx";
 import { useFocusMode, useStill } from "./shell/focus.ts";
 import { useEdgeStill, useFullScreen, useFullScreenKeys } from "./shell/fullscreen.ts";
+import { Held } from "./shell/Held.tsx";
 import { HudIsland, type StageFields } from "./shell/HudIsland.tsx";
 import {
   islandAttention,
@@ -156,7 +165,7 @@ import { LocalDotSwitcher } from "./shell/LocalDotSwitcher.tsx";
 import { useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
-import { atWork, narrationLine } from "./shell/narration.ts";
+import { atWork, longThinkAt, narrationLine } from "./shell/narration.ts";
 import { type RailView, usePanelPreferences } from "./shell/panel-preferences.ts";
 import { CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
@@ -167,9 +176,10 @@ import { StageFrame } from "./shell/StageFrame.tsx";
 import { StreamMenu } from "./shell/StreamMenu.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
+import { switchToDot, useLocalDots } from "./shell/useLocalDots.ts";
 import { useMobileScreen } from "./shell/useMobileScreen.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
-import type { StreamPicture } from "./stage/live-stream.ts";
+import { useStageConnection, useStagePicture } from "./stage/connection.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { useStreamPreference } from "./stage/stream-preference.ts";
@@ -186,6 +196,7 @@ import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
 import { showToast, Toaster } from "./ui/Toast.tsx";
+import { useHandler } from "./ui/useHandler.ts";
 import { WorkView } from "./work/WorkView.tsx";
 import { workCard } from "./work/work-view.ts";
 import "./app.css";
@@ -223,6 +234,7 @@ const SWITCH_MAX_MS = 3000;
 const ALREADY_NEW = "This is a new conversation";
 const NEW_TITLE = "New conversation";
 const NO_SESSIONS: readonly string[] = [];
+const NO_LINKS: readonly LocalDotLink[] = [];
 const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
 const CONFIRMING_LINE = "Checking that your last input reached the computer…";
 const SLOW_LINE = "This is taking longer than usual. Stop me if it looks stuck.";
@@ -365,6 +377,7 @@ const SENDING_HOLD_MS = 20_000;
 
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
+  const localDots = useLocalDots(api);
   const showDot = useShowDot();
   const streamChoice = useStreamPreference(showToast);
   const [replayId, setReplayId] = useState<string | null>(() =>
@@ -440,6 +453,7 @@ function Theatre({ api }: { api: ApiClient }) {
     pending,
     streamed,
     error,
+    startAnyway,
     listed,
     reconnects,
     operation,
@@ -455,6 +469,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const freshStart = useFreshStart(api, cell, selectReady);
   const keys = useKeys(api);
   const settings = useSettings(api);
+  const planUsage = usePlanUsage(api, settings.chatgpt.canStart || settings.claudeCode.canStart);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a saved-key revision invalidates the independently cached provider metadata
   useEffect(() => {
     if (keys.metadataReady) void settings.checkModels();
@@ -526,9 +541,11 @@ function Theatre({ api }: { api: ApiClient }) {
   const settingsOpen = useRef(settings.open);
   settingsOpen.current = settings.open;
   // Where Settings goes, with a count, so a section asked for again is still gone to.
-  const [settingsAt, setSettingsAt] = useState<{ section?: SettingsSection; request: number }>({
-    request: 0,
-  });
+  const [settingsAt, setSettingsAt] = useState<{
+    section?: SettingsSection;
+    tip?: SettingsTip;
+    request: number;
+  }>({ request: 0 });
   const [keyPreset, setKeyPreset] = useState<KeyFormPreset | undefined>();
   const [keyReentry, setKeyReentry] = useState<{ requestId: number; id: string } | undefined>();
   const keyRequest = useRef(0);
@@ -538,15 +555,32 @@ function Theatre({ api }: { api: ApiClient }) {
   } | null>(null);
   const { show: openSettings } = settings;
   const goToSettings = useCallback(
-    (trigger: HTMLElement | null, section?: SettingsSection) => {
+    (trigger: HTMLElement | null, section?: SettingsSection, tip?: SettingsTip) => {
       if (!settingsOpen.current) settingsOrigin.current = trigger;
-      setSettingsAt((now) => ({ section, request: now.request + 1 }));
+      setSettingsAt((now) => ({ section, tip, request: now.request + 1 }));
       openSettings();
     },
     [openSettings],
   );
-  const showSettings = (trigger: HTMLElement, section?: SettingsSection) =>
-    goToSettings(trigger, section);
+  const showSettings: (trigger: HTMLElement, section?: SettingsSection, tip?: SettingsTip) => void =
+    goToSettings;
+  const [reportAbout, setReportAbout] = useState<ReportAbout>();
+  const report = useMemo<ReportControl>(
+    () => ({
+      api,
+      about: reportAbout,
+      start: (trigger, about) => {
+        setReportAbout(about);
+        goToSettings(trigger, "report");
+      },
+      clear: () => setReportAbout(undefined),
+    }),
+    [api, reportAbout, goToSettings],
+  );
+  const showModels = useCallback(
+    (trigger: HTMLElement) => goToSettings(trigger, "models"),
+    [goToSettings],
+  );
   const showKeys = (trigger: HTMLElement | null) => {
     keyCapture.current = null;
     setKeyPreset(undefined);
@@ -585,7 +619,6 @@ function Theatre({ api }: { api: ApiClient }) {
     wasSettingsOpen.current = settings.open;
   }, [settings.open]);
   const stage = useRef<StageHandle>(null);
-  const [picture, setPicture] = useState<StreamPicture>("none");
   const conversation = useConversation(api);
   const session = useLiveSession(
     api,
@@ -684,8 +717,10 @@ function Theatre({ api }: { api: ApiClient }) {
     [startNew, continueFrom],
   );
   const selectedScreen = agent.watchScreen;
+  const shownScreen = selectedScreen?.screen ?? "desktop";
   const browserScreen = useBrowserScreen(api, cell, selectedScreen);
   const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
+  const { picture, onPicture } = useStagePicture(shownScreen, physicalStageCell?.state === "ready");
   const hud = hudFor({
     runtimeProblem: runtime.problem,
     cell,
@@ -706,10 +741,6 @@ function Theatre({ api }: { api: ApiClient }) {
   // A phone shows Activity in a sheet over the thread.
   const [activityOpen, setActivityOpen] = useState(false);
   if (activityOpen && !phone) setActivityOpen(false);
-  // A chat row showing its step opens Activity: the sheet on a phone, the rail's tab elsewhere.
-  const openActivity = useRef(() => {});
-  openActivity.current = () => (phone ? setActivityOpen(true) : setRailView("activity"));
-  useEffect(() => onStepFocus(() => wantedStep() && openActivity.current()), []);
   // A phone shows the routines in a sheet too.
   const [routinesOpen, setRoutinesOpen] = useState(false);
   if (routinesOpen && !phone) setRoutinesOpen(false);
@@ -821,6 +852,11 @@ function Theatre({ api }: { api: ApiClient }) {
     cell?.state === "ready" && !cell.paused ? cell.id : null,
     settings.open,
   );
+  const settingsBrowser = useBrowserStatus(
+    api,
+    cell?.state === "ready" && !cell.paused ? cell.id : null,
+    settings.open,
+  );
   const { rereadMemory } = settingsKnowledge;
   // A memory change's "Read memory again" opens Settings on what dot knows, read afresh.
   const [readMemory, setReadMemory] = useState(false);
@@ -884,18 +920,17 @@ function Theatre({ api }: { api: ApiClient }) {
       ),
     [askDraft],
   );
-  const shownScreen = selectedScreen?.screen ?? "desktop";
   const askFields = useMemo<StageFields | undefined>(() => {
     const marks = askMarks?.filter((mark) => mark.screen === shownScreen);
     return manualGeometry && marks?.length ? { screen: manualGeometry, marks } : undefined;
   }, [askMarks, shownScreen, manualGeometry]);
-  const replyAsk = async (text: string, attached: boolean): Promise<ReplyOutcome> => {
+  const replyAsk = useHandler(async (text: string, attached: boolean): Promise<ReplyOutcome> => {
     if (!askDraft) return "failed";
     const plan = composerReply(askDraft.question, text, attached);
     if (plan.kind === "hold") return { hold: plan.reason };
     if (!(await answerAsk(plan.request))) return "failed";
     return plan.kind === "answer" ? "answered" : "declined";
-  };
+  });
   const manualLive =
     yours &&
     controls.canInput &&
@@ -936,7 +971,7 @@ function Theatre({ api }: { api: ApiClient }) {
     if (browserProblem) showToast({ id: "screen", title: browserProblem, tone: "danger" });
   }, [browserProblem]);
   const shownView: RailView = phone ? "chat" : railView;
-  const guardStart = () => {
+  const guardStart = (anyway = false) => {
     if (
       !controls.stopping &&
       !controls.busy &&
@@ -944,7 +979,7 @@ function Theatre({ api }: { api: ApiClient }) {
       (controls.stopStatus.phase !== "stopped" || hud.action.kind === "start") &&
       !agent.model.pendingTakeover
     )
-      start();
+      start(anyway);
   };
   const guardResume = () => {
     if (
@@ -962,7 +997,7 @@ function Theatre({ api }: { api: ApiClient }) {
   };
   const [stoppingRun, setStoppingRun] = useState<string | null>(null);
   const stoppingRunRef = useRef<string | null>(null);
-  const taskStop = () => {
+  const taskStop = useHandler(() => {
     const id = agent.sessionId;
     if (!id || stoppingRunRef.current) return;
     stoppingRunRef.current = id;
@@ -980,7 +1015,7 @@ function Theatre({ api }: { api: ApiClient }) {
         agent.reconcile();
         session.check();
       });
-  };
+  });
   useStopHotkey(taskStop, controls.canStop && !controls.stopping && !stoppingRun);
   // Carries on a task the user's action limit stopped: their message starts the count again.
   const continueTask = async () => {
@@ -1019,6 +1054,19 @@ function Theatre({ api }: { api: ApiClient }) {
       : physicalStageCell && controls.stopStatus.phase === "stopped"
         ? { ...physicalStageCell, state: "stopped" as const }
         : physicalStageCell;
+  const connection = useStageConnection({
+    computer:
+      cell?.state === "ready" &&
+      !cell.fenced &&
+      !cell.replacementPending &&
+      controls.stopStatus.phase !== "stopped"
+        ? cell.id
+        : null,
+    screen: shownScreen,
+    picture,
+    screenUp: !stageCell || stageCell.state === "ready",
+    resting: !!replayId || !!cell?.paused || !!stageCell?.paused,
+  });
   // The displayed screen owns video visibility. Parent lifecycle controls still
   // use the desktop HUD, even when only the separate browser has a live viewer.
   const stageHud = hudFor({
@@ -1028,6 +1076,7 @@ function Theatre({ api }: { api: ApiClient }) {
     pending,
     picture,
     viewer: true,
+    away: connection.phase === "away" ? connection : null,
   });
   const containedHud =
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
@@ -1078,16 +1127,17 @@ function Theatre({ api }: { api: ApiClient }) {
     offer: ownHold ? (site, failed) => void signIn.start(site, failed) : undefined,
   });
   const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
-  const now = useNowMs(
+  // The page reads the task's time again only when what it shows may change by itself; its timers
+  // count on their own (SessionNowContext).
+  const sessionTime = useNowMs(
     session.model,
     session.version,
-    (t) => {
-      if (!shownTask) return false;
-      const hud = taskHud(session.model, t, facts);
-      return hud.phase === "running" || hud.elapsedS !== null;
-    },
+    (t, latest) =>
+      shownTask ? nextChange(t, latest, [facts.retry?.atMs, longThinkAt(session.model)]) : null,
     session.clock,
   );
+  const now = sessionTime.now;
+  const stalled = useTaskStalled(agent, !replayId);
   const task = shownTask ? taskHud(session.model, now, facts) : null;
   const work = footWork(task);
   const foot =
@@ -1163,6 +1213,7 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   // From the moment a message is sent until the task's first word, dot is shown thinking.
   const [sendingSince, setSendingSince] = useState<number | null>(null);
+  const onSending = useCallback((on: boolean) => setSendingSince(on ? Date.now() : null), []);
   const sendingAnswered = baseStatus.row !== "ready" && baseStatus.row !== "done";
   useEffect(() => {
     if (sendingSince === null) return;
@@ -1238,7 +1289,7 @@ function Theatre({ api }: { api: ApiClient }) {
     (action): action is HudAction & { kind: HudActionKind } => action.kind !== "stop-task",
   );
   const onComputer = {
-    start: guardStart,
+    start: () => guardStart(),
     stop: guardComputerStop,
     resume: guardResume,
     retry,
@@ -1323,7 +1374,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const modelNext = modelChanged && taskWorking;
   const modelLabel =
     modelSaving?.name ?? (mainChoice ? names.name(mainChoice.provider, mainChoice.model) : "");
-  const chooseModel = async (option: ModelOption) => {
+  const chooseModel = useHandler(async (option: ModelOption) => {
     setModelSaving(option);
     const saved = await settings.chooseMain(option.choice);
     setModelSaving(null);
@@ -1341,18 +1392,70 @@ function Theatre({ api }: { api: ApiClient }) {
         ? `${option.name} starts with the next task.`
         : `dot uses ${option.name} from your next message.`,
     );
-  };
-  const modelMenu = {
-    groups: modelChoices,
-    choice: mainChoice,
-    outputLimit: (choice: import("@localdot/protocol").AgentRoleChoice) =>
-      providerIndex?.providers
-        .find((provider) => provider.id === choice.provider)
-        ?.models.find((model) => model.id === choice.model)?.maxOutputTokens ?? 4096,
-    current: modelSaving?.id ?? currentOption(settings.saved),
-    working: taskWorking,
-    onChoose: (option: ModelOption) => void chooseModel(option),
-  };
+  });
+  const currentModel = modelSaving?.id ?? currentOption(settings.saved);
+  const modelMenu = useMemo(
+    () => ({
+      groups: modelChoices,
+      choice: mainChoice,
+      outputLimit: (choice: import("@localdot/protocol").AgentRoleChoice) =>
+        providerIndex?.providers
+          .find((provider) => provider.id === choice.provider)
+          ?.models.find((model) => model.id === choice.model)?.maxOutputTokens ?? 4096,
+      current: currentModel,
+      working: taskWorking,
+      onChoose: (option: ModelOption) => void chooseModel(option),
+      usage: planUsage,
+    }),
+    [modelChoices, mainChoice, providerIndex, currentModel, taskWorking, chooseModel, planUsage],
+  );
+  // The composer's parts, kept from one render to the next so the composer draws only for its own.
+  const browseAccounts = useHandler(() => {
+    settings.browseAccounts();
+    planUsage.refresh();
+  });
+  const modelChip = useMemo(
+    () =>
+      mainChoice && (
+        <ModelChip
+          {...modelMenu}
+          name={modelLabel}
+          next={modelNext}
+          disabledReason={modelSaving ? "Saving…" : undefined}
+          onPeek={browseAccounts}
+          onManage={showModels}
+        />
+      ),
+    [mainChoice, modelMenu, modelLabel, modelNext, modelSaving, browseAccounts, showModels],
+  );
+  const permissionMode = settings.saved?.permissionMode ?? "custom";
+  const choosePermissions = useHandler((mode: typeof permissionMode) => {
+    void settings.choosePermissions(mode).then((saved) => {
+      if (!saved) showToast({ title: "Couldn't save permissions", tone: "danger" });
+    });
+  });
+  const permissionChip = useMemo(
+    () => (
+      <PermissionChip value={permissionMode} busy={settings.busy} onChoose={choosePermissions} />
+    ),
+    [permissionMode, settings.busy, choosePermissions],
+  );
+  const stoppable =
+    !!agent.sessionId &&
+    !agent.model.ended &&
+    agent.snapshot?.status !== "idle" &&
+    agent.snapshot?.status !== "ended";
+  const stopAction = useMemo(
+    () =>
+      stoppable
+        ? {
+            kind: "stop" as const,
+            run: taskStop,
+            disabledReason: stoppingRun ? "Stopping…" : undefined,
+          }
+        : undefined,
+    [stoppable, taskStop, stoppingRun],
+  );
   const wide = layout === "wide";
   const views: SegmentItem[] = [
     {
@@ -1367,8 +1470,20 @@ function Theatre({ api }: { api: ApiClient }) {
     if (replayId) selectReplay(null);
     setRailView("routines");
   };
+  // The servers dot starts in its computer, opened on the owner's devices from what it printed.
+  const previews = usePreviewsState(
+    api,
+    viewedConversation
+      ? (viewedConversation.sessions.at(-1) ?? viewedConversation.id)
+      : (agent.sessionId ?? conversation.sessions.at(-1) ?? null),
+    {
+      openSettings: (trigger) => showSettings(trigger, "computer"),
+      update: updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate,
+    },
+  );
   const activity = (
     <ActivityRail
+      previews={previews}
       cellId={viewedConversation ? undefined : cell?.id}
       releaseReady={
         !viewedConversation &&
@@ -1415,7 +1530,6 @@ function Theatre({ api }: { api: ApiClient }) {
       sessionId={(viewedConversation ? historySession : session).sessionId}
       scale={cell?.scale ?? 2}
       api={api}
-      nowMs={now}
       historyLoaded={(viewedConversation ? historyAgent : agent).history === true}
     />
   );
@@ -1483,6 +1597,10 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const attention = useAttention(api, openSession);
   useEffect(() => listenForSessionLinks(openSession), [openSession]);
+  useEffect(
+    () => listenForSettingsLinks(({ section, tip }) => goToSettings(null, section, tip)),
+    [goToSettings],
+  );
   const viewing = replayId === LIBRARY ? null : (replayId ?? agent.sessionId ?? null);
   useSeenReporting(api, attention.items, viewing);
   useAttentionToasts(attention.latest, { viewing, island: !replayId }, openSession);
@@ -1593,7 +1711,7 @@ function Theatre({ api }: { api: ApiClient }) {
         ? CONFIRMING_LINE
         : yours && phone
           ? PHONE_CONTROL_LINE
-          : !replayId && taskStalled(agent, performance.now())
+          : stalled
             ? SLOW_LINE
             : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
               ? narrationLine(
@@ -1623,7 +1741,9 @@ function Theatre({ api }: { api: ApiClient }) {
   const voice = VOICES[settings.saved?.persona ?? DEFAULT_PERSONA];
   const idle = useIdleLine({
     resting,
-    suspended: !!replayId || onboarding.open,
+    // The picture coming back, after Replay or a dropped stream, until the curtain has lifted off
+    // it, is no task: dot keeps its line for when the stage is back.
+    suspended: !!replayId || onboarding.open || pictureAway(appStatus.computer) || curtain.lifting,
     held: pageHidden || overBand || settings.open,
     voice,
     signals: {
@@ -1649,6 +1769,12 @@ function Theatre({ api }: { api: ApiClient }) {
     }
   };
   const tipAction = idle?.action;
+  // This task met locked saved keys (or its model's key is in them), and they are still locked.
+  const keysLockedHere =
+    vaultLocked(keys.health) &&
+    !!agent.sessionId &&
+    !agent.model.ended &&
+    (agent.model.keysLocked || agent.model.state?.reason === STALL.keysLocked);
   const bandLine = hearing ? LISTENING_LINE : idle ? idle.text : narration;
   const bandSpeaker = hearing || idle ? "dot" : speaker;
   const pendingQuestion = agent.model.pendingAsk
@@ -1703,993 +1829,1028 @@ function Theatre({ api }: { api: ApiClient }) {
         : (session.model.title ?? NEW_TITLE);
   const page = useRef<HTMLDivElement>(null);
   useViewportFit(page);
+  // The top bar's parts, kept from one render to the next so the bar draws only when they change.
+  const saved = settings.saved;
+  const brand = useMemo(
+    () =>
+      saved ? (
+        <LocalDotSwitcher
+          name={saved.name}
+          others={saved.localDots ?? NO_LINKS}
+          here={localDots}
+          onManage={(trigger) => goToSettings(trigger, "dot")}
+          onAddHere={(trigger) => goToSettings(trigger, "computer")}
+        />
+      ) : undefined,
+    [saved, localDots, goToSettings],
+  );
+  const chooseMode = useHandler((mode: "watch" | "replay") =>
+    selectReplay(mode === "watch" ? null : LIBRARY),
+  );
+  const chooseModeAgain = useHandler(() => {
+    if (playing) selectReplay(LIBRARY);
+  });
+  const openKeys = useHandler(() => showKeys(keysButton.current));
+  const toggleChat = useHandler(() =>
+    updatePanels({ chat: !chatVisible, ...(!chatVisible ? { view: "chat" } : {}) }),
+  );
+  const panelsToggle = useMemo(
+    () =>
+      !phone &&
+      !replayId && <ChatToggle buttonRef={panelsButton} chat={chatVisible} onChat={toggleChat} />,
+    [phone, replayId, chatVisible, toggleChat],
+  );
   return (
-    <div
-      ref={page}
-      className={appStatus.control && !replayId ? "app control" : "app"}
-      data-layout={layout}
-      data-screen-minimized={(!replayId && mobileScreen.minimized) || undefined}
-      data-chat-hidden={!chatVisible || undefined}
-      data-activity-hidden={wide || undefined}
-      data-replaying={replayId ? "" : undefined}
-      data-focus={focus ? "" : undefined}
-      data-full={full ? "" : undefined}
-      data-still={still ? "" : undefined}
-      data-keyboard={keyboard ? "" : undefined}
-      data-setup={onboarding.open ? "" : undefined}
-      data-entering={opening ? "" : undefined}
-    >
-      <TopBar
-        brand={
-          settings.saved ? (
-            <LocalDotSwitcher
-              name={settings.saved.name}
-              others={settings.saved.localDots ?? []}
-              onManage={(trigger) => goToSettings(trigger, "dot")}
-            />
-          ) : undefined
-        }
-        title={
-          replayId === LIBRARY
-            ? "Replay"
-            : replayId
-              ? (shownRecording?.title ?? RECORDED_TASK)
-              : watchTitle
-        }
-        note={
-          shownRecording?.note ??
-          (!replayId && agent.model.origin?.kind === "routine" ? "Routine" : undefined)
-        }
-        mode={replayId ? "replay" : "watch"}
-        watchAttention={
-          !!replayId &&
-          (appStatus.attention === "needs_you" ||
-            attention.items.some(
-              (item) => item.level === "needs_you" && item.sessionId === agent.sessionId,
-            ))
-        }
-        replayEnabled={hasRecordings}
-        onMode={(mode) => selectReplay(mode === "watch" ? null : LIBRARY)}
-        onModeAgain={() => {
-          if (playing) selectReplay(LIBRARY);
-        }}
-        keys={keysState}
-        keysOpen={settings.open && settingsAt.section === "keys"}
-        onKeys={() => showKeys(keysButton.current)}
-        keysRef={keysButton}
-        settingsOpen={settings.open}
-        onSettings={showSettings}
-        settingsRef={settingsButton}
-        more={barMore}
-        panels={
-          !phone &&
-          !replayId && (
-            <ChatToggle
-              buttonRef={panelsButton}
-              chat={chatVisible}
-              onChat={() =>
-                updatePanels({ chat: !chatVisible, ...(!chatVisible ? { view: "chat" } : {}) })
-              }
-            />
-          )
-        }
-      />
-      <div className="watch" hidden={!!replayId} inert={!!replayId}>
-        {mobileScreen.minimized && (
-          <div className="mobile-screen-restore">
-            <Button icon="monitor" onClick={() => mobileScreen.setMinimized(false)}>
-              Show screen
-            </Button>
-          </div>
-        )}
-        <main
-          ref={mobileScreen.ref}
-          className="stage-col"
-          aria-label="Computer"
-          inert={mobileScreen.minimized}
-        >
-          <ErrorBoundary>
-            <StageFrame
-              boxRef={stageBox}
-              onPictureDoubleClick={!phone && !yours ? fullScreen.enter : undefined}
-              light={appStatus.control ? "dot" : yours ? "you" : "none"}
-              live={
-                stageHud.live || stageHud.phase === "reconnecting" || stageHud.phase === "suspended"
-              }
-              frozen={!!stageHud.paused}
-              curtain={
-                <Presence show={curtain.up}>
-                  <Curtain
-                    phase={curtain.phase}
-                    runtimeProblem={runtime.problem}
-                    onRuntimeRetry={runtime.check}
-                    first={!cell && listed.length === 0}
-                    waking={pending === "start" || pending === "create"}
-                    updating={!!cell?.updating}
-                    caption={computer.caption}
-                    notice={error ?? stoppedOff(controls.stopStatus)}
-                    onReload={opening && openingSlow ? () => window.location.reload() : undefined}
-                    action={computerAction}
-                    onAction={() => computerAction && onComputer[computerAction.kind]()}
-                    replace={
-                      cell?.fenced
-                        ? {
-                            enabled: safety.canReplace,
-                            busy: safety.replacing,
-                            note: replacementNotice(safety.replacement, safety.error),
-                            run: () => void safety.replace(),
-                          }
-                        : undefined
-                    }
-                    freshStart={freshStart.curtain}
-                    operation={operation}
-                    ready={curtain.lifting}
-                    showDot={showDot.value}
-                  />
-                </Presence>
-              }
-              island={
-                <>
-                  <HudIsland
-                    ref={island}
-                    status={appStatus}
-                    shape={shape}
-                    badge={place === "badge"}
-                    pause={pause}
-                    take={takeState}
-                    handBack={handBack.slot}
-                    decline={handBack.declinable ? handBack.declineSlot : undefined}
-                    onPause={taskStop}
-                    onContinue={() => void safety.resume()}
-                    onStopTask={taskStop}
-                    onTake={take}
-                    onHandBack={() => void handBack.run()}
-                    onDecline={() => void handBack.decline()}
-                    onComputer={onComputer}
-                    decision={grown}
-                    full={full}
-                    onExitFull={fullScreen.exit}
-                    fields={askFields}
-                    noticesRef={toastAnchor}
-                    notices={<SafetyNotes safety={safety} agent={agent} visible={sheetsClosed} />}
-                  />
-                  <Toaster anchor={toastAnchor} />
-                  {/* A phone has no top bar: New conversation waits in the top corner, beside the
-                      island, whenever there is something to start afresh from. */}
-                  {phone && !newConversation.reason && (
-                    <span className="island-new">
-                      <NewConversationButton {...newConversation} />
-                    </span>
-                  )}
-                </>
-              }
-              band={
-                <>
-                  <NarratorBand
-                    line={focus && idle && !hearing ? narration : bandLine}
-                    speaker={focus && idle && !hearing ? speaker : bandSpeaker}
-                    reveal={!!asked && narration === asked}
-                    forUser={hearing || !atWork(appStatus.row)}
-                    showDot={showDot.value}
-                    idle={!hearing && !!idle}
-                    action={
-                      hearing || !tipAction
-                        ? undefined
-                        : {
-                            label: tipAction.label,
-                            run: (trigger) => openTip(tipAction, trigger),
-                          }
-                    }
-                    dot={
-                      settings.saved
-                        ? {
-                            label: `Change your dot, now ${personaOf(settings.saved.persona).name}`,
-                            open: choosingDot,
-                            onPress: (trigger) => {
-                              dotAnchor.current = trigger;
-                              setChoosingDot(true);
-                            },
-                          }
-                        : undefined
-                    }
-                    onHover={setOverBand}
-                  />
-                  <DotChooser
-                    open={choosingDot}
-                    anchor={dotAnchor}
-                    value={settings.saved?.persona ?? DEFAULT_PERSONA}
-                    onChange={(persona) => void settings.choosePersona(persona)}
-                    onClose={() => setChoosingDot(false)}
-                  />
-                  {full && !focus && (
-                    <div className="fullscreen-stream-controls">
-                      {yours && !phone && (
-                        <ControlStrip
-                          send={sendToComputer}
-                          blocked={inputBlocked}
-                          full
-                          onFullScreen={fullScreen.toggle}
-                        />
-                      )}
-                      <StreamMenu stream={streamChoice} display={displayControl} />
-                    </div>
-                  )}
-                  {yours && !phone && !full && (
-                    <ControlStrip
-                      send={sendToComputer}
-                      blocked={inputBlocked}
-                      full={full}
-                      onFullScreen={fullScreen.toggle}
-                    />
-                  )}
-                </>
-              }
-              side={
-                focus && (
-                  <FocusControls
-                    display={displayControl}
-                    stream={streamChoice}
-                    take={takeState}
-                    pause={shape === "task" ? pause : null}
-                    stop={appStatus.actions.find((action) => action.kind === "stop-task")}
-                    onTake={take}
-                    onPause={taskStop}
-                    onContinue={() => void safety.resume()}
-                    onStop={taskStop}
-                    onLeave={() => {
-                      leaveFocus();
-                      fullScreen.exit();
-                    }}
-                    tools={
-                      yours ? (
-                        <ControlTools
-                          compact
-                          send={sendToComputer}
-                          blocked={inputBlocked}
-                          typing={typing}
-                          onKeyboard={(on) => stage.current?.keyboard(on)}
-                          rightClick={pointerMode === "right"}
-                          onRightClick={(on) => setPointerMode(on ? "right" : "click")}
-                          handBack={handBack.slot}
-                          onHandBack={() => void handBack.run()}
-                          {...(handBack.declinable
-                            ? {
-                                decline: handBack.declineSlot,
-                                onDecline: () => void handBack.decline(),
-                              }
-                            : {})}
-                        />
-                      ) : undefined
-                    }
-                  />
-                )
-              }
-            >
-              <Stage
-                ref={stage}
-                mode={replayId ? "replay" : "live"}
-                dim={decision !== null}
-                fields={replayId ? undefined : askMarks}
-                cell={stageCell}
-                parentId={cell?.id}
-                selection={selectedScreen}
-                api={api}
-                reconnects={reconnects + browserScreen.reconnects}
-                listed={listed}
-                onPicture={setPicture}
-                manual={
-                  yours && manualGeometry && !agent.model.ended
-                    ? {
-                        enabled: manualLive,
-                        screen: manualGeometry,
-                        pointer: pointerMode,
-                        send: sendToComputer,
-                        onTyping: setTyping,
-                        onRefused: setPasteRefused,
-                      }
-                    : undefined
-                }
-              />
-              <WorkView
-                key={agent.sessionId ?? "empty"}
-                api={api}
-                sessionId={agent.sessionId ?? ""}
-                candidate={currentWork}
-                display={displayControl}
-                hideControls={full || focus}
-                restoring={opening || curtain.up}
-                enabled={
-                  !!agent.sessionId &&
-                  !replayId &&
-                  !takeover &&
-                  !agent.snapshot?.holder &&
-                  !agent.snapshot?.manualControl &&
-                  !decision &&
-                  !approval &&
-                  !question &&
-                  !curtain.up &&
-                  !mobileScreen.minimized &&
-                  !agent.model.safetyPaused?.paused &&
-                  !agent.model.budget &&
-                  !agent.model.retrying
-                }
-              />
-              {!yours && !full && !focus && stageHud.live && (
-                <StageExpand
-                  phone={phone}
-                  onEnter={fullScreen.enter}
-                  onMinimize={phone ? () => mobileScreen.setMinimized(true) : undefined}
-                />
-              )}
-            </StageFrame>
-          </ErrorBoundary>
-        </main>
-        {chatVisible && (wide || layout === "laptop") && (
-          <ResizeHandle
-            panel={CHAT_WIDTH}
-            property="--rail-w"
-            label="Conversation width"
-            className="rail-resize-chat"
-          />
-        )}
-        <RailPanel
-          label="Conversation"
-          className="rail-chat"
-          hidden={!chatVisible}
-          views={views}
-          view={shownView}
-          onView={(view) => setRailView(view as RailView)}
-          end={
-            !phone && (
-              <span className="rail-actions">
-                <ConversationsButton {...conversationList} />
-                <NewConversationButton {...newConversation} />
-              </span>
-            )
+    <SessionNowContext.Provider value={sessionTime.at}>
+      <div
+        ref={page}
+        className={appStatus.control && !replayId ? "app control" : "app"}
+        data-layout={layout}
+        data-screen-minimized={(!replayId && mobileScreen.minimized) || undefined}
+        // Replay's rail takes the chat's column whether or not Watch shows the chat.
+        data-chat-hidden={(!chatVisible && !replayId) || undefined}
+        data-activity-hidden={wide || undefined}
+        data-replaying={replayId ? "" : undefined}
+        data-focus={focus ? "" : undefined}
+        data-full={full ? "" : undefined}
+        data-still={still ? "" : undefined}
+        data-keyboard={keyboard ? "" : undefined}
+        data-setup={onboarding.open ? "" : undefined}
+        data-entering={opening ? "" : undefined}
+      >
+        <TopBar
+          brand={brand}
+          title={
+            replayId === LIBRARY
+              ? "Replay"
+              : replayId
+                ? (shownRecording?.title ?? RECORDED_TASK)
+                : watchTitle
           }
-        >
-          <ErrorBoundary>
-            <ChatThread
-              visible={shownView === "chat"}
-              suggestions={voice.suggestions}
-              agent={switching ? undefined : viewedConversation ? historyAgent : agent}
-              words={
-                switching
-                  ? undefined
-                  : viewedConversation
-                    ? historySession.agentFeed
-                    : session.agentFeed
-              }
-              api={api}
-              rows={viewedConversation ? historyRows : rows}
-              reveal={reveal}
-              names={names}
-              computerReady={cell?.state === "ready" && !cell.paused}
-              computerUpdating={!!cell?.updating}
-              live={!viewedConversation && foot && !session.ended ? { ...foot, nowMs: now } : null}
-              onReplay={
-                viewedConversation
-                  ? () => selectReplay(viewedConversation.id)
-                  : agent.sessionId && (agent.model.ended || task?.phase === "finished")
-                    ? () => selectReplay(agent.sessionId)
-                    : undefined
-              }
-              onReplayTask={selectReplay}
-              sessions={
-                switching ? NO_SESSIONS : (viewedConversation?.sessions ?? conversation.sessions)
-              }
-              more={!switching && conversation.more}
-              pending={
-                switching
-                  ? switching.to !== null
-                  : viewedConversation
-                    ? !historyAgent.history
-                    : threadPending
-              }
-              pinned={phone}
-              lead={
-                phone && (
-                  <IconButton
-                    className="toolbar-button"
-                    size={44}
-                    round
-                    icon="list"
-                    label="Activity"
-                    onClick={() => setActivityOpen(true)}
-                  />
-                )
-              }
-              trail={
-                phone && (
-                  <MoreMenu
-                    items={[
-                      {
-                        label: "New conversation",
-                        icon: "compose",
-                        disabledReason: newConversation.reason,
-                        run: newConversation.run,
-                      },
-                      {
-                        label: "Conversations",
-                        icon: "message-circle",
-                        run: () => setConversationsOpen(true),
-                      },
-                      {
-                        label: "Research a question",
-                        icon: "globe",
-                        disabledReason: researchWait(agent),
-                        run: requestResearch,
-                      },
-                      ...(mainChoice
-                        ? [
-                            {
-                              label: `${modelNext ? "Next task" : "Model"}: ${modelLabel}`,
-                              icon: "cpu" as const,
-                              disabledReason: modelSaving ? "Saving…" : undefined,
-                              run: (trigger: HTMLButtonElement) => {
-                                settings.browseAccounts();
-                                phoneModelsAnchor.current = trigger;
-                                setPhoneModels(true);
-                              },
-                            },
-                          ]
-                        : []),
-                      {
-                        label: "Replay",
-                        icon: "history",
-                        startsGroup: true,
-                        disabledReason: hasRecordings ? undefined : "No recordings yet",
-                        run: () => selectReplay(LIBRARY),
-                      },
-                      {
-                        label: "Routines",
-                        icon: "repeat",
-                        run: () => setRoutinesOpen(true),
-                      },
-                      {
-                        label: "Settings",
-                        icon: "settings",
-                        run: (trigger) => showSettings(trigger),
-                      },
-                      { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
-                      ...(settings.saved?.localDots ?? []).map((link, index) => ({
-                        label: `Switch to ${link.name}`,
-                        icon: "monitor" as const,
-                        startsGroup: index === 0,
-                        run: () => window.location.assign(link.url),
-                      })),
-                      {
-                        label: mobileScreen.minimized ? "Show screen" : "Minimize screen",
-                        icon: mobileScreen.minimized ? "monitor" : "chevron-up",
-                        run: () => mobileScreen.setMinimized(!mobileScreen.minimized),
-                      },
-                      {
-                        label: "Full screen",
-                        icon: "expand",
-                        disabledReason:
-                          curtain.up || replayId ? "Turn on your computer first" : undefined,
-                        run: () => {
-                          mobileScreen.setMinimized(false);
-                          fullScreen.enter();
-                        },
-                      },
-                      {
-                        label: "Stop everything",
-                        icon: "stop",
-                        startsGroup: true,
-                        disabledReason: stopAll.running ? "Stopping…" : undefined,
-                        run: () => void stopAll.run(),
-                      },
-                    ]}
-                  />
-                )
-              }
-              start={
-                setupDone === false ? (
-                  <FinishSetup
-                    steps={setup.steps}
-                    done={setup.done}
-                    onChooseModel={(event) => showSettings(event.currentTarget, "models")}
-                    onContinue={() => onboarding.reopen()}
-                  />
-                ) : undefined
-              }
-              covered={shownView !== "chat"}
-              cover={
-                !phone && (
+          note={
+            shownRecording?.note ??
+            (!replayId && agent.model.origin?.kind === "routine" ? "Routine" : undefined)
+          }
+          mode={replayId ? "replay" : "watch"}
+          watchAttention={
+            !!replayId &&
+            (appStatus.attention === "needs_you" ||
+              attention.items.some(
+                (item) => item.level === "needs_you" && item.sessionId === agent.sessionId,
+              ))
+          }
+          replayEnabled={hasRecordings}
+          onMode={chooseMode}
+          onModeAgain={chooseModeAgain}
+          keys={keysState}
+          keysOpen={settings.open && settingsAt.section === "keys"}
+          onKeys={openKeys}
+          keysRef={keysButton}
+          settingsOpen={settings.open}
+          onSettings={showSettings}
+          settingsRef={settingsButton}
+          more={barMore}
+          panels={panelsToggle}
+        />
+        <div className="watch" hidden={!!replayId} inert={!!replayId}>
+          {mobileScreen.minimized && (
+            <div className="mobile-screen-restore">
+              <Button icon="monitor" onClick={() => mobileScreen.setMinimized(false)}>
+                Show screen
+              </Button>
+            </div>
+          )}
+          <main
+            ref={mobileScreen.ref}
+            className="stage-col"
+            aria-label="Computer"
+            inert={mobileScreen.minimized}
+          >
+            <ErrorBoundary>
+              <StageFrame
+                boxRef={stageBox}
+                onPictureDoubleClick={!phone && !yours ? fullScreen.enter : undefined}
+                light={appStatus.control ? "dot" : yours ? "you" : "none"}
+                live={
+                  stageHud.live ||
+                  stageHud.phase === "reconnecting" ||
+                  stageHud.phase === "suspended"
+                }
+                frozen={!!stageHud.paused}
+                curtain={
+                  <Presence show={curtain.up}>
+                    <Curtain
+                      phase={curtain.phase}
+                      runtimeProblem={runtime.problem}
+                      onRuntimeRetry={runtime.check}
+                      first={!cell && listed.length === 0}
+                      waking={pending === "start" || pending === "create"}
+                      updating={!!cell?.updating}
+                      caption={computer.caption}
+                      notice={error ?? stoppedOff(controls.stopStatus)}
+                      onReload={opening && openingSlow ? () => window.location.reload() : undefined}
+                      action={computerAction}
+                      onAction={() => computerAction && onComputer[computerAction.kind]()}
+                      startAnyway={startAnyway ? () => guardStart(true) : undefined}
+                      replace={
+                        cell?.fenced
+                          ? {
+                              enabled: safety.canReplace,
+                              busy: safety.replacing,
+                              note: replacementNotice(safety.replacement, safety.error),
+                              run: () => void safety.replace(),
+                            }
+                          : undefined
+                      }
+                      freshStart={freshStart.curtain}
+                      operation={operation}
+                      ready={curtain.lifting}
+                      showDot={showDot.value}
+                    />
+                  </Presence>
+                }
+                island={
                   <>
-                    <div
-                      className="rail-cover-activity"
-                      data-shown={shownView === "activity" || undefined}
-                    >
-                      {activity}
-                    </div>
-                    <div
-                      className="rail-cover-routines"
-                      data-shown={shownView === "routines" || undefined}
-                    >
-                      <RoutinesPanel routines={routines} onOpen={openRoutine} onNew={newRoutine} />
-                    </div>
+                    <HudIsland
+                      ref={island}
+                      status={appStatus}
+                      shape={shape}
+                      badge={place === "badge"}
+                      pause={pause}
+                      take={takeState}
+                      handBack={handBack.slot}
+                      decline={handBack.declinable ? handBack.declineSlot : undefined}
+                      onPause={taskStop}
+                      onContinue={() => void safety.resume()}
+                      onStopTask={taskStop}
+                      onTake={take}
+                      onHandBack={() => void handBack.run()}
+                      onDecline={() => void handBack.decline()}
+                      onComputer={onComputer}
+                      decision={grown}
+                      full={full}
+                      onExitFull={fullScreen.exit}
+                      fields={askFields}
+                      noticesRef={toastAnchor}
+                      notices={<SafetyNotes safety={safety} agent={agent} visible={sheetsClosed} />}
+                    />
+                    <Toaster anchor={toastAnchor} />
+                    {/* A phone has no top bar: New conversation waits in the top corner, beside the
+                      island, whenever there is something to start afresh from. */}
+                    {phone && !newConversation.reason && (
+                      <span className="island-new">
+                        <NewConversationButton {...newConversation} />
+                      </span>
+                    )}
                   </>
-                )
-              }
-              tools={
-                phone &&
-                yours && (
-                  <ControlTools
-                    send={sendToComputer}
-                    blocked={inputBlocked}
-                    typing={typing}
-                    onKeyboard={(on) => stage.current?.keyboard(on)}
-                    rightClick={pointerMode === "right"}
-                    onRightClick={(on) => setPointerMode(on ? "right" : "click")}
-                    handBack={handBack.slot}
-                    onHandBack={() => void handBack.run()}
-                    onFullScreen={fullScreen.enter}
-                  />
-                )
-              }
-              recovery={
-                !switching &&
-                !viewedConversation && (
+                }
+                band={
                   <>
-                    {takeover && takeover.by !== "user" && (
-                      <div className="thread-handoff" role="status">
-                        <strong>{yours ? "Your turn" : "dot needs your help"}</strong>
-                        <p>
-                          {takeover.note ||
-                            "Complete the step on the computer, then choose Hand back."}
-                        </p>
+                    <NarratorBand
+                      line={focus && idle && !hearing ? narration : bandLine}
+                      speaker={focus && idle && !hearing ? speaker : bandSpeaker}
+                      reveal={!!asked && narration === asked}
+                      forUser={hearing || !atWork(appStatus.row)}
+                      showDot={showDot.value}
+                      idle={!hearing && !!idle}
+                      action={
+                        hearing || !tipAction
+                          ? undefined
+                          : {
+                              label: tipAction.label,
+                              run: (trigger) => openTip(tipAction, trigger),
+                            }
+                      }
+                      dot={
+                        settings.saved
+                          ? {
+                              label: `Change your dot, now ${personaOf(settings.saved.persona).name}`,
+                              open: choosingDot,
+                              onPress: (trigger) => {
+                                dotAnchor.current = trigger;
+                                setChoosingDot(true);
+                              },
+                            }
+                          : undefined
+                      }
+                      onHover={setOverBand}
+                    />
+                    <DotChooser
+                      open={choosingDot}
+                      anchor={dotAnchor}
+                      value={settings.saved?.persona ?? DEFAULT_PERSONA}
+                      onChange={(persona) => void settings.choosePersona(persona)}
+                      onClose={() => setChoosingDot(false)}
+                    />
+                    {full && !focus && (
+                      <div className="fullscreen-stream-controls">
+                        {yours && !phone && (
+                          <ControlStrip
+                            send={sendToComputer}
+                            blocked={inputBlocked}
+                            full
+                            onFullScreen={fullScreen.toggle}
+                          />
+                        )}
+                        <StreamMenu stream={streamChoice} display={displayControl} />
                       </div>
                     )}
-                    {yours &&
-                      agent.sessionId &&
-                      takeover &&
-                      selectedScreen?.screen === "browser" && (
-                        <BrowserSignIn
-                          api={api}
-                          sessionId={agent.sessionId}
-                          requestId={takeover.requestId}
+                    {yours && !phone && !full && (
+                      <ControlStrip
+                        send={sendToComputer}
+                        blocked={inputBlocked}
+                        full={full}
+                        onFullScreen={fullScreen.toggle}
+                      />
+                    )}
+                  </>
+                }
+                side={
+                  focus && (
+                    <FocusControls
+                      display={displayControl}
+                      stream={streamChoice}
+                      take={takeState}
+                      pause={shape === "task" ? pause : null}
+                      stop={appStatus.actions.find((action) => action.kind === "stop-task")}
+                      onTake={take}
+                      onPause={taskStop}
+                      onContinue={() => void safety.resume()}
+                      onStop={taskStop}
+                      onLeave={() => {
+                        leaveFocus();
+                        fullScreen.exit();
+                      }}
+                      tools={
+                        yours ? (
+                          <ControlTools
+                            compact
+                            send={sendToComputer}
+                            blocked={inputBlocked}
+                            typing={typing}
+                            onKeyboard={(on) => stage.current?.keyboard(on)}
+                            rightClick={pointerMode === "right"}
+                            onRightClick={(on) => setPointerMode(on ? "right" : "click")}
+                            handBack={handBack.slot}
+                            onHandBack={() => void handBack.run()}
+                            {...(handBack.declinable
+                              ? {
+                                  decline: handBack.declineSlot,
+                                  onDecline: () => void handBack.decline(),
+                                }
+                              : {})}
+                          />
+                        ) : undefined
+                      }
+                    />
+                  )
+                }
+              >
+                <Stage
+                  ref={stage}
+                  mode={replayId ? "replay" : "live"}
+                  dim={decision !== null}
+                  fields={replayId ? undefined : askMarks}
+                  cell={stageCell}
+                  parentId={cell?.id}
+                  selection={selectedScreen}
+                  api={api}
+                  reconnects={reconnects + browserScreen.reconnects}
+                  listed={listed}
+                  onPicture={onPicture}
+                  connection={connection}
+                  covered={(!replayId && mobileScreen.minimized) || (phone && settings.open)}
+                  manual={
+                    yours && manualGeometry && !agent.model.ended
+                      ? {
+                          enabled: manualLive,
+                          screen: manualGeometry,
+                          pointer: pointerMode,
+                          send: sendToComputer,
+                          onTyping: setTyping,
+                          onRefused: setPasteRefused,
+                        }
+                      : undefined
+                  }
+                />
+                <WorkView
+                  key={agent.sessionId ?? "empty"}
+                  api={api}
+                  sessionId={agent.sessionId ?? ""}
+                  candidate={currentWork}
+                  display={displayControl}
+                  hideControls={full || focus}
+                  restoring={opening || curtain.up}
+                  enabled={
+                    !!agent.sessionId &&
+                    !replayId &&
+                    !takeover &&
+                    !agent.snapshot?.holder &&
+                    !agent.snapshot?.manualControl &&
+                    !decision &&
+                    !approval &&
+                    !question &&
+                    !curtain.up &&
+                    !mobileScreen.minimized &&
+                    !agent.model.safetyPaused?.paused &&
+                    !agent.model.budget &&
+                    !agent.model.retrying
+                  }
+                />
+                {!yours && !full && !focus && stageHud.live && (
+                  <StageExpand
+                    phone={phone}
+                    onEnter={fullScreen.enter}
+                    onMinimize={phone ? () => mobileScreen.setMinimized(true) : undefined}
+                  />
+                )}
+              </StageFrame>
+            </ErrorBoundary>
+          </main>
+          {chatVisible && (wide || layout === "laptop") && (
+            <ResizeHandle
+              panel={CHAT_WIDTH}
+              property="--rail-w"
+              label="Conversation width"
+              className="rail-resize-chat"
+            />
+          )}
+          <RailPanel
+            label="Conversation"
+            className="rail-chat"
+            hidden={!chatVisible}
+            views={views}
+            view={shownView}
+            onView={(view) => setRailView(view as RailView)}
+            end={
+              !phone && (
+                <span className="rail-actions">
+                  <ConversationsButton {...conversationList} />
+                  <NewConversationButton {...newConversation} />
+                </span>
+              )
+            }
+          >
+            <ErrorBoundary>
+              <ChatThread
+                previews={previews}
+                visible={shownView === "chat"}
+                suggestions={voice.suggestions}
+                agent={switching ? undefined : viewedConversation ? historyAgent : agent}
+                words={
+                  switching
+                    ? undefined
+                    : viewedConversation
+                      ? historySession.agentFeed
+                      : session.agentFeed
+                }
+                api={api}
+                rows={viewedConversation ? historyRows : rows}
+                scale={cell?.scale ?? 2}
+                reveal={reveal}
+                names={names}
+                computerReady={cell?.state === "ready" && !cell.paused}
+                computerUpdating={!!cell?.updating}
+                live={!viewedConversation && foot && !session.ended ? foot : null}
+                onReplay={
+                  viewedConversation
+                    ? () => selectReplay(viewedConversation.id)
+                    : agent.sessionId && (agent.model.ended || task?.phase === "finished")
+                      ? () => selectReplay(agent.sessionId)
+                      : undefined
+                }
+                onReplayTask={selectReplay}
+                sessions={
+                  switching ? NO_SESSIONS : (viewedConversation?.sessions ?? conversation.sessions)
+                }
+                more={!switching && conversation.more}
+                withdrawn={conversation.withdrawn}
+                pending={
+                  switching
+                    ? switching.to !== null
+                    : viewedConversation
+                      ? !historyAgent.history
+                      : threadPending
+                }
+                pinned={phone}
+                lead={
+                  phone && (
+                    <IconButton
+                      className="toolbar-button"
+                      size={44}
+                      round
+                      icon="list"
+                      label="Activity"
+                      onClick={() => setActivityOpen(true)}
+                    />
+                  )
+                }
+                trail={
+                  phone && (
+                    <MoreMenu
+                      onOpen={localDots.refresh}
+                      items={[
+                        // The computer's controls take Activity's place in the toolbar.
+                        ...(yours
+                          ? [
+                              {
+                                label: "Activity",
+                                icon: "list" as const,
+                                run: () => setActivityOpen(true),
+                              },
+                            ]
+                          : []),
+                        {
+                          label: "New conversation",
+                          icon: "compose",
+                          disabledReason: newConversation.reason,
+                          run: newConversation.run,
+                        },
+                        {
+                          label: "Conversations",
+                          icon: "message-circle",
+                          run: () => setConversationsOpen(true),
+                        },
+                        {
+                          label: "Research a question",
+                          icon: "globe",
+                          disabledReason: researchWait(agent),
+                          run: requestResearch,
+                        },
+                        ...(mainChoice
+                          ? [
+                              {
+                                label: `${modelNext ? "Next task" : "Model"}: ${modelLabel}`,
+                                icon: "cpu" as const,
+                                disabledReason: modelSaving ? "Saving…" : undefined,
+                                run: (trigger: HTMLButtonElement) => {
+                                  settings.browseAccounts();
+                                  phoneModelsAnchor.current = trigger;
+                                  setPhoneModels(true);
+                                },
+                              },
+                            ]
+                          : []),
+                        {
+                          label: "Replay",
+                          icon: "history",
+                          startsGroup: true,
+                          disabledReason: hasRecordings ? undefined : "No recordings yet",
+                          run: () => selectReplay(LIBRARY),
+                        },
+                        {
+                          label: "Routines",
+                          icon: "repeat",
+                          run: () => setRoutinesOpen(true),
+                        },
+                        {
+                          label: "Settings",
+                          icon: "settings",
+                          run: (trigger) => showSettings(trigger),
+                        },
+                        { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
+                        ...(localDots.dots && localDots.dots.length > 1
+                          ? localDots.dots.filter((dot) => !dot.self)
+                          : []
+                        ).map((dot, index) => ({
+                          label: `Switch to ${dot.name}`,
+                          icon: "monitor" as const,
+                          startsGroup: index === 0,
+                          run: () => switchToDot(localDots, dot),
+                        })),
+                        ...(settings.saved?.localDots ?? []).map((link, index) => ({
+                          label: `Switch to ${link.name}`,
+                          icon: "monitor" as const,
+                          startsGroup: index === 0,
+                          run: () => window.location.assign(link.url),
+                        })),
+                        {
+                          label: mobileScreen.minimized ? "Show screen" : "Minimize screen",
+                          icon: mobileScreen.minimized ? "monitor" : "chevron-up",
+                          run: () => mobileScreen.setMinimized(!mobileScreen.minimized),
+                        },
+                        {
+                          label: "Full screen",
+                          icon: "expand",
+                          disabledReason:
+                            curtain.up || replayId ? "Turn on your computer first" : undefined,
+                          run: () => {
+                            mobileScreen.setMinimized(false);
+                            fullScreen.enter();
+                          },
+                        },
+                        {
+                          label: "Stop everything",
+                          icon: "stop",
+                          startsGroup: true,
+                          disabledReason: stopAll.running ? "Stopping…" : undefined,
+                          run: () => void stopAll.run(),
+                        },
+                      ]}
+                    />
+                  )
+                }
+                start={
+                  setupDone === false ? (
+                    <FinishSetup
+                      steps={setup.steps}
+                      done={setup.done}
+                      onChooseModel={(event) => showSettings(event.currentTarget, "models")}
+                      onContinue={() => onboarding.reopen()}
+                    />
+                  ) : undefined
+                }
+                covered={shownView !== "chat"}
+                cover={
+                  !phone && (
+                    <>
+                      <div
+                        className="rail-cover-activity"
+                        data-shown={shownView === "activity" || undefined}
+                      >
+                        <Held hidden={shownView !== "activity"}>{activity}</Held>
+                      </div>
+                      <div
+                        className="rail-cover-routines"
+                        data-shown={shownView === "routines" || undefined}
+                      >
+                        <Held hidden={shownView !== "routines"}>
+                          <RoutinesPanel
+                            routines={routines}
+                            onOpen={openRoutine}
+                            onNew={newRoutine}
+                          />
+                        </Held>
+                      </div>
+                    </>
+                  )
+                }
+                tools={
+                  phone &&
+                  yours && (
+                    <ControlTools
+                      send={sendToComputer}
+                      blocked={inputBlocked}
+                      typing={typing}
+                      onKeyboard={(on) => stage.current?.keyboard(on)}
+                      rightClick={pointerMode === "right"}
+                      onRightClick={(on) => setPointerMode(on ? "right" : "click")}
+                      handBack={handBack.slot}
+                      onHandBack={() => void handBack.run()}
+                      onFullScreen={fullScreen.enter}
+                    />
+                  )
+                }
+                recovery={
+                  !switching &&
+                  !viewedConversation && (
+                    <>
+                      {takeover && takeover.by !== "user" && (
+                        <div className="thread-handoff" role="status">
+                          <strong>{yours ? "Your turn" : "dot needs your help"}</strong>
+                          <p>
+                            {takeover.note ||
+                              "Complete the step on the computer, then choose Hand back."}
+                          </p>
+                        </div>
+                      )}
+                      {yours &&
+                        agent.sessionId &&
+                        takeover &&
+                        selectedScreen?.screen === "browser" && (
+                          <BrowserSignIn
+                            api={api}
+                            sessionId={agent.sessionId}
+                            requestId={takeover.requestId}
+                          />
+                        )}
+                      {keysLockedHere && keys.unlock ? (
+                        <KeysLockedCard
+                          setup={keys.health?.vault?.state === "setup"}
+                          unlock={keys.unlock}
+                          onOpenKeys={(trigger) => showSettings(trigger, "keys", "keys-unlock")}
+                        />
+                      ) : (
+                        <TaskRecovery
+                          agent={agent}
+                          controls={controls}
+                          onSettings={showSettings}
+                          onReenterKey={reenterKey}
+                          onContinue={continueTask}
+                          onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
+                          onResumeSelected={modelChanged && recoveryWait ? carryOn : undefined}
+                          resumeBlocked={modelSaving ? "Saving the selected model…" : undefined}
+                          onReport={report.start}
                         />
                       )}
-                    <TaskRecovery
-                      agent={agent}
-                      controls={controls}
-                      onSettings={showSettings}
-                      onReenterKey={reenterKey}
-                      onContinue={continueTask}
-                      onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
-                      onResumeSelected={modelChanged && recoveryWait ? carryOn : undefined}
-                      resumeBlocked={modelSaving ? "Saving the selected model…" : undefined}
-                    />
-                  </>
-                )
-              }
-              ask={switching || viewedConversation ? undefined : askThread}
-              composer={
-                viewedConversation ? (
-                  <div className="thread-recovery-actions">
-                    <Button variant="quiet" onClick={() => setViewedConversation(null)}>
-                      Back to current conversation
-                    </Button>
-                    {!yours && (
-                      <Button onClick={() => void choose(viewedConversation.id)}>
-                        Continue this conversation
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <Composer
-                    api={api}
-                    cell={cell}
-                    onSending={(on) => setSendingSince(on ? Date.now() : null)}
-                    known={status === "known"}
-                    pending={pending !== null}
-                    controlBlocked={
-                      controls.fenced ||
-                      controls.stopping ||
-                      !!cell?.fenced ||
-                      !!cell?.replacementPending ||
-                      !!safety.approval
-                    }
-                    agent={agent}
-                    keysOpen={settings.open}
-                    receiveKey={receiveKey}
-                    configured={setupDone}
-                    onSettings={(trigger) => showSettings(trigger, "models")}
-                    onTaskStarted={session.check}
-                    layout={phone ? "pill" : "card"}
-                    reply={askDraft ? replyAsk : undefined}
-                    modelChanged={modelChanged}
-                    permissions={
-                      <PermissionChip
-                        value={settings.saved?.permissionMode ?? "custom"}
-                        busy={settings.busy}
-                        onChoose={(mode) => {
-                          void settings.choosePermissions(mode).then((saved) => {
-                            if (!saved)
-                              showToast({ title: "Couldn't save permissions", tone: "danger" });
-                          });
-                        }}
-                      />
-                    }
-                    taskAction={
-                      agent.sessionId &&
-                      !agent.model.ended &&
-                      agent.snapshot?.status !== "idle" &&
-                      agent.snapshot?.status !== "ended"
-                        ? {
-                            kind: "stop",
-                            run: taskStop,
-                            disabledReason: stoppingRun ? "Stopping…" : undefined,
-                          }
-                        : undefined
-                    }
-                    model={
-                      mainChoice && (
-                        <ModelChip
-                          {...modelMenu}
-                          name={modelLabel}
-                          next={modelNext}
-                          disabledReason={modelSaving ? "Saving…" : undefined}
-                          onPeek={settings.browseAccounts}
-                          onManage={(trigger) => showSettings(trigger, "models")}
-                        />
-                      )
-                    }
-                  />
-                )
-              }
-            />
-            {phone && (
-              <ModelMenu
-                {...modelMenu}
-                open={phoneModels}
-                onClose={() => setPhoneModels(false)}
-                anchor={phoneModelsAnchor}
-                side="top"
-                align="end"
-                dim
-                onManage={(trigger) => showSettings(trigger, "models")}
-              />
-            )}
-          </ErrorBoundary>
-        </RailPanel>
-      </div>
-      {replayId && (
-        <ErrorBoundary className="replay-failed">
-          <ReplayView
-            api={api}
-            sessionId={playing}
-            onSelect={selectReplay}
-            backLabel={window.history.state?.fromWatch ? "Conversation" : "Replay"}
-            onLibrary={() => selectReplay(window.history.state?.fromWatch ? null : LIBRARY)}
-            onGoLive={() => selectReplay(null)}
-            onDeleted={(id) => {
-              deletedRecordings.current.add(id);
-              if (id === newestReplayId) setNewestReplayId(null);
-              historyOwner.current++;
-              setHistoryRevision(historyOwner.current);
-              if (id === replayId) selectReplay(LIBRARY, "replace");
-            }}
-            onTitle={setRecorded}
-            continueTask={replayContinue}
-            exportJob={exportJob}
-            hostExports={hostExports}
-            visible={!settings.open && !safety.approval}
-            showDot={showDot.value}
-          />
-        </ErrorBoundary>
-      )}
-      <ErrorBoundary floating>
-        <SettingsSheet
-          section={settingsAt.section}
-          sectionRequest={settingsAt.request}
-          appearance={appearance}
-          showDot={showDot}
-          persona={{
-            value: settings.draft?.persona ?? settings.saved?.persona ?? DEFAULT_PERSONA,
-            onChange: settings.changePersona,
-          }}
-          look={{
-            name: settings.draft?.name ?? settings.saved?.name ?? "",
-            accessory: settings.draft ? settings.draft.accessory : settings.saved?.accessory,
-            problem: settings.validation?.find((line) => line.startsWith("Name this localDot")),
-            onName: (name) => settings.changeLook({ name }),
-            onAccessory: (accessory) => settings.changeLook({ accessory }),
-            others: settings.draft?.localDots ?? settings.saved?.localDots ?? [],
-            onOthers: (localDots) => settings.changeLook({ localDots }),
-          }}
-          voice={{
-            prefs: voicePrefs.value,
-            saved: voicePrefs.saved,
-            change: voicePrefs.change,
-            route: voiceRoute(voiceSupport.support, voicePrefs.value.online, voiceLanguage),
-            browser: voiceBrowser,
-            downloading: voiceSupport.downloading,
-            download: voiceSupport.download,
-          }}
-          stopNote={stopNote}
-          stream={streamChoice}
-          stop={sheetStopControl}
-          stopAll={settingsStopAll}
-          startAtLogin={settingsLogin}
-          appUpdate={appUpdate}
-          remoteApi={api}
-          update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
-          freshStart={freshStart.available ? { ...freshStart, waitReason: updateWait } : undefined}
-          open={settings.open}
-          keysPanel={keysPanel}
-          choices={settings.draft?.choices ?? {}}
-          chatgpt={settings.chatgpt}
-          claudeCode={settings.claudeCode}
-          subscriptionModels={settings.subscriptionModels}
-          providers={settings.index?.providers ?? []}
-          keys={settings.index ? pickerKeys(settings.index) : []}
-          keyLayer={settings.index?.keyLayer ?? "unknown"}
-          catalog={
-            settings.phase === "refreshing" || settings.index?.catalog?.refreshing
-              ? "refreshing"
-              : settings.phase === "loading"
-                ? "loading"
-                : settings.phase === "error"
-                  ? "offline"
-                  : !settings.index?.catalog
-                    ? "empty"
-                    : settings.index.catalog.stale ||
-                        Date.now() - Date.parse(settings.index.catalog.fetchedAt) > 300_000
-                      ? "stale"
-                      : "ready"
-          }
-          catalogAt={settings.index?.catalog?.fetchedAt}
-          dirty={settings.dirty}
-          busy={settings.busy}
-          loading={settings.phase === "loading" || !settings.draft}
-          error={settings.error}
-          validation={settings.validation}
-          onClose={settings.close}
-          onChange={settings.change}
-          onKeys={(role, providerId, trigger) => {
-            const provider = providerById(providerId);
-            if (
-              !provider ||
-              provider.local ||
-              provider.availableIn ||
-              provider.notOffered ||
-              !settings.open ||
-              settings.busy ||
-              !LLM_PROVIDERS.some((kind) => kind === provider.keyd)
-            )
-              return;
-            const request = ++keyRequest.current;
-            keyCapture.current = { request, capture: settings.captureKey(role, providerId) };
-            setKeyPreset({
-              requestId: request,
-              provider: provider.keyd as (typeof LLM_PROVIDERS)[number],
-              ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
-            });
-            goToSettings(trigger, "keys");
-          }}
-          onRefresh={() => void settings.refresh()}
-          onReload={settings.reload}
-          save={{
-            enabled: settings.saveEnabled && settings.dirty,
-            run: settings.save,
-          }}
-          manualPrices={Object.fromEntries(
-            (["main", "fast", "local"] as const)
-              .filter(
-                (role) =>
-                  needsPrice(settings.draft?.choices[role], settings.index) &&
-                  (role === "main" ||
-                    !["chatgpt", "claude-code"].includes(
-                      settings.draft?.choices.main?.provider ?? "",
-                    )),
-              )
-              .map((role) => [role, settings.draft?.prices[role] ?? { input: "", output: "" }]),
-          )}
-          onPrice={settings.changePrice}
-          autonomy={settings.draft?.autonomy}
-          savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
-          onAutonomy={settings.changeAutonomy}
-          knowledge={settingsKnowledge}
-          known={whatDotKnows}
-          recentActivity={
-            settings.draft
-              ? { on: settings.draft.recentActivity, change: settings.recentActivity }
-              : undefined
-          }
-          onOpenTask={(id) => {
-            settings.close();
-            selectReplay(id);
-          }}
-          notifications={settingsNotifications}
-          accounts={settingsAccounts}
-          signIn={signIn}
-          connectors={settingsConnectors}
-          rules={rules}
-          spending={
-            settings.draft
-              ? { value: settings.draft.spending, change: settings.spending }
-              : undefined
-          }
-          checkIns={
-            settings.draft
-              ? { value: settings.draft.checkIns, change: settings.checkIn }
-              : undefined
-          }
-          research={
-            settings.draft
-              ? { value: settings.draft.research, change: settings.research }
-              : undefined
-          }
-          purposeCheck={
-            settings.draft
-              ? {
-                  on: settings.draft.purposeCheck,
-                  api,
-                  keyId: keys.keys
-                    .filter(isJevKey)
-                    .map((key) => key.id)
-                    .sort()[0],
-                  fullAccess: settings.saved?.permissionMode === "full",
-                  manageJevKey: (trigger) => goToSettings(trigger, "keys"),
-                  change: settings.purposeCheck,
-                  judge: purposeJudge(keys.keys.some(isJevKey), settings.draft.choices),
-                  ...(subscription(settings.draft.choices.main?.provider)
-                    ? { plan: settings.draft.choices.main?.provider }
-                    : {}),
-                  addJevKey: (trigger) => {
-                    keyCapture.current = null;
-                    setKeyPreset({ requestId: ++keyRequest.current, web: JEV_KEY });
-                    goToSettings(trigger, "keys");
-                  },
+                    </>
+                  )
                 }
-              : undefined
-          }
-          spent={agent.model.spend}
-          onSetup={() => {
-            settings.close();
-            onboarding.reopen("thinks");
-          }}
-        />
-      </ErrorBoundary>
-      {phone && (
+                ask={switching || viewedConversation ? undefined : askThread}
+                composer={
+                  viewedConversation ? (
+                    <div className="thread-recovery-actions">
+                      <Button variant="quiet" onClick={() => setViewedConversation(null)}>
+                        Back to current conversation
+                      </Button>
+                      {!yours && (
+                        <Button onClick={() => void choose(viewedConversation.id)}>
+                          Continue this conversation
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <Composer
+                      api={api}
+                      cell={cell}
+                      onSending={onSending}
+                      known={status === "known"}
+                      pending={pending !== null}
+                      controlBlocked={
+                        controls.fenced ||
+                        controls.stopping ||
+                        !!cell?.fenced ||
+                        !!cell?.replacementPending ||
+                        !!safety.approval
+                      }
+                      agent={agent}
+                      keysOpen={settings.open}
+                      receiveKey={receiveKey}
+                      configured={setupDone}
+                      onSettings={showModels}
+                      onTaskStarted={session.check}
+                      layout={phone ? "pill" : "card"}
+                      reply={askDraft ? replyAsk : undefined}
+                      modelChanged={modelChanged}
+                      permissions={permissionChip}
+                      taskAction={stopAction}
+                      model={modelChip}
+                    />
+                  )
+                }
+              />
+              {phone && (
+                <ModelMenu
+                  {...modelMenu}
+                  open={phoneModels}
+                  onClose={() => setPhoneModels(false)}
+                  anchor={phoneModelsAnchor}
+                  side="top"
+                  align="end"
+                  dim
+                  onManage={showModels}
+                />
+              )}
+            </ErrorBoundary>
+          </RailPanel>
+        </div>
+        {replayId && (
+          <ErrorBoundary className="replay-failed">
+            <ReplayView
+              api={api}
+              sessionId={playing}
+              onSelect={selectReplay}
+              backLabel={window.history.state?.fromWatch ? "Conversation" : "Replay"}
+              onLibrary={() => selectReplay(window.history.state?.fromWatch ? null : LIBRARY)}
+              onGoLive={() => selectReplay(null)}
+              onDeleted={(id) => {
+                deletedRecordings.current.add(id);
+                if (id === newestReplayId) setNewestReplayId(null);
+                historyOwner.current++;
+                setHistoryRevision(historyOwner.current);
+                if (id === replayId) selectReplay(LIBRARY, "replace");
+              }}
+              onTitle={setRecorded}
+              continueTask={replayContinue}
+              exportJob={exportJob}
+              hostExports={hostExports}
+              visible={!settings.open && !safety.approval}
+              showDot={showDot.value}
+            />
+          </ErrorBoundary>
+        )}
         <ErrorBoundary floating>
-          <DecisionSheetPresence
-            show={!!approvalView || askIn === "sheet"}
-            label={appStatus.label}
-            elapsedS={appStatus.elapsedS}
+          <Held hidden={!settings.open}>
+            <SettingsSheet
+              section={settingsAt.section}
+              sectionRequest={settingsAt.request}
+              tip={settingsAt.tip}
+              appearance={appearance}
+              showDot={showDot}
+              persona={{
+                value: settings.draft?.persona ?? settings.saved?.persona ?? DEFAULT_PERSONA,
+                onChange: settings.changePersona,
+              }}
+              look={{
+                name: settings.draft?.name ?? settings.saved?.name ?? "",
+                accessory: settings.draft ? settings.draft.accessory : settings.saved?.accessory,
+                problem: settings.validation?.find((line) => line.startsWith("Name this localDot")),
+                onName: (name) => settings.changeLook({ name }),
+                onAccessory: (accessory) => settings.changeLook({ accessory }),
+                others: settings.draft?.localDots ?? settings.saved?.localDots ?? [],
+                onOthers: (localDots) => settings.changeLook({ localDots }),
+              }}
+              voice={{
+                prefs: voicePrefs.value,
+                saved: voicePrefs.saved,
+                change: voicePrefs.change,
+                route: voiceRoute(voiceSupport.support, voicePrefs.value.online, voiceLanguage),
+                browser: voiceBrowser,
+                downloading: voiceSupport.downloading,
+                download: voiceSupport.download,
+              }}
+              stopNote={stopNote}
+              stream={streamChoice}
+              stop={sheetStopControl}
+              stopAll={settingsStopAll}
+              startAtLogin={settingsLogin}
+              appUpdate={appUpdate}
+              remoteApi={api}
+              dots={localDots}
+              report={report}
+              update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
+              freshStart={
+                freshStart.available ? { ...freshStart, waitReason: updateWait } : undefined
+              }
+              open={settings.open}
+              keysPanel={keysPanel}
+              choices={settings.draft?.choices ?? {}}
+              chatgpt={settings.chatgpt}
+              claudeCode={settings.claudeCode}
+              subscriptionModels={settings.subscriptionModels}
+              providers={settings.index?.providers ?? []}
+              keys={settings.index ? pickerKeys(settings.index) : []}
+              keyLayer={settings.index?.keyLayer ?? "unknown"}
+              catalog={
+                settings.phase === "refreshing" || settings.index?.catalog?.refreshing
+                  ? "refreshing"
+                  : settings.phase === "loading"
+                    ? "loading"
+                    : settings.phase === "error"
+                      ? "offline"
+                      : !settings.index?.catalog
+                        ? "empty"
+                        : settings.index.catalog.stale ||
+                            Date.now() - Date.parse(settings.index.catalog.fetchedAt) > 300_000
+                          ? "stale"
+                          : "ready"
+              }
+              catalogAt={settings.index?.catalog?.fetchedAt}
+              dirty={settings.dirty}
+              busy={settings.busy}
+              loading={settings.phase === "loading" || !settings.draft}
+              error={settings.error}
+              validation={settings.validation}
+              onClose={settings.close}
+              onChange={settings.change}
+              onKeys={(role, providerId, trigger) => {
+                const provider = providerById(providerId);
+                if (
+                  !provider ||
+                  provider.local ||
+                  provider.availableIn ||
+                  provider.notOffered ||
+                  !settings.open ||
+                  settings.busy ||
+                  !LLM_PROVIDERS.some((kind) => kind === provider.keyd)
+                )
+                  return;
+                const request = ++keyRequest.current;
+                keyCapture.current = { request, capture: settings.captureKey(role, providerId) };
+                setKeyPreset({
+                  requestId: request,
+                  provider: provider.keyd as (typeof LLM_PROVIDERS)[number],
+                  ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
+                });
+                goToSettings(trigger, "keys");
+              }}
+              onRefresh={() => void settings.refresh()}
+              onReload={settings.reload}
+              save={{
+                enabled: settings.saveEnabled && settings.dirty,
+                run: settings.save,
+              }}
+              manualPrices={Object.fromEntries(
+                (["main", "fast", "local"] as const)
+                  .filter(
+                    (role) =>
+                      needsPrice(settings.draft?.choices[role], settings.index) &&
+                      (role === "main" ||
+                        !["chatgpt", "claude-code"].includes(
+                          settings.draft?.choices.main?.provider ?? "",
+                        )),
+                  )
+                  .map((role) => [role, settings.draft?.prices[role] ?? { input: "", output: "" }]),
+              )}
+              onPrice={settings.changePrice}
+              autonomy={settings.draft?.autonomy}
+              savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
+              onAutonomy={settings.changeAutonomy}
+              knowledge={settingsKnowledge}
+              known={whatDotKnows}
+              recentActivity={
+                settings.draft
+                  ? { on: settings.draft.recentActivity, change: settings.recentActivity }
+                  : undefined
+              }
+              onOpenTask={(id) => {
+                settings.close();
+                selectReplay(id);
+              }}
+              notifications={settingsNotifications}
+              accounts={settingsAccounts}
+              browser={settingsBrowser}
+              signIn={signIn}
+              connectors={settingsConnectors}
+              rules={rules}
+              spending={
+                settings.draft
+                  ? { value: settings.draft.spending, change: settings.spending }
+                  : undefined
+              }
+              checkIns={
+                settings.draft
+                  ? { value: settings.draft.checkIns, change: settings.checkIn }
+                  : undefined
+              }
+              research={
+                settings.draft
+                  ? { value: settings.draft.research, change: settings.research }
+                  : undefined
+              }
+              purposeCheck={
+                settings.draft
+                  ? {
+                      on: settings.draft.purposeCheck,
+                      api,
+                      keyId: keys.keys
+                        .filter(isJevKey)
+                        .map((key) => key.id)
+                        .sort()[0],
+                      fullAccess: settings.saved?.permissionMode === "full",
+                      manageJevKey: (trigger) => goToSettings(trigger, "keys"),
+                      change: settings.purposeCheck,
+                      judge: purposeJudge(keys.keys.some(isJevKey), settings.draft.choices),
+                      ...(subscription(settings.draft.choices.main?.provider)
+                        ? { plan: settings.draft.choices.main?.provider }
+                        : {}),
+                      addJevKey: (trigger) => {
+                        keyCapture.current = null;
+                        setKeyPreset({ requestId: ++keyRequest.current, web: JEV_KEY });
+                        goToSettings(trigger, "keys");
+                      },
+                    }
+                  : undefined
+              }
+              spent={agent.model.spend}
+              onSetup={() => {
+                settings.close();
+                onboarding.reopen("thinks");
+              }}
+            />
+          </Held>
+        </ErrorBoundary>
+        {phone && (
+          <ErrorBoundary floating>
+            <DecisionSheetPresence
+              show={!!approvalView || askIn === "sheet"}
+              label={appStatus.label}
+              elapsedS={appStatus.elapsedS}
+              timer={appStatus.timer}
+            >
+              {approvalView || askOver("sheet")}
+            </DecisionSheetPresence>
+          </ErrorBoundary>
+        )}
+        {phone && (
+          <Sheet
+            open={routinesOpen}
+            onClose={() => setRoutinesOpen(false)}
+            title="Routines"
+            doneLabel="Done"
+            detents={ACTIVITY_DETENTS}
+            className="routines-sheet"
           >
-            {approvalView || askOver("sheet")}
-          </DecisionSheetPresence>
-        </ErrorBoundary>
-      )}
-      {phone && (
-        <Sheet
-          open={routinesOpen}
-          onClose={() => setRoutinesOpen(false)}
-          title="Routines"
-          doneLabel="Done"
-          detents={ACTIVITY_DETENTS}
-          className="routines-sheet"
-        >
-          <RoutinesPanel
-            routines={routines}
-            compact
-            onOpen={(routine, trigger) => {
-              setRoutinesOpen(false);
-              openRoutine(routine, trigger);
-            }}
-            onNew={(trigger) => {
-              setRoutinesOpen(false);
-              newRoutine(trigger);
-            }}
-          />
-        </Sheet>
-      )}
-      <ErrorBoundary floating>
-        <RoutineSheet
-          routines={routines}
-          target={routineTarget}
-          onClose={() => setRoutineTarget(null)}
-          onWatch={(sessionId) => {
-            setRoutineTarget(null);
-            selectReplay(sessionId);
-          }}
-          onAnswer={() => {
-            setRoutineTarget(null);
-            if (replayId) selectReplay(null);
-            setRailView("chat");
-          }}
-          returnFocus={routineOrigin}
-        />
-      </ErrorBoundary>
-      {phone && (
-        <Sheet
-          open={conversationsOpen}
-          onClose={() => setConversationsOpen(false)}
-          title="Conversations"
-          doneLabel="Done"
-          detents={LIST_DETENTS}
-          className="conversations-sheet"
-        >
-          <ConversationList
-            {...conversationList}
-            open={conversationsOpen}
-            onPick={(id, sessions) => {
-              setConversationsOpen(false);
-              conversationList.onPick(id, sessions);
-            }}
-            onReplay={() => {
-              setConversationsOpen(false);
-              conversationList.onReplay();
-            }}
-          />
-        </Sheet>
-      )}
-      {phone && (
-        <Sheet
-          open={activityOpen}
-          onClose={() => setActivityOpen(false)}
-          title="Activity"
-          className="activity-dialog"
-          doneLabel="Done"
-          flush
-          detents={ACTIVITY_DETENTS}
-        >
-          <div className="activity-sheet">{activity}</div>
-        </Sheet>
-      )}
-      <Presence show={onboarding.open}>
+            <RoutinesPanel
+              routines={routines}
+              compact
+              onOpen={(routine, trigger) => {
+                setRoutinesOpen(false);
+                openRoutine(routine, trigger);
+              }}
+              onNew={(trigger) => {
+                setRoutinesOpen(false);
+                newRoutine(trigger);
+              }}
+            />
+          </Sheet>
+        )}
         <ErrorBoundary floating>
-          <Onboarding
-            api={api}
-            control={onboarding}
-            phone={phone}
-            keys={keys}
-            index={settings.index}
-            modelsLoading={settings.phase === "loading" || settings.phase === "refreshing"}
-            onRefreshModels={settings.refreshModels}
-            onCheckModels={settings.checkModels}
-            saved={settings.saved}
-            onSaved={settings.reload}
-            turnOn={
-              computerAction && computerAction.kind !== "stop"
-                ? {
-                    run: () => onComputer[computerAction.kind](),
-                    reason: computerAction.enabled ? undefined : "Wait a moment",
-                  }
-                : null
-            }
-            showDot={showDot.value}
-          />
+          <Held hidden={!routineTarget}>
+            <RoutineSheet
+              routines={routines}
+              target={routineTarget}
+              onClose={() => setRoutineTarget(null)}
+              onWatch={(sessionId) => {
+                setRoutineTarget(null);
+                selectReplay(sessionId);
+              }}
+              onAnswer={() => {
+                setRoutineTarget(null);
+                if (replayId) selectReplay(null);
+                setRailView("chat");
+              }}
+              returnFocus={routineOrigin}
+            />
+          </Held>
         </ErrorBoundary>
-      </Presence>
-      {showDot.value && (
-        <ErrorBoundary quiet>
-          <PresenceLayer
-            place={mobileScreen.minimized && !replayId && !onboarding.open ? null : place}
-            feed={
-              onboarding.open
-                ? {
-                    state: STEP_DOT[setupStep],
-                    control: false,
-                    attention: false,
-                    focus: null,
-                    dispatched: null,
-                    done: false,
-                    nod: setupStep,
-                  }
-                : hearing
-                  ? { ...dotFeed(appStatus, null, now), state: "listening", tool: null }
-                  : dotFeed(appStatus, session.sessionId ? session.model : null, now)
-            }
-            line={onboarding.open || bandSpeaker !== "dot" || hearing ? "" : bandLine}
-          />
-        </ErrorBoundary>
-      )}
-      <Announcer />
-    </div>
+        {phone && (
+          <Sheet
+            open={conversationsOpen}
+            onClose={() => setConversationsOpen(false)}
+            title="Conversations"
+            doneLabel="Done"
+            detents={LIST_DETENTS}
+            className="conversations-sheet"
+          >
+            <ConversationList
+              {...conversationList}
+              open={conversationsOpen}
+              onPick={(id, sessions) => {
+                setConversationsOpen(false);
+                conversationList.onPick(id, sessions);
+              }}
+              onReplay={() => {
+                setConversationsOpen(false);
+                conversationList.onReplay();
+              }}
+            />
+          </Sheet>
+        )}
+        {phone && (
+          <Sheet
+            open={activityOpen}
+            onClose={() => setActivityOpen(false)}
+            title="Activity"
+            className="activity-dialog"
+            doneLabel="Done"
+            flush
+            detents={ACTIVITY_DETENTS}
+          >
+            <div className="activity-sheet">{activity}</div>
+          </Sheet>
+        )}
+        <Presence show={onboarding.open}>
+          <ErrorBoundary floating>
+            <Onboarding
+              api={api}
+              control={onboarding}
+              phone={phone}
+              keys={keys}
+              index={settings.index}
+              modelsLoading={settings.phase === "loading" || settings.phase === "refreshing"}
+              onRefreshModels={settings.refreshModels}
+              onCheckModels={settings.checkModels}
+              saved={settings.saved}
+              onSaved={settings.reload}
+              turnOn={
+                computerAction && computerAction.kind !== "stop"
+                  ? {
+                      run: () => onComputer[computerAction.kind](),
+                      reason: computerAction.enabled ? undefined : "Wait a moment",
+                    }
+                  : null
+              }
+              showDot={showDot.value}
+            />
+          </ErrorBoundary>
+        </Presence>
+        {showDot.value && (
+          <ErrorBoundary quiet>
+            <PresenceLayer
+              place={mobileScreen.minimized && !replayId && !onboarding.open ? null : place}
+              feed={
+                onboarding.open
+                  ? {
+                      state: STEP_DOT[setupStep],
+                      control: false,
+                      attention: false,
+                      focus: null,
+                      dispatched: null,
+                      done: false,
+                      nod: setupStep,
+                    }
+                  : hearing
+                    ? { ...dotFeed(appStatus, null, now), state: "listening", tool: null }
+                    : dotFeed(appStatus, session.sessionId ? session.model : null, now)
+              }
+              line={onboarding.open || bandSpeaker !== "dot" || hearing ? "" : bandLine}
+            />
+          </ErrorBoundary>
+        )}
+        <PreviewNotice previews={previews} />
+        <Announcer />
+      </div>
+    </SessionNowContext.Provider>
   );
 }

@@ -31,7 +31,7 @@ import { CopyButton } from "./CopyButton.tsx";
 import { cancelQueuedMessage, steerQueuedMessage } from "./control-api.ts";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
 import { HistoryPages } from "./HistoryPages.tsx";
-import { type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
+import { type LiveWork, LiveWorkLine, sameSteps } from "./LiveWorkLine.tsx";
 import type { AgentMessage, AgentResult, AgentWords } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
@@ -39,7 +39,6 @@ import { editQueued } from "./queued-draft.ts";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { StepPreviewScope } from "./StepPreview.tsx";
-import { showStep } from "./step-focus.ts";
 import { ThreadSkeleton } from "./ThreadSkeleton.tsx";
 import { TurnMeta } from "./TurnMeta.tsx";
 import {
@@ -49,7 +48,6 @@ import {
   type ThreadRow,
   threadRows,
   timeLabel,
-  type WorkStep,
 } from "./thread.ts";
 import { UserBubble } from "./UserBubble.tsx";
 import { useFollowScroll } from "./useFollowScroll.ts";
@@ -67,6 +65,7 @@ const FOOT_FROM = 480;
 const END_BELOW = 400;
 // A recovery card brought into view sits this far under the scroller's faded top edge.
 const REVEAL_MARGIN = 16;
+const NONE: readonly string[] = [];
 const itemKey = (item: ThreadItem) => item.key;
 
 // What the jump button says has arrived: one kind by its name, a mix as updates. Your answers are
@@ -193,30 +192,6 @@ const MessageCard = memo(function MessageCard({
 
 const endedOf = (item: WorkItem, thread: ThreadContext) =>
   item.key === thread.latestWork ? thread.ended : undefined;
-
-// A turn's steps are rebuilt with every event; they draw the same while what the line shows of
-// them is the same.
-function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean {
-  return (
-    was === now ||
-    (was.length === now.length &&
-      was.every((step, index) => {
-        const other = now[index];
-        return (
-          !!other &&
-          step.key === other.key &&
-          step.readGroup === other.readGroup &&
-          step.output === other.output &&
-          step.state === other.state &&
-          step.title === other.title &&
-          step.meta === other.meta &&
-          step.time === other.time &&
-          step.startT === other.startT &&
-          step.endT === other.endT
-        );
-      }))
-  );
-}
 
 function SteerMessage({
   messageId,
@@ -440,11 +415,12 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
         live={null}
         ended={endedOf(item, thread)}
         spend={item.spend}
-        onOpenStep={item.earlier ? undefined : showStep}
+        sessionId={item.sessionId}
       />
     ),
     same: (was, now, then, thread) =>
       was.startMs === now.startMs &&
+      was.sessionId === now.sessionId &&
       was.spend?.usd === now.spend?.usd &&
       was.spend?.estimated === now.spend?.estimated &&
       endedOf(was, then) === endedOf(now, thread) &&
@@ -519,6 +495,8 @@ export interface ConversationProps {
   earlier?: Pick<EarlierThread, "more" | "reading" | "older">;
   // The conversation goes back further than the thread shows.
   earlierInReplay?: boolean;
+  // Messages Stop left unsent that the user has taken back to edit, on any device.
+  withdrawn?: readonly string[];
   visible?: boolean;
   ownerKey?: string;
   // The latest turn's work while its task has not ended.
@@ -527,6 +505,8 @@ export interface ConversationProps {
   pendingAsk?: string | null;
   api?: ApiClient | null;
   sessionId?: string | null;
+  // The computer's display scale, for the screenshots a step unfolds.
+  scale?: number;
   recovery?: ReactNode;
   // Under the thread: the composer, always in its place, so a draft survives and nothing moves.
   composer?: ReactNode;
@@ -566,6 +546,7 @@ export function Conversation({
   loading = false,
   earlier,
   earlierInReplay = false,
+  withdrawn = NONE,
   visible = true,
   ownerKey = "",
   live = null,
@@ -573,6 +554,7 @@ export function Conversation({
   pendingAsk = null,
   api = null,
   sessionId = null,
+  scale,
   recovery,
   composer,
   ask,
@@ -596,11 +578,12 @@ export function Conversation({
   // turn is over it joins the thread as that turn's last row.
   const latestWork = items.findLast((item) => item.kind === "work") as WorkItem | undefined;
   const liveWork = live ? latestWork : undefined;
-  // Messages Stop left unsent that the user took back into the composer.
+  // Messages Stop left unsent that the user took back into the composer here; `withdrawn` names
+  // those taken back before, here or on another device.
   const [taken, setTaken] = useState<ReadonlySet<string>>(() => new Set());
   const takeBack = useCallback(
     (message: AgentMessage) =>
-      editQueued(message.sessionId ?? "", message.id, message.text)?.then((done) => {
+      editQueued(message.sessionId ?? "", message.id, true)?.then((done) => {
         if (done) setTaken((was) => new Set(was).add(message.id));
         return done;
       }) ?? null,
@@ -614,11 +597,12 @@ export function Conversation({
       !!item.message.queued &&
       !ended &&
       item.message.sessionId === sessionId;
+    const gone = (id: string) => taken.has(id) || withdrawn.includes(id);
     const kept = items.filter(
-      (item) => item !== liveWork && !(item.kind === "message" && taken.has(item.message.id)),
+      (item) => item !== liveWork && !(item.kind === "message" && gone(item.message.id)),
     );
     return [kept.filter((item) => !waits(item)), kept.filter(waits)];
-  }, [items, liveWork, ended, sessionId, taken]);
+  }, [items, liveWork, ended, sessionId, taken, withdrawn]);
   const lastLive = useRef<WorkItem | undefined>(undefined);
   if (liveWork) lastLive.current = liveWork;
   const footWork = liveWork ?? lastLive.current;
@@ -1156,7 +1140,6 @@ export function Conversation({
                 startMs={footWork.startMs}
                 live={liveWork ? live : null}
                 ended={ended}
-                onOpenStep={showStep}
               />
             )}
           </Collapse>
@@ -1174,7 +1157,7 @@ export function Conversation({
     </div>
   );
   return (
-    <StepPreviewScope api={api} sessionId={sessionId} results={results}>
+    <StepPreviewScope api={api} sessionId={sessionId} results={results} scale={scale}>
       {content}
     </StepPreviewScope>
   );

@@ -11,14 +11,17 @@ import type { ClaudeCodeControls } from "./useClaudeCode.ts";
 export function ClaudeCodePanel({
   claude,
   titled = true,
+  id,
 }: {
   claude: ClaudeCodeControls;
   titled?: boolean;
+  id?: string;
 }) {
   const status = claude.status;
   const ready = status?.state === "signed_in";
   return (
     <section
+      id={id}
       className="settings-claude-code"
       {...(titled ? { "aria-labelledby": "claude-code-title" } : { "aria-label": "Claude Code" })}
     >

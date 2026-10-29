@@ -1,5 +1,6 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Disclosure } from "../ui/Disclosure.tsx";
+import { afterMotion } from "../ui/finished.ts";
 import { type GlyphState, StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { markdownToPlain } from "./markdown.ts";
 import type { PlanPhase } from "./plan-state.ts";
@@ -76,6 +77,10 @@ export function PlanStrip({
   phase?: PlanPhase;
 }) {
   const [open, setOpen] = useState(false);
+  // Until the list has folded away again, the card stays lifted over the steps at its closed
+  // height, so closing moves them no more than opening does.
+  const [lifted, setLifted] = useState(false);
+  if (open && !lifted) setLifted(true);
   const [closedHeight, setClosedHeight] = useState(0);
   const card = useRef<HTMLDivElement>(null);
   const done = plan.filter((item) => item.status === "done").length;
@@ -95,18 +100,23 @@ export function PlanStrip({
       document.removeEventListener("keydown", dismiss);
     };
   }, [open]);
+  useEffect(() => {
+    if (open || !lifted) return;
+    return afterMotion([card.current], () => setLifted(false));
+  }, [open, lifted]);
   return (
     <div
       ref={card}
       className="plan-card"
-      style={open ? ({ "--_closed": `${closedHeight}px` } as CSSProperties) : undefined}
+      data-lifted={lifted || undefined}
+      style={lifted ? ({ "--_closed": `${closedHeight}px` } as CSSProperties) : undefined}
     >
       <Disclosure
         strip
         className="plan-strip"
         open={open}
         onOpenChange={(next) => {
-          if (next) setClosedHeight(card.current?.offsetHeight ?? 0);
+          if (next && !lifted) setClosedHeight(card.current?.getBoundingClientRect().height ?? 0);
           setOpen(next);
         }}
         summary={

@@ -135,3 +135,86 @@ to the computer or relax migration's protection for user-modified files.
 
 For this incident, both runtime files and their metadata were backed up, exact target hashes
 were verified, and only their ownership was corrected before retrying the normal updater.
+
+## Opening previews on the owner's devices
+
+A server dot starts in its computer can be opened on the owner's Mac and phone. A local address
+in dot's messages or in a command's output (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`, any
+`*.localhost` name, or the computer's own network address, any port) gets **Open preview**. The
+Activity panel's **Previews** tab lists every server listening in the computer, including ones that
+never printed an address, with **Open** and **Stop**. Stop ends the preview link; the server keeps
+running. Stored messages are never rewritten: the action is added when the text is shown.
+
+Previews open only over Tailscale: one HTTPS address that works the same on the Mac and the phone,
+on a site separate from this Mac's `localhost`. A preview never opens at `localhost:<port>`, which
+shares cookies with every other local server and reaches the LAN outside the key layer. Without
+Tailscale the app says so and points to **Settings › Your computer**. Previews are the owner's
+only; shared links cannot list, open or stop them.
+
+How a request travels:
+
+1. desktopd listens on 7701 (the preview forwarder). The daemon sends one line,
+   `LOCALDOT-PREVIEW/1 <desktopd token> OPEN <host>:<port>` or `... LIST`, and the forwarder
+   answers `OK` (and the listing for `LIST`) or `NO <reason>`, then carries the server's bytes.
+   `*.localhost` names and `localhost` dial both `127.0.0.1` and `::1`, since Vite and others bind
+   `::1` alone. The forwarder refuses localDot's own services (3000, 3001, 3129, 7700, 7701, 8082,
+   9222) and dials no address outside the computer. `LIST` reads listening sockets from
+   `/proc/net/tcp{,6}`, named by their program where desktopd can see it.
+2. The desktop's gate relays 8083 to desktop:7701 with its own bound of 64 connections
+   (`LD_PREVIEWS=1`), so long-lived hot-reload sockets never hold up control (8081) or the
+   stream (8082). Docker publishes it on the Mac's 127.0.0.1 like the other two.
+3. The daemon gives each preview a loopback port from its block (`LOCALDOT_PREVIEW_PORTS`,
+   default `4900-4915`; a port something else holds is skipped) and serves it there. One preview
+   is one origin, so absolute asset paths and hot reload work unchanged. The request reaches the
+   server as if sent to its own address: Host, Origin and Referer name it (Vite's `allowedHosts`
+   and Next.js's `allowedDevOrigins` pass), redirects to it come back to the preview's address,
+   and bodies are never rewritten. Only the tailnet fronts' names are accepted as Host (a page
+   that rebinds its own name to this Mac is refused), and a WebSocket must come from the
+   preview's own pages.
+4. Signing in: the link carries a one-use secret after `#`, valid for two minutes. The entry page
+   (`/__localdot/preview`, its own script, no inline code) posts it and receives an HttpOnly,
+   Secure, SameSite=Lax cookie named for that port. Every request needs it; every preview cookie
+   is removed before a request reaches a server, as are Tailscale's identity headers and
+   forwarding headers. A server cannot set those cookies, HSTS, Alt-Svc or Clear-Site-Data. When a
+   port served another server before, a device's first visit clears that origin's cache and
+   storage (`Clear-Site-Data: "cache", "storage"`), so an old service worker cannot answer.
+5. A preview ends on Stop, after two hours with no request or open socket, or when its computer
+   stops, freezes or is replaced. `https://` servers are reached over TLS without checking their
+   development certificate: the connection already ends at the computer's loopback.
+
+The address handed back depends on how the owner reached localDot. An HTTPS front set up by
+tailnet address (`LOCALDOT_PUBLIC_ORIGIN`, such as this Mac's `https://100.91.187.75:4744`) must
+also listen on the preview ports, same numbers on the same address, proxying each to
+`127.0.0.1:<port>`; when one is configured every preview uses it, and Tailscale Serve, which would
+take the same ports on the same address, is not used for them. Otherwise, while Tailscale Serve
+shares localDot, the daemon adds `tailscale serve --bg --https=<p> http://127.0.0.1:<p>` for each
+port it actually holds and removes it when the preview ends (and removes leftovers in its block
+before adding the first). See [remote access](remote-access.md#previews).
+
+A computer made before previews has no forwarder or no preview relay, so the Previews tab says
+**Update your computer to open previews** until desktopd answers on 7701. Computers update when
+the owner presses Update (desktop and gate images together).
+
+Not supported (open the page in the computer's own browser instead): pages that hard-code full
+`http://localhost:…` addresses of other ports, cookies set for `Domain=localhost`, and OAuth
+callbacks registered to localhost.
+
+### Checks
+
+- Unit: `pnpm exec vitest run packages/protocol/src/previews.test.ts apps/daemon/src/previews
+  cells/desktop/desktopd/src/preview-forwarder.test.ts cells/desktop/desktopd/src/connection-owner.test.ts`
+  (URL detection, the forwarder's line, refused ports and dialing, listing, allocation, the
+  sign-in and cookie flow, the Host allowlist, header rewrites, WebSocket passthrough, Tailscale
+  Serve through a stand-in CLI, states and expiry).
+- Docker, after building the desktop and gate images:
+
+  ```sh
+  LOCALDOT_DOCKER_TESTS=1 LOCALDOT_DESKTOP_IMAGE=localdot/desktop:dev \
+    LOCALDOT_GATE_IMAGE=localdot/gate:dev LOCALDOT_OLD_GATE_IMAGE=<a gate from before previews> \
+    pnpm exec vitest run --config vitest.docker.config.ts apps/daemon/src/previews/previews.docker.test.ts
+  ```
+
+  It runs a Vite-like server (modules, a redirect, a hot-reload socket that checks Host and
+  Origin) and a Portless-like HTTPS server with live updates inside a desktop behind its gate, and
+  opens both through the daemon's listener, 120 module requests at once included.
+- UI: `apps/web/e2e/ui/dev-previews.spec.ts` (see the UI harness README).

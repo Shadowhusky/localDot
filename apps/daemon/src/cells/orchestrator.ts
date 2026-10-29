@@ -8,6 +8,7 @@ import {
   ulid,
 } from "@localdot/protocol";
 import { ComputerResetRecord } from "../../../../packages/protocol/src/computer-reset.ts";
+import { computerCapacity } from "../dots/capacity.ts";
 import type { CellKeyd } from "../keyd/cell-wiring.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
 import type { ComputerUpdates } from "./computer-update.ts";
@@ -56,6 +57,10 @@ export interface OrchestratorDeps {
     remove(parentCellId: string, options?: { purgeProfile?: boolean }): Promise<void>;
     reservedKeydPorts?(): Iterable<number>;
   };
+  // A recovery left every browser closed because one could not be confirmed stopped; only a
+  // complete browser recovery (confirmBrowsers) reopens them.
+  browsersUnconfirmed?(): void;
+  browserStopRetryMs?: readonly number[];
   externalKeydPorts?(): Iterable<number>;
   permanentFence?(id: string): { revision: number } | boolean | undefined;
   // Independent reset ownership cannot be cleared by ordinary replacement publication.
@@ -66,7 +71,14 @@ export interface OrchestratorDeps {
   diagnosticAdmission?(id: string): { release(): void } | undefined;
   updates?: Pick<
     ComputerUpdates,
-    "available" | "needsFreshStart" | "pending" | "prepare" | "swap" | "recover" | "discard"
+    | "available"
+    | "blocked"
+    | "needsFreshStart"
+    | "pending"
+    | "prepare"
+    | "swap"
+    | "recover"
+    | "discard"
   >;
   diagnosticProbe?(
     endpoint: CellEndpoints["desktopd"],
@@ -113,6 +125,7 @@ export type CellApi = Pick<
 interface Ports {
   desktopd: number;
   stream: number;
+  preview?: number;
 }
 
 type OperationStart = BeginOptions & { kind: ComputerOperationKind };
@@ -137,7 +150,13 @@ interface UndoStep {
 }
 
 interface ContainerInspect {
-  State: { Running: boolean; Paused?: boolean; ExitCode: number; Error: string };
+  State: {
+    Running: boolean;
+    Paused?: boolean;
+    ExitCode: number;
+    Error: string;
+    OOMKilled?: boolean;
+  };
   NetworkSettings: {
     Ports: Record<string, { HostIp: string; HostPort: string }[] | null>;
     Networks: Record<string, unknown>;
@@ -161,6 +180,10 @@ class BrowserShutdownConflict extends CellControlConflict {
     super("browser shutdown could not be confirmed; retry Stop");
   }
 }
+
+// After a browser stop that could not be confirmed (keyd or Docker away), the waits before it is
+// tried again, the last one repeating.
+const BROWSER_STOP_RETRY_MS = [5000, 15_000, 30_000, 60_000] as const;
 
 export class UnknownCellError extends Error {
   constructor(readonly cellId: string) {
@@ -189,6 +212,7 @@ export function endpointsFor(record: CellRecord, ports: Ports): CellEndpoints {
   return {
     desktopd: { baseUrl: `http://127.0.0.1:${ports.desktopd}`, token: record.tokens.desktopd },
     stream: { baseUrl: `http://127.0.0.1:${ports.stream}`, authorization: `Basic ${basic}` },
+    ...(ports.preview ? { preview: { port: ports.preview, token: record.tokens.desktopd } } : {}),
   };
 }
 
@@ -208,6 +232,8 @@ export const UPDATE_RECORDS_UNREADABLE =
   "localDot can't read its update records. Restart localDot, then turn on your computer.";
 export const UPDATE_NEEDS_FRESH_START =
   "Your computer's update can't be finished. Start fresh to use it again.";
+export const UPDATE_BLOCKED =
+  "An installed app changed files this update needs, so it can't be applied automatically. Your computer is unchanged; you can keep using it. To get the new version, Start fresh in Settings; it erases your computer's files.";
 const UPDATE_UNDONE = "Your computer couldn't be updated. It's back as it was.";
 const UPDATE_STOPPED = "Your computer couldn't be updated. Turn it on to keep using it.";
 
@@ -267,7 +293,11 @@ export class CellOrchestrator {
   readonly #diagnostics = new Map<string, AbortController>();
   readonly #browserHolds = new Map<string, number>();
   readonly #browserStops = new Map<string, Promise<void>>();
-  readonly #browserFailures = new Set<string>();
+  // Each computer whose browser stop could not be confirmed, with the order of that failure.
+  readonly #browserFailures = new Map<string, number>();
+  #browserFailureSeq = 0;
+  readonly #browserStopRetries = new Map<string, ReturnType<typeof setTimeout>>();
+  readonly #browserStopAttempts = new Map<string, number>();
   // From an update's stop until its computer is ready again or fails.
   readonly #updating = new Set<string>();
   #browserRecoveries = 0;
@@ -343,6 +373,37 @@ export class CellOrchestrator {
     );
   }
 
+  // Why a ready computer's browser may not run: a stop of it, or a recovery, is under way, or one
+  // could not be confirmed and is being tried again.
+  browserPending(id: string): "stopping" | "unconfirmed" | undefined {
+    if (this.browserAvailable(id) || this.endpoints(id) === undefined) return undefined;
+    return this.#browserRecoveryFailed && this.#browserRecoveries === 0
+      ? "unconfirmed"
+      : this.#browserFailures.has(id) && !this.#browserStops.has(id)
+        ? "unconfirmed"
+        : "stopping";
+  }
+
+  // Start of a complete browser recovery: once it has confirmed every browser stopped, calling the
+  // returned function lifts the fences of earlier unconfirmed stops and recoveries. Any begun since
+  // stay until confirmed in their turn.
+  confirmBrowsers(): () => void {
+    const epoch = this.#browserRecoveryEpoch;
+    const seq = this.#browserFailureSeq;
+    return () => {
+      if (this.#disposed) return;
+      const lifted = [...this.#browserFailures].filter(([, failed]) => failed <= seq);
+      for (const [id] of lifted) this.#browserFailures.delete(id);
+      const recovered =
+        this.#browserRecoveryFailed &&
+        this.#browserRecoveries === 0 &&
+        epoch === this.#browserRecoveryEpoch;
+      if (recovered) this.#browserRecoveryFailed = false;
+      for (const id of recovered ? this.#live.keys() : lifted.map(([id]) => id))
+        if (this.#live.has(id)) this.#emit(id);
+    };
+  }
+
   // Only a ready cell's ports are its own: any other state may hold ports Docker has handed on.
   endpoints(id: string): CellEndpoints | undefined {
     const live = this.#live.get(id);
@@ -368,6 +429,8 @@ export class CellOrchestrator {
   dispose(): void {
     this.#disposed = true;
     for (const controller of this.#diagnostics.values()) controller.abort();
+    for (const timer of this.#browserStopRetries.values()) clearTimeout(timer);
+    this.#browserStopRetries.clear();
     for (const id of this.#live.keys()) void this.#stopBrowser(id).catch(() => {});
   }
 
@@ -393,7 +456,7 @@ export class CellOrchestrator {
       ...this.#candidateHolds,
       ...this.#browserHolds.keys(),
       ...this.#browserStops.keys(),
-      ...this.#browserFailures,
+      ...this.#browserFailures.keys(),
     ]))
       fence(id);
     try {
@@ -425,6 +488,8 @@ export class CellOrchestrator {
       // A discovery error must still wait for already-started browser containment.
       await Promise.allSettled(drains.values());
       this.#browserRecoveries--;
+      if (this.#browserRecoveryFailed && this.#browserRecoveries === 0 && !this.#disposed)
+        this.deps.browsersUnconfirmed?.();
     }
   }
 
@@ -798,9 +863,11 @@ export class CellOrchestrator {
         this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
       throw new CellControlConflict(
         back
-          ? error instanceof SystemMigrationConflict || error instanceof SystemBaseMissing
-            ? error.message
-            : refusal
+          ? error instanceof SystemMigrationConflict
+            ? UPDATE_BLOCKED
+            : error instanceof SystemBaseMissing
+              ? error.message
+              : refusal
           : UPDATE_STOPPED,
       );
     }
@@ -916,7 +983,8 @@ export class CellOrchestrator {
         };
         const ports = { desktopd: port(GATE_PORTS.desktopd), stream: port(GATE_PORTS.stream) };
         if (
-          JSON.stringify(ports) !== JSON.stringify(live.ports) ||
+          ports.desktopd !== live.ports?.desktopd ||
+          ports.stream !== live.ports.stream ||
           !(await this.#keyd?.isWired(record))
         )
           throw refused();
@@ -1536,14 +1604,44 @@ export class CellOrchestrator {
     void stop.then(
       () => {
         this.#browserFailures.delete(id);
+        this.#browserStopAttempts.delete(id);
         finish();
       },
       () => {
-        this.#browserFailures.add(id);
+        this.#browserFailures.set(id, ++this.#browserFailureSeq);
         finish();
+        this.#retryBrowserStop(id);
       },
     );
     return stop;
+  }
+
+  // A browser stop that could not be confirmed is tried again until it is, so that keyd or Docker
+  // being away for a moment doesn't keep the computer's browser closed for good.
+  #retryBrowserStop(id: string): void {
+    if (this.#disposed || this.#browserStopRetries.has(id)) return;
+    const delays = this.deps.browserStopRetryMs ?? BROWSER_STOP_RETRY_MS;
+    const attempt = this.#browserStopAttempts.get(id) ?? 0;
+    this.#browserStopAttempts.set(id, attempt + 1);
+    const timer = setTimeout(
+      () => {
+        this.#browserStopRetries.delete(id);
+        if (
+          this.#disposed ||
+          !this.#browserFailures.has(id) ||
+          this.#browserStops.has(id) ||
+          !this.#records.has(id)
+        )
+          return;
+        void this.#stopBrowser(id).then(
+          () => this.#emit(id),
+          () => {},
+        );
+      },
+      delays[Math.min(attempt, delays.length - 1)] ?? 60_000,
+    );
+    timer.unref?.();
+    this.#browserStopRetries.set(id, timer);
   }
 
   #withBrowser<T>(
@@ -1569,7 +1667,11 @@ export class CellOrchestrator {
     return operation.finally(() => {
       const count = (this.#browserHolds.get(id) ?? 1) - 1;
       if (count > 0) this.#browserHolds.set(id, count);
-      else this.#browserHolds.delete(id);
+      else {
+        this.#browserHolds.delete(id);
+        // A resumed or started computer's browser may start now, not at the next sweep.
+        this.#emit(id);
+      }
     });
   }
 
@@ -1609,6 +1711,15 @@ export class CellOrchestrator {
           gone: true,
         };
       }
+      if (info?.State.OOMKilled && !info.State.Running) {
+        // Several dots' computers share Docker's memory: say what to raise, when that is why.
+        const advice = await computerCapacity(this.#docker, record.id).catch(() => undefined);
+        return {
+          role,
+          detail: `${role} container ran out of memory${advice ? ` — ${advice}` : ""}`,
+          gone: false,
+        };
+      }
       if (info && !info.State.Running) {
         const reason = info.State.Error ? `: ${clamp(info.State.Error)}` : "";
         return {
@@ -1630,7 +1741,16 @@ export class CellOrchestrator {
       }
       return p;
     };
-    return { desktopd: port(GATE_PORTS.desktopd), stream: port(GATE_PORTS.stream) };
+    // A gate made before previews publishes no preview relay; its computer needs an update first.
+    const preview = info.NetworkSettings.Ports[GATE_PORTS.preview]?.[0];
+    const previewPort = Number(preview?.HostPort);
+    return {
+      desktopd: port(GATE_PORTS.desktopd),
+      stream: port(GATE_PORTS.stream),
+      ...(preview?.HostIp === "127.0.0.1" && Number.isInteger(previewPort) && previewPort > 0
+        ? { preview: previewPort }
+        : {}),
+    };
   }
 
   #inspect(name: string): Promise<ContainerInspect> {
@@ -2079,6 +2199,11 @@ export class CellOrchestrator {
       !this.#held(record.id) &&
       this.deps.updates?.available(record.id)
         ? { updateAvailable: true as const }
+        : {}),
+      ...(!this.#updating.has(record.id) &&
+      !this.#held(record.id) &&
+      this.deps.updates?.blocked(record.id)
+        ? { updateBlocked: true as const }
         : {}),
       ...(this.deps.runtimeHold?.(record.id)
         ? {

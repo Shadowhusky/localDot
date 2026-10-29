@@ -1,13 +1,21 @@
 import type { TaskModelSelection } from "@localdot/protocol";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useMemo, useRef } from "react";
 import { Conversation } from "../agent/Conversation.tsx";
 import { useEarlierThread } from "../agent/earlier.ts";
 import type { LiveWork } from "../agent/LiveWorkLine.tsx";
 import type { AgentWords, SpendCall } from "../agent/model.ts";
-import { type ModelRef, threadItems, type WorkStep, withWork, workSteps } from "../agent/thread.ts";
+import {
+  type ModelRef,
+  threadItems,
+  type WorkStep,
+  type WorkStepCache,
+  withWork,
+  workSteps,
+} from "../agent/thread.ts";
 import { billedPerCall } from "../agent/UsageFooter.tsx";
 import type { AgentSessionView } from "../agent/useAgentSession.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { type Previews, PreviewsScope } from "../previews/PreviewsContext.tsx";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import type { ModelNames } from "../settings/model-names.ts";
@@ -71,11 +79,14 @@ export function ChatThread({
   suggestions,
   sessions = NO_SESSIONS,
   more = false,
+  withdrawn,
   pending = false,
   start,
   reveal,
   words,
   names,
+  scale,
+  previews = null,
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
@@ -103,6 +114,8 @@ export function ChatThread({
   sessions?: readonly string[];
   // Older tasks of the conversation are left out of `sessions`.
   more?: boolean;
+  // Messages Stop left unsent that the user took back to edit.
+  withdrawn?: readonly string[];
   // Which conversation and task the thread shows is not known yet.
   pending?: boolean;
   // In place of the empty thread's suggestions.
@@ -112,11 +125,19 @@ export function ChatThread({
   // A streaming message's new words, which redraw only that message.
   words?: AgentWords;
   names?: ModelNames;
+  // The computer's display scale, for the screenshots a step unfolds.
+  scale?: number;
+  // The owner's previews of the servers dot starts; none for anyone else.
+  previews?: Previews | null;
 }) {
   const model = agent?.model;
   const ended = agent?.interrupted ? "interrupted" : model?.ended?.reason;
   const sessionId = agent?.sessionId ?? null;
-  const steps = useMemo<WorkStep[]>(() => (model ? workSteps(rows, model) : []), [rows, model]);
+  const built = useRef<WorkStepCache>(new Map());
+  const steps = useMemo<WorkStep[]>(
+    () => (model ? workSteps(rows, model, built.current) : []),
+    [rows, model],
+  );
   const items = useMemo(
     () =>
       model
@@ -151,7 +172,7 @@ export function ChatThread({
       ...thread,
     ];
   }, [before, thread]);
-  return (
+  const conversation = (
     <Conversation
       visible={visible}
       suggestions={suggestions}
@@ -161,11 +182,13 @@ export function ChatThread({
       loading={pending || earlier.opening}
       earlier={earlier}
       earlierInReplay={!!sessionId && more && !earlier.more}
+      withdrawn={withdrawn}
       live={working ? live : null}
       ended={ended}
       pendingAsk={model?.pendingAsk ?? null}
       api={api}
       sessionId={sessionId}
+      scale={scale}
       recovery={recovery}
       onReplay={onReplay}
       onReplayTask={onReplayTask}
@@ -185,4 +208,5 @@ export function ChatThread({
       names={names}
     />
   );
+  return <PreviewsScope value={previews}>{conversation}</PreviewsScope>;
 }

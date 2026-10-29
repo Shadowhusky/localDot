@@ -9,6 +9,7 @@ import {
   ModelRetry,
   ModelUsage,
   SubagentState,
+  SubagentStop,
   ThoughtDelta,
 } from "./events.ts";
 import { ULID_PATTERN } from "./ids.ts";
@@ -98,6 +99,23 @@ export type AgentLimits = z.infer<typeof AgentLimits>;
 
 export const DEFAULT_AGENT_LIMITS: AgentLimits = { maxRetries: 8 };
 
+// What a delegated agent was asked and had done, kept with its task so that a later task in the
+// conversation can hand the unfinished work to a fresh agent. A task keeps the newest few.
+export const MAX_SUBAGENT_BRIEFS = 16;
+export const SubagentBrief = z.strictObject({
+  id: z.string().min(1).max(128),
+  label: z.string().max(200),
+  instructions: z.string().max(3000),
+  progress: z.string().max(5000),
+});
+export type SubagentBrief = z.infer<typeof SubagentBrief>;
+// A delegated agent a stop interrupted, which the brain wakes as it continues the task.
+export const SubagentResume = SubagentBrief.extend({
+  runId: z.string().min(1).max(128),
+  reason: SubagentStop,
+});
+export type SubagentResume = z.infer<typeof SubagentResume>;
+
 export const BootConfig = z.object({
   sessionId: z.string().regex(ULID_PATTERN),
   task: z.string().min(1).max(8000),
@@ -130,6 +148,7 @@ export const BootConfig = z.object({
   research: ResearchBudget.optional(),
   // The chosen dot's instructions; absent for the everyday dot.
   role: z.string().min(1).max(2000).optional(),
+  subagents: z.array(SubagentResume).max(MAX_SUBAGENT_BRIEFS).optional(),
 });
 export type BootConfig = z.infer<typeof BootConfig>;
 
@@ -213,3 +232,4 @@ export const BrainEvent = z.discriminatedUnion("type", [
 export type BrainEvent = z.infer<typeof BrainEvent>;
 export const MAX_BRAIN_EVENTS = 256;
 export const BrainEvents = z.object({ events: z.array(BrainEvent).min(1).max(MAX_BRAIN_EVENTS) });
+export const BriefPost = z.strictObject({ brief: SubagentBrief });

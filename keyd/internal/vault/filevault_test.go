@@ -348,7 +348,7 @@ func TestRealSystemdCreds(t *testing.T) {
 	if os.Getenv("KEYD_SYSTEMD_CREDS_IT") != "1" {
 		t.Skip("needs systemd-creds (KEYD_SYSTEMD_CREDS_IT=1)")
 	}
-	creds := FindSystemdCreds(os.Getenv)
+	creds := FindSystemdCreds(os.Getenv, DefaultService)
 	if creds == nil {
 		t.Fatal("systemd-creds cannot wrap keys here")
 	}
@@ -357,7 +357,7 @@ func TestRealSystemdCreds(t *testing.T) {
 	if err := f.Put("weather", fakeValue, testBinding); err != nil {
 		t.Fatal(err)
 	}
-	reopened := fastFileVault(t, path, FindSystemdCreds(os.Getenv))
+	reopened := fastFileVault(t, path, FindSystemdCreds(os.Getenv, DefaultService))
 	if got, err := reopened.Get("weather", testBinding); err != nil || !bytes.Equal(got, fakeValue) {
 		t.Fatalf("read = %q, %v", got, err)
 	}
