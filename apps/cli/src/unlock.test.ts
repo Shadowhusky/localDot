@@ -72,10 +72,10 @@ const locked = (fingerprint?: string): KeydVault => ({
 const PASS = "correct horse battery staple";
 
 describe("localdot unlock", () => {
-  it("warns when the passphrase wasn't set with localdot unlock, and remembers one that works", async () => {
+  it("warns when the passphrase wasn't set with localDot, and remembers one that works", async () => {
     const elsewhere = harness(locked(MINE), [PASS], { chosen: null });
     expect(await elsewhere.run()).toBe(0);
-    expect(elsewhere.err.join(" ")).toContain("wasn't set with localdot unlock");
+    expect(elsewhere.err.join(" ")).toContain("wasn't set with localDot");
     expect(elsewhere.remembered()).toBe(MINE);
     const mine = harness(locked(MINE), [PASS]);
     expect(await mine.run()).toBe(0);
@@ -92,14 +92,14 @@ describe("localdot unlock", () => {
   it("warns about a vault made anew, though an earlier vault's passphrase was chosen here", async () => {
     const anew = harness(locked(ANEW), [PASS]);
     expect(await anew.run()).toBe(0);
-    expect(anew.err.join(" ")).toContain("wasn't set with localdot unlock");
+    expect(anew.err.join(" ")).toContain("wasn't set with localDot");
     expect(anew.remembered()).toBe(ANEW);
     const unnamed = harness(locked(), [PASS]);
     await unnamed.run();
-    expect(unnamed.err.join(" ")).toContain("wasn't set with localdot unlock");
+    expect(unnamed.err.join(" ")).toContain("wasn't set with localDot");
     const undated = harness(locked(MINE), [PASS], { chosen: "2026-10-09T12:00:00.000Z" });
     await undated.run();
-    expect(undated.err.join(" ")).toContain("wasn't set with localdot unlock");
+    expect(undated.err.join(" ")).toContain("wasn't set with localDot");
   });
 
   it("warns about an unlocked vault whose passphrase something else chose", async () => {
@@ -107,7 +107,7 @@ describe("localdot unlock", () => {
     const anew = harness({ ...ready, fingerprint: ANEW }, []);
     expect(await anew.run()).toBe(0);
     expect(anew.prompts).toHaveLength(0);
-    expect(anew.err.join(" ")).toContain("wasn't set with localdot unlock");
+    expect(anew.err.join(" ")).toContain("wasn't set with localDot");
     expect(anew.out).toEqual(["Your saved keys are already unlocked."]);
     expect(anew.remembered()).toBe(MINE);
     const mine = harness({ ...ready, fingerprint: MINE }, []);

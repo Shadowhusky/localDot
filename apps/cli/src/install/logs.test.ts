@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { displayLogLine, readServiceLogs, runLogs } from "./logs.ts";
+import { readServiceLogs, runLogs } from "./logs.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -137,23 +137,6 @@ it("reports missing files once while following and notices their later creation"
   expect((await readServiceLogs(f.home, next.cursors, true, signal(), first.owner)).lines).toEqual([
     "[daemon.log] created",
   ]);
-});
-it("escapes terminal/bidi controls and masks recognizable credential forms", () => {
-  const raw = `\u001b]52;c;clipboard\u0007 \u202ereverse Bearer private-value #code=code-value token="private token" sk-provider-private ld_abc_${"a".repeat(22)}_${"b".repeat(6)}`;
-  const output = displayLogLine(raw);
-  for (const value of [
-    "\u001b",
-    "\u0007",
-    "\u202e",
-    "private-value",
-    "code-value",
-    "private token",
-    "sk-provider-private",
-    `ld_abc_${"a".repeat(22)}`,
-  ])
-    expect(output).not.toContain(value);
-  expect(output).toContain("\\u001b");
-  expect(output).toContain("[redacted]");
 });
 it("runs follow until interrupted, with no further output after cancellation", async () => {
   const f = await fixture();

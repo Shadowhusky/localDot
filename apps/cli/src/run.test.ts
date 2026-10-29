@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { parsePort } from "../../daemon/src/port.ts";
-import { HELP, parseArgs } from "./args.ts";
+import { HELP, parseArgs, usageHint } from "./args.ts";
+import { CommandError } from "./local-dot.ts";
 import { runCli } from "./run.ts";
 import type { CommandContextInput } from "./runtime.ts";
 
@@ -18,13 +19,26 @@ function fixture(args: string[], env: NodeJS.ProcessEnv = {}) {
     startAtLogin: vi.fn(async () => 0),
     update: vi.fn(async () => 0),
     down: vi.fn(async () => 0),
+    restart: vi.fn(async () => 0),
+    status: vi.fn(async () => 0),
     logs: vi.fn(async () => 0),
     open: vi.fn(async () => 0),
+    link: vi.fn(async () => 0),
+    remote: vi.fn(async () => 0),
+    tailscale: vi.fn(async () => 0),
+    computer: vi.fn(async () => 0),
     stop: vi.fn(async () => 0),
     resetComputer: vi.fn(async () => 0),
     doctor: vi.fn(async () => 0),
     recover: vi.fn(async () => 0),
+    browser: vi.fn(async () => 0),
     unlock: vi.fn(async () => 0),
+    dots: vi.fn(async () => 0),
+    report: vi.fn(async () => 0),
+    dotEnvironment: vi.fn(async () => ({
+      LOCALDOT_HOME: "/private/work-home",
+      LOCALDOT_PORT: "5750",
+    })),
   };
   return {
     controller,
@@ -156,9 +170,14 @@ describe("operational CLI dispatch", () => {
       });
       expect(await f.run()).toBe(0);
       expect(f.runtime.logs).toHaveBeenCalledExactlyOnceWith(
-        { home: "/private/test-home", signal: f.controller.signal, follow },
+        expect.objectContaining({
+          home: "/private/test-home",
+          signal: f.controller.signal,
+          follow,
+        }),
         f.io,
       );
+      expect(f.runtime.context).not.toHaveBeenCalled();
       expect(parseArgs(["logs", "--file", "/private/elsewhere"])).toBeUndefined();
       expect(parseArgs(["logs", "--follow", "--follow"])).toBeUndefined();
     },
@@ -181,9 +200,10 @@ describe("operational CLI dispatch", () => {
     });
     expect(await f.run()).toBe(0);
     expect(f.runtime.up).toHaveBeenCalledExactlyOnceWith(
-      { home: "/private/test-home", signal: f.controller.signal },
+      expect.objectContaining({ home: "/private/test-home", signal: f.controller.signal }),
       f.io,
     );
+    expect(f.runtime.context).not.toHaveBeenCalled();
     expect(f.runtime.down).not.toHaveBeenCalled();
     expect(parseArgs(["up", "--force"])).toBeUndefined();
   });
@@ -195,9 +215,10 @@ describe("operational CLI dispatch", () => {
     });
     expect(await f.run()).toBe(0);
     expect(f.runtime.down).toHaveBeenCalledExactlyOnceWith(
-      { home: "/private/test-home", signal: f.controller.signal },
+      expect.objectContaining({ home: "/private/test-home", signal: f.controller.signal }),
       f.io,
     );
+    expect(f.runtime.context).not.toHaveBeenCalled();
     expect(f.runtime.stop).not.toHaveBeenCalled();
     expect(parseArgs(["down", "--force"])).toBeUndefined();
   });
@@ -289,7 +310,7 @@ describe("start at login commands", () => {
     const f = fixture(["up", "--at-login"], { LOCALDOT_HOME: "/private/test-home" });
     expect(await f.run()).toBe(0);
     expect(f.runtime.up).toHaveBeenCalledExactlyOnceWith(
-      { home: "/private/test-home", signal: f.controller.signal },
+      expect.objectContaining({ home: "/private/test-home", signal: f.controller.signal }),
       f.io,
       { atLogin: true },
     );
@@ -298,7 +319,7 @@ describe("start at login commands", () => {
     const f = fixture(["start-at-login", "status"], { LOCALDOT_HOME: "/private/test-home" });
     expect(await f.run()).toBe(0);
     expect(f.runtime.startAtLogin).toHaveBeenCalledExactlyOnceWith(
-      { home: "/private/test-home", signal: f.controller.signal },
+      expect.objectContaining({ home: "/private/test-home", signal: f.controller.signal }),
       "status",
       f.io,
     );
@@ -343,6 +364,48 @@ it("doctor requires an explicit fix flag before restarting anything", async () =
   expect(parseArgs(["doctor", "--fix", "--force"])).toBeUndefined();
 });
 
+describe("localdot browser", () => {
+  it("parses status and restart, optionally for one computer, and nothing looser", () => {
+    expect(parseArgs(["browser", "status"])).toEqual({ kind: "browser", operation: "status" });
+    expect(parseArgs(["browser", "restart", "--cell", cell])).toEqual({
+      kind: "browser",
+      operation: "restart",
+      cellId: cell,
+    });
+    expect(parseArgs(["browser", "restart", "--dot", "Work"])).toEqual({
+      kind: "browser",
+      operation: "restart",
+      dot: "Work",
+    });
+    for (const args of [
+      ["browser"],
+      ["browser", "stop"],
+      ["browser", "restart", "--cell"],
+      ["browser", "restart", "--cell", "not-a-computer"],
+      ["browser", "status", "--force"],
+    ])
+      expect(parseArgs(args)).toBeUndefined();
+    expect(HELP).toContain("localdot browser restart [--cell <id>]");
+  });
+
+  it("routes to the browser runtime with the daemon's port and the chosen computer", async () => {
+    const f = fixture(["browser", "restart", "--cell", cell], {
+      LOCALDOT_HOME: "/private/test-home",
+      LOCALDOT_PORT: "4850",
+    });
+    expect(await f.run()).toBe(0);
+    expect(f.runtime.browser).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        home: "/private/test-home",
+        port: 4850,
+        operation: "restart",
+        cellId: cell,
+      }),
+      f.io,
+    );
+  });
+});
+
 it("requires an exact computer identity and explicit native exit confirmation", () => {
   const id = "01M4PT514STKGMY0HC4Y0AGQCY";
   expect(parseArgs(["recover", "--cell", id])).toEqual({ kind: "recover", cellId: id });
@@ -358,4 +421,251 @@ it("requires an exact computer identity and explicit native exit confirmation", 
     ["recover", "--cell", id, "--confirm-native-exit", "extra"],
   ])
     expect(parseArgs(args)).toBeUndefined();
+});
+
+describe("several dots", () => {
+  it("parses the dots commands and refuses anything looser", () => {
+    expect(parseArgs(["dots", "list"])).toEqual({ kind: "dots", dots: { operation: "list" } });
+    expect(parseArgs(["dots", "add", "Work"])).toEqual({
+      kind: "dots",
+      dots: {
+        operation: "add",
+        name: "Work",
+        copy: ["settings", "keys", "memory", "skills", "connectors"],
+      },
+    });
+    expect(
+      parseArgs([
+        "dots",
+        "add",
+        "Home Mac",
+        "--from",
+        "work",
+        "--copy",
+        "keys,conversations,keys",
+        "--home",
+        "/data/home",
+        "--json",
+      ]),
+    ).toEqual({
+      kind: "dots",
+      dots: {
+        operation: "add",
+        name: "Home Mac",
+        from: "work",
+        copy: ["keys", "conversations"],
+        home: "/data/home",
+        json: true,
+      },
+    });
+    expect(parseArgs(["dots", "add", "Work", "--copy", "none"])).toMatchObject({
+      dots: { copy: [] },
+    });
+    expect(parseArgs(["dots", "remove", "work", "--delete-data"])).toEqual({
+      kind: "dots",
+      dots: { operation: "remove", dot: "work", deleteData: true },
+    });
+    expect(parseArgs(["dots", "login", "off"])).toEqual({
+      kind: "dots",
+      dots: { operation: "login", on: false },
+    });
+    for (const args of [
+      ["dots"],
+      ["dots", "add"],
+      ["dots", "add", "x".repeat(41)],
+      ["dots", "add", "a\nb"],
+      ["dots", "add", "Work", "--copy", "keys,tokens"],
+      ["dots", "add", "Work", "--from"],
+      ["dots", "add", "Work", "--from", "a", "--from", "b"],
+      ["dots", "add", "Work", "--token", "secret"],
+      ["dots", "remove", "work", "--force"],
+      ["dots", "env", "work", "--json"],
+      ["dots", "login", "maybe"],
+    ])
+      expect(parseArgs(args), args.join(" ")).toBeUndefined();
+  });
+
+  it("takes --dot only on the commands that act on one dot", () => {
+    expect(parseArgs(["doctor", "--fix", "--dot", "work"])).toEqual({
+      kind: "doctor",
+      fix: true,
+      dot: "work",
+    });
+    expect(parseArgs(["open", "--qr", "--dot", "Home Mac"])).toEqual({
+      kind: "open",
+      qr: true,
+      dot: "Home Mac",
+    });
+    for (const args of [
+      ["update", "--dot", "work"],
+      ["stop", "--all", "--dot", "work"],
+      ["up", "--at-login", "--dot", "work"],
+      ["doctor", "--dot", ""],
+    ])
+      expect(parseArgs(args), args.join(" ")).toBeUndefined();
+  });
+
+  it("runs dots commands and points a command at the chosen dot", async () => {
+    const add = fixture(["dots", "add", "Work"], { LOCALDOT_HOME: "/private/main" });
+    expect(await add.run()).toBe(0);
+    expect(add.runtime.dots).toHaveBeenCalledWith(
+      expect.objectContaining({ home: "/private/main" }),
+      expect.objectContaining({ operation: "add", name: "Work" }),
+      add.io,
+    );
+    const up = fixture(["up", "--dot", "work"]);
+    expect(await up.run()).toBe(0);
+    expect(up.runtime.dots).toHaveBeenCalledWith(
+      expect.anything(),
+      { operation: "start", dot: "work" },
+      up.io,
+    );
+    expect(up.runtime.up).not.toHaveBeenCalled();
+    const doctor = fixture(["doctor", "--dot", "work"], { LOCALDOT_HOME: "/private/main" });
+    expect(await doctor.run()).toBe(0);
+    expect(doctor.runtime.context).toHaveBeenCalledWith(
+      expect.objectContaining({
+        home: "/private/work-home",
+        env: expect.objectContaining({ LOCALDOT_PORT: "5750" }),
+      }),
+    );
+    expect(HELP).toContain("localdot dots add <name>");
+  });
+});
+
+describe("restart, status, links and computers", () => {
+  it.each([
+    [["restart"], { kind: "restart" }],
+    [["status"], { kind: "status" }],
+    [["status", "--json"], { kind: "status", json: true }],
+    [["link"], { kind: "link" }],
+    [["link", "remote", "--qr"], { kind: "link", only: "remote", qr: true }],
+    [["link", "--json", "network"], { kind: "link", only: "network", json: true }],
+    [["link", "local"], { kind: "link", only: "local" }],
+    [["remote", "on"], { kind: "remote", operation: "on" }],
+    [["remote", "status", "--json"], { kind: "remote", operation: "status", json: true }],
+    [["tailscale", "on"], { kind: "tailscale", operation: "on" }],
+    [["computer", "list", "--json"], { kind: "computer", operation: "list", json: true }],
+    [["computer", "restart"], { kind: "computer", operation: "restart" }],
+    [
+      ["computer", "resume", "--cell", cell],
+      { kind: "computer", operation: "resume", cellId: cell },
+    ],
+    [["restart", "--dot", "work"], { kind: "restart", dot: "work" }],
+    [
+      ["link", "remote", "--qr", "--dot", "Home Mac"],
+      { kind: "link", only: "remote", qr: true, dot: "Home Mac" },
+    ],
+  ])("parses %j", (args, command) => {
+    expect(parseArgs(args)).toEqual(command);
+  });
+
+  it.each([
+    [["restart", "--force"]],
+    [["status", "--json", "--json"]],
+    [["link", "local", "--qr"]],
+    [["link", "--qr", "--json"]],
+    [["link", "local", "remote"]],
+    [["link", "https://example.com/#code=private-value"]],
+    [["remote"]],
+    [["remote", "on", "--json"]],
+    [["remote", "token", "private-value"]],
+    [["tailscale", "off"]],
+    [["computer"]],
+    [["computer", "list", "--cell", cell]],
+    [["computer", "stop", "--cell", "../bad"]],
+    [["computer", "start", "--cell", cell, "--cell", cell]],
+    [["computer", "delete", "--cell", cell]],
+  ])("refuses %j", (args) => {
+    expect(parseArgs(args)).toBeUndefined();
+  });
+
+  it("dispatches each new command with this dot's home and settings, without the daemon context", async () => {
+    const env = { LOCALDOT_HOME: "/private/test-home", LOCALDOT_PORT: "4891" };
+    const cases = [
+      [["restart"], "restart", []],
+      [["status", "--json"], "status", [{ json: true, version: "1.2.3" }]],
+      [["link", "remote", "--qr"], "link", [{ only: "remote", qr: true, json: false }]],
+      [["remote", "off"], "remote", [{ operation: "off", json: false }]],
+      [["tailscale", "status"], "tailscale", ["status"]],
+      [
+        ["computer", "stop", "--cell", cell],
+        "computer",
+        [{ operation: "stop", cellId: cell, json: false }],
+      ],
+    ] as const;
+    for (const [args, name, rest] of cases) {
+      const f = fixture([...args], env);
+      expect(await f.run()).toBe(0);
+      expect(f.runtime[name]).toHaveBeenCalledExactlyOnceWith(
+        { home: "/private/test-home", env, signal: f.controller.signal },
+        f.io,
+        ...rest,
+      );
+      expect(f.runtime.context).not.toHaveBeenCalled();
+    }
+  });
+
+  it("points restart and link at the chosen dot", async () => {
+    const f = fixture(["restart", "--dot", "work"], { LOCALDOT_HOME: "/private/main" });
+    expect(await f.run()).toBe(0);
+    expect(f.runtime.restart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        home: "/private/work-home",
+        env: expect.objectContaining({ LOCALDOT_PORT: "5750" }),
+      }),
+      f.io,
+    );
+    expect(f.runtime.dots).not.toHaveBeenCalled();
+  });
+
+  it("prints a failure's own next step and exits 1", async () => {
+    const f = fixture(["restart"]);
+    f.runtime.restart.mockRejectedValue(
+      new CommandError("Port 4750 is in use by python3 (process 7)."),
+    );
+    expect(await f.run()).toBe(1);
+    expect(f.io.err).toHaveBeenCalledWith("Port 4750 is in use by python3 (process 7).");
+  });
+
+  it("exits 2 with the mistyped command's usage, never echoing its arguments", async () => {
+    const f = fixture(["link", "token", "private-value"]);
+    expect(await f.run()).toBe(2);
+    const message = f.io.err.mock.calls.join("\n");
+    expect(message).toContain("Usage:\n  localdot link [local|network|remote] [--qr | --json]");
+    expect(message).not.toContain("private-value");
+    const unknown = fixture(["private-value"]);
+    expect(await unknown.run()).toBe(2);
+    expect(unknown.io.err).toHaveBeenCalledWith("Invalid command. Run localdot --help for usage.");
+    expect(usageHint(["computer", "x"])).toBe(
+      [
+        "Usage:",
+        "  localdot computer list [--json]",
+        "  localdot computer start|stop|restart|resume [--cell <id>]",
+      ].join("\n"),
+    );
+  });
+
+  it("organizes the help by section and lists every command", () => {
+    for (const section of [
+      "Start and stop:",
+      "Sign in:",
+      "Computers and tasks:",
+      "Troubleshooting:",
+      "Several dots:",
+    ])
+      expect(HELP).toContain(`\n${section}\n`);
+    for (const command of [
+      "localdot restart",
+      "localdot status [--json]",
+      "localdot link [local|network|remote] [--qr | --json]",
+      "localdot remote on|off|status [--json]",
+      "localdot tailscale on|status",
+      "localdot computer start|stop|restart|resume [--cell <id>]",
+      "localdot report [--message <text>] [--yes] [--dry-run] [--json]",
+      "localdot report delete <id>",
+    ])
+      expect(HELP).toContain(`  ${command}`);
+    expect(Math.max(...HELP.split("\n").map((line) => line.length))).toBeLessThanOrEqual(100);
+  });
 });

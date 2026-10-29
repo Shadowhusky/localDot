@@ -1,40 +1,24 @@
-import { readFileSync, writeFileSync } from "node:fs";
 import type { KeydStatus, KeydVault, Sealed } from "../../../packages/protocol/src/keyd.ts";
 import { sealPassphrase } from "../../../packages/protocol/src/seal.ts";
 import { KeydError } from "../../daemon/src/keyd/client.ts";
+import type { PassphraseRecord } from "../../daemon/src/keyd/passphrase-record.ts";
 import type { ConsoleIO } from "./runtime.ts";
 
 export const MIN_PASSPHRASE = 12;
 // keyd takes up to 1024 bytes.
 export const MAX_PASSPHRASE_BYTES = 1024;
 
+export {
+  type PassphraseRecord,
+  passphraseRecord,
+} from "../../daemon/src/keyd/passphrase-record.ts";
+
 export interface PassphrasePrompt {
   read(prompt: string, signal: AbortSignal): Promise<string>;
 }
 
-// Which vault's passphrase was chosen or entered with localdot unlock, by keyd's fingerprint of
-// it. The first passphrase keyd hears becomes the vault's, from whichever program sends it, and a
-// vault made anew has a new fingerprint.
-export interface PassphraseRecord {
-  known(fingerprint: string | undefined): boolean;
-  remember(fingerprint: string): void;
-}
-
-export function passphraseRecord(path: string): PassphraseRecord {
-  return {
-    known(fingerprint) {
-      try {
-        return fingerprint !== undefined && readFileSync(path, "utf8").trim() === fingerprint;
-      } catch {
-        return false;
-      }
-    },
-    remember: (fingerprint) => writeFileSync(path, `${fingerprint}\n`, { mode: 0o600 }),
-  };
-}
-
 const CHOSEN_ELSEWHERE =
-  "Your saved keys already have a passphrase that wasn't set with localdot unlock. If you don't know it, something else chose it: see Saved keys in docs/install.md to start over.";
+  "Your saved keys already have a passphrase that wasn't set with localDot. If you don't know it, something else chose it: see Saved keys in docs/install.md to start over.";
 
 export interface UnlockKeyd {
   status(): Promise<Pick<KeydStatus, "sealKey" | "vault">>;

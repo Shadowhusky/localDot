@@ -3,7 +3,7 @@ import { type FileHandle, lstat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { ServiceOwner } from "../../../../packages/protocol/src/install-services.ts";
-import { redactor } from "../../../daemon/src/agent/redact.ts";
+import { displayLogLine } from "../../../daemon/src/daemon-log.ts";
 import type { ConsoleIO, RuntimeContext } from "../runtime.ts";
 import { privateDirectory } from "./copy-inventory.ts";
 import { privateRecordStore } from "./private-record.ts";
@@ -11,25 +11,10 @@ import { privateRecordStore } from "./private-record.ts";
 const FILES = ["daemon.log", "daemon.error.log", "keyd.log", "keyd.error.log"] as const;
 const WINDOW = 64 * 1024,
   MAX_LINE = 16 * 1024;
-const redactSurrogates = redactor([]);
 const unsafe = () => new Error("Service logs unavailable");
 const missing = (error: unknown) =>
   error instanceof Error && "code" in error && error.code === "ENOENT";
 
-/** Whole-line sanitization before terminal output. Producers must still avoid logging secrets. */
-export function displayLogLine(raw: string): string {
-  return redactSurrogates(raw)
-    .replace(/\bBearer\s+[^\s"'<>]+/gi, "Bearer [redacted]")
-    .replace(/([#?&](?:code|token)=)[^\s"'<>]*/gi, "$1[redacted]")
-    .replace(
-      /(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|authorization)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)/gi,
-      "$1[redacted]",
-    )
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "[redacted]")
-    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (char) =>
-      char === "\t" ? "  " : `\\u${char.codePointAt(0)?.toString(16).padStart(4, "0")}`,
-    );
-}
 type Cursor = { dev: bigint; ino: bigint; offset: number; pending: Buffer; discarding: boolean };
 export type LogCursors = Partial<Record<(typeof FILES)[number], Cursor | null>>;
 

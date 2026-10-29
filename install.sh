@@ -80,8 +80,15 @@ localdot: start and manage localDot
   localdot up                  Start localDot and print a sign-in link
   localdot down                Stop localDot until you start it again or restart this computer
   localdot start-at-login on|off|status  Choose whether localDot starts at login
-  localdot restart             Restart localDot
+  localdot restart             Restart localDot from any state and print a sign-in link
+  localdot status [--json]     Show localDot, its services, computers, tasks and remote access
   localdot open [--qr]         Print a fresh, single-use sign-in link (--qr: draw it for your phone)
+  localdot link [local|network|remote] [--qr | --json]
+                               Print sign-in links for this computer, your network and remote access
+  localdot remote on|off|status  Open localDot from anywhere through the localDot relay, or not
+  localdot tailscale on|status Share localDot with your devices on Tailscale
+  localdot computer list|start|stop|restart|resume [--cell <id>]
+                               Manage your computers; their data is kept
   localdot doctor              Check Docker, computers, task cleanup and the app
   localdot doctor --fix        Restart only localDot and recheck; keep computer data
   localdot recover --cell <id> Explain recovery for an old native task
@@ -90,6 +97,14 @@ localdot: start and manage localDot
   localdot stop [--all]        Stop dot's actions (--all: every task and computer)
   localdot update [options]    Upgrade and keep your data (options as for install.sh, e.g. --ref)
   localdot uninstall           Remove localDot; keeps your data
+  localdot dots list           List the dots on this computer
+  localdot dots add <name> [--from <dot>] [--copy <what>]
+                               Add a dot with its own data, keys and computer
+  localdot dots remove <dot> [--delete-data]
+                               Remove a dot; its data stays unless --delete-data
+  localdot <command> ... --dot <dot>
+                               Run up, down, restart, status, doctor, open, link, remote,
+                               tailscale, computer, unlock or logs for one dot of this computer
 EOF
 }
 
@@ -727,11 +742,37 @@ set_paths() {
   GO_DIR=$RUNTIME/go$GO_VERSION
   LAUNCH_DIR=$HOME/Library/LaunchAgents
   UNIT_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+  service_files
+}
+
+service_files() {
   if [ "$OS" = macos ]; then
     KEYD_FILE=$LAUNCH_DIR/$KEYD_LABEL.plist DAEMON_FILE=$LAUNCH_DIR/$DAEMON_LABEL.plist
   else
     KEYD_FILE=$UNIT_DIR/$KEYD_UNIT DAEMON_FILE=$UNIT_DIR/$DAEMON_UNIT
   fi
+}
+
+# Points the commands below at another dot of this installation: its folder, port, address and
+# services, as the dots registry describes it (localdot dots env).
+use_dot() {
+  local out line key value
+  out=$(cli dots env "$1") || exit 1
+  while IFS= read -r line; do
+    key=${line%%=*}
+    value=${line#*=\"}
+    value=${value%\"}
+    case "$key" in
+    DOT_ID) DOT_ID=$value ;;
+    LD_HOME) LD_HOME=$value ;;
+    PORT) PORT=$value ;;
+    PUBLIC_ORIGIN) DOT_ORIGIN=$value ;;
+    KEYD_SERVICE) if [ "$OS" = macos ]; then KEYD_LABEL=$value; else KEYD_UNIT=$value; fi ;;
+    DAEMON_SERVICE) if [ "$OS" = macos ]; then DAEMON_LABEL=$value; else DAEMON_UNIT=$value; fi ;;
+    esac
+  done <<<"$out"
+  [ "$DOT_ID" = main ] || PUBLIC_ORIGIN=$DOT_ORIGIN
+  service_files
 }
 
 owned() { [ -f "$1" ] && grep -qF "$MARKER" "$1"; }
@@ -1407,6 +1448,7 @@ set_startup_preference() {
   fi
   (umask 077; printf '%s\n' "$value" > "$PREFIX/start-at-login.new")
   mv "$PREFIX/start-at-login.new" "$PREFIX/start-at-login"
+  cli dots login "$value" >/dev/null || warn "Your other dots keep their startup setting."
   say "$value"
 }
 
@@ -1664,7 +1706,13 @@ run_install() {
   install_command
   start_services "$KEYD_CHANGED" "$DAEMON_CHANGED"
   write_state
+  refresh_dots
   finish
+}
+
+# Every dot runs this installation: after an update, each is given the new services and restarts.
+refresh_dots() {
+  cli dots refresh || warn "Your other dots couldn't all be updated. Restart them with: localdot up --dot <name>"
 }
 
 run_uninstall() {
@@ -1677,6 +1725,7 @@ run_uninstall() {
     return
   fi
   step "Removing localDot"
+  cli dots uninstall || warn "Some of your other dots' services may remain. Check: localdot dots list"
   remove_services
   [ "$TAILSCALE" != on ] || stop_tailscale "$PORT"
   local link=$HOME/.local/bin/localdot
@@ -1715,6 +1764,19 @@ run_command() {
   resolve_settings
   set_paths
   [ "$INSTALLED" = 1 ] || die "localDot isn't installed in $PREFIX."
+  if [ "$COMMAND" = dots ]; then
+    cli dots ${COMMAND_ARGS[@]+"${COMMAND_ARGS[@]}"}
+    return
+  fi
+  local count=${#COMMAND_ARGS[@]}
+  if [ "$count" -ge 2 ] && [ "${COMMAND_ARGS[$((count - 2))]}" = --dot ]; then
+    case "$COMMAND" in
+    up | down | restart | status | doctor | open | link | remote | tailscale | computer | unlock | logs) ;;
+    *) die "--dot works with up, down, restart, status, doctor, open, link, remote, tailscale, computer, unlock and logs." ;;
+    esac
+    use_dot "${COMMAND_ARGS[$((count - 1))]}"
+    COMMAND_ARGS=(${COMMAND_ARGS[@]+"${COMMAND_ARGS[@]:0:$((count - 2))}"})
+  fi
   case "$COMMAND" in
   up)
     start_services 0 0
@@ -1738,11 +1800,8 @@ run_command() {
     esac
     ;;
   start-at-login) set_startup_preference "${COMMAND_ARGS[@]:-status}" ;;
-  restart)
-    stop_services
-    start_services 0 0
-    wait_ready
-    ;;
+  # The app's own command restarts from any state: hung, crashed, a stale lock or a held port.
+  restart) cli restart ;;
   logs)
     case "${COMMAND_ARGS[*]-}" in
     "") tail -n 100 "$LD_HOME/logs/daemon.log" "$LD_HOME/logs/keyd.log" ;;
@@ -1750,7 +1809,9 @@ run_command() {
     *) die "Usage: localdot logs [--follow]" ;;
     esac
     ;;
-  open | unlock | stop | reset-computer | recover) cli "$COMMAND" ${COMMAND_ARGS[@]+"${COMMAND_ARGS[@]}"} ;;
+  open | unlock | stop | reset-computer | recover | status | link | remote | tailscale | computer)
+    cli "$COMMAND" ${COMMAND_ARGS[@]+"${COMMAND_ARGS[@]}"}
+    ;;
   *)
     printf 'Unknown command: %s\n\n' "$COMMAND" >&2
     command_usage >&2
@@ -1851,6 +1912,7 @@ activate_package() {
   install_command
   start_services "$KEYD_CHANGED" "$DAEMON_CHANGED"
   write_state
+  refresh_dots
 }
 
 run_package_install() {

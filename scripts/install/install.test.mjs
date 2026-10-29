@@ -225,6 +225,12 @@ case "$*" in
   [ -z "$LOCALDOT_PUBLIC_ORIGIN" ] || echo "From your other devices: $LOCALDOT_PUBLIC_ORIGIN/#code=fakecode"
   case "$*" in *--qr*) echo "[qr code]" ;; esac ;;
 *" stop --computers"*) exit "\${STUB_STOP_COMPUTERS_RC:-0}" ;;
+*" dots env "*)
+  [ -n "\${STUB_DOT_HOME:-}" ] || { echo "There's no dot called that" >&2; exit 1; }
+  if [ "$STUB_KERNEL" = Darwin ]; then keyd=dev.localdot.work.keyd daemon=dev.localdot.work.daemon
+  else keyd=localdot-work-keyd.service daemon=localdot-work-daemon.service; fi
+  printf '%s\n' 'DOT_ID="work"' "LD_HOME=\\"$STUB_DOT_HOME\\"" 'PORT="5750"' 'KEYD_PORTS="5760-5789"' \
+    'PUBLIC_ORIGIN="https://box.example.ts.net:5750"' "KEYD_SERVICE=\\"$keyd\\"" "DAEMON_SERVICE=\\"$daemon\\"" ;;
 *" doctor"*) echo "ok   docker"; exit "\${STUB_DOCTOR_RC:-0}" ;;
 esac`,
   );
@@ -985,6 +991,63 @@ describe.concurrent("installing on macOS", { timeout: 60_000 }, () => {
   });
 });
 
+describe.concurrent("several dots on one computer", { timeout: 60_000 }, () => {
+  it("runs a command for one dot, with its own folder, port, address and services", async () => {
+    const host = await makeHost();
+    expect((await host.run()).code).toBe(0);
+    const work = join(host.home, ".localdot-work");
+    mkdirSync(join(work, "logs"), { recursive: true });
+    writeFileSync(join(work, "logs/daemon.log"), "work daemon line\n");
+    writeFileSync(join(host.home, ".localdot/logs/daemon.log"), "main daemon line\n");
+    const env = { STUB_DOT_HOME: work };
+    host.clearCalls();
+    const up = await host.command(["up", "--dot", "work"], env);
+    expect(up.code).toBe(0);
+    expect(host.calls()).toContain("systemctl --user start localdot-work-keyd.service");
+    expect(host.calls()).toContain("systemctl --user start localdot-work-daemon.service");
+    expect(host.calls()).not.toContain("systemctl --user start localdot-daemon.service");
+    expect(host.calls()).toContainEqual(
+      expect.stringMatching(
+        new RegExp(
+          `main\\.ts open( --qr)? \\| .*home=${work} \\| port=5750 \\| origin=https://box\\.example\\.ts\\.net:5750$`,
+        ),
+      ),
+    );
+    expect(up.stdout).toContain("http://127.0.0.1:5750/#code=fakecode");
+    host.clearCalls();
+    expect((await host.command(["down", "--dot", "work"], env)).code).toBe(0);
+    expect(host.calls()).toContain(
+      "systemctl --user stop localdot-work-daemon.service localdot-work-keyd.service",
+    );
+    const logs = await host.command(["logs", "--dot", "work"], env);
+    expect(logs.stdout).toContain("work daemon line");
+    expect(logs.stdout).not.toContain("main daemon line");
+    const unknown = await host.command(["doctor", "--dot", "nowhere"]);
+    expect(unknown.code).not.toBe(0);
+    expect(unknown.stderr).toContain("no dot called that");
+    const wrong = await host.command(["recover", "--cell", "x", "--dot", "work"], env);
+    expect(wrong.code).not.toBe(0);
+    expect(wrong.stderr).toContain("--dot works with");
+  });
+
+  it("hands dots commands to the app's command, and updates every dot with the installation", async () => {
+    const host = await makeHost();
+    expect((await host.run()).code).toBe(0);
+    expect(host.calls()).toContainEqual(expect.stringMatching(/main\.ts dots refresh /));
+    host.clearCalls();
+    expect((await host.command(["dots", "add", "Home Mac", "--copy", "keys"])).code).toBe(0);
+    expect(host.calls()).toContainEqual(
+      expect.stringMatching(/main\.ts dots add Home Mac --copy keys \| /),
+    );
+    host.clearCalls();
+    expect((await host.command(["start-at-login", "off"])).code).toBe(0);
+    expect(host.calls()).toContainEqual(expect.stringMatching(/main\.ts dots login off /));
+    host.clearCalls();
+    expect((await host.command(["uninstall"])).code).toBe(0);
+    expect(host.calls()).toContainEqual(expect.stringMatching(/main\.ts dots uninstall /));
+  });
+});
+
 describe.concurrent("the localdot command and uninstall", { timeout: 60_000 }, () => {
   it("starts, stops and shows logs of the installed services", async () => {
     const host = await makeHost();
@@ -1018,6 +1081,8 @@ describe.concurrent("the localdot command and uninstall", { timeout: 60_000 }, (
     expect(host.calls().some((call) => /systemctl.*(stop|restart)/.test(call))).toBe(false);
     host.clearCalls();
     expect((await host.command(["restart"])).code).toBe(0);
+    // The app's command restarts, keeping start at login as it was.
+    expect(host.calls()).toContainEqual(expect.stringMatching(/main\.ts restart \| /));
     expect(host.calls()).not.toContain(
       "systemctl --user enable --quiet localdot-keyd.service localdot-daemon.service",
     );
@@ -1035,6 +1100,15 @@ describe.concurrent("the localdot command and uninstall", { timeout: 60_000 }, (
         `^node --import tsx \\.\\./cli/src/main\\.ts stop --all \\| cwd=.*/app/apps/daemon \\| home=${host.home}/data \\| port=${host.port} `,
       ),
     );
+    for (const args of [
+      ["status", "--json"],
+      ["link", "remote", "--qr"],
+      ["computer", "list"],
+    ]) {
+      host.clearCalls();
+      expect((await host.command(args)).code).toBe(0);
+      expect(host.calls()[0]).toContain(`../cli/src/main.ts ${args.join(" ")} | `);
+    }
   });
 
   it("prints help with no command and refuses an unknown one", async () => {
