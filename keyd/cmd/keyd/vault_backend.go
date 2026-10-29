@@ -132,12 +132,12 @@ func writePrivateFile(path string, data []byte) error {
 	return nil
 }
 
-// systemVaultHost is the real machine.
-func systemVaultHost(goos string) vaultHost {
+// systemVaultHost is the real machine, keeping this dot's items under service.
+func systemVaultHost(goos, service string) vaultHost {
 	return vaultHost{
 		goos: goos,
 		keychain: func() (vault.Store, error) {
-			k := vault.NewKeychain(keychainService)
+			k := vault.NewKeychain(service)
 			if err := k.Check(); err != nil {
 				return nil, errors.New("keyd: the Keychain vault requires a signed native keyd build")
 			}
@@ -147,11 +147,11 @@ func systemVaultHost(goos string) vaultHost {
 			return k, nil
 		},
 		keyring: func() (vault.Store, error) {
-			s := vault.NewSecretService(keychainService, os.Getenv)
+			s := vault.NewSecretService(service, os.Getenv)
 			return s, s.Check()
 		},
 		creds: func() vault.Credentials {
-			if c := vault.FindSystemdCreds(os.Getenv); c != nil {
+			if c := vault.FindSystemdCreds(os.Getenv, service); c != nil {
 				return c
 			}
 			return nil

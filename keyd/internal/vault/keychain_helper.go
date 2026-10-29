@@ -31,12 +31,15 @@ const (
 )
 
 func validRequest(op, service, account string) bool {
-	if service != "localdot-keyd" && service != "localdot-keyd-test" {
+	if !ValidService(service) {
 		return false
 	}
 	switch op {
-	case "store", "read", "delete", "check":
+	case "store", "read", "check":
 		return accountPattern.MatchString(account)
+	case "delete":
+		// Forgetting the whole vault deletes the claim last, for the next keyd of a removed dot.
+		return accountPattern.MatchString(account) || account == sessionAccount
 	case "claim":
 		return account == sessionAccount
 	case "adopt", "list":

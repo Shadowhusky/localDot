@@ -12,13 +12,17 @@ import (
 )
 
 // fakeSecretTool answers like libsecret's secret-tool, keeping items as files: lookup of a missing
-// item exits 1 and prints nothing. FAKE_FAIL=store fails a store after printing its input;
+// item exits 1 and prints nothing; clear with only a service clears all of its items. FAKE_FAIL=store fails a store after printing its input;
 // FAKE_FAIL=locked fails everything the way a locked keyring does.
 const fakeSecretTool = `#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_DIR/argv.log"
 mkdir -p "$FAKE_DIR/items"
 op=$1; shift
 case "$op" in store) shift ;; esac
+if [ "$op" = clear ] && [ $# = 2 ] && [ "$1" = service ]; then
+  if [ "$FAKE_FAIL" = locked ]; then echo "secret-tool: Cannot delete items in a locked collection" >&2; exit 1; fi
+  rm -f "$FAKE_DIR/items/$2".*; exit 0
+fi
 [ "$1" = service ] && [ "$3" = account ] || { echo "secret-tool: bad attributes" >&2; exit 2; }
 [ $# = 4 ] || [ "$5" = part ] || { echo "secret-tool: bad attributes" >&2; exit 2; }
 item="$FAKE_DIR/items/$2.$4.$6"

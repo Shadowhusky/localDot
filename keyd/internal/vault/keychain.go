@@ -235,6 +235,32 @@ func (k *Keychain) delete(ctx context.Context, id string) error {
 	return err
 }
 
+// forgetAll deletes every item of the service that holds a head, with its chunks, then the bindings
+// marker and, last, this keyd's claim, which no later operation of this keyd survives. An item it
+// cannot delete stops it before the claim, so the same keyd can try again.
+func (k *Keychain) forgetAll() error {
+	ids, err := k.secretItems()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		ctx, cancel := k.deadline()
+		err := k.delete(ctx, id)
+		cancel()
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
+	ctx, cancel := k.deadline()
+	defer cancel()
+	for _, account := range []string{markerAccount, sessionAccount} {
+		if err := k.remove(ctx, account); err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
 // The child authenticates its signed parent before any Keychain access.
 func (k *Keychain) add(ctx context.Context, account, data string) error {
 	return k.run(ctx, "store", account, strings.NewReader(data), nil)

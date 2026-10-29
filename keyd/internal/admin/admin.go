@@ -47,6 +47,10 @@ type Server struct {
 	VaultState func() vault.VaultState
 	// Unlock takes the file vault's passphrase; nil when the vault has none.
 	Unlock func(passphrase []byte) error
+	// The dot's home, which a key copy may not name.
+	Home string
+	// VerifyPeer checks the other end of a key copy's socket; nil means GenuineKeydPeer.
+	VerifyPeer func(*net.UnixConn) error
 }
 
 func (s *Server) Handler() http.Handler {
@@ -79,6 +83,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/push/key", s.pushKey)
 	mux.HandleFunc("POST /v1/push/send", s.pushSend)
 	mux.HandleFunc("POST /v1/vault/unlock", s.unlockVault)
+	mux.HandleFunc("POST /v1/vault/forget", s.forgetVault)
+	mux.HandleFunc("POST /v1/keys/copy", s.copyKeys)
 	return mux
 }
 
@@ -132,6 +138,9 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		// A desktop cell takes its gate's capture token on open; an older keyd refuses that field.
 		"capture":        true,
 		"generalSecrets": true,
+		// A dot on the same machine can be given this keyd's keys, and a removed one cleared.
+		"keyCopy":     true,
+		"vaultForget": true,
 	})
 }
 

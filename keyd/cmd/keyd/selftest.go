@@ -32,7 +32,7 @@ func selfTest(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "keyd self-test: the home already holds keyd state")
 		return 2
 	}
-	if err := vault.NewKeychain(keychainService).Check(); err != nil {
+	if err := vault.NewKeychain(vault.DefaultService).Check(); err != nil {
 		fmt.Fprintln(stderr, "keyd self-test: the Keychain helper refused this keyd")
 		return 1
 	}

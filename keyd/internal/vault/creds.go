@@ -15,7 +15,14 @@ type Credentials interface {
 	TPM() bool
 }
 
-const credentialName = "localdot-keyd-vault"
+// credentialName is the name systemd-creds binds a wrapped vault key to, so one dot's key never
+// unwraps as another's. The first dot keeps the name keyd has always used.
+func credentialName(service string) string {
+	if service == "" || service == DefaultService {
+		return "localdot-keyd-vault"
+	}
+	return service + "-vault"
+}
 
 // SystemdCreds wraps with systemd-creds: this user's scope of the host key, plus the TPM when the
 // machine has one. root, which has no user scope, uses the system scope.
@@ -23,17 +30,20 @@ type SystemdCreds struct {
 	tool tool
 	user bool
 	tpm  bool
+	// The Keychain and keyring service of the dot whose vault this wraps.
+	service string
 }
 
 var errNoCredentials = errors.New("systemd-creds cannot wrap keys on this machine")
 
-// FindSystemdCreds returns systemd-creds when it can wrap and unwrap a probe here, or nil.
-func FindSystemdCreds(getenv func(string) string) *SystemdCreds {
+// FindSystemdCreds returns systemd-creds for service's vault when it can wrap and unwrap a probe
+// here, or nil.
+func FindSystemdCreds(getenv func(string) string, service string) *SystemdCreds {
 	path := systemProgram("systemd-creds")
 	if path == "" {
 		return nil
 	}
-	c := &SystemdCreds{tool: tool{path: path, env: sessionEnv(getenv), timeout: 15 * time.Second}, user: os.Getuid() != 0}
+	c := &SystemdCreds{tool: tool{path: path, env: sessionEnv(getenv), timeout: 15 * time.Second}, user: os.Getuid() != 0, service: service}
 	if c.probe() != nil {
 		return nil
 	}
@@ -58,7 +68,7 @@ func (c *SystemdCreds) probe() error {
 func (c *SystemdCreds) TPM() bool { return c.tpm }
 
 func (c *SystemdCreds) args(op string) []string {
-	args := []string{op, "--name=" + credentialName}
+	args := []string{op, "--name=" + credentialName(c.service)}
 	if c.user {
 		args = append(args, "--user")
 	}

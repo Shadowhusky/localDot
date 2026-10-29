@@ -316,6 +316,21 @@ func (f *FileVault) Delete(id string) error {
 	return nil
 }
 
+func (f *FileVault) forgetAll() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.key == nil {
+		return ErrLocked
+	}
+	next := *f.file
+	next.Items = map[string]fileItem{}
+	if err := f.saveLocked(&next); err != nil && !errors.Is(err, errNotSynced) {
+		return err
+	}
+	f.file = &next
+	return nil
+}
+
 func (f *FileVault) saveLocked(file *vaultFile) error {
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
