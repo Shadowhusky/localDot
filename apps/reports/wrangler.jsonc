@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "localdot-reports",
+  "account_id": "31c17ebe287229213316608e4ef93f80",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-10",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "reports.localdot.dev", "custom_domain": true }],
+  // wrangler dev would otherwise present local requests as http://reports.localdot.dev, which
+  // the Worker refuses; on loopback it allows plain HTTP.
+  "dev": { "ip": "127.0.0.1", "port": 8787, "host": "127.0.0.1" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "localdot-reports",
+      "database_id": "3c4a21b5-9775-4ef5-89e5-39316b1a07cb",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [{ "binding": "BUNDLES", "id": "e2b18d5681924b58a1075140ecb349f5" }],
+  // Daily retention sweep.
+  "triggers": { "crons": ["17 3 * * *"] },
+  "observability": {
+    "enabled": true,
+    // Reporter and owner tokens travel in headers only; paths carry report ids, never secrets.
+    "logs": { "enabled": true, "invocation_logs": false, "head_sampling_rate": 1 },
+    "traces": { "enabled": false }
+  }
+}
