@@ -45,6 +45,7 @@ import { AutoDot } from "./AutoDot.tsx";
 import { AlwaysAllowed, AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import { ClaudeCodePanel } from "./ClaudeCodePanel.tsx";
+import { ComputerSizeSettings } from "./ComputerSize.tsx";
 import { ConnectorsSection } from "./ConnectorsSection.tsx";
 import {
   type ModelRole,
@@ -835,6 +836,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
           </Group>
         </div>
       )}
+      {props.remoteApi && <ComputerSizeSettings api={props.remoteApi} />}
       {props.remoteApi && <AccessLinksSettings api={props.remoteApi} />}
       {props.remoteApi && <RemoteAccessSettings api={props.remoteApi} />}
       {props.remoteApi && <RecordingStorageSettings api={props.remoteApi} />}

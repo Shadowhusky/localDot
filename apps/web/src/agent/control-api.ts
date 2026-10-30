@@ -1,5 +1,6 @@
 import {
   BudgetRaiseRequest,
+  type GivenBack,
   HandbackRequest,
   keyLikePresent,
   QuestionAnswerRequest,
@@ -7,6 +8,7 @@ import {
   StopOutcome,
   TakeComputerReply,
   TakeControlReply,
+  TaskStopReply,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { RECOVERY_RUNTIME_UNAVAILABLE } from "../cells/errors.ts";
@@ -274,15 +276,22 @@ export function stopTask(
   );
 }
 
-export function endTaskRun(api: ApiClient, sessionId: string, signal: AbortSignal): Promise<void> {
+// The task's Stop, which gives back the user's own messages dot had not acted on yet.
+export function endTaskRun(
+  api: ApiClient,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<GivenBack[]> {
   if (!ULID_PATTERN.test(sessionId)) return Promise.reject(new ControlFailure(false));
   return controlRequest(
     api,
-    `/api/agent/sessions/${sessionId}/stop`,
+    `/api/agent/sessions/${sessionId}/stop?giveBack=1`,
     undefined,
-    204,
+    200,
     signal,
-    () => {},
+    (text) => TaskStopReply.parse(JSON.parse(text)).messages,
+    "POST",
+    4 * 1024 * 1024,
   );
 }
 export function steerQueuedMessage(

@@ -1,9 +1,12 @@
+import type { ComputerSize, ComputerSizeView } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
-import { type RefObject, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
 import { AUTONOMY_PRESETS } from "../copy/autonomy.ts";
 import { DOCTOR } from "../keys/Protection.tsx";
+import { SizeSlider, tooSmall } from "../settings/ComputerSize.tsx";
 import { modelAllowed, type PickerModel, type SubscriptionModel } from "../settings/choices.ts";
 import { modelItems } from "../settings/chooser.ts";
+import { cpuCount, gigabytes, sameSize } from "../settings/computer-size.ts";
 import { CommandChip } from "../shell/CommandChip.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -637,7 +640,13 @@ export interface SummaryRow {
   change(): void;
 }
 
-export function SummaryStep({ rows }: { rows: readonly SummaryRow[] }) {
+export function SummaryStep({
+  rows,
+  children,
+}: {
+  rows: readonly SummaryRow[];
+  children?: ReactNode;
+}) {
   return (
     <>
       <Group roomy>
@@ -661,10 +670,65 @@ export function SummaryStep({ rows }: { rows: readonly SummaryRow[] }) {
             }
           />
         ))}
+        {children}
       </Group>
       <p className="onboarding-note">
         Everything here is in Settings later. There's no spending limit unless you set one.
       </p>
     </>
+  );
+}
+
+export interface SizeChoice {
+  view: ComputerSizeView;
+  size: ComputerSize;
+  recommended: ComputerSize | null;
+  onChange(size: ComputerSize): void;
+}
+
+// The computer's size before it is first turned on: the recommended one, or changed in place.
+export function SizeRow({ choice }: { choice: SizeChoice }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const { view, size, recommended } = choice;
+  const problem = tooSmall(view);
+  if (problem)
+    return (
+      <GroupRow leading={<IconTile icon="monitor" />} label="Computer size">
+        <p className="onboarding-size-problem" role="alert">
+          {problem}
+        </p>
+      </GroupRow>
+    );
+  return (
+    <GroupRow
+      leading={<IconTile icon="monitor" />}
+      label="Computer size"
+      detail={recommended && sameSize(size, recommended) ? "Recommended" : "Your choice"}
+      trailing={
+        <>
+          <span className="onboarding-summary-value">
+            {`${gigabytes(size.memoryBytes)} · ${cpuCount(size.cpus)}`}
+          </span>
+          <Button
+            variant="quiet"
+            size="sm"
+            aria-label="Change computer size"
+            aria-expanded={open}
+            aria-controls={id}
+            onClick={() => setOpen((now) => !now)}
+          >
+            {open ? "Done" : "Change"}
+          </Button>
+        </>
+      }
+    >
+      {open && (
+        <div id={id} className="onboarding-size">
+          <SizeSlider kind="memory" view={view} size={size} onChange={choice.onChange} />
+          <SizeSlider kind="cpus" view={view} size={size} onChange={choice.onChange} />
+        </div>
+      )}
+    </GroupRow>
   );
 }

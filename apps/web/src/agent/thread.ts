@@ -117,11 +117,14 @@ const wallTime = (id: string) => (ULID_PATTERN.test(id) ? ulidTime(id) : undefin
 const sessionMs = (micros: number | undefined) =>
   micros === undefined ? undefined : microsToMs(micros);
 
-// A queued message the user took back to edit, or cancelled, never reached dot.
+// A message the user took back to edit, or cancelled, or that Stop left unanswered, was never said
+// to dot.
 const unsent = (message: AgentMessage) =>
   message.delivery === "withdrawn" || message.delivery === "cancelled";
-// Only one Stop left unsent stays in the thread, for the user to take back.
-const dropped = (message: AgentMessage) => unsent(message) && !message.stopped;
+// Only one Stop left unsent stays in the thread, for the user to take back; one taken back, by
+// Edit or by Stop, has left it.
+const dropped = (message: AgentMessage) =>
+  message.delivery === "withdrawn" || (unsent(message) && !message.stopped);
 
 interface Placed {
   item: ThreadItem;

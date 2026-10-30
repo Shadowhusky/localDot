@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { ConversationEntry, ConversationLive } from "@localdot/protocol";
+import type { ConversationEntry, ConversationLive, SearchHit } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { LiveFacts } from "../agent/conversation-list.ts";
@@ -59,27 +59,46 @@ interface Daemon {
   posts: { path: string; body: unknown }[];
   list: ConversationEntry[];
   rename?: number;
+  // What the search index finds, whatever the words.
+  hits: SearchHit[];
 }
 
+// Keeps names, tags, pins and archives as the daemon does, and lists those archived apart.
 function daemon(list: ConversationEntry[]) {
-  const state: Daemon = { reads: 0, posts: [], list };
+  const state: Daemon = { reads: 0, posts: [], list, hits: [] };
   const api = createApi("a".repeat(43), {
     origin: "http://127.0.0.1",
     fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = new URL(String(input)).pathname;
+      const url = new URL(String(input));
+      const path = url.pathname;
       if (init?.method === "POST") {
         const body = JSON.parse(String(init.body));
         state.posts.push({ path, body });
         if (state.rename) return new Response(null, { status: state.rename });
-        state.list = state.list.map((each) =>
-          path === `/api/conversations/${each.sessionId}/title`
-            ? { ...each, title: body.title }
-            : each,
-        );
+        state.list = state.list.map((each) => {
+          if (!path.startsWith(`/api/conversations/${each.sessionId}/`)) return each;
+          const { tag, pinned, archived, ...rest } = { ...each, ...body };
+          return {
+            ...rest,
+            ...(tag ? { tag } : {}),
+            ...(pinned ? { pinned } : {}),
+            ...(archived ? { archived } : {}),
+          };
+        });
         return new Response(null, { status: 204 });
       }
-      state.reads++;
-      return Response.json({ conversations: state.list });
+      if (init?.method === "DELETE") {
+        state.list = state.list.filter((each) => path !== `/api/conversations/${each.sessionId}`);
+        return new Response(null, { status: 204 });
+      }
+      if (path === "/api/search")
+        return Response.json({ hits: state.hits, complete: true, mode: "fts" });
+      const archived = url.searchParams.get("archived") === "1";
+      if (!archived) state.reads++;
+      return Response.json({
+        conversations: state.list.filter((each) => !!each.archived === archived),
+        archivedCount: state.list.filter((each) => each.archived).length,
+      });
     }) as typeof fetch,
   });
   return { api, state };
@@ -266,7 +285,7 @@ it("renames a conversation with F2, showing the new name at once, and Escape lea
   let field = screen.getByRole("textbox", { name: "Conversation name" });
   expect(document.activeElement).toBe(field);
   fireEvent.keyDown(field, { key: "Escape" });
-  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(screen.queryByRole("textbox", { name: "Conversation name" })).toBeNull();
   expect(document.activeElement?.getAttribute("aria-label")).toMatch(/^Plan the trip/);
   fireEvent.keyDown(document.activeElement as Element, { key: "F2" });
   field = screen.getByRole("textbox", { name: "Conversation name" });
@@ -381,4 +400,171 @@ it("shares what it read with the conversations popover, which opens on it at onc
   const list = screen.getByRole("grid", { name: "Recent conversations" });
   expect(within(list).getByRole("img", { name: "Working" })).toBeTruthy();
   expect(within(list).getByText("Comparing the fares")).toBeTruthy();
+});
+
+const menu = () => screen.getByRole("menu", { name: "Conversation actions" });
+const group = (name: string) => within(nav()).getByRole("list", { name });
+
+it("tags, pins and archives from a row's menu, opened from the keyboard or a right click", async () => {
+  const trip = entry("Plan the trip", HOURS(1));
+  const dog = entry("Draw a dog", HOURS(2));
+  const working = entry("Tidy the photos", HOURS(3), null, {
+    state: "working",
+    ago: MINUTE,
+    onScreen: true,
+  });
+  const { state } = rail([trip, dog, working]);
+  const row = await screen.findByRole("button", { name: /^Plan the trip/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+  fireEvent.click(within(menu()).getByRole("menuitemradio", { name: "Blue" }));
+  expect(row.getAttribute("aria-label")).toBe("Plan the trip, blue tag, done, 1 h");
+  expect(row.querySelector(".ui-tag-mark")?.getAttribute("data-tag")).toBe("blue");
+
+  fireEvent.contextMenu(row);
+  expect(
+    within(menu()).getByRole("menuitemradio", { name: "Blue" }).getAttribute("aria-checked"),
+  ).toBe("true");
+  fireEvent.click(within(menu()).getByRole("menuitem", { name: "Pin to top" }));
+  await waitFor(() =>
+    expect(within(group("Pinned")).getByRole("button", { name: /^Plan the trip/ })).toBeTruthy(),
+  );
+
+  fireEvent.contextMenu(screen.getByRole("button", { name: /^Tidy the photos/ }));
+  const refused = within(menu()).getByRole("menuitem", { name: /^Archive/ });
+  expect(refused.getAttribute("aria-disabled")).toBe("true");
+  expect(refused.textContent).toContain("Stop this task before archiving its conversation.");
+  fireEvent.keyDown(menu(), { key: "Escape" });
+
+  fireEvent.contextMenu(screen.getByRole("button", { name: /^Draw a dog/ }));
+  fireEvent.click(within(menu()).getByRole("menuitem", { name: "Archive" }));
+  expect(screen.queryByRole("button", { name: /^Draw a dog/ })).toBeNull();
+  const archived = await screen.findByRole("button", { name: /^Archived/ });
+  expect(archived.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(archived);
+  const back = await within(group("Archived")).findByRole("button", { name: /^Draw a dog/ });
+  fireEvent.contextMenu(back);
+  fireEvent.click(within(menu()).getByRole("menuitem", { name: "Unarchive" }));
+  await waitFor(() =>
+    expect(within(group("Recent")).getByRole("button", { name: /^Draw a dog/ })).toBeTruthy(),
+  );
+  expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull();
+  expect(state.posts).toEqual([
+    { path: `/api/conversations/${trip.sessionId}/tag`, body: { tag: "blue" } },
+    { path: `/api/conversations/${trip.sessionId}/pin`, body: { pinned: true } },
+    { path: `/api/conversations/${dog.sessionId}/archive`, body: { archived: true } },
+    { path: `/api/conversations/${dog.sessionId}/archive`, body: { archived: false } },
+  ]);
+});
+
+it("follows the tags, pins and archives other viewers make", async () => {
+  const trip = entry("Plan the trip", HOURS(1));
+  const dog = entry("Draw a dog", HOURS(2));
+  const { state } = rail([trip, dog]);
+  await screen.findByRole("button", { name: /^Plan the trip/ });
+  act(() => events().open());
+  const organized = (sessionId: string, over: object) =>
+    act(() =>
+      events().onmessage?.({
+        data: JSON.stringify({
+          type: "conversation.organized",
+          sessionId,
+          tag: null,
+          pinned: false,
+          archived: false,
+          ...over,
+        }),
+      }),
+    );
+  await organized(trip.sessionId, { tag: "red", pinned: true });
+  expect(
+    within(group("Pinned"))
+      .getByRole("button", { name: /^Plan the trip/ })
+      .getAttribute("aria-label"),
+  ).toBe("Plan the trip, red tag, done, 1 h");
+  expect(state.reads).toBe(1);
+  state.list = state.list.map((each) => (each === dog ? { ...dog, archived: true } : each));
+  await organized(dog.sessionId, { archived: true });
+  await waitFor(() => expect(screen.queryByRole("button", { name: /^Draw a dog/ })).toBeNull());
+  expect(state.reads).toBe(2);
+  expect(screen.getByRole("button", { name: /^Archived/ }).textContent).toContain("1");
+});
+
+it("searches names as you type and what was said once typing pauses, marking why each matched", async () => {
+  const trip = entry("Plan the Lisbon trip", HOURS(1));
+  const boiler = entry("Call a plumber", HOURS(2));
+  const dog = entry("Draw a dog", HOURS(3));
+  const { state } = rail([trip, boiler, dog]);
+  state.hits = [
+    {
+      sessionId: boiler.sessionId,
+      title: null,
+      startedAt: null,
+      kind: "user",
+      at: NOW.toISOString(),
+      snippet: "the \uE000boiler\uE001 in the flat",
+    },
+  ];
+  await screen.findByRole("button", { name: /^Plan the Lisbon trip/ });
+  const field = screen.getByRole("textbox", { name: "Search conversations" });
+  fireEvent.change(field, { target: { value: "lisbn" } });
+  expect(within(group("Results")).getAllByRole("listitem")).toHaveLength(1);
+  expect(within(group("Results")).getByText("Lisbon").tagName).toBe("MARK");
+
+  fireEvent.change(field, { target: { value: "boiler" } });
+  const found = await waitFor(() =>
+    within(group("Results")).getByRole("button", { name: /^Call a plumber/ }),
+  );
+  expect(found.querySelector(".sessions-activity mark")?.textContent).toBe("boiler");
+  expect(document.getElementById(found.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+    "the boiler in the flat",
+  );
+  fireEvent.keyDown(field, { key: "ArrowDown" });
+  expect(document.activeElement).toBe(found);
+  fireEvent.keyDown(found, { key: "ArrowUp" });
+  expect(document.activeElement).toBe(field);
+  fireEvent.keyDown(field, { key: "Escape" });
+  expect((field as HTMLInputElement).value).toBe("");
+  expect(within(nav()).queryByRole("list", { name: "Results" })).toBeNull();
+  state.hits = [];
+  fireEvent.change(field, { target: { value: "zebra" } });
+  expect(await screen.findByText("Nothing matches “zebra”")).toBeTruthy();
+});
+
+it("expands from its search mark, and lets the search go when it collapses", async () => {
+  const { props, view } = rail([entry("Plan the trip", HOURS(1))], { expanded: false });
+  fireEvent.click(await screen.findByRole("button", { name: "Search conversations" }));
+  expect(props.onExpandedChange).toHaveBeenCalledWith(true);
+  view.rerender(<SessionRail {...props} expanded />);
+  const field = screen.getByRole("textbox", { name: "Search conversations" });
+  expect(document.activeElement).toBe(field);
+  fireEvent.change(field, { target: { value: "trip" } });
+  view.rerender(<SessionRail {...props} expanded={false} />);
+  view.rerender(<SessionRail {...props} expanded />);
+  expect(
+    (screen.getByRole("textbox", { name: "Search conversations" }) as HTMLInputElement).value,
+  ).toBe("");
+});
+
+it("deletes a conversation from its menu once asked, and never one under way", async () => {
+  const trip = entry("Plan the trip", HOURS(1));
+  const working = entry("Tidy the photos", HOURS(3), null, {
+    state: "working",
+    ago: MINUTE,
+    onScreen: true,
+  });
+  const onDeleted = vi.fn();
+  rail([trip, working], { onDeleted });
+  fireEvent.contextMenu(await screen.findByRole("button", { name: /^Tidy the photos/ }));
+  expect(
+    within(menu())
+      .getByRole("menuitem", { name: /^Delete conversation/ })
+      .getAttribute("aria-disabled"),
+  ).toBe("true");
+  fireEvent.keyDown(menu(), { key: "Escape" });
+  fireEvent.contextMenu(screen.getByRole("button", { name: /^Plan the trip/ }));
+  fireEvent.click(within(menu()).getByRole("menuitem", { name: "Delete conversation" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(trip.sessions));
+  await waitFor(() => expect(screen.queryByRole("button", { name: /^Plan the trip/ })).toBeNull());
 });

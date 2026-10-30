@@ -151,13 +151,15 @@
   --line-x: 92px;
   --line-y: 12px;
   --line-h: 72px;
+  /* A hat drops dot and its line by as much as it rises, keeping a bare head's gap under the stage. */
+  --dock-lift: calc(var(--dock) * var(--dot-crown) / 64);
   position: absolute;
   inset: 0;
 }
 
 .narrator-dock {
   position: absolute;
-  top: var(--dock-y);
+  top: calc(var(--dock-y) + var(--dock-lift));
   left: var(--dock-x);
   width: var(--dock);
   height: var(--dock);
@@ -166,7 +168,7 @@
 /* What a press on dot reaches: the ball, which is three quarters of its frame. */
 .narrator-dot {
   position: absolute;
-  top: calc(var(--dock-y) + var(--dock) / 8);
+  top: calc(var(--dock-y) + var(--dock-lift) + var(--dock) / 8);
   left: calc(var(--dock-x) + var(--dock) / 8);
   width: calc(var(--dock) * 0.75);
   height: calc(var(--dock) * 0.75);
@@ -178,7 +180,7 @@
 
 .narration {
   position: absolute;
-  top: var(--line-y);
+  top: calc(var(--line-y) + var(--dock-lift));
   left: var(--line-x);
   width: calc(100% - var(--line-x));
   height: var(--line-h);

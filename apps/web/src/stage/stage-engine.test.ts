@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { APPEARANCE_EVENT } from "../onboarding/appearance.ts";
 import { FakeWorker, fakeChromium } from "../testing/fake-chromium.ts";
 import type { FrameSource } from "./frame-source.ts";
-import { holdEngine } from "./stage-engine.ts";
+import { holdEngine, RESIZE_SETTLE_MS } from "./stage-engine.ts";
 
 // A kept stage outlives its page in tests and on a remount; one that is away read the theme from
 // whatever the document held then, and threw where it held no tokens.
@@ -78,6 +78,54 @@ it("tells its stage when the canvas is clipped away or has no size, and how much
   } finally {
     anchor.remove();
     restore();
+  }
+});
+
+it("sizes the canvas to a box that changed once at once, and to one that keeps changing once it settles", () => {
+  vi.useFakeTimers();
+  const restore = fakeChromium();
+  const sizes: ((entries: { contentRect: { width: number; height: number } }[]) => void)[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(report: (typeof sizes)[number]) {
+        sizes.push(report);
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const anchor = document.createElement("template");
+  document.body.append(anchor);
+  try {
+    const held = holdEngine(null);
+    held.engine.place(anchor);
+    const worker = FakeWorker.instances.at(-1);
+    const resizes = () =>
+      worker?.sent
+        .filter(({ message }) => message.type === "resize")
+        .map(({ message }) => `${message.width}x${message.height}`);
+    const box = (width: number) => sizes[0]?.([{ contentRect: { width, height: width * 0.625 } }]);
+    box(1000);
+    expect(resizes()).toEqual(["1000x625"]);
+    // A rail sliding open beside the stage narrows it on every frame.
+    for (let width = 990; width >= 900; width -= 10) {
+      vi.advanceTimersByTime(16);
+      box(width);
+    }
+    vi.advanceTimersByTime(RESIZE_SETTLE_MS - 1);
+    expect(resizes()).toEqual(["1000x625"]);
+    vi.advanceTimersByTime(1);
+    expect(resizes()).toEqual(["1000x625", "900x563"]);
+    // The size the canvas already has is not sent again.
+    box(900);
+    vi.advanceTimersByTime(RESIZE_SETTLE_MS);
+    expect(resizes()).toEqual(["1000x625", "900x563"]);
+    held.engine.close();
+  } finally {
+    anchor.remove();
+    restore();
+    vi.useRealTimers();
   }
 });
 

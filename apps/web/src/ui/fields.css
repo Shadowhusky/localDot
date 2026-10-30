@@ -1052,3 +1052,313 @@
     }
   }
 }
+
+/* A stepped slider: a porcelain knob over a rail cut at each whole step. The rail runs from 0 to
+   its end (Docker's limit, say) and marks what is in use, what others hold and what stays free;
+   the fill runs to the value. Positions follow the knob's centre, which travels half a knob in
+   from each end, so a mark and the knob meet where they mean the same value. */
+@layer kit {
+  .ui-step-slider {
+    --_grip: calc(var(--spacing) * 5);
+    --_bar: calc(var(--spacing) * 1.5);
+    --_lane: calc(var(--spacing) * 8);
+    --_cut: var(--color-raised);
+    display: grid;
+    gap: var(--spacing);
+    min-width: 0;
+  }
+
+  .ui-step-slider-head,
+  .ui-step-slider-foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: calc(var(--spacing) * 3);
+    min-width: 0;
+  }
+
+  .ui-step-slider-label,
+  .ui-step-slider-value {
+    color: var(--color-fg-1);
+    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    letter-spacing: var(--text-body--letter-spacing);
+  }
+
+  .ui-step-slider-value {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .ui-step-slider-track {
+    position: relative;
+    display: grid;
+    height: var(--_lane);
+  }
+
+  .ui-step-slider-rail {
+    --_span: calc(100% - var(--_grip));
+    position: absolute;
+    inset-inline: 0;
+    top: 50%;
+    height: var(--_bar);
+    overflow: hidden;
+    border-radius: var(--radius-full);
+    background-color: var(--color-track-strong);
+    translate: 0 -50%;
+  }
+
+  .ui-step-slider-fill,
+  .ui-step-slider-mark,
+  .ui-step-slider-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+  }
+
+  .ui-step-slider-fill {
+    left: 0;
+    width: calc(var(--_grip) / 2 + var(--_value) * var(--_span));
+    background-color: var(--color-fg-3);
+  }
+
+  .ui-step-slider-mark {
+    left: calc(var(--_grip) / 2 + var(--_from) * var(--_span));
+    right: calc(100% - var(--_grip) / 2 - var(--_to) * var(--_span));
+    transition:
+      left var(--dur-default) var(--ease-standard),
+      right var(--dur-default) var(--ease-standard);
+  }
+
+  .ui-step-slider-mark[data-start] {
+    left: 0;
+  }
+
+  .ui-step-slider-mark[data-end] {
+    right: 0;
+  }
+
+  .ui-step-slider-mark[data-tone="used"] {
+    background-color: var(--color-fg-1);
+  }
+
+  /* What can't be had is hatched: firmly where other dots hold it, lightly where it stays free. */
+  .ui-step-slider-mark:is([data-tone="held"], [data-tone="kept"]),
+  .ui-step-slider-key:is([data-tone="held"], [data-tone="kept"])::before {
+    background-image: repeating-linear-gradient(-45deg, var(--_stripe) 0 2px, transparent 2px 4px);
+  }
+
+  [data-tone="held"]:is(.ui-step-slider-mark, .ui-step-slider-key) {
+    --_stripe: var(--color-fg-3);
+  }
+
+  [data-tone="kept"]:is(.ui-step-slider-mark, .ui-step-slider-key) {
+    --_stripe: var(--color-fg-4);
+  }
+
+  .ui-step-slider-tick {
+    left: calc(var(--_grip) / 2 + var(--_at) * var(--_span) - 1px);
+    width: 2px;
+    background-color: var(--_cut);
+  }
+
+  .ui-step-slider-input {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+    touch-action: pan-y;
+  }
+
+  .ui-step-slider-input:focus-visible {
+    outline: none;
+  }
+
+  .ui-step-slider-input::-webkit-slider-runnable-track {
+    height: 100%;
+    background: transparent;
+  }
+
+  .ui-step-slider-input::-moz-range-track {
+    background: transparent;
+  }
+
+  .ui-step-slider-input::-webkit-slider-thumb {
+    width: var(--_grip);
+    height: var(--_grip);
+    margin-top: calc((var(--_lane) - var(--_grip)) / 2);
+    appearance: none;
+    border-radius: var(--radius-full);
+    background-image: var(--porcelain-knob);
+    box-shadow: var(--shadow-knob);
+    transition: scale var(--dur-snappy) var(--ease-spring);
+  }
+
+  .ui-step-slider-input::-moz-range-thumb {
+    width: var(--_grip);
+    height: var(--_grip);
+    border: 0;
+    border-radius: var(--radius-full);
+    background-image: var(--porcelain-knob);
+    box-shadow: var(--shadow-knob);
+    transition: scale var(--dur-snappy) var(--ease-spring);
+  }
+
+  .ui-step-slider-input:active::-webkit-slider-thumb {
+    scale: 1.1;
+  }
+
+  .ui-step-slider-input:active::-moz-range-thumb {
+    scale: 1.1;
+  }
+
+  .ui-step-slider-input:focus-visible::-webkit-slider-thumb {
+    box-shadow:
+      var(--shadow-knob),
+      0 0 0 var(--focus-offset) var(--_cut),
+      0 0 0 calc(var(--focus-offset) + var(--focus-width)) var(--color-fg-1);
+  }
+
+  .ui-step-slider-input:focus-visible::-moz-range-thumb {
+    box-shadow:
+      var(--shadow-knob),
+      0 0 0 var(--focus-offset) var(--_cut),
+      0 0 0 calc(var(--focus-offset) + var(--focus-width)) var(--color-fg-1);
+  }
+
+  .ui-step-slider-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing) calc(var(--spacing) * 3);
+    min-width: 0;
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ui-step-slider-key {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 1.5);
+    white-space: nowrap;
+  }
+
+  /* A swatch of the rail itself: the same height, ends and fill as the mark it names. */
+  .ui-step-slider-key::before {
+    content: "";
+    flex: none;
+    width: calc(var(--spacing) * 3);
+    height: var(--_bar);
+    border-radius: var(--radius-full);
+    background-color: var(--color-track-strong);
+  }
+
+  .ui-step-slider-key[data-tone="used"]::before {
+    background-color: var(--color-fg-1);
+  }
+
+  /* The track's end: a quiet figure whose tip says where the limit comes from. */
+  .ui-step-slider-end {
+    position: relative;
+    flex-shrink: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: none;
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    font-variant-numeric: tabular-nums;
+    text-decoration: underline dotted var(--color-fg-4);
+    text-underline-offset: 3px;
+    cursor: help;
+  }
+
+  .ui-step-slider-end::after {
+    content: "";
+    position: absolute;
+    inset: calc(var(--spacing) * -1.5) calc(var(--spacing) * -2);
+  }
+
+  @media (hover: hover) {
+    .ui-step-slider-end:hover {
+      color: var(--color-fg-1);
+    }
+  }
+
+  .ui-step-slider-end:focus-visible {
+    outline: var(--focus-width) solid var(--color-fg-1);
+    outline-offset: var(--focus-offset);
+  }
+
+  .ui-step-slider-reason {
+    margin: 0;
+    color: var(--color-fg-1);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    text-wrap: pretty;
+  }
+
+  .ui-step-slider-reason:empty {
+    display: none;
+  }
+
+  @media (--coarse) {
+    .ui-step-slider {
+      --_lane: calc(var(--spacing) * 11);
+      --_grip: calc(var(--spacing) * 6);
+    }
+
+    .ui-step-slider-end::after {
+      inset: calc(var(--spacing) * -3);
+    }
+  }
+
+  @media (--phone) {
+    .ui-step-slider-label,
+    .ui-step-slider-value {
+      font: var(--text-touch) / var(--text-touch--line-height) var(--font-ui);
+      letter-spacing: var(--text-touch--letter-spacing);
+    }
+
+    .ui-step-slider-legend,
+    .ui-step-slider-end,
+    .ui-step-slider-reason {
+      font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ui-step-slider-mark {
+      transition: none;
+    }
+
+    .ui-step-slider-input:active::-webkit-slider-thumb,
+    .ui-step-slider-input:active::-moz-range-thumb {
+      scale: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .ui-step-slider-rail {
+      forced-color-adjust: none;
+      border: 1px solid CanvasText;
+      background-color: Canvas;
+    }
+
+    .ui-step-slider-fill,
+    .ui-step-slider-mark[data-tone="used"] {
+      background-color: Highlight;
+    }
+
+    .ui-step-slider-mark[data-tone="held"],
+    .ui-step-slider-mark[data-tone="kept"] {
+      background: GrayText;
+    }
+
+    .ui-step-slider-input::-webkit-slider-thumb {
+      forced-color-adjust: none;
+      background: ButtonText;
+    }
+  }
+}

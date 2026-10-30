@@ -1,10 +1,19 @@
-import { ConversationList, PERSONAS, type PersonaId } from "@localdot/protocol";
+import {
+  CONVERSATION_TAGS,
+  ConversationList,
+  type ConversationTag,
+  PERSONAS,
+  type PersonaId,
+} from "@localdot/protocol";
 import { useMemo, useRef } from "react";
 import {
   conversationStatus,
   conversationTitle,
   type LiveFacts,
+  type Organize,
+  organizeConversation,
   STATUS_LABEL,
+  useRecentConversations,
   whenLabel,
 } from "../agent/conversation-list.ts";
 import { researchQuestion } from "../agent/research.ts";
@@ -15,6 +24,7 @@ import { addEntry, MemoryRequestError } from "../settings/memory/memory-api.ts";
 import type { ModelGroup, ModelOption } from "../settings/model-options.ts";
 import { SECTIONS, type SettingsSection } from "../settings/sections.ts";
 import { announce } from "../ui/Announcer.tsx";
+import { TAG_NAMES } from "../ui/ConversationTag.tsx";
 import { showToast } from "../ui/Toast.tsx";
 import { type Action, type ActionChoice, fillComposer } from "./actions.ts";
 import type { AsideControl } from "./useAside.ts";
@@ -44,6 +54,8 @@ export interface ActionsInput {
     readonly facts: LiveFacts;
     pick(id: string, sessions: readonly string[]): void;
     renamed(): void;
+    // Asks before deleting the current conversation.
+    remove(trigger: HTMLElement | null): void;
   };
   readonly replay: Doable;
   readonly watch: Doable;
@@ -127,10 +139,34 @@ export function useActions(input: ActionsInput): {
   const conversationReason = conversations.reason;
   const currentConversation = conversations.current;
   const facts = conversations.facts;
+  // How the current conversation is kept, as the lists last read it.
+  const recent = useRecentConversations(api, false).entries;
+  const archived = useRecentConversations(api, false, "archived").entries;
+  const filed = [...recent, ...archived].find((entry) =>
+    entry.sessions.includes(currentConversation ?? ""),
+  );
+  const filedTag = filed?.tag;
+  const filedPinned = !!filed?.pinned;
+  const filedArchived = !!filed?.archived;
+  const underWay =
+    !!filed?.live ||
+    (!!facts.live && (filed?.sessions ?? [currentConversation]).includes(facts.live));
   // biome-ignore lint/correctness/useExhaustiveDependencies: what runs is read from the latest render; these are what the actions show
   const actions = useMemo((): Action[] => {
     const doable = (pick: (input: ActionsInput) => Doable) => () => {
       if (!pick(now()).reason) pick(now()).run();
+    };
+    const noConversation = currentConversation ? undefined : "Start a conversation first";
+    const organize = async (change: Organize, done: string) => {
+      const id = now().conversations.current;
+      if (!id) return "Start a conversation first.";
+      try {
+        await organizeConversation(api, id, change);
+      } catch {
+        return "That change couldn't be saved. Try again.";
+      }
+      announce("conversation", done);
+      return undefined;
     };
     const modelChoices: ActionChoice[] = modelGroups.flatMap((group) =>
       group.options.map((option) => ({
@@ -273,6 +309,84 @@ export function useActions(input: ActionsInput): {
           announce("conversation", title ? `Renamed to ${title}.` : "dot names this conversation.");
           return undefined;
         },
+      },
+      {
+        id: "tag",
+        command: "tag",
+        title: "Tag this conversation",
+        description: "Give it a colour to tell it apart in the list",
+        hint: "[colour]",
+        group: "Conversation",
+        icon: "tag",
+        keywords: "colour color label mark",
+        placeholder: "Search colours",
+        unavailable: noConversation,
+        choices: [
+          { value: "none", label: "No tag", current: !filedTag },
+          ...CONVERSATION_TAGS.map((tag) => ({
+            value: tag,
+            label: TAG_NAMES[tag],
+            current: tag === filedTag,
+          })),
+        ],
+        run: ({ choice }) => {
+          if (!choice) return undefined;
+          const tag = choice.value === "none" ? null : (choice.value as ConversationTag);
+          return organize(
+            { tag },
+            tag ? `Tagged ${TAG_NAMES[tag].toLowerCase()}.` : "Tag taken off.",
+          );
+        },
+      },
+      {
+        id: "pin",
+        command: "pin",
+        title: filedPinned ? "Unpin this conversation" : "Pin this conversation",
+        description: filedPinned
+          ? "Let it move down the list with the rest"
+          : "Keep it at the top of the list",
+        group: "Conversation",
+        icon: "pin",
+        keywords: "top favourite favorite star keep",
+        unavailable: noConversation,
+        run: () =>
+          organize(
+            { pinned: !filedPinned },
+            filedPinned ? "Unpinned this conversation." : "Pinned to the top.",
+          ),
+      },
+      {
+        id: "archive",
+        command: "archive",
+        title: filedArchived ? "Unarchive this conversation" : "Archive this conversation",
+        description: filedArchived
+          ? "Bring it back to the list"
+          : "Put it away; it comes back if it goes on",
+        group: "Conversation",
+        icon: filedArchived ? "archive-restore" : "archive",
+        keywords: "hide put away tidy",
+        unavailable:
+          noConversation ??
+          (underWay && !filedArchived
+            ? "Stop the task before archiving its conversation"
+            : undefined),
+        run: () =>
+          organize(
+            { archived: !filedArchived },
+            filedArchived ? "Back in the list." : "Archived. It's under Archived in the list.",
+          ),
+      },
+      {
+        id: "delete-conversation",
+        title: "Delete this conversation",
+        description: "Its messages, recordings and screenshots, for good",
+        group: "Conversation",
+        icon: "trash",
+        keywords: "remove erase forget",
+        unavailable:
+          noConversation ??
+          (underWay ? "Stop the task before deleting its conversation" : undefined),
+        run: ({ trigger }) => now().conversations.remove(trigger),
       },
       {
         id: "replay",
@@ -603,6 +717,10 @@ export function useActions(input: ActionsInput): {
     conversationReason,
     currentConversation,
     facts,
+    filedTag,
+    filedPinned,
+    filedArchived,
+    underWay,
   ]);
   const suggested = [
     ...(stopReason ? [] : ["stop", "btw", "takeover"]),

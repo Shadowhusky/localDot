@@ -133,6 +133,7 @@ import { Thumbnails } from "../../../daemon/src/sessions/thumbs.ts";
 import { readStatic } from "../../../daemon/src/static-files.ts";
 import { UI_CSP } from "../../../daemon/src/static-ui.ts";
 import { attachUpgradeRouter } from "../../../daemon/src/upgrade-router.ts";
+import { fakeDockerRoom } from "./fake-docker-room.ts";
 import { fakeDots } from "./fake-dots.ts";
 import {
   bootStep,
@@ -408,6 +409,8 @@ const initial = cellFor(cellKind, cellId);
 if (initial) cells.emit(initial);
 // A start takes this long here; a longer one lets a page reload part way through, as on a computer.
 const START_MS = Number(env.QA_START_MS ?? 1500);
+// How long dot takes to answer a new task; `POST /__qa/reply?ms=` changes it.
+let replyMs = 800;
 function operation(
   kind: "first-start" | "start",
   step: ComputerOperationStep,
@@ -565,11 +568,12 @@ function attachLive(owned: AgentSession) {
       }),
   );
 }
-// Ends the live task, as the daemon does, and waits until the computer is free of it.
+// Ends the live task, as the daemon does, and waits until the computer is free of it: a task Stop
+// has already ended still has its run to settle.
 async function endLive(how?: "done" | "crash") {
   const owned = session;
-  if (!owned || owned.stopped) return;
-  if (how) ending.set(owned, how);
+  if (!owned) return;
+  if (how && !owned.stopped) ending.set(owned, how);
   live.stop(owned.id);
   await live.settled(owned.id);
 }
@@ -1745,7 +1749,7 @@ const agent: AgentRoutesDeps = {
       raisedDuringPause = false;
       selection = planSelection();
       attachLive(session);
-      session.append("message.user", { messageId: ulid(), kind: "task", text: task });
+      session.askTask();
       if (!continues) lookFirst(session);
       session.setStatus("running");
       session.append("agent.state", { state: "thinking" });
@@ -1767,7 +1771,7 @@ const agent: AgentRoutesDeps = {
           s.append("agent.state", { state: "acting" });
           readSources(s, 3);
         }
-      }, 800);
+      }, replyMs);
       return s;
     },
     release: async () => {
@@ -1912,6 +1916,12 @@ const sealKey = toBase64url(
   new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey)),
 );
 const dotsHere = fakeDots(sealKey);
+const dockerRoom = fakeDockerRoom(HOME, () =>
+  cells.list().map((cell) => ({
+    id: cell.id,
+    running: cell.state === "ready" || cell.state === "starting",
+  })),
+);
 
 const recorder = new Recorder({
   home: HOME,
@@ -2122,10 +2132,24 @@ const routes = createApp({
     },
     signIn: connectorSignIn,
   },
-  cells: { cells, tickets, update: updateCell, capacity: dotsHere.capacity },
+  cells: {
+    cells,
+    tickets,
+    update: updateCell,
+    capacity: dotsHere.capacity,
+    size: dockerRoom.sizes,
+  },
   desktop: realDesktop,
   accounts,
-  gateway: { registry, clock, eventLog: log, live, killSwitch, frames },
+  gateway: {
+    registry,
+    clock,
+    eventLog: log,
+    live,
+    killSwitch,
+    frames,
+    conversation: () => conversations.current(),
+  },
   agent,
   search: { index: searchIndex, feed: searchFeed },
   recorder,
@@ -2137,6 +2161,7 @@ const routes = createApp({
     index,
     thumbs: new Thumbnails(HOME, frames),
     live,
+    publish: (event) => appEvents.publish(event),
   },
   deliverables: deliverablesDeps(deliverablesFixture),
   // QA_UI_DIR serves another build of the app, such as an earlier one to measure against.
@@ -2178,6 +2203,7 @@ const routes = createApp({
 });
 deliverableScenarios(routes, deliverablesFixture);
 dotsHere.qa(routes);
+dockerRoom.qa(routes);
 // QA_SLOW_KEYS=<ms> answers the key layer that much later, as a key layer still waking up does.
 const slowKeys = Number(env.QA_SLOW_KEYS ?? 0);
 if (slowKeys > 0)
@@ -3969,6 +3995,12 @@ routes.post("/__qa/first-look", async (c) => {
     ...(persona.success ? { persona: persona.data } : {}),
     ...(body.reason ? { reason: body.reason } : {}),
   };
+  return c.json({ ok: true });
+});
+routes.post("/__qa/reply", (c) => {
+  const ms = Number(c.req.query("ms"));
+  if (!Number.isSafeInteger(ms) || ms < 0) return c.text("ms is a whole number", 400);
+  replyMs = ms;
   return c.json({ ok: true });
 });
 routes.post("/__qa/plan-usage/:state", (c) => {

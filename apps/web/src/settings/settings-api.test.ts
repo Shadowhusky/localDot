@@ -97,6 +97,27 @@ describe("bounded authenticated settings wire", () => {
     );
     expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toEqual(data);
   });
+  it("takes the daemon's list of model choices not in use, which it keeps itself", async () => {
+    const haiku = { provider: "claude-code", model: "haiku" };
+    const data = {
+      main: { provider: "claude-code", model: "opus" },
+      fast: haiku,
+      models: [haiku, { provider: "claude-code", model: "sonnet" }],
+    };
+    const reply = { ...data, models: [{ provider: "claude-code", model: "sonnet" }] };
+    expect(
+      await saveSettings(
+        apiFor(async () => Response.json(reply)),
+        data,
+      ),
+    ).toEqual(reply);
+    await expect(
+      saveSettings(
+        apiFor(async () => Response.json({ ...reply, fast: undefined })),
+        data,
+      ),
+    ).rejects.toMatchObject({ uncertain: true });
+  });
   it("refuses invalid numeric values locally before network, without clipping an oversized value", async () => {
     const fetchImpl = vi.fn(async () => Response.json({}));
     for (const price of [

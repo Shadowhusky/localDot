@@ -10,7 +10,7 @@ import { withAttachments } from "./attachments.ts";
 import { Composer, type ComposerProps, type ReplyOutcome } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
 import { Outbox } from "./outbox.ts";
-import { editQueued } from "./queued-draft.ts";
+import { editQueued, giveBack } from "./queued-draft.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 
 const spoken = vi.hoisted(() => ({ announce: vi.fn() }));
@@ -1496,15 +1496,15 @@ describe("a queued message taken back to edit", () => {
     });
   });
 
-  it("follows a newer draft once, however often it is asked, and a file removed stays on the computer", async () => {
+  it("goes ahead of a newer draft once, however often it is asked, and a file removed stays on the computer", async () => {
     const { calls, f } = editing(() =>
       Response.json({ text: withAttachments("Original words", [path]) }),
     );
     f.input("My newer draft");
     await act(async () => expect(await editQueued(sessionId, messageId)).toBe(true));
-    expect(f.field.value).toBe("My newer draft\n\nOriginal words");
+    expect(f.field.value).toBe("Original words\n\nMy newer draft");
     await act(async () => expect(await editQueued(sessionId, messageId)).toBe(true));
-    expect(f.field.value).toBe("My newer draft\n\nOriginal words");
+    expect(f.field.value).toBe("Original words\n\nMy newer draft");
     expect(calls.filter((call) => call.path === edit)).toHaveLength(1);
     expect(editQueued(otherSession, messageId)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Remove totals.csv" }));
@@ -1512,7 +1512,7 @@ describe("a queued message taken back to edit", () => {
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(calls[1]?.body).toEqual({
       kind: "followup",
-      text: "My newer draft\n\nOriginal words",
+      text: "Original words\n\nMy newer draft",
     });
     expect(calls.some((call) => call.method === "DELETE")).toBe(false);
   });
@@ -1527,7 +1527,7 @@ describe("a queued message taken back to edit", () => {
     const taking = editQueued(otherSession, messageId, true);
     expect(document.activeElement).toBe(f.field);
     await act(async () => expect(await taking).toBe(true));
-    expect(f.field.value).toBe("My newer draft\n\nOriginal words");
+    expect(f.field.value).toBe("Original words\n\nMy newer draft");
     expect(screen.getByRole("list", { name: "Attached files" }).textContent).toContain(
       "totals.csv",
     );
@@ -1565,5 +1565,85 @@ describe("a queued message taken back to edit", () => {
     await act(async () => expect(await editQueued(sessionId, messageId)).toBe(true));
     expect(f.field.value).toBe("Original words");
     expect(calls.filter((call) => call.path === edit)).toHaveLength(2);
+  });
+});
+
+describe("what this device's Stop gave back", () => {
+  const path = "~/Downloads/Uploads/0f0f1558-d8b6-478a-8daf-eadc6dc3725f/totals.csv";
+  const first = "01JXYZ00000000000000000M10";
+  const second = "01JXYZ00000000000000000M11";
+  const message = (
+    id: string,
+    text: string,
+    delivery?: AgentMessage["delivery"],
+  ): AgentMessage => ({
+    id,
+    role: "user",
+    text,
+    final: true,
+    kind: "followup",
+    ...(delivery ? { delivery, stopped: true } : {}),
+  });
+  const withMessages = (...messages: AgentMessage[]): AgentSessionView => ({
+    ...agent,
+    model: { ...emptyAgentModel(), messages: new Map(messages.map((m) => [m.id, m])) },
+  });
+
+  it("comes into the draft as it leaves the thread, ahead of the draft, with its files as chips", () => {
+    const f = setup(undefined, {
+      agent: withMessages(message(first, withAttachments("Draw a dog", [path]))),
+    });
+    f.input("My newer draft");
+    f.update({ stopping: sessionId });
+    expect(f.field.value).toBe("My newer draft");
+    f.update({
+      agent: withMessages(
+        message(first, withAttachments("Draw a dog", [path]), "withdrawn"),
+        message(second, "Make it brown", "withdrawn"),
+      ),
+    });
+    expect(f.field.value).toBe("Draw a dog\n\nMake it brown\n\nMy newer draft");
+    expect(f.field.selectionStart).toBe(f.field.value.length);
+    expect(screen.getByRole("list", { name: "Attached files" }).textContent).toContain(
+      "totals.csv",
+    );
+    expect(said()).toContain("Messages moved to the composer. Edit them, then send when ready.");
+    // Stop's reply names the same messages: they come back once.
+    act(() => {
+      expect(
+        giveBack(sessionId, [
+          { messageId: first, text: "Draw a dog" },
+          { messageId: second, text: "Make it brown" },
+        ]),
+      ).toBe(true);
+    });
+    expect(f.field.value).toBe("Draw a dog\n\nMake it brown\n\nMy newer draft");
+  });
+
+  it("takes them from Stop's reply when the thread has not shown them yet", () => {
+    const f = setup();
+    f.input("My newer draft");
+    act(() => {
+      expect(giveBack(sessionId, [{ messageId: first, text: "Draw a dog" }])).toBe(true);
+    });
+    expect(f.field.value).toBe("Draw a dog\n\nMy newer draft");
+    expect(said()).toContain("Message moved to the composer. Edit it, then send when ready.");
+  });
+
+  it("leaves the draft alone for another device's Stop, or a message left unsent for Edit", () => {
+    const f = setup(undefined, {
+      agent: withMessages(
+        message(first, "Draw a dog", "withdrawn"),
+        message(second, "Make it brown", "cancelled"),
+      ),
+    });
+    f.input("My newer draft");
+    f.update({ stopping: otherSession });
+    expect(f.field.value).toBe("My newer draft");
+    f.update({
+      stopping: sessionId,
+      agent: withMessages(message(second, "Make it brown", "cancelled")),
+    });
+    expect(f.field.value).toBe("My newer draft");
   });
 });

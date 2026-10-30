@@ -150,9 +150,7 @@ describe("explicit configuration save ownership", () => {
       held.resolve(f.state.index);
       await Promise.all([first, second]);
     });
-    expect(f.state.puts).toEqual([
-      { ...initial(), main: { provider: "ollama", model: "edited" }, models: [initial().main] },
-    ]);
+    expect(f.state.puts).toEqual([{ ...initial(), main: { provider: "ollama", model: "edited" } }]);
     expect(result.current.saved).toEqual(f.state.puts[0]);
     expect(result.current.dirty).toBe(false);
   });
@@ -311,9 +309,7 @@ describe("explicit configuration save ownership", () => {
     await act(async () => {
       await result.current.save();
     });
-    expect(f.state.puts).toEqual([
-      { ...initial(), main: { provider: "ollama", model: "edited" }, models: [initial().main] },
-    ]);
+    expect(f.state.puts).toEqual([{ ...initial(), main: { provider: "ollama", model: "edited" } }]);
   });
   it("restores readiness after a background while Settings is closed", async () => {
     const f = server(),

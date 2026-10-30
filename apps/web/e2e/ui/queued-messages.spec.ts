@@ -5,8 +5,8 @@ import { attachFiles } from "./attach.ts";
 import { composer, expect, runAt, test } from "./harness.ts";
 
 // A message sent while dot works: it waits at the end of the thread, Edit takes it back into the
-// composer with its files, Stop leaves it unsent for Edit to take back, and the files a message
-// carried sit atop its bubble.
+// composer with its files, Stop gives it back there too, and the files a message carried sit atop
+// its bubble.
 runAt("c14", "c39", "w39");
 
 // Rows that arrive ease in; the picture waits until they have.
@@ -139,10 +139,10 @@ test("Edit takes a queued message back into the composer with its files", async 
   await queued.getByRole("button", { name: "Edit", exact: true }).click();
 
   await expect(queued).toHaveCount(0);
-  await expect(field).toHaveValue("My existing draft\n\nUse both files for the summary");
+  await expect(field).toHaveValue("Use both files for the summary\n\nMy existing draft");
   await expect(field).toBeFocused();
   expect(await field.evaluate((box: HTMLTextAreaElement) => box.selectionStart)).toBe(
-    "My existing draft\n\nUse both files for the summary".length,
+    "Use both files for the summary\n\nMy existing draft".length,
   );
   const chips = card.getByRole("list", { name: "Attached files" });
   await expect(chips.getByRole("listitem")).toHaveCount(2);
@@ -169,7 +169,10 @@ test("Edit takes a queued message back into the composer with its files", async 
   expect(removed).toEqual([]);
 });
 
-test("a message Stop left unsent waits for Edit to take it back", async ({ page, ui }) => {
+test("Stop gives a queued message straight back into the composer with its files", async ({
+  page,
+  ui,
+}) => {
   await ui.open("running");
   const card = await composer(page);
   const field = card.getByRole("textbox", { name: "Message", exact: true });
@@ -179,20 +182,15 @@ test("a message Stop left unsent waits for Edit to take it back", async ({ page,
   await expect(queued.getByText("After this task")).toBeVisible();
   await card.getByRole("button", { name: "Stop task" }).click();
   await expect(card.getByRole("button", { name: "Stop task" })).toHaveCount(0);
-  await expect(queued.getByText("Not sent")).toBeVisible();
-  await expect(queued.getByRole("list", { name: "Attached files" })).toHaveText(/notes\.txt/);
-  expect((await order(page)).at(-1)).toBe("Then tidy up the sheet");
-  await shot(page, "stop-unsent");
-  await queued.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(queued).toHaveCount(0);
   await expect(field).toHaveValue("Then tidy up the sheet");
-  await expect(field).toBeFocused();
   const chips = card.getByRole("list", { name: "Attached files" });
   await expect(chips.getByText("Uploaded to Downloads")).toHaveCount(1);
   await expect(chips).toContainText("notes.txt");
+  await shot(page, "stop-given-back");
 });
 
-test("a message Stop left unsent stays out of the thread once taken back, on every device", async ({
+test("a message Stop gave back stays out of the thread, read again and on another device", async ({
   page,
   ui,
   browser,
@@ -200,27 +198,11 @@ test("a message Stop left unsent stays out of the thread once taken back, on eve
   // The app opens three times: at first, read again, and on another device.
   test.slow();
   const fixture = await ui.open("running");
-  // The task's record, which Replay reads.
-  const record = async () =>
-    (
-      await (
-        await page.request.get(`${fixture.origin}/api/sessions/${fixture.sessionId}/events`, {
-          headers: { authorization: `Bearer ${TOKEN}`, accept: "application/x-ndjson" },
-        })
-      ).text()
-    )
-      .split("\n")
-      .filter(Boolean);
   const card = await composer(page);
   const field = card.getByRole("textbox", { name: "Message", exact: true });
   await queue(page, card, "Then tidy up the sheet");
-  const queued = yours(page, "Then tidy up the sheet");
   await card.getByRole("button", { name: "Stop task" }).click();
-  await expect(queued.getByText("Not sent")).toBeVisible();
-  const recorded = await record();
-  await queued.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(field).toHaveValue("Then tidy up the sheet");
-  expect(await record()).toEqual(recorded);
 
   // Read again, the thread leaves it out, not even for a moment while it comes in, and the draft
   // still has it.
@@ -232,6 +214,7 @@ test("a message Stop left unsent stays out of the thread once taken back, on eve
   });
   // WebKit reports a request that a reload cuts off as a page error, so the page settles first.
   await page.waitForLoadState("networkidle");
+  ui.leaving();
   await page.reload();
   await expect(yours(page, "Summarise the sample sales table")).toBeVisible();
   await expect(yours(page, "Then tidy up the sheet")).toHaveCount(0);
@@ -246,6 +229,10 @@ test("a message Stop left unsent stays out of the thread once taken back, on eve
     await device.goto(`${fixture.origin}/#token=${TOKEN}`);
     await expect(yours(device, "Summarise the sample sales table")).toBeVisible();
     await expect(yours(device, "Then tidy up the sheet")).toHaveCount(0);
+    // Its composer has nothing of it: the words went back to the device that stopped.
+    await expect(
+      (await composer(device)).getByRole("textbox", { name: /^(New task|Message)$/ }),
+    ).toHaveValue("");
   } finally {
     await other.close();
   }

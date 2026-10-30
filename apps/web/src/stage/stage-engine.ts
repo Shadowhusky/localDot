@@ -58,6 +58,11 @@ const reducedMotionQuery = () => window.matchMedia("(prefers-reduced-motion: red
 // shows little more, and every frame costs the GPU for each pixel.
 export const MAX_BACKING_SCALE = 1.5;
 
+// A stage whose box keeps changing, as when a rail slides open beside it, keeps its canvas's size,
+// its picture scaled to the box, until the box has been still this long: each new size costs the
+// worker a fresh backing store and a full redraw.
+export const RESIZE_SETTLE_MS = 100;
+
 // Whether some of the canvas is in the viewport with a size, and the share of the viewport it
 // covers.
 export interface StageView {
@@ -206,18 +211,27 @@ export class StageEngine implements StageCanvasHandle {
         onScreen: inView && box.w > 0 && box.h > 0,
         share: (box.w * box.h) / Math.max(1, window.innerWidth * window.innerHeight),
       });
+    // Explicit DPR also respects Chromium's emulated HiDPI: its devicePixelContentBoxSize
+    // describes native display pixels and can disagree with the page's devicePixelRatio.
+    const resize = () => {
+      const w = Math.round(box.w * dpr);
+      const h = Math.round(box.h * dpr);
+      if (w <= 0 || h <= 0 || (w === this.#viewport.w && h === this.#viewport.h)) return;
+      this.#viewport = { w, h };
+      this.#post({ type: "resize", width: w, height: h });
+    };
+    // A still box's first change is taken at once; one that keeps changing waits to settle.
+    let settling: ReturnType<typeof setTimeout> | undefined;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       box = { w: entry?.contentRect.width ?? 0, h: entry?.contentRect.height ?? 0 };
       view();
-      // Explicit DPR also respects Chromium's emulated HiDPI: its devicePixelContentBoxSize
-      // describes native display pixels and can disagree with the page's devicePixelRatio.
-      const w = Math.round(box.w * dpr);
-      const h = Math.round(box.h * dpr);
-      if (w > 0 && h > 0) {
-        this.#viewport = { w, h };
-        this.#post({ type: "resize", width: w, height: h });
-      }
+      if (settling === undefined) resize();
+      else clearTimeout(settling);
+      settling = setTimeout(() => {
+        settling = undefined;
+        resize();
+      }, RESIZE_SETTLE_MS);
     });
     observer.observe(canvas);
     // Clipped away counts as out of sight: a folded phone screen keeps its size at no height.
@@ -245,6 +259,7 @@ export class StageEngine implements StageCanvasHandle {
       window.removeEventListener(APPEARANCE_EVENT, onAppearance);
       window.removeEventListener("resize", view);
       motion.removeEventListener("change", onMotion);
+      clearTimeout(settling);
       observer.disconnect();
       sight?.disconnect();
       this.#source?.stop();

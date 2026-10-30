@@ -1,4 +1,4 @@
-import type { SessionIndexPage } from "@localdot/protocol";
+import { type SessionIndexPage, TaskStopReply } from "@localdot/protocol";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { AgentMessage, AgentWords } from "../agent/model.ts";
 import { SafeMarkdown } from "../agent/SafeMarkdown.tsx";
@@ -64,6 +64,10 @@ export function SharedApp({ api }: { api: ApiClient }) {
     connection.phase === "away" && connection.level !== "blip" && connection.cause !== "switch"
       ? awayWords(connection.cause, connection.screen).brief
       : null;
+  // A message taken back has left the conversation.
+  const said = [...agent.model.messages.values()].filter(
+    (message) => message.delivery !== "withdrawn",
+  );
   const status = agent.snapshot?.status;
   const owns = !!live.sessionId && !!grant?.ownedSessions.includes(live.sessionId);
   const working = status === "running" || status === "starting";
@@ -209,10 +213,10 @@ export function SharedApp({ api }: { api: ApiClient }) {
       </div>
       <section className="shared-chat" aria-label="Conversation">
         <div className="shared-messages">
-          {[...agent.model.messages.values()].slice(-50).map((message) => (
+          {said.slice(-50).map((message) => (
             <SharedMessage key={message.id} message={message} feed={live.agentFeed} />
           ))}
-          {!agent.model.messages.size && <p>What would you like dot to do?</p>}
+          {!said.length && <p>What would you like dot to do?</p>}
         </div>
         <Disclosure
           className="shared-progress"
@@ -260,9 +264,17 @@ export function SharedApp({ api }: { api: ApiClient }) {
               <Button
                 variant="quiet"
                 onClick={() => {
+                  // What this link said that dot had not acted on comes back to be sent again.
                   void api
-                    .post(`/api/agent/sessions/${live.sessionId}/stop`)
-                    .then(() => agent.reconcile())
+                    .post(`/api/agent/sessions/${live.sessionId}/stop?giveBack=1`)
+                    .then((reply) => {
+                      const back = TaskStopReply.parse(reply).messages.map(({ text }) => text);
+                      if (back.length)
+                        setText((draft) =>
+                          [...back, draft].filter((part) => part.trim()).join("\n\n"),
+                        );
+                      agent.reconcile();
+                    })
                     .catch(() => setError("The task could not be stopped."));
                 }}
               >

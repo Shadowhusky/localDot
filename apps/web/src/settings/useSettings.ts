@@ -431,21 +431,6 @@ export function useSettings(
       setIndex(fresh);
       const checked = validateForm(captured, previous, fresh, subscriptionModels);
       if (!checked.ok) return;
-      // Keep the previous saved model when a replacement is actually committed, not
-      // when the user merely browses providers and returns to the saved choice, nor when
-      // only its options change: the daemon keeps no history of a model still in use.
-      for (const role of ["main", "fast", "local"] as const) {
-        const old = previous[role];
-        const now = checked.document[role];
-        if (
-          old &&
-          (old.provider !== now?.provider || old.model !== now.model || old.key !== now.key)
-        ) {
-          const models = checked.document.models ?? [];
-          if (!models.some((choice) => sameSettingsValue(choice, old)))
-            checked.document.models = [...models, old].slice(-100);
-        }
-      }
       sent = true;
       writing.current = true;
       const next = await saveSettings(api, checked.document, abort.signal);

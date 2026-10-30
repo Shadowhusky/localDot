@@ -62,6 +62,8 @@ export class PixiPresenter implements Presenter {
   #screen: { w: number; h: number } | null = null;
   #backdrop = false;
   #dim = { from: 1, to: 1, start: 0, ms: 0 };
+  // The canvas size the next render takes.
+  #resize: { w: number; h: number } | null = null;
   readonly #warn: (message: string) => void;
 
   static async create(canvas: OffscreenCanvas, opts: PresenterOptions): Promise<PixiPresenter> {
@@ -199,8 +201,10 @@ export class PixiPresenter implements Presenter {
     this.overlays.setCamera(cam);
   }
 
+  // The canvas takes its new size in the render that next draws into it: resizing clears it, so a
+  // size taken any earlier could reach a display frame as a blank stage.
   setViewport(width: number, height: number): void {
-    this.app.renderer.resize(width, height);
+    this.#resize = { w: width, h: height };
     this.overlays.setViewport(width, height);
   }
 
@@ -237,6 +241,10 @@ export class PixiPresenter implements Presenter {
       const now = performance.now();
       const level = this.#tint(now);
       this.video.tint = (level << 16) | (level << 8) | level;
+      if (this.#resize) {
+        this.app.renderer.resize(this.#resize.w, this.#resize.h);
+        this.#resize = null;
+      }
       this.app.renderer.render(this.app.stage);
       if (frame) {
         this.presented += 1;

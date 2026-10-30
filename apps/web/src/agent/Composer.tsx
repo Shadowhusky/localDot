@@ -1,4 +1,4 @@
-import { keyLikePresent, STALL, ULID_PATTERN } from "@localdot/protocol";
+import { type GivenBack, keyLikePresent, STALL, ULID_PATTERN } from "@localdot/protocol";
 import {
   memo,
   type ReactNode,
@@ -49,7 +49,7 @@ import { PendingMessage } from "./DeliveryState.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import { Outbox } from "./outbox.ts";
 import { pastedFiles, pastedText } from "./paste.ts";
-import { onQueuedEdit } from "./queued-draft.ts";
+import { onGiveBack, onQueuedEdit } from "./queued-draft.ts";
 import { ResearchLine, ResearchToggle } from "./ResearchToggle.tsx";
 import { RevisingChip } from "./RevisingChip.tsx";
 import { looksLikeResearch, onResearchRequest, researchWait } from "./research.ts";
@@ -98,6 +98,8 @@ export interface ComposerProps {
   // The model chip, in a card's row.
   model?: ReactNode;
   taskAction?: { kind: "stop" | "continue"; run(): void; disabledReason?: string };
+  // The task this device is stopping: what its Stop gives back comes into the draft.
+  stopping?: string | null;
   permissions?: ReactNode;
   // The main model saved since this task started: a message at rest starts a task on it.
   modelChanged?: boolean;
@@ -598,11 +600,61 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       }),
     [measure],
   );
-  // Edit on a message that never reached dot: its words and files come back into the draft, after
-  // anything already written there, once dot has given them back.
+  // A message that never reached dot, or that Stop gave back: its words and files come back into
+  // the draft ahead of anything written there since, as they were written first, and the caret
+  // stays at the end, where the user was writing. Each message comes back once.
   const takenBack = useRef(new Set<string>());
   const restoreFiles = useRef(uploads.restore);
   restoreFiles.current = uploads.restore;
+  const takeBack = useCallback(
+    (sessionId: string, messages: readonly GivenBack[]) => {
+      const box = form.current?.querySelector("textarea");
+      if (!box) return false;
+      const fresh = messages.filter(
+        ({ messageId }) => !takenBack.current.has(`${sessionId}:${messageId}`),
+      );
+      if (!fresh.length) return true;
+      const parts = fresh.map(({ messageId, text }) => {
+        takenBack.current.add(`${sessionId}:${messageId}`);
+        return splitAttachments(text);
+      });
+      box.value = [...parts.map((part) => part.body), box.value]
+        .filter((text) => text.trim())
+        .join("\n\n");
+      restoreFiles.current(parts.flatMap((part) => part.files));
+      revision.current += 1;
+      keepDraft(guardOwner.current.check(box) ? box.value : "");
+      measure(box);
+      setProblem(null);
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
+      box.scrollTop = box.scrollHeight;
+      announce(
+        "composer",
+        fresh.length > 1
+          ? "Messages moved to the composer. Edit them, then send when ready."
+          : "Message moved to the composer. Edit it, then send when ready.",
+      );
+      return true;
+    },
+    [measure],
+  );
+  useEffect(() => onGiveBack(takeBack), [takeBack]);
+  // This device's Stop: what it gave back comes into the draft as it leaves the thread.
+  const stopping = props.stopping;
+  const said = props.agent.model.messages;
+  const shownTask = props.agent.sessionId;
+  useEffect(() => {
+    if (!stopping || stopping !== shownTask) return;
+    const back = [...said.values()].filter(
+      (message) => message.role === "user" && message.delivery === "withdrawn" && message.stopped,
+    );
+    if (back.length)
+      takeBack(
+        stopping,
+        back.map((message) => ({ messageId: message.id, text: message.text })),
+      );
+  }, [stopping, shownTask, said, takeBack]);
   useEffect(() => {
     const lifetime = new AbortController();
     const unsubscribe = onQueuedEdit((sessionId, messageId, stopped) => {
@@ -611,26 +663,9 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       if (!input || (!stopped && sessionId !== now.agent.sessionId)) return null;
       // In the press itself, so a phone raises its keyboard for the words on their way.
       input.focus();
-      const key = `${sessionId}:${messageId}`;
-      if (takenBack.current.has(key)) return Promise.resolve(true);
+      if (takenBack.current.has(`${sessionId}:${messageId}`)) return Promise.resolve(true);
       return editQueuedMessage(now.api, sessionId, messageId, lifetime.signal).then(
-        (text) => {
-          const box = form.current?.querySelector("textarea");
-          if (!box || takenBack.current.has(key)) return !!box;
-          takenBack.current.add(key);
-          const { body, files } = splitAttachments(text);
-          box.value = box.value.trim() ? `${box.value}\n\n${body}` : body;
-          restoreFiles.current(files);
-          revision.current += 1;
-          keepDraft(guardOwner.current.check(box) ? box.value : "");
-          measure(box);
-          setProblem(null);
-          box.focus();
-          box.setSelectionRange(box.value.length, box.value.length);
-          box.scrollTop = box.scrollHeight;
-          announce("composer", "Message moved to the composer. Edit it, then send when ready.");
-          return true;
-        },
+        (text) => takeBack(sessionId, [{ messageId, text }]),
         () => {
           if (!lifetime.signal.aborted)
             setProblem(
@@ -646,7 +681,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       lifetime.abort();
       unsubscribe();
     };
-  }, [measure]);
+  }, [takeBack]);
   // A key taken out, or discarded, changes the text under the composer.
   // biome-ignore lint/correctness/useExhaustiveDependencies: a notice's change is the trigger.
   useLayoutEffect(() => {

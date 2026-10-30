@@ -15,6 +15,28 @@
     white-space: nowrap;
   }
 
+  /* What a search matched, brighter, as a picker marks it. */
+  :is(.sessions-row, .conversations-pick) mark {
+    background: none;
+    color: var(--color-fg-1);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .conversations-foot {
+    gap: calc(var(--spacing) * 2);
+  }
+
+  /* A row's status glyph and, at the row's leading edge, its colour tag. */
+  :is(.sessions-glyph, .conversations-glyph) {
+    position: relative;
+    display: grid;
+    place-items: center;
+  }
+
+  .conversations-glyph > .ui-tag-mark {
+    left: calc(var(--spacing) * -3);
+  }
+
   /* The conversations rail (SessionRail). Collapsed or expanded, a row's mark keeps one column
      under the rail's toggle, so collapsing only clips the names away: a row hides what it has no
      room for, so focusing it never scrolls the rail sideways. The rail is too narrow collapsed for
@@ -50,6 +72,20 @@
     outline-offset: calc(var(--focus-width) * -1);
   }
 
+  /* Magnified (useDockMagnify.ts), the marks move under a still pointer while the browser keeps
+     the hover on the one it last hit, so the lens marks the one under it, as the Dock does: with
+     no plate, only brighter ink. */
+  .sessions:has(> .sessions-dock[data-magnify]) .sessions-row:not([data-pressed]) {
+    --_face: var(--_bg);
+    color: var(--_fg);
+  }
+
+  .sessions:has(> .sessions-dock[data-magnify])
+    .sessions-item[data-under]
+    > .sessions-row:not([aria-disabled="true"]) {
+    color: var(--_fg-hover);
+  }
+
   /* Over the time at the row's end, shown on hover, on focus and while its menu is open. */
   .sessions-more {
     position: absolute;
@@ -77,5 +113,70 @@
 
   .sessions-rename {
     width: 100%;
+  }
+
+  /* 3 px in from the row's edge, which is its border and padding away from the glyph. */
+  .sessions-glyph > .ui-tag-mark {
+    left: calc(var(--spacing) * -3 + 3px);
+  }
+
+  .sessions-search {
+    flex: none;
+    padding: var(--spacing) calc(var(--spacing) * 2) 0;
+  }
+
+  /* The field's search glyph sits in the marks' column, where the collapsed rail's search mark
+     was, so as the rail opens only its fill and words come in, with the names. */
+  .sessions-search-field {
+    width: 100%;
+    padding-inline: calc(var(--spacing) * 3 - 1px) var(--spacing);
+    animation: sessions-search-fill var(--dur-default) var(--ease-standard) var(--dur-press) both;
+  }
+
+  .sessions-search-field > .ui-input {
+    animation: sessions-search-words var(--dur-default) var(--ease-standard) var(--dur-press) both;
+  }
+
+  @keyframes sessions-search-fill {
+    from {
+      background-color: transparent;
+    }
+  }
+
+  @keyframes sessions-search-words {
+    from {
+      opacity: 0;
+    }
+  }
+
+  /* Archived, below the rest: a group whose name opens it. */
+  .sessions-archived {
+    justify-content: flex-start;
+    gap: calc(var(--spacing) * 1.5);
+    width: 100%;
+    height: calc(var(--spacing) * 8);
+    margin-top: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+    color: var(--color-fg-3);
+    font:
+      var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+  }
+
+  /* A disclosure, not a menu's trigger: open, it stays unlit. */
+  .sessions-archived[aria-expanded="true"] {
+    --_face: transparent;
+    color: var(--color-fg-3);
+  }
+
+  .sessions-archived > .ui-button-content {
+    gap: calc(var(--spacing) * 1.5);
+    width: 100%;
+  }
+
+  .sessions-archived-count {
+    margin-inline-start: auto;
+    font-weight: var(--font-weight-medium);
   }
 }

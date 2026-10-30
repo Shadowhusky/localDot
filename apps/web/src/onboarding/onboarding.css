@@ -246,12 +246,15 @@
   margin-top: calc(var(--spacing) * 5);
 }
 
+/* Its foot room counts within the minimum height, so a short step keeps the footer where it was and
+   a long one, such as a size opened on the last step, pushes it down rather than touching it. */
 .onboarding-column {
   display: flex;
   flex-direction: column;
   width: 100%;
   min-height: 464px;
   margin-top: calc(var(--spacing) * 3);
+  padding-bottom: calc(var(--spacing) * 6);
   transition: opacity var(--dur-text-in) var(--ease-standard);
 }
 
@@ -443,9 +446,11 @@
   margin-top: calc(var(--spacing) * 2);
 }
 
+/* A phone's footer sits under the scroller, past the page's own foot room. */
 .onboarding[data-layout="phone"] .onboarding-column {
   min-height: 0;
   margin-top: calc(var(--spacing) * 2.5);
+  padding-bottom: 0;
 }
 
 .onboarding[data-layout="phone"] .onboarding-sub {
@@ -514,4 +519,24 @@
   width: calc(var(--spacing) * 11);
   height: calc(var(--spacing) * 11);
   border-radius: var(--radius-md);
+}
+
+/* The computer's size, changed in place under its summary row, across the row's whole width. */
+.onboarding-size {
+  display: grid;
+  gap: calc(var(--spacing) * 4);
+  padding: calc(var(--spacing) * 3) 0 var(--spacing);
+}
+
+.onboarding-size-problem {
+  margin: 0 0 var(--spacing) calc(var(--spacing) * 10);
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-wrap: pretty;
+}
+
+@media (width < 700px) {
+  .onboarding-size-problem {
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  }
 }

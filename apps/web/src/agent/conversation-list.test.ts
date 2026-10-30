@@ -2,12 +2,11 @@ import { type ConversationEntry, ulid } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import { createApi } from "../lib/api.ts";
 import {
+  arrangeConversations,
   conversationRows,
   conversationStatus,
   conversationTitle,
   groupConversations,
-  matchesConversation,
-  pinActive,
   renameConversation,
   whenLabel,
 } from "./conversation-list.ts";
@@ -126,10 +125,22 @@ describe("a conversation's row", () => {
           ended: null,
           live: { state: "paused", since: at(0), onScreen: false },
         }),
+        entry({ title: "pinned", pinned: true }),
+        entry({
+          title: "pinned live",
+          pinned: true,
+          ended: null,
+          live: { state: "working", since: at(0), onScreen: true },
+        }),
       ],
       QUIET,
     );
-    expect(pinActive(rows).map((row) => row.title)).toEqual(["live", "older live", "new", "old"]);
+    const { pinned, active, rest } = arrangeConversations(rows);
+    expect([pinned, active, rest].map((group) => group.map((row) => row.title))).toEqual([
+      ["pinned", "pinned live"],
+      ["live", "older live"],
+      ["new", "old"],
+    ]);
   });
 });
 
@@ -182,7 +193,7 @@ describe("grouping by day", () => {
     expect(groupConversations(rows.slice(3), NOW).map((group) => group.label)).toEqual(["Earlier"]);
   });
 
-  it("lists the conversations under way first, whatever their day", () => {
+  it("lists those pinned, then those under way, first, whatever their day", () => {
     const rows = conversationRows(
       [
         entry({ title: "a", startedAt: at(0, 1) }),
@@ -192,32 +203,17 @@ describe("grouping by day", () => {
           ended: null,
           live: { state: "waiting-for-computer", since: at(0), onScreen: false },
         }),
+        entry({ title: "c", startedAt: at(12), pinned: true }),
       ],
       QUIET,
     );
     expect(
       groupConversations(rows, NOW).map((group) => [group.label, group.rows.map((r) => r.title)]),
     ).toEqual([
+      ["Pinned", ["c"]],
       ["Active", ["b"]],
       ["Today", ["a"]],
     ]);
-  });
-});
-
-describe("search", () => {
-  it("matches every word in the title or the first message, in any case and order", () => {
-    const trip = entry({ title: "Plan the trip", said: "Somewhere warm in May" });
-    expect(matchesConversation(trip, "")).toBe(true);
-    expect(matchesConversation(trip, "TRIP plan")).toBe(true);
-    expect(matchesConversation(trip, "warm may")).toBe(true);
-    expect(matchesConversation(trip, "trip june")).toBe(false);
-  });
-
-  it("matches a conversation whose tasks the search index found the words in", () => {
-    const older = ulid();
-    const trip = entry({ sessions: [ulid(), older] });
-    expect(matchesConversation(trip, "boiler", new Set([older]))).toBe(true);
-    expect(matchesConversation(trip, "boiler", new Set([ulid()]))).toBe(false);
   });
 });
 

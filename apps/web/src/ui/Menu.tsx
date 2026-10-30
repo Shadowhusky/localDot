@@ -2,6 +2,7 @@ import { clsx } from "clsx";
 import {
   createContext,
   type KeyboardEvent,
+  type PointerEvent,
   type ReactNode,
   type RefObject,
   useContext,
@@ -110,7 +111,14 @@ export function Menu({ label, className, children, ...props }: MenuProps) {
         initialFocus={(menu) => {
           if (lastModality() !== "keyboard") return undefined;
           const list = items(menu);
-          return list.find((item) => item.getAttribute("aria-checked") === "true") ?? list[0];
+          // A row of choices among actions, such as a tag's swatches, is not where it opens.
+          return (
+            list.find(
+              (item) =>
+                item.getAttribute("aria-checked") === "true" &&
+                !item.closest("[data-inline-choices]"),
+            ) ?? list[0]
+          );
         }}
         panelProps={{
           role: "menu",
@@ -126,6 +134,28 @@ export function Menu({ label, className, children, ...props }: MenuProps) {
       </Anchored>
     </MenuContext.Provider>
   );
+}
+
+// What any item of a menu does: the pointer focuses it, and choosing it hands focus back to the
+// trigger and closes the menu before the choice runs, so anything the choice opens returns there.
+export function useMenuItem(onSelect: () => void, unavailable = false) {
+  const menu = useContext(MenuContext);
+  return {
+    ...pressHandlers,
+    type: "button" as const,
+    tabIndex: -1,
+    onPointerMove: (event: PointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "touch" && document.activeElement !== event.currentTarget)
+        focusWithoutScroll(event.currentTarget);
+    },
+    onClick: () => {
+      if (unavailable || !menu) return;
+      const anchor = menu.anchor.current;
+      if (anchor) focusWithoutScroll(anchor);
+      menu.close();
+      onSelect();
+    },
+  };
 }
 
 export interface MenuItemProps {
@@ -150,37 +180,23 @@ export function MenuItem({
   checked,
   children,
 }: MenuItemProps) {
-  const menu = useContext(MenuContext);
+  const item = useMenuItem(onSelect, !!disabledReason);
   const labelId = useId();
   const reasonId = useId();
   const keys = kbd && formatKeys(kbd);
   const glyph = checked ? "check" : checked === undefined ? icon : undefined;
   return (
     <button
-      {...pressHandlers}
-      type="button"
+      {...item}
       {...(checked === undefined
         ? { role: "menuitem" }
         : { role: "menuitemradio", "aria-checked": checked })}
-      tabIndex={-1}
       className="ui-menu-item"
       data-label={textValue ?? (typeof children === "string" ? children : undefined)}
       aria-labelledby={labelId}
       aria-disabled={disabledReason ? true : undefined}
       aria-describedby={disabledReason ? reasonId : undefined}
       aria-keyshortcuts={keys?.aria}
-      onPointerMove={(event) => {
-        if (event.pointerType !== "touch" && document.activeElement !== event.currentTarget)
-          focusWithoutScroll(event.currentTarget);
-      }}
-      onClick={() => {
-        if (disabledReason || !menu) return;
-        // Focus is back on the trigger before the action runs, so anything it opens returns there.
-        const anchor = menu.anchor.current;
-        if (anchor) focusWithoutScroll(anchor);
-        menu.close();
-        onSelect();
-      }}
     >
       {glyph && <Icon name={glyph} size={18} className="ui-menu-icon" />}
       <span className="ui-menu-text">

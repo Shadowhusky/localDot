@@ -793,6 +793,11 @@
   color: var(--color-danger-fg);
 }
 
+/* A slider standing as a group row, with room above its name and below its legend. */
+.settings-size-row > .ui-step-slider {
+  padding-block: calc(var(--spacing) * 1.5);
+}
+
 /* Under the update row, past its tile: the bar and one line of detail, or what failed. */
 .settings-update-progress {
   display: grid;

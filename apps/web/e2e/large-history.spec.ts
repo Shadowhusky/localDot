@@ -88,7 +88,7 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
         const url = input instanceof Request ? input.url : String(input);
         if (
           init?.method === "POST" &&
-          /\/api\/agent\/sessions\/[^/]+\/stop$/.test(url) &&
+          /\/api\/agent\/sessions\/[^/]+\/stop(\?|$)/.test(url) &&
           timing.clickAt
         )
           timing.dispatchMs = performance.now() - timing.clickAt;

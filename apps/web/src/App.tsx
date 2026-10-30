@@ -13,7 +13,7 @@ import {
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { providerById, sameModelOptions } from "@localdot/providers";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { CommandPalette, type PalettePage, usePaletteKeys } from "./actions/CommandPalette.tsx";
 import { SideNote } from "./actions/SideNote.tsx";
@@ -32,6 +32,7 @@ import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
 import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
 import { PermissionChip } from "./agent/PermissionChip.tsx";
+import { giveBack } from "./agent/queued-draft.ts";
 import { requestResearch, researchWait } from "./agent/research.ts";
 import { uploadFile } from "./agent/resumable-upload.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
@@ -62,6 +63,7 @@ import { dotFeed } from "./dot/dot-feed.ts";
 import { pictureAway, restingBand, useIdleLine, usePageHidden } from "./dot/idle-line.ts";
 import { PresenceLayer } from "./dot/PresenceLayer.tsx";
 import { presencePlace } from "./dot/presence-rules.ts";
+import { crown } from "./dot/render/wearables.ts";
 import { useShowDot } from "./dot/show-dot.ts";
 import type { TipAction } from "./dot/tips.ts";
 import { VOICES } from "./dot/voices.ts";
@@ -154,6 +156,7 @@ import { ConversationList, ConversationsButton } from "./shell/ConversationList.
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
 import { ApprovalDecision, DecisionSheetPresence } from "./shell/DecisionIsland.tsx";
+import { DeleteConversationDialog } from "./shell/DeleteConversationDialog.tsx";
 import { DotChooser } from "./shell/DotChooser.tsx";
 import { FocusControls } from "./shell/FocusControls.tsx";
 import { useFocusMode, useStill } from "./shell/focus.ts";
@@ -1020,6 +1023,7 @@ function Theatre({ api }: { api: ApiClient }) {
     stoppingRunRef.current = id;
     setStoppingRun(id);
     void endTaskRun(api, id, new AbortController().signal)
+      .then((messages) => giveBack(id, messages))
       .catch(() => {
         showToast({
           title: "Couldn't confirm Stop. Check the task and try again.",
@@ -1658,11 +1662,18 @@ function Theatre({ api }: { api: ApiClient }) {
     },
     onReplay: () => selectReplay(LIBRARY),
   };
+  // The current conversation, asked about from the palette before it is deleted.
+  const [deletingCurrent, setDeletingCurrent] = useState<{
+    sessionId: string;
+    sessions: readonly string[];
+  } | null>(null);
+  const deleteFrom = useRef<HTMLElement | null>(null);
   // The conversations rail, beside the stage while Watch shows on anything wider than a phone.
   const railShown = !phone && !replayId && !full && !onboarding.open;
   const railExpanded = panels.sessions ?? railByDefault;
   const pickFromRail = useHandler(pickConversation);
   const newFromRail = useHandler(newConversation.run);
+  const deletedFromRail = useHandler(conversationList.onDeleted);
   const expandRail = useHandler((sessions: boolean) => updatePanels({ sessions }));
   const askOver = (layout: "island" | "sheet") =>
     askDraft && (
@@ -1935,6 +1946,11 @@ function Theatre({ api }: { api: ApiClient }) {
       facts: liveFacts,
       pick: pickConversation,
       renamed: conversation.reload,
+      remove: (trigger) => {
+        if (!currentTask) return;
+        deleteFrom.current = trigger;
+        setDeletingCurrent({ sessionId: currentTask, sessions: conversation.sessions });
+      },
     },
     replay: {
       reason: hasRecordings ? undefined : "No recordings yet",
@@ -2005,6 +2021,7 @@ function Theatre({ api }: { api: ApiClient }) {
       <div
         ref={page}
         className={appStatus.control && !replayId ? "app control" : "app"}
+        style={{ "--dot-crown": crown(worn) } as CSSProperties}
         data-layout={layout}
         data-sessions={railShown ? (railExpanded ? "expanded" : "collapsed") : undefined}
         data-screen-minimized={(!replayId && mobileScreen.minimized) || undefined}
@@ -2065,6 +2082,7 @@ function Theatre({ api }: { api: ApiClient }) {
               onPick={pickFromRail}
               onNew={newFromRail}
               newReason={newConversation.reason}
+              onDeleted={deletedFromRail}
             />
           )}
           {mobileScreen.minimized && (
@@ -2692,6 +2710,7 @@ function Theatre({ api }: { api: ApiClient }) {
                       modelChanged={modelChanged}
                       permissions={permissionChip}
                       taskAction={stopAction}
+                      stopping={stoppingRun}
                       model={modelChip}
                       actions={commands.actions}
                     />
@@ -2980,6 +2999,13 @@ function Theatre({ api }: { api: ApiClient }) {
             />
           </Held>
         </ErrorBoundary>
+        <DeleteConversationDialog
+          api={api}
+          conversation={deletingCurrent}
+          anchor={deleteFrom}
+          onClose={() => setDeletingCurrent(null)}
+          onDeleted={conversationList.onDeleted}
+        />
         {phone && (
           <Sheet
             open={conversationsOpen}

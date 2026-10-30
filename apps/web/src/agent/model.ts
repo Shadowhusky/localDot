@@ -49,7 +49,8 @@ export interface AgentMessage {
   readonly queued?: boolean;
   readonly sessionId?: string;
   readonly delivery?: "sent" | "steering" | "cancelled" | "withdrawn";
-  // Cancelled because its task stopped, not by the user: it waits, unsent, for them to edit it.
+  // Its task's Stop left it unanswered: cancelled, it waits unsent for the user to edit it;
+  // withdrawn, Stop gave it back to whoever stopped the task.
   readonly stopped?: boolean;
   readonly files?: readonly string[];
   readonly truncated?: boolean;
