@@ -19,9 +19,14 @@ export const BUILT_IN_TOOLS: readonly string[] = Object.freeze([
   "AskUserQuestion",
   "Bash",
   "BashOutput",
+  "CronCreate",
+  "CronDelete",
+  "CronList",
   "Edit",
   "EnterPlanMode",
+  "EnterWorktree",
   "ExitPlanMode",
+  "ExitWorktree",
   "Glob",
   "Grep",
   "KillShell",
@@ -33,14 +38,23 @@ export const BUILT_IN_TOOLS: readonly string[] = Object.freeze([
   "NotebookRead",
   "Read",
   "ReadMcpResourceTool",
+  "ReportFindings",
+  "ScheduleWakeup",
+  "SendMessage",
   "Skill",
   "SlashCommand",
   "Task",
+  "TaskCreate",
+  "TaskGet",
+  "TaskList",
+  "TaskStop",
+  "TaskUpdate",
   "TodoRead",
   "TodoWrite",
   "ToolSearch",
   "WebFetch",
   "WebSearch",
+  "Workflow",
   "Write",
 ]);
 
@@ -51,11 +65,12 @@ export const isLocaldotTool = (name: string): boolean =>
   LOCALDOT_TOOLS.includes(name) ||
   (name.startsWith(PREFIX) && isConnectorToolName(name.slice(PREFIX.length)));
 
+export const ONLY_LOCALDOT = "Only localDot's tools are available.";
 // Every tool call asks here: localDot's own in-process server is allowed, anything else refused.
 export const onlyLocaldot: CanUseTool = async (name, input, { mcpServer }) =>
   isLocaldotTool(name) && mcpServer?.source === "sdk" && mcpServer.name === LOCALDOT_SERVER
     ? { behavior: "allow", updatedInput: input }
-    : { behavior: "deny", message: "Only localDot's tools are available." };
+    : { behavior: "deny", message: ONLY_LOCALDOT };
 
 export const refuseAll: CanUseTool = async () => ({
   behavior: "deny",
@@ -72,6 +87,8 @@ export interface ClaudeCodeRunInput {
 }
 export interface ClaudeCodeOptionsInput extends ClaudeCodeRunInput {
   readonly server: McpSdkServerConfigWithInstance;
+  // Built-ins a newer Claude Code turned on that localDot has learned to switch off by name.
+  readonly disallowed?: readonly string[];
 }
 
 // The user's own Claude Code with none of their setup: no settings, CLAUDE.md, memory, skills,
@@ -117,8 +134,12 @@ function isolated(input: ClaudeCodeRunInput): Options {
 
 // Dot's brain: localDot's tools over MCP and nothing else.
 export function claudeCodeOptions(input: ClaudeCodeOptionsInput): Options {
+  const learned = (input.disallowed ?? []).filter(
+    (name) => !isLocaldotTool(name) && !BUILT_IN_TOOLS.includes(name),
+  );
   return {
     ...isolated(input),
+    disallowedTools: [...BUILT_IN_TOOLS, ...new Set(learned)],
     mcpServers: { [LOCALDOT_SERVER]: input.server },
     canUseTool: onlyLocaldot,
     includePartialMessages: true,

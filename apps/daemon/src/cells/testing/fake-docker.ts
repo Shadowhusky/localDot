@@ -445,6 +445,13 @@ export async function startFakeDocker(
       c.exitCode = 0;
       return { status: 204 };
     }
+    const update = /^\/containers\/([^/]+)\/update$/.exec(path);
+    if (method === "POST" && update) {
+      const c = findContainer(segment(update));
+      if (!c) return notFound("container");
+      Object.assign(c.body.HostConfig, body);
+      return json(200, { Warnings: [] });
+    }
     // A one-shot container (the desktop's link helper) has run to its end by the time it is waited on.
     const wait = /^\/containers\/([^/]+)\/wait$/.exec(path);
     if (method === "POST" && wait) {

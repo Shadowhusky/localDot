@@ -11,7 +11,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CodexInstallState, InstalledCodex } from "@localdot/codex-harness";
-import { type ChatgptSandbox, type KeydRecord, PlanUsageReply, ulid } from "@localdot/protocol";
+import {
+  type ChatgptSandbox,
+  type KeydRecord,
+  PlanUsageReply,
+  TaskStopReply,
+  ulid,
+} from "@localdot/protocol";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1732,6 +1738,7 @@ describe("shared-link task enforcement", () => {
     expect(f.start).toHaveBeenCalledWith(CELL, "Hello", expect.any(AbortSignal), {
       main: f.model,
       budgetUSD: 1,
+      sender: f.issued.grant.id,
     });
     expect(f.links.owns(f.issued.grant.id, SESSION)).toBe(true);
     expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Another" })).status).toBe(403);
@@ -1755,5 +1762,31 @@ describe("shared-link task enforcement", () => {
     started.resolve(f.session);
     expect((await pending).status).toBe(403);
     expect(f.stopRun).toHaveBeenCalledWith(SESSION);
+  });
+  it("gives a link's Stop back only what that link said, never the owner's words", async () => {
+    const f = await guest();
+    f.start.mockImplementationOnce(async (_cell, _task, _signal, options) => {
+      f.session.askTask(options?.sender);
+      return f.session;
+    });
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    f.session.post("followup", "The owner's words");
+    const said = await f.send(`/api/agent/sessions/${SESSION}/messages`, {
+      text: "The guest's words",
+      kind: "steer",
+    });
+    expect(said.status).toBe(202);
+    const stopped = await f.send(`/api/agent/sessions/${SESSION}/stop?giveBack=1`, {});
+    expect(stopped.status).toBe(200);
+    expect(
+      TaskStopReply.parse(await stopped.json()).messages.map((message) => message.text),
+    ).toEqual(["task", "The guest's words"]);
+    expect(f.stopRun).toHaveBeenCalledWith(SESSION);
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        type: "message.delivery",
+        data: expect.objectContaining({ state: "cancelled", reason: "stopped" }),
+      }),
+    );
   });
 });

@@ -11,6 +11,7 @@ import { ComputerResetRecord } from "../../../../packages/protocol/src/computer-
 import { computerCapacity } from "../dots/capacity.ts";
 import type { CellKeyd } from "../keyd/cell-wiring.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
+import type { ComputerSizes } from "./computer-size.ts";
 import type { ComputerUpdates } from "./computer-update.ts";
 import { type DiagnosticSelfTest, probeDiagnosticSelfTest } from "./diagnostic-selftest.ts";
 import { type DockerClient, DockerError } from "./docker.ts";
@@ -87,6 +88,8 @@ export interface OrchestratorDeps {
   docker: DockerClient;
   store: CellStore;
   images: Images;
+  // The dot's computer size, which each desktop takes before it starts.
+  size?: Pick<ComputerSizes, "prepare" | "read">;
   // How gates reach keyd and the daemon (cells/relay.ts); Docker Desktop's host name by default.
   relay?: () => Promise<GateRelay>;
   streamFullcolor?: boolean;
@@ -1347,6 +1350,12 @@ export class CellOrchestrator {
       if (!this.#current(record.id, starting)) return false;
       if (!frozen) {
         this.#step(record.id, "desktop");
+        await this.deps.size
+          ?.prepare(d.desktop)
+          .catch((err: unknown) =>
+            console.error(`cell ${record.id}: desktop kept its size (${messageOf(err)})`),
+          );
+        if (!this.#current(record.id, starting)) return false;
         await this.#docker.request({
           method: "POST",
           path: objectPath("containers", d.desktop, "start"),
@@ -1713,7 +1722,11 @@ export class CellOrchestrator {
       }
       if (info?.State.OOMKilled && !info.State.Running) {
         // Several dots' computers share Docker's memory: say what to raise, when that is why.
-        const advice = await computerCapacity(this.#docker, record.id).catch(() => undefined);
+        const advice = await computerCapacity(
+          this.#docker,
+          record.id,
+          this.deps.size?.read().memoryBytes,
+        ).catch(() => undefined);
         return {
           role,
           detail: `${role} container ran out of memory${advice ? ` — ${advice}` : ""}`,

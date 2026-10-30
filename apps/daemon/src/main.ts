@@ -22,6 +22,7 @@ import { BrowserStreams } from "./browser/streams.ts";
 import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
 import { BrowserRecovery, credentialsChanged } from "./cells/browser-recovery.ts";
+import { ComputerSizes } from "./cells/computer-size.ts";
 import { ComputerUpdates, updateComputer } from "./cells/computer-update.ts";
 import { DockerClient } from "./cells/docker.ts";
 import { browserImagesFromEnv, imagesFromEnv } from "./cells/images.ts";
@@ -214,6 +215,11 @@ const keydWiring = new CellKeydWiring({ keyd, docker });
 let agent: ReturnType<typeof createAgent> | undefined;
 let browser: BrowserOrchestrator | undefined;
 const store = new CellStore(home, keydPorts);
+const sizes = new ComputerSizes({
+  home,
+  docker,
+  computers: () => store.list().map((record) => record.id),
+});
 const stream = streamOptions(process.env);
 const images = imagesFromEnv();
 const migration = new SystemMigration(docker, home);
@@ -228,6 +234,7 @@ const updates = new ComputerUpdates({
 });
 const orchestrator = new CellOrchestrator({
   updates,
+  size: sizes,
   diagnosticAdmission: (id) => live.admitIdleOperation(id),
   externalKeydPorts: () => [
     ...(agent?.reservedPorts() ?? []),
@@ -303,6 +310,7 @@ browser = new BrowserOrchestrator({
     ),
   keysLocked: () => keydMonitor.health.online && keydMonitor.health.vault?.state === "locked",
   notify: (id, text) => browserNotice(id, text),
+  size: () => sizes.read(),
   retiredDesktopPortOwner: (id) => orchestrator.retiredPortOwner(id),
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],
 });
@@ -808,6 +816,7 @@ const app = createApp({
     live,
     retention: retentionPolicy,
     framesMaxAgeDays,
+    publish: (event) => appEvents.publish(event),
   },
   deliverables: deliverablesFor(home, eventLog, frames, {
     computers: () => orchestrator.list(),
@@ -822,7 +831,8 @@ const app = createApp({
     tickets,
     replacement,
     reset,
-    capacity: (starting) => computerCapacity(docker, starting),
+    capacity: (starting) => computerCapacity(docker, starting, sizes.read().memoryBytes),
+    size: sizes,
     importComputer: computerImport(home, docker),
     checkRuntime: () => docker.checkReady(),
     runtimeStatus: () => runtimeStartup.snapshot(),

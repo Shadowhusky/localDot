@@ -103,6 +103,30 @@ describe("search feed", () => {
     expect(index.search({ query: "forecast" }).map((r) => r.sessionId)).toEqual([id]);
   });
 
+  it("forgets a message Stop gave back or left unanswered, live and on catching up", () => {
+    const { home, log, index, feed } = setup();
+    cleanup.push(feed.start());
+    const other = new EventLog(home);
+    cleanup.push(() => other.close());
+    const taken = (by: EventLog, id: string, text: string, state: "withdrawn" | "cancelled") => {
+      const said = user(text);
+      by.append(id, said);
+      by.append(id, {
+        type: "message.delivery",
+        agent: "main",
+        data: { messageId: said.data.messageId, state, reason: "stopped" },
+      });
+    };
+    // Written where the feed doesn't hear it, so read when it catches up.
+    const id = other.createSession("Pets");
+    other.append(id, user("draw a dog"));
+    taken(other, id, "feed the walrus", "cancelled");
+    log.append(id, user("then a cat"));
+    taken(log, id, "paint the giraffe", "withdrawn");
+    for (const query of ["giraffe", "walrus"]) expect(index.search({ query })).toEqual([]);
+    for (const query of ["dog", "cat"]) expect(index.search({ query })).toHaveLength(1);
+  });
+
   it("never indexes tool output, thoughts, file patches, typed text or lookups", async () => {
     const { log, index, feed } = setup();
     const id = log.createSession("Quiet");

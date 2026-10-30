@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type ConversationOrganizedEvent,
   DeleteSessionsResult,
   emptyManifest,
   type LocalDotEvent,
@@ -53,6 +54,7 @@ async function setup(withBrowser = true) {
   const liveWriters = new Map<string, RecordingWriter>();
   const index = new SessionIndex(home, { isLive: (id) => liveIds.has(id) });
   indexes.push(index);
+  const published: ConversationOrganizedEvent[] = [];
   const app = createApp({
     token,
     port: 4790,
@@ -63,6 +65,7 @@ async function setup(withBrowser = true) {
       index,
       thumbs: new Thumbnails(home, new FrameStore(home)),
       live: { cellOf: (id) => (controlledIds.has(id) ? "test-cell" : undefined) },
+      publish: (event) => published.push(event),
       recorder: {
         ...(withBrowser ? { browser } : {}),
         isLive: (id) => liveIds.has(id),
@@ -90,7 +93,7 @@ async function setup(withBrowser = true) {
       ...init,
       headers: { ...headers, ...init.headers },
     });
-  return { home, seed, log, index, request, liveIds, controlledIds, liveWriters };
+  return { home, seed, log, index, request, liveIds, controlledIds, liveWriters, published };
 }
 afterEach(() => {
   vi.restoreAllMocks();
@@ -182,7 +185,9 @@ describe("replay APIs", () => {
     expect((await rename(first, { title: "  Mum's 60th in Lisbon " })).status).toBe(204);
     expect(titles()).toEqual(["Mum's 60th in Lisbon", "Mum's 60th in Lisbon"]);
     expect(await card(first)).toBe("Mum's 60th in Lisbon");
-    expect(new Conversations(f.home, f.log).list()[0]?.title).toBe("Mum's 60th in Lisbon");
+    expect(new Conversations(f.home, f.log).list().conversations[0]?.title).toBe(
+      "Mum's 60th in Lisbon",
+    );
     // The same name again records nothing new; dot's later name never takes over.
     const events = f.log.read(latest).length;
     expect((await rename(latest, { title: "Mum's 60th in Lisbon" })).status).toBe(204);
@@ -222,6 +227,99 @@ describe("replay APIs", () => {
     expect(f.log.sessionInfo([hold]).get(hold)?.title).toBe("You used the computer");
     expect((await rename(ulid(), { title: "Nowhere" })).status).toBe(404);
     expect((await rename("not-a-task", { title: "Nowhere" })).status).toBe(404);
+  });
+  it("tags, pins and archives a whole conversation by any of its tasks, and tells every viewer", async () => {
+    const f = await setup();
+    const task = (continues?: string) => {
+      const id = f.log.createSession("plan the trip");
+      f.log.append(id, {
+        type: "session.start",
+        agent: "main",
+        data: {
+          screen: { w: 1280, h: 800, scale: 1 },
+          os: "linux",
+          title: "plan the trip",
+          ...(continues ? { continues } : {}),
+        },
+      });
+      f.log.append(id, {
+        type: "message.user",
+        agent: "main",
+        data: { messageId: ulid(), text: "plan the trip", kind: "task" },
+      });
+      return id;
+    };
+    const first = task(),
+      latest = task(first);
+    const post = (id: string, action: string, body: unknown) =>
+      f.request(`/api/conversations/${id}/${action}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const listed = (archived = false) =>
+      new Conversations(f.home, f.log).list(undefined, archived).conversations;
+
+    expect((await post(first, "tag", { tag: "purple" })).status).toBe(204);
+    expect((await post(first, "pin", { pinned: true })).status).toBe(204);
+    expect(listed()[0]).toMatchObject({ sessionId: latest, tag: "purple", pinned: true });
+    expect(f.published).toEqual([
+      {
+        type: "conversation.organized",
+        sessionId: latest,
+        tag: "purple",
+        pinned: false,
+        archived: false,
+      },
+      {
+        type: "conversation.organized",
+        sessionId: latest,
+        tag: "purple",
+        pinned: true,
+        archived: false,
+      },
+    ]);
+
+    // Never while a task of it is under way: it would leave the list while dot works in it.
+    f.controlledIds.add(first);
+    expect((await post(latest, "archive", { archived: true })).status).toBe(409);
+    expect(listed().map((entry) => entry.sessionId)).toContain(latest);
+    expect(f.published).toHaveLength(2);
+    f.controlledIds.clear();
+    f.liveIds.add(latest);
+    expect((await post(first, "archive", { archived: true })).status).toBe(409);
+    f.liveIds.clear();
+    expect((await post(first, "archive", { archived: true })).status).toBe(204);
+    expect(listed().map((entry) => entry.sessionId)).not.toContain(latest);
+    expect(listed(true)[0]).toMatchObject({ sessionId: latest, archived: true, tag: "purple" });
+    expect(f.published.at(-1)).toMatchObject({ sessionId: latest, archived: true });
+    // Its name changes by any of its tasks while it is archived.
+    expect(
+      (
+        await f.request(`/api/conversations/${first}/title`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "Lisbon" }),
+        })
+      ).status,
+    ).toBe(204);
+    expect(listed(true)[0]?.title).toBe("Lisbon");
+    // Unarchiving is never refused.
+    f.controlledIds.add(first);
+    expect((await post(latest, "archive", { archived: false })).status).toBe(204);
+    expect(listed()[0]).toMatchObject({ sessionId: latest, title: "Lisbon" });
+
+    for (const [action, body] of [
+      ["tag", { tag: "pink" }],
+      ["tag", {}],
+      ["tag", { tag: "red", pinned: true }],
+      ["pin", { pinned: "yes" }],
+      ["archive", { archived: null }],
+    ] as const)
+      expect((await post(latest, action, body)).status).toBe(400);
+    expect((await post(ulid(), "tag", { tag: "red" })).status).toBe(404);
+    expect((await post("not-a-task", "pin", { pinned: true })).status).toBe(404);
+    expect(f.published).toHaveLength(4);
   });
   it("serves each physical recording's bytes, range and metadata independently", async () => {
     const { home, seed, request } = await setup();

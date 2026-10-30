@@ -48,6 +48,14 @@ export function docsOf(sessionId: string, startedAt: string, e: LocalDotEvent): 
   }
 }
 
+// A message the user cancelled or took back, or that Stop left unanswered, was never said to dot.
+function unsaidOf(e: LocalDotEvent): string | undefined {
+  return e.type === "message.delivery" &&
+    (e.data.state === "cancelled" || e.data.state === "withdrawn")
+    ? `msg:${e.data.messageId}`
+    : undefined;
+}
+
 export function notesDocs(file: string, text: string): SearchDoc[] {
   const day = file.slice(6, 16);
   return parseMemory(text).flatMap((b, i): SearchDoc[] => {
@@ -111,6 +119,8 @@ export class SearchFeed {
       this.catchUp(id);
       return;
     }
+    const unsaid = unsaidOf(e);
+    if (unsaid) this.deps.index.remove(id, "user", unsaid);
     const docs = docsOf(id, this.#startedAt(id), e);
     if (docs.length) this.deps.index.add(docs, { sessionId: id, seq: e.seq + 1 });
     this.#progress.set(id, e.seq + 1);
@@ -121,6 +131,10 @@ export class SearchFeed {
     const last = events.at(-1);
     if (!last) return;
     const startedAt = this.#startedAt(sessionId);
+    for (const e of events) {
+      const unsaid = unsaidOf(e);
+      if (unsaid) this.deps.index.remove(sessionId, "user", unsaid);
+    }
     this.deps.index.add(
       events.flatMap((e) => docsOf(sessionId, startedAt, e)),
       { sessionId, seq: last.seq + 1 },

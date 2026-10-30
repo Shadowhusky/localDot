@@ -40,10 +40,15 @@ export function runtimeCandidateIdentity(
     !environment(raw.Config.Env, spec.Env) ||
     ("User" in spec && raw.Config.User !== spec.User) ||
     !subset(raw.Config.Labels, spec.Labels) ||
-    !subset(raw.HostConfig, spec.HostConfig)
+    !subset(raw.HostConfig, sized(spec.HostConfig))
   )
     throw failure();
   return raw.Id;
+}
+// The dot's computer size changes a desktop's memory and CPUs while it lives (computer-size.ts).
+function sized(config: object): object {
+  const { Memory, MemorySwap, NanoCpus, ...rest } = config as Record<string, unknown>;
+  return rest;
 }
 function subset(actual: unknown, expected: unknown): boolean {
   if (Array.isArray(expected))

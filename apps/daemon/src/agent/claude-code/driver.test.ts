@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import type { Options, SDKUserMessage, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import {
@@ -12,6 +12,7 @@ import {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RETRY_NEXT } from "../native-tools.ts";
 import { redactor } from "../redact.ts";
 import { AgentSession } from "../session.ts";
 import { TranscriptStore } from "../transcript.ts";
@@ -23,7 +24,7 @@ import {
   type ClaudeCodeDriverDeps,
   type QueryFn,
 } from "./driver.ts";
-import { LOCALDOT_TOOLS } from "./options.ts";
+import { BUILT_IN_TOOLS, LOCALDOT_TOOLS } from "./options.ts";
 import { ClaudeCodeUnavailable } from "./setup.ts";
 
 const PNG = Buffer.from(
@@ -31,6 +32,19 @@ const PNG = Buffer.from(
   "base64",
 );
 const INIT = { type: "system", subtype: "init", tools: [...LOCALDOT_TOOLS] };
+// The real CLI's own messages for calls to tools that are not localDot's.
+const recorded = JSON.parse(
+  readFileSync(new URL("./fixtures/claude-code-2.1.314.json", import.meta.url), "utf8"),
+);
+const toolStart = (name: string) => ({
+  type: "stream_event",
+  parent_tool_use_id: null,
+  event: {
+    type: "content_block_start",
+    index: 0,
+    content_block: { type: "tool_use", id: "toolu_1", name },
+  },
+});
 const turn = (model = "claude-sonnet-5-5") => ({
   type: "stream_event",
   parent_tool_use_id: null,
@@ -431,43 +445,112 @@ describe("Claude Code driver", () => {
     expect(await result).toBe(CLAUDE_CODE_DONE);
   });
 
-  it("stops the task when Claude Code offers any tool that is not localDot's", async () => {
+  it("switches off a built-in Claude Code turns on, starting again once", async () => {
     const f = fixture();
     const result = f.run();
     await until(() => (f.runs[0]?.prompts.length ?? 0) > 0);
-    const fake = f.runs[0] as FakeRun;
-    fake.emit({ ...INIT, tools: [...LOCALDOT_TOOLS, "Bash"] });
-    expect(await result).toBe(CLAUDE_CODE_GAVE_UP);
-    expect(f.states().at(-1)).toEqual({
-      state: "error",
-      reason: "Claude Code used a tool that is not localDot's; localDot stopped the task",
-    });
-    expect(fake.closed).toBe(true);
+    const first = f.runs[0] as FakeRun;
+    first.emit({ ...INIT, claude_code_version: "2.1.400", tools: [...LOCALDOT_TOOLS, "Monitor"] });
+    const second = await f.started(1);
+    expect(first.closed).toBe(true);
     expect(f.dispatch).not.toHaveBeenCalled();
+    expect(second.options.disallowedTools).toEqual([...BUILT_IN_TOOLS, "Monitor"]);
+    await second.call("done", { summary: "ok" });
+    expect(await result).toBe(CLAUDE_CODE_DONE);
+    expect(f.states().some((state) => state.state === "error")).toBe(false);
   });
 
-  it("stops the task when Claude Code calls a foreign tool or starts a sub-agent", async () => {
+  it("stops, naming the tool and the version, when a built-in stays on", async () => {
+    const f = fixture();
+    const result = f.run();
+    for (const index of [0, 1]) {
+      await until(() => (f.runs[index]?.prompts.length ?? 0) > 0);
+      f.runs[index]?.emit({
+        ...INIT,
+        claude_code_version: "2.1.400",
+        tools: [...LOCALDOT_TOOLS, "Monitor"],
+      });
+    }
+    expect(await result).toBe(CLAUDE_CODE_GAVE_UP);
+    expect(f.runs).toHaveLength(2);
+    expect(f.states().at(-1)).toEqual({
+      state: "error",
+      reason:
+        "Claude Code 2.1.400 turns on its own tool Monitor, which localDot couldn't switch off, so localDot stopped the task",
+      next: "Update Claude Code, or choose another model in Settings, then send your message again.",
+    });
+    expect(f.runs.every((run) => run.closed)).toBe(true);
+    expect(f.dispatch).not.toHaveBeenCalled();
+    const g = fixture();
+    const unnamed = g.run();
+    await until(() => (g.runs[0]?.prompts.length ?? 0) > 0);
+    g.runs[0]?.emit({ ...INIT, tools: [...LOCALDOT_TOOLS, "Bash(rm -rf ~)"] });
+    expect(await unnamed).toBe(CLAUDE_CODE_GAVE_UP);
+    expect(g.runs).toHaveLength(1);
+    expect(g.states().at(-1)?.reason).toBe(
+      "Claude Code turns on its own tool an unnamed tool, which localDot couldn't switch off, so localDot stopped the task",
+    );
+  });
+
+  it("goes on when Claude Code refuses a tool that is not localDot's, and tells Claude why", async () => {
     const f = fixture();
     const result = f.run();
     const fake = await f.started();
-    fake.emit({
-      type: "stream_event",
-      parent_tool_use_id: null,
-      event: {
-        type: "content_block_start",
-        index: 0,
-        content_block: { type: "tool_use", name: "Read" },
-      },
+    const [ask, refusal] = recorded.refusedUnoffered;
+    fake.emit(toolStart("Bash"), ask, refusal);
+    await until(() => fake.prompts.length === 2);
+    expect(fake.prompts[1]?.message.content).toBe(
+      "From localDot, not the user: Bash is not available here. Use only localDot's tools (mcp__localdot__…) for this task.",
+    );
+    expect(f.events.filter((e) => e.type === "step.end").at(-1)?.data).toEqual({
+      status: "blocked",
+      note: "Claude asked for Bash, which isn't one of localDot's tools, and Claude Code refused it.",
     });
+    await fake.call("done", { summary: "ok" });
+    expect(await result).toBe(CLAUDE_CODE_DONE);
+    expect(f.states().some((state) => state.state === "error")).toBe(false);
+  });
+
+  it("stops when Claude keeps asking for refused tools without using localDot's", async () => {
+    const f = fixture();
+    const result = f.run();
+    const fake = await f.started();
+    const [ask, refusal] = recorded.refusedUnoffered;
+    fake.emit(ask, refusal);
+    await until(() => fake.prompts.length === 2);
+    await fake.call("computer", { action: "screenshot" });
+    for (let round = 0; round < 3; round++) fake.emit(ask, refusal);
     expect(await result).toBe(CLAUDE_CODE_GAVE_UP);
+    expect(f.states().at(-1)).toEqual({
+      state: "error",
+      reason:
+        "Claude kept asking for Bash, which isn't one of localDot's tools, so localDot stopped the task",
+      next: RETRY_NEXT,
+    });
+  });
+
+  it("stops the task when a tool that is not localDot's ran, or a sub-agent started", async () => {
+    const f = fixture();
+    const result = f.run();
+    const fake = await f.started();
+    fake.emit(...recorded.ranOffered);
+    expect(await result).toBe(CLAUDE_CODE_GAVE_UP);
+    expect(f.states().at(-1)).toEqual({
+      state: "error",
+      reason:
+        "Claude Code used its own tool Read instead of localDot's, so localDot stopped the task",
+      next: RETRY_NEXT,
+    });
     const g = fixture();
     const second = g.run();
     const other = await g.started();
     other.emit({ type: "assistant", parent_tool_use_id: "toolu_1", message: { content: [] } });
     expect(await second).toBe(CLAUDE_CODE_GAVE_UP);
-    expect(g.states().at(-1)?.reason).toBe(
-      "Claude Code started a sub-agent; localDot stopped the task",
-    );
+    expect(g.states().at(-1)).toEqual({
+      state: "error",
+      reason: "Claude Code started a sub-agent; localDot stopped the task",
+      next: RETRY_NEXT,
+    });
   });
 
   it("stops the task at once when Claude Code starts a sub-agent while pausing", async () => {

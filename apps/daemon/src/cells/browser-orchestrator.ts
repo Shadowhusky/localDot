@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ULID_PATTERN, ulid } from "@localdot/protocol";
+import { type ComputerSize, DEFAULT_COMPUTER_SIZE, ULID_PATTERN, ulid } from "@localdot/protocol";
 import {
   type BrowserStatus,
   BrowserSupervisorState,
@@ -34,6 +34,7 @@ import {
   retireBrowserResources,
 } from "./browser-resources.ts";
 import { browserNames, browserNetworkSpec, browserSpec } from "./browser-spec.ts";
+import { browserLimits } from "./computer-size.ts";
 import { type DockerClient, DockerError } from "./docker.ts";
 import type { BrowserImages } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
@@ -118,6 +119,8 @@ export interface BrowserOrchestratorDeps {
   keysLocked?(): boolean;
   // A word to the task running on this computer.
   notify?(parentCellId: string, text: string): void;
+  // The dot's computer size, which each new web browser takes its share of.
+  size?(): ComputerSize;
 }
 
 // browserd's own lines in the container log: the reasons it stopped, never page data.
@@ -807,6 +810,7 @@ export class BrowserOrchestrator {
             this.deps.images.browser,
             { fullcolor: this.deps.streamFullcolor ?? false },
             this.#accounts.volume,
+            browserLimits(this.deps.size?.() ?? DEFAULT_COMPUTER_SIZE),
           ),
         );
       });

@@ -24,6 +24,7 @@ import {
 } from "@localdot/protocol";
 import { z } from "zod";
 import { NativeRetirement } from "../native-retirement.ts";
+import { RETRY_NEXT } from "../native-tools.ts";
 import { type Redactor, redactor } from "../redact.ts";
 import type { AgentSession, BrainGeneration } from "../session.ts";
 import type { TranscriptStore } from "../transcript.ts";
@@ -47,6 +48,9 @@ const SUB_AGENT =
   "Sub-agents are not available here. Continue the task yourself with the localdot tools.";
 const PNG_HEADER = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_PROMPT_BYTES = 256 * 1024;
+// Refused calls to Codex's own tools, with no localDot tool result between, before localDot stops.
+// One code-mode script often calls both resource readers, so this counts calls, not turns.
+const MAX_REFUSALS = 6;
 const TurnStartResult = z.looseObject({ turn: Turn });
 const opaqueObject = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -167,7 +171,7 @@ type CycleResult =
         | "plan_limit"
         | "safety";
     }
-  | { kind: "violation"; what: Violation }
+  | { kind: "violation"; what: Violation | "refused"; tool?: string }
   | { kind: "retry" | "failed"; message: string };
 interface ActiveCycle {
   finish(result: CycleResult): void;
@@ -447,15 +451,21 @@ export class CodexDriver {
             next = SUB_AGENT;
             continue;
           }
+          const tool = result.tool ?? "an unnamed tool";
           const reason =
             result.what === "command"
-              ? "Codex ran a command of its own; localDot stopped the task"
+              ? "Codex started a command of its own instead of using localDot's shell; localDot stopped the task"
               : result.what === "file_applied"
-                ? "Codex changed a file itself; localDot stopped the task"
+                ? "Codex changed a file itself with apply_patch instead of using localDot's files; localDot stopped the task"
                 : result.what === "sub_agent"
                   ? "Codex kept starting sub-agents; localDot stopped the task"
-                  : "Codex used a tool that is not localDot's; localDot stopped the task";
-          this.#state(session, "error", reason);
+                  : result.what === "refused"
+                    ? `Codex kept asking for its own ${tool}, which isn't one of localDot's tools, so localDot stopped the task`
+                    : result.what === "foreign_tool"
+                      ? `Codex used ${tool} from another tool server, so localDot stopped the task`
+                      : `Codex used its own ${tool} instead of localDot's tools, so localDot stopped the task`;
+          console.error(`codex: ${reason} (task ${session.id})`);
+          this.#state(session, "error", reason, RETRY_NEXT);
           return CODEX_GAVE_UP;
         }
         if (result.kind === "retry") {
@@ -520,10 +530,15 @@ export class CodexDriver {
       this.#retirement.end(session.id);
     }
   }
-  #state(session: AgentSession, state: "paused" | "idle" | "error", reason: string): void {
+  #state(
+    session: AgentSession,
+    state: "paused" | "idle" | "error",
+    reason: string,
+    next?: string,
+  ): void {
     if (session.stopped || session.controlHeld) return;
     if (state !== "error") session.setStatus(state);
-    session.append("agent.state", { state, reason });
+    session.append("agent.state", { state, reason, ...(next ? { next } : {}) });
   }
   async #release(session: AgentSession, lease: CodexDriverLease): Promise<void> {
     try {
@@ -596,7 +611,8 @@ export class CodexDriver {
       savedAssistant: string | undefined,
       fenced = false,
       progressed = false,
-      nativeUncertain = false;
+      nativeUncertain = false,
+      refusals = 0;
     let pauseInterruptOwner: Pick<PauseSnapshot, "requestId" | "revision"> | undefined;
     let pauseWork: Promise<{ generationId: number; completedCalls: number }> | undefined;
     const current = () =>
@@ -770,7 +786,13 @@ export class CodexDriver {
           else wireTurn = item.turnId;
         } else if (item.kind === "violation") {
           blocked({ kind: "think", tool: "codex.disabled", note: item.detail });
-          finish({ kind: "violation", what: item.what });
+          finish({ kind: "violation", what: item.what, tool: item.tool });
+        } else if (item.kind === "refused") {
+          // Codex itself or localDot answered the call as unavailable; nothing else ran.
+          console.warn(`codex: refused its call to ${item.tool} (task ${session.id})`);
+          blocked({ kind: "think", tool: "codex.disabled", note: item.detail });
+          if (++refusals >= MAX_REFUSALS)
+            finish({ kind: "violation", what: "refused", tool: item.tool });
         } else if (item.kind === "turn_completed") {
           const outcome = turnOutcome(item.turn);
           // The interrupt issued only after MCP result ownership and step drain is expected.
@@ -806,6 +828,7 @@ export class CodexDriver {
       )
         return;
       if (session.safetyPause) return;
+      refusals = 0;
       if (tool === "done" && value.ok && value.final) finish(done());
       else if (value.final) finish({ kind: "done" });
       else if (value.ok && !value.pause && !value.cancelled) progressed = true;

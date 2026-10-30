@@ -1,8 +1,19 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { redactor } from "../redact.ts";
 import { ClaudeCodeEventMapper } from "./events.ts";
+import { localdotTools } from "./mcp-server.ts";
 
 const SECRET = "fixture-private-token-123";
+// The real CLI's own messages; re-record when Claude Code changes and review the diff.
+const recorded = JSON.parse(
+  readFileSync(new URL("./fixtures/claude-code-2.1.314.json", import.meta.url), "utf8"),
+);
+const toolStart = (name: string, type = "tool_use") => ({
+  type: "content_block_start",
+  index: 0,
+  content_block: { type, id: "toolu_1", name },
+});
 function mapper() {
   const events: { type: string; data: Record<string, unknown> }[] = [];
   const said: string[] = [];
@@ -195,21 +206,108 @@ describe("Claude Code events", () => {
       { provider: "claude-code", windows: [], limitReached: false },
     ]);
   });
-  it("tells the driver about any tool that is not localDot's", () => {
+  it("passes the startup tool list the real Claude Code reports under localDot's options", () => {
     const f = mapper();
+    expect(recorded.init.claude_code_version).toBe("2.1.314");
+    expect([...recorded.init.tools].sort()).toEqual(
+      localdotTools()
+        .map((tool) => `mcp__localdot__${tool.name}`)
+        .sort(),
+    );
+    expect(f.map.handle(recorded.init)).toEqual([{ kind: "started" }]);
+  });
+  it("names the tools Claude Code itself offers that are not localDot's", () => {
+    const f = mapper();
+    expect(
+      f.map.handle({ ...recorded.init, tools: [...recorded.init.tools, "Monitor", "Read"] }),
+    ).toEqual([
+      { kind: "offered", tools: ["Monitor", "Read"], unnamed: false, version: "2.1.314" },
+    ]);
+    expect(
+      f.map.handle({ type: "system", subtype: "init", tools: ["Bash(rm *)", "Read"] }),
+    ).toEqual([{ kind: "offered", tools: ["Read"], unnamed: true }]);
+  });
+  it("goes on when Claude Code refuses a tool that is not localDot's", () => {
+    const f = mapper();
+    f.map.handle(recorded.init);
+    const [ask, answer] = recorded.refusedUnoffered;
+    expect(f.stream(toolStart("Bash"))).toEqual([]);
+    expect(f.map.handle(ask)).toEqual([]);
+    expect(f.map.handle(answer)).toEqual([{ kind: "refused", tools: ["Bash"] }]);
+    const [denied, refusal] = recorded.refusedByLocaldot;
+    expect(f.map.handle(denied)).toEqual([]);
+    expect(f.map.handle(refusal)).toEqual([{ kind: "refused", tools: ["Write"] }]);
+    expect(f.map.handle({ type: "result", subtype: "success", is_error: false })).toEqual([
+      { kind: "result", ok: true, queued: false },
+    ]);
+  });
+  it("stops on a tool that is not localDot's once it ran", () => {
+    const f = mapper();
+    const [ask, ran] = recorded.ranOffered;
+    expect(f.map.handle(ask)).toEqual([]);
+    expect(f.map.handle(ran)).toEqual([{ kind: "violation", what: "foreign_tool", tool: "Read" }]);
+    const g = mapper();
+    g.map.handle(recorded.init);
+    const [bash, refusal] = recorded.refusedUnoffered;
+    g.map.handle(bash);
+    // An answer that is not Claude Code's refusal means the tool ran, whatever its text says.
+    expect(
+      g.map.handle({
+        ...refusal,
+        message: { role: "user", content: [{ ...refusal.message.content[0], is_error: false }] },
+      }),
+    ).toEqual([{ kind: "violation", what: "foreign_tool", tool: "Bash" }]);
+    const h = mapper();
+    h.map.handle(bash);
+    expect(h.map.handle({ type: "result", subtype: "success", is_error: false })).toEqual([
+      { kind: "violation", what: "foreign_tool", tool: "Bash" },
+    ]);
+  });
+  it("stops at once on a server tool, which the API runs before Claude Code sees it", () => {
+    const f = mapper();
+    expect(f.stream(toolStart("web_search", "server_tool_use"))).toEqual([
+      { kind: "violation", what: "foreign_tool", tool: "web_search" },
+    ]);
     expect(
       f.map.handle({
         type: "assistant",
         parent_tool_use_id: null,
-        message: { content: [{ type: "server_tool_use", name: "web_search" }] },
+        message: { content: [{ type: "server_tool_use", id: "srvtoolu_1", name: "web_search" }] },
       }),
-    ).toEqual([{ kind: "violation", what: "foreign_tool" }]);
+    ).toEqual([{ kind: "violation", what: "foreign_tool", tool: "web_search" }]);
+  });
+  it("names only a plain tool name, never one that carries anything else", () => {
+    const f = mapper();
+    const ask = (name: string) =>
+      f.map.handle({
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "tool_use", id: "toolu_1", name, input: { SECRET } }] },
+      });
+    for (const name of [`Bash ${SECRET}`, SECRET, "x".repeat(200)]) {
+      ask(name);
+      const signals = f.map.handle({ type: "result", subtype: "success", is_error: false });
+      expect(signals).toEqual([
+        { kind: "violation", what: "foreign_tool", tool: "an unnamed tool" },
+      ]);
+      expect(JSON.stringify(signals)).not.toContain(SECRET);
+    }
+    ask("a".repeat(100));
+    expect(f.map.handle({ type: "result", subtype: "success", is_error: false })).toEqual([
+      { kind: "violation", what: "foreign_tool", tool: `${"a".repeat(63)}…` },
+    ]);
+  });
+  it("stops on any sign of a sub-agent", () => {
+    const f = mapper();
     expect(f.map.handle({ type: "user", parent_tool_use_id: "toolu_9" })).toEqual([
       { kind: "violation", what: "sub_agent" },
     ]);
     expect(
-      f.map.handle({ type: "system", subtype: "init", tools: ["mcp__localdot__computer"] }),
-    ).toEqual([{ kind: "started" }]);
+      f.map.handle({ type: "assistant", parent_tool_use_id: "toolu_9", message: { content: [] } }),
+    ).toEqual([{ kind: "violation", what: "sub_agent" }]);
+    expect(
+      f.stream(toolStart("mcp__localdot__computer"), { parent_tool_use_id: "toolu_9" }),
+    ).toEqual([{ kind: "violation", what: "sub_agent" }]);
   });
   it("accepts the connected apps' tools that localDot's own server offers", () => {
     const f = mapper();
@@ -237,7 +335,7 @@ describe("Claude Code events", () => {
       ["mcp__other__github__list_issues"],
     ])
       expect(f.map.handle({ type: "system", subtype: "init", tools })).toEqual([
-        { kind: "violation", what: "foreign_tool" },
+        { kind: "offered", tools, unnamed: false },
       ]);
   });
 });

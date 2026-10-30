@@ -6,15 +6,22 @@ import {
 } from "@localdot/protocol";
 import { servedSpeed } from "@localdot/providers";
 import { z } from "zod";
+import { plainToolName, toolLabel } from "../native-tools.ts";
 import type { Redactor } from "../redact.ts";
-import { isLocaldotTool } from "./options.ts";
+import { isLocaldotTool, ONLY_LOCALDOT } from "./options.ts";
 
 export const CLAUDE_CODE_ROUTE = "claude-code";
-export type Violation = "foreign_tool" | "sub_agent";
 export type ClaudeSignal =
   | { kind: "started" }
   | { kind: "turn" }
-  | { kind: "violation"; what: Violation }
+  // Claude Code itself offers tools that are not localDot's: plain names it can be told to switch
+  // off, and whether any name was not plain.
+  | { kind: "offered"; tools: string[]; unnamed: boolean; version?: string }
+  // The model asked for tools that are not localDot's and Claude Code refused them.
+  | { kind: "refused"; tools: string[] }
+  // A tool that is not localDot's ran, or a sub-agent started.
+  | { kind: "violation"; what: "foreign_tool"; tool: string }
+  | { kind: "violation"; what: "sub_agent" }
   | { kind: "error"; error: string; detail?: string }
   | { kind: "consumed"; uuids: string[] }
   | { kind: "result"; ok: boolean; queued: boolean };
@@ -28,6 +35,7 @@ const Init = z.looseObject({
   type: z.literal("system"),
   subtype: z.literal("init"),
   tools: z.array(z.string()),
+  claude_code_version: z.unknown().optional(),
 });
 const Retry = z.looseObject({
   type: z.literal("system"),
@@ -83,11 +91,28 @@ const Assistant = Consumed.extend({
   error: z.string().optional(),
   message: z.looseObject({
     content: z.array(
-      z.looseObject({ type: z.string(), name: z.string().optional(), text: z.string().optional() }),
+      z.looseObject({
+        type: z.string(),
+        id: z.unknown().optional(),
+        name: z.string().optional(),
+        text: z.string().optional(),
+      }),
     ),
   }),
 });
-const User = z.looseObject({ type: z.literal("user"), parent_tool_use_id: z.string().nullish() });
+const ToolResult = z.looseObject({
+  type: z.literal("tool_result"),
+  tool_use_id: z.string(),
+  is_error: z.boolean().nullish(),
+  content: z
+    .union([z.string(), z.array(z.looseObject({ type: z.string(), text: z.unknown().optional() }))])
+    .nullish(),
+});
+const User = z.looseObject({
+  type: z.literal("user"),
+  parent_tool_use_id: z.string().nullish(),
+  message: z.looseObject({ content: z.unknown() }).optional(),
+});
 const Result = Consumed.extend({
   type: z.literal("result"),
   subtype: z.string(),
@@ -112,6 +137,13 @@ const WINDOWS: Record<string, { window: SubscriptionWindow["window"]; minutes: n
   seven_day: { window: "secondary", minutes: 10_080 },
 };
 
+const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;
+const MAX_ASKED = 64;
+const resultText = (content: z.infer<typeof ToolResult>["content"]): string =>
+  typeof content === "string"
+    ? content
+    : (content ?? []).map((part) => (typeof part.text === "string" ? part.text : "")).join("\n");
+
 function clip(text: string, max: number): string {
   if (text.length <= max) return text;
   let end = max - 1;
@@ -127,8 +159,9 @@ interface Block {
   said: string;
 }
 
-// Claude Code's stream as dot's own events. Only localDot's tools may appear, and only on the main
-// thread; anything else is reported for the driver to stop on.
+// Claude Code's stream as dot's own events. Only localDot's tools may run, and only on the main
+// thread. A call the model makes to any other tool is followed to its result: Claude Code refusing
+// it is reported as refused, anything else as a violation for the driver to stop on.
 export class ClaudeCodeEventMapper {
   readonly #sink: MapperSink;
   readonly #redact: Redactor;
@@ -142,6 +175,9 @@ export class ClaudeCodeEventMapper {
   #input = 0;
   #speed: PremiumSpeed | undefined;
   #callModel: string;
+  // What Claude Code said it offers, and the model's calls to other tools still awaiting a result.
+  readonly #offered = new Set<string>();
+  readonly #asked = new Map<string, string>();
   constructor(sink: MapperSink, redact: Redactor, model: string) {
     this.#sink = sink;
     this.#redact = redact;
@@ -155,13 +191,10 @@ export class ClaudeCodeEventMapper {
     const type = (message as { type?: unknown } | null)?.type;
     if (type === "stream_event") return this.#stream(message);
     if (type === "assistant") return this.#assistant(message);
-    if (type === "user") {
-      const user = User.safeParse(message);
-      return user.success && user.data.parent_tool_use_id
-        ? [{ kind: "violation", what: "sub_agent" }]
-        : [];
-    }
+    if (type === "user") return this.#user(message);
     if (type === "result") {
+      const unanswered = this.#asked.values().next();
+      if (!unanswered.done) return [this.#ran(unanswered.value)];
       const result = Result.safeParse(message);
       if (!result.success) return [{ kind: "result", ok: false, queued: false }];
       return [
@@ -185,10 +218,7 @@ export class ClaudeCodeEventMapper {
     }
     if (type === "system") {
       const init = Init.safeParse(message);
-      if (init.success)
-        return init.data.tools.every(isLocaldotTool)
-          ? [{ kind: "started" }]
-          : [{ kind: "violation", what: "foreign_tool" }];
+      if (init.success) return [this.#init(init.data)];
       const retry = Retry.safeParse(message);
       if (retry.success)
         this.#sink.append("model.retry", {
@@ -208,18 +238,65 @@ export class ClaudeCodeEventMapper {
     ];
     return uuids.length ? [{ kind: "consumed", uuids }] : [];
   }
+  #init(init: z.infer<typeof Init>): ClaudeSignal {
+    this.#offered.clear();
+    for (const tool of init.tools) this.#offered.add(tool);
+    const foreign = init.tools.filter((tool) => !isLocaldotTool(tool));
+    if (!foreign.length) return { kind: "started" };
+    const version =
+      typeof init.claude_code_version === "string" && VERSION.test(init.claude_code_version)
+        ? init.claude_code_version
+        : undefined;
+    const tools = foreign.flatMap((tool) => plainToolName(tool) ?? []);
+    return {
+      kind: "offered",
+      tools: [...new Set(tools)],
+      unnamed: tools.length < foreign.length,
+      ...(version ? { version } : {}),
+    };
+  }
+  #ran(name: unknown): ClaudeSignal {
+    this.#asked.clear();
+    return { kind: "violation", what: "foreign_tool", tool: toolLabel(name, this.#redact) };
+  }
+  // Claude Code's answer to each call the model made to a tool that is not localDot's. A refusal
+  // is an error result naming the tool as unavailable (it was never offered) or carrying
+  // localDot's own denial; any other answer means the tool ran.
+  #user(message: unknown): ClaudeSignal[] {
+    const user = User.safeParse(message);
+    if (!user.success) return [];
+    if (user.data.parent_tool_use_id) return [{ kind: "violation", what: "sub_agent" }];
+    const content = user.data.message?.content;
+    if (!this.#asked.size || !Array.isArray(content)) return [];
+    const refused: string[] = [];
+    for (const block of content) {
+      const result = ToolResult.safeParse(block);
+      const name = result.success ? this.#asked.get(result.data.tool_use_id) : undefined;
+      if (!result.success || name === undefined) continue;
+      this.#asked.delete(result.data.tool_use_id);
+      const text = resultText(result.data.content);
+      const unavailable =
+        !this.#offered.has(name) && text.includes(`No such tool available: ${name}`);
+      if (result.data.is_error !== true || !(unavailable || text.includes(ONLY_LOCALDOT)))
+        return [this.#ran(name)];
+      refused.push(toolLabel(name, this.#redact));
+    }
+    return refused.length ? [{ kind: "refused", tools: refused }] : [];
+  }
   #assistant(message: unknown): ClaudeSignal[] {
     const parsed = Assistant.safeParse(message);
     if (!parsed.success) return [];
     if (parsed.data.parent_tool_use_id) return [{ kind: "violation", what: "sub_agent" }];
-    if (
-      parsed.data.message.content.some(
-        (block) =>
-          (block.type === "tool_use" || block.type === "server_tool_use") &&
-          !isLocaldotTool(block.name ?? ""),
-      )
-    )
-      return [{ kind: "violation", what: "foreign_tool" }];
+    for (const block of parsed.data.message.content) {
+      const name = block.name ?? "";
+      if (isLocaldotTool(name)) continue;
+      // The API ran a server tool before Claude Code saw it.
+      if (block.type === "server_tool_use") return [this.#ran(name)];
+      if (block.type !== "tool_use") continue;
+      if (typeof block.id !== "string" || !block.id || this.#asked.size >= MAX_ASKED)
+        return [this.#ran(name)];
+      this.#asked.set(block.id, name);
+    }
     return [
       ...this.#consumed(parsed.data),
       ...(parsed.data.error
@@ -265,10 +342,8 @@ export class ClaudeCodeEventMapper {
       const start = BlockStart.safeParse(event);
       if (!start.success) return [];
       const block = start.data.content_block;
-      if (block.type === "tool_use" || block.type === "server_tool_use")
-        return isLocaldotTool(block.name ?? "")
-          ? []
-          : [{ kind: "violation", what: "foreign_tool" }];
+      if (block.type === "server_tool_use" && !isLocaldotTool(block.name ?? ""))
+        return [this.#ran(block.name)];
       if (block.type === "text" || block.type === "thinking")
         this.#blocks.set(start.data.index, {
           kind: block.type,

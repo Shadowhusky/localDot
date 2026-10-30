@@ -515,3 +515,21 @@ describe("bounded redaction and final publication", () => {
     expect(h.events().filter((e) => e.type === "task.result")).toHaveLength(0);
   });
 });
+
+describe("what answers the user", () => {
+  it("counts a look at the screen, as a brain's first one, as no answer, and an action as one", async () => {
+    const looked = setup();
+    looked.session.askTask();
+    expect((await looked.call("computer", { action: "screenshot" })).result.ok).toBe(true);
+    expect(looked.session.giveBack(null).map((message) => message.text)).toEqual([
+      looked.session.task,
+    ]);
+
+    const acted = setup();
+    acted.session.askTask();
+    expect((await acted.call("computer", { action: "screenshot" })).result.ok).toBe(true);
+    const click = { action: "click", point: { x: 10, y: 20 }, basedOn: acted.session.lastFrameId };
+    expect((await acted.call("computer", click)).result.ok).toBe(true);
+    expect(acted.session.giveBack(null)).toEqual([]);
+  });
+});

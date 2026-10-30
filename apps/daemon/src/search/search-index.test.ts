@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EventLog } from "../event-log.ts";
+import { DatabaseSync } from "../sqlite.ts";
 import { recallHits } from "./recall-hits.ts";
 import { type SearchDoc, SearchIndex } from "./search-index.ts";
 
@@ -88,6 +89,21 @@ describe.each([false, true])("search index (forceLike=%s)", (forceLike) => {
       const file = join(home, `index.sqlite${suffix}`);
       if (existsSync(file)) expect(readFileSync(file).includes(Buffer.from(planted))).toBe(false);
     }
+  });
+  it("applies today's redaction to what an older version indexed, as recall does", () => {
+    const { home, log, index } = setup(forceLike);
+    const id = log.createSession("Keys");
+    const planted = `sk-ant-api03-${"q".repeat(95)}`;
+    const db = new DatabaseSync(join(home, "index.sqlite"));
+    db.prepare(
+      `INSERT INTO ${forceLike ? "docs_plain" : "docs"}(kind, session_id, at, ref, text) VALUES ('user', ?, '2026-09-03T09:00:00.000Z', 'm', ?)`,
+    ).run(id, `the deploy key ${planted} for the staging server`);
+    db.close();
+    const [hit] = index.search({ query: "staging" });
+    expect(hit?.sessionId).toBe(id);
+    expect(hit?.snippet).not.toContain(planted);
+    expect(hit?.snippet).toContain("[redacted]");
+    expect(hit?.snippet).toMatch(/\uE000staging\uE001/);
   });
   it("drops hits for deleted tasks but keeps their daily notes, and prunes orphans", () => {
     const { log, index } = setup(forceLike);

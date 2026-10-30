@@ -1,8 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SELFTEST_CHECKS, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ComputerSizes } from "./computer-size.ts";
 import { DockerClient } from "./docker.ts";
 import { CellOrchestrator, UnknownCellError } from "./orchestrator.ts";
 import type { GateRelay } from "./relay.ts";
@@ -93,6 +94,7 @@ async function setup(
     relay?: () => Promise<GateRelay>;
     updates?: ConstructorParameters<typeof CellOrchestrator>[0]["updates"];
     keyd?: ConstructorParameters<typeof CellOrchestrator>[0]["keyd"];
+    size?: (home: string, store: CellStore) => ComputerSizes;
   } = {},
 ) {
   fake = await startFakeDocker();
@@ -117,6 +119,7 @@ async function setup(
     restartBackoffMs: opts.restartBackoffMs ?? [0, 0],
     ...(opts.externalKeydPorts ? { externalKeydPorts: opts.externalKeydPorts } : {}),
     ...(opts.relay ? { relay: opts.relay } : {}),
+    ...(opts.size ? { size: opts.size(home, store) } : {}),
   });
   made.push(orchestrator);
   orchestrator.subscribe((cell) => changes.push(cell));
@@ -182,6 +185,44 @@ describe("CellOrchestrator.create", () => {
       baseUrl: "http://127.0.0.1:50001",
       authorization: `Basic ${Buffer.from(`localdot:${record?.tokens.stream}`).toString("base64")}`,
     });
+  });
+
+  it("gives a new desktop the dot's size before it first starts, and again after a restart", async () => {
+    const GIB = 1024 ** 3;
+    const { orchestrator, store, stateOf } = await setup({
+      size: (home, cells) => {
+        writeFileSync(
+          join(home, "computer-size.json"),
+          JSON.stringify({ v: 1, memoryBytes: 6 * GIB, cpus: 6 }),
+          { mode: 0o600 },
+        );
+        return new ComputerSizes({
+          home,
+          docker: new DockerClient(fake.socketPath),
+          computers: () => cells.list().map((record) => record.id),
+        });
+      },
+    });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const desktop = store.get(cell.id)?.docker.desktop ?? "";
+    expect(fake.state.containers.get(desktop)?.body.HostConfig).toMatchObject({
+      Memory: 6 * GIB,
+      MemorySwap: 6 * GIB + 256 * 1024 ** 2,
+      NanoCpus: 6e9,
+      ShmSize: GIB,
+      PidsLimit: 4096,
+    });
+    const order = fake.state.calls.map((c) => `${c.method} ${c.path}`);
+    expect(order.indexOf(`POST /containers/${desktop}/update`)).toBeLessThan(
+      order.indexOf(`POST /containers/${desktop}/start`),
+    );
+
+    await orchestrator.stop(cell.id);
+    Object.assign(fake.state.containers.get(desktop)?.body.HostConfig ?? {}, { Memory: 4 * GIB });
+    await orchestrator.start(cell.id);
+    await stateOf(cell.id, "ready");
+    expect(fake.state.containers.get(desktop)?.body.HostConfig.Memory).toBe(6 * GIB);
   });
 
   it("links each started desktop to its gate with a one-shot helper and leaves none behind", async () => {

@@ -129,6 +129,7 @@ it.each([
   "/api/exports/stream",
   "/api/accounts",
   "/api/agent/rules",
+  "/api/computer-size",
 ])("denies owner endpoint %s, including when session settings are enabled", (path) => {
   const { links } = make();
   const issued = links.create({ ...options, settings: true });
@@ -177,16 +178,34 @@ it("never lets a link read files on the computer, even of a task it started", ()
   expect(links.permits(row, "POST", `/api/agent/sessions/${id}/preview-link`)).toBe(false);
 });
 
-it("never lets a shared link rename a conversation or change a task's dot", () => {
+it("never lets a shared link rename, tag, pin, archive or delete a conversation, or change a task's dot", () => {
   const { links } = make();
   const id = ulid();
   const row = links.authenticate(links.create({ ...options, replay: true, settings: true }).token);
   if (!row) throw new Error("the link did not authenticate");
   links.reserve(row.id).finish(id);
   expect(links.permits(row, "POST", `/api/agent/sessions/${id}/messages`)).toBe(true);
-  for (const path of [`/api/conversations/${id}/title`, `/api/agent/sessions/${id}/persona`])
-    for (const method of ["POST", "PUT", "DELETE"])
-      expect(links.permits(row, method, path)).toBe(false);
+  for (const path of [
+    `/api/conversations/${id}`,
+    `/api/conversations/${id}/title`,
+    `/api/conversations/${id}/tag`,
+    `/api/conversations/${id}/pin`,
+    `/api/conversations/${id}/archive`,
+    `/api/agent/sessions/${id}/persona`,
+  ])
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"])
+      expect(links.permits(row, method, path), `${method} ${path}`).toBe(false);
+});
+it("never lets a shared link read or change the computer's size, even with replay and settings", () => {
+  const { links } = make();
+  const row = links.authenticate(
+    links.create({ ...options, replay: true, settings: true, chooseModel: true }).token,
+  );
+  if (!row) throw new Error("the link did not authenticate");
+  links.reserve(row.id).finish(ulid());
+  for (const path of ["/api/computer-size", "/api/computer-size/", "/api/computer-size?x=1"])
+    for (const method of ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
+      expect(links.permits(row, method, path), `${method} ${path}`).toBe(false);
 });
 it("fails closed without destroying corrupt records or preventing local startup", () => {
   const { home } = make();

@@ -162,7 +162,12 @@ class PrivateMcpTransport implements Transport {
         id: message.id,
         error: {
           code: message.error.code,
-          message: "The Codex tool request could not be completed.",
+          // Method not found: something other than localDot's tools, such as Codex's own
+          // resource readers. Tell Codex what to use instead.
+          message:
+            message.error.code === -32601
+              ? "localDot offers only its tools here (mcp__localdot__…); use them instead."
+              : "The Codex tool request could not be completed.",
         },
       };
     if (capture && !this.guard(capture))

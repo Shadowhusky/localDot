@@ -126,7 +126,15 @@ export interface AgentRoutesDeps {
     >;
   conversations?: Pick<
     Conversations,
-    "current" | "snapshot" | "begin" | "select" | "has" | "list" | "withdrawStopped"
+    | "current"
+    | "snapshot"
+    | "begin"
+    | "select"
+    | "has"
+    | "list"
+    | "withdrawStopped"
+    | "leave"
+    | "discard"
   >;
   settings: Pick<SettingsStore, "get" | "put">;
   purpose?: Pick<PurposeService, "status" | "test">;
@@ -648,6 +656,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
                 ),
               }
             : {}),
+          ...(grant ? { sender: grant.id } : {}),
         };
         result = Object.keys(startOptions).length
           ? await deps.runner.start(cellId, task, startSignal, startOptions)
@@ -676,14 +685,16 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     );
     app.get(
       "/api/conversations",
-      route((c) =>
-        c.json({
-          conversations: conversations.list().map((entry) => {
+      route((c) => {
+        const listed = conversations.list(undefined, c.req.query("archived") === "1");
+        return c.json({
+          ...listed,
+          conversations: listed.conversations.map((entry) => {
             const live = deps.runner.liveStatus?.(entry.sessionId);
             return live ? { ...entry, live } : entry;
           }),
-        }),
-      ),
+        });
+      }),
     );
     app.post(
       "/api/conversation/new",
@@ -747,8 +758,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         // waking the model, so it cannot resume the old plan ahead of the message.
         if (!(await s.handback(s.pendingTakeover, text, c.req.raw.signal)))
           throw new RouteError(409, "The computer is still changing hands. Try sending again.");
-      } else if (parsed.kind === "followup") s.enqueue(text);
-      else s.post(parsed.kind, text);
+      } else if (parsed.kind === "followup") s.enqueue(text, c.get("remoteGrant")?.id);
+      else s.post(parsed.kind, text, c.get("remoteGrant")?.id);
       return c.body(null, 202);
     }),
   );
@@ -783,9 +794,28 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     route(async (c) => {
       const id = c.req.param("id") ?? "";
       if (!ULID_PATTERN.test(id)) throw new RouteError(400, "invalid task id");
+      // Asked to, Stop gives the stopper back what they said that dot had not acted on.
+      const giving = c.req.query("giveBack") === "1";
+      const live = giving ? deps.runner.get(id) : undefined;
+      const messages = live?.giveBack(c.get("remoteGrant")?.id ?? null) ?? [];
+      // A task that carried nothing out leaves its conversation as it was before it, for every
+      // viewer as the task ends, and leaves no record once it has settled.
+      const emptied = !!live?.emptied;
+      if (emptied)
+        try {
+          conversations?.leave(id);
+        } catch {
+          console.error("the current conversation could not be saved");
+        }
       if (!deps.runner.stopRun || !(await deps.runner.stopRun(id)))
         throw new RouteError(404, "task not found");
-      return c.body(null, 204);
+      if (emptied)
+        try {
+          conversations?.discard(id);
+        } catch {
+          console.error("a task that carried nothing out could not be removed");
+        }
+      return giving ? c.json({ messages }) : c.body(null, 204);
     }),
   );
   app.post(

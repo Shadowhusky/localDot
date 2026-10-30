@@ -4,6 +4,7 @@ import type {
   AskFieldValue,
   AskRequestField,
   EventOf,
+  GivenBack,
   PageElement,
   PauseSnapshot,
   RecentLine,
@@ -60,6 +61,8 @@ const HANDBACK_WAIT_MS = 5000;
 // After input whose landing was unknown, the computer is asked again this much later each time.
 const CONFIRM_RETRY_MS = { first: 250, max: 5000 };
 export type SessionStatus = "starting" | "running" | "waiting_user" | "paused" | "idle" | "ended";
+// Whose Stop gives back their own messages: a shared link's id, or null for the owner.
+export type Stopper = string | null;
 export interface AskAnswer {
   // Per field id, as the journal and the model may see them: a secret only as provided.
   fields?: Readonly<Record<string, AskFieldRecord>>;
@@ -288,6 +291,15 @@ export class AgentSession {
   readonly #queued = new Map<string, string>();
   readonly #withdrawn = new Map<string, string>();
   readonly #cancelledQueued = new Set<string>();
+  // The user's messages dot has received and not acted on, by id: no words of its own and no tool
+  // call since. Stop gives these back.
+  readonly #unanswered = new Map<string, string>();
+  // dot has acted at least once in this task.
+  #acted = false;
+  // Each message the user sent in this task, in order, and who sent it.
+  readonly #senders = new Map<string, Stopper>();
+  #givenBack: { by: Stopper; messages: GivenBack[] } | undefined;
+  #emptied = false;
   // Notes to dot that are not the user's words: they never wake a task waiting for them.
   readonly #notes = new Set<number>();
   // dot's next input waits for a fresh look at the screen, which the user has had.
@@ -864,6 +876,17 @@ export class AgentSession {
     this.#active.set(lease, { abort, settled, finish: lease.finish });
     return lease;
   }
+  // One of dot's tool calls: from here, what the user said has had an answer. Admission and Stop
+  // are both synchronous, so a message is given back only if no call can start for it.
+  admitCall(generation: BrainGeneration, requestSignal?: AbortSignal): ToolLease {
+    const lease = this.admit(generation, requestSignal);
+    this.#answered();
+    return lease;
+  }
+  #answered(): void {
+    this.#acted = true;
+    this.#unanswered.clear();
+  }
   admitManual(requestId: string, requestSignal: AbortSignal): ManualLease {
     const record = this.#control;
     if (
@@ -988,6 +1011,13 @@ export class AgentSession {
       data,
     } as unknown as EventDraft);
     this.#delegates.fold(type, data);
+    if (
+      type === "ask.request" ||
+      ((type === "message.delta" || type === "message.assistant") &&
+        typeof data.text === "string" &&
+        data.text.trim())
+    )
+      this.#answered();
   }
   #interruptDelegates(runs: readonly EventOf<"subagent.state">["data"][], reason: SubagentStop) {
     for (const { id, runId, label } of runs)
@@ -1006,8 +1036,18 @@ export class AgentSession {
       ...this.inherited.filter((agent) => !this.#delegates.has(agent.id)),
     ].slice(0, MAX_SUBAGENT_BRIEFS);
   }
-  post(kind: InboxItem["kind"], text: string): InboxItem {
-    return this.#deliverInbox(kind, text, ulid(), true);
+  // The task's own message, which dot reads as its task rather than from its inbox. `sender`: the
+  // shared link it came through.
+  askTask(sender?: string): void {
+    const messageId = ulid();
+    this.append("message.user", { messageId, text: this.task, kind: "task" });
+    this.#unanswered.set(messageId, this.task);
+    this.#senders.set(messageId, sender ?? null);
+  }
+  post(kind: InboxItem["kind"], text: string, sender?: string): InboxItem {
+    const item = this.#deliverInbox(kind, text, ulid(), true);
+    if (kind !== "resume") this.#senders.set(item.messageId, sender ?? null);
+    return item;
   }
   #deliverInbox(
     kind: InboxItem["kind"],
@@ -1022,6 +1062,7 @@ export class AgentSession {
     this.#seq = item.seq;
     this.#inbox.push(item);
     if (kind !== "resume") {
+      this.#unanswered.set(messageId, text);
       this.requests.push(text);
       this.tainted = false;
       this.actionsSinceUser = 0;
@@ -1034,10 +1075,10 @@ export class AgentSession {
   }
   // Hold follow-ups outside the model inbox until its current task finishes. A queued
   // message can therefore be promoted without racing the model's inbox cursor.
-  enqueue(text: string): void {
+  enqueue(text: string, sender?: string): void {
     if (this.stopped) throw new SessionStoppedError();
     if (this.status === "idle") {
-      this.post("followup", text);
+      this.post("followup", text, sender);
       return;
     }
     const item = InboxItem.parse({ seq: 1, messageId: ulid(), kind: "followup", text });
@@ -1049,6 +1090,7 @@ export class AgentSession {
       sessionId: this.id,
     });
     this.#queued.set(item.messageId, text);
+    this.#senders.set(item.messageId, sender ?? null);
   }
   steerQueued(messageId: string): boolean {
     if (this.stopped) throw new SessionStoppedError();
@@ -1759,12 +1801,23 @@ export class AgentSession {
     }
   }
   // User Stop ends the run, not the computer. Emergency callers retain stop(). `why` says what
-  // ended the task: only "stopped" keeps its delegated agents from resuming in a later task.
-  cancel(why: SubagentStop = "stopped"): void {
+  // ended the task: only "stopped" keeps its delegated agents from resuming in a later task. `by`
+  // gives the stopper back their own messages dot never acted on.
+  cancel(why: SubagentStop = "stopped", by?: Stopper): void {
     if (this.stopped) return;
-    this.#end(false, why);
+    this.#end(false, why, by);
     this.#screenClosing = this.#screens?.cancel();
     void this.#screenClosing?.catch(() => {});
+  }
+  // The user's Stop, giving back what they said that dot had not acted on yet. Asked again, it
+  // answers as it did the first time.
+  giveBack(by: Stopper): GivenBack[] {
+    if (!this.stopped) this.cancel("stopped", by);
+    return this.#givenBack?.by === by ? [...this.#givenBack.messages] : [];
+  }
+  // A Stop gave back all the user said, and dot had done nothing: the task carried nothing out.
+  get emptied(): boolean {
+    return this.#emptied;
   }
 
   stop(): void {
@@ -1776,17 +1829,36 @@ export class AgentSession {
     }
     this.#end(true, "stopped");
   }
-  #end(contain: boolean, why: SubagentStop): void {
+  #end(contain: boolean, why: SubagentStop, by?: Stopper): void {
     this.#steps.stop();
     if (this.stopped) return;
     this.#stopping = true;
-    for (const messageId of this.#queued.keys()) {
+    // Stop leaves unanswered what dot never acted on; any other end, what it never received.
+    const left = [...this.#senders.keys()].flatMap((messageId) => {
+      const text =
+        (why === "stopped" ? this.#unanswered.get(messageId) : undefined) ??
+        this.#queued.get(messageId);
+      return text === undefined ? [] : [[messageId, text] as const];
+    });
+    const mine = (messageId: string) => by !== undefined && this.#senders.get(messageId) === by;
+    const given: GivenBack[] = [];
+    for (const [messageId, text] of left) {
       try {
-        this.append("message.delivery", { messageId, state: "cancelled", reason: "stopped" });
+        this.append("message.delivery", {
+          messageId,
+          state: mine(messageId) ? "withdrawn" : "cancelled",
+          reason: "stopped",
+        });
+        if (mine(messageId)) given.push({ messageId, text });
       } catch {
         /* Stopping must still retire all input. */
       }
     }
+    if (by !== undefined) {
+      this.#givenBack = { by, messages: given };
+      this.#emptied = !this.#acted && left.length > 0 && given.length === left.length;
+    }
+    this.#unanswered.clear();
     this.#queued.clear();
     this.status = "ended";
     this.#approvals.cancel(this.id);

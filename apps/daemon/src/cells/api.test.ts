@@ -5,6 +5,7 @@ import type { Hono } from "hono";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
+import { SizeRefused } from "./computer-size.ts";
 import { ComputerUpdateRefused } from "./computer-update.ts";
 import { DockerError } from "./docker.ts";
 import { SkippedCellsError } from "./orchestrator.ts";
@@ -506,5 +507,64 @@ describe("several dots' computers on one Docker", () => {
     const refused = await create(app);
     expect(refused.status).toBe(409);
     expect(await refused.text()).toContain("no network addresses left");
+  });
+});
+
+describe("the computer's size", () => {
+  const GIB = 1024 ** 3;
+  function sized() {
+    const view = { size: { memoryBytes: 4 * GIB, cpus: 4 } };
+    const size = {
+      view: vi.fn(async () => view as never),
+      change: vi.fn(async (next: { memoryBytes: number; cpus: number }) => {
+        if (next.memoryBytes > 6 * GIB)
+          throw new SizeRefused(409, "Docker can hold at most 6 GB for this computer now.");
+        return { size: next } as never;
+      }),
+    };
+    const app = createApp({
+      token: TOKEN,
+      port: PORT,
+      eventLog,
+      cells: { cells: new FakeOrchestrator(), tickets: new TicketRegistry(), size },
+    });
+    const put = (body: unknown) =>
+      app.request(url("/api/computer-size"), {
+        method: "PUT",
+        headers: { ...bearer, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    return { app, size, put };
+  }
+
+  it("reads it with the install token only, never cached", async () => {
+    const { app } = sized();
+    expect((await app.request(url("/api/computer-size"))).status).toBe(401);
+    const read = await app.request(url("/api/computer-size"), { headers: bearer });
+    expect(read.headers.get("cache-control")).toBe("no-store");
+    expect(await read.json()).toEqual({ size: { memoryBytes: 4 * GIB, cpus: 4 } });
+  });
+
+  it("changes it, and answers a refusal in plain words", async () => {
+    const { size, put } = sized();
+    expect(await (await put({ memoryBytes: 6 * GIB, cpus: 8 })).json()).toEqual({
+      size: { memoryBytes: 6 * GIB, cpus: 8 },
+    });
+    const refused = await put({ memoryBytes: 8 * GIB, cpus: 8 });
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toBe("Docker can hold at most 6 GB for this computer now.");
+    for (const bad of [{ memoryBytes: 4 * GIB }, { memoryBytes: 4 * GIB, cpus: 2.5 }, null])
+      expect((await put(bad)).status).toBe(400);
+    expect(size.change).toHaveBeenCalledTimes(2);
+  });
+
+  it("says Docker isn't answering when it can't be reached", async () => {
+    const { app, size } = sized();
+    size.view.mockRejectedValueOnce(new DockerError(0, "ENOENT", "/info"));
+    const read = await app.request(url("/api/computer-size"), { headers: bearer });
+    expect(read.status).toBe(503);
+    expect(await read.text()).toBe(
+      "Docker isn't answering, so the computer's size can't be changed now.",
+    );
   });
 });

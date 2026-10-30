@@ -901,6 +901,24 @@ describe("signing in to a site from Settings", () => {
     expect(f.containment).not.toHaveBeenCalled();
   });
 
+  it("tells the user the driver's own next step when a stop has a known remedy", async () => {
+    const f = setup();
+    f.run.mockImplementationOnce(async (session) => {
+      session.append("agent.state", {
+        state: "error",
+        reason:
+          "Claude Code used its own tool Read instead of localDot's, so localDot stopped the task",
+        next: "Send your message again to continue.",
+      });
+      return 3;
+    });
+    const session = await f.runner.start(f.cellId, "Say hello");
+    await f.live.settled(session.id);
+    expect(f.log.read(session.id).find((e) => e.type === "message.assistant")?.data).toMatchObject({
+      text: "I couldn't continue: Claude Code used its own tool Read instead of localDot's, so localDot stopped the task. Send your message again to continue.",
+    });
+  });
+
   it("ends a task that gave up and got no follow-up without stopping the computer", async () => {
     const f = setup(1);
     const { closed, cancelled } = screens(f);
