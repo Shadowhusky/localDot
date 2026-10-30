@@ -181,7 +181,9 @@ describe("recording retention", () => {
       isLive: (id) => id === live.id,
     });
     expect(result.expired).toEqual([old.id]);
-    expect(readFileSync(join(live.directory, "video.mp4"))).toEqual(Buffer.alloc(megabyte, 17));
+    expect(readFileSync(join(live.directory, "video.mp4")).equals(Buffer.alloc(megabyte, 17))).toBe(
+      true,
+    );
     expect(readManifest(live.directory)).toEqual({ ok: true, manifest: live.manifest });
   });
 
