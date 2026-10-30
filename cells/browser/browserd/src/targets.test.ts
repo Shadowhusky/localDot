@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CdpTransport } from "./pipe.ts";
 import {
   BROWSER_CRASH_RELOADS,
+  BROWSER_KEPT_TABS,
   BROWSER_RELOAD_TIMEOUT_MS,
+  BROWSER_TAB_OPEN_TIMEOUT_MS,
   type BrowserDocument,
   BrowserTargets,
   MAX_BROWSER_NODES,
@@ -44,6 +46,9 @@ function setup() {
         result,
       }),
     );
+  };
+  const refuse = (command: WireCommand) => {
+    receive(JSON.stringify({ id: command.id, error: { code: -32000, message: "refused" } }));
   };
   const event = (method: string, params: unknown, sessionId?: string) => {
     receive(JSON.stringify({ method, params, ...(sessionId ? { sessionId } : {}) }));
@@ -101,6 +106,7 @@ function setup() {
     targets,
     writes,
     reply,
+    refuse,
     event,
     attach,
     fatal,
@@ -875,5 +881,191 @@ describe("private browser target ownership", () => {
     );
     fixture.targets.close();
     expect(fixture.fatal).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a blank tab in front", () => {
+  const blank = (targetId: string) => ({ ...info(targetId), title: "", url: "about:blank" });
+  // Chromium's side: its list of targets, a created tab that attaches, and closed tabs that go.
+  function chromium(
+    fixture: Awaited<ReturnType<typeof started>>,
+    targetInfos: ReturnType<typeof info>[],
+    created?: string,
+  ) {
+    fixture.intercept((command) => {
+      if (command.method === "Target.getTargets")
+        queueMicrotask(() => fixture.reply(command, { targetInfos }));
+      else if (command.method === "Target.createTarget" && created)
+        queueMicrotask(() => {
+          fixture.event("Target.targetCreated", { targetInfo: blank(created) });
+          fixture.reply(command, { targetId: created });
+          fixture.event("Target.attachedToTarget", {
+            sessionId: `${created}-session`,
+            targetInfo: blank(created),
+            waitingForDebugger: true,
+          });
+        });
+      else if (command.method === "Target.closeTarget")
+        queueMicrotask(() => {
+          fixture.reply(command, { success: true });
+          fixture.event("Target.targetDestroyed", { targetId: command.params.targetId });
+        });
+      else if (command.method === "Page.getLayoutMetrics")
+        queueMicrotask(() =>
+          fixture.reply(command, {
+            cssLayoutViewport: { clientWidth: 1280, clientHeight: 713, pageX: 0, pageY: 0 },
+          }),
+        );
+      else return false;
+      return true;
+    });
+  }
+  const browserCommands = (fixture: Awaited<ReturnType<typeof started>>, from: number) =>
+    fixture.writes
+      .slice(from)
+      .filter((command) => command.sessionId === undefined)
+      .map(({ method, params }) => ({ method, params }));
+  // The blank page laid out again, so that Chromium's accessibility sees it.
+  const laidOut = (sessionId: string) => [
+    { method: "Page.getLayoutMetrics", params: {}, sessionId },
+    {
+      method: "Emulation.setDeviceMetricsOverride",
+      params: { width: 1280, height: 712, deviceScaleFactor: 0, mobile: false },
+      sessionId,
+    },
+    { method: "Page.getLayoutMetrics", params: {}, sessionId },
+    { method: "Emulation.clearDeviceMetricsOverride", params: {}, sessionId },
+  ];
+  const layoutCommands = (fixture: Awaited<ReturnType<typeof started>>, from: number) =>
+    fixture.writes
+      .slice(from)
+      .filter(({ method }) => method === "Page.getLayoutMetrics" || method.startsWith("Emulation."))
+      .map(({ method, params, sessionId }) => ({ method, params, sessionId }));
+
+  it("opens a blank tab in front of the page, which stays open behind it", async () => {
+    const fixture = await started();
+    chromium(fixture, [info()], "page-2");
+    const from = fixture.writes.length;
+    const tabId = await fixture.targets.openTab(new AbortController().signal);
+    expect(tabId).not.toBe(fixture.tabId);
+    expect(fixture.targets.tabs()).toEqual([
+      { id: fixture.tabId, ready: true },
+      { id: tabId, ready: true },
+    ]);
+    expect(browserCommands(fixture, from)).toEqual([
+      { method: "Target.getTargets", params: expect.any(Object) },
+      { method: "Target.createTarget", params: { url: "about:blank" } },
+      { method: "Target.activateTarget", params: { targetId: "page-2" } },
+    ]);
+    expect(layoutCommands(fixture, from)).toEqual(laidOut("page-2-session"));
+    expect(fixture.targets.documents(tabId)).toHaveLength(1);
+    expect(() => fixture.targets.check(fixture.document)).not.toThrow();
+    expect(fixture.fatal).not.toHaveBeenCalled();
+    fixture.targets.close();
+  });
+
+  it("brings the blank tab already open forward and closes the other blank ones", async () => {
+    const fixture = await started();
+    fixture.attach("page-2", "session-2");
+    fixture.attach("page-3", "session-3");
+    await settle();
+    const [page, , newer] = fixture.targets.tabs().map((tab) => tab.id);
+    chromium(fixture, [info(), blank("page-2"), blank("page-3")]);
+    const from = fixture.writes.length;
+    expect(await fixture.targets.openTab(new AbortController().signal)).toBe(newer);
+    expect(browserCommands(fixture, from)).toEqual([
+      { method: "Target.getTargets", params: expect.any(Object) },
+      { method: "Target.closeTarget", params: { targetId: "page-2" } },
+      { method: "Target.activateTarget", params: { targetId: "page-3" } },
+    ]);
+    expect(layoutCommands(fixture, from)).toEqual(laidOut("session-3"));
+    await settle();
+    expect(fixture.targets.tabs().map((tab) => tab.id)).toEqual([page, newer]);
+    fixture.targets.close();
+  });
+
+  it(`keeps ${BROWSER_KEPT_TABS} of the tabs it opened, closing its oldest but never the user's`, async () => {
+    const fixture = await started();
+    fixture.attach("page-2", "session-2");
+    await settle();
+    const ours: string[] = [];
+    let closed: unknown[] = [];
+    for (let n = 1; n <= BROWSER_KEPT_TABS + 1; n++) {
+      // Each tab opened earlier has left about:blank by the next new conversation.
+      chromium(fixture, [info(), info("page-2"), ...ours.map((id) => info(id))], `ours-${n}`);
+      const from = fixture.writes.length;
+      await fixture.targets.openTab(new AbortController().signal);
+      closed = browserCommands(fixture, from).filter(
+        ({ method }) => method === "Target.closeTarget",
+      );
+      if (n <= BROWSER_KEPT_TABS) expect(closed).toEqual([]);
+      ours.push(`ours-${n}`);
+      await settle();
+    }
+    expect(closed).toEqual([{ method: "Target.closeTarget", params: { targetId: "ours-1" } }]);
+    expect(fixture.targets.tabs()).toHaveLength(2 + BROWSER_KEPT_TABS);
+    fixture.targets.close();
+  });
+
+  it("stops between Chromium commands when cancelled, keeping the browser's connection", async () => {
+    const fixture = await started();
+    const abort = new AbortController();
+    fixture.intercept((command) => {
+      if (command.method === "Target.getTargets")
+        queueMicrotask(() => fixture.reply(command, { targetInfos: [info()] }));
+      else if (command.method === "Target.createTarget")
+        queueMicrotask(() => {
+          fixture.reply(command, { targetId: "page-2" });
+          abort.abort();
+        });
+      else return false;
+      return true;
+    });
+    await expect(fixture.targets.openTab(abort.signal)).rejects.toThrow();
+    expect(fixture.writes.some((command) => command.method === "Target.activateTarget")).toBe(
+      false,
+    );
+    expect(fixture.targets.closed).toBe(false);
+    expect(fixture.fatal).not.toHaveBeenCalled();
+    await expect(fixture.targets.openTab(AbortSignal.abort())).rejects.toThrow();
+    fixture.targets.close();
+  });
+
+  it("refuses a tab that never attaches, and one Chromium won't create", async () => {
+    const fixture = await started();
+    fixture.intercept((command) => {
+      if (command.method === "Target.getTargets")
+        queueMicrotask(() => fixture.reply(command, { targetInfos: [info()] }));
+      else if (command.method === "Target.createTarget")
+        queueMicrotask(() => fixture.reply(command, { targetId: "page-2" }));
+      else return false;
+      return true;
+    });
+    const now = vi
+      .spyOn(performance, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValue(BROWSER_TAB_OPEN_TIMEOUT_MS);
+    try {
+      await expect(fixture.targets.openTab(new AbortController().signal)).rejects.toThrow(
+        "unready",
+      );
+    } finally {
+      now.mockRestore();
+    }
+    fixture.intercept((command) => {
+      if (command.method === "Target.getTargets")
+        queueMicrotask(() => fixture.reply(command, { targetInfos: [info()] }));
+      else if (command.method === "Target.createTarget")
+        queueMicrotask(() => fixture.refuse(command));
+      else return false;
+      return true;
+    });
+    await expect(fixture.targets.openTab(new AbortController().signal)).rejects.toThrow();
+    expect(fixture.writes.some((command) => command.method === "Target.activateTarget")).toBe(
+      false,
+    );
+    expect(fixture.targets.closed).toBe(false);
+    fixture.targets.close();
+    await expect(fixture.targets.openTab(new AbortController().signal)).rejects.toThrow("closed");
   });
 });

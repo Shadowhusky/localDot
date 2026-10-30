@@ -13,6 +13,7 @@ import {
   TypeRequest,
   type TypeResult,
   WindowControlRequest,
+  WindowsRequest,
   ZoomRequest,
 } from "@localdot/protocol";
 import { type Context, Hono } from "hono";
@@ -44,6 +45,7 @@ import {
 import { observe } from "./perception/observe.ts";
 import { settle } from "./settle.ts";
 import { addToolRoutes, type ToolRouteDeps } from "./tools/routes.ts";
+import { type ShellSessions, screenWindows } from "./windows.ts";
 import type { WorkWindow } from "./work-window.ts";
 import type { XHelper } from "./x/helper.ts";
 import type { Screen, Xsettings } from "./xsettings.ts";
@@ -66,6 +68,7 @@ export interface DesktopdDeps {
   selfTest?: () => Promise<SelfTestReport>;
   connectionOwner?(port: number): Promise<string | undefined>;
   tools?: ToolRouteDeps;
+  shells?: ShellSessions;
   prepareBrowser?(
     taskId: string,
     signal: AbortSignal,
@@ -345,6 +348,18 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
       if (!parsed.success) return c.text("invalid window operation", 400);
       if (c.req.raw.signal.aborted) return c.text("request aborted", 408);
       return c.json(await x.call("window_control", parsed.data));
+    })(),
+  );
+
+  // Which windows are on screen and whose programs show them; the tasks sharing the computer
+  // bring their own forward with `activate`.
+  app.post("/windows", async (c) =>
+    withX(async (x) => {
+      const parsed = WindowsRequest.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) return c.text("invalid windows request", 400);
+      return c.json(
+        await screenWindows({ x, ...(deps.shells ? { shells: deps.shells } : {}) }, parsed.data),
+      );
     })(),
   );
 

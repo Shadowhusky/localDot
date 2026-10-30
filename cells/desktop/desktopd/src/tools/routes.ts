@@ -24,6 +24,7 @@ import {
   DesktopUploadRead,
 } from "../../../../../packages/protocol/src/desktop-uploads.ts";
 import { PlacementError, parsePlacementHeader, placeDownload } from "../place-download.ts";
+import type { ShellSessions } from "../windows.ts";
 import { NavigationError, NoPageError, type PageBrowser } from "./browser.ts";
 import { desktopCapabilities } from "./capabilities.ts";
 import {
@@ -50,6 +51,8 @@ export interface ToolRouteDeps {
   maxPutBytes?: number;
   runShell?: typeof runShell;
   placeDownload?: typeof placeDownload;
+  // Each command's process session, by the id its caller gave it.
+  shells?: ShellSessions;
 }
 
 const JSON_FILE_BYTES = 4 * 1024 * 1024 + 64 * 1024;
@@ -244,6 +247,7 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
               maxOutputBytes: req.maxOutputBytes,
               env: shellEnv(deps.env, deps.home),
               signal: execution,
+              ...(id && deps.shells ? { onSpawn: (pid: number) => deps.shells?.add(pid, id) } : {}),
             },
             (chunk) => {
               if (!execution.aborted) send(chunk);

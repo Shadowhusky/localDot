@@ -1,6 +1,13 @@
 import type { LookupAddress } from "node:dns";
-import { connect, createServer, type LookupFunction, type Server, type Socket } from "node:net";
-import { networkInterfaces } from "node:os";
+import {
+  connect,
+  createServer,
+  isIP,
+  type LookupFunction,
+  type Server,
+  type Socket,
+} from "node:net";
+import { hostname, networkInterfaces } from "node:os";
 import {
   PREVIEW_PREFACE_BYTES,
   type PreviewListing,
@@ -66,16 +73,24 @@ export function createPreviewForwarder(opts: PreviewForwarderOptions): Server {
   });
 }
 
-export function ownAddresses(): string[] {
-  return Object.values(networkInterfaces())
+const HOSTNAME = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+
+// The computer's network addresses, then its name, which some servers print in place of an address
+// (Jupyter's http://<name>:8888/).
+export function ownAddresses(name = hostname().toLowerCase()): string[] {
+  const addresses = Object.values(networkInterfaces())
     .flat()
     .flatMap((entry) =>
       entry && entry.family === "IPv4" && !entry.internal ? [entry.address] : [],
     )
-    .slice(0, 8);
+    .slice(0, 7);
+  return HOSTNAME.test(name) && name !== "localhost" && addresses.length
+    ? [...addresses, name]
+    : addresses;
 }
 
-// Where to dial for a host the daemon named: every *.localhost name is loopback, as in a browser.
+// Where to dial for a host the daemon named: every *.localhost name is loopback, as in a browser,
+// and the computer's name is its first address, as its hosts file says, without asking DNS.
 export function dialTarget(
   dial: string,
   addresses: readonly string[],
@@ -87,7 +102,9 @@ export function dialTarget(
     return { host: "localhost", port, lookup: bothLoopbacks };
   if (name === "127.0.0.1") return { host: name, port };
   if (name === "[::1]") return { host: "::1", port };
-  return addresses.includes(name) ? { host: name, port } : undefined;
+  if (!addresses.includes(name)) return undefined;
+  const address = isIP(name) ? name : addresses.find((entry) => isIP(entry));
+  return address ? { host: address, port } : undefined;
 }
 
 // A computer with no IPv6 network resolves localhost to 127.0.0.1 alone (Node asks for the

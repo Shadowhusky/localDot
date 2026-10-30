@@ -59,6 +59,7 @@ const navigationSchema = schema.strictObject({
   ...actionFields,
   url: schema.string().min(1).max(8192),
 });
+const openTabSchema = schema.strictObject({ permit: BrowserActionPermit });
 const progressSchema = schema.strictObject({
   count: schema.number().int().min(1).max(4000),
   pressMono: schema.number().finite().nonnegative(),
@@ -68,6 +69,7 @@ const routes = new Set([
   "GET /health",
   "GET /supervisor",
   "GET /tabs",
+  "POST /tabs",
   "PUT /control",
   "POST /input",
   "POST /type",
@@ -101,7 +103,7 @@ export interface BrowserHttpOptions {
     Partial<Pick<BrowserInput, "timing" | "manual" | "secret">>;
   readonly observation: Pick<BrowserObservation, "observe"> &
     Partial<Pick<BrowserObservation, "lookup" | "read">>;
-  readonly navigation?: Pick<BrowserNavigation, "navigate">;
+  readonly navigation?: Pick<BrowserNavigation, "navigate" | "openTab">;
   readonly downloads?: Pick<BrowserDownloadService, "arm" | "list" | "read" | "acknowledge">;
   readonly uploads?: Pick<BrowserUploadService, "chooser" | "upload">;
   readonly accounts?: Pick<BrowserAccounts, "domains" | "signOut">;
@@ -597,6 +599,18 @@ export class BrowserHttp {
         );
         this.#available(signal);
         send(response, 200, BrowserManualReply.parse(reply));
+        return;
+      }
+      if (route === "POST /tabs") {
+        const parsed = openTabSchema.safeParse(body);
+        if (!parsed.success) throw new HttpRefusal(400, "request");
+        if (!this.#options.navigation) throw new HttpRefusal(503, "unavailable");
+        if (this.#active) throw new HttpRefusal(409, "busy");
+        this.#active = true;
+        ownsSlot = true;
+        const opened = await this.#options.navigation.openTab(parsed.data.permit, signal);
+        this.#available(signal);
+        send(response, 200, opened);
         return;
       }
       const parsed = (

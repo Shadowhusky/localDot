@@ -43,11 +43,14 @@ function permitData(raw: unknown, depth = 0): Record<string, unknown> {
 
 export class BrowserNavigation {
   readonly #control: Pick<BrowserControl, "admit">;
-  readonly #targets: Pick<BrowserTargets, "navigate">;
+  readonly #targets: Pick<BrowserTargets, "navigate" | "openTab">;
   readonly #lifetime = new AbortController();
   #active?: Promise<void>;
 
-  constructor(control: Pick<BrowserControl, "admit">, targets: Pick<BrowserTargets, "navigate">) {
+  constructor(
+    control: Pick<BrowserControl, "admit">,
+    targets: Pick<BrowserTargets, "navigate" | "openTab">,
+  ) {
     this.#control = control;
     this.#targets = targets;
   }
@@ -67,6 +70,25 @@ export class BrowserNavigation {
     if (this.#active) throw new BrowserNavigationError("busy");
     if (typeof tabId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/u.test(tabId) || !navigable(url))
       throw new BrowserNavigationError("request");
+    const outcome = await this.#admitted(permit, signal, (combined) =>
+      this.#targets.navigate(tabId, url, combined),
+    );
+    return { done: true, ...(outcome === "download" ? { download: true as const } : {}) };
+  }
+
+  async openTab(permit: unknown, signal: AbortSignal): Promise<{ tabId: string }> {
+    if (this.#lifetime.signal.aborted) throw new BrowserNavigationError("closed");
+    if (this.#active) throw new BrowserNavigationError("busy");
+    return {
+      tabId: await this.#admitted(permit, signal, (combined) => this.#targets.openTab(combined)),
+    };
+  }
+
+  async #admitted<T>(
+    permit: unknown,
+    signal: AbortSignal,
+    work: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
     const completion = Promise.withResolvers<void>();
     this.#active = completion.promise;
     let lease: BrowserActionLease | undefined;
@@ -76,10 +98,10 @@ export class BrowserNavigation {
       const combined = AbortSignal.any([signal, lease.signal, this.#lifetime.signal]);
       combined.throwIfAborted();
       lease.check();
-      const outcome = await this.#targets.navigate(tabId, url, combined);
+      const result = await work(combined);
       combined.throwIfAborted();
       lease.check();
-      return { done: true, ...(outcome === "download" ? { download: true as const } : {}) };
+      return result;
     } catch {
       throw new BrowserNavigationError("refused");
     } finally {

@@ -59,7 +59,11 @@ async function setup(enableNavigation = true) {
     if (!signal) throw new Error("navigation signal missing");
     await work(signal);
   });
-  const navigation = new BrowserNavigation(control, { navigate });
+  const openTab = vi.fn(async (signal: AbortSignal) => {
+    await work(signal);
+    return tabId;
+  });
+  const navigation = new BrowserNavigation(control, { navigate, openTab });
   const admission = async (
     raw: unknown,
     signal: AbortSignal,
@@ -278,6 +282,7 @@ async function setup(enableNavigation = true) {
     timing,
     manual,
     navigate,
+    openTab,
     stop,
     fence,
     clearSelections,
@@ -482,6 +487,66 @@ describe("authenticated browser HTTP transport", () => {
     expect(peer.inject).not.toHaveBeenCalled();
     expect(peer.type).not.toHaveBeenCalled();
     expect(peer.observe).not.toHaveBeenCalled();
+  });
+
+  it("opens a blank tab for the holder and names it", async () => {
+    const peer = await setup();
+    const reply = await peer.send("POST", "/tabs", { permit });
+    expect(reply.status).toBe(200);
+    expect(JSON.parse(reply.text)).toEqual({ tabId });
+    expect(peer.openTab).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal));
+    expect(peer.workWindow.hide).toHaveBeenCalled();
+  });
+
+  it.each([{}, { permit, tabId }, { permit, url: "https://example.test/" }, { permit: {} }])(
+    "rejects a malformed blank tab request before dispatch %#",
+    async (body) => {
+      const peer = await setup();
+      expect((await peer.send("POST", "/tabs", body)).status).toBe(400);
+      expect(peer.openTab).not.toHaveBeenCalled();
+    },
+  );
+
+  it("opens no tab without a wired owner or for anyone but the holder", async () => {
+    const unavailable = await setup(false);
+    expect((await unavailable.send("POST", "/tabs", { permit })).status).toBe(503);
+    const peer = await setup();
+    for (const stale of [
+      { ...permit, revision: 2 },
+      { ...permit, owner: { ...owner, generation: 2 } },
+    ]) {
+      const reply = await peer.send("POST", "/tabs", { permit: stale });
+      expect(reply.status).toBe(409);
+      expect(JSON.parse(reply.text)).toEqual({ error: "refused" });
+    }
+    const takeover = await peer.send("PUT", "/control", {
+      ...identity,
+      revision: 2,
+      requestId: ulid(),
+      holder: "user",
+    });
+    expect(takeover.status).toBe(200);
+    expect((await peer.send("POST", "/tabs", { permit })).status).toBe(409);
+    expect(peer.openTab).not.toHaveBeenCalled();
+    expect(unavailable.openTab).not.toHaveBeenCalled();
+  });
+
+  it("waits its turn behind other browser work", async () => {
+    const peer = await setup();
+    const complete = Promise.withResolvers<void>();
+    peer.setWork(() => complete.promise);
+    const navigating = peer.send("POST", "/navigate", {
+      permit,
+      tabId,
+      url: "https://example.test/",
+    });
+    await until(() => peer.navigate.mock.calls.length === 1);
+    const reply = await peer.send("POST", "/tabs", { permit });
+    expect(reply.status).toBe(409);
+    expect(JSON.parse(reply.text)).toEqual({ error: "busy" });
+    complete.resolve();
+    expect((await navigating).status).toBe(200);
+    expect(peer.openTab).not.toHaveBeenCalled();
   });
 
   it("returns a bounded identity and opaque tabs without private metadata", async () => {

@@ -40,6 +40,7 @@ const roots: [string, Record<string, unknown>][] = [
   ["Target.detachFromTarget", { sessionId: "session-1" }],
   ["Target.createTarget", { url: "about:blank" }],
   ["Target.activateTarget", { targetId: "page-1" }],
+  ["Target.closeTarget", { targetId: "page-1" }],
 ];
 const pages: [string, Record<string, unknown>][] = [
   ["Runtime.runIfWaitingForDebugger", {}],
@@ -52,6 +53,11 @@ const pages: [string, Record<string, unknown>][] = [
   ["Page.bringToFront", {}],
   ["Page.setInterceptFileChooserDialog", { enabled: true }],
   ["Page.handleJavaScriptDialog", { accept: false }],
+  [
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1280, height: 712, deviceScaleFactor: 0, mobile: false },
+  ],
+  ["Emulation.clearDeviceMetricsOverride", {}],
   ["DOM.enable", {}],
   ["DOM.getDocument", { depth: 1 }],
   ["DOM.getNodeForLocation", { x: 10, y: 20 }],
@@ -163,6 +169,17 @@ describe("closed private CDP command boundary", () => {
     expect(() =>
       guardCdpCommand("Target.createTarget", { url: "chrome://settings" }, capabilities),
     ).toThrow("params");
+    expect(() =>
+      guardCdpCommand("Target.closeTarget", { targetId: "devtools" }, capabilities),
+    ).toThrow("scope");
+    for (const metrics of [
+      { width: 375, height: 667, deviceScaleFactor: 3, mobile: true },
+      { width: 1280, height: 712, deviceScaleFactor: 0, mobile: false, screenWidth: 375 },
+      { width: 0, height: 712, deviceScaleFactor: 0, mobile: false },
+    ])
+      expect(() =>
+        guardCdpCommand("Emulation.setDeviceMetricsOverride", metrics, capabilities, "session-1"),
+      ).toThrow("params");
     expect(() =>
       guardCdpCommand("DOM.describeNode", { backendNodeId: 5 }, capabilities, "session-1"),
     ).toThrow("scope");

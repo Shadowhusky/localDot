@@ -3,7 +3,7 @@ import { createServer as createHttpServer, type Server as HttpServer } from "nod
 import { type AddressInfo, connect, createServer, type Server } from "node:net";
 import { previewPreface } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { createPreviewForwarder, dialTarget } from "./preview-forwarder.ts";
+import { createPreviewForwarder, dialTarget, ownAddresses } from "./preview-forwarder.ts";
 
 const TOKEN = "f".repeat(43);
 const open: (Server | HttpServer)[] = [];
@@ -113,6 +113,18 @@ describe("the preview forwarder", () => {
     expect(await exchange(port, previewPreface(TOKEN, { open: `10.0.0.5:${server}` }))).toBe(
       "NO bad-request\n",
     );
+  });
+
+  it("dials the computer's name at its address, and lists it after its addresses", () => {
+    expect(dialTarget("3f2a9c1b7d4e:8888", ["172.20.0.11", "3f2a9c1b7d4e"])).toEqual({
+      host: "172.20.0.11",
+      port: 8888,
+    });
+    expect(dialTarget("3f2a9c1b7d4e:8888", ["3f2a9c1b7d4e"])).toBeUndefined();
+    expect(dialTarget("other-name:8888", ["172.20.0.11", "3f2a9c1b7d4e"])).toBeUndefined();
+    expect(ownAddresses("3f2a9c1b7d4e").at(-1)).toBe("3f2a9c1b7d4e");
+    expect(ownAddresses("localhost")).not.toContain("localhost");
+    expect(ownAddresses("evil.example")).not.toContain("evil.example");
   });
 
   it("tries both loopback addresses for localhost names, whatever the computer resolves", () => {

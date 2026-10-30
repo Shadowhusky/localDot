@@ -15,6 +15,7 @@ import { AtspiAccessibility } from "./perception/native.ts";
 import { createPreviewForwarder } from "./preview-forwarder.ts";
 import { cachedSelfTest, nodeProbes, runSelfTest, selfTestConfigFromEnv } from "./selftest.ts";
 import { PageBrowser } from "./tools/browser.ts";
+import { ShellSessions } from "./windows.ts";
 import { WorkWindow } from "./work-window.ts";
 import { startXHelper, type XHelper } from "./x/helper.ts";
 import { readScreen, readXsettings, windowScaling } from "./xsettings.ts";
@@ -77,12 +78,15 @@ const cdp = new ChromiumPerception({
   },
 });
 const scaling = windowScaling(() => readXsettings(uid), scale);
+const shells = new ShellSessions();
 const app = createDesktopdApp({
   workWindow: new WorkWindow(),
   prepareBrowser: prepareDesktopBrowser,
+  shells,
   tools: {
     home: process.env.LOCALDOT_HOME_DIR ?? "/config",
     env: process.env,
+    shells,
     browser: new PageBrowser({
       window: async (signal) => {
         signal.throwIfAborted();

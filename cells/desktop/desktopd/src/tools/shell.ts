@@ -12,6 +12,8 @@ export interface ShellOptions {
   signal?: AbortSignal;
   // A login shell sources /etc/profile.d, including the cell's keyd surrogates.
   shell?: string;
+  // The command's own process session, which its programs' windows carry.
+  onSpawn?(pid: number): void;
 }
 
 // The caller can freeze the cell on uncertain cleanup. Signalling this UID's process group alone
@@ -64,6 +66,7 @@ async function executeShell(
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  if (child.pid) opts.onSpawn?.(child.pid);
 
   return new Promise<ShellDone>((resolveDone, reject) => {
     let settled = false;

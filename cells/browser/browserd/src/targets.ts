@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { z as schema } from "zod";
 import {
   type BrowserUploadChooser,
@@ -19,6 +20,10 @@ export const BROWSER_CHOOSER_TIMEOUT_MS = 5 * 60_000;
 // its error page.
 export const BROWSER_CRASH_RELOADS = 3;
 export const BROWSER_CRASH_WINDOW_MS = 60_000;
+// Opening a blank tab keeps this many tabs, itself included, closing the oldest others: every tab
+// is read for each action's page geometry, and a background page still loads frames and memory.
+export const BROWSER_KEPT_TABS = 4;
+export const BROWSER_TAB_OPEN_TIMEOUT_MS = 5000;
 
 const identifier = schema.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
 const nodeNumber = schema.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -142,6 +147,8 @@ export interface BrowserTargetsOptions {
 export class BrowserTargets {
   readonly #broker: GuardedCdp;
   readonly #targets = new Map<string, TargetRecord>();
+  // The tabs openTab made, which only it closes.
+  readonly #ours = new Set<string>();
   readonly #sessions = new Map<string, TargetRecord>();
   readonly #documents = new WeakMap<BrowserDocument, DocumentRecord>();
   readonly #queue: TargetRecord[] = [];
@@ -555,6 +562,97 @@ export class BrowserTargets {
     const target = this.#tab(tabId);
     await this.#broker.send("Target.activateTarget", { targetId: target.targetId }, { signal });
     this.#sameTab(target);
+  }
+
+  // A blank tab in front of the others: the blank tab already open, else a new one. Page geometry
+  // tells tabs apart by address, so the other blank tabs close, as do the oldest of the tabs opened
+  // here past BROWSER_KEPT_TABS; tabs the user or a page opened stay. Cancelling stops between
+  // Chromium commands: abandoning one fences them all.
+  async openTab(signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted();
+    this.#checkOpen();
+    const listed = schema
+      .object({ targetInfos: schema.array(targetInfo).max(MAX_BROWSER_TARGETS) })
+      .safeParse(await this.#broker.send("Target.getTargets", { filter }));
+    if (!listed.success) throw new BrowserTargetError("protocol");
+    const blank = new Set(
+      listed.data.targetInfos
+        .filter((info) => info.type === "page" && info.url === "about:blank")
+        .map((info) => info.targetId),
+    );
+    const tabs = () => [...this.#targets.values()].filter((target) => target.type === "page");
+    let front = tabs().findLast(
+      (target) => blank.has(target.targetId) && target.ready && this.#current(target),
+    );
+    if (!front) {
+      signal.throwIfAborted();
+      const created = schema
+        .object({ targetId: identifier })
+        .safeParse(await this.#broker.send("Target.createTarget", { url: "about:blank" }));
+      if (!created.success) throw new BrowserTargetError("protocol");
+      this.#ours.add(created.data.targetId);
+      front = await this.#opened(created.data.targetId, signal);
+    }
+    for (const id of this.#ours) if (!this.#targets.has(id)) this.#ours.delete(id);
+    const others = tabs().filter((target) => target !== front);
+    const earlier = others.filter(
+      (target) => !blank.has(target.targetId) && this.#ours.has(target.targetId),
+    );
+    for (const target of [
+      ...others.filter((target) => blank.has(target.targetId)),
+      ...earlier.slice(0, Math.max(0, earlier.length + 1 - BROWSER_KEPT_TABS)),
+    ]) {
+      signal.throwIfAborted();
+      if (this.#targets.get(target.targetId) === target)
+        await this.#broker.send("Target.closeTarget", { targetId: target.targetId });
+    }
+    signal.throwIfAborted();
+    await this.activate(front.tabId);
+    await this.#layOut(front);
+    return front.tabId;
+  }
+
+  // Chromium's accessibility attaches to an about:blank document after it has loaded and misses it
+  // until its layout changes, so the native surface can't see the tab: a viewport a pixel shorter,
+  // then the real one, lays it out again.
+  async #layOut(target: TargetRecord): Promise<void> {
+    const options = { sessionId: target.sessionId };
+    const metrics = schema
+      .object({
+        cssLayoutViewport: schema.object({
+          clientWidth: schema.number().min(2).max(8192),
+          clientHeight: schema.number().min(2).max(8192),
+        }),
+      })
+      .safeParse(await this.#broker.send("Page.getLayoutMetrics", {}, options));
+    if (!metrics.success) throw new BrowserTargetError("protocol");
+    const { clientWidth, clientHeight } = metrics.data.cssLayoutViewport;
+    await this.#broker.send(
+      "Emulation.setDeviceMetricsOverride",
+      {
+        width: Math.round(clientWidth),
+        height: Math.round(clientHeight) - 1,
+        deviceScaleFactor: 0,
+        mobile: false,
+      },
+      options,
+    );
+    try {
+      await this.#broker.send("Page.getLayoutMetrics", {}, options);
+    } finally {
+      await this.#broker.send("Emulation.clearDeviceMetricsOverride", {}, options);
+    }
+    this.#sameTab(target);
+  }
+
+  async #opened(targetId: string, signal: AbortSignal): Promise<TargetRecord> {
+    for (const deadline = performance.now() + BROWSER_TAB_OPEN_TIMEOUT_MS; ; ) {
+      this.#checkOpen();
+      const target = this.#targets.get(targetId);
+      if (target?.type === "page" && target.ready && this.#current(target)) return target;
+      if (performance.now() >= deadline) throw new BrowserTargetError("unready");
+      await sleep(25, undefined, { signal });
+    }
   }
 
   async reload(tabId: string, signal?: AbortSignal): Promise<void> {
