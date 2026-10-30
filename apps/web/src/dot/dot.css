@@ -39,9 +39,11 @@
   height: 100%;
 }
 
+/* The shadow's plate is cut square, which shows on a light floor, so its edges fade. */
 .dot-shadow {
   display: none;
   transform-origin: 50% 92%;
+  mask-image: radial-gradient(50% 10% at 50% 92%, currentColor 50%, transparent);
 }
 
 .dot[data-lod="glance"] .dot-shadow,

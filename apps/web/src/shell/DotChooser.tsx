@@ -1,6 +1,7 @@
 import type { PersonaId } from "@localdot/protocol";
 import type { RefObject } from "react";
 import { PersonaPicker } from "../onboarding/PersonaPicker.tsx";
+import { AutoDot, dotChoiceNote } from "../settings/AutoDot.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { Popover } from "../ui/Popover.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
@@ -13,19 +14,22 @@ export function DotChooser({
   anchor,
   value,
   onChange,
+  auto,
   onClose,
 }: {
   open: boolean;
   anchor: RefObject<HTMLElement | null>;
   value: PersonaId;
   onChange(value: PersonaId): void;
+  auto: { on: boolean; onChange(on: boolean): void; disabledReason?: string };
   onClose(): void;
 }) {
   const phone = useMediaQuery(PHONE);
   const choices = (
     <>
+      <AutoDot {...auto} />
       <PersonaPicker layout="rows" value={value} onChange={onChange} />
-      <p className="persona-note">Your choice applies from the next task.</p>
+      <p className="persona-note">{dotChoiceNote(auto.on && !auto.disabledReason)}</p>
     </>
   );
   if (phone)

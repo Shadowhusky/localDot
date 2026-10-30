@@ -45,7 +45,7 @@ type Client = Pick<
   | "lookup"
   | "read"
 > &
-  Partial<Pick<BrowserClient, "manual" | "uploadChooser" | "upload" | "signIn">>;
+  Partial<Pick<BrowserClient, "manual" | "uploadChooser" | "upload" | "signIn" | "openTab">>;
 interface BrowserOwner {
   readonly endpoint: ReadyBrowser;
   readonly client: Client;
@@ -85,6 +85,13 @@ export interface ScreenControllerDeps {
   // Synchronously stop agent admission, then physically contain both cells independently.
   fenceSession(): void;
   contain(): Promise<void>;
+  // The web browser works for one task at a time on its computer; a finished task holding it may
+  // make way first.
+  claimBrowser?(signal: AbortSignal): boolean | Promise<boolean>;
+  releaseBrowser?(): void;
+  // A new conversation's task first sees the web browser on a blank tab, the page the task before
+  // it left kept in a tab behind; a task that continues a conversation carries on from that page.
+  readonly freshTab?: boolean;
 }
 export class ScreenControlError extends Error {
   constructor() {
@@ -93,6 +100,15 @@ export class ScreenControlError extends Error {
   }
 }
 class SignInStillHeldError extends ScreenControlError {}
+
+export class BrowserInUseError extends Error {
+  constructor() {
+    super(
+      "Another task is using the web browser. Use the desktop meanwhile, or switch to the web browser later.",
+    );
+    this.name = "BrowserInUseError";
+  }
+}
 
 export class ScreenUnavailableError extends Error {
   constructor(
@@ -170,10 +186,12 @@ export class ScreenController {
   #downloadEpoch = 0;
   #restartRequested = Number.NEGATIVE_INFINITY;
   readonly #downloadRetiring = new Set<Promise<void>>();
+  #freshTab: boolean;
 
   constructor(private readonly deps: ScreenControllerDeps) {
     if (!ULID_PATTERN.test(deps.sessionId) || !ULID_PATTERN.test(deps.parentCellId))
       throw new ScreenControlError();
+    this.#freshTab = deps.freshTab === true;
     this.#desktopGeometry = Object.freeze(ScreenGeometry.parse(deps.desktopGeometry));
     this.#selection = Object.freeze({
       screen: "desktop",
@@ -598,6 +616,7 @@ export class ScreenController {
   #shutdown(contain: boolean): Promise<void> {
     const completion = Promise.withResolvers<void>();
     this.#closing = completion.promise;
+    this.deps.releaseBrowser?.();
     this.#finishing = !contain;
     this.#closed = true;
     this.#userReady = false;
@@ -705,6 +724,9 @@ export class ScreenController {
           let cellId = this.deps.parentCellId;
           let geometry = this.#desktopGeometry;
           if (screen === "browser") {
+            if ((await this.deps.claimBrowser?.(operationScope.signal)) === false)
+              throw new BrowserInUseError();
+            guard();
             const owner = await this.#prepare(operationScope, restart);
             guard();
             // A fresh physical user receipt owns profile restoration. Reconnect before
@@ -754,6 +776,7 @@ export class ScreenController {
               requestId: request.requestId,
               owner: Object.freeze({ ...request.owner }),
             });
+            if (this.#freshTab) owner.tabId = await this.#openTab(owner, browserScope);
             owner.tabId = await this.#foreground(owner, browserScope);
             guard();
             cellId = owner.endpoint.browserCellId;
@@ -812,6 +835,8 @@ export class ScreenController {
           guard();
           this.#selection = selection;
           this.#ownerGeneration = scope.generation;
+          if (screen === "desktop") this.deps.releaseBrowser?.();
+          else this.#freshTab = false;
           return result;
         } catch (error) {
           if (error instanceof SignInStillHeldError) throw error;
@@ -821,10 +846,14 @@ export class ScreenController {
             // A web browser that fails, its recording included, costs dot the web browser, never
             // the task or the computer: no grant of it is left, and the session goes on recorded
             // on the desktop.
-            if (granted || handback) await this.#revoke().catch(() => this.#retireBrowser());
-            this.#reportBrowser(error);
+            const inUse = error instanceof BrowserInUseError;
+            if (!inUse) {
+              if (granted || handback) await this.#revoke().catch(() => this.#retireBrowser());
+              this.#reportBrowser(error);
+            }
             const desktop = await this.#onDesktop(scope, operationScope, handback, recorded);
             if (handback && desktop) return desktop;
+            if (inUse) throw error;
             throw await this.#browserUnavailable();
           } else if (handback || integrity) {
             // An unrecorded screen, an unjournaled selection or a daemon handback that cannot
@@ -919,11 +948,25 @@ export class ScreenController {
       if (!this.deps.desktopReady()) throw new ScreenControlError();
       this.deps.publish(result);
       this.#selection = selection;
+      this.deps.releaseBrowser?.();
       if (handback) this.#ownerGeneration = scope.generation;
       return result;
     } catch {
       await this.#fail();
       throw new ScreenControlError();
+    }
+  }
+
+  // A browser that can't open the tab still shows the page in front, as before.
+  async #openTab(owner: BrowserOwner, scope: BrowserScope): Promise<string | undefined> {
+    if (!owner.permit || !owner.client.openTab) return undefined;
+    try {
+      return await owner.client.openTab(owner.permit, scope);
+    } catch (error) {
+      scope.check();
+      if (!(error instanceof BrowserClientError)) throw error;
+      this.deps.report?.(`a blank tab couldn't open in the web browser: ${error.message}`);
+      return undefined;
     }
   }
 

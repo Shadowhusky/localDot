@@ -193,7 +193,11 @@ describe("starting research", () => {
       research: true,
     });
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toEqual({ task: "Compare heat pumps", mode: "research" });
+    expect(JSON.parse(String(init.body))).toEqual({
+      task: "Compare heat pumps",
+      continues: null,
+      mode: "research",
+    });
     await expect(
       deliverText(client, { cellId, sessionId, mode: "steer", text: "x", research: true }),
     ).rejects.toMatchObject({ uncertain: false });

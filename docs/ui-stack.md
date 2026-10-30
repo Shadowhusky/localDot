@@ -219,6 +219,25 @@ T03 (UI plan §4.1). Files: `src/ui/tokens.css`, `base.css`, `motion.css`; tests
   unit test holds those steps, and the tiles' top band, at least .03 apart. xenon (chroma .12, hue 225)
   still reads as the accent on them. fg-2 and fg-3 are shared, so fg-2 against fg-3 is 1.59:1 in both
   (it was 1.24:1 in the old Midnight). The theme picker's preview tiles read the ramps directly.
+- **Daylight.** A third ramp, `--daylight-*`, under `:root[data-appearance="daylight"]`, which also
+  sets `color-scheme: light` (in `base.css`). Lift reverses: the void (`#f2f3f5`) is the floor, cards
+  are white, and raised-2 is a grey tile or bubble. Every white alpha of the dark house becomes the
+  same alpha of ink (`rgba(22, 23, 26, …)`); porcelain controls turn to ink faces with white words
+  (and a switch's knob to white), so the one primary action stays the strongest thing on the page;
+  xenon deepens to `#0b7fae` and amber to `#a8650c` to hold 3:1 on white, red to `#b72c29` to hold
+  4.5:1 on its own tint. Glass is light (.8 holds fg-2 at 4.8:1 over a black frame). The curtain is
+  pale cloth. What the stage paints over the picture and into a video reads `--color-stage-*`
+  (`stage/theme.ts`), which follow the house in the dark appearances and keep Graphite's values in
+  Daylight, so dot's marks and an exported video look the same whatever the page.
+- **Choosing.** `onboarding/appearance.ts` keeps the choice (`localdot.appearance.v1`: `graphite`,
+  `midnight`, `daylight` or `system`; anything else is Graphite, so nobody's page changes under them)
+  and, apart, the dark appearance System shows while the device is dark (the dark one chosen last).
+  `vite.config.ts` builds `appearance-boot.ts` on its own as a classic script and puts it in the head
+  ahead of the stylesheets and the app (the page's policy refuses inline script), so the root's
+  `data-appearance` and `color-scheme` are set before any frame is styled, and `theme-color` takes
+  the void on the first frame that is; WebKit drew a styled frame before a script placed after the
+  stylesheets had run. The app then follows `prefers-color-scheme` and other tabs
+  (`followAppearance`). The export page keeps Graphite.
 - **Modes.** `prefers-contrast: more` brightens fg-2 and fg-3, turns hairlines into field lines, makes
   the HUD solid and widens the focus ring to 3 px. `prefers-reduced-transparency` makes the HUD solid.
   `motion.css` maps every duration into 120–150 ms under reduced motion.

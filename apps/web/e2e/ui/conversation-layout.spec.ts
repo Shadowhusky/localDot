@@ -38,10 +38,11 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
           });
         const mobile = (page.viewportSize()?.width ?? 0) < 700;
         if (mobile) await page.getByRole("button", { name: "More", exact: true }).click();
-        const action = page.getByRole(mobile ? "menuitem" : "button", {
-          name: "New conversation",
-          exact: true,
-        });
+        const action = mobile
+          ? page.getByRole("menuitem", { name: "New conversation", exact: true })
+          : page
+              .getByRole("complementary", { name: "Conversation" })
+              .getByRole("button", { name: "New conversation", exact: true });
         await action.focus();
         await page.evaluate(() => {
           window.conversationLayoutFrames = [];

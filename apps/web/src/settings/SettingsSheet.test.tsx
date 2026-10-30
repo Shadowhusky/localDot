@@ -125,7 +125,11 @@ describe("settings inspector", () => {
     const p = {
       ...props(),
       keysPanel: keysPanel(),
-      persona: { value: "coder" as const, onChange: vi.fn() },
+      persona: {
+        value: "coder" as const,
+        onChange: vi.fn(),
+        auto: { on: false, onChange: vi.fn() },
+      },
     };
     const view = render(<SettingsSheet {...p} loading sectionRequest={1} />);
     expect(settingsScroll().scrollTop).toBe(0);
@@ -484,7 +488,11 @@ describe("settings inspector", () => {
       ...props(),
       autonomy: DEFAULT_AUTONOMY,
       onAutonomy: vi.fn(),
-      persona: { value: "coder" as const, onChange: vi.fn() },
+      persona: {
+        value: "coder" as const,
+        onChange: vi.fn(),
+        auto: { on: false, onChange: vi.fn() },
+      },
     };
     render(<SettingsSheet {...p} keysPanel={keysPanel()} />);
     expect(sheet()).toBeTruthy();
@@ -866,5 +874,23 @@ describe("Settings Done", () => {
     view.rerender(<SettingsSheet {...p} dirty={false} />);
     await act(async () => finish());
     expect(p.onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("your dot", () => {
+  it("turns Auto on beside the dots, which then stand for when Auto can't pick", () => {
+    const onAuto = vi.fn();
+    const p = (on: boolean) => ({
+      ...props(),
+      persona: { value: "coder" as const, onChange: vi.fn(), auto: { on, onChange: onAuto } },
+    });
+    const view = render(<SettingsSheet {...p(false)} sectionRequest={1} />);
+    const region = screen.getByRole("region", { name: "Your dot" });
+    fireEvent.click(within(region).getByRole("switch", { name: "Auto" }));
+    expect(onAuto).toHaveBeenCalledWith(true);
+    expect(within(region).getByRole("radiogroup", { name: "Your dot" })).toBeTruthy();
+    view.rerender(<SettingsSheet {...p(true)} sectionRequest={1} />);
+    expect(within(region).getByRole("switch", { name: "Auto" })).toHaveProperty("checked", true);
+    expect(within(region).getByRole("radiogroup", { name: "When Auto can't pick" })).toBeTruthy();
   });
 });

@@ -1,8 +1,11 @@
+import { useMemo } from "react";
 import { Button } from "../ui/Button.tsx";
 import { ActivityRow } from "./ActivityRow.tsx";
 import { changeView, memoryUndoEligible } from "./activity.ts";
+import { changedFiles } from "./changed-files.ts";
 import { DiffViewer } from "./DiffViewer.tsx";
 import type { AgentChange } from "./model.ts";
+import { useStepPreviewEnvironment } from "./StepPreview.tsx";
 
 export type UndoStatus = "ready" | "pending" | "conflict" | "uncertain" | "failed" | "undone";
 
@@ -36,10 +39,47 @@ export function ChangeRow({
   const memory = change.type === "memory";
   const eligible = status !== "undone" && memoryUndoEligible(change, changes);
   const message = STATUS[status];
+  const preview = useStepPreviewEnvironment();
+  const sessionId = preview?.sessionId;
+  const task = useMemo(
+    () => (sessionId ? { sessionId, changes } : undefined),
+    [sessionId, changes],
+  );
+  const files = useMemo(() => (task ? changedFiles(task.sessionId, task.changes) : []), [task]);
+  const at = files.findIndex((file) => file.path === change.path);
+  const file = files[at];
+  const state = file && preview?.downloads.state(file);
+  const gone = file?.changes?.at(-1)?.op === "delete";
   return (
     <ActivityRow id={id} view={changeView(change)} open={open} onToggle={onToggle}>
       <div className="activity-detail">
-        <DiffViewer change={change} compact />
+        <DiffViewer change={change} compact task={task} />
+        {file && preview && (
+          <div className="activity-detail-actions">
+            <Button
+              size="sm"
+              aria-label={`Open ${change.path}`}
+              onClick={(event) =>
+                preview.open({ kind: "files", entries: files, index: at }, event.currentTarget)
+              }
+            >
+              Open
+            </Button>
+            {!gone && (
+              <Button
+                variant="quiet"
+                size="sm"
+                icon={state === "done" ? "check" : "download"}
+                busy={state === "busy"}
+                aria-label={`Download ${change.path}`}
+                disabledReason={preview.downloads.blocked(file)}
+                onClick={() => preview.downloads.request(file)}
+              >
+                Download
+              </Button>
+            )}
+          </div>
+        )}
         {memory && !change.undoes && (
           <div className="activity-detail-actions">
             {eligible ? (

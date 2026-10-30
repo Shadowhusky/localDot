@@ -28,6 +28,8 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   budget: hud("Spending limit reached"),
   "keys-locked": shows((page) => page.getByRole("heading", { name: "Unlock your saved keys" })),
   "image-output": hud("Done"),
+  narrated: hud("Done"),
+  "long-run": hud("Fill the tail with brown"),
   done: hud("Done"),
   continued: hud("Done"),
   reconnecting: hud("Reconnecting…"),

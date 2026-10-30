@@ -100,6 +100,9 @@ export const AgentSettingsDocument = z.strictObject({
   research: ResearchBudget.optional(),
   // Which dot works the next task; the everyday dot when absent.
   persona: PersonaId.optional(),
+  // Auto: each new conversation's dot is picked from its first message, `persona` when no pick
+  // comes in time. Off when absent.
+  autoPersona: z.literal(true).optional(),
   // This localDot, as the user tells it apart from their others.
   name: z
     .string()

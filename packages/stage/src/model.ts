@@ -119,7 +119,10 @@ export interface PlanSnapshot {
 export interface SessionModel {
   screenChanges: (ScreenSwitchData & { t: number; firstAction: number })[];
   screen: { w: number; h: number; scale: number } | null;
+  // What the task is called: the user's name for its conversation, else dot's, else what it was
+  // called when it started.
   title: string | null;
+  names: { start: string | null; auto: string | null; user: string | null };
   startT: number | null;
   // Every agent.state in log order: a scene at any t reads the state in effect then, so replay
   // equals live (research §4.1).
@@ -149,6 +152,7 @@ export function emptyModel(): SessionModel {
     screenChanges: [],
     screen: null,
     title: null,
+    names: { start: null, auto: null, user: null },
     startT: null,
     agentStates: [],
     ended: null,
@@ -332,8 +336,13 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
         break;
       case "session.start":
         model.screen = e.data.screen;
-        model.title = e.data.title ?? null;
+        model.names = { ...model.names, start: e.data.title ?? null };
+        model.title = model.names.user ?? model.names.auto ?? model.names.start;
         model.startT = t;
+        break;
+      case "session.title":
+        model.names = { ...model.names, [e.data.by]: e.data.title };
+        model.title = model.names.user ?? model.names.auto ?? model.names.start;
         break;
       case "screen.switch":
         model.screenChanges.push({ ...e.data, t, firstAction: model.actions.length });

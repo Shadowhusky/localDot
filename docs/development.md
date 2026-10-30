@@ -141,8 +141,8 @@ with file-picker and H.264 encoding support.
 
 Recordings live in `~/.localdot/sessions/<id>/recording/`. Takeover stretches are never recorded.
 By default, finalized videos expire after 30 days or when the completed-video budget exceeds
-20 GiB, oldest first; events and captured screenshots remain. `LOCALDOT_RECORDING=0` disables
-new video recordings. See [the Replay guide](replay.md) for privacy, retention settings,
+20 GiB, oldest first; events and captured screenshots remain. Finished videos are re-encoded
+in the background to take far less space. `LOCALDOT_RECORDING=0` disables new video recordings. See [the Replay guide](replay.md) for privacy, retention settings,
 recovery, export details, and the browser acceptance commands.
 
 ## keyd
@@ -366,6 +366,24 @@ Authorization header and JSON request bodies:
   resend a mutation if its reply is lost: reconcile the session and event log first.
 - Questions and hand-back require the current `askId` or `requestId` from the session snapshot.
   Completed files are downloaded from `/api/agent/sessions/<id>/files/<name>`, as attachments.
+- `POST /api/conversations/<id>/title` with `{"title":"…"}` (1–80 characters once trimmed, one
+  line, no control characters) names the conversation that task belongs to, any of its tasks
+  finding it; `{"title":null}` gives it back its automatic name. Both answer 204; a bad body is
+  400, an unknown task 404. The user's name wins over dot's until cleared. Shared links can't
+  rename. `POST /api/agent/sessions/<id>/persona` with `{"persona":"coder"}` switches a running
+  task's dot: its agent carries on from its saved history with that dot's skills and role.
+
+A new conversation's first message gets one short call to a quick model beside the task
+(`agent/first-look.ts`): the fast model, else the main model at its least thinking (Claude Code's
+own no-tools answer, or a priced keyd listener of the daemon's own for keys). It names the
+conversation in at most six words, recorded as a `session.title` event that the conversation list,
+Replay and search results show; until it comes, or when it never does, the first message is the
+name. The task never waits for it. With **Auto** on (`autoPersona`), the same call also picks the
+dot, and the task waits up to 4 seconds for it before installing skills and starting its agent,
+falling back to the chosen dot (`persona.choice`). A ChatGPT plan has no call to spare: its one
+Codex process is the task's. The agent's own first reply can't do this: Claude Code and Codex shape
+their own output, and the dot's skills and role must be in place before that agent starts. Follow-up
+tasks keep the conversation's names and dot without asking again.
 
 Memory lives in `<home>/memory/USER.md` and `MEMORY.md` (normally under `~/.localdot`). Skills
 are `SKILL.md` directories under `<home>/skills/` and this repository's `skills/`; task startup

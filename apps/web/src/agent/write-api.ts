@@ -4,6 +4,7 @@ import type { ApiClient } from "../lib/api.ts";
 export type MessageMode = "new" | "steer" | "followup";
 export interface TextDelivery {
   readonly cellId: string;
+  // The task a message is for; for a new task, the latest of the conversation it continues.
   readonly sessionId: string | null;
   readonly mode: MessageMode;
   readonly text: string;
@@ -31,7 +32,8 @@ export class DeliveryFailure extends Error {
 export async function deliverText(api: ApiClient, request: TextDelivery): Promise<string> {
   if (
     !ULID_PATTERN.test(request.cellId) ||
-    (request.mode !== "new" && (!request.sessionId || !ULID_PATTERN.test(request.sessionId))) ||
+    (request.mode !== "new" && !request.sessionId) ||
+    (request.sessionId !== null && !ULID_PATTERN.test(request.sessionId)) ||
     !["new", "steer", "followup"].includes(request.mode) ||
     !request.text.trim() ||
     request.text.length > 8000 ||
@@ -60,7 +62,11 @@ export async function deliverText(api: ApiClient, request: TextDelivery): Promis
         revise
           ? { cellId: request.cellId, version: revise.version, text: request.text }
           : request.mode === "new"
-            ? { task: request.text, ...(request.research ? { mode: "research" } : {}) }
+            ? {
+                task: request.text,
+                continues: request.sessionId,
+                ...(request.research ? { mode: "research" } : {}),
+              }
             : { kind: request.mode, text: request.text },
       ),
       signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),

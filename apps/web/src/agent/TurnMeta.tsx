@@ -16,8 +16,8 @@ const ROLES: Record<string, string> = { fast: "Fast", local: "Local" };
 const whole = (value: number) => value.toLocaleString();
 
 // The line names the model, the speed above Standard it ran at, and its plan's app when the plan,
-// not a key, paid for the turn. The work line above a turn says how long it took; cost belongs
-// with model usage here.
+// not a key, paid for the turn, then how long the whole turn took: each run of steps times only
+// itself. Cost belongs with model usage here.
 function metaParts(item: MetaItem, names?: ModelNames) {
   const lead: Partial<TurnModel> | undefined = item.models[0] ?? item.main;
   if (!lead?.route || !lead.model) return undefined;
@@ -27,7 +27,7 @@ function metaParts(item: MetaItem, names?: ModelNames) {
     speed: lead.speed,
     rest: [
       subscription(lead.route) ? providerName(lead.route) : "",
-      !item.work && (item.durationMs ?? 0) >= 1000 ? clock(item.durationMs ?? 0) : "",
+      (item.durationMs ?? 0) >= 1000 ? clock(item.durationMs ?? 0) : "",
       tokens ? tokenCount(tokens) : "",
       item.usd !== undefined ? spendText(item.usd, !!item.estimated) : "",
     ].filter(Boolean),

@@ -302,7 +302,7 @@ function setup(
         return { online: state.online, bootId: "fixture" };
       },
     },
-    killSwitch: { isBusy: () => state.busy, stopSession: vi.fn(async () => undefined) },
+    killSwitch: { isBusy: () => state.busy, contain: vi.fn(async () => undefined) },
     keydPorts: { from: 4791, to: 4796 },
     toolPort: 0,
     ...(options.codex === false ? {} : { codex: { realHome, user: "fixture" } }),

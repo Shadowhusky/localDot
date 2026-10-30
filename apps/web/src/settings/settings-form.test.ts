@@ -504,6 +504,19 @@ describe("configuration validation before explicit save", () => {
       ),
     ).toEqual({ ok: true, document: { main } });
   });
+  it("leaves Auto's dot off until the user turns it on, and saves only On", () => {
+    const main = { provider: "ollama", model: "custom" } as const;
+    const d = formOf({ main });
+    expect(d.autoPersona).toBe(false);
+    expect(formOf({ main, autoPersona: true }).autoPersona).toBe(true);
+    expect(validateForm({ ...d, autoPersona: true }, { main }, providerFixture())).toEqual({
+      ok: true,
+      document: { main, autoPersona: true },
+    });
+    expect(
+      validateForm({ ...d, autoPersona: false }, { main, autoPersona: true }, providerFixture()),
+    ).toEqual({ ok: true, document: { main } });
+  });
   it("keeps the limits and check-ins the user turned on, and drops ones turned off", () => {
     const saved = {
       main: { provider: "ollama", model: "custom" },

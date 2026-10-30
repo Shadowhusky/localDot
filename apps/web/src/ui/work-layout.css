@@ -1,6 +1,6 @@
 @layer utilities {
-  /* One compact menu, also when Work is pinned. The closed face stays small;
-   its touch target remains 44px high and all three modes live in the menu. */
+  /* One compact menu. The closed face stays small; its touch target remains 44px high and all
+   three modes live in the menu. Once the reader stops following, Follow work sits beside it. */
   .work-controls .ui-select-trigger {
     min-width: 0;
     width: auto;
@@ -24,7 +24,11 @@
       background: color-mix(in srgb, var(--color-raised) 88%, transparent);
     }
     .work-follow {
-      display: none;
+      --_bg: color-mix(in srgb, var(--color-raised) 88%, transparent);
+      height: 44px;
+      padding-inline: calc(var(--spacing) * 3);
+      font-size: var(--text-footnote);
+      border-radius: var(--radius-full);
     }
   }
 }
@@ -35,16 +39,6 @@
     position: sticky;
     top: 0;
     z-index: 1;
-    background-color: var(--color-void);
-  }
-}
-
-@layer utilities {
-  @media (width < 700px) and (height < 650px) {
-    /* The island still shows the current action; this duplicate line cannot
-       displace the collapse control or composer in a short viewport. */
-    .thread-live .thread-work-now {
-      display: none;
-    }
+    background-color: var(--rail-surface);
   }
 }

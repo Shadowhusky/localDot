@@ -20,6 +20,7 @@ import {
   EARLIER_TURNS,
   isOwnWords,
   type LocalDotEvent,
+  type PersonaId,
   ULID_PATTERN,
   ulidTime,
 } from "@localdot/protocol";
@@ -50,6 +51,7 @@ const LOOK_BACK = 20;
 const KEPT_TASKS = 64;
 const TURN_TYPES =
   /"type":"(?:message\.user|message\.delivery|message\.assistant|ask\.request|ask\.answer|task\.result|session\.end|plan\.set|tool\.start|step\.end|action\.intent|action\.target)"/;
+const PERSONA_CHOICE = /"type":"persona\.choice"/;
 // The list of conversations reads through this many of the newest sessions.
 const LIST_SCAN = 200;
 // A task's session.end is among the last lines of its log.
@@ -62,12 +64,18 @@ const ENDINGS: Record<string, string> = {
   error: "(That task ended with an error.)",
 };
 
-export type ConversationLog = Pick<EventLog, "hasSession" | "logFile" | "listSessions">;
+export type ConversationLog = Pick<EventLog, "hasSession" | "logFile" | "listSessions" | "titles">;
 
 interface TaskHead {
   continues: string | undefined;
   title: string | null;
   said: string | null;
+}
+// What a conversation is called: dot's name for it, else its first words, and the user's name,
+// which wins.
+export interface ConversationNames {
+  automatic: string | null;
+  user?: string;
 }
 
 const firstLine = (text: string) => {
@@ -121,8 +129,10 @@ export class Conversations {
     return true;
   }
 
-  // A task that just started continues the current conversation, and is now its latest.
-  adopt(sessionId: string): void {
+  // A task that just started is now its conversation's latest. Given the task it continues, the
+  // current conversation follows it only while it is still that one: the user may have moved on.
+  adopt(sessionId: string, after?: string | null): void {
+    if (after !== undefined && this.current() !== after) return;
     this.#write(sessionId);
   }
 
@@ -301,15 +311,26 @@ ${checkpoint}`);
     return turns;
   }
 
-  // Only the lines that can be turns are parsed; a task's log is mostly its steps.
-  #events(sessionId: string): LocalDotEvent[] {
+  // The dot the conversation that ends with this task works as, when one was chosen for it.
+  persona(sessionId: string): PersonaId | undefined {
+    for (const id of this.chain(sessionId).sessions.reverse()) {
+      const chosen = this.#events(id, PERSONA_CHOICE).findLast(
+        (event) => event.type === "persona.choice",
+      );
+      if (chosen?.type === "persona.choice") return chosen.data.persona;
+    }
+    return undefined;
+  }
+
+  // Only the lines of the types asked for are parsed; a task's log is mostly its steps.
+  #events(sessionId: string, types = TURN_TYPES): LocalDotEvent[] {
     const file = this.log.logFile(sessionId);
     if (!existsSync(file)) return [];
     const text = readFileSync(file, "utf8");
     return text
       .slice(0, text.lastIndexOf("\n") + 1)
       .split("\n")
-      .flatMap((line) => (TURN_TYPES.test(line) ? (parseLine(line) ?? []) : []));
+      .flatMap((line) => (types.test(line) ? (parseLine(line) ?? []) : []));
   }
 
   #head(sessionId: string): LocalDotEvent[] {
@@ -334,16 +355,27 @@ ${checkpoint}`);
     }
   }
 
-  // What a task was called when it started.
-  title(sessionId: string): string | undefined {
-    return this.#head(sessionId).find((event) => event.type === "session.start")?.data.title;
-  }
-
   has(sessionId: string): boolean {
     return ULID_PATTERN.test(sessionId) && this.log.hasSession(sessionId);
   }
 
-  #isTask(sessionId: string): boolean {
+  // The names of the conversation that ends with this task, as its latest task holds them: the
+  // user's own time on the computer only says what it was called when it started.
+  names(sessionId: string): ConversationNames {
+    const task = this.chain(sessionId)
+      .sessions.reverse()
+      .find((id) => this.isTask(id));
+    const facts = task && this.#facts(task);
+    if (!task || !facts)
+      return {
+        automatic:
+          this.#head(sessionId).find((event) => event.type === "session.start")?.data.title ?? null,
+      };
+    const { autoTitle, userTitle } = this.log.titles(task);
+    return { automatic: autoTitle ?? facts.title, ...(userTitle ? { user: userTitle } : {}) };
+  }
+
+  isTask(sessionId: string): boolean {
     return (
       this.has(sessionId) && this.#head(sessionId).some((event) => event.type === "message.user")
     );
@@ -351,12 +383,12 @@ ${checkpoint}`);
 
   #latestTask(): string | null {
     for (const session of this.log.listSessions().slice(0, LOOK_BACK))
-      if (this.#isTask(session.id)) return session.id;
+      if (this.isTask(session.id)) return session.id;
     return null;
   }
 
   // The recent conversations, newest first: each task joins the conversation of the newer task that
-  // continues it. The latest task's title names it, as the app's title does, and the oldest task
+  // continues it. The latest task's name names it, as the app's title does, and the oldest task
   // read says what was first asked.
   list(max = CONVERSATION_LIST): ConversationEntry[] {
     const listed: ConversationEntry[] = [];
@@ -364,18 +396,22 @@ ${checkpoint}`);
     for (const session of this.log.listSessions().slice(0, LIST_SCAN)) {
       const head = this.#facts(session.id);
       if (!head) continue;
+      const named = () => {
+        const { autoTitle, userTitle } = this.log.titles(session.id);
+        return (userTitle ?? autoTitle ?? head.title)?.trim().slice(0, 200) || null;
+      };
       let entry = continuedBy.get(session.id);
       continuedBy.delete(session.id);
       if (entry) {
         if (entry.sessions.length < CONVERSATION_TASKS) entry.sessions.push(session.id);
-        entry.title ??= head.title;
+        entry.title ??= named();
         entry.said = head.said ?? entry.said;
       } else if (listed.length < max) {
         const started = Date.parse(session.startedAt);
         entry = {
           sessionId: session.id,
           sessions: [session.id],
-          title: head.title,
+          title: named(),
           said: head.said,
           startedAt: new Date(
             Number.isFinite(started) ? started : ulidTime(session.id),
@@ -389,7 +425,8 @@ ${checkpoint}`);
     return listed;
   }
 
-  // A task's chain link, title and first message; null for a session that is not a task.
+  // A task's chain link, what it was called when it started and its first message; null for a
+  // session that is not a task.
   #facts(sessionId: string): TaskHead | null {
     const kept = this.#heads.get(sessionId);
     if (kept) return kept;

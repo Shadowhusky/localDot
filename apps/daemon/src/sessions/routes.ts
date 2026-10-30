@@ -4,6 +4,7 @@ import {
   DeleteSessionsRequest,
   type DeleteSessionsResult,
   emptyManifest,
+  RenameConversation,
   recordingDirectory,
   type ScreenName,
   ULID_PATTERN,
@@ -18,6 +19,7 @@ import type { Recorder } from "../recorder/recorder.ts";
 import { NoFragmentsError, openRecordingView, type RecordingView } from "../recorder/view.ts";
 import type { SessionIndex } from "./index-store.ts";
 import { NDJSON_TYPE, streamEventLines } from "./ndjson.ts";
+import { type RetentionPolicy, recordingStorage } from "./retention.ts";
 import type { Thumbnails } from "./thumbs.ts";
 export interface ReplayRoutesDeps {
   home: string;
@@ -26,6 +28,8 @@ export interface ReplayRoutesDeps {
   index: SessionIndex;
   thumbs: Thumbnails;
   live?: Pick<LiveSessions, "cellOf">;
+  retention?: RetentionPolicy;
+  framesMaxAgeDays?: number;
 }
 function requestedScreen(request: Request): ScreenName | null {
   const values = new URL(request.url).searchParams.getAll("screen");
@@ -195,6 +199,11 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
       throw error;
     }
   });
+  app.get("/api/recordings/storage", (c) =>
+    deps.retention
+      ? c.json(recordingStorage(deps.home, deps.retention, deps.framesMaxAgeDays))
+      : c.notFound(),
+  );
   app.get("/api/sessions/:id/card", async (c) => {
     try {
       return c.json(await deps.index.card(c.req.param("id")));
@@ -251,15 +260,20 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
       if (!Number.isSafeInteger(upto) || upto > info.entries.length)
         return c.text("invalid snapshot", 400);
     }
+    const bytes = c.req.query("bytes");
+    if (bytes !== undefined && !/^\d+$/.test(bytes)) return c.text("invalid snapshot", 400);
     try {
-      return videoResponse(
-        openRecordingView(join(deps.home, "sessions", id, recordingDirectory(screen)), {
-          complete: !info.live && info.manifest.finalized,
-          entries: info.entries,
-          upto,
-        }),
-        c.req.raw,
-      );
+      const view = openRecordingView(join(deps.home, "sessions", id, recordingDirectory(screen)), {
+        complete: !info.live && info.manifest.finalized,
+        entries: info.entries,
+        upto,
+      });
+      // The reader opened the video at another size: compaction has replaced it since.
+      if (bytes !== undefined && view.size !== Number(bytes)) {
+        view.close();
+        return c.text("recording changed", 409);
+      }
+      return videoResponse(view, c.req.raw);
     } catch (error) {
       if (error instanceof NoFragmentsError) return c.text("no video", 404);
       throw error;
@@ -293,6 +307,29 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
       deps.index.invalidate(task);
     }
     if (current && sessions.includes(current)) conversations.begin();
+    return c.body(null, 204);
+  });
+  // The user's name for a conversation, or null for its automatic one again, on each of its tasks;
+  // the user's own time on the computer keeps its name in Replay. The owner's alone: a shared link
+  // never renames.
+  app.post("/api/conversations/:id/title", bodyLimit({ maxSize: 4 * 1024 }), async (c) => {
+    if (c.get("remoteGrant")) return c.text("Only the owner renames conversations", 403);
+    const id = c.req.param("id");
+    const conversations = new Conversations(deps.home, deps.eventLog);
+    if (!ULID_PATTERN.test(id) || !conversations.has(id))
+      return c.text("conversation not found", 404);
+    const parsed = RenameConversation.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text("invalid name", 400);
+    const { title } = parsed.data;
+    // Any of its tasks finds the conversation, whose newest task the rest continue.
+    const latest = conversations.list().find((entry) => entry.sessions.includes(id))?.sessionId;
+    for (const task of conversations.chain(latest ?? id, Number.MAX_SAFE_INTEGER).sessions)
+      if (conversations.isTask(task) && (deps.eventLog.titles(task).userTitle ?? null) !== title)
+        deps.eventLog.append(task, {
+          agent: "main",
+          type: "session.title",
+          data: { title, by: "user" },
+        });
     return c.body(null, 204);
   });
   // No await separates the live check from the deletion, so a run cannot start between them.

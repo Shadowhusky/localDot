@@ -151,6 +151,24 @@ describe("foldEvents", () => {
     expect(emptyModel().keyUses).toEqual([]);
   });
 
+  it("calls the task by the user's name for its conversation, else dot's, else how it started", () => {
+    const named = (title: string | null, by: "auto" | "user") =>
+      ev("session.title", 5, { title, by });
+    const start = ev("session.start", 0, {
+      screen: { w: 1280, h: 800, scale: 1 },
+      os: "linux",
+      title: "plan kyoto pls",
+    });
+    const titleAfter = (...events: LocalDotEvent[]) =>
+      foldEvents(emptyModel(), [start, ...events]).title;
+    expect(titleAfter()).toBe("plan kyoto pls");
+    expect(titleAfter(named("Kyoto trip", "auto"))).toBe("Kyoto trip");
+    expect(titleAfter(named("Mum's trip", "user"), named("Kyoto trip", "auto"))).toBe("Mum's trip");
+    expect(
+      titleAfter(named("Kyoto trip", "auto"), named("Mum's trip", "user"), named(null, "user")),
+    ).toBe("Kyoto trip");
+  });
+
   it("builds one action per intent and attaches the rest by step, converting times to ms", () => {
     const m = foldEvents(emptyModel(), [
       ev("session.start", 0, { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", title: "t" }),

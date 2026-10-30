@@ -30,7 +30,7 @@ function fixture() {
   const live = new Map([[busy, session]]);
   const order: string[] = [];
   const killSwitch = {
-    stopSession: vi.fn(async (id: string): Promise<StopOutcome | undefined> => {
+    contain: vi.fn(async (id: string): Promise<StopOutcome | undefined> => {
       order.push(
         `stop ${id} with ${store.list().filter((r) => r.state === "active").length} active routines`,
       );
@@ -54,7 +54,7 @@ function fixture() {
   );
   const deps = {
     cells,
-    live: { get: (id: string) => live.get(id) },
+    live: { sessionsOn: (id: string) => [...live].flatMap(([c, s]) => (c === id ? [s] : [])) },
     killSwitch,
     store,
     launcher: { cancelAll: vi.fn(() => 1) },
@@ -104,7 +104,7 @@ describe("stop everything", () => {
 
   it("reports an unconfirmed stop", async () => {
     const f = fixture();
-    f.killSwitch.stopSession.mockResolvedValueOnce({
+    f.killSwitch.contain.mockResolvedValueOnce({
       revoked: false,
       paused: false,
       closed: false,
@@ -116,7 +116,7 @@ describe("stop everything", () => {
 
   it("freezes the computer when its task ended in between", async () => {
     const f = fixture();
-    f.killSwitch.stopSession.mockResolvedValueOnce(undefined);
+    f.killSwitch.contain.mockResolvedValueOnce(undefined);
     const outcome = await stopAll(f.deps, "user");
     expect(f.killSwitch.stopIdleCell).toHaveBeenCalledWith(f.busy);
     expect(outcome.cells.map((c) => c.cellId).sort()).toEqual([f.busy, f.idle].sort());

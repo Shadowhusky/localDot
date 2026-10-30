@@ -70,7 +70,7 @@ const everything = (): SettingsSheetProps => ({
   },
   spending: { value: { on: true, task: "3", day: "" }, change: vi.fn() },
   spent: { taskUSD: 0.21, dayUSD: 1.39, estimated: true },
-  appearance: { value: "graphite", saved: true, change: vi.fn() },
+  appearance: { value: "graphite", dark: "graphite", saved: true, change: vi.fn() },
   showDot: { value: true, saved: true, change: vi.fn() },
   knowledge: {
     skills: [{ name: "sample-tables", description: "Reads tables.", source: "builtin" }],

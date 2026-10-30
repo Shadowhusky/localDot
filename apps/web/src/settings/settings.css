@@ -1102,9 +1102,6 @@
   padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
   min-width: 0;
 }
-.settings-remote-action > .ui-button {
-  margin-left: calc(var(--spacing) * -2);
-}
 .settings-remote-hint {
   color: var(--color-fg-3);
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);

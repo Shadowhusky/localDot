@@ -349,15 +349,16 @@ describe("serialized agent lifecycle", () => {
       expect(required(h.ledger.get(session.id)).limit).toBe(8);
     },
   );
-  it("rejects concurrent start and a cell paused during preflight", async () => {
+  it("admits concurrent starts one at a time, and refuses both on a cell paused in preflight", async () => {
     const h = setup();
     const gate = deferred<void>();
     h.state.secretsGate = gate.promise;
     const first = h.runner.start(h.cellId, "one");
-    await expect(h.runner.start(h.cellId, "two")).rejects.toMatchObject({ status: 409 });
+    const second = h.runner.start(h.cellId, "two");
     h.state.paused = true;
     gate.resolve();
     await expect(first).rejects.toMatchObject({ status: 409 });
+    await expect(second).rejects.toMatchObject({ status: 409 });
     expect(h.opens).toHaveLength(0);
   });
   it("does not start or publish a brain after Stop during ignored open cancellation", async () => {

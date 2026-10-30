@@ -149,6 +149,8 @@ it("enforces replay permission and action ownership separately", () => {
   links.reserve(row.id).finish(id);
   expect(links.permits(row, "POST", `/api/agent/sessions/${id}/messages`)).toBe(true);
   expect(links.permits(row, "POST", `/api/agent/sessions/${id}/approvals/answer`)).toBe(false);
+  // A side question is the owner's, even about a task the guest started.
+  expect(links.permits(row, "POST", `/api/agent/sessions/${id}/side-question`)).toBe(false);
   const allowed = links.create({ ...options, replay: true });
   expect(
     links.permits(
@@ -159,6 +161,32 @@ it("enforces replay permission and action ownership separately", () => {
   ).toBe(true);
   links.revoke(row.id);
   expect(links.permits(row, "GET", "/api/cells")).toBe(false);
+});
+it("never lets a link read files on the computer, even of a task it started", () => {
+  const { links } = make();
+  const row = links.authenticate(links.create({ ...options, replay: true }).token);
+  if (!row) throw new Error("the link did not authenticate");
+  const id = ulid();
+  links.reserve(row.id).finish(id);
+  for (const action of ["about", "text", "table", "download", "thumbnail"])
+    for (const method of ["GET", "HEAD", "POST"])
+      expect(
+        links.permits(row, method, `/api/agent/sessions/${id}/computer-files/${action}`),
+        `${method} ${action}`,
+      ).toBe(false);
+  expect(links.permits(row, "POST", `/api/agent/sessions/${id}/preview-link`)).toBe(false);
+});
+
+it("never lets a shared link rename a conversation or change a task's dot", () => {
+  const { links } = make();
+  const id = ulid();
+  const row = links.authenticate(links.create({ ...options, replay: true, settings: true }).token);
+  if (!row) throw new Error("the link did not authenticate");
+  links.reserve(row.id).finish(id);
+  expect(links.permits(row, "POST", `/api/agent/sessions/${id}/messages`)).toBe(true);
+  for (const path of [`/api/conversations/${id}/title`, `/api/agent/sessions/${id}/persona`])
+    for (const method of ["POST", "PUT", "DELETE"])
+      expect(links.permits(row, method, path)).toBe(false);
 });
 it("fails closed without destroying corrupt records or preventing local startup", () => {
   const { home } = make();

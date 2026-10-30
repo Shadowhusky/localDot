@@ -83,6 +83,8 @@ import { previewPortRange } from "./previews/config.ts";
 import { previewFronts } from "./previews/fronts.ts";
 import { Previews } from "./previews/previews.ts";
 import { PreviewServe } from "./previews/serve.ts";
+import { resumeCompactions } from "./recorder/compaction.ts";
+import { compactionFromEnv, DockerTrackEncoder, RecordingCompactor } from "./recorder/compactor.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
 import { ScreenRecordings } from "./recorder/screen-recordings.ts";
 import { configuredRemoteDomain, RemoteAccess } from "./remote/manager.ts";
@@ -109,7 +111,12 @@ import { SearchIndex } from "./search/search-index.ts";
 import { retainManagedDaemonLease } from "./service-lease.ts";
 import { ManagedServiceReadiness, managedServiceFromEnv } from "./service-readiness.ts";
 import { SessionIndex } from "./sessions/index-store.ts";
-import { retentionFromEnv, sweepRecordings } from "./sessions/retention.ts";
+import {
+  framesMaxAgeFromEnv,
+  retentionFromEnv,
+  sweepFrames,
+  sweepRecordings,
+} from "./sessions/retention.ts";
 import { summarizeSession, writeSummary } from "./sessions/summary.ts";
 import { Thumbnails } from "./sessions/thumbs.ts";
 import { webDir } from "./static-ui.ts";
@@ -322,12 +329,13 @@ const browserWarmer = new BrowserWarmer({
   report: (message) => console.error(message),
   notify: (id, text) => browserNotice(id, text),
 });
-// Tells the task running on a computer about its web browser; a finished or idle one hears nothing.
+// Tells the tasks running on a computer about its web browser; a finished or idle one hears nothing.
 const browserNotice = (parentCellId: string, text: string) => {
-  const sessionId = live.get(parentCellId);
-  const session = sessionId ? agent?.runner.get(sessionId) : undefined;
-  if (session && !session.stopped && session.status !== "idle" && session.status !== "ended")
-    session.remind(text);
+  for (const sessionId of live.sessionsOn(parentCellId)) {
+    const session = agent?.runner.get(sessionId);
+    if (session && !session.stopped && session.status !== "idle" && session.status !== "ended")
+      session.remind(text);
+  }
 };
 const browserTickets = new TicketRegistry();
 const browserStreams = new BrowserStreams({
@@ -360,7 +368,16 @@ const gateway = new ActionGateway({
 });
 const live = new LiveSessions();
 let sessionIndex: SessionIndex | undefined;
+let compactor: RecordingCompactor | undefined;
 const retentionPolicy = retentionFromEnv();
+const framesMaxAgeDays = framesMaxAgeFromEnv();
+const sweepOldFrames = () =>
+  sweepFrames({
+    home,
+    maxAgeDays: framesMaxAgeDays,
+    now: new Date(),
+    isLive: (id) => recorder.isLive(id) || live.cellOf(id) !== undefined,
+  });
 const recorder = new ScreenRecordings(
   {
     home,
@@ -377,11 +394,14 @@ const recorder = new ScreenRecordings(
         now: new Date(),
         isLive: (id) => recorder.isLive(id),
       });
+      sweepOldFrames();
+      compactor?.finished(sessionId);
     },
   },
   { cells: browserStreams },
 );
 await recorder.recoverAll();
+resumeCompactions(home);
 sessionIndex = new SessionIndex(home, {
   isLive: (id) => recorder.isLive(id) || live.cellOf(id) !== undefined,
 });
@@ -391,6 +411,7 @@ sweepRecordings({
   now: new Date(),
   isLive: (id) => recorder.isLive(id),
 });
+sweepOldFrames();
 live.addHooks({
   beforeRun: (cell, session) => recorder.start(cell, session),
   afterRun: (_cell, session) => recorder.stop(session),
@@ -402,6 +423,7 @@ const killSwitch = new KillSwitch({
   keyd: keydWiring,
   cells: orchestrator,
   froze: (id) => shutdownFreezes.forget(id),
+  endTask: async (id) => (await agent?.runner.stopRun(id)) ?? false,
 });
 keydMonitor.subscribe((now, before) => {
   if (credentialsChanged(now, before)) {
@@ -481,6 +503,8 @@ agent = createAgent({
     registry,
     downloads,
     pendingStop: (sessionId) => killSwitch.pendingStop(sessionId),
+    live,
+    makeWay: async (sessionId, signal) => (await agent?.runner.makeWay(sessionId, signal)) ?? false,
     report: (message) => console.error(message),
     now: () => clock.nowMicros(),
   }),
@@ -498,6 +522,8 @@ agent = createAgent({
   monitor: keydMonitor,
   killSwitch,
   shutdownFreezes,
+  liveChanged: (sessionId, live) =>
+    appEvents.publish({ type: "conversation.live", sessionId, ...(live ? { live } : {}) }),
   keydPorts,
   toolPort,
   relay,
@@ -670,7 +696,29 @@ const remoteAccess = new RemoteAccess(home, port, configuredRemoteDomain(home), 
 const working = () =>
   orchestrator
     .list()
-    .some((cell) => live.get(cell.id) || live.idleOperationPending(cell.id) || cell.operation);
+    .some((cell) => live.busy(cell.id) || live.idleOperationPending(cell.id) || cell.operation);
+const compaction = compactionFromEnv();
+if (compaction.enabled) {
+  const started = new RecordingCompactor({
+    home,
+    encoder: new DockerTrackEncoder(docker, images.desktop, home),
+    backfill: compaction.backfill,
+    retention: retentionPolicy,
+    busy: working,
+    inUse: (id) =>
+      recorder.isLive(id) ||
+      live.cellOf(id) !== undefined ||
+      exportJobs
+        .state()
+        .exports.some(
+          (job) => job.sessionId === id && (job.phase === "queued" || job.phase === "making"),
+        ),
+    compacted: (id) => sessionIndex?.invalidate(id),
+  });
+  compactor = started;
+  shutdown.push({ name: "recording compaction", stop: () => started.close() });
+  void started.start();
+}
 const dots = new DotsService({
   self: instance.id,
   registry: new DotsRegistry(registryPath(), home),
@@ -698,17 +746,18 @@ appUpdater.start();
 shutdown.unshift({ name: "app updater", stop: () => appUpdater.close() });
 const accessLinks = new AccessLinks(port, home);
 void accessLinks.read().catch(() => {});
+// A task from before this daemon started is known only by its log; it ran on the one computer.
+const taskCell = (id: string): string | undefined =>
+  live.cellOf(id) ??
+  running.runner.get(id)?.cellId ??
+  running.runner.terminalOf(id)?.cellId ??
+  (eventLog.hasSession(id) && orchestrator.list().length === 1
+    ? orchestrator.list()[0]?.id
+    : undefined);
 const previews = new Previews({
   range: previewPorts,
   cells: orchestrator,
-  // A task from before this daemon started is known only by its log; it ran on the one computer.
-  cellOf: (id) =>
-    live.cellOf(id) ??
-    running.runner.get(id)?.cellId ??
-    running.runner.terminalOf(id)?.cellId ??
-    (eventLog.hasSession(id) && orchestrator.list().length === 1
-      ? orchestrator.list()[0]?.id
-      : undefined),
+  cellOf: taskCell,
   fronts: async () =>
     previewFronts(
       configuredAccessOrigins(),
@@ -757,10 +806,13 @@ const app = createApp({
     index: sessionIndex,
     thumbs: new Thumbnails(home, frames),
     live,
+    retention: retentionPolicy,
+    framesMaxAgeDays,
   },
   deliverables: deliverablesFor(home, eventLog, frames, {
     computers: () => orchestrator.list(),
     access: running.computerAccess,
+    cellOf: taskCell,
     start: (cellId, task, signal, opts) => running.runner.start(cellId, task, signal, opts),
     upload: running.routes.desktop,
     redactUserText: running.routes.redactUserText,
@@ -791,6 +843,7 @@ const app = createApp({
     live,
     killSwitch,
     prepareDesktopTask: agent.prepareDesktopTask,
+    conversation: () => running.routes.conversations?.current() ?? null,
   },
   keys: {
     keyd,

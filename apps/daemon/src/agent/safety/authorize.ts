@@ -205,9 +205,15 @@ export async function authorizePrepared(
   };
   if (decision.mode === "handoff" || holdsCredentials(ctx, { ...prepared, input, target, upload }))
     return handOff(decision);
+  // Others may use the computer while this step waits on a judge or the user; it takes its turn
+  // back before it looks or acts again.
+  const aside = <T>(work: (resume?: () => Promise<void>) => Promise<T>): Promise<T> =>
+    ctx.turn ? ctx.turn.yielding(work) : work();
   if (decision.judge && ctx.session.autoPermit) {
-    const allowed = await ctx.session
-      .autoPermit(
+    const { autoPermit } = ctx.session;
+    const observe = prepared.observeTarget;
+    const allowed = await aside((resume) =>
+      autoPermit(
         {
           tool: prepared.tool,
           operation: facts.operation,
@@ -218,12 +224,16 @@ export async function authorizePrepared(
           facts: actingFacts(ctx, facts),
         },
         ctx.signal,
-        prepared.observeTarget,
-      )
-      .then(
-        (yes) => yes,
-        () => undefined,
-      );
+        observe &&
+          (async () => {
+            await resume?.();
+            return observe();
+          }),
+      ),
+    ).then(
+      (yes) => yes,
+      () => undefined,
+    );
     ctx.check();
     if (allowed) {
       if (!(await prepared.revalidate())) return undefined;
@@ -237,54 +247,57 @@ export async function authorizePrepared(
   }
   const purpose =
     decision.mode === "act" && permission !== "full"
-      ? await purposeCheck(ctx, prepared, input)
+      ? await aside(() => purposeCheck(ctx, prepared, input))
       : undefined;
   if (decision.mode === "ask" || purpose) {
     const draft = approvalDraft(prepared.tool, input, facts, decision, ctx.redact, upload);
     const acting = actingFacts(ctx, facts);
-    const outcome = await ctx.session.requestApproval(
-      {
-        sessionId: ctx.session.id,
-        cellId: ctx.session.cellId,
-        generation: ctx.generation.id,
-        callId: ctx.callId,
-        digest,
-        targetDigest,
-      },
-      ApprovalRequestDraft.parse(
-        purpose
-          ? {
-              ...draft,
-              title: purpose.title,
-              why: purpose.why,
-              ...(purpose.destinations.length
-                ? { destinations: purpose.destinations.slice(0, MAX_DESTINATIONS) }
-                : {}),
-              fields: [
-                ["Destination", purpose.destinations.join("\n") || "Not named in this step"],
-                ...draft.fields,
-              ],
-              // A yes reaches these hosts for this task, never a kind of step. One for a host
-              // nothing names covers only this step.
-              always: purpose.destinations.length
-                ? alwaysOptions(decision.actionClass, acting, ctx.redact).filter(
-                    (option) => option.scope === "task",
-                  )
-                : [],
-            }
-          : { ...draft, always: alwaysOptions(decision.actionClass, acting, ctx.redact) },
-      ),
-      {
-        signal: ctx.signal,
-        check: () => ctx.check(),
-        revalidate: async () => {
-          ctx.check();
-          const valid = await prepared.revalidate();
-          ctx.check();
-          return valid;
+    const outcome = await aside((resume) =>
+      ctx.session.requestApproval(
+        {
+          sessionId: ctx.session.id,
+          cellId: ctx.session.cellId,
+          generation: ctx.generation.id,
+          callId: ctx.callId,
+          digest,
+          targetDigest,
         },
-        place: decision.place,
-      },
+        ApprovalRequestDraft.parse(
+          purpose
+            ? {
+                ...draft,
+                title: purpose.title,
+                why: purpose.why,
+                ...(purpose.destinations.length
+                  ? { destinations: purpose.destinations.slice(0, MAX_DESTINATIONS) }
+                  : {}),
+                fields: [
+                  ["Destination", purpose.destinations.join("\n") || "Not named in this step"],
+                  ...draft.fields,
+                ],
+                // A yes reaches these hosts for this task, never a kind of step. One for a host
+                // nothing names covers only this step.
+                always: purpose.destinations.length
+                  ? alwaysOptions(decision.actionClass, acting, ctx.redact).filter(
+                      (option) => option.scope === "task",
+                    )
+                  : [],
+              }
+            : { ...draft, always: alwaysOptions(decision.actionClass, acting, ctx.redact) },
+        ),
+        {
+          signal: ctx.signal,
+          check: () => ctx.check(),
+          revalidate: async () => {
+            await resume?.();
+            ctx.check();
+            const valid = await prepared.revalidate();
+            ctx.check();
+            return valid;
+          },
+          place: decision.place,
+        },
+      ),
     );
     ctx.check();
     if (outcome === "take_control") {

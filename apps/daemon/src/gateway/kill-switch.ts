@@ -4,7 +4,9 @@ import type { CellKeyd } from "../keyd/cell-wiring.ts";
 import type { LiveSessions } from "./live.ts";
 
 export interface KillSwitchDeps {
-  live: Pick<LiveSessions, "cellOf" | "stop" | "settled" | "get">;
+  live: Pick<LiveSessions, "cellOf" | "stop" | "settled" | "get" | "sessionsOn">;
+  // Ends one task without touching its computer, which other tasks are using.
+  endTask?(sessionId: string): Promise<boolean>;
   keyd: Pick<CellKeyd, "revoke" | "refresh" | "isWired" | "close">;
   cells: Pick<CellOrchestrator, "get" | "record" | "withLifecycle">;
   settleMs?: number;
@@ -23,6 +25,14 @@ export interface StopOutcome {
   stopped: boolean;
   errors: string[];
 }
+
+const ENDED = {
+  revoked: false,
+  paused: false,
+  closed: false,
+  stopped: false,
+  ended: true,
+} as const;
 
 // Abort work immediately, then revoke, drain and freeze in the cell's lifecycle
 // queue. If freezing fails, close egress and stop both containers in that queue.
@@ -46,27 +56,43 @@ export class KillSwitch {
     return this.#stops.get(sessionId);
   }
 
+  // A task sharing its computer with others ends alone; the computer's only task stops it too.
   stopSession(sessionId: string): Promise<StopOutcome | undefined> {
+    const existing = this.#stops.get(sessionId);
+    if (existing) return existing;
+    const { live, endTask } = this.deps;
+    const cellId = live.cellOf(sessionId);
+    if (!cellId) return Promise.resolve(undefined);
+    if (!endTask || live.sessionsOn(cellId).length < 2) return this.contain(sessionId);
+    return endTask(sessionId).then((found) => (found ? { ...ENDED, errors: [] } : undefined));
+  }
+
+  // Abort every task on the session's computer, then revoke, drain and freeze it.
+  contain(sessionId: string): Promise<StopOutcome | undefined> {
     const existing = this.#stops.get(sessionId);
     if (existing) return existing;
     const { live } = this.deps;
     const cellId = live.cellOf(sessionId);
     if (!cellId) return Promise.resolve(undefined);
-    const settled = live.settled(sessionId);
+    const sessions = live.sessionsOn(cellId).filter((id) => !this.#stops.has(id));
+    const settled = Promise.all(sessions.map((id) => live.settled(id))).then(() => {});
     const completion = Promise.withResolvers<StopOutcome>();
     const stopped = completion.promise;
-    this.#stops.set(sessionId, stopped);
+    for (const id of sessions) this.#stops.set(id, stopped);
     const work = this.#track(cellId, () => {
-      live.stop(sessionId);
+      for (const id of sessions) live.stop(id);
       return this.#freeze(cellId, settled);
     });
+    const forget = () => {
+      for (const id of sessions) if (this.#stops.get(id) === stopped) this.#stops.delete(id);
+    };
     void work.then(
       (outcome) => {
-        this.#stops.delete(sessionId);
+        forget();
         completion.resolve(outcome);
       },
       (error) => {
-        this.#stops.delete(sessionId);
+        forget();
         completion.reject(error);
       },
     );
@@ -77,7 +103,7 @@ export class KillSwitch {
   // queue. Undefined when it is not ready, already frozen, or gone.
   stopIdleCell(cellId: string): Promise<StopOutcome | undefined> {
     const sessionId = this.deps.live.get(cellId);
-    if (sessionId) return this.stopSession(sessionId);
+    if (sessionId) return this.contain(sessionId);
     const cell = this.deps.cells.get(cellId);
     if (cell?.state !== "ready" || cell.paused) return Promise.resolve(undefined);
     return this.#track(cellId, () => this.#freeze(cellId, undefined));

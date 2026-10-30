@@ -546,7 +546,7 @@ describe("composer delivery ownership and draft handling", () => {
     await act(async () => {});
     expect(f.requests[0]).toEqual({
       path: `/api/cells/${cellId}/agent`,
-      body: { task: "new task" },
+      body: { task: "new task", continues: null },
     });
     f.update({
       agent: { ...agent, snapshot: { ...snapshot, status: "idle" } },
@@ -788,7 +788,10 @@ describe("the composer's controls", () => {
     fireEvent.keyDown(f.field, { key: "Enter" });
     await act(async () => {});
     expect(f.requests).toEqual([
-      { path: `/api/cells/${cellId}/agent`, body: { task: "Now fill in the form" } },
+      {
+        path: `/api/cells/${cellId}/agent`,
+        body: { task: "Now fill in the form", continues: sessionId },
+      },
     ]);
   });
   it("does nothing on Return with nothing written, and says why Send waits", () => {
@@ -847,7 +850,10 @@ describe("the composer's controls", () => {
     f.input("Now make it blue");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send" })));
     expect(f.requests).toEqual([
-      { path: `/api/cells/${cellId}/agent`, body: { task: "Now make it blue" } },
+      {
+        path: `/api/cells/${cellId}/agent`,
+        body: { task: "Now make it blue", continues: sessionId },
+      },
     ]);
   });
   it("shows a dragged file over the card and adds what is dropped", async () => {

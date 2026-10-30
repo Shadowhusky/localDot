@@ -1,42 +1,12 @@
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Read-only diff lines have no child state; line position identifies each span.
 import { Fragment, useMemo } from "react";
+import { DIFF_LIMITS, diffPreview } from "../deliverables/viewer/diff.ts";
 import { diffStat } from "./activity.ts";
+import { changedFiles } from "./changed-files.ts";
 import type { AgentChange } from "./model.ts";
 import { OutputCopy } from "./OutputCopy.tsx";
 import { StepPreviewButton } from "./StepPreview.tsx";
 import "./output.css";
-export const DIFF_LIMITS = Object.freeze({ chars: 64_000, lines: 2000, path: 1024 });
-export function diffPreview(patch: string | undefined) {
-  // Inspect and render only the bounded preview, regardless of the source size.
-  const source = patch?.slice(0, DIFF_LIMITS.chars);
-  if (
-    !source ||
-    source.includes("\0") ||
-    /(^|\n)(Binary files .+ differ|GIT binary patch)(\n|$)/.test(source)
-  )
-    return {
-      text: "",
-      lines: [] as string[],
-      truncated: (patch?.length ?? 0) > DIFF_LIMITS.chars,
-      unavailable: true,
-    };
-  let bounded = "";
-  for (const char of source.toWellFormed().replace(/\r\n?/g, "\n")) {
-    const code = char.charCodeAt(0);
-    bounded +=
-      (code < 0x20 && code !== 9 && code !== 10) || (code >= 0x7f && code <= 0x9f)
-        ? String.fromCharCode(code < 0x20 ? 0x2400 + code : 0x2421)
-        : char;
-  }
-  const all = bounded.split("\n"),
-    lines = all.slice(0, DIFF_LIMITS.lines);
-  return {
-    text: lines.join("\n"),
-    lines,
-    truncated: (patch?.length ?? 0) > DIFF_LIMITS.chars || all.length > DIFF_LIMITS.lines,
-    unavailable: false,
-  };
-}
 
 const KINDS = {
   hunk: "diff-hunk",
@@ -71,15 +41,25 @@ export function numberLines(lines: readonly string[]): Numbered[] {
   });
 }
 
-// Inside a row that already says what changed, only the full path is repeated.
+// Inside a row that already says what changed, only the full path is repeated. With the task it
+// belongs to, its preview opens the file on the computer at its changes, beside the file itself.
 export function DiffViewer({
   change,
   compact = false,
+  task,
 }: {
   change: AgentChange;
   compact?: boolean;
+  task?: { sessionId: string; changes: readonly AgentChange[] };
 }) {
   const preview = useMemo(() => diffPreview(change.patch), [change.patch]);
+  const file = useMemo(
+    () =>
+      task &&
+      change.type === "file" &&
+      changedFiles(task.sessionId, task.changes).find((entry) => entry.path === change.path),
+    [task, change],
+  );
   const numbered = useMemo(() => numberLines(preview.lines), [preview.lines]);
   const stat = diffStat([preview.text]);
   return (
@@ -91,7 +71,11 @@ export function DiffViewer({
       {!preview.unavailable && (
         <StepPreviewButton
           label="Preview code changes"
-          resource={{ kind: "text", name: change.path, text: preview.text }}
+          resource={
+            file
+              ? { kind: "files", entries: [file], index: 0, view: "changes" }
+              : { kind: "text", name: change.path, text: preview.text, diff: true }
+          }
         />
       )}
       <p className="diff-head">

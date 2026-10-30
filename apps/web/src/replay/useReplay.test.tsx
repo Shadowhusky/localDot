@@ -323,6 +323,60 @@ describe("a recording that fails to load", () => {
     await vi.waitFor(() => expect(fixture.replay.open).toHaveBeenCalledOnce());
     expect(hook.result.current.status).not.toBe("error");
   });
+
+  it("opens a finished video again at its new size when compaction replaced it while open", async () => {
+    const fixture = liveFixture([
+      {
+        v: 1,
+        id: ulid(),
+        seq: 2,
+        t: 6_000_000,
+        agent: "main",
+        type: "session.end",
+        data: { reason: "done" },
+      },
+    ]);
+    let servedBytes = 9000;
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: (async (input, init) => {
+        if (new URL(String(input)).pathname.endsWith("/recording"))
+          return Response.json({
+            manifest: { ...emptyManifest("complete"), bytes: servedBytes, finalized: true },
+            live: false,
+            upto: 1,
+            servedBytes,
+          });
+        return fixture.api.fetch(input, init);
+      }) as typeof fetch,
+    });
+    const hook = renderHook(() =>
+      useReplay(api, fixture.sessionId, fixture.stage, { onGoLive: vi.fn() }),
+    );
+    try {
+      await vi.waitFor(() => expect(fixture.replay.open).toHaveBeenCalledOnce());
+      expect(fixture.replay.open.mock.calls[0]?.[0].video).toEqual({ upto: null, bytes: 9000 });
+      servedBytes = 3000;
+      act(() =>
+        fixture.emit({
+          type: "replay-status",
+          status: { state: "error", message: "Replay media is unavailable at this step." },
+        } as WorkerOut),
+      );
+      await vi.waitFor(() => expect(fixture.replay.open).toHaveBeenCalledTimes(2));
+      expect(fixture.replay.open.mock.calls[1]?.[0].video).toEqual({ upto: null, bytes: 3000 });
+      act(() =>
+        fixture.emit({
+          type: "replay-status",
+          status: { state: "error", message: "Replay media is unavailable at this step." },
+        } as WorkerOut),
+      );
+      await vi.waitFor(() => expect(hook.result.current.status).toBe("error"));
+      expect(fixture.replay.open).toHaveBeenCalledTimes(2);
+    } finally {
+      hook.unmount();
+    }
+  });
 });
 
 it("loads saved command details with replay and preserves them when switching screens", async () => {

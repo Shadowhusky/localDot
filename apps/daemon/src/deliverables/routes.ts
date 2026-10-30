@@ -30,12 +30,13 @@ import { DesktopdError } from "../desktopd/client.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "../gateway/frames.ts";
 import { recordingCard } from "../sessions/summary.ts";
+import { type ComputerFiles, computerFileRoutes } from "./computer-files.ts";
 import { fileText, screenLine, textEncoding } from "./excerpt.ts";
 import { fileVersions } from "./lineage.ts";
 import { isLoopbackRequest } from "./loopback.ts";
 import { type MacOpener, OpenRefused, openOnMac } from "./open-on-mac.ts";
-import type { PageQuieter } from "./page-quieter.ts";
-import { previewFileRoutes } from "./preview-files.ts";
+import { PageQuieter } from "./page-quieter.ts";
+import { previewFileRoutes, SECURE } from "./preview-files.ts";
 import { PreviewLinks } from "./preview-links.ts";
 import type { Previews } from "./previews.ts";
 import { resultProof } from "./proof.ts";
@@ -54,6 +55,7 @@ export interface DeliverablesDeps {
   opener: MacOpener;
   revise?: ReviseDeps;
   quieter?: PageQuieter;
+  computer?: ComputerFiles;
 }
 export interface ReviseDeps {
   start(
@@ -65,12 +67,6 @@ export interface ReviseDeps {
   access(cellId: string, signal: AbortSignal): UploadAccess | undefined;
   redactUserText(text: string, sessionId?: string, cellId?: string): string;
 }
-
-const SECURE = {
-  "x-content-type-options": "nosniff",
-  "content-security-policy": "default-src 'none'; sandbox",
-  "cache-control": "no-store",
-};
 
 export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
   const stored = new StoredFiles(deps.home);
@@ -88,7 +84,16 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
     );
   const file = "/api/agent/sessions/:id/files/:name";
   const links = new PreviewLinks();
-  previewFileRoutes(app, { home: deps.home, port: deps.port, links, quieter: deps.quieter });
+  const quieter = deps.quieter ?? new PageQuieter();
+  previewFileRoutes(app, { home: deps.home, port: deps.port, links, quieter });
+  if (deps.computer)
+    computerFileRoutes(app, {
+      port: deps.port,
+      eventLog: deps.eventLog,
+      computer: deps.computer,
+      links,
+      quieter,
+    });
   for (const path of [
     `${file}/*`,
     "/api/agent/sessions/:id/proof",

@@ -20,6 +20,7 @@ import {
 import { join } from "node:path";
 import {
   type EventDraft,
+  type EventOf,
   type LocalDotEvent,
   parseEvent,
   ULID_PATTERN,
@@ -41,8 +42,23 @@ export interface SessionSummary {
 
 export interface SessionMeta {
   id: string;
+  // What the task was called when it started.
   title: string | null;
   startedAt: string;
+  // The conversation's names from its session.title events: dot's, and the user's, which wins.
+  autoTitle?: string;
+  userTitle?: string;
+}
+
+// What the session is called now.
+export const shownTitle = (meta: Pick<SessionMeta, "title" | "autoTitle" | "userTitle">) =>
+  meta.userTitle ?? meta.autoTitle ?? meta.title;
+
+function retitled(meta: SessionMeta, data: EventOf<"session.title">["data"]): SessionMeta {
+  const { autoTitle, userTitle, ...rest } = meta;
+  const auto = data.by === "auto" ? data.title : autoTitle;
+  const user = data.by === "user" ? data.title : userTitle;
+  return { ...rest, ...(auto ? { autoTitle: auto } : {}), ...(user ? { userTitle: user } : {}) };
 }
 
 export type EventListener = (sessionId: string, event: LocalDotEvent) => void;
@@ -128,7 +144,10 @@ export class EventLog {
     state.lastT = t;
     this.#updateIndex(sessionId, state, () => {
       if (state.indexStale) this.#rebuildIndex(sessionId, readValid(state.file).events);
-      else this.#insert(sessionId, event);
+      else {
+        this.#insert(sessionId, event);
+        if (event.type === "session.title") this.#retitle(sessionId, [event]);
+      }
     });
     for (const listener of this.#listeners) {
       try {
@@ -252,6 +271,13 @@ export class EventLog {
     return out;
   }
 
+  // The names the session's conversation has been given: dot's and the user's.
+  titles(sessionId: string): Pick<SessionMeta, "autoTitle" | "userTitle"> {
+    this.#existingFileOf(sessionId);
+    const { autoTitle, userTitle } = readMeta(join(this.#root, sessionId), sessionId);
+    return { ...(autoTitle ? { autoTitle } : {}), ...(userTitle ? { userTitle } : {}) };
+  }
+
   subscribe(listener: EventListener): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
@@ -358,11 +384,26 @@ export class EventLog {
         .run(meta.id, meta.title, meta.startedAt);
       this.#deleteEvents.run(sessionId);
       for (const event of events) this.#insert(sessionId, event);
+      this.#retitle(sessionId, events, true);
       this.#db.exec("COMMIT");
     } catch (err) {
       if (this.#db.isTransaction) this.#db.exec("ROLLBACK");
       throw err;
     }
+  }
+
+  // session.json and the index call the session what its session.title events say, applied to
+  // what they said before or, `fresh`, to the name it started with.
+  #retitle(sessionId: string, events: readonly LocalDotEvent[], fresh = false): void {
+    const dir = join(this.#root, sessionId);
+    const meta = readMeta(dir, sessionId);
+    let next: SessionMeta = fresh
+      ? { id: meta.id, title: meta.title, startedAt: meta.startedAt }
+      : meta;
+    for (const event of events)
+      if (event.type === "session.title") next = retitled(next, event.data);
+    if (JSON.stringify(next) !== JSON.stringify(meta)) writeMeta(dir, next);
+    this.#db.prepare("UPDATE sessions SET title = ? WHERE id = ?").run(shownTitle(next), sessionId);
   }
 
   #insert(sessionId: string, event: LocalDotEvent): void {

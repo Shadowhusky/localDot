@@ -187,7 +187,12 @@ export function ActivityDetail({
         </TerminalViewer>
       )}
       {own.map((change) => (
-        <DiffViewer key={change.id} change={change} compact={own.length === 1} />
+        <DiffViewer
+          key={change.id}
+          change={change}
+          compact={own.length === 1}
+          task={{ sessionId, changes }}
+        />
       ))}
       {entry.keys.length > 0 && <KeysUsed keys={entry.keys} />}
     </div>

@@ -15,16 +15,24 @@ it("restores independent panel choices and the selected view on a new visit", ()
   act(() => first.result.current.update({ activity: false, view: "routines" }));
   first.unmount();
   const next = renderHook(usePanelPreferences);
-  expect(next.result.current.panels).toEqual({ chat: false, activity: false, view: "routines" });
+  expect(next.result.current.panels).toEqual({
+    chat: false,
+    activity: false,
+    view: "routines",
+    sessions: null,
+  });
   act(() => next.result.current.update({ chat: true }));
-  expect(readPanels()).toEqual({ chat: true, activity: false, view: "routines" });
+  expect(readPanels()).toEqual({ chat: true, activity: false, view: "routines", sessions: null });
 });
 
 it("accepts valid fields and ignores malformed saved preferences", () => {
-  localStorage.setItem(PANELS_KEY, '{"chat":false,"activity":"false","view":"invalid"}');
-  expect(readPanels()).toEqual({ chat: false, activity: true, view: "chat" });
+  localStorage.setItem(
+    PANELS_KEY,
+    '{"chat":false,"activity":"false","view":"invalid","sessions":"yes"}',
+  );
+  expect(readPanels()).toEqual({ chat: false, activity: true, view: "chat", sessions: null });
   localStorage.setItem(PANELS_KEY, "broken");
-  expect(readPanels()).toEqual({ chat: true, activity: true, view: "chat" });
+  expect(readPanels()).toEqual({ chat: true, activity: true, view: "chat", sessions: null });
 });
 
 it("keeps successive changes in memory if browser storage is unavailable", () => {
@@ -34,7 +42,20 @@ it("keeps successive changes in memory if browser storage is unavailable", () =>
   const { result } = renderHook(usePanelPreferences);
   act(() => result.current.update({ chat: false }));
   act(() => result.current.update({ activity: false }));
-  expect(result.current.panels).toEqual({ chat: false, activity: false, view: "chat" });
+  expect(result.current.panels).toEqual({
+    chat: false,
+    activity: false,
+    view: "chat",
+    sessions: null,
+  });
+});
+
+it("remembers whether the conversations rail was expanded, and leaves it to the layout until then", () => {
+  const first = renderHook(usePanelPreferences);
+  expect(first.result.current.panels.sessions).toBeNull();
+  act(() => first.result.current.update({ sessions: false }));
+  first.unmount();
+  expect(renderHook(usePanelPreferences).result.current.panels.sessions).toBe(false);
 });
 
 it("follows layout changes made in another tab", () => {

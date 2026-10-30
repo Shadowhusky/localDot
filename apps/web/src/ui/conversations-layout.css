@@ -1,10 +1,10 @@
 /* A row of the conversation list lays out the kit button's own content, so it must follow the kit
    layer: from the legacy rail sheet the kit's inline-flex wins, and a long title squeezes the
-   status point. */
+   status glyph. */
 @layer utilities {
   .conversations-pick > .ui-button-content {
     display: grid;
-    grid-template-columns: 8px minmax(0, 1fr) auto;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
     column-gap: calc(var(--spacing) * 3);
     align-items: center;
     width: 100%;
@@ -13,5 +13,69 @@
 
   .conversations-when {
     white-space: nowrap;
+  }
+
+  /* The conversations rail (SessionRail). Collapsed or expanded, a row's mark keeps one column
+     under the rail's toggle, so collapsing only clips the names away: a row hides what it has no
+     room for, so focusing it never scrolls the rail sideways. The rail is too narrow collapsed for
+     a scrollbar's gutter. */
+  .sessions-scroll {
+    scrollbar-width: none;
+    scrollbar-gutter: auto;
+  }
+
+  .sessions-row {
+    display: flex;
+    justify-content: flex-start;
+    width: 100%;
+    height: auto;
+    min-height: calc(var(--spacing) * 9);
+    padding: calc(var(--spacing) * 2 - 1px) calc(var(--spacing) * 3 - 1px);
+    border-radius: var(--radius-row);
+    overflow: hidden;
+    font-weight: var(--font-weight-medium);
+    text-align: start;
+  }
+
+  .sessions-row > .ui-button-content {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+    column-gap: calc(var(--spacing) * 2.5);
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .sessions-row:focus-visible {
+    outline-offset: calc(var(--focus-width) * -1);
+  }
+
+  /* Over the time at the row's end, shown on hover, on focus and while its menu is open. */
+  .sessions-more {
+    position: absolute;
+    top: calc(var(--spacing) * 1.5);
+    right: calc(var(--spacing) * 1.5);
+    opacity: 0;
+    transition: opacity var(--dur-hover) var(--ease-standard);
+  }
+
+  .sessions-item:is(:focus-within, [data-menu]) > .sessions-more {
+    opacity: 1;
+  }
+
+  @media (hover: hover) {
+    .sessions-item:hover > .sessions-more {
+      opacity: 1;
+    }
+  }
+
+  @media (hover: none) {
+    .sessions-item[data-current] > .sessions-more {
+      opacity: 1;
+    }
+  }
+
+  .sessions-rename {
+    width: 100%;
   }
 }

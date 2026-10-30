@@ -106,21 +106,35 @@
   gap: calc(var(--spacing) * 5);
 }
 
+/* Each ramp is drawn in its own appearance, whatever the page's. */
 .system-ramp {
+  --_ink-2: var(--graphite-fg-2);
+  --_ink-3: var(--graphite-fg-3);
   display: grid;
   gap: calc(var(--spacing) * 3.5);
   padding: calc(var(--spacing) * 4.5);
   border-radius: var(--radius-xl);
   background: var(--graphite-void);
   box-shadow: inset 0 0 0 1px var(--color-control);
+  color: var(--graphite-fg-1);
 }
 
 .system-ramp[data-appearance="midnight"] {
+  --_ink-2: var(--midnight-fg-2);
+  --_ink-3: var(--midnight-fg-3);
   background: var(--midnight-void);
+  color: var(--midnight-fg-1);
+}
+
+.system-ramp[data-appearance="daylight"] {
+  --_ink-2: var(--daylight-fg-2);
+  --_ink-3: var(--daylight-fg-3);
+  background: var(--daylight-void);
+  color: var(--daylight-fg-1);
 }
 
 .system-ramp h3 {
-  color: var(--color-fg-2);
+  color: var(--_ink-2);
   font:
     var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
@@ -149,7 +163,7 @@
 }
 
 .system-swatch-value {
-  color: var(--color-fg-3);
+  color: var(--_ink-3);
   font:
     var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
     var(--font-ui);

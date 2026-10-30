@@ -9,19 +9,34 @@ import {
   type ServerResponse,
   STATUS_CODES,
 } from "node:http";
-import type { Duplex } from "node:stream";
-import type { PreviewTarget } from "@localdot/protocol";
+import { type Duplex, pipeline, type Transform } from "node:stream";
+import { constants, createGzip } from "node:zlib";
+import { type PreviewTarget, previewTarget } from "@localdot/protocol";
+import {
+  bodyRewrite,
+  type Computer,
+  deviceCookie,
+  deviceHeader,
+  type Route,
+  TextRewriter,
+  VIA_PATH,
+  viaOf,
+} from "./rewrite.ts";
 import { ForwarderRefused } from "./tunnel.ts";
 
 // The daemon's own paths on a preview's origin. A device signs in by opening the entry page with
 // a one-use secret after the #, which its script trades for this preview's cookie.
 export const ENTRY_PATH = "/__localdot/preview";
 const ENTRY_SCRIPT = `${ENTRY_PATH}.js`;
+const PAGE_STYLE = `${ENTRY_PATH}.css`;
 // Cookies ignore ports, so every preview on a host sees every other's cookie: each has a name of its
 // own, and every one of them is taken out of what a server receives.
 const COOKIE_PREFIX = "__Host-localdot-preview-";
 export const cookieName = (port: number) => `${COOKIE_PREFIX}${port}`;
 const ENTRY_MS = 120_000;
+// How long a page the device opens may take to start answering before it is told why and offered
+// another try. Requests a page makes itself (events, long polls, uploads) have no limit.
+const NAVIGATE_MS = 30_000;
 const SECRET = /^[A-Za-z0-9_-]{43}$/;
 const HOP = new Set([
   "connection",
@@ -38,27 +53,42 @@ const HOP = new Set([
 const PRIVATE_REQUEST = /^(?:x-forwarded-.+|forwarded|x-real-ip|tailscale-.+)$/;
 // A server's say over the whole host, which other previews and localDot itself share.
 const HOST_WIDE = new Set(["strict-transport-security", "alt-svc", "clear-site-data"]);
-const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]);
 const PAGE_POLICY =
-  "default-src 'none'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+  "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const PAGE_HEADERS = {
   "content-security-policy": PAGE_POLICY,
   "cache-control": "no-store",
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
 };
-const ENTRY_PAGE = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Opening preview</title><script defer src="${ENTRY_SCRIPT}"></script><p id="status">Opening preview…</p></html>`;
+const PAGE_CSS = `:root{color-scheme:light dark;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:Canvas;color:CanvasText}
+main{max-width:30rem}
+h1{font-size:1.125rem;font-weight:600;margin:0 0 .25rem}
+p{margin:0;opacity:.72}
+a{display:inline-block;margin-top:1rem;color:inherit;font-weight:600}
+`;
+const ENTRY_PAGE = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Opening preview</title><link rel="stylesheet" href="${PAGE_STYLE}"><script defer src="${ENTRY_SCRIPT}"></script><main><h1 id="title">Opening preview…</h1><p id="status"></p></main></html>`;
+// While the server's first page is on its way the browser keeps this page up, and its clock runs.
 const ENTRY_CODE = `(async () => {
   const secret = location.hash.slice(1);
   history.replaceState(null, "", location.pathname);
+  const title = document.getElementById("title");
+  const status = document.getElementById("status");
   try {
     const answer = await fetch(${JSON.stringify(ENTRY_PATH)}, { method: "POST", body: secret, cache: "no-store" });
     if (!answer.ok) throw new Error();
-    const { next } = await answer.json();
+    const { next, server } = await answer.json();
+    title.textContent = "Waiting for " + server + " to answer…";
+    const started = Date.now();
+    setInterval(() => {
+      const seconds = Math.round((Date.now() - started) / 1000);
+      status.textContent = seconds < 3 ? "" : seconds + " s. A server that is starting up can take a while.";
+    }, 1000);
     location.replace(new URL(next, location.origin).href);
   } catch {
-    document.getElementById("status").textContent =
-      "This preview link was already used or has expired. Open the preview again from localDot.";
+    title.textContent = "This preview link has expired";
+    status.textContent = "Links open once, within two minutes. Open the preview again from localDot.";
   }
 })();
 `;
@@ -68,24 +98,31 @@ export interface SiteOptions {
   target: PreviewTarget;
   // The Host values a request may carry: the tailnet fronts' names with this port.
   hosts(): ReadonlySet<string>;
-  // A new connection to the server, with TLS already started for an https server.
-  connect(): Promise<Duplex>;
+  // A new connection to a server in the computer, with TLS already started for an https one.
+  connect(target: PreviewTarget): Promise<Duplex>;
+  // The computer's addresses and listening ports, as last seen.
+  computer(): Computer;
+  // Opens another server in the computer as a preview of its own and returns the link that signs this
+  // device in to it, for a page that goes there.
+  hop(target: PreviewTarget, host: string): Promise<string>;
   // Another server used this port before, so a device's first visit clears what that one stored.
   reused: boolean;
   now?: () => number;
+  navigateMs?: number;
 }
 
 // One preview: a loopback listener that only the owner's tailnet fronts reach. It signs devices in,
 // then hands each request and WebSocket to the server as if it came to the server's own address:
-// Host, Origin and Referer name that address, redirects to it come back to the preview's, and
-// bodies pass untouched.
+// Host, Origin and Referer name that address, and addresses of the computer's servers in what comes
+// back (redirects, links, a page's own requests) lead to this preview or, through the via path, to
+// the computer's other servers.
 export class PreviewSite {
   readonly id = randomBytes(12).toString("base64url");
   readonly #cookie = randomBytes(32).toString("base64url");
   readonly #entries = new Map<string, { path: string; expires: number }>();
   readonly #upgraded = new Set<Duplex>();
+  readonly #agents = new Map<string, Agent>();
   readonly #server: Server;
-  readonly #agent: Agent;
   readonly #now: () => number;
   #busy = 0;
   #lastUsed: number;
@@ -93,7 +130,6 @@ export class PreviewSite {
   constructor(readonly options: SiteOptions) {
     this.#now = options.now ?? Date.now;
     this.#lastUsed = this.#now();
-    this.#agent = new TunnelAgent(options.connect);
     this.#server = createServer((req, res) => this.#request(req, res));
     this.#server.on("upgrade", (req, socket, head) => this.#upgrade(req, socket, head));
   }
@@ -139,7 +175,8 @@ export class PreviewSite {
     this.#server.closeAllConnections();
     for (const socket of this.#upgraded) socket.destroy();
     this.#upgraded.clear();
-    this.#agent.destroy();
+    for (const agent of this.#agents.values()) agent.destroy();
+    this.#agents.clear();
     this.#entries.clear();
   }
 
@@ -151,13 +188,16 @@ export class PreviewSite {
       return page(res, 200, ENTRY_PAGE, "text/html; charset=utf-8");
     if (path === ENTRY_SCRIPT && req.method === "GET")
       return page(res, 200, ENTRY_CODE, "text/javascript; charset=utf-8");
+    if (path === PAGE_STYLE && req.method === "GET")
+      return page(res, 200, PAGE_CSS, "text/css; charset=utf-8");
     if (path === ENTRY_PATH && req.method === "POST") return void this.#enter(req, res, host);
     if (!this.#signedIn(req.headers))
       return req.method === "GET"
-        ? message(res, 401, "Open this preview from localDot to sign this device in to it.")
+        ? message(res, 401, "Open this preview from localDot", "That signs this device in to it.")
         : plain(res, 401, "unauthorized");
     if (!req.url?.startsWith("/")) return plain(res, 400, "bad request");
-    this.#forward(req, res, host);
+    if (req.url.startsWith(`${VIA_PATH}/`)) return void this.#via(req, res, host);
+    this.#forward(req, res, host, this.target, req.url);
   }
 
   // The request's Host, when it is one of the fronts this preview is served through: anything else
@@ -188,14 +228,71 @@ export class PreviewSite {
       ...PAGE_HEADERS,
       "content-type": "application/json",
       "set-cookie": `${cookieName(this.port)}=${this.#cookie}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+      // Only "storage", which takes an old service worker with it: "cache" makes browsers walk their
+      // whole disk cache first (seconds to tens of seconds). Answers a browser could keep without
+      // asking are told to ask again instead (deviceHeaders).
       ...(this.options.reused && !this.#signedIn(req.headers)
-        ? { "clear-site-data": '"cache", "storage"' }
+        ? { "clear-site-data": '"storage"' }
         : {}),
     });
-    res.end(JSON.stringify({ next: entry.path }));
+    res.end(JSON.stringify({ next: entry.path, server: this.target.host }));
   }
 
-  #forward(req: IncomingMessage, res: ServerResponse, host: string) {
+  // Another server in the computer, named by the via path. A page the device opens there becomes a
+  // preview of its own, so the server's own paths work; anything a page asks of it, a form it posts
+  // included, travels here.
+  async #via(req: IncomingMessage, res: ServerResponse, host: string) {
+    const via = viaOf(req.url ?? "");
+    const target = via && previewTarget(via.address, this.options.computer().addresses);
+    if (!via || !target) return message(res, 400, "That address isn't in your computer");
+    if (!navigating(req) || (req.method !== "GET" && req.method !== "HEAD"))
+      return this.#forward(req, res, host, target, target.path, via.prefix);
+    // Another site may send the owner here, but not have a preview opened for it.
+    if (req.headers["sec-fetch-site"] === "cross-site")
+      return message(res, 403, "Open this page from its preview", "Another site sent you here.");
+    try {
+      const link = await this.options.hop(target, host);
+      res.writeHead(303, { ...PAGE_HEADERS, location: link });
+      res.end();
+    } catch (error) {
+      message(
+        res,
+        502,
+        `${target.host} couldn't open`,
+        error instanceof Error && error.name === "PreviewError"
+          ? error.message
+          : "Open it from localDot instead.",
+      );
+    }
+  }
+
+  #agent(target: PreviewTarget): Agent {
+    const key = `${target.scheme}://${target.host} ${target.dial}`;
+    let agent = this.#agents.get(key);
+    if (!agent) {
+      agent = new TunnelAgent(() => this.options.connect(target));
+      this.#agents.set(key, agent);
+    }
+    return agent;
+  }
+
+  #route(host: string, via?: string): Route {
+    return {
+      front: host,
+      target: this.target,
+      computer: this.options.computer(),
+      ...(via ? { via } : {}),
+    };
+  }
+
+  #forward(
+    req: IncomingMessage,
+    res: ServerResponse,
+    host: string,
+    target: PreviewTarget,
+    path: string,
+    via?: string,
+  ) {
     this.#busy++;
     this.#lastUsed = this.#now();
     let done = false;
@@ -206,27 +303,54 @@ export class PreviewSite {
       this.#lastUsed = this.#now();
     };
     res.once("close", finish);
+    const route = this.#route(host, via);
     const up = request({
-      agent: this.#agent,
+      agent: this.#agent(target),
       method: req.method,
-      path: req.url,
-      headers: serverHeaders(req.headers, host, this.target),
+      path,
+      headers: serverHeaders(req.headers, host, target, this.target),
       setHost: false,
     });
+    const limit = this.options.navigateMs ?? NAVIGATE_MS;
+    const slow =
+      navigating(req) && (req.method === "GET" || req.method === "HEAD")
+        ? setTimeout(() => {
+            up.destroy();
+            if (res.headersSent) return;
+            message(
+              res,
+              504,
+              `${target.host} didn't answer within ${Math.round(limit / 1000)} seconds`,
+              "It may still be starting, or it may be stuck. Try again in a moment.",
+              true,
+            );
+          }, limit)
+        : undefined;
     up.on("response", (answer) => {
+      clearTimeout(slow);
       answer.on("error", () => res.destroy());
+      const status = answer.statusCode ?? 502;
+      const body = bodyRewrite(req.method, status, answer.headers);
       res.writeHead(
-        answer.statusCode ?? 502,
+        status,
         answer.statusMessage,
-        deviceHeaders(answer.rawHeaders, host, this.target, false),
+        deviceHeaders(answer.rawHeaders, route, false, body && (body.decode ? "gzip" : "")),
       );
-      answer.pipe(res);
+      if (!body) return void answer.pipe(res);
+      const steps: Transform[] = [
+        ...(body.decode ? [body.decode()] : []),
+        new TextRewriter(route),
+        ...(body.decode ? [createGzip({ flush: constants.Z_SYNC_FLUSH })] : []),
+      ];
+      pipeline([answer, ...steps, res], () => undefined);
     });
     up.on("error", (error) => {
+      clearTimeout(slow);
       if (res.headersSent) res.destroy();
-      else failure(res, error, this.target);
+      else if (!res.writableEnded) failure(res, error, target);
     });
     res.once("close", () => {
+      clearTimeout(slow);
       if (!res.writableFinished) up.destroy();
     });
     req.pipe(up);
@@ -241,18 +365,24 @@ export class PreviewSite {
     // take the rewritten Origin for its own: only this preview's own pages may.
     if (req.headers.origin !== `https://${host}`) return refuseRaw(socket, 403);
     if (!req.url?.startsWith("/")) return refuseRaw(socket, 400);
+    const via = req.url.startsWith(`${VIA_PATH}/`) ? viaOf(req.url) : undefined;
+    const target = via
+      ? previewTarget(via.address, this.options.computer().addresses)
+      : this.target;
+    if (!target) return refuseRaw(socket, 400);
     this.#upgraded.add(socket);
     this.#lastUsed = this.#now();
     socket.once("close", () => {
       this.#upgraded.delete(socket);
       this.#lastUsed = this.#now();
     });
+    const route = this.#route(host, via?.prefix);
     const up = request({
-      createConnection: later(this.options.connect),
+      createConnection: later(() => this.options.connect(target)),
       method: req.method,
-      path: req.url,
+      path: via ? target.path : req.url,
       headers: {
-        ...serverHeaders(req.headers, host, this.target),
+        ...serverHeaders(req.headers, host, target, this.target),
         connection: "Upgrade",
         upgrade: req.headers.upgrade ?? "websocket",
       },
@@ -263,9 +393,7 @@ export class PreviewSite {
       server.on("error", () => socket.destroy());
       socket.on("close", () => server.destroy());
       server.on("close", () => socket.destroy());
-      socket.write(
-        statusLine(answer) + rawLines(deviceHeaders(answer.rawHeaders, host, this.target, true)),
-      );
+      socket.write(statusLine(answer) + rawLines(deviceHeaders(answer.rawHeaders, route, true)));
       if (serverHead.length) socket.write(serverHead);
       if (head.length) server.write(head);
       server.pipe(socket);
@@ -275,11 +403,7 @@ export class PreviewSite {
     up.on("response", (answer) => {
       socket.write(
         statusLine(answer) +
-          rawLines([
-            ...deviceHeaders(answer.rawHeaders, host, this.target, false),
-            "Connection",
-            "close",
-          ]),
+          rawLines([...deviceHeaders(answer.rawHeaders, route, false), "Connection", "close"]),
       );
       answer.pipe(socket);
     });
@@ -295,8 +419,9 @@ export class PreviewSite {
 
 class TunnelAgent extends Agent {
   constructor(private readonly open: () => Promise<Duplex>) {
-    // HTTP/1.1 as a browser would: a few connections per preview, kept for the next request.
-    super({ keepAlive: true, maxSockets: 8, maxFreeSockets: 2 });
+    // HTTP/1.1 as a browser would, with room for every device's open event streams and long polls
+    // beside its page loads: a request waiting for a free connection would wait for them to end.
+    super({ keepAlive: true, maxSockets: 32, maxFreeSockets: 4 });
   }
 
   override createConnection(
@@ -323,6 +448,13 @@ function later(open: () => Promise<Duplex>) {
   };
 }
 
+// A page the device itself opens, as browsers mark one; older browsers by what they accept.
+function navigating(req: IncomingMessage): boolean {
+  const mode = req.headers["sec-fetch-mode"];
+  if (mode) return mode === "navigate" && req.headers["sec-fetch-dest"] === "document";
+  return req.method === "GET" && /\btext\/html\b/.test(req.headers.accept ?? "");
+}
+
 export function cookies(header: string | undefined): Map<string, string> {
   const found = new Map<string, string>();
   for (const part of (header ?? "").split(";")) {
@@ -333,14 +465,16 @@ export function cookies(header: string | undefined): Map<string, string> {
 }
 
 // What the server receives: the request as the browser sent it, addressed to the server itself,
-// without the hop's own headers, the previews' cookies or who the owner is.
+// without the hop's own headers, the previews' cookies or who the owner is. Origin and Referer name
+// the server whose page sent it (`page`), as they would in the computer's own browser.
 export function serverHeaders(
   headers: IncomingHttpHeaders,
   host: string,
   target: PreviewTarget,
+  page: PreviewTarget = target,
 ): Record<string, string | string[]> {
   const own = `https://${host}`;
-  const server = `${target.scheme}://${target.host}`;
+  const server = `${page.scheme}://${page.host}`;
   const hop = new Set([
     ...HOP,
     ...(headers.connection ?? "")
@@ -366,60 +500,67 @@ export function serverHeaders(
 }
 
 // What the device receives: the server's answer as raw header pairs, without what would reach past
-// this preview, and with redirects to the server's address sent to the preview's.
+// this preview, with the addresses it names sent where they open on the device and its cookies kept
+// on the preview's host. `body` is the encoding of a rewritten body ("" for none), whose length is
+// no longer the server's.
 export function deviceHeaders(
   raw: readonly string[],
-  host: string,
-  target: PreviewTarget,
+  route: Route,
   upgrade: boolean,
+  body?: "" | "gzip",
 ): string[] {
   const out: string[] = [];
+  let cached = false;
   for (let i = 0; i + 1 < raw.length; i += 2) {
     const name = raw[i] as string;
-    let value = raw[i + 1] as string;
+    const value = raw[i + 1] as string;
     const lower = name.toLowerCase();
     if (HOST_WIDE.has(lower) || (!upgrade && HOP.has(lower))) continue;
     if (lower === "set-cookie" && value.trimStart().startsWith(COOKIE_PREFIX)) continue;
-    if (lower === "location" || lower === "content-location")
-      value = toPreview(value, host, target);
-    out.push(name, value);
+    if (body !== undefined && (lower === "content-length" || lower === "content-encoding"))
+      continue;
+    cached ||= lower === "cache-control" || lower === "expires";
+    out.push(
+      name,
+      lower === "set-cookie"
+        ? deviceCookie(value, route.computer)
+        : deviceHeader(lower, value, route),
+    );
   }
+  if (body) out.push("Content-Encoding", "gzip");
+  // A port serves one server after another: what one left in a browser's cache without saying how
+  // long it stays fresh must not answer for the next.
+  if (!upgrade && !cached) out.push("Cache-Control", "no-cache");
   return out;
-}
-
-function toPreview(value: string, host: string, target: PreviewTarget): string {
-  if (!URL.canParse(value)) return value;
-  const url = new URL(value);
-  const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
-  const named = new URL(`${target.scheme}://${target.host}`).hostname;
-  const same =
-    url.protocol === `${target.scheme}:` &&
-    port === target.port &&
-    (url.hostname === named || (LOOPBACK.has(url.hostname) && LOOPBACK.has(named)));
-  return same ? `https://${host}${url.pathname}${url.search}${url.hash}` : value;
 }
 
 function failure(res: ServerResponse, error: Error, target: PreviewTarget) {
   if (error instanceof ForwarderRefused && error.reason === "refused-port")
-    return message(res, 403, "localDot's own services can't be opened as a preview.");
+    return message(res, 403, "localDot's own services can't be opened as a preview");
   if (error instanceof ForwarderRefused && error.reason === "unreachable")
     return message(
       res,
       502,
-      `Nothing is answering at ${target.host} in your computer. Start the server again, then reload this page.`,
+      `Nothing is answering at ${target.host}`,
+      "The server in your computer stopped or hasn't started. Start it again, then try again.",
+      true,
     );
   if (error.name === "ForwarderMissing")
     return message(
       res,
       502,
-      "Your computer isn't answering. Check that it's on, then reload this page.",
+      "Your computer isn't answering",
+      "Check that it's on, then try again.",
+      true,
     );
   return message(
     res,
     502,
     target.scheme === "https"
-      ? `The server at ${target.host} didn't answer over HTTPS. Reload this page to try again.`
-      : `The server at ${target.host} stopped answering. Reload this page to try again.`,
+      ? `${target.host} didn't answer over HTTPS`
+      : `${target.host} stopped answering`,
+    "Try again in a moment.",
+    true,
   );
 }
 
@@ -433,11 +574,15 @@ function page(res: ServerResponse, status: number, body: string, type: string) {
   res.end(body);
 }
 
-function message(res: ServerResponse, status: number, text: string) {
+const escaped = (text: string) => text.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+
+// A page of localDot's own on the preview's origin: what happened, what to do, and a link that asks
+// for the same page again.
+function message(res: ServerResponse, status: number, title: string, detail = "", retry = false) {
   page(
     res,
     status,
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Preview</title><p>${text.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`)}</p></html>`,
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escaped(title)}</title><link rel="stylesheet" href="${PAGE_STYLE}"><main><h1>${escaped(title)}</h1>${detail ? `<p>${escaped(detail)}</p>` : ""}${retry ? '<a href="">Try again</a>' : ""}</main></html>`,
     "text/html; charset=utf-8",
   );
 }

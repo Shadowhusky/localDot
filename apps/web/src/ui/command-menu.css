@@ -1,0 +1,287 @@
+/* The slash menu, the palette and the side notes lay out kit rows and buttons, so they follow the
+   kit layer as the composer does. */
+@layer utilities {
+  .action-list {
+    padding: 0;
+  }
+
+  .action-row {
+    gap: calc(var(--spacing) * 2.5);
+    min-height: calc(var(--spacing) * 9);
+    padding-block: calc(var(--spacing) * 1.5);
+  }
+
+  .action-row-icon,
+  .action-row-current {
+    flex: none;
+    color: var(--color-fg-2);
+  }
+
+  .action-row-text {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: calc(var(--spacing) * 2);
+    min-width: 0;
+  }
+
+  .action-row-label,
+  .action-row-hint,
+  .action-row-note {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .action-row-label {
+    flex: 0 1 auto;
+    min-width: 0;
+    color: var(--color-fg-1);
+    font-weight: var(--font-weight-medium);
+  }
+
+  .action-row-hint {
+    flex: 0 1 auto;
+    min-width: 0;
+    color: var(--color-fg-3);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-mono);
+  }
+
+  .action-row-note {
+    flex: 1 0 100%;
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  }
+
+  .action-row-keys {
+    flex: none;
+  }
+
+  .action-list[data-compact] .action-row {
+    padding-block: var(--spacing);
+  }
+
+  .action-list[data-compact] .action-row-text {
+    flex-wrap: nowrap;
+  }
+
+  .action-list[data-compact] :is(.action-row-label, .action-row-hint) {
+    flex: none;
+  }
+
+  .action-list[data-compact] .action-row-note {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--color-fg-3);
+  }
+
+  .action-row[aria-disabled="true"] .action-row-label {
+    color: var(--color-fg-3);
+  }
+
+  .command-menu {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + var(--spacing) * 2);
+    left: 0;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    max-height: min(calc(var(--spacing) * 84), 46dvh);
+  }
+
+  .command-menu-empty {
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2.5);
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  }
+
+  .command-menu-foot,
+  .command-palette-foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 1) calc(var(--spacing) * 3);
+    margin-top: calc(var(--spacing) * 1.5);
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2.5) 0;
+    border-top: 1px solid var(--color-separator);
+    color: var(--color-fg-3);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  .command-menu-foot > span,
+  .command-palette-foot > span {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing);
+  }
+
+  .command-palette {
+    position: absolute;
+    /* Below the island, which stays above every layer so Stop is always in reach. */
+    top: max(14dvh, calc(var(--spacing) * 28));
+    left: 50%;
+    display: flex;
+    flex-direction: column;
+    width: min(calc(var(--spacing) * 160), calc(100% - var(--spacing) * 8));
+    max-height: min(calc(var(--spacing) * 128), 72dvh);
+    translate: -50% 0;
+  }
+
+  .command-palette-search {
+    flex: none;
+    margin-bottom: calc(var(--spacing) * 1.5);
+    padding-bottom: calc(var(--spacing) * 1.5);
+    border-bottom: 1px solid var(--color-separator);
+  }
+
+  .command-palette-page {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing);
+    padding: 0 calc(var(--spacing) * 1) calc(var(--spacing) * 1.5);
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  }
+
+  .command-palette-empty {
+    padding: calc(var(--spacing) * 4) calc(var(--spacing) * 2);
+    color: var(--color-fg-2);
+    text-align: center;
+  }
+
+  .shortcut-list {
+    display: grid;
+    gap: calc(var(--spacing) * 3);
+    min-height: 0;
+    margin: 0;
+    padding: calc(var(--spacing) * 1) calc(var(--spacing) * 2.5);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .shortcut-group {
+    display: grid;
+    gap: calc(var(--spacing) * 1.5);
+  }
+
+  .shortcut-group-title {
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+  }
+
+  .shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: calc(var(--spacing) * 3);
+    color: var(--color-fg-1);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  }
+
+  .shortcut-keys {
+    display: inline-flex;
+    flex: none;
+    gap: var(--spacing);
+  }
+
+  .side-note {
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+    margin-block: calc(var(--spacing) * 3);
+    padding: calc(var(--spacing) * 3);
+    border-radius: var(--radius-lg);
+    background-color: var(--color-raised);
+    box-shadow:
+      var(--shadow-raised),
+      inset 0 0 0 1px var(--color-hairline);
+  }
+
+  .side-note-head {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+  }
+
+  .side-note-title {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    color: var(--color-fg-1);
+    font:
+      var(--font-weight-semibold) var(--text-callout) / var(--text-callout--line-height)
+      var(--font-ui);
+  }
+
+  .side-note-private {
+    color: var(--color-fg-3);
+    font:
+      var(--font-weight-normal) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+  }
+
+  .side-note-question {
+    margin: 0;
+    padding-left: calc(var(--spacing) * 2.5);
+    border-left: 2px solid var(--color-separator);
+    color: var(--color-fg-2);
+    overflow-wrap: anywhere;
+  }
+
+  .side-note-answer {
+    min-width: 0;
+    color: var(--color-fg-1);
+    overflow-wrap: anywhere;
+  }
+
+  .side-note-wait,
+  .side-note-by {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    color: var(--color-fg-3);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  .side-note-problem {
+    margin: 0;
+    color: var(--color-fg-2);
+  }
+
+  .side-note-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  @media (max-width: 759px) {
+    .command-palette {
+      top: calc(var(--spacing) * 22 + env(safe-area-inset-top));
+      width: calc(100% - var(--spacing) * 4);
+      max-height: 62dvh;
+    }
+  }
+
+  @media (pointer: coarse) {
+    .action-row {
+      min-height: calc(var(--spacing) * 11);
+    }
+
+    /* A phone has room for the whole description only on a line of its own. */
+    .action-list[data-compact] .action-row-text {
+      flex-wrap: wrap;
+    }
+
+    .action-list[data-compact] .action-row-note {
+      flex-basis: 100%;
+    }
+
+    .command-menu-foot,
+    .command-palette-foot {
+      display: none;
+    }
+  }
+}

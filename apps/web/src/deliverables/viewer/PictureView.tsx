@@ -40,10 +40,12 @@ export function PictureView({
   src,
   name,
   caption,
+  lead,
 }: {
   src: string;
   name: string;
   caption?: ReactNode;
+  lead?: ReactNode;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -239,6 +241,7 @@ export function PictureView({
           ) : undefined
         }
       >
+        {lead}
         <SegmentedControl
           size={28}
           aria-label="Zoom"

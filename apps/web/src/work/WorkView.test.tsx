@@ -44,11 +44,20 @@ it("waits for a settled task, stays bounded under continuous output, and adds no
   expect(screen.getByLabelText("Work output").textContent).toMatch(/Chunk 1[789]|Chunk 20/);
   expect(fetchImpl).not.toHaveBeenCalled();
 });
+// jsdom lays nothing out: the output is given room to scroll.
+function scrollable(output: HTMLElement) {
+  Object.defineProperty(output, "scrollHeight", { configurable: true, value: 900 });
+  Object.defineProperty(output, "clientHeight", { configurable: true, value: 300 });
+  return output;
+}
+const next = { ...card, key: "two", text: "Next" };
+const followed = () => screen.queryByRole("button", { name: "Follow work" }) === null;
+
 it("pins on reading, can follow again, and yields immediately during handover", async () => {
   const view = render(<WorkView {...props} candidate={card} />);
   await tick(700);
-  fireEvent.wheel(screen.getByLabelText("Work output"));
-  view.rerender(<WorkView {...props} candidate={{ ...card, key: "two", text: "Next" }} />);
+  fireEvent.wheel(scrollable(screen.getByLabelText("Work output")), { deltaY: 120 });
+  view.rerender(<WorkView {...props} candidate={next} />);
   await tick(1000);
   expect(screen.getByText("First output")).toBeTruthy();
   view.rerender(<WorkView {...props} candidate={card} enabled={false} />);
@@ -58,6 +67,139 @@ it("pins on reading, can follow again, and yields immediately during handover", 
   view.rerender(<WorkView {...props} candidate={null} />);
   expect(screen.queryByLabelText("Work output")).toBeNull();
 });
+it("keeps following through a click, a tap, focus moves and a wheel with nothing to scroll", async () => {
+  const view = render(<WorkView {...props} candidate={card} />);
+  await tick(700);
+  const output = screen.getByLabelText("Work output");
+  fireEvent.pointerDown(output, {
+    pointerId: 1,
+    isPrimary: true,
+    buttons: 1,
+    clientX: 50,
+    clientY: 50,
+  });
+  fireEvent.pointerMove(output, {
+    pointerId: 1,
+    isPrimary: true,
+    buttons: 1,
+    clientX: 53,
+    clientY: 54,
+  });
+  fireEvent.pointerUp(output, { pointerId: 1, isPrimary: true, clientX: 53, clientY: 54 });
+  fireEvent.click(output);
+  fireEvent.pointerDown(output, {
+    pointerId: 7,
+    isPrimary: true,
+    pointerType: "touch",
+    buttons: 1,
+  });
+  fireEvent.pointerUp(output, { pointerId: 7, isPrimary: true, pointerType: "touch" });
+  fireEvent.keyDown(output, { key: "Tab" });
+  fireEvent.wheel(output, { deltaY: 120 });
+  // A mouse that went up outside does not turn later movement into a drag.
+  fireEvent.pointerDown(output, {
+    pointerId: 1,
+    isPrimary: true,
+    buttons: 1,
+    clientX: 50,
+    clientY: 50,
+  });
+  fireEvent.pointerMove(output, {
+    pointerId: 1,
+    isPrimary: true,
+    buttons: 0,
+    clientX: 200,
+    clientY: 50,
+  });
+  fireEvent.pointerMove(output, {
+    pointerId: 1,
+    isPrimary: true,
+    buttons: 1,
+    clientX: 300,
+    clientY: 50,
+  });
+  expect(followed()).toBe(true);
+  view.rerender(<WorkView {...props} candidate={next} />);
+  await tick(700);
+  expect(screen.getByText("Next")).toBeTruthy();
+});
+
+for (const [name, read] of [
+  [
+    "a drag across the output",
+    (output: HTMLElement) => {
+      fireEvent.pointerDown(output, {
+        pointerId: 1,
+        isPrimary: true,
+        buttons: 1,
+        clientX: 50,
+        clientY: 50,
+      });
+      fireEvent.pointerMove(output, {
+        pointerId: 1,
+        isPrimary: true,
+        buttons: 1,
+        clientX: 50,
+        clientY: 90,
+      });
+    },
+  ],
+  [
+    "a pan the browser takes over",
+    (output: HTMLElement) => {
+      fireEvent.pointerDown(output, {
+        pointerId: 3,
+        isPrimary: true,
+        pointerType: "touch",
+        buttons: 1,
+      });
+      fireEvent.pointerCancel(output, { pointerId: 3, isPrimary: true, pointerType: "touch" });
+    },
+  ],
+  [
+    "a pinch",
+    (output: HTMLElement) => {
+      fireEvent.pointerDown(output, {
+        pointerId: 3,
+        isPrimary: true,
+        pointerType: "touch",
+        buttons: 1,
+      });
+      fireEvent.pointerDown(output, {
+        pointerId: 4,
+        isPrimary: false,
+        pointerType: "touch",
+        buttons: 1,
+      });
+    },
+  ],
+  ["a key that scrolls", (output: HTMLElement) => fireEvent.keyDown(output, { key: "PageDown" })],
+  [
+    "a scrollbar dragged under a still press",
+    (output: HTMLElement) => {
+      fireEvent.pointerDown(output, {
+        pointerId: 1,
+        isPrimary: true,
+        buttons: 1,
+        clientX: 50,
+        clientY: 50,
+      });
+      fireEvent.scroll(output);
+    },
+  ],
+] as const)
+  it(`stops following on ${name}, until Follow work`, async () => {
+    const view = render(<WorkView {...props} candidate={card} />);
+    await tick(700);
+    read(screen.getByLabelText("Work output"));
+    view.rerender(<WorkView {...props} candidate={next} />);
+    await tick(1000);
+    expect(screen.getByText("First output")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Follow work" }));
+    await tick(700);
+    expect(screen.getByText("Next")).toBeTruthy();
+  });
+
 it("follows replay immediately without future text surviving a backwards seek", () => {
   const view = render(<WorkView {...props} candidate={card} replay />);
   expect(screen.getByText("First output")).toBeTruthy();

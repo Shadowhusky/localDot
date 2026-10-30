@@ -13,6 +13,7 @@ import {
 import {
   AGENT_LIMITS,
   type AgentChange,
+  type AgentDotChoice,
   type AgentMessage,
   type AgentModel,
   type AgentQuestion,
@@ -53,9 +54,12 @@ interface Item<K extends string> {
   speaker: Speaker;
   // Wall-clock ms, when the item's ID says.
   time?: number;
+  // Session ms it happened at, which places the steps taken around it.
+  atMs?: number;
 }
 export type ThreadItem =
-  | (Item<"message"> & { message: AgentMessage })
+  // `narration`: dot's words before more of its work in the turn, rather than its answer.
+  | (Item<"message"> & { message: AgentMessage; narration?: true })
   | (Item<"question"> & { question: AgentQuestion })
   | (Item<"answer"> & { question: AgentQuestion })
   | (Item<"result"> & { result: AgentResult })
@@ -63,16 +67,19 @@ export type ThreadItem =
   | (Item<"routine"> & { proposal: RoutineProposal })
   // What started a task the user didn't: a routine or a follow-up.
   | (Item<"origin"> & { origin: SessionOrigin })
+  // The dot the conversation works as, when Auto picked it or the user switched.
+  | (Item<"dot"> & { choice: AgentDotChoice })
   // The computer changing hands: the user took it or dot handed it over (`handed`), or the user
   // handed it back, maybe saying "Not now" to dot's hand-off (`declined`).
   | (Item<"control"> & { took: boolean; at?: number; handed?: boolean; declined?: boolean })
+  // The steps dot took between two things it said, or since the last while it works.
   | (Item<"work"> & {
       turn: string;
       steps: readonly WorkStep[];
       startMs: number | null;
       // An earlier task's turn: the task its steps were recorded in.
       sessionId?: string;
-      // What the turn's model calls cost, when any cost something.
+      // What the turn's model calls cost, when any cost something; on the turn's last steps.
       spend?: { usd: number; estimated: boolean };
     })
   // A finished turn's quiet last line: the model, and what the turn's calls reported.
@@ -86,7 +93,7 @@ export type ThreadItem =
       // What the turn's calls cost, only when the provider billed every one.
       usd?: number;
       estimated?: boolean;
-      // The turn's work line, just above, already says how long it took and what it cost.
+      // Steps sit just above the line.
       work: boolean;
     });
 
@@ -107,6 +114,8 @@ export interface ThreadRow {
 }
 
 const wallTime = (id: string) => (ULID_PATTERN.test(id) ? ulidTime(id) : undefined);
+const sessionMs = (micros: number | undefined) =>
+  micros === undefined ? undefined : microsToMs(micros);
 
 // A queued message the user took back to edit, or cancelled, never reached dot.
 const unsent = (message: AgentMessage) =>
@@ -129,6 +138,7 @@ export function threadItems(
   takeovers: Iterable<AgentTakeover> = [],
   proposals: Iterable<RoutineProposal> = [],
   origin?: SessionOrigin,
+  dots: Iterable<AgentDotChoice> = [],
 ): ThreadItem[] {
   const placed: Placed[] = [];
   const place = (item: ThreadItem, order: number | undefined) =>
@@ -141,6 +151,7 @@ export function threadItems(
           key: `message-${message.id}`,
           speaker: message.role === "user" ? "user" : "dot",
           time: message.time ?? wallTime(message.id),
+          atMs: sessionMs(message.at),
           message,
         },
         message.seq,
@@ -152,6 +163,7 @@ export function threadItems(
         key: `question-${question.askId}`,
         speaker: "dot",
         time: wallTime(question.askId),
+        atMs: sessionMs(question.at),
         question,
       },
       question.seq,
@@ -170,9 +182,15 @@ export function threadItems(
         key: `result-${result.id}`,
         speaker: "dot",
         time: wallTime(result.id),
+        atMs: sessionMs(result.at),
         result,
       },
       result.seq,
+    );
+  for (const choice of dots)
+    place(
+      { kind: "dot", key: `dot-${choice.id}`, speaker: "dot", time: wallTime(choice.id), choice },
+      choice.seq,
     );
   for (const proposal of proposals)
     place(
@@ -181,6 +199,7 @@ export function threadItems(
         key: `routine-${proposal.routineId}`,
         speaker: "dot",
         time: wallTime(proposal.id),
+        atMs: sessionMs(proposal.at),
         proposal,
       },
       proposal.seq,
@@ -188,7 +207,9 @@ export function threadItems(
   for (const takeover of takeovers) {
     // The user took it when they asked for it, or when they took the computer dot handed over.
     const took =
-      takeover.by === "user" ? { seq: takeover.seq, time: takeover.time } : takeover.taken;
+      takeover.by === "user"
+        ? { seq: takeover.seq, time: takeover.time, at: takeover.at }
+        : takeover.taken;
     if (took)
       place(
         {
@@ -196,6 +217,7 @@ export function threadItems(
           key: `took-${takeover.requestId}`,
           speaker: "user",
           at: took.time,
+          atMs: sessionMs(took.at),
           took: true,
           ...(takeover.by === "user" ? {} : { handed: true }),
         },
@@ -208,6 +230,7 @@ export function threadItems(
           key: `back-${takeover.requestId}`,
           speaker: "user",
           at: takeover.endTime,
+          atMs: sessionMs(takeover.endAt),
           took: false,
           ...(takeover.end.declined ? { declined: true } : {}),
         },
@@ -384,14 +407,80 @@ function turnMeta(
     ...(billed
       ? { usd, ...(bills.some((call) => call.estimated) ? { estimated: true } : {}) }
       : {}),
-    work: own.length > 0,
+    work: false,
   };
 }
 
-// Each turn that worked on the computer ends with a line of what it did. The latest turn also has one
-// while the task is live, steps or not, so the thread is never silent while dot works. A finished
-// turn then ends with its model and what its calls reported; `main` names the task's model when they
-// said nothing.
+type WorkItem = Extract<ThreadItem, { kind: "work" }>;
+
+// A message waiting for the task to finish is drawn at the end of the thread, and one that never
+// reached dot not at all: neither splits the steps dot takes meanwhile.
+const waits = (item: ThreadItem) =>
+  item.kind === "message" && (!!item.message.queued || dropped(item.message));
+
+// A turn as it happened: what was said and handed over, and between them each run of steps dot took,
+// after the item it followed. While the turn is live it ends with a run, empty until dot takes a step,
+// so the thread is never silent while dot works.
+function interleave(turn: Turn, own: readonly WorkStep[], open: boolean): ThreadItem[] {
+  const placed: ThreadItem[] = [];
+  let after: ThreadItem | undefined;
+  let run: WorkStep[] | null = null;
+  let held: ThreadItem[] = [];
+  let clock = Number.NEGATIVE_INFINITY;
+  let next = 0;
+  // The steps before `until`, or all that are left.
+  const take = (until?: number) => {
+    const from = next;
+    while (next < own.length && (until === undefined || (own[next]?.startT ?? until) < until))
+      next++;
+    if (next > from) run = [...(run ?? []), ...own.slice(from, next)];
+  };
+  const close = () => {
+    if (run)
+      placed.push({
+        kind: "work",
+        key: `work-${after?.key ?? turn.key}`,
+        speaker: "dot",
+        turn: turn.key,
+        steps: run,
+        startMs: (after && (seenAt(after) ?? after.atMs)) ?? run[0]?.startT ?? null,
+      });
+    run = null;
+    placed.push(...held);
+    held = [];
+  };
+  for (const item of turn.items) {
+    clock = Math.max(clock, item.atMs ?? clock);
+    take(clock);
+    if (waits(item) && run) held.push(item);
+    else if (waits(item)) placed.push(item);
+    else {
+      close();
+      placed.push(item);
+      after = item;
+    }
+  }
+  take();
+  if (open) run ??= [];
+  close();
+  return placed;
+}
+
+// dot's words before more steps in their turn narrate its work; the words after its last steps are
+// its answer.
+function narrated(items: ThreadItem[]): ThreadItem[] {
+  let worked = false;
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index];
+    if (item?.kind === "work" && item.steps.length) worked = true;
+    else if (worked && item?.kind === "message" && item.message.role === "assistant")
+      items[index] = { ...item, narration: true };
+  }
+  return items;
+}
+
+// Each turn shows its steps where dot took them, between what it said. A finished turn then ends with
+// its model and what its calls reported; `main` names the task's model when they said nothing.
 export function withWork(
   items: readonly ThreadItem[],
   steps: readonly WorkStep[],
@@ -437,15 +526,9 @@ export function withWork(
     calls.length < limit || (start !== null && start >= (calls[0]?.atMs ?? 0));
   return turns.flatMap((turn, index) => {
     const own = owned.get(index) ?? [];
-    const latest = index === turns.length - 1;
-    const open = latest && live;
+    const open = live && index === turns.length - 1;
     const bills = charged.get(index) ?? [];
     const usd = bills.reduce((sum, call) => sum + call.usd, 0);
-    const work = own.length > 0 || open;
-    // The lines close dot's own part of the turn: the computer changing hands after it, and a message
-    // Stop left unsent, stay after.
-    let end = turn.items.length;
-    while (end > 0 && trails(turn.items[end - 1])) end--;
     const calls = counted(turn.start, usage, AGENT_LIMITS.usageCalls)
       ? (called.get(index) ?? [])
       : [];
@@ -459,25 +542,26 @@ export function withWork(
           counted(turn.start, spends, AGENT_LIMITS.spendCalls),
           main,
         );
-    if (!work && !meta) return turn.items;
-    const estimated = bills.some((call) => call.estimated);
+    if (!own.length && !open && !meta) return turn.items;
+    const placed = narrated(interleave(turn, own, open));
+    const last = placed.findLastIndex((item) => item.kind === "work");
+    const work = placed[last] as WorkItem | undefined;
+    // The run dot is at counts the whole turn, as the task's own clock does.
+    if (work && (usd > 0 || open))
+      placed[last] = {
+        ...work,
+        ...(open && turn.start !== null ? { startMs: turn.start } : {}),
+        ...(usd > 0 ? { spend: { usd, estimated: bills.some((call) => call.estimated) } } : {}),
+      };
+    if (!meta) return placed;
+    // The line closes dot's own part of the turn: the computer changing hands after it, and a message
+    // Stop left unsent, stay after.
+    let end = placed.length;
+    while (end > 0 && trails(placed[end - 1])) end--;
     return [
-      ...turn.items.slice(0, end),
-      ...(work
-        ? [
-            {
-              kind: "work" as const,
-              key: `work-${turn.key}`,
-              speaker: "dot" as const,
-              turn: turn.key,
-              steps: own,
-              startMs: turn.start ?? own[0]?.startT ?? null,
-              ...(usd > 0 ? { spend: { usd, estimated } } : {}),
-            },
-          ]
-        : []),
-      ...(meta ? [meta] : []),
-      ...turn.items.slice(end),
+      ...placed.slice(0, end),
+      { ...meta, work: placed[end - 1]?.kind === "work" },
+      ...placed.slice(end),
     ];
   });
 }

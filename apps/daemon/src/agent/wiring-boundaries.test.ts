@@ -122,7 +122,7 @@ function setup() {
     docker: {} as AgentWiringDeps["docker"],
     keyd: {} as AgentWiringDeps["keyd"],
     monitor: { health: { online: true, bootId: "one" } },
-    killSwitch: { isBusy: () => busy, stopSession: async () => undefined },
+    killSwitch: { isBusy: () => busy, contain: async () => undefined },
     keydPorts: { from: 4791, to: 4796 },
     toolPort: 0,
   };

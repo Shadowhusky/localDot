@@ -1,7 +1,7 @@
 // Resolves the custom properties that stylesheets declare on :root, as a browser would for one
 // appearance and set of media features. jsdom computes none of them, so tests read the source.
 export interface TokenContext {
-  appearance?: "graphite" | "midnight";
+  appearance?: "graphite" | "midnight" | "daylight";
   // Media features that match, written as in the stylesheet: "prefers-contrast: more".
   media?: string[];
 }
@@ -11,8 +11,6 @@ export interface CssBlock {
   selector: string;
   body: string;
 }
-
-const MIDNIGHT = ':root[data-appearance="midnight"]';
 
 export function cssBlocks(css: string): CssBlock[] {
   const blocks: CssBlock[] = [];
@@ -43,7 +41,9 @@ function applies(block: CssBlock, appearance: string, media: string[]): boolean 
   }
   if (block.selector.startsWith("@theme")) return true;
   const selectors = block.selector.split(",").map((s) => s.trim());
-  return selectors.includes(":root") || (appearance === "midnight" && selectors.includes(MIDNIGHT));
+  return (
+    selectors.includes(":root") || selectors.includes(`:root[data-appearance="${appearance}"]`)
+  );
 }
 
 export function readTokens(sources: string[], context: TokenContext = {}): Map<string, string> {

@@ -28,12 +28,20 @@
 .shared-screen > .stage {
   height: 100%;
 }
+/* Over the picture, so on glass: it reads on a light or a dark screen in every appearance. */
 .shared-screen-status {
   position: absolute;
   left: 12px;
   top: 12px;
+  padding: var(--spacing) calc(var(--spacing) * 2.5);
+  border-radius: var(--radius-full);
+  background-color: var(--color-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  backdrop-filter: blur(var(--blur-glass));
+  box-shadow: var(--shadow-glass);
   pointer-events: none;
-  font-size: var(--text-callout);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 .shared-chat {
   display: flex;

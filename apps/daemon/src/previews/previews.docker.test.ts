@@ -281,8 +281,8 @@ describe.skipIf(!DOCKER_TESTS)("previews of servers in a desktop, through its ga
     expect(status.state).toBe("ready");
     expect(status.servers).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ port: 1355, url: "http://localhost:1355/" }),
-        expect.objectContaining({ port: 5173, url: "http://localhost:5173/" }),
+        expect.objectContaining({ port: 1355, url: "https://localhost:1355/", state: "answering" }),
+        expect.objectContaining({ port: 5173, url: "http://localhost:5173/", state: "answering" }),
       ]),
     );
     const ports = status.servers.map((server) => server.port);
@@ -356,13 +356,10 @@ describe.skipIf(!DOCKER_TESTS)("previews of servers in a desktop, through its ga
   });
 
   it("never opens localDot's own services", async () => {
-    const opened = await previews.open(TASK, { url: "http://localhost:7700/healthz" }, ASKED);
-    const device = await signIn(opened.open);
-    const answer = await send(device.port, device.next, {
-      host: device.host,
-      cookie: device.cookie,
-    });
-    expect(answer.status).toBe(403);
+    // The computer never lists them, so there is nothing running there to open.
+    await expect(
+      previews.open(TASK, { url: "http://localhost:7700/healthz" }, ASKED),
+    ).rejects.toMatchObject({ status: 409 });
   });
 
   it.skipIf(!OLD_GATE_IMAGE)(

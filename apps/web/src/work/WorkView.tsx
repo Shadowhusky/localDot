@@ -7,6 +7,7 @@ import { Button } from "../ui/Button.tsx";
 import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { Select } from "../ui/Select.tsx";
+import { useReading } from "./reading.ts";
 import type { WorkCard } from "./work-view.ts";
 
 const MODES = [
@@ -102,14 +103,14 @@ function WorkSurfaceView({
             ? shown
             : null
         : null;
-  // Keep the last DOM picture while hidden; only painting and network work pause.
-  if (!enabled) return null;
-  const pin = () => {
+  const reading = useReading(() => {
     if (!replay && mode === "auto" && card) {
       setPinned(card);
       setMode("work");
     }
-  };
+  });
+  // Keep the last DOM picture while hidden; only painting and network work pause.
+  if (!enabled) return null;
   return (
     <section
       className="work-view"
@@ -132,9 +133,7 @@ function WorkSurfaceView({
             className="work-content"
             tabIndex={0}
             aria-label="Work output"
-            onWheel={pin}
-            onPointerDown={pin}
-            onKeyDown={pin}
+            {...reading}
           >
             <div>
               {card.image && (

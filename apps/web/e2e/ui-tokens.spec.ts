@@ -25,6 +25,7 @@ const WEB = fileURLToPath(new URL("..", import.meta.url));
 const tokensCss = readFileSync(join(WEB, "src/ui/tokens.css"), "utf8");
 
 type Rgba = [number, number, number, number];
+type Appearance = "graphite" | "midnight" | "daylight";
 
 let scratch: string;
 let server: Server;
@@ -89,7 +90,7 @@ async function expectColour(page: Page, token: string, expected: string) {
   expect(Math.abs(a - ea), `${token} alpha`).toBeLessThan(0.01);
 }
 
-async function open(browser: Browser, appearance: "graphite" | "midnight", contrast = false) {
+async function open(browser: Browser, appearance: Appearance, contrast = false) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   await page.emulateMedia({ contrast: contrast ? "more" : "no-preference" });
@@ -111,7 +112,7 @@ for (const [engine, launch] of Object.entries(ENGINES)) {
       await browser?.close();
     });
 
-    for (const appearance of ["graphite", "midnight"] as const) {
+    for (const appearance of ["graphite", "midnight", "daylight"] as const) {
       for (const contrast of [false, true]) {
         const label = `${appearance}${contrast ? ", more contrast" : ""}`;
 
@@ -147,6 +148,9 @@ for (const [engine, launch] of Object.entries(ENGINES)) {
           });
           expect(body.background).toBe(await computed(page, "color", "var(--color-void)"));
           expect(body.family).toMatch(/^system-ui, -apple-system/);
+          expect(
+            await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
+          ).toBe(appearance === "daylight" ? "light" : "dark");
           await context.close();
         });
 

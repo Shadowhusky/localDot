@@ -1,14 +1,20 @@
 import { RadioCards } from "../ui/RadioCards.tsx";
-import type { Appearance } from "./appearance.ts";
+import { APPEARANCE_CHOICES, type AppearanceChoice, type DarkAppearance } from "./appearance.ts";
 import "./onboarding.css";
 
 export interface AppearanceControl {
-  value: Appearance;
+  value: AppearanceChoice;
+  dark: DarkAppearance;
   saved: boolean;
-  change(value: Appearance): void;
+  change(value: AppearanceChoice): void;
 }
 
-const NAMES: Record<Appearance, string> = { graphite: "Graphite", midnight: "Midnight" };
+export const APPEARANCE_NAMES: Record<AppearanceChoice, string> = {
+  graphite: "Graphite",
+  midnight: "Midnight",
+  daylight: "Daylight",
+  system: "System",
+};
 
 export function AppearancePicker({
   appearance,
@@ -22,11 +28,20 @@ export function AppearancePicker({
       layout="tiles"
       aria-label={label}
       value={appearance.value}
-      onValueChange={(value) => appearance.change(value === "midnight" ? "midnight" : "graphite")}
-      options={(["graphite", "midnight"] as const).map((value) => ({
+      onValueChange={(value) => {
+        const choice = APPEARANCE_CHOICES.find((option) => option === value);
+        if (choice) appearance.change(choice);
+      }}
+      options={APPEARANCE_CHOICES.map((value) => ({
         value,
-        label: NAMES[value],
-        preview: <span className="appearance-swatch" data-appearance={value} />,
+        label: APPEARANCE_NAMES[value],
+        preview: (
+          <span
+            className="appearance-swatch"
+            data-appearance={value}
+            data-dark={value === "system" ? appearance.dark : undefined}
+          />
+        ),
       }))}
     />
   );

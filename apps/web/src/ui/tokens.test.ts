@@ -80,12 +80,11 @@ function palette(context: TokenContext) {
 const WHITE: Rgba = [255, 255, 255, 1];
 const BLACK: Rgba = [0, 0, 0, 1];
 const MORE_CONTRAST = "prefers-contrast: more";
-const CONTEXTS: TokenContext[] = [
-  { appearance: "graphite" },
-  { appearance: "midnight" },
-  { appearance: "graphite", media: [MORE_CONTRAST] },
-  { appearance: "midnight", media: [MORE_CONTRAST] },
-];
+const APPEARANCES = ["graphite", "midnight", "daylight"] as const;
+const CONTEXTS: TokenContext[] = APPEARANCES.flatMap((appearance) => [
+  { appearance },
+  { appearance, media: [MORE_CONTRAST] },
+]);
 
 describe("colour tokens", () => {
   for (const context of CONTEXTS) {
@@ -127,10 +126,29 @@ describe("colour tokens", () => {
         expect(ratio, `field-line on ${ground}`).toBeGreaterThanOrEqual(3);
       }
     });
+
+    // Xenon and amber are points, rings and arcs; red is words, on the page and on its own tint.
+    it(`keeps the lights at 3:1 and red words at 4.5:1 (${label})`, () => {
+      for (const ground of ["void", "console", "raised", "overlay", "popover"]) {
+        for (const light of ["xenon", "attention"])
+          expect(contrast(color(light), color(ground)), `${light} on ${ground}`).toBeGreaterThan(3);
+        const red = color("danger-fg");
+        expect(contrast(red, color(ground)), `danger on ${ground}`).toBeGreaterThanOrEqual(4.5);
+        const tint = over(color("danger-bg"), color(ground));
+        expect(contrast(red, tint), `danger on its tint on ${ground}`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    it(`keeps the primary action's words on its face (${label})`, () => {
+      for (const face of ["porcelain-top", "porcelain-bottom"]) {
+        const ratio = contrast(color("porcelain-ink"), color(face));
+        expect(ratio, face).toBeGreaterThanOrEqual(7);
+      }
+    });
   }
 
-  it("keeps secondary and tertiary text apart in both appearances", () => {
-    for (const appearance of ["graphite", "midnight"] as const) {
+  it("keeps secondary and tertiary text apart in every appearance", () => {
+    for (const appearance of APPEARANCES) {
       const color = palette({ appearance });
       expect(contrast(color("fg-2"), color("fg-3")), appearance).toBeGreaterThanOrEqual(1.5);
     }
@@ -174,8 +192,17 @@ describe("colour tokens", () => {
     expect(widest).toBeGreaterThanOrEqual(VISIBLY_APART);
   });
 
+  it("paints the stage's marks and videos in Graphite's colours under Daylight", () => {
+    const graphite = readTokens([tokensCss]);
+    const daylight = readTokens([tokensCss], { appearance: "daylight" });
+    const marks = [...graphite.keys()].filter((name) => name.startsWith("--color-stage-"));
+    expect(marks.length).toBeGreaterThan(10);
+    for (const name of marks) expect(daylight.get(name), name).toBe(graphite.get(name));
+    expect(daylight.get("--color-fg-1")).not.toBe(graphite.get("--color-fg-1"));
+  });
+
   it("makes glass solid for more contrast or less transparency", () => {
-    for (const appearance of ["graphite", "midnight"] as const) {
+    for (const appearance of APPEARANCES) {
       for (const feature of [MORE_CONTRAST, "prefers-reduced-transparency: reduce"]) {
         const tokens = readTokens([tokensCss], { appearance, media: [feature] });
         expect(tokens.get("--color-glass"), `${appearance}, ${feature}`).toBe(

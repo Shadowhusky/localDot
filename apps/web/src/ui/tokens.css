@@ -1,5 +1,6 @@
-/* One ramp per appearance: Graphite near-neutral, Midnight the same steps at hue 255. Roles below
-   point into the ramp of the active appearance, so components name roles, never hex. */
+/* One ramp per appearance: Graphite near-neutral, Midnight the same steps at hue 255, Daylight the
+   house in daylight: a light grey floor, white cards and near-black ink. Roles below point into the
+   ramp of the active appearance, so components name roles, never hex. */
 @layer theme {
   :root {
     --graphite-void: #0a0b0d;
@@ -31,6 +32,22 @@
     --midnight-glass: rgba(10, 16, 26, 0.72);
     --midnight-glass-solid: rgba(10, 16, 26, 0.94);
     --midnight-stage-dim: rgba(6, 11, 20, 0.42);
+
+    /* Lift reverses in daylight: a card is white over a light grey floor. The well sinks a little
+       below the floor, and raised-2, a tile or bubble on white, is grey rather than lighter. */
+    --daylight-void: #f2f3f5;
+    --daylight-console: #f8f9fa;
+    --daylight-raised: #ffffff;
+    --daylight-raised-2: #ebedf0;
+    --daylight-overlay: #fcfcfd;
+    --daylight-popover: #ffffff;
+    --daylight-well: #eceef1;
+    --daylight-fg-1: #16171a;
+    --daylight-fg-2: #474a52;
+    --daylight-fg-3: #676a72;
+    --daylight-field-line: #858890;
+    --daylight-glass: rgba(250, 250, 251, 0.8);
+    --daylight-glass-solid: rgba(250, 250, 251, 0.96);
   }
 }
 
@@ -126,8 +143,23 @@
   --color-glyph-light: #ffffff;
   --color-glyph-mid: #d9dce0;
   --color-glyph-shade: #9fa4ab;
+  /* What the stage paints over the picture and into a video: the house's colours in a dark
+     appearance, a dark appearance's in Daylight, so dot's marks and a video look the same whatever
+     the page around them. */
+  --color-stage-fg-1: var(--color-fg-1);
+  --color-stage-fg-2: var(--color-fg-2);
+  --color-stage-void: var(--color-void);
+  --color-stage-hud: var(--color-glass-solid);
+  --color-stage-hud-line: var(--color-glass-line);
+  --color-stage-xenon: var(--color-xenon);
+  --color-stage-attention: var(--color-attention);
+  --color-stage-key-bevel: var(--color-key-bevel);
+  --color-stage-spill: var(--color-spill);
+  --color-stage-spill-xenon: var(--color-spill-xenon);
 
   --color-state-hover: rgba(255, 255, 255, 0.06);
+  /* The band of light that sweeps a skeleton's bones. */
+  --color-shimmer: var(--color-state-hover);
   --color-state-pressed: rgba(255, 255, 255, 0.1);
   --color-state-selected: var(--color-selected);
   --color-selected: rgba(255, 255, 255, 0.1);
@@ -471,6 +503,170 @@
     --color-glass-solid: var(--midnight-glass-solid);
   }
 
+  /* Daylight: the same roles, lit from above. White light turns into ink where the dark house
+     layers white at an alpha, porcelain controls become ink with white words, and xenon and amber
+     deepen to hold 3:1 on white. */
+  :root[data-appearance="daylight"] {
+    --color-void: var(--daylight-void);
+    --color-console: var(--daylight-console);
+    --color-raised: var(--daylight-raised);
+    --color-raised-2: var(--daylight-raised-2);
+    --color-overlay: var(--daylight-overlay);
+    --color-popover: var(--daylight-popover);
+    --color-well: var(--daylight-well);
+    --color-fg-1: var(--daylight-fg-1);
+    --color-fg-2: var(--daylight-fg-2);
+    --color-fg-3: var(--daylight-fg-3);
+    --color-fg-4: rgba(22, 23, 26, 0.28);
+    --color-field-line: var(--daylight-field-line);
+    --color-glass: var(--daylight-glass);
+    --color-glass-solid: var(--daylight-glass-solid);
+
+    --color-hairline: rgba(22, 23, 26, 0.08);
+    --color-separator: rgba(22, 23, 26, 0.1);
+    --color-field-line-hover: #6a6d75;
+    --color-field: #ffffff;
+    --color-field-ring: rgba(22, 23, 26, 0.1);
+    --color-track: rgba(22, 23, 26, 0.06);
+    --color-track-strong: rgba(22, 23, 26, 0.16);
+    --color-grabber: rgba(22, 23, 26, 0.22);
+    --color-row-hover: rgba(22, 23, 26, 0.035);
+    --color-scrollbar: rgba(22, 23, 26, 0.24);
+    --color-menu-dim: rgba(22, 23, 26, 0.12);
+    --color-code-text: #24262b;
+    --color-inline-code: rgba(22, 23, 26, 0.06);
+    --color-quote-bar: rgba(22, 23, 26, 0.18);
+    --color-link-line: rgba(22, 23, 26, 0.35);
+    --color-table-head: rgba(22, 23, 26, 0.03);
+    --color-code-keyword: #7b3fbf;
+    --color-code-string: #2b7a37;
+    --color-code-number: #0e64a3;
+    --color-checker-light: #ffffff;
+    --color-checker-dark: #e6e8eb;
+    --color-scrubber-track: rgba(22, 23, 26, 0.14);
+    --color-step-tick: rgba(22, 23, 26, 0.45);
+
+    --color-xenon: #0b7fae;
+    --color-xenon-glow: rgba(11, 127, 174, 0.24);
+    --color-xenon-a08: rgba(11, 127, 174, 0.08);
+    --color-xenon-a10: rgba(11, 127, 174, 0.1);
+    --color-xenon-a40: rgba(11, 127, 174, 0.4);
+    --color-you: var(--daylight-fg-1);
+    --color-you-glow: rgba(22, 23, 26, 0.12);
+    --color-attention: #a8650c;
+
+    --color-diff-add-fg: #176c37;
+    --color-diff-add-bg: rgba(40, 160, 90, 0.12);
+    --color-diff-del-fg: #a92a27;
+    --color-diff-del-bg: rgba(220, 70, 70, 0.1);
+    --color-danger-fg: #b72c29;
+    --color-danger-bg: rgba(220, 60, 60, 0.1);
+
+    --color-state-hover: rgba(22, 23, 26, 0.05);
+    --color-shimmer: rgba(255, 255, 255, 0.7);
+    --color-state-pressed: rgba(22, 23, 26, 0.09);
+    --color-selected: rgba(22, 23, 26, 0.07);
+    --color-selection: rgba(22, 23, 26, 0.14);
+    --color-control: rgba(22, 23, 26, 0.06);
+    --color-control-hover: rgba(22, 23, 26, 0.09);
+    --color-control-pressed: rgba(22, 23, 26, 0.13);
+    --color-key-bevel: rgba(22, 23, 26, 0.1);
+
+    --color-porcelain-top: #2c2e33;
+    --color-porcelain-bottom: #17181b;
+    --color-porcelain-pressed-top: #222428;
+    --color-porcelain-pressed-bottom: #111214;
+    --color-porcelain-ink: #ffffff;
+    --color-porcelain-dark-top: #ffffff;
+    --color-porcelain-dark-bottom: #eceef1;
+    --color-porcelain-tint: rgba(255, 255, 255, 0.08);
+
+    --color-scrim: rgba(22, 23, 26, 0.24);
+
+    --color-glass-line: rgba(22, 23, 26, 0.1);
+    --color-glass-hover: rgba(22, 23, 26, 0.06);
+    --color-glass-pressed: rgba(22, 23, 26, 0.1);
+    --color-thick-glass: rgba(252, 252, 253, 0.97);
+    --color-inset: rgba(22, 23, 26, 0.035);
+
+    --rim-xenon: inset 0 0 0 1.5px var(--color-xenon), inset 0 0 18px rgba(11, 127, 174, 0.12);
+    --rim-xenon-glow:
+      0 0 0 1px rgba(11, 127, 174, 0.3), 0 0 28px var(--color-xenon-glow),
+      0 0 90px rgba(11, 127, 174, 0.1);
+    --rim-you: inset 0 0 0 1.5px var(--color-you), inset 0 0 18px rgba(22, 23, 26, 0.06);
+    --rim-you-glow:
+      0 0 0 1px rgba(22, 23, 26, 0.2), 0 0 28px var(--color-you-glow),
+      0 0 90px rgba(22, 23, 26, 0.05);
+    --color-spill: rgba(255, 255, 255, 0.7);
+    --color-spill-xenon: rgba(11, 127, 174, 0.08);
+    --spill-you: radial-gradient(ellipse 50% 70% at 50% 0, rgba(22, 23, 26, 0.04), transparent 70%);
+
+    /* The curtain in daylight: pale folds, the beam and the pool brighter than the cloth. */
+    --curtain:
+      radial-gradient(ellipse 30% 70% at 50% -8%, rgba(255, 255, 255, 0.8), transparent 70%),
+      radial-gradient(ellipse 44% 56% at 50% 36%, rgba(255, 255, 255, 0.4), transparent 72%),
+      repeating-linear-gradient(
+        90deg,
+        rgba(22, 23, 26, 0.035) 0,
+        rgba(255, 255, 255, 0.05) 37px,
+        rgba(22, 23, 26, 0.035) 74px
+      ),
+      repeating-linear-gradient(
+        90deg,
+        rgba(22, 23, 26, 0.02) 0,
+        rgba(255, 255, 255, 0.03) 23px,
+        rgba(22, 23, 26, 0.02) 46px
+      ),
+      linear-gradient(180deg, #e8eaed 0%, #e3e5e9 60%, #dcdee2 100%);
+    --curtain-shade: linear-gradient(180deg, transparent, rgba(22, 23, 26, 0.06));
+    --setup-light:
+      radial-gradient(ellipse 34% 60% at 50% -6%, rgba(255, 255, 255, 0.9), transparent 70%),
+      radial-gradient(ellipse 30% 22% at 50% 30%, rgba(255, 255, 255, 0.6), transparent 70%);
+    --setup-light-phone: radial-gradient(
+      ellipse 60% 40% at 50% -4%,
+      rgba(255, 255, 255, 0.9),
+      transparent 70%
+    );
+    --color-progress-track: rgba(22, 23, 26, 0.1);
+    --color-progress-fill: rgba(22, 23, 26, 0.72);
+
+    --shadow-edge: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    --shadow-stage:
+      0 0 0 1px rgba(22, 23, 26, 0.08), 0 8px 24px rgba(22, 23, 26, 0.08),
+      0 32px 80px rgba(22, 23, 26, 0.1);
+    --shadow-console: 0 0 0 1px rgba(22, 23, 26, 0.06), 0 1px 2px rgba(22, 23, 26, 0.04);
+    --shadow-raised: 0 0 0 1px rgba(22, 23, 26, 0.07), 0 1px 2px rgba(22, 23, 26, 0.06);
+    --shadow-overlay:
+      0 0 0 1px rgba(22, 23, 26, 0.08), 0 4px 12px rgba(22, 23, 26, 0.08),
+      0 24px 64px rgba(22, 23, 26, 0.16);
+    --shadow-glass:
+      inset 0 0.5px 0 rgba(255, 255, 255, 0.9), 0 0 0 0.5px rgba(22, 23, 26, 0.12),
+      0 8px 24px rgba(22, 23, 26, 0.12);
+    --shadow-thick-glass:
+      inset 0 0.5px 0 rgba(255, 255, 255, 0.9), 0 0 0 0.5px rgba(22, 23, 26, 0.12),
+      0 24px 64px rgba(22, 23, 26, 0.2), 0 6px 18px rgba(22, 23, 26, 0.1);
+    --shadow-porcelain:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 2px rgba(22, 23, 26, 0.3),
+      0 4px 12px rgba(22, 23, 26, 0.14);
+    --shadow-porcelain-sm: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 2px rgba(22, 23, 26, 0.3);
+    --shadow-thumb: 0 0 0 0.5px rgba(22, 23, 26, 0.1), 0 1px 3px rgba(22, 23, 26, 0.14);
+    --shadow-knob: 0 0 0 0.5px rgba(22, 23, 26, 0.1), 0 1px 3px rgba(22, 23, 26, 0.24);
+    --shadow-knob-on: 0 1px 2px rgba(22, 23, 26, 0.3);
+    --shadow-thumbnail: 0 0 0 0.5px rgba(22, 23, 26, 0.14);
+    --focus-halo: 0 0 0 5px rgba(255, 255, 255, 0.75);
+
+    --color-stage-fg-1: var(--graphite-fg-1);
+    --color-stage-fg-2: var(--graphite-fg-2);
+    --color-stage-void: var(--graphite-void);
+    --color-stage-hud: var(--graphite-glass-solid);
+    --color-stage-hud-line: rgba(255, 255, 255, 0.14);
+    --color-stage-xenon: #3fb5de;
+    --color-stage-attention: #e9b44c;
+    --color-stage-key-bevel: rgba(255, 255, 255, 0.06);
+    --color-stage-spill: rgba(220, 228, 238, 0.07);
+    --color-stage-spill-xenon: rgba(63, 181, 222, 0.11);
+  }
+
   /* Under the laptop layout the stage spans its column and the band under it is shorter. */
   @media (width < 1100px) {
     :root {
@@ -505,11 +701,21 @@
       --color-glass: var(--color-glass-solid);
       --focus-width: 3px;
     }
+
+    :root[data-appearance="daylight"] {
+      --color-hairline: var(--color-field-line);
+      --color-field-ring: rgba(22, 23, 26, 0.3);
+      --color-fg-2: #36383f;
+      --color-fg-3: #4e5159;
+      --color-glass: var(--color-glass-solid);
+      --focus-width: 3px;
+    }
   }
 
   @media (prefers-reduced-transparency: reduce) {
     :root,
-    :root[data-appearance="midnight"] {
+    :root[data-appearance="midnight"],
+    :root[data-appearance="daylight"] {
       --color-glass: var(--color-glass-solid);
       --blur-glass: 0px;
     }

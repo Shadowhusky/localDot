@@ -44,7 +44,8 @@ export interface ReplaySource {
   sessionId: string;
   origin: string;
   authorization: string;
-  video: { upto: number | null } | null;
+  // A live recording's committed fragments, or a finished one's file at the size it was opened.
+  video: { upto: number | null; bytes?: number } | null;
   gaps: RecordingGap[];
 }
 

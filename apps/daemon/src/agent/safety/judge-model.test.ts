@@ -91,6 +91,35 @@ describe("the fast model as judge", () => {
       "too large",
     );
   });
+
+  it("turns thinking down in each API's own words, only where the model takes that level", () => {
+    const of = (provider: string, client: ModelBinding["client"], model: string) => ({
+      ...binding(client, model),
+      provider,
+    });
+    const body = (b: ModelBinding, effort: Parameters<typeof completionCall>[4]) =>
+      completionCall(b, "sys", "prompt", undefined, effort).body as Record<string, unknown>;
+    expect(body(of("openai", "openai", "gpt-5-mini"), "minimal")).toMatchObject({
+      reasoning: { effort: "minimal" },
+    });
+    expect(body(of("groq", "groq", "openai/gpt-oss-120b"), "low")).toMatchObject({
+      reasoning_effort: "low",
+    });
+    expect(body(of("deepseek", "deepseek", "deepseek-chat"), "none")).toMatchObject({
+      thinking: { type: "disabled" },
+    });
+    expect(body(of("google", "google", "gemini-2.5-flash"), "none")).toMatchObject({
+      generationConfig: { maxOutputTokens: 512, thinkingConfig: { thinkingBudget: 0 } },
+    });
+    expect(body(of("google", "google", "gemini-3-flash"), "minimal")).toMatchObject({
+      generationConfig: { thinkingConfig: { thinkingLevel: "minimal" } },
+    });
+    const plain = body(of("anthropic", "anthropic", "claude-haiku-4-5"), "none");
+    expect(plain).not.toHaveProperty("thinking");
+    // A level the model doesn't offer, or no level, leaves the request as it was.
+    expect(body(of("openai", "openai", "gpt-5-mini"), "none")).not.toHaveProperty("reasoning");
+    expect(body(of("openai", "openai", "gpt-5-mini"), undefined)).not.toHaveProperty("reasoning");
+  });
 });
 
 describe("visual target requests", () => {

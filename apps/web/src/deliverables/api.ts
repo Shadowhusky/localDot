@@ -1,6 +1,8 @@
 import {
   CompareReply,
+  ComputerFileReply,
   FileVersionsReply,
+  isComputerPath,
   JsonPreview,
   OpenOnMacReply,
   PREVIEW_LIMITS,
@@ -37,6 +39,31 @@ const fileBase = (sessionId: string, name: string) => {
     throw new DeliverableError(400, "invalid file");
   return `/api/agent/sessions/${sessionId}/files/${encodeURIComponent(name)}`;
 };
+// A version of a file dot handed over, which localDot keeps.
+export interface KeptFile {
+  readonly sessionId: string;
+  readonly name: string;
+  readonly version: number | null;
+}
+// The file itself on dot's computer, by its path there: one the user sent, or one the task changed.
+export interface ComputerFile {
+  readonly sessionId: string;
+  readonly name: string;
+  readonly path: string;
+}
+export type FileRef = KeptFile | ComputerFile;
+export const onComputer = (file: FileRef): file is ComputerFile => "path" in file;
+// A request about a file: a kept version's own address, or the task's computer files by path.
+function fileRoute(file: FileRef, action: string, query: Record<string, string> = {}): string {
+  if (!onComputer(file)) {
+    const params = new URLSearchParams(file.version === null ? {} : { v: String(file.version) });
+    for (const [key, value] of Object.entries(query)) params.set(key, value);
+    return `${fileBase(file.sessionId, file.name)}/${action}${params.size ? `?${params}` : ""}`;
+  }
+  if (!ULID_PATTERN.test(file.sessionId) || !isComputerPath(file.path))
+    throw new DeliverableError(400, "invalid file");
+  return `/api/agent/sessions/${file.sessionId}/computer-files/${action}?${new URLSearchParams({ path: file.path, ...query })}`;
+}
 async function request(
   api: ApiClient,
   path: string,
@@ -97,13 +124,10 @@ export type LoadedPages =
 // for a long deck, then kept for that version.
 export async function loadPages(
   api: ApiClient,
-  sessionId: string,
-  name: string,
-  version: number | null,
+  file: KeptFile,
   signal: AbortSignal,
 ): Promise<LoadedPages> {
-  const query = version === null ? "" : `?v=${version}`;
-  const response = await request(api, `${fileBase(sessionId, name)}/pages${query}`, {
+  const response = await request(api, fileRoute(file, "pages"), {
     signal,
     timeoutMs: 150_000,
   });
@@ -208,14 +232,13 @@ export async function previewBase(
   return base;
 }
 // Where the full preview loads a file the browser draws itself: a picture, a page, a PDF or media.
-export function previewUrl(
-  api: ApiClient,
-  base: string,
-  name: string,
-  version: number | null,
-): string {
-  if (!safeTransferName(name)) throw new DeliverableError(400, "invalid file");
-  return `${origin(api)}${base}${encodeURIComponent(name)}${version === null ? "" : `?v=${version}`}`;
+export function previewUrl(api: ApiClient, base: string, file: FileRef): string {
+  if (!safeTransferName(file.name)) throw new DeliverableError(400, "invalid file");
+  const name = encodeURIComponent(file.name);
+  if (!onComputer(file))
+    return `${origin(api)}${base}${name}${file.version === null ? "" : `?v=${file.version}`}`;
+  if (!isComputerPath(file.path)) throw new DeliverableError(400, "invalid file");
+  return `${origin(api)}${base}computer/${name}?${new URLSearchParams({ path: file.path })}`;
 }
 // A PDF's bytes for the renderer, never more than `max`.
 export async function loadPreviewBytes(
@@ -236,30 +259,25 @@ export async function loadPreviewBytes(
 const TEXT_REPLY_BYTES = 8 * 1024 * 1024;
 export async function loadText(
   api: ApiClient,
-  sessionId: string,
-  name: string,
-  version: number | null,
+  file: FileRef,
   from: "start" | "end",
   signal: AbortSignal,
 ): Promise<TextFileReply> {
-  const query = new URLSearchParams(version === null ? {} : { v: String(version) });
-  if (from === "end") query.set("from", "end");
-  const tail = query.size ? `?${query}` : "";
-  const response = await request(api, `${fileBase(sessionId, name)}/text${tail}`, { signal });
+  const response = await request(
+    api,
+    fileRoute(file, "text", from === "end" ? { from: "end" } : {}),
+    { signal },
+  );
   const body = await bounded(response, TEXT_REPLY_BYTES);
   return TextFileReply.parse(JSON.parse(new TextDecoder().decode(body)));
 }
 export async function loadTable(
   api: ApiClient,
-  sessionId: string,
-  name: string,
-  version: number | null,
+  file: FileRef,
   sheet: number,
   signal: AbortSignal,
 ): Promise<TableFileReply> {
-  const query = new URLSearchParams({ sheet: String(sheet) });
-  if (version !== null) query.set("v", String(version));
-  const response = await request(api, `${fileBase(sessionId, name)}/table?${query}`, {
+  const response = await request(api, fileRoute(file, "table", { sheet: String(sheet) }), {
     signal,
     timeoutMs: 45_000,
   });
@@ -274,4 +292,50 @@ export function isLoopbackPage(
     location.protocol === "http:" &&
     (location.hostname === "127.0.0.1" || location.hostname === "localhost")
   );
+}
+// What the computer says of one of its files: its size now, or why it can't be read.
+export async function loadComputerFile(
+  api: ApiClient,
+  file: ComputerFile,
+  signal: AbortSignal,
+): Promise<ComputerFileReply> {
+  const response = await request(api, fileRoute(file, "about"), { signal, timeoutMs: 30_000 });
+  return ComputerFileReply.parse(
+    JSON.parse(new TextDecoder().decode(await bounded(response, PREVIEW_LIMITS.jsonBytes))),
+  );
+}
+// A small picture of a picture on the computer, made metadata-free by the daemon.
+export async function loadThumbnail(
+  api: ApiClient,
+  file: ComputerFile,
+  signal: AbortSignal,
+): Promise<Blob> {
+  const response = await request(api, fileRoute(file, "thumbnail"), { signal, timeoutMs: 45_000 });
+  if (response.headers.get("content-type") !== "image/png") {
+    void response.body?.cancel().catch(() => {});
+    throw new DeliverableError(415, "unexpected thumbnail");
+  }
+  return new Blob([await bounded(response, PREVIEW_LIMITS.pngBytes)], { type: "image/png" });
+}
+// A file on the computer, checked the way result downloads are (agent/file-transfer.ts).
+export async function downloadComputerFile(
+  api: ApiClient,
+  file: ComputerFile,
+  signal: AbortSignal,
+): Promise<Blob> {
+  const response = await request(api, fileRoute(file, "download"), {
+    signal,
+    timeoutMs: FILE_LIMITS.deadlineMs,
+  });
+  if (
+    response.headers.get("content-disposition") !== disposition(file.name) ||
+    response.headers.get("content-type") !== "application/octet-stream" ||
+    response.headers.get("x-content-type-options") !== "nosniff"
+  ) {
+    void response.body?.cancel().catch(() => {});
+    throw new FileTransferFailure(false, response.status);
+  }
+  return new Blob([await bounded(response, FILE_LIMITS.bytes)], {
+    type: "application/octet-stream",
+  });
 }

@@ -1,6 +1,8 @@
 // biome-ignore-all lint/a11y/useFocusableInteractive: rows are reached through aria-activedescendant on the search field, which keeps focus.
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: the search field takes the keys for every row.
 // biome-ignore-all lint/a11y/useSemanticElements: a listbox's groups are ARIA groups; a fieldset cannot sit in one.
+
+import { CONVERSATION_NAME_CHARS, RenameConversation } from "@localdot/protocol";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -30,6 +32,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
+import { SessionGlyph } from "../ui/SessionGlyph.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import "../ui/conversations-layout.css";
@@ -49,8 +52,9 @@ export interface ConversationListProps {
   onDeleted?(sessions: readonly string[]): void;
 }
 
-// The recent conversations by day, a search over them and the way into Replay for the rest. The
-// search field keeps the focus while the arrows move through the rows, as a picker's does.
+// The recent conversations, those under way first and the rest by day, a search over them and
+// the way into Replay for the rest. The search field keeps the focus while the arrows move through
+// the rows, as a picker's does.
 export function ConversationList({
   api,
   open,
@@ -67,6 +71,33 @@ export function ConversationList({
   const [deleting, setDeleting] = useState<ConversationRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The row whose name is being typed in place, and what is typed. An empty name gives the
+  // conversation back its automatic one.
+  const [renaming, setRenaming] = useState<{ id: string; name: string; was: string } | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  // Enter and the blur that follows the field going save once.
+  const editing = useRef(renaming);
+  editing.current = renaming;
+  const rename = async () => {
+    const current = editing.current;
+    if (!current) return;
+    editing.current = null;
+    setRenaming(null);
+    const { id, name, was } = current;
+    if (name.trim() === was) return;
+    const body = RenameConversation.safeParse({ title: name.trim() || null });
+    if (!body.success) {
+      setRenameError("Use one line of text for the name.");
+      return;
+    }
+    try {
+      await api.post(`/api/conversations/${id}/title`, body.data);
+      setRenameError(null);
+      recent.retry();
+    } catch {
+      setRenameError("The new name couldn't be saved. Try again.");
+    }
+  };
   const remove = async () => {
     if (!deleting || busy) return;
     setBusy(true);
@@ -232,23 +263,50 @@ export function ConversationList({
               }}
             >
               <div role="gridcell" className="conversations-main">
-                <Button
-                  variant="quiet"
-                  className="conversations-pick"
-                  disabledReason={!isCurrent ? reason : undefined}
-                  onClick={() => pick(row)}
-                >
-                  <span
-                    className="conversations-status"
-                    data-status={row.status}
-                    role="img"
-                    aria-label={STATUS_LABEL[row.status]}
+                {renaming?.id === id ? (
+                  <TextField
+                    size="sm"
+                    className="conversations-rename"
+                    aria-label={`New name for ${row.title}`}
+                    placeholder="Automatic name"
+                    maxLength={CONVERSATION_NAME_CHARS}
+                    autoComplete="off"
+                    enterKeyHint="done"
+                    autoFocus
+                    value={renaming.name}
+                    onChange={(event) => setRenaming({ ...renaming, name: event.target.value })}
+                    onBlur={() => void rename()}
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing) return;
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void rename();
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setRenaming(null);
+                      }
+                    }}
                   />
-                  <span className="conversations-title">{row.title}</span>
-                  <time className="conversations-when num" dateTime={row.entry.startedAt}>
-                    {whenLabel(row.entry.startedAt, now)}
-                  </time>
-                </Button>
+                ) : (
+                  <Button
+                    variant="quiet"
+                    className="conversations-pick"
+                    disabledReason={!isCurrent ? reason : undefined}
+                    onClick={() => pick(row)}
+                  >
+                    <SessionGlyph
+                      status={row.status}
+                      label={STATUS_LABEL[row.status]}
+                      className="conversations-status"
+                    />
+                    <span className="conversations-title">{row.title}</span>
+                    <time className="conversations-when num" dateTime={row.since}>
+                      {whenLabel(row.since, now)}
+                    </time>
+                    {row.activity && <span className="conversations-activity">{row.activity}</span>}
+                  </Button>
+                )}
               </div>
               <div role="gridcell">
                 <IconButton
@@ -294,6 +352,11 @@ export function ConversationList({
         onKeyDown={onKeyDown}
       />
       {reason && <p className="conversations-note">{reason}</p>}
+      {renameError && (
+        <p className="conversations-note" role="alert">
+          {renameError}
+        </p>
+      )}
       <div className="conversations-body" aria-busy={recent.loading || matches.pending}>
         {body}
       </div>
@@ -312,6 +375,15 @@ export function ConversationList({
           }}
         >
           Open conversation
+        </MenuItem>
+        <MenuItem
+          icon="compose"
+          onSelect={() => {
+            if (action)
+              setRenaming({ id: action.entry.sessionId, name: action.title, was: action.title });
+          }}
+        >
+          Rename
         </MenuItem>
         <MenuItem
           icon="trash"

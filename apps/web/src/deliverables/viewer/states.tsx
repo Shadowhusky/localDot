@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { Progress } from "../../ui/Progress.tsx";
+import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
+import type { ViewChoice, ViewName } from "./views.ts";
 
 function extension(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -61,5 +63,20 @@ export function ViewerBar({
       {end && <div className="viewer-bar-controls viewer-bar-end">{end}</div>}
       {note && <div className="viewer-bar-note">{note}</div>}
     </div>
+  );
+}
+
+// The ways the file can be shown, at the start of its bar; nothing when there is only one.
+export function ViewSwitch({ choice, without }: { choice?: ViewChoice; without?: ViewName }) {
+  const items = choice?.items.filter((item) => item.value !== without) ?? [];
+  if (!choice || items.length < 2) return null;
+  return (
+    <SegmentedControl
+      size={28}
+      aria-label="Show"
+      value={choice.value}
+      items={items}
+      onValueChange={choice.choose}
+    />
   );
 }

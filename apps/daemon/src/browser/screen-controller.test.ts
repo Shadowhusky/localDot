@@ -10,6 +10,7 @@ import { BrowserStartCancelled } from "../cells/browser-ledger.ts";
 import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { BrowserClientError, type BrowserScope } from "./client.ts";
 import {
+  BrowserInUseError,
   browserUnavailableText,
   ScreenControlError,
   ScreenController,
@@ -1403,5 +1404,114 @@ describe("what dot hears when the web browser can't open", () => {
       /^The web browser couldn't open\. localDot restarts it by itself/u,
     );
     await controller.close();
+  });
+});
+
+describe("a new conversation's first look at the web browser", () => {
+  // The browser's earlier page is in front until a blank tab opens; only the tab in front answers.
+  function fresh(deps: Partial<ScreenControllerDeps> = {}) {
+    const f = fixture();
+    const opened = randomUUID();
+    let front = f.tabId;
+    const openTab = vi.fn(async (_permit: unknown, scope: BrowserScope) => {
+      scope.check();
+      expect(f.holder()).toBe("agent");
+      front = opened;
+      return opened;
+    });
+    Object.assign(f.client, { openTab });
+    f.client.tabs.mockImplementation(async (scope) => {
+      scope.check();
+      return {
+        tabs: [
+          { id: f.tabId, ready: true },
+          ...(front === opened ? [{ id: opened, ready: true }] : []),
+        ],
+      };
+    });
+    f.client.clock.mockImplementation(async (_permit, tabId, scope) => {
+      scope.check();
+      if (tabId !== front) throw new BrowserClientError("refused");
+      return { mono: 50 };
+    });
+    const controller = new ScreenController({ ...f.deps, freshTab: true, ...deps });
+    const shown = () => {
+      const lease = controller.lease(f.scope);
+      try {
+        return controller.browserAccess(lease).tabId;
+      } finally {
+        lease.finish();
+      }
+    };
+    return { ...f, controller, opened, openTab, shown };
+  }
+
+  it("opens a blank tab for the task's first switch to the web browser, and only then", async () => {
+    const f = fresh();
+    await f.controller.activate(f.scope);
+    await f.controller.switchTo("browser", f.scope);
+    expect(f.openTab).toHaveBeenCalledOnce();
+    expect(f.openTab.mock.calls[0]?.[0]).toMatchObject({
+      instance: f.endpoint.instance,
+      owner: { sessionId: f.scope.sessionId, generation: 1 },
+    });
+    expect(f.shown()).toBe(f.opened);
+    await f.controller.switchTo("desktop", f.scope);
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.takeOver();
+    await f.controller.handback(f.scope);
+    expect(f.openTab).toHaveBeenCalledOnce();
+    expect(f.shown()).toBe(f.opened);
+    await f.controller.close();
+  });
+
+  it("carries on from the page in front for a task that continues its conversation", async () => {
+    const f = fresh({ freshTab: false });
+    await f.controller.switchTo("browser", f.scope);
+    expect(f.openTab).not.toHaveBeenCalled();
+    expect(f.shown()).toBe(f.tabId);
+    await f.controller.close();
+  });
+
+  it("shows the page in front when no blank tab opens, and doesn't try again", async () => {
+    const report = vi.fn();
+    const f = fresh({ report });
+    f.openTab.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    await f.controller.switchTo("browser", f.scope);
+    expect(f.controller.selection.screen).toBe("browser");
+    expect(f.shown()).toBe(f.tabId);
+    expect(report).toHaveBeenCalledWith(
+      expect.stringMatching(/^a blank tab couldn't open in the web browser: /u),
+    );
+    await f.controller.switchTo("desktop", f.scope);
+    await f.controller.switchTo("browser", f.scope);
+    expect(f.openTab).toHaveBeenCalledOnce();
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    await f.controller.close();
+  });
+
+  it("opens the blank tab once the task gets the web browser from another task", async () => {
+    const claimBrowser = vi.fn(() => claimBrowser.mock.calls.length > 1);
+    const f = fresh({ claimBrowser, releaseBrowser: vi.fn() });
+    await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(BrowserInUseError);
+    expect(f.openTab).not.toHaveBeenCalled();
+    await f.controller.switchTo("browser", f.scope);
+    expect(f.openTab).toHaveBeenCalledOnce();
+    expect(f.shown()).toBe(f.opened);
+    await f.controller.close();
+  });
+
+  it("stops a switch cancelled while the tab opens, without granting the page in front", async () => {
+    const f = fresh();
+    f.openTab.mockImplementationOnce(async (_permit, scope) => {
+      f.abort.abort();
+      scope.check();
+      return f.opened;
+    });
+    await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow();
+    expect(f.client.clock).not.toHaveBeenCalled();
+    expect(f.deps.publish).not.toHaveBeenCalled();
+    expect(f.holder()).toBe("user");
+    await f.controller.close();
   });
 });

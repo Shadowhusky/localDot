@@ -32,7 +32,10 @@ it("saved Markdown toggles reuse the loaded file rather than fetching or calling
   );
   const api = createApi("token", { fetchImpl });
   render(
-    <TextView api={api} sessionId="01J9ZQ3V8Y7X6W5T4S3R2Q1P0N" name="report.md" version={1} />,
+    <TextView
+      api={api}
+      file={{ sessionId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", name: "report.md", version: 1 }}
+    />,
   );
   await screen.findByRole("heading", { name: "Report" });
   fireEvent.click(screen.getByRole("radio", { name: "Source" }));

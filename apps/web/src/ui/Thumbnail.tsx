@@ -1,11 +1,11 @@
 import { clsx } from "clsx";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { pressHandlers } from "./press.ts";
 
 export interface ThumbnailButtonProps {
   // What pressing it does, such as "Watch from the start".
   label: string;
-  onClick(): void;
+  onClick(event: MouseEvent<HTMLButtonElement>): void;
   className?: string;
   // Width over height; 16:10 unless the picture has its own shape, such as a portrait page.
   ratio?: number;

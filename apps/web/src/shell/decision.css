@@ -279,20 +279,10 @@
 .decision-sheet-expand {
   position: absolute;
   top: 24px;
-  right: 8px;
+  right: calc(var(--spacing) * 3);
   display: grid;
-  place-items: center;
-  width: 44px;
-  height: 32px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-fg-2);
 }
-.decision-sheet-expand:focus-visible {
-  outline: var(--focus-width) solid var(--color-fg-1);
-}
-.decision-sheet-expand[aria-disabled="true"] {
+.decision-sheet-expand > [aria-disabled="true"] {
   visibility: hidden;
 }
 

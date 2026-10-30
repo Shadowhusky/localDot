@@ -1,27 +1,52 @@
-import type { PreviewItem, PreviewServer } from "@localdot/protocol";
-import { useEffect, useId } from "react";
+import type { PreviewItem, PreviewRequest, PreviewServer } from "@localdot/protocol";
+import { useEffect } from "react";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
-import { Group, GroupHead, GroupNote, GroupRow } from "../ui/Group.tsx";
+import { Group, GroupRow } from "../ui/Group.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { type Previews, requestKey, unavailable, usePreviews } from "./PreviewsContext.tsx";
 import "../ui/previews.css";
 
 // An address without its scheme, as the computer's servers print it.
 const shownAddress = (address: string) => address.replace(/^https?:\/\//, "").replace(/\/$/, "");
-const portOf = (address: string) => {
-  if (!URL.canParse(address)) return undefined;
-  const url = new URL(address);
-  return Number(url.port || (url.protocol === "https:" ? 443 : 80));
-};
 
-// What listens in dot's computer, and the previews open on the owner's devices: the Activity's
-// Previews tab.
+// One web app to open: a server answering in the computer, or a *.localhost site one names (several
+// can share a port).
+interface App {
+  address: string;
+  request: PreviewRequest;
+  server: PreviewServer;
+}
+
+function appsOf(servers: readonly PreviewServer[], previews: readonly PreviewItem[]): App[] {
+  return servers.flatMap((server) => [
+    { address: shownAddress(server.url), request: { port: server.port }, server },
+    ...previews
+      .filter((preview) => {
+        const url = new URL(preview.target);
+        return url.hostname.endsWith(".localhost") && Number(url.port) === server.port;
+      })
+      .map((preview) => ({
+        address: shownAddress(preview.target),
+        request: { url: preview.target },
+        server,
+      })),
+  ]);
+}
+
+// A server that stops answering leaves the list ten minutes after it last did.
+function stateText(server: PreviewServer, now: number): string {
+  if (server.state === "answering") return "Running";
+  const minutes = Math.floor((now - Date.parse(server.seenAt)) / 60_000);
+  return minutes < 1 ? "Not answering" : `Not answering for ${minutes} min`;
+}
+
+// The web apps dot runs in its computer, to open on the owner's devices: the Activity's Previews tab.
 export function PreviewsPanel({ active }: { active: boolean }) {
   const previews = usePreviews();
   const watch = previews?.watch;
   useEffect(() => (active && watch ? watch() : undefined), [active, watch]);
-  const headId = useId();
   if (!previews) return null;
   const { status } = previews;
   if (!status)
@@ -29,15 +54,16 @@ export function PreviewsPanel({ active }: { active: boolean }) {
       <p className="activity-empty">
         {previews.settled
           ? "Previews aren't available for this computer."
-          : "Looking for servers in dot's computer…"}
+          : "Looking for web apps in dot's computer…"}
       </p>
     );
-  const opened = status.previews;
-  const previewed = new Set(opened.map((preview) => portOf(preview.target)));
-  const servers = status.servers.filter((server) => !previewed.has(server.port));
+  const apps = appsOf(status.servers, status.previews);
   const notice = status.state === "ready" ? null : unavailable(status.state, status.message);
   return (
     <div className="previews-panel">
+      <p className="previews-intro">
+        Web apps dot runs on its computer. Open one on this device or your phone.
+      </p>
       {status.state === "needs-update" && (
         <Banner
           tone="attention"
@@ -65,98 +91,75 @@ export function PreviewsPanel({ active }: { active: boolean }) {
           {notice?.message}
         </EmptyState>
       )}
-      {opened.length > 0 && (
-        <section aria-labelledby={`${headId}-open`}>
-          <GroupHead id={`${headId}-open`} title="Open previews" />
+      {apps.length > 0 && (
+        <section aria-label="Web apps in dot's computer">
           <Group>
-            {opened.map((preview) => (
-              <PreviewRow
-                key={preview.id}
-                preview={preview}
-                name={status.servers.find((server) => server.port === portOf(preview.target))?.name}
-                previews={previews}
-              />
-            ))}
-          </Group>
-          <GroupNote>Stop closes the preview's link. The server keeps running.</GroupNote>
-        </section>
-      )}
-      {servers.length > 0 && (
-        <section aria-labelledby={`${headId}-servers`}>
-          <GroupHead id={`${headId}-servers`} title="Servers in dot's computer" />
-          <Group>
-            {servers.map((server) => (
-              <ServerRow key={server.port} server={server} previews={previews} />
+            {apps.map((app) => (
+              <AppRow key={app.address} app={app} previews={previews} />
             ))}
           </Group>
         </section>
       )}
-      {status.state === "ready" && !opened.length && !servers.length && (
-        <EmptyState layout="start" title="No servers yet">
-          When dot starts a server in its computer, open it here on any of your devices.
+      {apps.length > 0 && status.previews.length > 0 && (
+        <Group>
+          <GroupRow
+            label="Signed-in devices"
+            detail="Each stays signed in to an app until it goes unused for two hours."
+            trailing={
+              <Button
+                size="sm"
+                variant="quiet"
+                busy={previews.pending.has("sign-out")}
+                onClick={(event) => previews.signOut(event.currentTarget)}
+              >
+                Sign out
+              </Button>
+            }
+          />
+        </Group>
+      )}
+      {status.state === "ready" && !apps.length && (
+        <EmptyState layout="start" title="No web apps running">
+          When dot starts one in its computer, such as a dev server, it shows up here.
         </EmptyState>
       )}
     </div>
   );
 }
 
-function PreviewRow({
-  preview,
-  name,
-  previews,
-}: {
-  preview: PreviewItem;
-  // The program serving it, when the computer can tell.
-  name?: string;
-  previews: Previews;
-}) {
-  const label = shownAddress(preview.target);
-  const request = { url: preview.target };
+function AppRow({ app, previews }: { app: App; previews: Previews }) {
+  const { server, address, request } = app;
+  const title = "url" in request ? undefined : server.title;
+  // A title names the app, so its address says where it is; else its program does.
+  const where = title ? address : server.name;
   return (
     <GroupRow
-      label={label}
-      detail={name}
+      label={title ?? address}
+      detail={
+        <>
+          {where && `${where} · `}
+          <span className="preview-app-state" data-state={server.state}>
+            {stateText(server, Date.now())}
+          </span>
+        </>
+      }
       trailing={
         <>
+          <IconButton
+            icon="copy"
+            label={`Copy link to ${address}`}
+            aria-busy={previews.pending.has(`copy ${requestKey(request)}`) || undefined}
+            onClick={(event) => previews.copy(request, event.currentTarget)}
+          />
           <Button
             size="sm"
-            aria-label={`Open preview of ${label}`}
+            aria-label={`Open preview of ${address}`}
             busy={previews.pending.has(requestKey(request))}
             onClick={(event) => previews.open(request, event.currentTarget)}
           >
             Open
           </Button>
-          <Button
-            size="sm"
-            variant="quiet"
-            aria-label={`Stop preview of ${label}`}
-            busy={previews.pending.has(preview.id)}
-            onClick={(event) => previews.stop(preview.id, event.currentTarget)}
-          >
-            Stop
-          </Button>
         </>
-      }
-    />
-  );
-}
-
-function ServerRow({ server, previews }: { server: PreviewServer; previews: Previews }) {
-  const label = shownAddress(server.url);
-  const request = { port: server.port };
-  return (
-    <GroupRow
-      label={label}
-      detail={server.name}
-      trailing={
-        <Button
-          size="sm"
-          aria-label={`Open preview of ${label}`}
-          busy={previews.pending.has(requestKey(request))}
-          onClick={(event) => previews.open(request, event.currentTarget)}
-        >
-          Open
-        </Button>
       }
     />
   );

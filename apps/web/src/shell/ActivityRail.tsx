@@ -46,7 +46,7 @@ import { SwipePanels } from "../ui/SwipePanels.tsx";
 import { TabPanel, Tabs } from "../ui/Tabs.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { VirtualList } from "../ui/VirtualList.tsx";
-import { activityTabs as chosenTabs } from "./activity-tabs.ts";
+import { activityTabs as chosenTabs, onActivityTab } from "./activity-tabs.ts";
 import { HANDHELD } from "./layout.ts";
 import "../agent/activity.css";
 
@@ -194,6 +194,9 @@ export function ActivityRail({
     chosenTabs.set(owner, next as RailTab);
     setPicked({ owner, tab: next as RailTab });
   };
+  const chooseNow = useRef(choose);
+  chooseNow.current = choose;
+  useEffect(() => onActivityTab((next) => chooseNow.current(next)), []);
   useEffect(() => {
     if (historyLoaded && (tab === "files" || !seenFiles.has(owner))) seenFiles.set(owner, handed);
   }, [historyLoaded, owner, tab, handed]);

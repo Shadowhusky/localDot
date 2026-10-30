@@ -27,7 +27,40 @@ export type ConversationSnapshot = z.infer<typeof ConversationSnapshot>;
 export const ContinueConversation = z.strictObject({ sessionId: SessionId });
 export type ContinueConversation = z.infer<typeof ContinueConversation>;
 
+export const CONVERSATION_NAME_CHARS = 80;
+// What a conversation is called: one line of plain text.
+export const ConversationName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(CONVERSATION_NAME_CHARS)
+  .refine((name) => name.isWellFormed() && !/\p{Cc}/u.test(name), "Use one line of text");
+// The name the user gives a conversation; null gives it back its automatic name.
+export const RenameConversation = z.strictObject({ title: ConversationName.nullable() });
+export type RenameConversation = z.infer<typeof RenameConversation>;
+
+export const LIVE_ACTIVITY_CHARS = 120;
+// A conversation whose latest task is live: working, waiting for its turn on the computer it shares,
+// waiting on the user, at rest after its answer, or paused. `onScreen`: it holds the computer now.
+export const ConversationLive = z.strictObject({
+  state: z.enum(["working", "waiting-for-computer", "needs-you", "idle", "paused"]),
+  since: z.iso.datetime(),
+  onScreen: z.boolean(),
+  // Its current step, in a line.
+  activity: z.string().max(LIVE_ACTIVITY_CHARS).optional(),
+});
+export type ConversationLive = z.infer<typeof ConversationLive>;
+
+// A live status changed, on the app's own channel; none once the task has ended.
+export const ConversationLiveEvent = z.strictObject({
+  type: z.literal("conversation.live"),
+  sessionId: SessionId,
+  live: ConversationLive.optional(),
+});
+export type ConversationLiveEvent = z.infer<typeof ConversationLiveEvent>;
+
 export const CONVERSATION_LIST = 50;
+
 // A recent conversation, named by its latest task: the one a Continue takes up.
 export const ConversationEntry = z.strictObject({
   sessionId: SessionId,
@@ -40,6 +73,7 @@ export const ConversationEntry = z.strictObject({
   startedAt: z.iso.datetime(),
   // How its latest task ended; null while it runs, or when it was cut short.
   ended: z.enum(["done", "stopped", "error"]).nullable(),
+  live: ConversationLive.optional(),
 });
 export type ConversationEntry = z.infer<typeof ConversationEntry>;
 

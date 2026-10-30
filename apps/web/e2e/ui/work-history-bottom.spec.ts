@@ -2,25 +2,26 @@ import { expect, runAt, test } from "./harness.ts";
 
 runAt("c39", "w39");
 for (const height of [568, 680, 844]) {
-  test(`Working disclosure reaches the entire final step at ${height}px`, async ({ page, ui }) => {
+  test(`the run dot is at reaches its entire final step at ${height}px`, async ({ page, ui }) => {
     await page.setViewportSize({ width: 390, height });
     const fixture = await ui.open("running");
     const added = await page.request.post(
       `${fixture.origin}/__qa/steps?n=110&label=${encodeURIComponent("Checking the final multiline step stays fully visible above the composer")}`,
     );
     expect(added.ok(), await added.text()).toBe(true);
-    const working = page.locator(".thread-live .ui-disclosure-summary");
-    await expect(working).toContainText("Working");
-    await working.click();
-    const pane = page.locator(".thread-live .thread-work-scroll");
+    const run = page.locator(".thread-work[data-live]");
+    await expect(run.locator(".ui-disclosure-summary")).toContainText("Working");
+    // It stays open in the thread while dot works there.
+    const toggle = run.locator(".thread-work-steps > .ui-disclosure-trigger");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const pane = run.locator(".thread-work-scroll");
     await expect(pane).toBeVisible();
     await pane.dispatchEvent("touchstart");
     await pane.evaluate((node) => {
       node.scrollTop = node.scrollHeight;
     });
     await ui.settle();
-    // Opening a long history must not scroll its collapse control under the live screen.
-    const toggle = page.locator(".thread-live .thread-work-steps > .ui-disclosure-trigger");
+    // A long history must not scroll its collapse control under the live screen.
     await expect
       .poll(() =>
         toggle.evaluate((node) => {
@@ -82,7 +83,7 @@ for (const finished of [false, true]) {
     await page.request.post(`${fixture.origin}/__qa/steps?n=180`);
     if (finished) {
       await page.request.post(`${fixture.origin}/__qa/finish?done=1`);
-      await expect(page.locator(".thread-live .thread-work-steps:visible")).toHaveCount(0);
+      await expect(page.locator(".thread-work[data-live]")).toHaveCount(0);
     }
     // A tall screen / enlarged system text can leave much less chat space than
     // the viewport-based history cap. Keep the stage visible throughout.
@@ -90,7 +91,9 @@ for (const finished of [false, true]) {
       (node as HTMLElement).style.maxHeight = "210px";
     });
     const toggle = page.locator(".thread-work-steps > .ui-disclosure-trigger:visible").last();
-    await toggle.click();
+    // The live run is open already; a finished one opens on a press.
+    if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await ui.settle();
     await page.screenshot({ path: test.info().outputPath("expanded.png") });
     await expect

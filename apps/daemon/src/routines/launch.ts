@@ -18,8 +18,9 @@ import { RoutineError, type RoutineStore, type StoredRoutine, type StoredRun } f
 export interface RoutineRunnerPort {
   start(cellId: string, task: string, options: TaskStartOptions): Promise<{ id: string }>;
   end(sessionId: string): boolean;
-  live(cellId: string): string | undefined;
-  // A live session that is not idle, or that the user holds.
+  // The computer's live tasks.
+  live(cellId: string): readonly string[];
+  // The user holds the computer, which its tasks share otherwise.
   busy(cellId: string): boolean;
   // Waiting on a question, a takeover or an approval.
   parked(sessionId: string): boolean;
@@ -179,7 +180,7 @@ export class RoutineLauncher {
     const followed = routine.kind === "follow_up" ? routine.followUp?.sessionId : undefined;
     const cell = pickComputer(
       cells.list(),
-      followed ? (id) => runner.live(id) === followed : undefined,
+      followed ? (id) => runner.live(id).includes(followed) : undefined,
     );
     if (!cell) return this.#finish(routine, run, "skipped", "No computer is set up yet.");
     if (cell.paused) return this.#finish(routine, run, "skipped", FROZEN);
@@ -211,7 +212,7 @@ export class RoutineLauncher {
     const followUp = routine.kind === "follow_up" ? routine.followUp : null;
     if (
       followUp &&
-      runner.live(cell.id) === followUp.sessionId &&
+      runner.live(cell.id).includes(followUp.sessionId) &&
       runner.post(
         followUp.sessionId,
         `It's time for the follow-up scheduled earlier. ${NOTE_FRAME}\n${untrusted("follow-up note", followUp.note)}`,
@@ -442,7 +443,7 @@ export class RoutineLauncher {
     if (!(await this.#ready(cellId, new AbortController().signal))) return;
     const cell = this.deps.cells.get(cellId);
     if (cell?.state !== "ready" || cell.paused || cell.stream.viewers > 0) return;
-    if (this.deps.runner.live(cellId) !== undefined) return;
+    if (this.deps.runner.live(cellId).length) return;
     if ([...this.#pending.keys()].some((id) => id !== runId)) return;
     await this.deps.cells
       .stop(cellId)

@@ -127,7 +127,7 @@ describe("the export page", () => {
       sessionId,
       origin: "http://127.0.0.1:4750",
       geometry: { w: 2560, h: 1600, scale: 1 },
-      video: { upto: null },
+      video: { upto: null, bytes: 100 },
     });
     progress({ done: 15, total: 60 });
     finish({ type: "done", frames: 60, bytes: 123, hashes: null });

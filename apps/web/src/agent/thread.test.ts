@@ -160,8 +160,91 @@ describe("the conversation's order", () => {
   });
 });
 
-describe("the work line of each turn", () => {
-  it("gives each task or follow-up its steps, and keeps a steer in the turn it changed", () => {
+const runs = (thread: ThreadItem[]) =>
+  thread.flatMap((item) => (item.kind === "work" ? [item.steps.map((s) => s.key)] : []));
+
+describe("the steps of each turn", () => {
+  it("places each run of steps after what dot said before it, as the turn happened", () => {
+    const items = threadItems(
+      [
+        message("task", 1),
+        message("plan", 2, "assistant", { doneAt: 2_500_000 }),
+        message("checked", 6, "assistant", { doneAt: 6_200_000 }),
+        message("answer", 12, "assistant"),
+      ],
+      [],
+      [{ id: "result", seq: 11, at: 11_000_000, summary: "Report ready", files: [] }],
+    );
+    const thread = withWork(
+      items,
+      [step("open", 3000), step("type", 4000), step("check", 7000), step("save", 9000)],
+      false,
+    );
+    expect(thread.map((item) => item.key)).toEqual([
+      "message-task",
+      "message-plan",
+      "work-message-plan",
+      "message-checked",
+      "work-message-checked",
+      "result-result",
+      "message-answer",
+    ]);
+    expect(runs(thread)).toEqual([
+      ["open", "type"],
+      ["check", "save"],
+    ]);
+    // Each run's time starts once the words before it were whole.
+    expect(thread.flatMap((item) => (item.kind === "work" ? [item.startMs] : []))).toEqual([
+      2500, 6200,
+    ]);
+    // Words before more steps narrate; those after the last steps answer.
+    expect(
+      thread.flatMap((item) =>
+        item.kind === "message" && item.speaker === "dot" ? [[item.key, !!item.narration]] : [],
+      ),
+    ).toEqual([
+      ["message-plan", true],
+      ["message-checked", true],
+      ["message-answer", false],
+    ]);
+  });
+
+  it("keeps a run that came before any words of dot's under your message", () => {
+    const items = threadItems([message("task", 1), message("done", 5, "assistant")]);
+    const thread = withWork(items, [step("a", 2000), step("b", 3000)], false);
+    expect(thread.map((item) => item.key)).toEqual([
+      "message-task",
+      "work-message-task",
+      "message-done",
+    ]);
+    expect(thread.find((item) => item.kind === "work")?.startMs).toBe(1000);
+  });
+
+  it("ends a live turn with the run dot is at, empty until its next step, on the turn's clock", () => {
+    const items = threadItems([
+      message("task", 1),
+      message("first", 2, "assistant"),
+      message("streaming", 6, "assistant", { final: false }),
+    ]);
+    const live = withWork(items, [step("a", 3000), step("b", 4000)], true);
+    expect(live.map((item) => item.key)).toEqual([
+      "message-task",
+      "message-first",
+      "work-message-first",
+      "message-streaming",
+      "work-message-streaming",
+    ]);
+    const [done, now] = live.filter((item) => item.kind === "work");
+    expect(done?.kind === "work" && done.steps).toHaveLength(2);
+    expect(now?.kind === "work" && [now.steps, now.startMs]).toEqual([[], 1000]);
+    // Words still arriving answer until a step follows them.
+    expect(live.find((item) => item.key === "message-streaming")).not.toHaveProperty("narration");
+    const next = withWork(items, [step("a", 3000), step("b", 4000), step("c", 7000)], true);
+    expect(next.find((item) => item.key === "message-streaming")).toHaveProperty("narration", true);
+    expect(runs(next)).toEqual([["a", "b"], ["c"]]);
+  });
+
+  it("gives each task or follow-up its steps, split where you steered", () => {
     const items = threadItems([
       message("task", 1),
       message("steer", 5, "user", { kind: "steer" }),
@@ -170,14 +253,16 @@ describe("the work line of each turn", () => {
     const thread = withWork(items, [step("a", 2000), step("b", 6000), step("c", 11000)], false);
     expect(thread.map((item) => item.key)).toEqual([
       "message-task",
-      "message-steer",
       "work-message-task",
+      "message-steer",
+      "work-message-steer",
       "message-followup",
       "work-message-followup",
     ]);
-    const work = thread.filter((item) => item.kind === "work");
-    expect(work.map((item) => item.steps.map((s) => s.key))).toEqual([["a", "b"], ["c"]]);
-    expect(work.map((item) => item.startMs)).toEqual([1000, 10_000]);
+    expect(runs(thread)).toEqual([["a"], ["b"], ["c"]]);
+    expect(thread.flatMap((item) => (item.kind === "work" ? [item.startMs] : []))).toEqual([
+      1000, 5000, 10_000,
+    ]);
   });
 
   it("files a follow-up dot received after the task it waited for, as a turn of its own", () => {
@@ -192,15 +277,15 @@ describe("the work line of each turn", () => {
     const thread = withWork(items, [step("a", 1500), step("b", 4000), step("c", 11_000)], false);
     expect(thread.map((item) => item.key)).toEqual([
       "message-task",
-      "message-working",
-      "message-done",
       "work-message-task",
+      "message-working",
+      "work-message-working",
+      "message-done",
       "message-followup",
-      "message-next",
       "work-message-followup",
+      "message-next",
     ]);
-    const work = thread.filter((item) => item.kind === "work");
-    expect(work.map((item) => item.steps.map((s) => s.key))).toEqual([["a", "b"], ["c"]]);
+    expect(runs(thread)).toEqual([["a"], ["b"], ["c"]]);
   });
 
   it("starts no turn at a queued message, nor at one taken back to edit or cancelled", () => {
@@ -219,22 +304,27 @@ describe("the work line of each turn", () => {
       "message-queued",
       "message-still",
     ]);
-    const steps = [step("a", 2000), step("b", 7000)];
+    // The waiting message splits no run: a and b both follow what dot said at 3.
+    const steps = [step("a", 3500), step("b", 7000)];
     const lines = (thread: ThreadItem[]) =>
       thread.flatMap((item) =>
         item.kind === "work" ? [[item.startMs, item.steps.map((s) => s.key)]] : [],
       );
-    expect(lines(withWork(items, steps, true))).toEqual([[1000, ["a", "b"]]]);
-    // Handed the unsent ones as well, the live line still counts the task from its start.
+    expect(lines(withWork(items, steps, false))).toEqual([[3000, ["a", "b"]]]);
+    // Handed the unsent ones as well, the live run still counts the task from its start.
     const unsent = messages.slice(3, 5).map(
       (sent): ThreadItem => ({
         kind: "message",
         key: `message-${sent.id}`,
         speaker: "user",
+        atMs: (sent.at ?? 0) / 1000,
         message: sent,
       }),
     );
-    expect(lines(withWork([...items, ...unsent], steps, true))).toEqual([[1000, ["a", "b"]]]);
+    expect(lines(withWork([...items, ...unsent], steps, true))).toEqual([
+      [3000, ["a", "b"]],
+      [1000, []],
+    ]);
   });
 
   it("keeps a message Stop left unsent after the turn's line, and starts no turn for it", () => {
@@ -246,10 +336,16 @@ describe("the work line of each turn", () => {
     ]);
     expect(
       withWork(items, [step("a", 2000), step("b", 5000)], false).map((item) => item.key),
-    ).toEqual(["message-task", "message-working", "work-message-task", "message-unsent"]);
+    ).toEqual([
+      "message-task",
+      "work-message-task",
+      "message-working",
+      "work-message-working",
+      "message-unsent",
+    ]);
   });
 
-  it("says what each turn's model calls cost on its line, an estimate if any call was", () => {
+  it("says what each turn's model calls cost on its last run, an estimate if any call was", () => {
     const items = threadItems([
       message("task", 1),
       message("followup", 10, "user", { kind: "followup" }),
@@ -275,19 +371,38 @@ describe("the work line of each turn", () => {
     expect(free.find((item) => item.kind === "work")?.spend).toBeUndefined();
   });
 
-  it("keeps the line with dot's part of the turn, before the computer changes hands", () => {
+  it("places the computer changing hands among the steps, where it happened", () => {
     const taken = ulidAt(5_000);
     const items = threadItems(
       [message("Download it", 1)],
       [],
       [],
-      [{ requestId: taken, reason: "other", note: "", by: "user", seq: 2, time: 5_000 }],
+      [
+        {
+          requestId: taken,
+          reason: "other",
+          note: "",
+          by: "user",
+          seq: 2,
+          time: 5_000,
+          at: 2_000_000,
+          end: { requestId: taken, by: "user" },
+          endSeq: 3,
+          endAt: 3_000_000,
+        },
+      ],
     );
-    expect(withWork(items, [step("Open", 1_500)], true).map((item) => item.kind)).toEqual([
-      "message",
-      "work",
-      "control",
+    const thread = withWork(items, [step("Open", 1_500), step("Save", 3_500)], false);
+    expect(thread.map((item) => item.key)).toEqual([
+      "message-Download it",
+      "work-message-Download it",
+      `took-${taken}`,
+      `back-${taken}`,
+      `work-back-${taken}`,
     ]);
+    // While the user holds the computer, the live run waits after the change of hands.
+    const held = withWork(items.slice(0, 2), [step("Open", 1_500)], true);
+    expect(held.map((item) => item.kind)).toEqual(["message", "work", "control", "work"]);
   });
 
   it("holds a live line on the latest turn before any step, and none on a turn that only talked", () => {
@@ -354,7 +469,7 @@ describe("the meta line of each finished turn", () => {
     expect(meta(thread)[0]).toMatchObject({ usd: 0.03, estimated: true });
   });
 
-  it("follows a turn's work line, leads with the main model and keeps each turn's own calls", () => {
+  it("ends a turn after its answer, leads with the main model and keeps each turn's own calls", () => {
     const items = threadItems([
       message("task", 1),
       message("done", 3, "assistant"),
@@ -370,15 +485,18 @@ describe("the meta line of each finished turn", () => {
     });
     expect(thread.map((item) => item.key)).toEqual([
       "message-task",
-      "message-done",
       "work-message-task",
+      "message-done",
       "meta-message-task",
       "message-followup",
       "message-again",
       "meta-message-followup",
     ]);
     const [first, second] = meta(thread);
-    expect(first).toMatchObject({ work: true });
+    expect(first).toMatchObject({ work: false });
+    expect(
+      meta(withWork(items.slice(0, 1), [step("a", 2000)], false, [], { usage: [used(2200)] })),
+    ).toMatchObject([{ work: true }]);
     expect(first?.kind === "meta" && first.models.map((row) => row.model)).toEqual([
       "claude-sonnet-5-5",
       "gpt-6-luna",

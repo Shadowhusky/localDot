@@ -12,8 +12,27 @@ const FIRST = "01JXYZ0000000000000000AAA1",
   SECOND = "01JXYZ0000000000000000AAA2",
   THIRD = "01JXYZ0000000000000000AAA3";
 
+type Logged = readonly [type: string, data: Record<string, unknown>, step?: string];
+const ndjson = (events: readonly Logged[]) =>
+  events
+    .map(([type, data, step], seq) =>
+      JSON.stringify(
+        LocalDotEvent.parse({
+          v: 1,
+          id: ulid(),
+          seq,
+          t: seq * 1000,
+          agent: "main",
+          type,
+          data,
+          ...(step ? { step } : {}),
+        }),
+      ),
+    )
+    .join("\n");
+
 function log(task: string, reply: string, files: string[] = []) {
-  const events = [
+  return ndjson([
     ["session.start", { screen: { w: 1280, h: 800, scale: 1 }, os: "linux", title: task }],
     ["message.user", { messageId: ulid(), text: task, kind: "task" }],
     ["message.assistant", { messageId: ulid(), text: reply }],
@@ -22,20 +41,36 @@ function log(task: string, reply: string, files: string[] = []) {
       { summary: reply, files: files.map((name) => ({ name, path: name, bytes: 1 })) },
     ],
     ["session.end", { reason: "done" }],
-  ] as const;
-  return events
-    .map(([type, data], seq) =>
-      JSON.stringify(
-        LocalDotEvent.parse({ v: 1, id: ulid(), seq, t: seq * 1000, agent: "main", type, data }),
-      ),
-    )
-    .join("\n");
+  ]);
+}
+
+// A task that talked between its steps: one before them, one after a failed check, and an answer.
+function worked(task: string) {
+  const command = (step: string, title: string, ok: boolean): Logged[] => [
+    ["step.start", { kind: "shell" }, step],
+    ["tool.start", { tool: "shell", title }, step],
+    ["tool.end", { ok, exitCode: ok ? 0 : 2 }, step],
+    ["step.end", { status: ok ? "ok" : "failed" }, step],
+  ];
+  return ndjson([
+    ["session.start", { screen: { w: 1280, h: 800, scale: 1 }, os: "linux", title: task }],
+    ["message.user", { messageId: ulid(), text: task, kind: "task" }],
+    ["message.assistant", { messageId: ulid(), text: "Checking the totals first." }],
+    ...command("check", "Check totals", true),
+    ...command("schema", "Validate schema", false),
+    ["message.assistant", { messageId: ulid(), text: "No schema; writing the report." }],
+    ...command("write", "Write report", true),
+    ["message.assistant", { messageId: ulid(), text: "The report is ready." }],
+    ["task.result", { summary: "Report ready", files: [] }],
+    ["session.end", { reason: "done" }],
+  ]);
 }
 
 function setup() {
   const logs: Record<string, string> = {
     [FIRST]: log("Draw a dog", "Drew it.", ["dog.png"]),
     [SECOND]: log("Make it blue", "Made it blue."),
+    [THIRD]: worked("Write the report"),
   };
   const read = vi.fn((id: string) => logs[id]);
   const paths: string[] = [];
@@ -167,4 +202,35 @@ it("reads each earlier task's history, not its whole log", async () => {
   renderHook(() => useEarlierThread(f.api, [FIRST, SECOND], { sessionId: SECOND, items: [] }));
   await settle();
   expect(f.paths()).toEqual([`/api/sessions/${FIRST}/history`]);
+});
+
+it("reads an earlier task's steps where dot took them, between its words, as that task's", async () => {
+  const f = setup();
+  const view = renderHook(() =>
+    useEarlierThread(f.api, [THIRD, FIRST], { sessionId: FIRST, items: [] }),
+  );
+  await settle();
+  const items = view.result.current.items;
+  expect(
+    items.map((item) =>
+      item.kind === "work"
+        ? `steps: ${item.steps.map((step) => step.title).join(", ")} (${item.sessionId})`
+        : item.kind === "message"
+          ? `${item.narration ? "narrates" : item.speaker}: ${item.message.text}`
+          : item.kind,
+    ),
+  ).toEqual([
+    "user: Write the report",
+    "narrates: Checking the totals first.",
+    `steps: Check totals, Validate schema (${THIRD})`,
+    "narrates: No schema; writing the report.",
+    `steps: Write report (${THIRD})`,
+    "dot: The report is ready.",
+    "result",
+  ]);
+  const [first] = items.filter((item) => item.kind === "work");
+  expect(first?.kind === "work" && first.steps.map((step) => step.state)).toEqual([
+    "done",
+    "failed",
+  ]);
 });

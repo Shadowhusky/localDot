@@ -94,7 +94,7 @@ function viewer(name: string, pdf: PDFDocumentProxy) {
       entries={entries}
       index={0}
       open
-      downloads={{ state: () => undefined, busy: false, request: async () => true, sessionId: ID }}
+      downloads={{ state: () => undefined, blocked: () => undefined, request: () => {} }}
       onMac={false}
       onIndex={onIndex}
       onClose={() => {}}

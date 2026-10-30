@@ -5,6 +5,7 @@ import { Chip } from "../ui/Chip.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select } from "../ui/Select.tsx";
+import { SessionGlyph, type SessionStatus } from "../ui/SessionGlyph.tsx";
 import { type GlyphState, StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
@@ -45,6 +46,17 @@ const GLYPHS: { state: GlyphState; name: string }[] = [
   { state: "ask", name: "ask" },
 ];
 
+const SESSION_STATUSES: SessionStatus[] = [
+  "working",
+  "waiting",
+  "needs-you",
+  "idle",
+  "paused",
+  "done",
+  "stopped",
+  "failed",
+];
+
 const MODELS = [
   { value: "sonnet", label: "Claude Sonnet 5.5" },
   { value: "opus", label: "Claude Opus 5.5" },
@@ -69,7 +81,13 @@ function Swatch({ name, token }: { name: string; token: string }) {
   );
 }
 
-function Ramp({ appearance, title }: { appearance: "graphite" | "midnight"; title: string }) {
+function Ramp({
+  appearance,
+  title,
+}: {
+  appearance: "graphite" | "midnight" | "daylight";
+  title: string;
+}) {
   return (
     <section className="system-ramp" data-appearance={appearance} aria-label={title}>
       <h3>{title}</h3>
@@ -185,11 +203,13 @@ export function SystemPage() {
   return (
     <div className="system">
       <p className="system-lede">
-        Graphite and Midnight ramps, type, controls and status glyphs, from the kit's own tokens.
+        Graphite, Midnight and Daylight ramps, type, controls and status glyphs, from the kit's own
+        tokens.
       </p>
       <div className="system-ramps">
         <Ramp appearance="graphite" title="Graphite (default)" />
         <Ramp appearance="midnight" title="Midnight" />
+        <Ramp appearance="daylight" title="Daylight" />
       </div>
       <section className="system-type" aria-label="Type">
         <h2>Type (system font)</h2>
@@ -211,6 +231,18 @@ export function SystemPage() {
             <span key={state} className="system-glyph">
               <StatusGlyph state={state} />
               {name}
+            </span>
+          ))}
+        </div>
+      </section>
+      <section aria-label="Conversation status">
+        <h2>Conversation status</h2>
+        <div className="system-glyphs">
+          {SESSION_STATUSES.map((status) => (
+            <span key={status} className="system-glyph">
+              <SessionGlyph status={status} />
+              <SessionGlyph status={status} size={22} />
+              {status}
             </span>
           ))}
         </div>

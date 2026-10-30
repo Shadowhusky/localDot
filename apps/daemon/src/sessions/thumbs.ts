@@ -38,12 +38,13 @@ export class Thumbnails {
     this.#pending.set(key, work);
     return work;
   }
+  // A thumbnail made earlier outlives its screenshot, which goes with age.
   async #make(id: string, frameId: string): Promise<string | undefined> {
-    const source = this.#frames.path(id, frameId);
-    if (!source) return undefined;
     const dir = join(this.#home, "sessions", id, SESSION_THUMBS),
       file = join(dir, `${frameId}.webp`);
     if (existsSync(file)) return file;
+    const source = this.#frames.path(id, frameId);
+    if (!source) return undefined;
     await this.#acquire();
     const temp = `${file}.${randomUUID()}.tmp`;
     try {

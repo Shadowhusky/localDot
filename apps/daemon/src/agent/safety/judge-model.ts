@@ -1,5 +1,5 @@
-import type { ModelBinding } from "@localdot/protocol";
-import { gatewayBaseURL } from "@localdot/providers";
+import type { ModelBinding, ReasoningEffort } from "@localdot/protocol";
+import { gatewayBaseURL, modelControls } from "@localdot/providers";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
 
 const OUTPUT_TOKENS = 512;
@@ -20,13 +20,49 @@ const texts = (parts: unknown, key = "text"): string =>
         .join("")
     : "";
 
-// One short answer from the fast model, in its provider's own API, as the brain asks it.
+// The fields that set a model's thinking to `effort` in a plain request, for the wires that take
+// one there; any other model thinks as it does by default.
+function thinking(b: ModelBinding, effort: ReasoningEffort | undefined): Record<string, unknown> {
+  if (!effort || !b.provider) return {};
+  const { wire, efforts } = modelControls(b.provider, b.model, b.controls);
+  if (!efforts.includes(effort)) return {};
+  const off = effort === "none";
+  switch (wire) {
+    case "effort":
+      return b.client === "openai" || b.client === "azure" || b.client === "xai"
+        ? { reasoning: { effort } }
+        : { reasoning_effort: effort };
+    case "openrouter":
+      return { reasoning: { effort } };
+    case "binary-effort":
+      return off ? { reasoning_effort: "none" } : {};
+    case "deepseek":
+      return { thinking: { type: off ? "disabled" : "enabled" } };
+    case "thinking":
+      return off ? { thinking: { type: "disabled" } } : {};
+    case "enable-thinking":
+      return off ? { enable_thinking: false } : {};
+    case "together":
+      return off ? { reasoning: { enabled: false } } : {};
+    case "google-level":
+      return { thinkingConfig: { thinkingLevel: effort } };
+    case "google-budget":
+      return off ? { thinkingConfig: { thinkingBudget: 0 } } : {};
+    default:
+      return {};
+  }
+}
+
+// One short answer from the fast model, in its provider's own API, as the brain asks it, thinking
+// at `effort` where the request can say so.
 export function completionCall(
   b: ModelBinding,
   system: string,
   prompt: string,
   image?: string,
+  effort?: ReasoningEffort,
 ): Call {
+  const think = thinking(b, effort);
   const key = b.surrogate ?? "";
   const bearer: Record<string, string> = key ? { authorization: `Bearer ${key}` } : {};
   switch (b.client) {
@@ -74,7 +110,7 @@ export function completionCall(
               ],
             },
           ],
-          generationConfig: { maxOutputTokens: OUTPUT_TOKENS },
+          generationConfig: { maxOutputTokens: OUTPUT_TOKENS, ...think },
         },
         read: (reply) =>
           texts(
@@ -104,6 +140,7 @@ export function completionCall(
             : prompt,
           max_output_tokens: OUTPUT_TOKENS,
           store: false,
+          ...think,
         },
         read: (reply) =>
           ((reply as { output?: { content?: unknown }[] }).output ?? [])
@@ -117,6 +154,7 @@ export function completionCall(
         body: {
           model: b.model,
           max_tokens: OUTPUT_TOKENS,
+          ...think,
           messages: [
             { role: "system", content: system },
             {
@@ -175,6 +213,7 @@ export function gatewayCompletion(
   binding: () => ModelBinding | undefined,
   listener: () => { port: number; token: string } | undefined,
   fetch: typeof undiciFetch = undiciFetch,
+  effort?: ReasoningEffort,
 ) {
   return async (
     system: string,
@@ -185,7 +224,7 @@ export function gatewayCompletion(
     const b = binding();
     const at = listener();
     if (!b || !at) throw new Error("the fast model is not running");
-    const call = completionCall(b, system, prompt, image);
+    const call = completionCall(b, system, prompt, image, effort);
     const agent = new ProxyAgent({
       uri: `http://127.0.0.1:${at.port}`,
       token: `Basic ${Buffer.from(`brain:${at.token}`).toString("base64")}`,

@@ -103,6 +103,7 @@ sessions/<id>/
     video.mp4
     fragments.jsonl
     journal/
+    .compact/         # Only while a finished video is re-encoded.
 exports/
   exports.json        # The exported videos and their state.
   <id>.mp4            # One finished video, named when it is saved.
@@ -119,11 +120,17 @@ Configure the daemon before starting it:
 | `LOCALDOT_RECORDING` | enabled | Set to `0` to stop new video recording; existing recordings remain usable. |
 | `LOCALDOT_RECORDINGS_MAX_DAYS` | `30` | Maximum age of eligible finalized recordings. |
 | `LOCALDOT_RECORDINGS_MAX_GB` | `20` | Completed-video budget in GiB (1024³ bytes per unit). |
+| `LOCALDOT_RECORDING_COMPACTION` | enabled | Set to `0` to keep finished videos as recorded. |
+| `LOCALDOT_RECORDING_BACKFILL` | enabled | Set to `0` to re-encode only videos that finish from now on. |
+| `LOCALDOT_FRAMES_MAX_DAYS` | `180` | Age after which a finished task keeps only its cover screenshot. |
 
 Limits must be positive finite numbers; invalid values use the defaults. Retention runs at
 startup and after recording completion. It removes the oldest eligible finalized videos and
 their fragment/journal files, marks their manifest expired, and preserves session events,
-screenshots, and thumbnails. Live or unfinished recordings are not retention candidates.
+screenshots, and thumbnails. Screenshots have their own, longer age: past it, a finished task keeps
+only its cover frame (the library picture), and thumbnails already made keep serving after their
+screenshot goes. A task whose summary names no cover keeps all of its screenshots. Live or
+unfinished recordings are not retention candidates.
 Deleting from the library (a row's Delete, **Select**, or one of **Free up space**'s choices: older
 than 7, 30 or 90 days, stopped or failed, all but the newest 10) is separate from retention: it
 removes the whole task folder above and the task's history, so its messages leave its conversation
@@ -131,6 +138,29 @@ too. Each choice says how many recordings it picks and what they take on disk be
 confirmation; a running task is never picked or deleted. `POST /api/session-index/delete` with
 `{"ids": [...]}` (1–100 task ids) reports each id as `deleted` (also when already gone), `live` or
 `failed`.
+
+**Settings** › **Your computer** shows what the videos take, what re-encoding saved, and this rule.
+
+The live stream spends most of its bytes on a key frame every two seconds. Once a video is
+finished and no task runs on the computer, localDot re-encodes it in the background: one video at
+a time, largest first, including videos recorded before this version. ffmpeg from the desktop
+image runs in a helper container with no network, one CPU at the lowest priority, and only that
+video's files. It keeps the picture size, colour format and every kept frame's time, and drops
+only frames that repeat the last one kept (no 8×8 block differs by more than one level a pixel on
+average). The result is H.264 High with still-image tuning, no B-frames, and a key frame at least
+every 10 seconds while the screen changes and every 240 frames, so a timeline drag shows a
+picture at most 10 seconds old and an exact seek decodes at most 240 frames. Recordings of real
+tasks took an eighth to a ninth of their space this way; short, mostly still ones save less.
+
+The new video is written under `.compact/` with its own fragment index by the recorder's own
+writer. It replaces the original only after it decodes whole, starts and ends where the original
+does, has only the original's frame times, and returns the same frame and key frame as the
+original for sampled seeks; anything less keeps the original, and a result that saves less than a
+tenth is not used. The swap renames the index, the video and the manifest in turn; a restart
+during it finishes it, and a restart before it drops the staging. The manifest's `bytes` is the
+new size and `compacted.sourceBytes` the original one. A task starting stops the re-encode, which
+tries again later. Videos under 8 MiB, videos being exported, and videos within a day of their
+age limit are left alone. A page that had the old video open asks for its new size and opens that.
 
 ## Acceptance commands
 

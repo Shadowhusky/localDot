@@ -66,6 +66,7 @@ export interface SettingsDraft {
   purposeCheck: boolean;
   recentActivity: boolean;
   persona: PersonaId;
+  autoPersona: boolean;
   // This localDot's name, as typed, the accessory its dot wears, and the user's others.
   name: string;
   accessory?: Accessory;
@@ -93,6 +94,7 @@ export function formOf(settings: AgentSettingsDocument): SettingsDraft {
     prices,
     autonomy: settings.autonomy ?? DEFAULT_AUTONOMY,
     persona: settings.persona ?? DEFAULT_PERSONA,
+    autoPersona: settings.autoPersona === true,
     name: settings.name ?? "",
     ...(settings.accessory ? { accessory: settings.accessory } : {}),
     localDots: settings.localDots ?? [],
@@ -168,6 +170,8 @@ export function validateForm(
   if (draft.models?.length) document.models = draft.models;
   if (draft.persona === DEFAULT_PERSONA) delete document.persona;
   else document.persona = draft.persona;
+  if (draft.autoPersona) document.autoPersona = true;
+  else delete document.autoPersona;
   const name = draft.name.trim();
   if (!name) delete document.name;
   else if (AgentSettingsDocument.shape.name.safeParse(name).success) document.name = name;

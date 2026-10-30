@@ -8,9 +8,9 @@ test("earlier Activity and work steps remain reachable without paging or moving 
 }) => {
   const fixture = await ui.open("running");
   await page.request.post(`${fixture.origin}/__qa/steps?n=140`);
-  const work = page.locator(".thread-live .thread-work");
+  // The run dot is at stays open in the thread while its steps arrive.
+  const work = page.locator(".thread-work[data-live]");
   await expect(work).toContainText("steps");
-  await work.getByRole("button", { expanded: false }).click();
   const history = work.getByRole("region", { name: "Work history" });
   await expect
     .poll(async () => Number(await history.locator("[data-last]").getAttribute("data-index")))
@@ -28,7 +28,7 @@ test("earlier Activity and work steps remain reachable without paging or moving 
   expect(await history.locator('[data-index="0"]').textContent()).toBe(oldest);
   expect(await history.evaluate((node) => node.scrollTop)).toBeLessThan(2);
   expect(await history.evaluate((node) => node.clientHeight)).toBeLessThanOrEqual(280);
-  await work.getByRole("button", { expanded: true }).click();
+  await work.locator(".thread-work-steps > .ui-disclosure-trigger").click();
   const phone = (page.viewportSize()?.width ?? 0) < 700;
   if (phone) await page.getByRole("button", { name: "Activity", exact: true }).click();
   else
@@ -67,10 +67,10 @@ test("earlier Activity and work steps remain reachable without paging or moving 
 
 test("expanding work keeps the composer inside a short viewport", async ({ page, ui }) => {
   await ui.open("running");
-  const work = page.locator(".thread-live .thread-work");
+  const work = page.locator(".thread-work[data-live]");
   for (const height of [620, 480]) {
     await page.setViewportSize({ width: page.viewportSize()?.width ?? 390, height });
-    const toggle = work.getByRole("button", { expanded: false });
+    const toggle = work.locator(".thread-work-steps > .ui-disclosure-trigger[aria-expanded=false]");
     if (await toggle.count()) await toggle.click();
     await ui.settle();
     const field = page.getByRole("textbox", { name: "Message", exact: true });

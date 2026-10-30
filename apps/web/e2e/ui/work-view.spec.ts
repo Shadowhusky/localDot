@@ -25,8 +25,9 @@ test("background work is readable, pinnable, bounded and yields to the actual br
   await expect(work.getByRole("combobox", { name: "Display view" })).toContainText("Work");
   if ((page.viewportSize()?.width ?? 0) < 700) {
     const box = await work.locator(".work-controls").boundingBox();
-    expect(box?.width).toBeLessThan(100);
     expect(box?.height).toBe(44);
+    const follow = await work.getByRole("button", { name: "Follow work" }).boundingBox();
+    expect(follow?.height).toBe(44);
   }
   await page.request.post(`${fixture.origin}/__qa/work?kind=browser`);
   await expect(output).toBeVisible();
@@ -73,7 +74,8 @@ for (const scenario of ["ask", "approval", "takeover"] as const) {
     await page.request.post(`${fixture.origin}/__qa/work`);
     const output = page.getByLabel("Work output");
     await expect(output).toBeVisible();
-    await output.dispatchEvent("wheel", { deltaY: 1 });
+    await output.press("PageDown");
+    await expect(page.getByRole("button", { name: "Follow work" })).toBeVisible();
     await ui.step(scenario);
     await expect(page.getByLabel("Work display")).toHaveCount(0);
   });

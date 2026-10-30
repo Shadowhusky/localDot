@@ -33,7 +33,7 @@ async function navigationFixture() {
   });
   await control.set({ ...permit, holder: "agent" });
   const navigate = vi.fn(async (_tab: string, _url: string, _signal: AbortSignal) => {});
-  const navigation = new BrowserNavigation(control, { navigate });
+  const navigation = new BrowserNavigation(control, { navigate, openTab: vi.fn() });
   return { control, navigate, navigation };
 }
 

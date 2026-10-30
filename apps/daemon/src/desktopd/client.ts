@@ -19,6 +19,8 @@ import {
   TypeResult,
   type WindowControlRequest,
   WindowControlResult,
+  type WindowsRequest,
+  WindowsResult,
   type ZoomRequest,
 } from "@localdot/protocol";
 import type { DesktopdEndpoint } from "../cells/types.ts";
@@ -136,6 +138,10 @@ export class DesktopdClient {
       WindowControlResult.parse,
       signal,
     );
+  }
+
+  windows(req: WindowsRequest, signal?: AbortSignal): Promise<WindowsResult> {
+    return this.#json("POST", "/windows", req, TIMEOUT_MS.launch, WindowsResult.parse, signal);
   }
 
   launch(req: LaunchRequest, signal?: AbortSignal): Promise<LaunchResult> {

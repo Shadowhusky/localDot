@@ -107,7 +107,7 @@
   position: absolute;
   inset: 22% 18%;
   border-radius: var(--radius-xs);
-  background: linear-gradient(135deg, var(--color-porcelain-top), var(--color-porcelain-bottom));
+  background: linear-gradient(135deg, var(--color-glyph-light), var(--color-glyph-mid));
   content: "";
 }
 
@@ -119,7 +119,25 @@
   background: linear-gradient(180deg, var(--midnight-void), var(--midnight-raised-2));
 }
 
-.ui-radio-card:has(.appearance-swatch[data-appearance="midnight"]) {
+.appearance-swatch[data-appearance="daylight"] {
+  background: linear-gradient(180deg, var(--daylight-void), var(--daylight-raised-2));
+}
+
+.appearance-swatch[data-appearance="daylight"]::after {
+  box-shadow: 0 0 0 1px var(--daylight-raised-2);
+}
+
+/* System: Daylight and the dark appearance it takes at night, side by side. */
+.appearance-swatch[data-appearance="system"] {
+  background: linear-gradient(90deg, var(--daylight-void) 50%, var(--graphite-void) 50%);
+}
+
+.appearance-swatch[data-appearance="system"][data-dark="midnight"] {
+  background: linear-gradient(90deg, var(--daylight-void) 50%, var(--midnight-void) 50%);
+}
+
+:root:not([data-appearance="daylight"])
+  .ui-radio-card:has(.appearance-swatch[data-appearance="midnight"]) {
   background-color: var(--midnight-raised);
 }
 

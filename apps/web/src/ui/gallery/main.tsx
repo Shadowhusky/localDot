@@ -39,19 +39,23 @@ const PAGES = {
 
 // A stand-in for the T01 gallery until it lands here, loading the same legacy styles it does.
 const query = new URLSearchParams(location.search);
-const midnight = query.get("appearance") === "midnight";
+const APPEARANCES = { graphite: "Graphite", midnight: "Midnight", daylight: "Daylight" } as const;
+type Appearance = keyof typeof APPEARANCES;
+const appearance: Appearance =
+  (Object.keys(APPEARANCES) as Appearance[]).find((name) => name === query.get("appearance")) ??
+  "graphite";
 const requested = query.get("page");
 const pageName: keyof typeof PAGES =
   requested === "fields" || requested === "overlays" || requested === "feedback"
     ? requested
     : "atoms";
 const { title, note, Page } = PAGES[pageName];
-if (midnight) document.documentElement.dataset.appearance = "midnight";
+document.documentElement.dataset.appearance = appearance;
 
-function link(page: keyof typeof PAGES, dark: boolean): string {
+function link(page: keyof typeof PAGES, shown: Appearance): string {
   const params = new URLSearchParams();
   if (page !== "atoms") params.set("page", page);
-  if (dark) params.set("appearance", "midnight");
+  if (shown !== "graphite") params.set("appearance", shown);
   return `?${params}`;
 }
 
@@ -70,7 +74,7 @@ createRoot(root).render(
             {(Object.keys(PAGES) as (keyof typeof PAGES)[]).map((page) => (
               <a
                 key={page}
-                href={link(page, midnight)}
+                href={link(page, appearance)}
                 aria-current={page === pageName ? "page" : undefined}
               >
                 {PAGES[page].name}
@@ -78,12 +82,15 @@ createRoot(root).render(
             ))}
           </nav>
           <nav className="atoms-appearance" aria-label="Appearance">
-            <a href={link(pageName, false)} aria-current={midnight ? undefined : "page"}>
-              Graphite
-            </a>
-            <a href={link(pageName, true)} aria-current={midnight ? "page" : undefined}>
-              Midnight
-            </a>
+            {(Object.keys(APPEARANCES) as Appearance[]).map((name) => (
+              <a
+                key={name}
+                href={link(pageName, name)}
+                aria-current={name === appearance ? "page" : undefined}
+              >
+                {APPEARANCES[name]}
+              </a>
+            ))}
           </nav>
         </div>
       </header>

@@ -142,6 +142,8 @@ interface ControlRecord {
   // The user took the computer themselves, at this time, from a task in this state, maybe setting
   // aside dot's question.
   user?: { since: number; from: SessionStatus; asked: boolean };
+  // The user's hold on the computer the task shares: every task's actions wait for its end.
+  turn?: { release(): Promise<void> };
 }
 export class SessionStoppedError extends Error {
   constructor() {
@@ -212,6 +214,8 @@ export interface AgentSessionOptions {
 // Daemon-owned state outlives any brain or HTTP request. In particular, retirement cancels the
 // caller of a takeover but cannot hand the computer back on the user's behalf.
 export class AgentSession {
+  // The computer this task shares with others, held for the user while they have control.
+  computer?: { forUser(signal: AbortSignal): Promise<{ release(): Promise<void> }> };
   // Read when an action is admitted, so the chat's permission switch applies to
   // subsequent actions without changing a decision already on screen.
   permissionMode: () => "custom" | "auto" | "full" = () => "custom";
@@ -1424,6 +1428,7 @@ export class AgentSession {
     const draining: Promise<void>[] = this.#screens ? [this.#screens.takeOver()] : [];
     const releasing = this.releaseInput();
     if (releasing) draining.push(releasing);
+    draining.push(this.#userTurn(record));
     const observers = [...this.#controlObservers].filter(
       (observer) => observer.generation === generation,
     );
@@ -1511,6 +1516,7 @@ export class AgentSession {
     const draining: Promise<void>[] = this.#screens ? [this.#screens.takeOver()] : [];
     const releasing = this.releaseInput();
     if (releasing) draining.push(releasing);
+    draining.push(this.#userTurn(record));
     if (generation && !pause) {
       // dot's question waits for the hand-back, when dot can ask it again.
       user.asked = this.#ask?.finish({ by: "control" }) ?? false;
@@ -1546,6 +1552,13 @@ export class AgentSession {
         /* Keep the control fence if publication fails. Stop remains available. */
       });
     return record.requestId;
+  }
+  // Whatever the other tasks are doing finishes first; then the computer is the user's alone.
+  async #userTurn(record: ControlRecord): Promise<void> {
+    if (!this.computer) return;
+    const turn = await this.computer.forUser(this.abort.signal);
+    if (this.#control === record && !this.stopped) record.turn = turn;
+    else await turn.release();
   }
   endTakeover(requestId: string, note: string | undefined): boolean {
     const record = this.#control;
@@ -1642,6 +1655,7 @@ export class AgentSession {
       record.step,
     );
     this.#control = undefined;
+    void record.turn?.release();
     // Whatever the user did on the computer, a page read before it is no longer one to act on.
     this.pageRefs = undefined;
     const user = record.user;
@@ -1801,6 +1815,7 @@ export class AgentSession {
         console.error("agent takeover end could not be recorded");
       } finally {
         this.#control = undefined;
+        void record.turn?.release();
         record.resolve({ by: "stop" });
       }
     }

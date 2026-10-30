@@ -148,10 +148,6 @@
   padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 3);
 }
 
-.rail-panel .thread-live {
-  padding-inline: calc(var(--spacing) * 2);
-}
-
 /* Activity, laid over the thread or in its own rail on a wide screen. */
 .rail-cover-activity {
   display: grid;
@@ -299,30 +295,15 @@
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
-/* The status point: xenon while dot works, amber when it needs you, red for a failure, a quiet
-   disc when done and a ring when stopped. */
-.conversations-status {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: var(--color-fg-3);
-}
-
-.conversations-status[data-status="running"] {
-  background-color: var(--color-xenon);
-}
-
-.conversations-status[data-status="needs-you"] {
-  background-color: var(--color-attention);
-}
-
-.conversations-status[data-status="failed"] {
-  background-color: var(--color-danger-fg);
-}
-
-.conversations-status[data-status="stopped"] {
-  background-color: transparent;
-  box-shadow: inset 0 0 0 2px var(--color-fg-3);
+/* What dot is doing in a conversation under way, under its title. */
+.conversations-activity {
+  grid-column: 2 / -1;
+  overflow: hidden;
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conversations-foot {
@@ -393,5 +374,261 @@
 @media (prefers-reduced-motion: reduce) {
   .conversations-list {
     animation: none;
+  }
+}
+
+/* The conversations rail (SessionRail): on the house beside the stage, a column of status marks
+   or, expanded, their names. Its room is the page's left padding, so the grid's areas stay as
+   they are; the toggle, New conversation and every mark share one column, so expanding only
+   uncovers the names. */
+.app[data-sessions] {
+  --_sessions-w: calc(var(--spacing) * 14);
+  padding-left: var(--_sessions-w);
+  transition: padding-left var(--dur-default) var(--ease-spring);
+}
+
+.app[data-sessions="expanded"] {
+  --_sessions-w: calc(var(--spacing) * 64);
+}
+
+.sessions {
+  position: fixed;
+  inset-block: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: var(--_sessions-w);
+  overflow: hidden;
+  color: var(--color-fg-2);
+  transition:
+    width var(--dur-default) var(--ease-spring),
+    opacity var(--dur-gentle) var(--ease-spring) var(--dur-press),
+    translate var(--dur-gentle) var(--ease-spring) var(--dur-press);
+}
+
+.app[data-entering] .sessions {
+  opacity: 0;
+  translate: calc(var(--spacing) * -6) 0;
+  transition: none;
+}
+
+.sessions-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: var(--bar-h);
+  padding-inline: calc(var(--spacing) * 3);
+}
+
+.sessions-new {
+  flex: none;
+  padding: 0 calc(var(--spacing) * 2);
+}
+
+.sessions-scroll {
+  flex: 1;
+  padding: 0 calc(var(--spacing) * 2) calc(var(--spacing) * 4);
+}
+
+.sessions-retry {
+  margin: calc(var(--spacing) * 2) auto 0;
+}
+
+/* Collapsed, a group's name gives way to a hairline in the same room, so no row moves. */
+.sessions-group-label {
+  position: relative;
+  height: calc(var(--spacing) * 8);
+  padding: calc(var(--spacing) * 3.5) calc(var(--spacing) * 3) 0;
+  overflow: hidden;
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  white-space: nowrap;
+}
+
+.sessions-group-name {
+  transition: opacity var(--dur-default) var(--ease-standard);
+}
+
+.sessions-group-label[data-hidden] > .sessions-group-name {
+  opacity: 0;
+  transition-duration: var(--dur-text-out);
+}
+
+.sessions-group-label::after {
+  content: "";
+  position: absolute;
+  inset-inline: calc(var(--spacing) * 3);
+  top: 50%;
+  height: 1px;
+  background-color: var(--color-separator);
+  opacity: 0;
+  transition: opacity var(--dur-text-out) var(--ease-standard);
+}
+
+.sessions-group-label[data-hidden]::after {
+  opacity: 1;
+  transition-duration: var(--dur-default);
+}
+
+.sessions-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A row is as wide as the rail leaves it, whatever its hidden name and time would need. */
+.sessions-item {
+  position: relative;
+  display: grid;
+  min-width: 0;
+}
+
+/* The light under the conversation on show; it glides from the row it lit before. */
+.sessions-selection {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-row);
+  background-color: var(--color-selected);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sessions-item[data-current] > .sessions-selection {
+  opacity: 1;
+}
+
+.sessions-item[data-current] > .sessions-row {
+  --_quiet-fg: var(--color-fg-1);
+}
+
+.sessions-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessions-when {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing);
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  white-space: nowrap;
+}
+
+.sessions-item:is(:focus-within, [data-menu]) .sessions-when {
+  opacity: 0;
+}
+
+@media (hover: hover) {
+  .sessions-item:hover .sessions-when {
+    opacity: 0;
+  }
+}
+
+/* The activity line folds away with the names, so a row is one mark tall when collapsed. */
+.sessions-activity {
+  display: grid;
+  grid-column: 2 / -1;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-default) var(--ease-spring);
+}
+
+.sessions-activity[data-shown] {
+  grid-template-rows: 1fr;
+}
+
+.sessions-activity-text {
+  min-height: 0;
+  overflow: hidden;
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Expanding, the names come in once the rail has started to open; collapsing, they go first. */
+:is(.sessions-title, .sessions-when, .sessions-activity-text) {
+  transition: opacity var(--dur-default) var(--ease-standard) var(--dur-press);
+}
+
+.sessions:not([data-expanded]) :is(.sessions-title, .sessions-when, .sessions-activity-text) {
+  opacity: 0;
+  transition: opacity var(--dur-text-out) var(--ease-exit);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-sessions],
+  .sessions,
+  .sessions-activity {
+    transition: none;
+  }
+
+  .app[data-entering] .sessions {
+    translate: none;
+  }
+
+  .sessions-selection {
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+}
+
+/* Taking up another conversation (switch-motion.ts): the thread it leaves slides out the way the
+   list moved and the new one comes in after it. The rest of the page stays as it is, live. */
+:root[data-switch] {
+  --_switch: calc(var(--spacing) * 3);
+}
+
+:root[data-switch="up"] {
+  --_switch: calc(var(--spacing) * -3);
+}
+
+:root[data-switch] .rail-chat .thread-scroll {
+  view-transition-name: conversation;
+}
+
+:root[data-switch]::view-transition-old(root),
+:root[data-switch]::view-transition-new(root) {
+  animation: none;
+}
+
+:root[data-switch]::view-transition-group(conversation) {
+  animation-duration: var(--dur-default);
+}
+
+:root[data-switch]::view-transition-old(conversation) {
+  animation: conversation-leave var(--dur-exit) var(--ease-exit) both;
+}
+
+:root[data-switch]::view-transition-new(conversation) {
+  animation: conversation-enter var(--dur-default) var(--ease-spring) var(--dur-press) both;
+}
+
+@keyframes conversation-leave {
+  to {
+    opacity: 0;
+    translate: 0 calc(var(--_switch) * -1);
+  }
+}
+
+@keyframes conversation-enter {
+  from {
+    opacity: 0;
+    translate: 0 var(--_switch);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-switch] {
+    --_switch: 0px;
   }
 }

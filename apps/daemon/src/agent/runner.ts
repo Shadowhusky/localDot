@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { CHATGPT_SWITCHED_OFF } from "@localdot/codex-harness";
 import {
@@ -7,11 +8,15 @@ import {
   BootConfig,
   type CheckIns,
   type ClaudeCodeStatus,
+  type ConversationLive,
+  clipText,
   DEFAULT_AGENT_LIMITS,
+  DEFAULT_PERSONA,
   DEFAULT_RESEARCH_BUDGET,
   freezeAutonomy,
   isJevKey,
   type KeydRecord,
+  LIVE_ACTIVITY_CHARS,
   type ModelBinding,
   type ModelOptions,
   type PersonaId,
@@ -59,7 +64,16 @@ import type { ClaudeCodeAnswer } from "./claude-code/answer.ts";
 import { ClaudeCodeCleanupError, type ClaudeCodeDriver } from "./claude-code/driver.ts";
 import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
-import type { Conversations } from "./conversation.ts";
+import type { ComputerTurns } from "./computer-turn.ts";
+import type { ConversationNames, Conversations } from "./conversation.ts";
+import {
+  type Ask,
+  DOT_WAIT_MS,
+  type FirstLook,
+  firstLook,
+  LOOK_MS,
+  leastEffort,
+} from "./first-look.ts";
 import type { MemoryStore } from "./memory.ts";
 import { providerNotice } from "./provider-notice.ts";
 import type { RecentActivity } from "./recent-activity.ts";
@@ -82,6 +96,12 @@ import { taintMemory } from "./safety/taint.ts";
 import { visualNavigation } from "./safety/visual-target.ts";
 import { AgentSession, abortable, SessionStoppedError } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
+import {
+  SideQuestionError,
+  sideAnswerText,
+  sideQuestionEvents,
+  sideQuestionPrompt,
+} from "./side-question.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
 import { resumable, unfinishedIn } from "./subagents.ts";
 import type { TranscriptStore } from "./transcript.ts";
@@ -142,6 +162,8 @@ export interface TaskStartOptions {
   readonly revises?: ReviseLink;
   // Research mode, within the user's research budget.
   readonly research?: boolean;
+  // The conversation's latest task, or null for a new one; left out, the current conversation.
+  readonly continues?: string | null;
 }
 export class AgentError extends Error {
   constructor(
@@ -158,11 +180,26 @@ export interface AgentRunnerDeps {
   eventLog: Pick<EventLog, "createSession" | "append" | "subscribe" | "logFile">;
   live: Pick<
     LiveSessions,
-    "start" | "get" | "alias" | "unalias" | "settled" | "stop" | "idleOperationPending"
+    | "start"
+    | "get"
+    | "alias"
+    | "unalias"
+    | "settled"
+    | "stop"
+    | "idleOperationPending"
+    | "sessionsOn"
+    | "busy"
+    | "cellOf"
+    | "lease"
+    | "browserHolder"
   >;
+  // A task's live status changed; undefined once it has ended.
+  liveChanged?(sessionId: string, live: ConversationLive | undefined): void;
+  // Turns on the computer its tasks share, and which of its windows are whose.
+  computer?: Pick<ComputerTurns, "take" | "owners">;
   cell(cellId: string): CellSummary | undefined;
   cellBusy?(cellId: string): boolean;
-  installSession?(session: AgentSession, cell: CellSummary): void;
+  installSession?(session: AgentSession, cell: CellSummary, freshTab?: boolean): void;
   // Starts the computer's web browser, or finds it running.
   startBrowser?(cellId: string): Promise<void>;
   brains: Pick<BrainCells, "open" | "start" | "exited" | "close"> &
@@ -178,7 +215,7 @@ export interface AgentRunnerDeps {
   recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
-    Partial<Pick<Conversations, "title">>;
+    Partial<Pick<Conversations, "names" | "persona">>;
   installSkills(cellId: string, signal: AbortSignal, persona?: PersonaId): Promise<SkillSummary[]>;
   prepareDesktop?(session: AgentSession): Promise<void>;
   waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
@@ -207,6 +244,13 @@ export interface AgentRunnerDeps {
     // Asks a task's fast model on the plan one question, with no tools.
     answer?(fast: { model: string; options?: ModelOptions }): ClaudeCodeAnswer;
   };
+  // Asks a model billed per token one short question before the task's brain starts.
+  quickModel?(
+    role: ResolvedRole,
+    system: string,
+    prompt: string,
+    signal: AbortSignal,
+  ): Promise<string>;
 }
 // "none": the user's own hold on the computer, which no model works on.
 type ModelSelection =
@@ -224,6 +268,8 @@ type ModelSelection =
       model: string;
       options?: ModelOptions;
       fast?: { model: string; options?: ModelOptions };
+      // A new conversation's first look: the fast model, else the main one, at its least thinking.
+      quick: { model: string; options?: ModelOptions };
     }
   | { kind: "none" };
 // A plan's account says what each of its models takes: its efforts and speeds replace the bundled
@@ -258,8 +304,11 @@ function planOptionsProblem(
 interface Runtime {
   session: AgentSession;
   selection: ModelSelection;
-  // The dot chosen when the task started; its skills and instructions hold for the whole task.
+  // The dot chosen when the task started, or the user's switch; its skills and instructions hold
+  // from the agent's next start.
   persona?: PersonaId;
+  // Auto's pick for a new conversation, or nothing once it is too late to wait for one.
+  choosing?: Promise<FirstLook>;
   limits: AgentLimits;
   skills: SkillSummary[];
   epoch: number;
@@ -281,6 +330,16 @@ interface Runtime {
   // Ended from its wait for a follow-up, because the user moved to another conversation.
   released?: boolean;
   idleMs?: number;
+  // What it is doing now, in a line, and the live status last told.
+  activity?: string;
+  live?: ConversationLive;
+}
+interface FastModel {
+  readonly provider: string;
+  readonly model: string;
+  // Whether it can answer now: a fast model on an API key answers only through a running brain.
+  ready(): boolean;
+  ask(system: string, prompt: string, signal: AbortSignal): Promise<string>;
 }
 class CleanupUncertain extends Error {}
 function uncertain(error: unknown): boolean {
@@ -307,6 +366,9 @@ export class AgentRunner {
   // Bounded daemon-lifetime history only: never keep AgentSession, leases, brain IDs or keys.
   readonly #terminal = new Map<string, TerminalTaskSnapshot>();
   readonly #starting = new Set<string>();
+  // Starts on one computer are admitted one at a time.
+  readonly #admitting = new Map<string, Promise<void>>();
+  readonly #watched = new Map<string, () => void>();
   readonly #blockedCells = new Set<string>();
   readonly #wake = new Set<() => void>();
   readonly #unsubscribe: () => void;
@@ -319,6 +381,16 @@ export class AgentRunner {
     this.#unsubscribe = deps.eventLog.subscribe((id, event) => {
       const rt = this.#runtime.get(id);
       if (!rt || rt.session.stopped) return;
+      const doing =
+        event.type === "tool.start"
+          ? event.data.title
+          : event.type === "step.start"
+            ? event.data.intent
+            : event.type === "action.intent"
+              ? event.data.label
+              : undefined;
+      if (doing) rt.activity = clipText(doing, LIVE_ACTIVITY_CHARS);
+      queueMicrotask(() => this.#told(rt));
       if (event.type === "budget.exceeded") {
         rt.pause = "budget";
         rt.budgetScope = event.data.scope;
@@ -434,33 +506,63 @@ export class AgentRunner {
     }
     this.#ready(cellId);
     signal?.throwIfAborted();
-    if (this.#starting.has(cellId)) throw new AgentError(409, "a task is already starting");
+    const before = this.#admitting.get(cellId) ?? Promise.resolve();
+    const turn = Promise.withResolvers<void>();
+    const admitted = before.then(() => turn.promise);
+    this.#admitting.set(cellId, admitted);
     this.#starting.add(cellId);
+    const admittedNext = () => {
+      turn.resolve();
+      if (this.#admitting.get(cellId) !== admitted) return;
+      this.#admitting.delete(cellId);
+      this.#starting.delete(cellId);
+    };
+    try {
+      await (signal ? abortable(before, signal) : before);
+    } catch (error) {
+      admittedNext();
+      throw error;
+    }
     try {
       // Capture at request admission, before prior-task retirement or preflight can await.
       const settings = AgentSettings.parse({
         ...this.deps.settings(),
         ...(options.main ? { main: options.main, fast: undefined, local: undefined } : {}),
       });
-      const current = this.deps.live.get(cellId);
-      if (current) {
-        const old = this.sessions.get(current);
-        if (old && this.holds(current) && old.pendingTakeover) {
-          if (!(await old.handback(old.pendingTakeover, undefined, signal)))
+      // A routine's run is its own thread: it neither continues nor takes over the user's
+      // conversation. A conversation record that can't be read never keeps a task from starting.
+      let continues: string | undefined;
+      if (!origin)
+        try {
+          continues =
+            options.continues === undefined
+              ? (this.deps.conversations?.current() ?? undefined)
+              : (options.continues ?? undefined);
+        } catch {
+          console.error("the earlier conversation could not be read");
+        }
+      // The conversation's own task makes way for the new one; the computer's other tasks go on.
+      const previous = continues ? this.sessions.get(continues) : undefined;
+      if (previous && !previous.stopped) {
+        if (this.holds(previous.id) && previous.pendingTakeover) {
+          if (!(await previous.handback(previous.pendingTakeover, undefined, signal)))
             throw new AgentError(409, "The computer is still changing hands. Try sending again.");
         }
-        if (!old || (old.status !== "idle" && !recoverable(old)) || old.controlHeld)
-          throw new AgentError(409, "a task is already running on this computer");
+        if ((previous.status !== "idle" && !recoverable(previous)) || previous.controlHeld)
+          throw new AgentError(
+            409,
+            "That conversation's task is still at work: message it instead.",
+          );
         // A hold the user handed back ends by itself. A finished task ends as it would after its
-        // idle time; cancellation leaves the computer ready for the next task.
-        const waiting = this.#runtime.get(current);
+        // idle time.
+        const waiting = this.#runtime.get(previous.id);
         if (waiting?.idleWait) {
           waiting.released = true;
           waiting.idleWait.abort();
-        } else if (!this.holds(current)) old.cancel();
+        } else if (!this.holds(previous.id)) previous.cancel();
         await (signal
-          ? abortable(this.deps.live.settled(current), signal)
-          : this.deps.live.settled(current));
+          ? abortable(this.deps.live.settled(previous.id), signal)
+          : this.deps.live.settled(previous.id));
       }
       let selection: ModelSelection;
       // Undefined when the saved keys couldn't be read.
@@ -493,11 +595,16 @@ export class AgentRunner {
         const fast = activeRoles(settings).fast;
         const fastProblem = fast && planOptionsProblem(CLAUDE_CODE, fast, account(fast));
         if (fastProblem) throw new AgentError(400, `fast model: ${fastProblem}`);
+        const quick = fast ?? settings.main;
+        const least = leastEffort(
+          account(quick)?.efforts ?? modelControls(CLAUDE_CODE, quick.model).efforts,
+        );
         selection = {
           kind: "claude-code",
           model: settings.main.model,
           options: settings.main.options,
           ...(fast ? { fast: { model: fast.model, options: fast.options } } : {}),
+          quick: { model: quick.model, ...(least ? { options: { reasoningEffort: least } } : {}) },
         };
       } else if (settings.main?.provider === CHATGPT) {
         const codex = this.deps.codex;
@@ -552,20 +659,13 @@ export class AgentRunner {
         );
       signal?.throwIfAborted();
       const cell = this.#ready(cellId);
-      if (this.deps.live.get(cellId))
-        throw new AgentError(409, "a task is already running on this computer");
-      // A conversation record that can't be read never keeps a task from starting. A routine's
-      // run is its own thread: it neither continues nor takes over the user's conversation.
-      let continues: string | undefined;
       let earlier: string[] = [];
-      if (!origin)
+      if (continues)
         try {
-          continues = this.deps.conversations?.current() ?? undefined;
-          earlier = continues ? (this.deps.conversations?.earlier(continues) ?? []) : [];
+          earlier = this.deps.conversations?.earlier(continues) ?? [];
         } catch {
           console.error("the earlier conversation could not be read");
           continues = undefined;
-          earlier = [];
         }
       let recent: RecentLine[] = [];
       if (settings.recentActivity !== "off" && this.deps.recentActivity)
@@ -582,8 +682,19 @@ export class AgentRunner {
         } catch {
           console.error("the earlier task's delegated agents could not be read");
         }
+      // A task that continues a conversation keeps its name and, with Auto, its dot.
+      const named = continues ? this.#named(continues) : undefined;
+      let persona = settings.persona;
+      if (settings.autoPersona && continues)
+        try {
+          persona = this.deps.conversations?.persona?.(continues) ?? persona;
+        } catch {
+          console.error("the conversation's dot could not be read");
+        }
       const title = (
-        origin?.success && origin.data.kind === "routine" ? origin.data.name : task
+        origin?.success && origin.data.kind === "routine"
+          ? origin.data.name
+          : (named?.automatic ?? task)
       ).slice(0, 200);
       const id = this.deps.eventLog.createSession(title);
       const session = new AgentSession(
@@ -666,7 +777,7 @@ export class AgentRunner {
       const rt: Runtime = {
         session,
         selection,
-        ...(settings.persona ? { persona: settings.persona } : {}),
+        ...(persona ? { persona } : {}),
         limits: agentLimits(settings.checkIns),
         skills: [],
         epoch: 0,
@@ -683,8 +794,11 @@ export class AgentRunner {
       });
       this.sessions.set(id, session);
       this.#runtime.set(id, rt);
+      this.#share(session, continues);
+      // The desktop's browser starts afresh only for a computer no other task is using.
+      const alone = !this.deps.live.busy(cellId);
       try {
-        this.deps.installSession?.(session, cell);
+        this.deps.installSession?.(session, cell, !continues);
         session.append("session.start", {
           screen: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
           os: "linux",
@@ -695,6 +809,8 @@ export class AgentRunner {
           ...(session.research ? { research: session.research.budget } : {}),
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
+        if (named?.user) session.append("session.title", { title: named.user, by: "user" });
+        if (!origin && !continues) this.#lookFirst(rt, task, !!settings.autoPersona);
         if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));
         if (recent.length)
           session.taint.add("memory", "recent activity", recent.map((r) => r.title).join("\n"));
@@ -703,7 +819,7 @@ export class AgentRunner {
           cellId,
           id,
           (stop) => this.#run(rt, stop),
-          this.deps.prepareDesktop ? (stop) => this.#prepareDesktop(rt, stop) : undefined,
+          this.deps.prepareDesktop && alone ? (stop) => this.#prepareDesktop(rt, stop) : undefined,
         );
       } catch (error) {
         session.stop();
@@ -714,14 +830,121 @@ export class AgentRunner {
       }
       if (!origin)
         try {
-          this.deps.conversations?.adopt(id);
+          this.deps.conversations?.adopt(id, continues ?? null);
         } catch {
           console.error("the current conversation could not be saved");
         }
       return session;
     } finally {
-      this.#starting.delete(cellId);
+      admittedNext();
     }
+  }
+  #named(sessionId: string): ConversationNames | undefined {
+    try {
+      return this.deps.conversations?.names?.(sessionId);
+    } catch {
+      console.error("the conversation's name could not be read");
+      return undefined;
+    }
+  }
+  // A new conversation's name and, with Auto, its dot, from one quick call beside the task. The
+  // name comes when it comes; the dot only counts if it comes before the agent starts.
+  #lookFirst(rt: Runtime, task: string, auto: boolean): void {
+    const ask = this.#quick(rt);
+    if (!ask) return;
+    const looked = firstLook(ask, task, auto, AbortSignal.timeout(LOOK_MS)).catch(
+      (): FirstLook => ({}),
+    );
+    void looked.then(({ title }) => {
+      if (!title) return;
+      try {
+        rt.session.append("session.title", { title, by: "auto" });
+      } catch {
+        console.error("the conversation's name could not be saved");
+      }
+    });
+    if (!auto) return;
+    const answered = new AbortController();
+    const late = (this.deps.sleep ?? sleep)(DOT_WAIT_MS, answered.signal).then(
+      (): FirstLook => ({}),
+      (): FirstLook => ({}),
+    );
+    rt.choosing = Promise.race([looked, late]);
+    void looked.then(() => answered.abort());
+  }
+  // The fast model, else the main one at its least thinking. A ChatGPT plan has none to spare: its
+  // one Codex process is the task's.
+  #quick(rt: Runtime): Ask | undefined {
+    const { selection, session } = rt;
+    if (selection.kind === "claude-code") {
+      const { quick } = selection;
+      const answer = this.deps.claudeCode?.answer?.(quick);
+      if (!answer) return undefined;
+      return async (system, prompt, signal) => {
+        const reply = await answer(system, prompt, signal);
+        if (!session.stopped)
+          session.append("model.usage", {
+            role: selection.fast ? "fast" : "main",
+            route: CLAUDE_CODE,
+            model: quick.model,
+            inputTokens: reply.inputTokens,
+            outputTokens: reply.outputTokens,
+            ...(reply.speed ? { speed: reply.speed } : {}),
+          });
+        return reply.text;
+      };
+    }
+    const ask = this.deps.quickModel;
+    if (selection.kind !== "api" || !ask) return undefined;
+    const role =
+      selection.roles.find((r) => r.role === "fast") ??
+      selection.roles.find((r) => r.role === "main");
+    return role && ((system, prompt, signal) => ask(role, system, prompt, signal));
+  }
+  // The user's own dot for a task while Auto is on. Its skills and role take over when the agent
+  // next starts, which is at once for an agent at work: it carries on from its saved history.
+  switchPersona(id: string, persona: PersonaId): void {
+    const rt = this.#runtime.get(id);
+    const session = rt?.session;
+    if (!rt || !session || session.stopped || rt.selection.kind === "none")
+      throw new AgentError(409, "This task has ended.");
+    if (
+      rt.choosing ||
+      session.controlHeld ||
+      session.pendingAsk ||
+      session.pendingApproval ||
+      session.safetyPause
+    )
+      throw new AgentError(409, "Finish what dot is waiting on, then change its dot.");
+    if ((rt.persona ?? DEFAULT_PERSONA) === persona) return;
+    rt.persona = persona;
+    session.append("persona.choice", { persona, by: "user" });
+    if (session.generation) {
+      rt.epoch += 1;
+      session.retireBrain(session.generation, "restarted");
+      rt.backoff?.abort();
+    }
+  }
+  // The task's turns on the computer, which the user's control takes too; a task that continues
+  // another takes up its windows.
+  #share(session: AgentSession, continues?: string): void {
+    const cellId = session.cellId;
+    if (!this.#watched.has(cellId))
+      this.#watched.set(
+        cellId,
+        this.deps.live.lease(cellId).subscribe(() => {
+          for (const id of this.deps.live.sessionsOn(cellId)) {
+            const rt = this.#runtime.get(id);
+            if (rt) this.#told(rt);
+          }
+        }),
+      );
+    const computer = this.deps.computer;
+    if (!computer) return;
+    session.computer = {
+      forUser: (signal) => computer.take(session.id, session.cellId, signal, true),
+    };
+    if (continues) computer.owners(session.cellId).inherit(session.id, continues);
   }
   #judge(
     rt: Runtime,
@@ -729,38 +952,98 @@ export class AgentRunner {
     keys: KeydRecord[] | undefined,
   ): PurposeJudge | undefined {
     if (!keys) return unreadableJudge;
+    const fast = this.#fast(rt);
+    const choice = judgeChoice(settings.purposeCheck, keys, !!fast);
+    const jev = this.deps.jev;
+    if (choice?.kind === "jev" && jev)
+      return jevJudge((body, signal) => jev(choice.secretId, body, signal));
+    if (choice?.kind !== "model" || !fast) return undefined;
+    return modelJudge(fast.ask);
+  }
+  // The task's fast model, asked one question with no tools: on the plan through Claude Code, which
+  // counts its usage in the task, or through the task's own key layer, which counts its cost.
+  #fast(rt: Runtime): FastModel | undefined {
+    const planFast = rt.selection.kind === "claude-code" ? rt.selection.fast : undefined;
+    const answer = planFast && this.deps.claudeCode?.answer?.(planFast);
+    if (planFast && answer)
+      return {
+        provider: CLAUDE_CODE,
+        model: planFast.model,
+        ready: () => true,
+        ask: async (system, prompt, signal) => {
+          const reply = await answer(system, prompt, signal);
+          if (!rt.session.stopped)
+            rt.session.append("model.usage", {
+              role: "fast",
+              route: CLAUDE_CODE,
+              model: planFast.model,
+              inputTokens: reply.inputTokens,
+              outputTokens: reply.outputTokens,
+              ...(reply.speed ? { speed: reply.speed } : {}),
+            });
+          return reply.text;
+        },
+      };
     const fast =
       rt.selection.kind === "api"
         ? rt.selection.roles.find((role) => role.role === "fast")
         : undefined;
-    const planFast = rt.selection.kind === "claude-code" ? rt.selection.fast : undefined;
-    const answer = planFast && this.deps.claudeCode?.answer?.(planFast);
-    const choice = judgeChoice(settings.purposeCheck, keys, !!fast || !!answer);
-    const jev = this.deps.jev;
-    if (choice?.kind === "jev" && jev)
-      return jevJudge((body, signal) => jev(choice.secretId, body, signal));
-    if (choice?.kind !== "model") return undefined;
-    if (planFast && answer)
-      return modelJudge(async (system, prompt, signal) => {
-        const reply = await answer(system, prompt, signal);
-        if (!rt.session.stopped)
-          rt.session.append("model.usage", {
-            role: "fast",
-            route: CLAUDE_CODE,
-            model: planFast.model,
-            inputTokens: reply.inputTokens,
-            outputTokens: reply.outputTokens,
-            ...(reply.speed ? { speed: reply.speed } : {}),
-          });
-        return reply.text;
-      });
     if (!fast) return undefined;
-    return modelJudge(
-      gatewayCompletion(
+    return {
+      provider: fast.providerId,
+      model: fast.model.id,
+      ready: () => !!rt.brain,
+      ask: gatewayCompletion(
         () => (rt.brain ? bindingOf(fast, rt.brain.surrogates) : undefined),
         () => (rt.brain ? { port: rt.brain.keydPort, token: rt.brain.proxyToken } : undefined),
       ),
-    );
+    };
+  }
+  // A side question about a task, answered by the fast model with no tools. The task never hears
+  // of it: nothing of the question or the answer reaches its transcript or its log. With no task
+  // at work, a fast model on the Claude Code plan answers from the saved settings; one on an API
+  // key needs the task's key layer, which only a running task has.
+  async sideAnswer(
+    sessionId: string,
+    question: string,
+    signal: AbortSignal,
+  ): Promise<{ answer: string; provider: string; model: string }> {
+    let file: string;
+    try {
+      file = this.deps.eventLog.logFile(sessionId);
+    } catch {
+      throw new AgentError(404, "no such task");
+    }
+    if (!existsSync(file)) throw new AgentError(404, "no such task");
+    const rt = this.#runtime.get(sessionId);
+    const fast = (rt && !rt.session.stopped ? this.#fast(rt) : undefined) ?? this.#savedFast();
+    if (!fast.ready()) throw new SideQuestionError(409, "fast-model-not-running");
+    const { system, prompt } = sideQuestionPrompt(sideQuestionEvents(file), question);
+    let text: string;
+    try {
+      text = await fast.ask(system, prompt, signal);
+    } catch {
+      signal.throwIfAborted();
+      throw new SideQuestionError(502, "no-answer");
+    }
+    return { answer: sideAnswerText(text), provider: fast.provider, model: fast.model };
+  }
+  #savedFast(): FastModel {
+    const fast = activeRoles(this.deps.settings()).fast;
+    if (!fast || fast.provider === CHATGPT) throw new SideQuestionError(409, "no-fast-model");
+    const saved = { provider: fast.provider, model: fast.model };
+    if (fast.provider !== CLAUDE_CODE)
+      return { ...saved, ready: () => false, ask: () => Promise.reject(new Error("no brain")) };
+    const answer = this.deps.claudeCode?.answer?.({
+      model: fast.model,
+      ...(fast.options ? { options: fast.options } : {}),
+    });
+    if (!answer) throw new SideQuestionError(409, "no-fast-model");
+    return {
+      ...saved,
+      ready: () => true,
+      ask: async (system, prompt, signal) => (await answer(system, prompt, signal)).text,
+    };
   }
   // A parked (approval, question, takeover, budget) or idle task ends here without the kill
   // switch: no revoke and no freeze. The runner's own finally block appends session.end.
@@ -824,6 +1107,17 @@ export class AgentRunner {
     const settled = Promise.all(waiting.map((rt) => this.deps.live.settled(rt.session.id)));
     await (signal ? abortable(settled, signal) : settled);
   }
+  // Another task's switch to the web browser ends the finished task still holding it, as a sign-in
+  // does; false when that task is at work or waiting for the user.
+  async makeWay(sessionId: string, signal: AbortSignal): Promise<boolean> {
+    try {
+      await this.release(signal, sessionId);
+      return true;
+    } catch (error) {
+      if (error instanceof AgentError) return false;
+      throw error;
+    }
+  }
   // Settings > Accounts: the web browser opens the site's sign-in page and the user takes it there,
   // where the sign-in is kept. Their own hold of the computer gives way to this one, and a finished
   // task waiting for a follow-up ends; a task at work is left alone.
@@ -836,15 +1130,15 @@ export class AgentRunner {
     if (!ULID_PATTERN.test(cellId)) throw new AgentError(400, "invalid computer id");
     this.#ready(cellId);
     await this.#browserStarted(cellId, signal);
-    const current = this.deps.live.get(cellId);
-    const live = current ? this.sessions.get(current) : undefined;
-    if (current && (!live || live.stopped))
-      throw new AgentError(409, "the computer is changing hands");
-    if (live && this.holds(live.id)) {
+    const live = this.#userHold(cellId);
+    if (live) {
       const requestId = live.pendingTakeover;
       if (requestId && !(await live.handback(requestId, undefined, signal)))
         throw new AgentError(409, "Hand back the computer, then sign in.");
-    } else if (live) await this.release(signal, live.id);
+    }
+    // A finished task still showing the web browser makes way; one at work there is left alone.
+    const browsing = this.deps.live.browserHolder(cellId);
+    if (browsing && browsing !== live?.id) await this.release(signal, browsing);
     return this.hold(cellId, signal, { url, title: `Sign in to ${site}` });
   }
   // The web browser starts before the user's own hold gives way, so one that can't start leaves
@@ -869,9 +1163,9 @@ export class AgentRunner {
     }
     if (!started) throw new AgentError(503, BROWSER_UNAVAILABLE);
   }
-  // With no task at work, the user's own session holds the computer, in the current conversation,
-  // until they hand it back. A task at work, or at rest, gives the user its own control. Given a
-  // page, the hold first opens it in the web browser, and the user takes the computer there.
+  // The user's own session holds the computer, in the current conversation, until they hand it
+  // back; every task sharing the computer waits meanwhile. Given a page, the hold first opens it
+  // in the web browser, and the user takes the computer there.
   async hold(
     cellId: string,
     signal?: AbortSignal,
@@ -880,31 +1174,29 @@ export class AgentRunner {
     if (!ULID_PATTERN.test(cellId)) throw new AgentError(400, "invalid computer id");
     this.#ready(cellId);
     if (this.#starting.has(cellId)) throw new AgentError(409, "a task is starting");
-    const current = this.deps.live.get(cellId);
+    const current = this.#userHold(cellId);
     if (current) {
-      const live = this.sessions.get(current);
-      if (!live || live.stopped) throw new AgentError(409, "the computer is changing hands");
-      if (!this.holds(current) || live.controlHeld) {
-        if (open) throw new AgentError(409, "dot is using the computer");
-        return { sessionId: live.id, requestId: live.takeControl() };
+      if (current.controlHeld) {
+        if (open) throw new AgentError(409, "You already have the computer.");
+        return { sessionId: current.id, requestId: current.takeControl() };
       }
       // A hold the user handed back is ending: the new one follows it.
-      const settled = this.deps.live.settled(current);
+      const settled = this.deps.live.settled(current.id);
       await (signal ? abortable(settled, signal) : settled);
     }
     const cell = this.#ready(cellId);
-    if (this.#starting.has(cellId) || this.deps.live.get(cellId))
+    if (this.#starting.has(cellId) || this.#userHold(cellId))
       throw new AgentError(409, "the computer is changing hands");
     let continues: string | undefined;
-    let title: string | undefined;
     try {
       continues = this.deps.conversations?.current() ?? undefined;
-      title = continues ? this.deps.conversations?.title?.(continues) : undefined;
     } catch {
       console.error("the earlier conversation could not be read");
       continues = undefined;
-      title = undefined;
     }
+    // The user's own time is called what the conversation is, in the app; Replay keeps its own name.
+    const named = continues ? this.#named(continues) : undefined;
+    const title = named?.user ?? named?.automatic ?? undefined;
     const id = this.deps.eventLog.createSession(open?.title ?? HOLD_TITLE);
     const session = new AgentSession(id, cellId, "", this.deps.eventLog);
     const rt: Runtime = {
@@ -918,6 +1210,7 @@ export class AgentRunner {
     };
     this.sessions.set(id, session);
     this.#runtime.set(id, rt);
+    this.#share(session);
     let requestId: string | Promise<string>;
     try {
       this.deps.installSession?.(session, cell);
@@ -977,6 +1270,55 @@ export class AgentRunner {
     });
     return opened.promise;
   }
+  #userHold(cellId: string): AgentSession | undefined {
+    for (const id of this.deps.live.sessionsOn(cellId)) {
+      const session = this.sessions.get(id);
+      if (session && !session.stopped && this.holds(id)) return session;
+    }
+    return undefined;
+  }
+  // A live task as the conversation list shows it.
+  liveStatus(id: string): ConversationLive | undefined {
+    const rt = this.#runtime.get(id);
+    if (!rt || rt.session.stopped || rt.selection.kind === "none") return undefined;
+    return this.#told(rt);
+  }
+  #told(rt: Runtime): ConversationLive | undefined {
+    const { session } = rt;
+    if (session.stopped || rt.selection.kind === "none") return undefined;
+    const lease = this.deps.live.lease(session.cellId);
+    const cell = this.deps.cell(session.cellId);
+    const state: ConversationLive["state"] =
+      session.safetyPause || rt.pause || session.status === "paused" || cell?.paused
+        ? "paused"
+        : session.pendingApproval ||
+            session.pendingAsk ||
+            session.controlHeld ||
+            session.connections.pending
+          ? "needs-you"
+          : lease.waiting().includes(session.id)
+            ? "waiting-for-computer"
+            : session.status === "idle"
+              ? "idle"
+              : "working";
+    const onScreen = lease.holder === session.id;
+    const activity = state === "idle" ? undefined : rt.activity;
+    const before = rt.live;
+    if (before?.state === state && before.onScreen === onScreen && before.activity === activity)
+      return before;
+    rt.live = {
+      state,
+      since: before?.state === state ? before.since : new Date().toISOString(),
+      onScreen,
+      ...(activity ? { activity } : {}),
+    };
+    try {
+      this.deps.liveChanged?.(session.id, rt.live);
+    } catch {
+      console.error("a live status could not be told");
+    }
+    return rt.live;
+  }
   // The session is the user's own hold on the computer, with no task.
   holds(id: string): boolean {
     return this.#runtime.get(id)?.selection.kind === "none";
@@ -1026,7 +1368,7 @@ export class AgentRunner {
           cell?.state !== "ready" ||
           cell.paused ||
           this.#blockedCells.has(rt.session.cellId) ||
-          this.deps.live.get(rt.session.cellId) !== rt.session.id ||
+          this.deps.live.cellOf(rt.session.id) !== rt.session.cellId ||
           rt.session.stopped ||
           rt.session.controlHeld ||
           !this.#health.online ||
@@ -1275,7 +1617,7 @@ export class AgentRunner {
       taskEnded:
         !!record &&
         !this.#starting.has(cellId) &&
-        !this.deps.live.get(cellId) &&
+        !this.deps.live.busy(cellId) &&
         !this.deps.live.idleOperationPending(cellId) &&
         ![...this.#runtime.values()].some((rt) => rt.session.cellId === cellId) &&
         (record.executor !== "native" || record.nativeRetired),
@@ -1299,7 +1641,7 @@ export class AgentRunner {
       const fence = this.deps.fences.record(cellId);
       return (
         !this.#starting.has(cellId) &&
-        !this.deps.live.get(cellId) &&
+        !this.deps.live.busy(cellId) &&
         !this.deps.live.idleOperationPending(cellId) &&
         ![...this.#runtime.values()].some((rt) => rt.session.cellId === cellId) &&
         (fence?.executor !== "native" || fence.nativeRetired)
@@ -1334,7 +1676,7 @@ export class AgentRunner {
       }
       if (
         this.#starting.has(cellId) ||
-        this.deps.live.get(cellId) ||
+        this.deps.live.busy(cellId) ||
         this.deps.live.idleOperationPending(cellId) ||
         [...this.#runtime.values()].some((rt) => rt.session.cellId === cellId)
       )
@@ -1359,6 +1701,8 @@ export class AgentRunner {
     if (!this.#closing) {
       this.#closing = true;
       this.#unsubscribe();
+      for (const unwatch of this.#watched.values()) unwatch();
+      this.#watched.clear();
       for (const rt of this.#runtime.values()) {
         rt.session.cancel("restarted");
         this.deps.live.stop(rt.session.id);
@@ -1406,7 +1750,15 @@ export class AgentRunner {
     try {
       await this.deps.waitForUploads(session.cellId, session.abort.signal);
       session.abort.signal.throwIfAborted();
-      await this.deps.prepareDesktop?.(session);
+      // A task that starts meanwhile acts only once the desktop's browser has started afresh.
+      const turn = await this.deps.live
+        .lease(session.cellId)
+        .acquire(session.id, { signal: session.abort.signal });
+      try {
+        await this.deps.prepareDesktop?.(session);
+      } finally {
+        turn.release();
+      }
       session.abort.signal.throwIfAborted();
     } catch (error) {
       await this.contain(session, "desktop_profile_uncertain").catch(() => {});
@@ -1425,11 +1777,19 @@ export class AgentRunner {
       if (rt.selection.kind === "none") return await session.waitForControl();
       await this.deps.waitForUploads(session.cellId, session.abort.signal);
       session.abort.signal.throwIfAborted();
-      const skills = await this.deps.installSkills(
-        session.cellId,
-        session.abort.signal,
-        rt.persona,
-      );
+      if (rt.choosing) {
+        const pick = await abortable(rt.choosing, session.abort.signal);
+        rt.choosing = undefined;
+        if (pick.persona) rt.persona = pick.persona;
+        session.append(
+          "persona.choice",
+          pick.persona
+            ? { persona: pick.persona, by: "auto", ...(pick.reason ? { reason: pick.reason } : {}) }
+            : { persona: rt.persona ?? DEFAULT_PERSONA, by: "default" },
+        );
+      }
+      let dressed = rt.persona;
+      let skills = await this.deps.installSkills(session.cellId, session.abort.signal, dressed);
       session.abort.signal.throwIfAborted();
       rt.skills = structuredClone(skills);
       let resume = false,
@@ -1445,6 +1805,11 @@ export class AgentRunner {
         await session.waitForTools();
         await this.deps.waitForUploads(session.cellId, session.abort.signal);
         await this.#online(session);
+        if (rt.persona !== dressed) {
+          dressed = rt.persona;
+          skills = await this.deps.installSkills(session.cellId, session.abort.signal, dressed);
+          rt.skills = structuredClone(skills);
+        }
         session.connectors = this.deps.connectors?.() ?? NO_CONNECTORS;
         const epoch = rt.epoch;
         let code: number | undefined;
@@ -1646,6 +2011,12 @@ export class AgentRunner {
       liveSignal.removeEventListener("abort", stop);
       this.sessions.delete(session.id);
       this.#runtime.delete(session.id);
+      if (rt.live)
+        try {
+          this.deps.liveChanged?.(session.id, undefined);
+        } catch {
+          console.error("a live status could not be told");
+        }
     }
   }
   async #brainRun(

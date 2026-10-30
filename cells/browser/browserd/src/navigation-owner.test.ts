@@ -26,8 +26,9 @@ async function fixture(grant = true) {
   const navigate = vi.fn(
     async (_tab: string, _url: string, _signal?: AbortSignal): Promise<"download" | void> => {},
   );
-  const owner = new BrowserNavigation(control, { navigate });
-  return { control, owner, navigate };
+  const openTab = vi.fn(async (_signal: AbortSignal) => tabId);
+  const owner = new BrowserNavigation(control, { navigate, openTab });
+  return { control, owner, navigate, openTab };
 }
 
 describe("admitted navigation lifetime", () => {
@@ -198,5 +199,82 @@ describe("admitted navigation lifetime", () => {
     expect(
       await owner.navigate(permit, tabId, "https://example.test/", new AbortController().signal),
     ).toEqual({ done: true });
+  });
+});
+
+describe("admitted blank tab", () => {
+  it("opens a blank tab for the current holder and names it", async () => {
+    const { owner, openTab } = await fixture();
+    expect(await owner.openTab(permit, new AbortController().signal)).toEqual({ tabId });
+    expect(openTab).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal));
+    await owner.close();
+  });
+
+  it.each([
+    { ...permit, revision: 2 },
+    { ...permit, requestId: "01J00000000000000000000009" },
+    { ...permit, owner: { ...permit.owner, sessionId: "01J00000000000000000000008" } },
+    { ...permit, owner: { ...permit.owner, generation: 2 } },
+  ])("refuses a permit that is not the holder's without opening a tab", async (stale) => {
+    const { owner, openTab } = await fixture();
+    await expect(owner.openTab(stale, new AbortController().signal)).rejects.toThrow("refused");
+    expect(openTab).not.toHaveBeenCalled();
+  });
+
+  it("opens nothing while the user holds the browser, after closure, or once cancelled", async () => {
+    const { owner, openTab, control } = await fixture(false);
+    await expect(owner.openTab(permit, new AbortController().signal)).rejects.toThrow("refused");
+    await control.set({ ...permit, holder: "agent" });
+    await control.set({
+      ...identity,
+      revision: 2,
+      requestId: "01J00000000000000000000007",
+      holder: "user",
+    });
+    await expect(owner.openTab(permit, new AbortController().signal)).rejects.toThrow("refused");
+    await expect(owner.openTab(permit, AbortSignal.abort())).rejects.toThrow("refused");
+    await owner.close();
+    await expect(owner.openTab(permit, new AbortController().signal)).rejects.toThrow("closed");
+    expect(openTab).not.toHaveBeenCalled();
+  });
+
+  it("shares the navigation slot and hides a failure's cause", async () => {
+    const { owner, navigate, openTab } = await fixture();
+    const complete = Promise.withResolvers<void>();
+    navigate.mockImplementation(() => complete.promise);
+    const navigating = owner.navigate(
+      permit,
+      tabId,
+      "https://example.test/",
+      new AbortController().signal,
+    );
+    await expect(owner.openTab(permit, new AbortController().signal)).rejects.toThrow("busy");
+    complete.resolve();
+    await navigating;
+    openTab.mockRejectedValueOnce(new Error("private target detail"));
+    const refusal = await owner.openTab(permit, new AbortController().signal).catch((e) => e);
+    expect(String(refusal)).toBe("Error: Browser navigation refused: refused");
+    expect(await owner.openTab(permit, new AbortController().signal)).toEqual({ tabId });
+  });
+
+  it("is cancelled by a takeover, which waits for it to settle", async () => {
+    const { owner, openTab, control } = await fixture();
+    const opened = Promise.withResolvers<string>();
+    openTab.mockImplementation(() => opened.promise);
+    const pending = owner.openTab(permit, new AbortController().signal);
+    const refused = expect(pending).rejects.toThrow("refused");
+    let handedBack = false;
+    const handback = control
+      .set({ ...identity, revision: 2, requestId: "01J00000000000000000000007", holder: "user" })
+      .then(() => {
+        handedBack = true;
+      });
+    expect(openTab.mock.calls[0]?.[0].aborted).toBe(true);
+    await Promise.resolve();
+    expect(handedBack).toBe(false);
+    opened.resolve(tabId);
+    await refused;
+    await handback;
+    expect(handedBack).toBe(true);
   });
 });

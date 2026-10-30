@@ -1,4 +1,4 @@
-import { clipText, type FindInput, type ToolResult } from "@localdot/protocol";
+import { clipText, type FindInput, type Rect, type ToolResult } from "@localdot/protocol";
 import { untrusted } from "../untrusted.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, taintScreen, text } from "./deps.ts";
 import { corners } from "./elements.ts";
@@ -26,11 +26,20 @@ export async function findTool(
     tool: "find",
     title: clipText(`Looking for ${JSON.stringify(input.text)}`, 200),
   });
-  const found = await desktop.elements(
+  const listed = await desktop.elements(
     { text: input.text, ...(input.role ? { role: input.role } : {}), limit: LIMIT },
     ctx.signal,
   );
   ctx.check();
+  // Another task's windows are not this one's to read.
+  const hidden = (await ctx.turn?.hidden()) ?? [];
+  ctx.check();
+  const found = {
+    ...listed,
+    elements: listed.elements.filter((e) =>
+      e.bbox ? !hidden.some((r) => e.bbox && holds(r, e.bbox)) : !hidden.length,
+    ),
+  };
   ctx.session.tainted = true;
   // Names on a signed-in screen are private like a screenshot of it.
   taintScreen(
@@ -78,3 +87,9 @@ export async function findTool(
     ],
   };
 }
+
+const holds = (r: Rect, box: Rect) => {
+  const x = box.x + box.w / 2;
+  const y = box.y + box.h / 2;
+  return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+};

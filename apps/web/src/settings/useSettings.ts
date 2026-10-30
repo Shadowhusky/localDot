@@ -599,7 +599,9 @@ export function useSettings(
     }
   };
   // A one-tap choice outside the sheet, such as the permission mode or the user's dot.
-  const choose = async (patch: Pick<AgentSettingsDocument, "permissionMode" | "persona">) => {
+  const choose = async (
+    patch: Pick<AgentSettingsDocument, "permissionMode" | "persona" | "autoPersona">,
+  ) => {
     const owner = current.current;
     if (!owner.saved || owner.open || mutating.current || unresolved.current || blocked.current)
       return false;
@@ -706,6 +708,10 @@ export function useSettings(
       const d = current.current.draft;
       if (d) edit({ ...d, persona });
     },
+    changeAutoPersona: (autoPersona: boolean) => {
+      const d = current.current.draft;
+      if (d) edit({ ...d, autoPersona });
+    },
     changeLook: (look: Partial<Pick<SettingsDraft, "name" | "accessory" | "localDots">>) => {
       const d = current.current.draft;
       if (!d) return;
@@ -725,6 +731,7 @@ export function useSettings(
     chooseMain,
     choosePermissions: (permissionMode: "custom" | "auto" | "full") => choose({ permissionMode }),
     choosePersona: (persona: PersonaId) => choose({ persona }),
+    chooseAutoPersona: (on: boolean) => choose({ autoPersona: on ? true : undefined }),
     checkModels,
     browseAccounts: () => {
       setBrowsing(true);

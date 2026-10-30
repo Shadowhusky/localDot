@@ -1,12 +1,34 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
-import { join } from "node:path";
-import { isPresentation, type ReviseLink, ULID_PATTERN, ulid } from "@localdot/protocol";
+import { randomBytes, randomUUID } from "node:crypto";
+import {
+  cpSync,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { Readable } from "node:stream";
+import {
+  isPresentation,
+  type ReviseLink,
+  ULID_PATTERN,
+  ulid,
+  unifiedDiff,
+  userUploadPath,
+  withAttachments,
+} from "@localdot/protocol";
 import type { Hono } from "hono";
 import sharp from "sharp";
 import { OutputStore } from "../../agent/output-store.ts";
 import type { AgentSession } from "../../agent/session.ts";
+import { DesktopdError } from "../../desktopd/client.ts";
+import { MAX_TRANSFER_BYTES } from "../../desktopd/tools-client.ts";
 import type { EventLog } from "../../event-log.ts";
 import type { FrameStore } from "../../gateway/frames.ts";
+import type { ComputerFiles } from "../computer-files.ts";
 import type { PageQuieter } from "../page-quieter.ts";
 import { type Converter, Previews } from "../previews.ts";
 import type { DeliverablesDeps, ReviseDeps } from "../routes.ts";
@@ -65,6 +87,50 @@ export function deliverablesDeps(f: DeliverablesFixture): Omit<DeliverablesDeps,
     },
     ...(f.start ? { revise: fakeRevise(f, f.start) } : {}),
     ...(f.quieter ? { quieter: f.quieter } : {}),
+    computer: fakeComputer(computerHome(f)),
+  };
+}
+const computerHome = (f: DeliverablesFixture) => join(f.home, "computer-home");
+// One computer for every task, its home a folder of the fixture's: "~/x" is <folder>/x. Like
+// desktopd, it names a file by where links lead and refuses one outside its home.
+function fakeComputer(home: string): ComputerFiles {
+  mkdirSync(home, { recursive: true });
+  const root = realpathSync(home);
+  const find = (path: string, route: string) => {
+    let real: string;
+    try {
+      real = realpathSync(join(root, path.replace(/^~\//, "")));
+    } catch {
+      throw new DesktopdError(404, `${path} does not exist`, route);
+    }
+    const rel = relative(root, real);
+    if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+      throw new DesktopdError(400, `${path} is outside the home folder`, route);
+    const stat = statSync(real);
+    if (!stat.isFile()) throw new DesktopdError(409, `${path} is not a regular file`, route);
+    return { real, shown: `~/${rel}`, size: stat.size };
+  };
+  const tools = {
+    readFile: async (path: string, maxBytes = 1) => {
+      const file = find(path, "/files/read");
+      return {
+        path: file.shown,
+        content: "",
+        bytes: file.size,
+        truncated: file.size > maxBytes,
+        binary: false,
+      };
+    },
+    fetchFile: async (path: string, signal?: AbortSignal) => {
+      const file = find(path, "/files/fetch");
+      if (file.size > MAX_TRANSFER_BYTES)
+        throw new DesktopdError(413, "file too large", "/files/fetch");
+      return Readable.toWeb(createReadStream(file.real, { signal })) as ReadableStream<Uint8Array>;
+    },
+  };
+  return {
+    cellOf: () => "01JXYZ0000000000000000CE11",
+    access: () => ({ tools, signal: new AbortController().signal, release: () => {} }),
   };
 }
 // The copy into the computer is recorded, not made: the fixture has no real computer.
@@ -94,7 +160,8 @@ function fakeRevise(
 // follow-up with v2 of totals.csv; /__qa/previews hands over real files of every kind the full
 // preview shows, the page and the SVG carrying scripts that would call /__qa/canary if they ever
 // ran. ?probe=<port> also points the page's connection hints and links at that port, for a listener
-// counting connections.
+// counting connections. /__qa/computer-files puts files on the computer: six the user sends with a
+// follow-up, and two dot writes and then edits.
 export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
   const outputs = new OutputStore(f.home);
   const observe = (s: AgentSession, step: string, n: number) => {
@@ -191,6 +258,61 @@ export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
       "orders.xlsx": sampleWorkbook(),
     });
     return c.json({ ok: true });
+  });
+  app.post("/__qa/computer-files", async (c) => {
+    const s = f.session();
+    if (!s) return c.text("no session", 409);
+    const put = (path: string, data: string | Buffer) => {
+      const file = join(computerHome(f), path);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, data);
+      return `~/${path}`;
+    };
+    const sent = {
+      "photo.png": await samplePhoto(),
+      "brief.pdf": sampleBrief(),
+      "figures.csv": sampleFigures(),
+      "main.ts": SAMPLE_MAIN,
+      "firmware.bin": randomBytes(3 * 1024 * 1024),
+      "clip.wav": wavOf(3),
+    };
+    // Each upload has a folder of its own, as the composer's do.
+    const uploads = Object.entries(sent).map(([name, data]) =>
+      put(userUploadPath(randomUUID(), name), data),
+    );
+    s.append("message.user", {
+      messageId: ulid(),
+      kind: "followup",
+      text: withAttachments("Here are the files for the report.", uploads),
+    });
+    const changed = (
+      [
+        ["Documents/report.md", SAMPLE_REPORT, editedReport()],
+        ["Projects/app/src/server.ts", SAMPLE_SERVER, editedServer()],
+      ] as const
+    ).map(([path, written, edited]) => {
+      for (const [op, before, after] of [
+        ["create", "", written],
+        ["modify", written, edited],
+      ] as const) {
+        const step = ulid();
+        s.append("step.start", { kind: "file" }, step);
+        s.append(
+          "tool.start",
+          { tool: "files", title: `${op === "create" ? "write" : "edit"} ${path}` },
+          step,
+        );
+        s.append(
+          "file.change",
+          { path: `~/${path}`, op, patch: unifiedDiff(before, after, { path }) },
+          step,
+        );
+        s.append("tool.end", { ok: true }, step);
+        s.append("step.end", { status: "ok" }, step);
+      }
+      return put(path, edited);
+    });
+    return c.json({ uploads, changed });
   });
   app.post("/__qa/revise", (c) => {
     const s = f.session();
@@ -522,3 +644,170 @@ const SAMPLE_JSON = JSON.stringify(
   null,
   2,
 );
+
+// A landscape at dusk: a gradient sky, a sun and two ridges.
+async function samplePhoto(): Promise<Buffer> {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000">
+<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1f3b5c"/><stop offset="0.65" stop-color="#c8738a"/><stop offset="1" stop-color="#f6b26b"/></linearGradient></defs>
+<rect width="1600" height="1000" fill="url(#sky)"/>
+<circle cx="1160" cy="560" r="130" fill="#ffd98e"/>
+<path d="M0 720L260 520L470 660L760 420L1040 640L1290 500L1600 690V1000H0Z" fill="#3b4565"/>
+<path d="M0 850L380 650L700 800L1020 640L1340 780L1600 700V1000H0Z" fill="#1c2235"/>
+<g fill="#ffffff" fill-opacity="0.8"><circle cx="210" cy="140" r="3"/><circle cx="420" cy="90" r="2"/><circle cx="640" cy="180" r="2.5"/><circle cx="860" cy="70" r="2"/></g>
+</svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+function sampleBrief(): Buffer {
+  return pdfOf([
+    {
+      title: "Report brief",
+      lines: [
+        "Write up the quarter for the board in four pages.",
+        "Use figures.csv for every number; it is net of returns.",
+        "Lead with the regions, then returns, then the plan for Q4.",
+        "",
+        "Due Friday. Keep the tone plain and the charts simple.",
+      ],
+      bars: [120, 180, 150, 210],
+    },
+    {
+      title: "Sources",
+      lines: ["figures.csv: weekly orders by region", "photo.png: for the cover"],
+    },
+  ]);
+}
+
+function sampleFigures(): string {
+  const rows = ["Week,Region,Orders,Returns,Net"];
+  for (let i = 0; i < 30; i++)
+    rows.push(
+      `2026-W${String(27 + Math.floor(i / 4)).padStart(2, "0")},${REGIONS[i % 4]},${70 + ((i * 17) % 45)},${1 + ((i * 7) % 5)},${(3800 + ((i * 523) % 2100)).toFixed(2)}`,
+    );
+  return `${rows.join("\n")}\n`;
+}
+
+const SAMPLE_MAIN = `import { readFile } from "node:fs/promises";
+
+interface Row {
+  week: string;
+  region: string;
+  orders: number;
+  returns: number;
+  net: number;
+}
+
+function parse(text: string): Row[] {
+  const [header, ...lines] = text.trim().split("\\n");
+  if (header !== "Week,Region,Orders,Returns,Net") throw new Error("unexpected columns");
+  return lines.map((line) => {
+    const [week = "", region = "", orders, returns, net] = line.split(",");
+    return {
+      week,
+      region,
+      orders: Number(orders),
+      returns: Number(returns),
+      net: Number(net),
+    };
+  });
+}
+
+function byRegion(rows: Row[]): Map<string, Row[]> {
+  const out = new Map<string, Row[]>();
+  for (const row of rows) {
+    const list = out.get(row.region) ?? [];
+    list.push(row);
+    out.set(row.region, list);
+  }
+  return out;
+}
+
+function summary(rows: Row[]): string {
+  const orders = rows.reduce((sum, row) => sum + row.orders, 0);
+  const returns = rows.reduce((sum, row) => sum + row.returns, 0);
+  const net = rows.reduce((sum, row) => sum + row.net, 0);
+  const rate = orders ? (returns / orders) * 100 : 0;
+  return \`\${orders} orders, \${rate.toFixed(1)}% returned, £\${net.toFixed(2)} net\`;
+}
+
+async function main(path: string): Promise<number> {
+  const rows = parse(await readFile(path, "utf8"));
+  console.log(\`All regions: \${summary(rows)}\`);
+  for (const [region, list] of byRegion(rows)) {
+    console.log(\`\${region.padEnd(6)} \${summary(list)}\`);
+  }
+  return 0;
+}
+
+main(process.argv[2] ?? "figures.csv").then(
+  (code) => process.exit(code),
+  (error: unknown) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  },
+);
+`;
+
+const SAMPLE_REPORT = `# Quarterly report
+
+Prepared for the board, October 2026.
+
+## Highlights
+
+- Net revenue rose 8% on the quarter.
+- Returns fell to 2.4% of orders.
+- The West warehouse opens in November.
+
+## Regions
+
+| Region | Orders | Net |
+| --- | ---: | ---: |
+| North | 610 | £81,250 |
+| South | 575 | £74,900 |
+| East | 540 | £70,150 |
+| West | 495 | £64,300 |
+
+## Method
+
+Figures come from the weekly export, net of returns:
+
+\`\`\`sh
+npx tsx main.ts figures.csv
+\`\`\`
+
+> Weeks 27 to 34 only; week 35 is still open.
+`;
+const editedReport = () =>
+  SAMPLE_REPORT.replace("rose 8%", "rose 9.4%").replace(
+    "- Returns fell to 2.4% of orders.",
+    "- Returns fell to 2.1% of orders, the lowest this year.\n- The desk range sold out twice.",
+  );
+
+const SAMPLE_SERVER = `import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+
+const PORT = 8080;
+
+const server = createServer(async (req, res) => {
+  if (req.url === "/report") {
+    const body = await readFile("Documents/report.md", "utf8");
+    res.writeHead(200, { "content-type": "text/markdown; charset=utf-8" });
+    res.end(body);
+    return;
+  }
+  res.writeHead(404, { "content-type": "text/plain" });
+  res.end("not found");
+});
+
+server.listen(PORT, () => {
+  console.log(\`Serving the report on http://localhost:\${PORT}/report\`);
+});
+`;
+const editedServer = () =>
+  SAMPLE_SERVER.replace(
+    "const PORT = 8080;",
+    "const PORT = Number(process.env.PORT ?? 8080);",
+  ).replace(
+    '    res.writeHead(200, { "content-type": "text/markdown; charset=utf-8" });',
+    '    res.writeHead(200, {\n      "content-type": "text/markdown; charset=utf-8",\n      "cache-control": "no-store",\n    });',
+  );

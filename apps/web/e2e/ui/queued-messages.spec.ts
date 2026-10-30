@@ -89,9 +89,11 @@ test("a queued message stays at the end while dot works, then sits where dot rec
     expect(said.ok()).toBe(true);
     await expect(page.locator(".thread .safe-markdown").filter({ hasText: text })).toHaveCount(1);
   }
-  expect((await order(page)).slice(-3)).toEqual([
+  // Under them, the run dot is at, then the message waiting for the task to finish.
+  expect((await order(page)).slice(-4)).toEqual([
     "February's net total checks out.",
     "Now checking March.",
+    "work",
     "Then tidy up the sheet",
   ]);
   await expect(row.getByText("After this task")).toBeVisible();

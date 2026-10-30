@@ -12,6 +12,13 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import {
+  type Action,
+  type ActionInput,
+  onComposerFill,
+  rememberAction,
+} from "../actions/actions.ts";
+import { useCommandMenu } from "../actions/CommandMenu.tsx";
 import type { CellSummary } from "../cells/types.ts";
 import {
   linkFor,
@@ -59,6 +66,7 @@ const TRIES_AGAIN = new Set<string | undefined>([
 ]);
 
 const LIMIT = 8000;
+const NO_ACTIONS: readonly Action[] = [];
 // A phone: Return starts a new line there, and Send sends.
 const TOUCH = "(hover: none) and (pointer: coarse)";
 // What is left shows from here on.
@@ -93,6 +101,8 @@ export interface ComposerProps {
   permissions?: ReactNode;
   // The main model saved since this task started: a message at rest starts a task on it.
   modelChanged?: boolean;
+  // What "/" lists: the actions with a command name.
+  actions?: readonly Action[];
 }
 // What became of a message sent as a reply: it answered the question, it turned the question down
 // and goes on as a message, it did not arrive, or it was held with the reason why.
@@ -217,6 +227,8 @@ const ComposerField = memo(function ComposerField({
   unavailable,
   listening,
   describedBy,
+  menu,
+  active,
   events,
 }: {
   label: string;
@@ -225,6 +237,9 @@ const ComposerField = memo(function ComposerField({
   // While the user talks, the words land here and the field waits for them.
   listening: boolean;
   describedBy?: string;
+  // The command list the field drives, and its row in reach of Enter.
+  menu?: string;
+  active?: string;
   events: FieldEvents;
 }) {
   return (
@@ -240,6 +255,9 @@ const ComposerField = memo(function ComposerField({
       aria-disabled={unavailable || undefined}
       aria-busy={listening || undefined}
       aria-describedby={describedBy}
+      aria-autocomplete="list"
+      aria-controls={menu}
+      aria-activedescendant={active}
       {...events}
     />
   );
@@ -386,17 +404,6 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     wasKeysOpen.current = props.keysOpen;
   }, [props.keysOpen]);
   useEffect(() => () => window.clearTimeout(suggestion.current), []);
-  // From a phone's More menu: research the message, with the field ready for it.
-  useEffect(
-    () =>
-      onResearchRequest(() => {
-        const input = form.current?.querySelector("textarea");
-        if (!input || input.readOnly || researchWait(current.current.agent)) return;
-        setResearch(true);
-        input.focus();
-      }),
-    [],
-  );
   useEffect(() => {
     mounted.current = true;
     const changed = () => setOnline(navigator.onLine);
@@ -497,9 +504,11 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     return false;
   }, [delivery, messages]);
 
+  const menuChanged = useRef<(value: string) => void>(() => {});
   const measure = useCallback((input: HTMLTextAreaElement, nativeInput = false) => {
     // Native input already schedules sizing. Imperative paste, voice and clearing need it here.
     if (!nativeInput) resizeTextArea(input);
+    menuChanged.current(input.value);
     const next = shapeOf(input);
     if (next.blank === shown.current.blank && next.length === shown.current.length) return;
     shown.current = next;
@@ -512,6 +521,57 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       SUGGEST_MS,
     );
   }, []);
+  const actionRunning = useRef(false);
+  // A command runs instead of being sent: the field clears once it has, unless the action wrote in it.
+  const runAction = async (action: Action, given: Omit<ActionInput, "trigger">) => {
+    const input = field();
+    if (!input || actionRunning.current) return;
+    if (!guardOwner.current.check(input)) {
+      measure(input);
+      return;
+    }
+    actionRunning.current = true;
+    const before = input.value;
+    setProblem(null);
+    try {
+      const problem = await action.run({ ...given, trigger: input });
+      if (!mounted.current) return;
+      if (typeof problem === "string" && problem) {
+        setProblem(problem);
+        return;
+      }
+      rememberAction(action.id);
+      const box = field();
+      if (box?.value === before) {
+        box.value = "";
+        revision.current += 1;
+        keepDraft("");
+        measure(box);
+      }
+    } catch {
+      if (mounted.current) setProblem("That didn't work. Try again.");
+    } finally {
+      actionRunning.current = false;
+    }
+  };
+  const write = (text: string) => {
+    const input = field();
+    if (!input || input.readOnly) return;
+    input.value = text;
+    revision.current += 1;
+    keepDraft(text);
+    measure(input);
+    if (problemShown.current !== null) setProblem(null);
+    input.focus();
+    input.setSelectionRange(text.length, text.length);
+  };
+  const commands = useCommandMenu({
+    actions: props.actions ?? NO_ACTIONS,
+    write,
+    problem: setProblem,
+    run: (action, given) => void runAction(action, given),
+  });
+  menuChanged.current = commands.changed;
   // What was being written before a reload comes back, through the key guard like a paste.
   useEffect(() => {
     const input = form.current?.querySelector("textarea");
@@ -744,14 +804,9 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   };
   const submit = (later = true, voiceFinished = false) => {
     const input = field();
-    if (
-      !input ||
-      pending.current ||
-      composing.current ||
-      replying.current ||
-      (talking && !voiceFinished)
-    )
-      return;
+    if (!input || composing.current || (talking && !voiceFinished)) return;
+    if (commands.submit(input.value) === "handled") return;
+    if (pending.current || replying.current) return;
     // Check the DOM before copying even ordinary text into delivery state or requests.
     if (!guardOwner.current.check(input)) {
       measure(input);
@@ -934,10 +989,27 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   // A phone's field has room for its text and Send only; there a message is read after the step.
   const pill = props.layout === "pill";
   if ((pill || !choosing) && menu) setMenu(false);
-  const typing = useRef({ submit, touch, choosing });
+  const typing = useRef({ submit, touch, choosing, write, menuKey: commands.key });
   useLayoutEffect(() => {
-    typing.current = { submit, touch, choosing };
+    typing.current = { submit, touch, choosing, write, menuKey: commands.key };
   });
+  useEffect(() => onComposerFill((text) => typing.current.write(text)), []);
+  // From a phone's More menu: research the message, with the field ready for it. Given the question,
+  // it goes at once.
+  useEffect(
+    () =>
+      onResearchRequest((question) => {
+        const input = form.current?.querySelector("textarea");
+        if (!input || input.readOnly || researchWait(current.current.agent)) return;
+        setResearch(true);
+        input.focus();
+        if (question === undefined) return;
+        researchNow.current = true;
+        typing.current.write(question);
+        typing.current.submit();
+      }),
+    [],
+  );
   const events = useMemo<FieldEvents>(
     () => ({
       onCompositionStart: () => {
@@ -981,7 +1053,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         if (problemShown.current !== null) setProblem(null);
       },
       onKeyDown: (event) => {
-        const { submit, touch, choosing } = typing.current;
+        const { submit, touch, choosing, menuKey } = typing.current;
+        if (!(touch && event.key === "Enter") && menuKey(event)) return;
         if (
           touch ||
           event.key !== "Enter" ||
@@ -1006,6 +1079,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     [measure, weigh],
   );
   const taskAction = text.blank && !talking ? props.taskAction : undefined;
+  const command = talking ? undefined : commands.command;
   const connect = mode === "new" && props.configured === false;
   const near = text.length > NEAR && text.length <= LIMIT;
   const unavailable = props.keysOpen || props.controlBlocked;
@@ -1110,6 +1184,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           submit();
         }}
       >
+        {!talking && commands.view}
         <KeyFound
           className="composer-key"
           guard={guard}
@@ -1168,6 +1243,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           unavailable={!!unavailable}
           listening={talking}
           describedBy={guard.notice ? keyNotice : undefined}
+          menu={commands.field["aria-controls"]}
+          active={commands.field["aria-activedescendant"]}
           events={events}
         />
         <div className="composer-bar">
@@ -1251,10 +1328,14 @@ export const Composer = memo(function Composer(props: ComposerProps) {
                   ? "Stop task"
                   : taskAction
                     ? "Continue task"
-                    : sendLabel
+                    : command
+                      ? `Run /${command.command}`
+                      : sendLabel
             }
             kbd={touch || taskAction || talking ? undefined : ["Enter"]}
-            disabledReason={taskAction ? taskAction.disabledReason : sendReason}
+            disabledReason={
+              taskAction ? taskAction.disabledReason : command ? command.unavailable : sendReason
+            }
             aria-describedby={guard.notice ? keyNotice : undefined}
           />
         </div>

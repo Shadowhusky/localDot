@@ -69,6 +69,7 @@ const commands = Object.freeze({
   "Target.detachFromTarget": schema.strictObject({ sessionId: identifier }),
   "Target.createTarget": schema.strictObject({ url: schema.literal("about:blank") }),
   "Target.activateTarget": target,
+  "Target.closeTarget": target,
   "Runtime.runIfWaitingForDebugger": empty,
   "Page.enable": empty,
   "Page.setLifecycleEventsEnabled": schema.strictObject({ enabled: schema.literal(true) }),
@@ -80,6 +81,14 @@ const commands = Object.freeze({
   "Page.bringToFront": empty,
   "Page.setInterceptFileChooserDialog": schema.strictObject({ enabled: schema.literal(true) }),
   "Page.handleJavaScriptDialog": schema.strictObject({ accept: schema.boolean() }),
+  // A blank tab's viewport a pixel shorter and back, so that Chromium's accessibility sees its page.
+  "Emulation.setDeviceMetricsOverride": schema.strictObject({
+    width: schema.number().int().positive().max(8192),
+    height: schema.number().int().positive().max(8192),
+    deviceScaleFactor: schema.literal(0),
+    mobile: schema.literal(false),
+  }),
+  "Emulation.clearDeviceMetricsOverride": empty,
   "DOM.enable": empty,
   "DOM.getDocument": schema.strictObject({
     depth: schema.literal(1),
@@ -212,7 +221,7 @@ export function guardCdpCommand(
   if (!parsed.success) throw new CdpRefused("params");
   const params = frozenParams(parsed.data as Record<string, unknown>);
   const pageCommand =
-    /^(Page|DOM|DOMSnapshot|Accessibility|Runtime|Network)\./u.test(name) ||
+    /^(Page|DOM|DOMSnapshot|Accessibility|Runtime|Network|Emulation)\./u.test(name) ||
     name === "Storage.clearDataForOrigin";
   if (pageCommand || (name === "Target.setAutoAttach" && sessionId !== undefined)) {
     if (

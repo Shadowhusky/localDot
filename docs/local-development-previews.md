@@ -140,10 +140,17 @@ were verified, and only their ownership was corrected before retrying the normal
 
 A server dot starts in its computer can be opened on the owner's Mac and phone. A local address
 in dot's messages or in a command's output (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`, any
-`*.localhost` name, or the computer's own network address, any port) gets **Open preview**. The
-Activity panel's **Previews** tab lists every server listening in the computer, including ones that
-never printed an address, with **Open** and **Stop**. Stop ends the preview link; the server keeps
-running. Stored messages are never rewritten: the action is added when the text is shown.
+`*.localhost` name, or the computer's own network address or name, any port) gets **Open preview**.
+Stored messages are never rewritten: the action is added when the text is shown.
+
+The Activity panel's **Previews** tab lists the web apps in the computer, including ones that never
+printed an address: each by its first page's title (else its address), with its address, program
+and whether it is **Running** or **Not answering** (with when it last answered), and **Open** and
+**Copy link**. Only servers that answer HTTP are listed; databases, debuggers and other listeners
+are not. A server leaves the list as soon as it stops listening, and one that stops answering (a
+stopped or hung process) is marked so and leaves ten minutes after it last answered. A copied
+link opens the app once, on any of the owner's devices, within two minutes. **Signed-in devices ›
+Sign out** ends every preview link; the servers keep running.
 
 Previews open only over Tailscale: one HTTPS address that works the same on the Mac and the phone,
 on a site separate from this Mac's `localhost`. A preview never opens at `localhost:<port>`, which
@@ -158,26 +165,34 @@ How a request travels:
    answers `OK` (and the listing for `LIST`) or `NO <reason>`, then carries the server's bytes.
    `*.localhost` names and `localhost` dial both `127.0.0.1` and `::1`, since Vite and others bind
    `::1` alone. The forwarder refuses localDot's own services (3000, 3001, 3129, 7700, 7701, 8082,
-   9222) and dials no address outside the computer. `LIST` reads listening sockets from
-   `/proc/net/tcp{,6}`, named by their program where desktopd can see it.
+   9222) and dials no address outside the computer; the computer's name dials its first address,
+   as its hosts file says. `LIST` reads listening sockets from `/proc/net/tcp{,6}`, named by their
+   program where desktopd can see it, and gives the computer's addresses and then its name.
 2. The desktop's gate relays 8083 to desktop:7701 with its own bound of 64 connections
    (`LD_PREVIEWS=1`), so long-lived hot-reload sockets never hold up control (8081) or the
    stream (8082). Docker publishes it on the Mac's 127.0.0.1 like the other two.
 3. The daemon gives each preview a loopback port from its block (`LOCALDOT_PREVIEW_PORTS`,
-   default `4900-4915`; a port something else holds is skipped) and serves it there. One preview
-   is one origin, so absolute asset paths and hot reload work unchanged. The request reaches the
-   server as if sent to its own address: Host, Origin and Referer name it (Vite's `allowedHosts`
-   and Next.js's `allowedDevOrigins` pass), redirects to it come back to the preview's address,
-   and bodies are never rewritten. Only the tailnet fronts' names are accepted as Host (a page
-   that rebinds its own name to this Mac is refused), and a WebSocket must come from the
-   preview's own pages.
+   default `4900-4915`; a port something else holds is skipped) and serves it there: the port that
+   server had before, else the one unused longest, and with every port taken, the port of a preview
+   whose server has gone. One preview is one origin, so root-relative paths and hot reload work
+   unchanged. The request reaches the server as if sent to its own address: Host, Origin and
+   Referer name it (Vite's `allowedHosts` and Next.js's `allowedDevOrigins` pass). Only the
+   tailnet fronts' names are accepted as Host (a page that rebinds its own name to this Mac is
+   refused), and a WebSocket must come from the preview's own pages. Event streams, long polls and
+   uploads stream both ways with no limit; a page the device opens that hasn't started answering
+   in 30 seconds gets a page saying so, with **Try again**.
 4. Signing in: the link carries a one-use secret after `#`, valid for two minutes. The entry page
    (`/__localdot/preview`, its own script, no inline code) posts it and receives an HttpOnly,
    Secure, SameSite=Lax cookie named for that port. Every request needs it; every preview cookie
    is removed before a request reaches a server, as are Tailscale's identity headers and
    forwarding headers. A server cannot set those cookies, HSTS, Alt-Svc or Clear-Site-Data. When a
-   port served another server before, a device's first visit clears that origin's cache and
-   storage (`Clear-Site-Data: "cache", "storage"`), so an old service worker cannot answer.
+   port may have served another server before, a device's first visit clears that origin's storage
+   (`Clear-Site-Data: "storage"`), so an old service worker cannot answer. Not `"cache"`: browsers
+   walk their whole disk cache for it before answering (3 to 4 s per 20,000 entries in Chromium;
+   this Mac's Chrome profiles hold 90,000 to 136,000), which kept the entry page on **Opening
+   preview…**. Instead, an answer that doesn't say how long it stays fresh is sent with
+   `Cache-Control: no-cache`, so the browser asks again rather than reusing what another server
+   left. While the server's first page is on its way, the entry page counts the seconds.
 5. A preview ends on Stop, after two hours with no request or open socket, or when its computer
    stops, freezes or is replaced. `https://` servers are reached over TLS without checking their
    development certificate: the connection already ends at the computer's loopback.
@@ -191,21 +206,60 @@ shares localDot, the daemon adds `tailscale serve --bg --https=<p> http://127.0.
 port it actually holds and removes it when the preview ends (and removes leftovers in its block
 before adding the first). See [remote access](remote-access.md#previews).
 
+### Addresses in what a server sends back
+
+A page means the computer's own servers when it names `localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`,
+a `*.localhost` name, or the computer's address or name. On the device those would reach the
+device itself, so the daemon sends each where it opens there:
+
+- **The previewed server**, by any of its loopback names or the computer's address, at its port:
+  the preview's own origin (`ws:` becomes `wss:`). Each `*.localhost` name is a site of its own.
+- **Another server listening in the computer** (another port, or another `*.localhost` name):
+  the via path on the same origin, `/__localdot/to/<http|https>/<host>/<port>/<path>`. A request,
+  event stream or WebSocket a page makes there reaches that server through this preview, with
+  Origin and Referer naming the page's own server, as the computer's browser would send them, so
+  cross-origin calls to an API on another port need no tailnet CORS. A page the device opens there
+  (a link, `target=_blank` included, or a redirect it follows) becomes a preview of its own: the
+  daemon opens that server's preview and sends the device through its sign-in, so its root-relative
+  paths work. A form a page posts there is passed through like a request. Another site cannot send the owner there (`Sec-Fetch-Site: cross-site` is refused).
+- **Anything else**, including a port nothing listens on, is left as it is.
+
+Where: `Location`, `Content-Location`, `Refresh` and `Link` headers; the sources of a page policy
+(`Content-Security-Policy`, so `connect-src ws://localhost:5173` still allows the preview); and
+the bodies of HTML, JavaScript, CSS, JSON, XML and SVG, plain or as JSON escapes them
+(`http:\/\/localhost:3000`), streamed as they arrive (only an address cut by a chunk's end waits for
+the next). A compressed body (gzip, Brotli, zstd) is decoded and sent on as gzip. A loopback name
+without a port is left alone, because libraries parse paths against `http://localhost`. Event
+streams, ranges, binary types and other charsets pass untouched. A root-relative redirect from a
+server reached through the via path stays on its via path.
+
+A server's cookies stay on the preview's host: a `Domain` naming the computer (`localhost`, a
+`*.localhost` name, its address) is dropped, since the browser would refuse it, and a cookie with
+`SameSite=None` gets `Secure`. Cookies ignore ports, as on `localhost`, so the computer's servers
+share them with each other, never with localDot (which uses none) or its preview cookies.
+
 A computer made before previews has no forwarder or no preview relay, so the Previews tab says
 **Update your computer to open previews** until desktopd answers on 7701. Computers update when
 the owner presses Update (desktop and gate images together).
 
-Not supported (open the page in the computer's own browser instead): pages that hard-code full
-`http://localhost:…` addresses of other ports, cookies set for `Domain=localhost`, and OAuth
-callbacks registered to localhost.
+Not supported (open the page in the computer's own browser instead): OAuth callbacks registered
+to localhost (the identity provider sends the browser to the device's own localhost, and changing
+`redirect_uri` would not match the registration), addresses built in a script from parts
+(`"http://localhost:" + port`), subresource integrity or a page policy's hashes over a rewritten
+script, and a server's root-relative paths in a page loaded through the via path (opening that
+server's page makes it a preview of its own instead).
 
 ### Checks
 
 - Unit: `pnpm exec vitest run packages/protocol/src/previews.test.ts apps/daemon/src/previews
   cells/desktop/desktopd/src/preview-forwarder.test.ts cells/desktop/desktopd/src/connection-owner.test.ts`
-  (URL detection, the forwarder's line, refused ports and dialing, listing, allocation, the
-  sign-in and cookie flow, the Host allowlist, header rewrites, WebSocket passthrough, Tailscale
-  Serve through a stand-in CLI, states and expiry).
+  (URL detection, the forwarder's line, refused ports and dialing, listing, which listeners answer
+  HTTP, titles, port choice and reuse, the sign-in and cookie flow, the Host allowlist, every
+  address rewrite and its chunk boundaries, cookies, the via path and opening another server,
+  slow pages, event streams beside page loads, WebSocket passthrough, Tailscale Serve through a
+  stand-in CLI, states and expiry). `previews.test.ts` also runs a web app and an API through
+  desktopd's real forwarder: redirects, absolute links, a cross-port request, an event stream, a
+  WebSocket echo and a redirect that opens the API as a preview of its own.
 - Docker, after building the desktop and gate images:
 
   ```sh

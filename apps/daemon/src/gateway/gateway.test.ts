@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,9 +7,11 @@ import {
   type LocalDotEvent,
   msToMicros,
   type Point,
+  type Rect,
   sessionMsOf,
   ulid,
 } from "@localdot/protocol";
+import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
 import { classify, nativeActionFacts } from "../agent/safety/classify.ts";
 import { BrowserClientError } from "../browser/client.ts";
@@ -26,6 +28,7 @@ import { FrameStore } from "./frames.ts";
 import {
   type ActionContext,
   ActionGateway,
+  ANOTHER_TASKS_WINDOW,
   type NativeActionIdentity,
   type NativeActionRequest,
   type NativeScreenBinding,
@@ -70,13 +73,14 @@ function setup(
     stream: { baseUrl: "http://127.0.0.1:2", authorization: "Basic x" },
   });
   const sleeps: number[] = [];
+  const frames = new FrameStore(home);
   const gateway = new ActionGateway({
     eventLog,
     cells,
     registry,
     onset: DEFAULT_ONSET_TABLE,
     ringOnset: keepPolicy(DEFAULT_ONSET_TABLE),
-    frames: new FrameStore(home),
+    frames,
     now: () => clock.nowMicros(),
     // Advances the fake clock, then yields one macrotask so a hit test that started beside the
     // travel resolves before the dispatch, as it does with real timers.
@@ -103,6 +107,7 @@ function setup(
     cellId,
     sessionId,
     gateway,
+    frames,
     sleeps,
     events,
     ofType,
@@ -1273,6 +1278,57 @@ describe("ActionGateway settle and zoom", () => {
   });
 });
 
+describe("ActionGateway on a computer tasks share", () => {
+  it("covers another task's windows in the frame it keeps, and never zooms through them", async () => {
+    const white = await sharp({
+      create: { width: 1280, height: 800, channels: 3, background: { r: 255, g: 255, b: 255 } },
+    })
+      .webp({ lossless: true })
+      .toBuffer();
+    const theirs = {
+      id: 9,
+      pid: 90,
+      cls: "Mousepad",
+      title: "b.txt",
+      rect: { x: 0, y: 0, w: 800, h: 600 },
+      frame: { x: 0, y: 0, w: 800, h: 600 },
+      active: false,
+    };
+    const s = setup({
+      observe: () => ({
+        frameId: ulid(),
+        width: 1280,
+        height: 800,
+        image: white.toString("base64"),
+        pointer: { x: 0, y: 0 },
+        windows: [theirs],
+      }),
+      zoom: () => Buffer.from("device pixels"),
+    });
+    const seen: number[][] = [];
+    const ctx = {
+      sessionId: s.sessionId,
+      cellId: s.cellId,
+      hidden: async (windows: readonly { id: number; frame: Rect }[]) => {
+        seen.push(windows.map((w) => w.id));
+        return windows.map((w) => w.frame);
+      },
+    };
+    const { frameId } = await s.gateway.observe(ctx);
+    expect(seen).toEqual([[9]]);
+    const path = s.frames.path(s.sessionId, frameId);
+    if (!path) throw new Error("no frame kept");
+    const pixels = await sharp(readFileSync(path)).removeAlpha().raw().toBuffer();
+    const at = (x: number, y: number) => pixels[(y * 1280 + x) * 3] as number;
+    expect(at(10, 10)).toBe(0x5b);
+    expect(at(399, 299)).toBe(0x5b);
+    expect(at(400, 300)).toBe(255);
+    const region = { x: 0, y: 0, w: 100, h: 100 };
+    expect(await s.gateway.zoom(s.sessionId, frameId, region)).toBeUndefined();
+    expect(s.fake.calls.some((c) => c.path === "/zoom")).toBe(false);
+  });
+});
+
 describe("ActionGateway native identity", () => {
   const frame = { x: 0, y: 54, w: 1604, h: 1258 };
   const element =
@@ -1327,6 +1383,21 @@ describe("ActionGateway native identity", () => {
     const inputs = () => s.fake.calls.filter((c) => c.path === "/input");
     return { s, ctx, consumed, found, admitted, revalidated, inputs };
   }
+
+  it("never sends input onto another task's window", async () => {
+    const a = agent([element(), element()]);
+    const outcome = await a.s.gateway.run({ ...a.ctx, foreign: (window) => window === 77 }, click);
+    expect(outcome).toMatchObject({
+      ok: false,
+      cancelled: "preflight",
+      error: ANOTHER_TASKS_WINDOW,
+    });
+    expect(a.inputs()).toHaveLength(0);
+    expect(a.admitted).toHaveLength(0);
+    const own = agent([element(), element()]);
+    expect((await own.s.gateway.run({ ...own.ctx, foreign: () => false }, click)).ok).toBe(true);
+    expect(own.inputs()).toHaveLength(1);
+  });
 
   it("acts on a window-level approval when the next read finds an element in that window", async () => {
     const a = agent([timedOut, element()]);

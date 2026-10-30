@@ -6,7 +6,7 @@ runAt("c14", "w39");
 test("thread, running", async ({ page, ui }) => {
   await ui.open("running");
   const rail = await conversation(page);
-  await expect(rail.locator(".thread-live .thread-work")).toContainText(
+  await expect(rail.locator(".thread .thread-work[data-live]")).toContainText(
     "Checking February's net total against revenue minus returns",
   );
   await ui.settle();

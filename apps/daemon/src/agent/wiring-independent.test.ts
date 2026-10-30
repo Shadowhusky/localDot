@@ -170,7 +170,7 @@ function setup(
     docker: {} as AgentWiringDeps["docker"],
     keyd: {} as AgentWiringDeps["keyd"],
     monitor: { health: { online: true, bootId: "one" } },
-    killSwitch: { isBusy: () => busy, stopSession: async () => undefined },
+    killSwitch: { isBusy: () => busy, contain: async () => undefined },
     keydPorts: { from: 4791, to: 4796 },
     toolPort: 0,
     ...extra(home),
@@ -205,7 +205,7 @@ it("scripted preparation shares the upload drain and holds Stop through physical
   const upload = transfers.acquire(h.cellId, [], () => {});
   const physical = Promise.withResolvers<void>();
   mocks.prepare.mockImplementation(async () => physical.promise);
-  const stop = vi.spyOn(h.deps.killSwitch, "stopSession").mockImplementation(async (id) => {
+  const stop = vi.spyOn(h.deps.killSwitch, "contain").mockImplementation(async (id) => {
     h.live.stop(id);
     return { revoked: true, paused: true, closed: false, stopped: false, errors: [] };
   });
@@ -253,7 +253,7 @@ it("lost scripted preparation replies fence the computer and cannot replay on an
   h.deps.fences = fences;
   await h.agent.start();
   mocks.prepare.mockRejectedValue(new Error("fixture reply lost"));
-  const stop = vi.spyOn(h.deps.killSwitch, "stopSession").mockImplementation(async (id) => {
+  const stop = vi.spyOn(h.deps.killSwitch, "contain").mockImplementation(async (id) => {
     h.live.stop(id);
     throw new Error("fixture containment reply lost");
   });
@@ -283,7 +283,7 @@ it("a confirmed service shutdown leaves the computer available across restart", 
   const id = h.log.createSession("completed work");
   const session = new AgentSession(id, h.cellId, "task", h.log);
   h.agent.runner.sessions.set(id, session);
-  vi.spyOn(h.deps.killSwitch, "stopSession").mockResolvedValue({
+  vi.spyOn(h.deps.killSwitch, "contain").mockResolvedValue({
     revoked: true,
     paused: true,
     closed: false,
@@ -300,7 +300,7 @@ it("an unconfirmed service shutdown still fences the computer", async () => {
   await h.agent.start();
   const id = h.log.createSession("interrupted work");
   h.agent.runner.sessions.set(id, new AgentSession(id, h.cellId, "task", h.log));
-  const stop = vi.spyOn(h.deps.killSwitch, "stopSession").mockResolvedValue({
+  const stop = vi.spyOn(h.deps.killSwitch, "contain").mockResolvedValue({
     revoked: false,
     paused: false,
     closed: false,
@@ -342,7 +342,7 @@ it("shutdown still contains every session and closes clients when Stop journal p
     return originalAppend(id, event);
   });
   const stop = vi
-    .spyOn(h.deps.killSwitch, "stopSession")
+    .spyOn(h.deps.killSwitch, "contain")
     .mockResolvedValue({ revoked: true, paused: true, closed: false, stopped: false, errors: [] });
   try {
     await Promise.resolve()
@@ -399,7 +399,7 @@ it("real idle-upload admission cannot pass a completed drain and overlap the rep
     gates.set(id, next);
     return { ...next };
   };
-  h.deps.killSwitch.stopSession = async () => ({
+  h.deps.killSwitch.contain = async () => ({
     revoked: true,
     paused: true,
     closed: false,

@@ -5,19 +5,14 @@ import type { RoutineRunnerPort } from "./launch.ts";
 
 export function agentRunnerPort(
   runner: Pick<AgentRunner, "start" | "end" | "get">,
-  live: Pick<LiveSessions, "get" | "settled">,
+  live: Pick<LiveSessions, "sessionsOn" | "settled" | "lease">,
   log: Pick<EventLog, "listSessions">,
 ): RoutineRunnerPort {
   return {
     start: (cellId, task, options) => runner.start(cellId, task, undefined, options),
     end: (id) => runner.end(id),
-    live: (cellId) => live.get(cellId),
-    busy: (cellId) => {
-      const id = live.get(cellId);
-      if (!id) return false;
-      const session = runner.get(id);
-      return session?.status !== "idle" || session.controlHeld;
-    },
+    live: (cellId) => live.sessionsOn(cellId),
+    busy: (cellId) => live.lease(cellId).userHolds,
     parked: (id) => {
       const session = runner.get(id);
       return (

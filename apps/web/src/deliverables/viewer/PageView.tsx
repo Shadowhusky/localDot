@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../../lib/api.ts";
 import { Icon } from "../../ui/Icon.tsx";
 import { useMediaQuery } from "../../ui/media.ts";
-import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
+import type { FileRef } from "../api.ts";
 import { CodeLines } from "./CodeLines.tsx";
 import { loadsFromWeb } from "./page-refs.ts";
-import { ViewerBar, ViewerLoading, ViewerMessage } from "./states.tsx";
+import { ViewerBar, ViewerLoading, ViewerMessage, ViewSwitch } from "./states.tsx";
 import { useText } from "./TextView.tsx";
+import type { ViewChoice } from "./views.ts";
 
 // A web page dot made, drawn in a frame that runs no script and reaches nothing outside the task:
 // the daemon serves it under a policy of no scripts, forms, fonts or connections, pictures and
@@ -15,18 +16,17 @@ import { useText } from "./TextView.tsx";
 export function PageView({
   api,
   url,
-  sessionId,
-  name,
-  version,
+  file,
+  choice,
 }: {
   api: ApiClient;
   url: string | null;
-  sessionId: string;
-  name: string;
-  version: number | null;
+  file: FileRef;
+  choice: ViewChoice;
 }) {
-  const [shown, setShown] = useState("page");
-  const source = useText(api, sessionId, name, version, "start");
+  const { name } = file;
+  const shown = choice.value === "source" ? "source" : "page";
+  const source = useText(api, file, "start");
   const text = source !== null && source !== "failed" && source.kind === "text" ? source : null;
   const web = text ? loadsFromWeb(text.lines.join("\n")) : false;
   const frame = useRef<HTMLIFrameElement>(null);
@@ -66,16 +66,7 @@ export function PageView({
           ) : undefined
         }
       >
-        <SegmentedControl
-          size={28}
-          aria-label="Show"
-          value={shown}
-          items={[
-            { value: "page", label: "Page" },
-            { value: "source", label: "Source" },
-          ]}
-          onValueChange={setShown}
-        />
+        <ViewSwitch choice={choice} />
       </ViewerBar>
       <div className="viewer-stage viewer-web" hidden={shown !== "page"}>
         {url === null ? (

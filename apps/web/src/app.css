@@ -527,10 +527,10 @@
   }
 }
 
-/* Short phones reserve room for the work disclosure before it opens. Waiting
-   until expansion can leave the trigger hidden behind the composer. */
+/* Short phones give the band's room to the thread while dot works, so the run it is at and the
+   composer both fit; the island still says what dot is doing. */
 @media (width < 700px) and (height < 650px) {
-  .app:has(.thread-live .thread-work) .stage-band {
+  .app:has(.thread-work[data-live]) .stage-band {
     display: none;
   }
 }

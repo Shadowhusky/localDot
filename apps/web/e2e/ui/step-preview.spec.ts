@@ -86,14 +86,9 @@ test("recorded output opens as selectable text beside the steps", async ({ page,
     "hero1.jpg · 80427 bytes",
   );
   await expect(dialog.getByRole("button", { name: "Copy output" })).toBeVisible();
-  await dialog.getByRole("radio", { name: "Rendered", exact: true }).click();
-  await expect(dialog.getByRole("region", { name: "Rendered Output" })).toContainText(
-    "80427 bytes",
-  );
-  await dialog.getByRole("radio", { name: "Source", exact: true }).click();
-  await expect(dialog.getByRole("region", { name: "Step output preview" })).toContainText(
-    "80427 bytes",
-  );
+  // Plain output has nothing to render: one view, with its lines wrapped or not.
+  await expect(dialog.getByRole("radio")).toHaveCount(0);
+  await expect(dialog.getByRole("switch", { name: "Wrap lines" })).toBeVisible();
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).not.toBeVisible();
 });

@@ -1,9 +1,14 @@
-import { type AttentionChangeEvent, ClientMessage, type RoutineAppEvent } from "@localdot/protocol";
+import {
+  type AttentionChangeEvent,
+  ClientMessage,
+  type ConversationLiveEvent,
+  type RoutineAppEvent,
+} from "@localdot/protocol";
 import type { PresenceBoard } from "./notify/presence.ts";
 import { tokenSocketServer, type UpgradeRoute } from "./upgrade-router.ts";
 
 // App-wide notices for every signed-in client, whatever task they are looking at.
-export type AppEvent = AttentionChangeEvent | RoutineAppEvent;
+export type AppEvent = AttentionChangeEvent | RoutineAppEvent | ConversationLiveEvent;
 const MAX_BUFFERED_BYTES = 1024 * 1024;
 const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost):\d+$/;
 

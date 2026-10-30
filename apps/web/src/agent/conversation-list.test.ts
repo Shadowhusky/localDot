@@ -1,11 +1,14 @@
 import { type ConversationEntry, ulid } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
+import { createApi } from "../lib/api.ts";
 import {
   conversationRows,
   conversationStatus,
   conversationTitle,
   groupConversations,
   matchesConversation,
+  pinActive,
+  renameConversation,
   whenLabel,
 } from "./conversation-list.ts";
 
@@ -26,11 +29,11 @@ function entry(over: Partial<ConversationEntry> = {}): ConversationEntry {
 const QUIET = { live: null, needsYou: new Set<string>() };
 
 describe("a conversation's status", () => {
-  it("reads running, needs you, done, failed and stopped from its latest task", () => {
+  it("reads working, needs you, done, failed and stopped from its latest task", () => {
     const running = entry({ ended: null });
     const waiting = entry({ ended: null });
     const facts = { live: running.sessionId, needsYou: new Set([waiting.sessionId]) };
-    expect(conversationStatus(running, facts)).toBe("running");
+    expect(conversationStatus(running, facts)).toBe("working");
     expect(conversationStatus(waiting, facts)).toBe("needs-you");
     expect(conversationStatus(entry({ ended: "done" }), facts)).toBe("done");
     expect(conversationStatus(entry({ ended: "error" }), facts)).toBe("failed");
@@ -46,6 +49,107 @@ describe("a conversation's status", () => {
 
   it("counts a task cut short, with no ending and not running, as stopped", () => {
     expect(conversationStatus(entry({ ended: null }), QUIET)).toBe("stopped");
+  });
+
+  it("takes the daemon's word for a conversation under way, and a question waiting over it", () => {
+    const live = (state: NonNullable<ConversationEntry["live"]>["state"]) =>
+      entry({ ended: null, live: { state, since: at(0), onScreen: false } });
+    expect(
+      (["working", "waiting-for-computer", "needs-you", "idle", "paused"] as const).map((state) =>
+        conversationStatus(live(state), QUIET),
+      ),
+    ).toEqual(["working", "waiting", "needs-you", "idle", "paused"]);
+    const asking = live("working");
+    expect(conversationStatus(asking, { live: null, needsYou: new Set([asking.sessionId]) })).toBe(
+      "needs-you",
+    );
+    // The daemon's word wins over the computer's: a second conversation can be at work too.
+    expect(conversationStatus(live("idle"), { ...QUIET, live: ulid() })).toBe("idle");
+  });
+});
+
+describe("a conversation's row", () => {
+  it("is under way while the daemon says so or while dot works or waits on the user in it", () => {
+    const working = entry({ ended: null });
+    const waiting = entry({ ended: "done" });
+    const paused = entry({ ended: null, live: { state: "paused", since: at(0), onScreen: false } });
+    const facts = { live: working.sessionId, needsYou: new Set([waiting.sessionId]) };
+    expect(
+      conversationRows([working, waiting, paused, entry()], facts).map((row) => row.active),
+    ).toEqual([true, true, true, false]);
+  });
+
+  it("dates a conversation under way from its status, and others from their latest task", () => {
+    const since = new Date(NOW.getTime() - 120_000).toISOString();
+    const [live, ended] = conversationRows(
+      [entry({ ended: null, live: { state: "working", since, onScreen: true } }), entry()],
+      QUIET,
+    );
+    expect(live?.since).toBe(since);
+    expect(ended?.since).toBe(at(0));
+  });
+
+  it("says what dot is doing while it works, from the daemon or from the task on the computer", () => {
+    const told = entry({
+      ended: null,
+      live: { state: "working", since: at(0), onScreen: false, activity: " Opening the site " },
+    });
+    const running = entry({ ended: null });
+    const idle = entry({
+      ended: null,
+      live: { state: "idle", since: at(0), onScreen: false, activity: "Waiting" },
+    });
+    const rows = conversationRows([told, running, idle], {
+      live: running.sessionId,
+      activity: "Typing the address",
+      needsYou: new Set(),
+    });
+    expect(rows.map((row) => row.activity)).toEqual([
+      "Opening the site",
+      "Typing the address",
+      undefined,
+    ]);
+  });
+
+  it("pins the conversations under way above the rest, each kept newest first", () => {
+    const rows = conversationRows(
+      [
+        entry({ title: "new" }),
+        entry({
+          title: "live",
+          ended: null,
+          live: { state: "idle", since: at(0), onScreen: false },
+        }),
+        entry({ title: "old" }),
+        entry({
+          title: "older live",
+          ended: null,
+          live: { state: "paused", since: at(0), onScreen: false },
+        }),
+      ],
+      QUIET,
+    );
+    expect(pinActive(rows).map((row) => row.title)).toEqual(["live", "older live", "new", "old"]);
+  });
+});
+
+describe("renaming", () => {
+  it("posts the new name, and an empty one gives the conversation back its own", async () => {
+    const posts: unknown[] = [];
+    const api = createApi("a".repeat(43), {
+      origin: "http://fixture.test",
+      fetchImpl: async (url, init) => {
+        posts.push([new URL(String(url)).pathname, JSON.parse(String(init?.body))]);
+        return new Response(null, { status: 204 });
+      },
+    });
+    const id = ulid();
+    await renameConversation(api, id, "  Lisbon trip ");
+    await renameConversation(api, id, " ");
+    expect(posts).toEqual([
+      [`/api/conversations/${id}/title`, { title: "Lisbon trip" }],
+      [`/api/conversations/${id}/title`, { title: null }],
+    ]);
   });
 });
 
@@ -76,6 +180,27 @@ describe("grouping by day", () => {
       ["Earlier", ["d"]],
     ]);
     expect(groupConversations(rows.slice(3), NOW).map((group) => group.label)).toEqual(["Earlier"]);
+  });
+
+  it("lists the conversations under way first, whatever their day", () => {
+    const rows = conversationRows(
+      [
+        entry({ title: "a", startedAt: at(0, 1) }),
+        entry({
+          title: "b",
+          startedAt: at(9),
+          ended: null,
+          live: { state: "waiting-for-computer", since: at(0), onScreen: false },
+        }),
+      ],
+      QUIET,
+    );
+    expect(
+      groupConversations(rows, NOW).map((group) => [group.label, group.rows.map((r) => r.title)]),
+    ).toEqual([
+      ["Active", ["b"]],
+      ["Today", ["a"]],
+    ]);
   });
 });
 

@@ -191,7 +191,7 @@ it("reviewer: pending task keeps its policy while an idle prior task drains", as
     }
     await settled(id);
   });
-  const pending = f.runner.start(f.cellId, "new task");
+  const pending = f.runner.start(f.cellId, "new task", undefined, { continues: old.id });
   try {
     await entered.promise;
     f.setSettings({

@@ -1,8 +1,11 @@
+import { ComputerLease } from "./computer-lease.ts";
+
 export interface LiveHooks {
   beforeRun?(cellId: string, sessionId: string): Promise<void>;
   afterRun?(cellId: string, sessionId: string): Promise<void>;
 }
-// Keep the settlement promise so Stop can drain work before freezing desktopd.
+// Keep the settlement promise so Stop can drain work before freezing desktopd. A computer runs
+// several tasks at once; its lease admits one action at a time.
 export class LiveSessions {
   readonly #hooks = new Set<LiveHooks>();
   addHooks(hooks: LiveHooks): () => void {
@@ -25,7 +28,7 @@ export class LiveSessions {
   // Hold idle native mutation admission through its actual completion. Cancelling a caller
   // cannot release it: the desktop operation must finish before any new task can own the cell.
   admitIdleOperation(cellId: string): { release(): void } | undefined {
-    if (this.get(cellId) || this.#idleOperations.has(cellId)) return undefined;
+    if (this.busy(cellId) || this.#idleOperations.has(cellId)) return undefined;
     const owner = {};
     this.#idleOperations.set(cellId, owner);
     return {
@@ -38,10 +41,36 @@ export class LiveSessions {
   idleOperationPending(cellId: string): boolean {
     return this.#idleOperations.has(cellId);
   }
-  readonly #byCell = new Map<
+  readonly #bySession = new Map<
     string,
-    { sessionId: string; controller: AbortController; done: Promise<void> }
+    { cellId: string; controller: AbortController; done: Promise<void>; since: number }
   >();
+  readonly #leases = new Map<string, ComputerLease>();
+  // The task each computer's web browser works for: it has one signed-in profile and one holder.
+  readonly #browsers = new Map<string, string>();
+  #starts = 0;
+
+  claimBrowser(cellId: string, sessionId: string): boolean {
+    const holder = this.browserHolder(cellId);
+    if (holder && holder !== sessionId) return false;
+    this.#browsers.set(cellId, sessionId);
+    return true;
+  }
+  browserHolder(cellId: string): string | undefined {
+    const holder = this.#browsers.get(cellId);
+    return holder && this.#bySession.get(holder)?.cellId === cellId ? holder : undefined;
+  }
+  releaseBrowser(cellId: string, sessionId: string): void {
+    if (this.#browsers.get(cellId) === sessionId) this.#browsers.delete(cellId);
+  }
+
+  lease(cellId: string): ComputerLease {
+    const existing = this.#leases.get(cellId);
+    if (existing) return existing;
+    const created = new ComputerLease();
+    this.#leases.set(cellId, created);
+    return created;
+  }
 
   start(
     cellId: string,
@@ -50,18 +79,17 @@ export class LiveSessions {
     prepare?: (signal: AbortSignal) => Promise<void>,
   ): void {
     if (this.#idleOperations.has(cellId)) throw new Error("computer operation is still settling");
-    if (this.#byCell.has(cellId) || this.#aliases.has(cellId))
-      throw new Error("this computer already has a live task");
+    if (this.#aliases.has(cellId)) throw new Error("this computer already has a live task");
     if (this.cellOf(sessionId)) throw new Error("session is already live");
     const controller = new AbortController();
     let settle!: () => void;
     const done = new Promise<void>((resolve) => {
       settle = resolve;
     });
-    const entry = { sessionId, controller, done };
+    const entry = { cellId, controller, done, since: ++this.#starts };
     // Register before invoking the callback, even if it throws or calls Stop
     // synchronously. The callback can subscribe to abort before start returns.
-    this.#byCell.set(cellId, entry);
+    this.#bySession.set(sessionId, entry);
     const hooks = [...this.#hooks];
     let pending: Promise<unknown>;
     if (hooks.length || prepare) {
@@ -111,21 +139,42 @@ export class LiveSessions {
         if (!controller.signal.aborted) console.error("a live session failed");
       })
       .finally(() => {
-        if (this.#byCell.get(cellId) === entry) this.#byCell.delete(cellId);
+        if (this.#bySession.get(sessionId) === entry) this.#bySession.delete(sessionId);
         for (const [alias, id] of this.#aliases) if (id === sessionId) this.#aliases.delete(alias);
+        this.#leases.get(cellId)?.revoke(sessionId);
+        this.releaseBrowser(cellId, sessionId);
         settle();
       });
   }
 
+  // The task a computer's doings are put down to: the one acting on it, else the one that acted
+  // last, else its newest. A brain's own computer is its task's.
   get(cellId: string): string | undefined {
-    return this.#byCell.get(cellId)?.sessionId ?? this.#aliases.get(cellId);
+    const alias = this.#aliases.get(cellId);
+    if (alias) return alias;
+    const on = this.sessionsOn(cellId);
+    const lease = this.#leases.get(cellId);
+    const last = lease?.last;
+    if (last && on.includes(last)) return last;
+    return on.at(-1);
+  }
+
+  // The computer's live tasks, oldest first.
+  sessionsOn(cellId: string): string[] {
+    return [...this.#bySession]
+      .filter(([, live]) => live.cellId === cellId)
+      .sort(([, a], [, b]) => a.since - b.since)
+      .map(([sessionId]) => sessionId);
+  }
+
+  busy(cellId: string): boolean {
+    return this.sessionsOn(cellId).length > 0 || this.#aliases.has(cellId);
   }
 
   alias(cellId: string, sessionId: string): void {
     if (!this.cellOf(sessionId)) throw new Error("session is not live");
     if (this.#idleOperations.has(cellId)) throw new Error("computer operation is still settling");
-    if (this.#byCell.has(cellId) || this.#aliases.has(cellId))
-      throw new Error("this computer is already assigned");
+    if (this.busy(cellId)) throw new Error("this computer is already assigned");
     this.#aliases.set(cellId, sessionId);
   }
 
@@ -134,19 +183,17 @@ export class LiveSessions {
   }
 
   cellOf(sessionId: string): string | undefined {
-    for (const [cellId, live] of this.#byCell) if (live.sessionId === sessionId) return cellId;
-    return undefined;
+    return this.#bySession.get(sessionId)?.cellId;
   }
 
   stop(sessionId: string): boolean {
-    const cellId = this.cellOf(sessionId);
-    if (!cellId) return false;
-    this.#byCell.get(cellId)?.controller.abort();
+    const live = this.#bySession.get(sessionId);
+    if (!live) return false;
+    live.controller.abort();
     return true;
   }
 
   settled(sessionId: string): Promise<void> {
-    const cellId = this.cellOf(sessionId);
-    return (cellId && this.#byCell.get(cellId)?.done) || Promise.resolve();
+    return this.#bySession.get(sessionId)?.done ?? Promise.resolve();
   }
 }
