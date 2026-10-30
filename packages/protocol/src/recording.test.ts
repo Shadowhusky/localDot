@@ -7,6 +7,7 @@ import {
   RecordingInfo,
   RecordingManifest,
   RecordingState,
+  RecordingStorage,
   SessionCard,
   SessionIndexPage,
 } from "./recording.ts";
@@ -68,6 +69,26 @@ describe("recording format", () => {
     ]) {
       expect(RecordingManifest.safeParse({ ...full(), ...patch }).success).toBe(false);
     }
+  });
+
+  it("records what a compacted video took before, and the storage summary", () => {
+    const compacted = { ...full(), compacted: { sourceBytes: 98_765 } };
+    expect(RecordingManifest.parse(compacted).compacted).toEqual({ sourceBytes: 98_765 });
+    expect(RecordingManifest.parse(full()).compacted).toBeUndefined();
+    expect(RecordingManifest.safeParse({ ...full(), compacted: { sourceBytes: 0 } }).success).toBe(
+      false,
+    );
+    const storage = {
+      videos: 2,
+      bytes: 10,
+      savedBytes: 90,
+      maxBytes: 20,
+      maxAgeDays: 30,
+      framesBytes: 5,
+      framesMaxAgeDays: 180,
+    };
+    expect(RecordingStorage.parse(storage)).toEqual(storage);
+    expect(RecordingStorage.safeParse({ ...storage, savedBytes: -1 }).success).toBe(false);
   });
 
   it("rejects reversed media and activity spans while permitting instantaneous activity", () => {

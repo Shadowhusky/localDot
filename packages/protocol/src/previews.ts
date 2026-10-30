@@ -18,12 +18,22 @@ export const PreviewItem = z.strictObject({
 });
 export type PreviewItem = z.infer<typeof PreviewItem>;
 
-// A server listening in the computer, whether or not it ever printed an address.
+// Whether a web server in the computer answered when localDot last asked.
+export const PreviewServerState = z.enum(["answering", "not-answering"]);
+export type PreviewServerState = z.infer<typeof PreviewServerState>;
+
+// A web server in the computer, whether or not it ever printed an address: one that answers HTTP
+// now, or did within the last few minutes. Other listeners (databases, debuggers) aren't listed.
 export const PreviewServer = z.strictObject({
   port: z.number().int().min(1).max(65535),
   url: z.string().max(256),
   // The program that listens, when the computer can tell.
   name: z.string().max(64).optional(),
+  // The title of its first page.
+  title: z.string().max(120).optional(),
+  state: PreviewServerState,
+  // When it last answered.
+  seenAt: z.string(),
 });
 export type PreviewServer = z.infer<typeof PreviewServer>;
 

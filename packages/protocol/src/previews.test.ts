@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PreviewRequest,
+  PreviewServer,
   PreviewsStatus,
   parsePreviewPreface,
   previewPreface,
@@ -117,9 +118,22 @@ describe("the previews API", () => {
         message: "Update your computer to open previews.",
         addresses: [],
         previews: [],
-        servers: [{ port: 5173, url: "http://localhost:5173/", name: "node" }],
+        servers: [
+          {
+            port: 5173,
+            url: "http://localhost:5173/",
+            name: "node",
+            title: "Shop",
+            state: "answering",
+            seenAt: "2026-10-30T09:00:00.000Z",
+          },
+        ],
       }).state,
     ).toBe("needs-update");
+    expect(
+      PreviewServer.safeParse({ port: 5173, url: "http://localhost:5173/", state: "listening" })
+        .success,
+    ).toBe(false);
     expect(
       PreviewsStatus.safeParse({ state: "open", addresses: [], previews: [], servers: [] }).success,
     ).toBe(false);

@@ -101,6 +101,8 @@ export const StopOutcome = z.strictObject({
   paused: z.boolean(),
   closed: z.boolean(),
   stopped: z.boolean(),
+  // Only this task ended: other tasks share the computer, which carries on.
+  ended: z.literal(true).optional(),
   errors: z
     .array(
       z.enum([

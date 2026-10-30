@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { AskFieldId, AskFieldKind, AskFieldRecord, MAX_ASK_FIELDS } from "./ask.ts";
+import { ConversationName } from "./conversation.ts";
 import { MAX_OUTPUT_VERSION, ReviseLink } from "./deliverables.ts";
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
 import { CredentialRequest } from "./keyd.ts";
+import { PersonaId } from "./personas.ts";
 import { TaintSource } from "./purpose.ts";
 import { ResearchBudget, ResearchBudgetData, ResearchSourceData } from "./research.ts";
 import {
@@ -71,6 +73,24 @@ export const SessionStart = event(
 export const SessionEnd = event(
   "session.end",
   z.object({ reason: z.enum(["done", "stopped", "error"]) }),
+);
+// A name for the task's conversation: dot's (`auto`) or the user's, which wins until the user
+// clears it with null.
+export const SessionTitle = event(
+  "session.title",
+  z
+    .object({ title: ConversationName.nullable(), by: z.enum(["auto", "user"]) })
+    .refine((data) => data.by === "user" || data.title !== null, "dot's name is never empty"),
+);
+// The dot a task works as while Auto is on: the one Auto picked and why, the user's default when
+// Auto had no answer in time (`default`), or the user's own switch.
+export const PersonaChoice = event(
+  "persona.choice",
+  z.object({
+    persona: PersonaId,
+    by: z.enum(["auto", "default", "user"]),
+    reason: z.string().min(1).max(160).optional(),
+  }),
 );
 export const ScreenSwitch = event("screen.switch", ScreenSwitchData);
 export const AgentState = event(
@@ -575,6 +595,8 @@ export const ResearchBudgetChange = event("research.budget", ResearchBudgetData)
 export const LocalDotEvent = z.discriminatedUnion("type", [
   SessionStart,
   SessionEnd,
+  SessionTitle,
+  PersonaChoice,
   ScreenSwitch,
   AgentState,
   Heartbeat,

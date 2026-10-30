@@ -80,6 +80,9 @@ export const RecordingManifest = z
     // fragments are served with a freshly synthesized tail, never as a raw file.
     finalized: z.boolean(),
     note: z.string().max(200).optional(),
+    // Set once the finished video was re-encoded to save space, or kept because that saved too
+    // little: the bytes it took before. `bytes` is what it takes now.
+    compacted: z.object({ sourceBytes: z.number().int().positive() }).optional(),
   })
   .refine(
     (manifest) =>
@@ -175,6 +178,19 @@ export const DeleteSessionsResult = z.object({
   failed: z.array(Ulid),
 });
 export type DeleteSessionsResult = z.infer<typeof DeleteSessionsResult>;
+
+// What the finished task videos on this computer take, what re-encoding them saved, and the rule
+// that removes the oldest.
+export const RecordingStorage = z.object({
+  videos: z.number().int().nonnegative(),
+  bytes: z.number().int().nonnegative(),
+  savedBytes: z.number().int().nonnegative(),
+  maxBytes: z.number().int().positive(),
+  maxAgeDays: z.number().positive(),
+  framesBytes: z.number().int().nonnegative(),
+  framesMaxAgeDays: z.number().positive(),
+});
+export type RecordingStorage = z.infer<typeof RecordingStorage>;
 
 export const RecordingInfo = z.object({
   manifest: RecordingManifest,

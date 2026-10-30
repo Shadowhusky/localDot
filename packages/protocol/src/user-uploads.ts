@@ -53,3 +53,22 @@ export const UserUploadReceipt = z.strictObject({
 });
 export type UserUploadReceipt = z.infer<typeof UserUploadReceipt>;
 export const userUploadPath = (id: string, name: string) => `Downloads/Uploads/${id}/${name}`;
+
+// A message names the files sent with it in a block at its end, which dot reads and the thread shows
+// as chips under the message instead.
+const ATTACHED = "Attached files on this computer:";
+
+export function withAttachments(text: string, paths: readonly string[]): string {
+  return paths.length
+    ? `${text}\n\n${ATTACHED}\n${paths.map((path) => `- ${path}`).join("\n")}`
+    : text;
+}
+
+export function splitAttachments(text: string): { body: string; files: string[] } {
+  const at = text.lastIndexOf(`\n\n${ATTACHED}\n`);
+  if (at < 0) return { body: text, files: [] };
+  const lines = text.slice(at + ATTACHED.length + 3).split("\n");
+  if (lines.some((line) => !line.startsWith("- ") || !line.slice(2).trim()))
+    return { body: text, files: [] };
+  return { body: text.slice(0, at), files: lines.map((line) => line.slice(2)) };
+}
