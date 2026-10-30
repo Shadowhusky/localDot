@@ -22,6 +22,11 @@ The web browser starts with the computer and stays running between tasks, so swi
 immediate. If it is still starting, dot's switch waits for it rather than failing. A local address
 such as localhost opens on the desktop, and the screen switches back to it.
 
+A new conversation's task first sees the web browser on a blank tab; the page the task before it
+left stays open, as it was, in a tab behind. A task that continues a conversation carries on from
+the page in front. Opening the blank tab reuses one already open, closes any other blank tab, and
+keeps at most four tabs, closing the oldest.
+
 The web browser recovers by itself and always keeps its saved sign-ins. A tab whose page crashes
 (for example, out of memory) is reloaded, up to three times a minute. If Chromium itself exits,
 hangs or loses its control connection, its container restarts it in place within a few seconds,

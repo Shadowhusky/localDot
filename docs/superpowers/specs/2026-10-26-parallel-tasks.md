@@ -1,10 +1,11 @@
 # Several tasks at once — design and decision
 
-Status: design note, deferred by the owner on 2026-10-26. Nothing here is built. A partial start of
-Phase 1 is saved as `~/builds/localdot-qa2/notes/parallel-tasks-phase1-partial.patch` (diff against
-the 2026-10-26 live snapshot; it also contains the already-shipped Claude Code tool-check and
-end-of-task fix). It doesn't compile cleanly yet: the stop-all test fakes and some runner tests
-still need updating.
+Status: superseded on 2026-10-30 by true concurrency with a per-action computer lease
+(`gateway/computer-lease.ts`, `agent/computer-turn.ts`, `gateway/window-owners.ts`): every task runs
+at once, each screen action takes a short turn on the computer that first brings the task's own
+window forward, other tasks' windows are refused as targets and covered in its screenshots, and the
+web browser works for one task at a time. The queue below was not built; the analysis of where the
+code assumed one task per computer still applies.
 
 ## Request
 
