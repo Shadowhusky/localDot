@@ -46,6 +46,13 @@ const STATUS: Record<
     light: "dot",
   },
   "image-output": { shape: "ready", control: /^Take control$/, label: "Done" },
+  narrated: { shape: "ready", control: /^Take control$/, label: "Done" },
+  "long-run": {
+    shape: "task",
+    control: /^Stop$/,
+    label: "Fill the tail with brown",
+    light: "dot",
+  },
   done: { shape: "ready", control: /^Take control$/, label: "Done" },
   continued: { shape: "ready", control: /^Take control$/, label: "Done" },
   // The last picture holds still and the island says why.

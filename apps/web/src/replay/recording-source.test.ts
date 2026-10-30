@@ -1,6 +1,7 @@
+import { emptyManifest } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReplaySource } from "../stage/worker-protocol.ts";
-import { openRecording, recordingUrl } from "./recording-source.ts";
+import { openRecording, recordingSnapshot, recordingUrl } from "./recording-source.ts";
 
 const source: ReplaySource = {
   sessionId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N",
@@ -23,6 +24,17 @@ describe("recording requests", () => {
     expect(() => recordingUrl({ ...source, origin: "http://user:secret@127.0.0.1:4750" })).toThrow(
       RangeError,
     );
+  });
+  it("names the size a finished video was opened at, so a compacted one is not mixed in", () => {
+    const url = new URL(recordingUrl({ ...source, video: { upto: null, bytes: 4096 } }));
+    expect(url.searchParams.get("bytes")).toBe("4096");
+    expect(url.searchParams.has("upto")).toBe(false);
+    expect(() => recordingUrl({ ...source, video: { upto: null, bytes: 1.5 } })).toThrow(
+      RangeError,
+    );
+    const info = { manifest: emptyManifest("complete"), upto: 3, servedBytes: 4096 };
+    expect(recordingSnapshot({ ...info, live: false })).toEqual({ upto: null, bytes: 4096 });
+    expect(recordingSnapshot({ ...info, live: true })).toEqual({ upto: 3 });
   });
   it("pins browser snapshots to the browser endpoint and rejects unknown screen names", () => {
     const url = new URL(recordingUrl({ ...source, screen: "browser", video: { upto: 7 } }));

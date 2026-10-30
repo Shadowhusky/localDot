@@ -8,6 +8,10 @@ export type IconNode = readonly (readonly [
 ])[];
 
 const FILLED = { fill: "currentColor", stroke: "none" } as const;
+// A conversation's status (status-*) is localDot's own: a ring, and inside it dot while its task is
+// under way or a mark for how it ended.
+const RING = ["circle", { cx: "12", cy: "12", r: "9" }] as const;
+const DOT = ["circle", { cx: "12", cy: "12", r: "2.5", ...FILLED }] as const;
 
 export const ICONS = {
   check: [["path", { d: "M20 6 9 17l-5-5" }]],
@@ -436,6 +440,28 @@ export const ICONS = {
     ["rect", { x: "3", y: "3", width: "18", height: "18", rx: "2" }],
     ["path", { d: "M15 3v18" }],
   ],
+  "panel-left": [
+    ["rect", { x: "3", y: "3", width: "18", height: "18", rx: "2" }],
+    ["path", { d: "M9 3v18" }],
+  ],
+  "status-working": [
+    ["circle", { cx: "12", cy: "12", r: "9", className: "ui-glyph-track" }],
+    ["path", { d: "M12 3a9 9 0 0 1 9 9", className: "ui-glyph-turn" }],
+    DOT,
+  ],
+  "status-waiting": [
+    ["circle", { cx: "12", cy: "12", r: "9", strokeWidth: "2.2", strokeDasharray: "0 4.712" }],
+    DOT,
+  ],
+  "status-needs-you": [RING, ["circle", { cx: "12", cy: "12", r: "4.5", ...FILLED }]],
+  "status-idle": [RING, DOT],
+  "status-paused": [RING, ["path", { d: "M10 9v6" }], ["path", { d: "M14 9v6" }]],
+  "status-done": [RING, ["path", { d: "m8.5 12.4 2.4 2.4 4.6-5" }]],
+  "status-stopped": [
+    RING,
+    ["rect", { x: "9", y: "9", width: "6", height: "6", rx: "1.2", ...FILLED }],
+  ],
+  "status-failed": [RING, ["path", { d: "m9.5 9.5 5 5" }], ["path", { d: "m14.5 9.5-5 5" }]],
   "zoom-in": [
     ["circle", { cx: "11", cy: "11", r: "8" }],
     ["path", { d: "m21 21-4.35-4.35" }],

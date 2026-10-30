@@ -379,15 +379,17 @@ export function DecisionSheet({ label, elapsedS, timer, children }: DecisionShee
           <TaskTime timer={timer} elapsedS={elapsedS} />
         </span>
       </div>
-      <IconButton
-        className="decision-sheet-expand"
-        label={full ? "Collapse question" : "Expand question"}
-        icon={full ? "chevron-down" : "chevron-up"}
-        size={32}
-        aria-expanded={full}
-        onClick={() => setExpanded(!full)}
-        disabledReason={keyboard > 0 ? "Expanded while typing" : undefined}
-      />
+      {/* A kit button keeps its own position, so a box holds this one in the corner. */}
+      <span className="decision-sheet-expand">
+        <IconButton
+          label={full ? "Collapse question" : "Expand question"}
+          icon={full ? "chevron-down" : "chevron-up"}
+          size={32}
+          aria-expanded={full}
+          onClick={() => setExpanded(!full)}
+          disabledReason={keyboard > 0 ? "Expanded while typing" : undefined}
+        />
+      </span>
       <div className="decision-sheet-content">{children}</div>
     </div>
   );

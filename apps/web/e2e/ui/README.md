@@ -34,6 +34,8 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   it: `GET /__qa/notify` lists Mac banners (`mac`, title and body) and counts phone pushes.
   `POST /__qa/finish?done=1` ends the task as the real runner does, which raises a Done;
   `?markdown=1` gives the result a summary with a heading, a list and bold words.
+- **Side questions:** `/btw` in the composer reaches the real side-question route, and the fixture
+  answers it from the task's own record, as the Fast model reads it, with no model.
 - **Plan usage:** `POST /__qa/plan-usage/<state>` sets what the plans used, as the model menu shows
   it: `normal`, `near`, `limit`, `stale`, `reset` or `unknown`. The `plan-usage` scenario signs in
   both plans and starts at `normal`.
@@ -41,6 +43,8 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   own browser streams, and `POST /__qa/screen` back to the desktop; `POST /__qa/browser/restart?ms=`
   starts the browser again in place. `POST /__qa/picture/drop` and `/resume` (`?screen=desktop` or
   `browser`, else both) take a screen's picture away and bring it back, as a lost stream does.
+  `POST /__qa/desktop/home` empties the desktop to its home screen, as when the last task worked only
+  in the web browser, and `/__qa/desktop/window` puts the spreadsheet window back.
 - **Update:** `POST /__qa/update` makes a new version of the computer ready (the island's one-time
   notice and Settings' Update row); `QA_UPDATE_MS` sets how long the update then takes.
 - **Typing:** `typing.spec.ts` measures each key press to the frame that shows it while

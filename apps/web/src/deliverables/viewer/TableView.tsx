@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useId, useState } from "react";
 import { count } from "../../copy/format.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { TabPanel, Tabs } from "../../ui/Tabs.tsx";
-import { loadTable } from "../api.ts";
+import { type FileRef, loadTable } from "../api.ts";
 import { ViewerBar, ViewerLoading, ViewerMessage } from "./states.tsx";
 
 type Table = Extract<TableFileReply, { kind: "table" }>;
@@ -28,26 +28,25 @@ export function rowsNote(table: Pick<Table, "rows" | "totalRows" | "columns">): 
 // tabs, each read when chosen. `lead` starts the bar, such as a workbook's Table | Pages.
 export function TableView({
   api,
-  sessionId,
-  name,
-  version,
+  file,
   lead,
 }: {
   api: ApiClient;
-  sessionId: string;
-  name: string;
-  version: number | null;
+  file: FileRef;
   lead?: ReactNode;
 }) {
+  const { name } = file;
+  const key = JSON.stringify(file);
   const tabs = useId();
   const [sheet, setSheet] = useState(0);
   const [loaded, setLoaded] = useState<{ sheet: number; reply: TableFileReply | "failed" } | null>(
     null,
   );
   const [sheets, setSheets] = useState<string[]>([]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key names the file.
   useEffect(() => {
     const controller = new AbortController();
-    loadTable(api, sessionId, name, version, sheet, controller.signal).then(
+    loadTable(api, file, sheet, controller.signal).then(
       (reply) => {
         if (controller.signal.aborted) return;
         setLoaded({ sheet, reply });
@@ -56,7 +55,7 @@ export function TableView({
       () => !controller.signal.aborted && setLoaded({ sheet, reply: "failed" }),
     );
     return () => controller.abort();
-  }, [api, sessionId, name, version, sheet]);
+  }, [api, key, sheet]);
   const reply = loaded?.sheet === sheet ? loaded.reply : null;
   const table = reply && reply !== "failed" && reply.kind === "table" ? reply : null;
   const bar =

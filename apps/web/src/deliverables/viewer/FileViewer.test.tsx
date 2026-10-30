@@ -43,9 +43,8 @@ const entry = (name: string, bytes = 100): ViewerEntry => ({
 });
 const downloads = {
   state: () => undefined,
-  busy: false,
-  request: vi.fn(async () => true),
-  sessionId: ID,
+  blocked: () => undefined,
+  request: vi.fn(),
 };
 
 function viewer(api: ReturnType<typeof daemon>["api"], entries: ViewerEntry[], index = 0) {
@@ -91,6 +90,43 @@ describe("the full preview", () => {
       expect(contents.querySelector("script")).toBeNull();
     },
   );
+  it("shows what a version changed from the one before it", async () => {
+    const version = (n: number) => ({
+      sessionId: ID,
+      version: n,
+      label: n,
+      bytes: 20,
+      resultId: RESULT,
+      tMs: n * 1000,
+      available: true,
+    });
+    const calls: string[] = [];
+    const api = createApi("a".repeat(43), {
+      origin: "http://127.0.0.1:4750",
+      fetchImpl: async (url) => {
+        const u = new URL(String(url));
+        calls.push(`${u.pathname}${u.search}`);
+        if (u.pathname.endsWith("/versions"))
+          return Response.json({ name: "notes.txt", versions: [version(1), version(2)] });
+        if (u.pathname.endsWith("/compare"))
+          return Response.json({
+            from: 1,
+            to: 2,
+            patch: "--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-draft\n+final\n",
+            truncated: false,
+          });
+        return Response.json({ kind: "text", from: "start", lines: ["final"], truncated: false });
+      },
+    });
+    viewer(api, [{ ...entry("notes.txt"), file: { ...entry("notes.txt").file, version: 2 } }]);
+    fireEvent.click(await screen.findByRole("radio", { name: "Changes" }));
+    const changes = await screen.findByRole("region", { name: "Changes to notes.txt" });
+    expect(changes.textContent).toContain("final");
+    expect(screen.getByText("v1 → v2")).toBeTruthy();
+    expect(calls).toContain(
+      `/api/agent/sessions/${ID}/files/notes.txt/compare?from=${ID}.1&to=${ID}.2`,
+    );
+  });
   it("explains binary files and offers a download", async () => {
     const api = createApi("a".repeat(43), {
       fetchImpl: async () => Response.json({ kind: "none", reason: "binary" }),
@@ -205,15 +241,22 @@ describe("the full preview", () => {
   it("opens from a file's row, and the row points there for a file it can't draw inline", async () => {
     const { api } = daemon();
     const row = entry("diagram.svg");
+    const results = {
+      state: () => undefined,
+      busy: false,
+      request: vi.fn(async () => true),
+      cancel: vi.fn(),
+      sessionId: ID,
+    };
     render(
-      <FileViewerScope api={api} entries={[row]} downloads={downloads} onMac={false}>
+      <FileViewerScope api={api} entries={[row]} downloads={results} onMac={false}>
         <ul>
           <DeliverableFile
             api={api}
             sessionId={ID}
             resultId={RESULT}
             file={row.file}
-            downloads={{ ...downloads, cancel: vi.fn() }}
+            downloads={results}
             refresh={1}
             defaultOpen
             onMac={false}

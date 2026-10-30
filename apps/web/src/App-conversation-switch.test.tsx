@@ -37,13 +37,13 @@ const TRIP = "Flights to Lisbon are booked for the 4th of May.";
 
 const event = (seq: number, type: string, data: unknown) =>
   ({ v: 1, id: ulid(), seq, t: seq, agent: "main", type, data }) as LocalDotEvent;
-function task(title: string, said: string, replied: string) {
+function task(title: string, said: string, replied: string, working = false) {
   const id = ulid();
   const history = [
     event(0, "session.start", { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", title }),
     event(1, "message.user", { messageId: ulid(), kind: "task", text: said }),
     event(2, "message.assistant", { messageId: ulid(), text: replied }),
-    event(3, "session.end", { reason: "done" }),
+    ...(working ? [] : [event(3, "session.end", { reason: "done" })]),
   ];
   const entry = {
     sessionId: id,
@@ -56,10 +56,9 @@ function task(title: string, said: string, replied: string) {
   return { id, history, entry };
 }
 
-// A computer at rest whose current conversation is one finished task, with an older conversation
-// beside it. Starting a new one or taking the older one up waits on `answer`, as a daemon ending the
-// finished task first does.
-function daemon() {
+// A computer whose current conversation is one task, finished or still at work, with an older
+// conversation beside it. Starting a new one or taking one up waits on `answer`.
+function daemon(working = false) {
   const cellId = ulid();
   const cell: CellSummary = {
     id: cellId,
@@ -68,7 +67,7 @@ function daemon() {
     createdAt: "2026-10-09T09:00:00.000Z",
     stream: { connection: "live", viewers: 1, lastUpstreamAt: null },
   };
-  const dog = task("Whiteboard dog", SAID, REPLIED);
+  const dog = task("Whiteboard dog", SAID, REPLIED, working);
   const trip = task("Lisbon trip", "Plan the trip to Lisbon", TRIP);
   const tasks = [dog, trip];
   const answer = Promise.withResolvers<void>();
@@ -84,7 +83,14 @@ function daemon() {
       return json({ sessions: current, more: false });
     }
     if (path === "/api/cells") return json([cell]);
-    if (path === `/api/cells/${cellId}/live`) return json({});
+    if (path === `/api/cells/${cellId}/live`)
+      return working
+        ? json({
+            sessionId: dog.id,
+            sessions: [dog.id],
+            ...(current.includes(dog.id) ? { current: dog.id } : {}),
+          })
+        : json({});
     if (path === `/api/cells/${cellId}/stream-ticket`)
       return json({ path: `/cells/${cellId}/desktop/${"d".repeat(22)}/` });
     if (path === `/api/cells/${cellId}/quarantine`) return json({ items: [] });
@@ -110,7 +116,7 @@ function daemon() {
       });
     return new Response(null, { status: 404 });
   }) as typeof fetch;
-  return { cell, cellId, fetchImpl, answer, posts, trip };
+  return { cell, cellId, fetchImpl, answer, posts, trip, dog };
 }
 
 const socket = async (path: string) => {
@@ -124,8 +130,8 @@ const socket = async (path: string) => {
   ) as FakeWebSocket;
 };
 
-async function opened() {
-  const d = daemon();
+async function opened(working = false) {
+  const d = daemon(working);
   render(<App fetchImpl={d.fetchImpl} />);
   const status = await socket(`/api/cells/${d.cellId}/status`);
   act(() => {
@@ -191,4 +197,33 @@ it("takes up a conversation chosen from the list, its thread coming in once it i
   await act(async () => d.answer.resolve());
   await waitFor(() => expect(thread.textContent).toContain(TRIP));
   expect(thread.textContent).not.toContain(REPLIED);
+});
+
+it("leaves a task at work in its conversation, and shows it live again when taken back up", async () => {
+  const d = await opened(true);
+  const { thread } = d;
+  const stream = `/api/sessions/${d.dog.id}/stream`;
+  await socket(stream);
+  const before = FakeWebSocket.instances.filter((entry) => entry.url.includes(stream)).length;
+  fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+  await act(async () => d.answer.resolve());
+  await waitFor(() => expect(thread.textContent).not.toContain(REPLIED));
+  expect(d.posts.map((post) => post.path)).toEqual(["/api/conversation/new"]);
+  fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
+  const list = await screen.findByRole("grid", { name: "Recent conversations" });
+  const row = within(await within(list).findByRole("row", { name: /Whiteboard dog/ })).getAllByRole(
+    "button",
+  )[0]!;
+  fireEvent.click(row);
+  await waitFor(() => expect(thread.textContent).toContain(REPLIED));
+  // Its feed is live again: a stream opens anew rather than an ended record.
+  await waitFor(() =>
+    expect(
+      FakeWebSocket.instances.filter((entry) => entry.url.includes(stream)).length,
+    ).toBeGreaterThan(before),
+  );
+  expect(d.posts.map((post) => post.path)).toEqual([
+    "/api/conversation/new",
+    "/api/conversation/continue",
+  ]);
 });

@@ -78,6 +78,7 @@ const keyReply = (path: string): Response | undefined => {
   if (path === `/api/cells/${CELL_ID}/quarantine`) return json({ items: [] });
   if (path === "/api/session-index") return json({ sessions: [], next: null });
   if (path === "/api/conversation") return json({ sessions: [], more: false });
+  if (path === "/api/conversations") return json({ conversations: [] });
   if (path === "/api/app-update") return new Response("unavailable", { status: 404 });
   if (path === "/api/agent/settings") return json({});
   if (path === "/api/runtime") return json({ docker: "available", startup: "ready" });

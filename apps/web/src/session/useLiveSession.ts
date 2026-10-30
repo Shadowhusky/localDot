@@ -31,6 +31,8 @@ export interface LiveSession {
   resting: boolean;
   // Which task to show is settled: the conversation is read and the computer has said what it runs.
   known: boolean;
+  // The task acting on the computer's screen now, which may be another conversation's.
+  screenHolder: string | null;
   stop(): void;
   check(): void;
 }
@@ -81,10 +83,10 @@ const saidLines = (model: SessionModel, id: string) =>
 
 // The worker gets every event at once; React sees the model at most ten times a second, as a
 // transition that typing can interrupt.
-// The computer's live task is shown while there is one. Otherwise the conversation's latest task,
-// `resting` (undefined until known), stays on show as ended, so a refresh, a stopped computer or a
-// restarted daemon reopens the conversation rather than an empty page. `choice` counts the
-// conversations the user chose (New, Continue).
+// The chosen conversation's live task is shown while there is one; the computer's other tasks go on
+// unseen. Otherwise the conversation's latest task, `resting` (undefined until known), stays on
+// show as ended, so a refresh, a stopped computer or a restarted daemon reopens the conversation
+// rather than an empty page. `choice` counts the conversations the user chose (New, Continue).
 export function useLiveSession(
   api: ApiClient,
   cell: CellSummary | null,
@@ -94,6 +96,7 @@ export function useLiveSession(
 ): LiveSession {
   const [shown, setShown] = useState<Shown | null>(null);
   const [known, setKnown] = useState(false);
+  const [screenHolder, setScreenHolder] = useState<string | null>(null);
   // The computer that has answered whether it runs a task.
   const [answered, setAnswered] = useState<string | null>(null);
   const [agentFeed] = useState(createAgentFeed);
@@ -157,15 +160,11 @@ export function useLiveSession(
     if (chosen.current === choice) return;
     chosen.current = choice;
     choices.current++;
-    // A successful choice retired the previous task on the daemon. Its final poll
-    // or delayed end event cannot reclaim the newly selected conversation.
+    // The task left on show goes on; an answer asked before the choice can't bring it back.
     if (resting !== undefined) {
       applied.current = resting;
       setKnown(true);
-      setShown((now) => {
-        if (now?.live && now.sessionId !== resting) over.current.add(now.sessionId);
-        return resting ? { sessionId: resting, cellId: null, live: false } : null;
-      });
+      setShown(() => (resting ? { sessionId: resting, cellId: null, live: false } : null));
     }
     lookNow.current();
   }, [choice, resting]);
@@ -186,12 +185,22 @@ export function useLiveSession(
       again = false;
       const asked = choices.current;
       try {
-        const reply = await api.get<{ sessionId: string } | undefined>(`/api/cells/${cellId}/live`);
+        const reply = await api.get<
+          { sessionId: string; sessions?: string[]; current?: string; holder?: string } | undefined
+        >(`/api/cells/${cellId}/live`);
+        if (!cancelled)
+          setScreenHolder(
+            typeof reply?.holder === "string" && ULID_PATTERN.test(reply.holder)
+              ? reply.holder
+              : null,
+          );
+        // A computer running several tasks names the chosen conversation's own; an older daemon
+        // runs one.
+        const running = reply?.sessions ?? (reply?.sessionId ? [reply.sessionId] : []);
+        const live = reply?.sessions ? reply.current : reply?.sessionId;
         const found =
-          typeof reply?.sessionId === "string" &&
-          ULID_PATTERN.test(reply.sessionId) &&
-          !over.current.has(reply.sessionId)
-            ? reply.sessionId
+          typeof live === "string" && ULID_PATTERN.test(live) && !over.current.has(live)
+            ? live
             : null;
         if (!cancelled && asked === choices.current) {
           if (first) setAnswered(cellId);
@@ -202,7 +211,7 @@ export function useLiveSession(
                 ? now
                 : { sessionId: found, cellId, live: true };
             if (!now?.live || now.cellId !== cellId) return now;
-            over.current.add(now.sessionId);
+            if (!running.includes(now.sessionId)) over.current.add(now.sessionId);
             return { ...now, live: false };
           });
         }
@@ -431,6 +440,7 @@ export function useLiveSession(
     ended: owned && (ended || atRest),
     resting: atRest,
     known,
+    screenHolder,
     stop,
     check,
   };

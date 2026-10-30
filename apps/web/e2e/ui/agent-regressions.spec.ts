@@ -261,7 +261,11 @@ test("Send queues, Steer now promotes once, and Stop frees New conversation", as
   if (isPhone(page)) {
     await page.getByRole("button", { name: "More", exact: true }).click();
     await page.getByRole("menuitem", { name: "New conversation" }).click();
-  } else await page.getByRole("button", { name: "New conversation" }).click();
+  } else
+    await page
+      .getByRole("complementary", { name: "Conversation" })
+      .getByRole("button", { name: "New conversation" })
+      .click();
   await expect(page.getByRole("heading", { name: "What should we do?" })).toBeVisible();
 });
 
@@ -288,7 +292,11 @@ test("Stop releases user control and allows New conversation without Hand back",
   if (isPhone(page)) {
     await page.getByRole("button", { name: "More", exact: true }).click();
     await page.getByRole("menuitem", { name: "New conversation" }).click();
-  } else await page.getByRole("button", { name: "New conversation" }).click();
+  } else
+    await page
+      .getByRole("complementary", { name: "Conversation" })
+      .getByRole("button", { name: "New conversation" })
+      .click();
   await expect(page.getByRole("heading", { name: "What should we do?" })).toBeVisible();
 });
 

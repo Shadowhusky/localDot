@@ -9,7 +9,7 @@ import { OPENING_ROWS } from "./earlier.ts";
 import type { AgentMessage, AgentQuestion } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { onQueuedEdit } from "./queued-draft.ts";
-import { threadItems } from "./thread.ts";
+import { threadItems, type WorkStep, withWork } from "./thread.ts";
 
 const spoken = vi.hoisted(() => ({ announce: vi.fn(), withdraw: vi.fn() }));
 vi.mock("../ui/Announcer.tsx", () => spoken);
@@ -745,4 +745,98 @@ it("cancels a queued message without replacing the current draft", async () => {
   } finally {
     unsubscribe();
   }
+});
+
+describe("a turn's steps between dot's words", () => {
+  const step = (key: string, startT: number, state: WorkStep["state"] = "done"): WorkStep => ({
+    key,
+    entry: { key, row: { kind: "step", id: key, startT }, keys: [] },
+    changes: [],
+    testId: "step-row",
+    title: `Step ${key}`,
+    meta: "",
+    time: "0:01",
+    state,
+    stateLabel: state,
+    startT,
+    endT: startT + 500,
+  });
+  const said = (id: string, text: string, seq: number, role: "user" | "assistant" = "assistant") =>
+    ({ ...message(id, text, role), seq, at: seq * 1_000_000 }) as AgentMessage;
+  const turn = [
+    said("task", "Make the report", 1, "user"),
+    said("plan", "Opening the sheet.", 2),
+    said("next", "Checking the totals.", 5),
+    said("answer", "The report is ready.", 9),
+  ];
+  const rows = () =>
+    [...document.querySelectorAll(".thread > .thread-row")].map((row) =>
+      row.getAttribute("data-kind") === "work"
+        ? `work: ${row.querySelector(".ui-disclosure-summary, .activity-row-title, .thread-work-status")?.textContent}`
+        : `${row.querySelector("[data-narration]") ? "narration" : "said"}: ${row.textContent}`,
+    );
+
+  it("draws each run where dot took it, folded, and its words between quieter than its answer", () => {
+    const steps = [step("a", 3000), step("b", 4000, "failed"), step("c", 6000)];
+    render(<Conversation items={withWork(items(turn), steps, false)} truncated={false} />);
+    expect(rows()).toEqual([
+      "said: Make the report",
+      "narration: Opening the sheet.",
+      "work: Worked for 0:03 · 2 steps · 1 failed",
+      "narration: Checking the totals.",
+      "work: Step c",
+      "said: The report is ready.",
+    ]);
+    expect(
+      [...document.querySelectorAll(".thread-work-steps > .ui-disclosure-trigger")].map((head) =>
+        head.getAttribute("aria-expanded"),
+      ),
+    ).toEqual(["false"]);
+    expect(document.querySelector(".thread-live")).toBeNull();
+  });
+
+  it("keeps the run dot is at open in the thread, its steps arriving there, then folds it", () => {
+    const working = turn.slice(0, 3);
+    const live = { phase: "running" as const, label: "Checking", nowMs: 8000 };
+    const view = render(
+      <Conversation
+        items={withWork(items(working), [step("a", 3000), step("c", 6000), step("d", 7000)], true)}
+        truncated={false}
+        live={live}
+      />,
+    );
+    const run = [...document.querySelectorAll(".thread > .thread-row")]
+      .at(-1)
+      ?.querySelector(".thread-work");
+    expect(run?.hasAttribute("data-live")).toBe(true);
+    expect(run?.querySelector(".ui-disclosure-trigger")?.getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(within(run as HTMLElement).getByText("Step d")).toBeTruthy();
+    expect(run?.querySelector(".ui-disclosure-summary")?.textContent).toBe(
+      "Working · 2 steps · 0:07",
+    );
+    // dot says the next thing: that run folds, and a new one waits under the words.
+    view.rerender(
+      <Conversation
+        items={withWork(
+          items([...working, said("more", "Saving it.", 8)]),
+          [step("a", 3000), step("c", 6000), step("d", 7000)],
+          true,
+        )}
+        truncated={false}
+        live={live}
+      />,
+    );
+    expect(rows().slice(-3)).toEqual([
+      "work: Worked for 0:03 · 2 steps",
+      "said: Saving it.",
+      "work: Working · 0:07",
+    ]);
+    expect(
+      document
+        .querySelector(".thread-work-steps > .ui-disclosure-trigger")
+        ?.getAttribute("aria-expanded"),
+    ).toBe("false");
+  });
 });

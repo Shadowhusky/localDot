@@ -56,6 +56,39 @@
     transition: stroke-dashoffset var(--dur-snappy) var(--ease-enter);
   }
 
+  /* A conversation's status (icons.ts, status-*): xenon while dot works, amber when it needs you,
+     red for a failure, fg-2 while under way otherwise and fg-3 once it has ended. */
+  .ui-session-glyph {
+    color: var(--color-fg-3);
+  }
+
+  .ui-session-glyph:is([data-status="waiting"], [data-status="idle"], [data-status="paused"]) {
+    color: var(--color-fg-2);
+  }
+
+  .ui-session-glyph[data-status="working"] {
+    color: var(--color-xenon);
+  }
+
+  .ui-session-glyph[data-status="needs-you"] {
+    color: var(--color-attention);
+  }
+
+  .ui-session-glyph[data-status="failed"] {
+    color: var(--color-danger-fg);
+  }
+
+  .ui-glyph-track {
+    stroke: var(--color-track-strong);
+  }
+
+  /* Only the arc turns, slowly, around dot at the centre. */
+  .ui-glyph-turn {
+    transform-box: view-box;
+    transform-origin: center;
+    animation: ui-spin calc(var(--loop-turn) * 2) linear infinite;
+  }
+
   .ui-speed-mark {
     display: inline-flex;
     flex-shrink: 0;
@@ -1113,6 +1146,11 @@
 
   @media (prefers-reduced-motion: reduce) {
     .ui-status-glyph[data-state="doing"] {
+      animation: none;
+    }
+
+    /* The arc stands at twelve o'clock, still reading as work under way against the faint ring. */
+    .ui-glyph-turn {
       animation: none;
     }
 

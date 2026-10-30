@@ -25,6 +25,7 @@ import {
   type KeydRecord,
   microsToMs,
   msToMicros,
+  PersonaId,
   type Point,
   RECORDING_DIR,
   RECORDING_VIDEO,
@@ -77,6 +78,7 @@ import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
+import { sideQuestionEvents, sideQuestionPrompt } from "../../../daemon/src/agent/side-question.ts";
 import { plainForm } from "../../../daemon/src/agent/tools/ask.ts";
 import { createApp } from "../../../daemon/src/app.ts";
 import { AppEvents, appEventsRoute } from "../../../daemon/src/app-events.ts";
@@ -289,6 +291,7 @@ const SETTINGS: Record<string, AgentSettings> = {
 // live. It asks the fixture whether its screen's picture is dropped (POST /__qa/picture/drop): then
 // its video goes, as Selkies' does while it reconnects, and comes back with a new track on resume.
 const clientJs = (paint: string) => `
+let seen={};
 const canvas=document.createElement('canvas');canvas.width=2560;canvas.height=1600;
 const ctx=canvas.getContext('2d');${paint}
 const screen=location.pathname.includes('/browser/')?'browser':'desktop';
@@ -299,11 +302,16 @@ const show=(down)=>{
   if(!video){video=document.createElement('video');video.id='videoStream';video.autoplay=true;video.muted=true;document.body.append(video)}
   video.srcObject=canvas.captureStream(10);video.play().catch(()=>{});
 };
-const ask=()=>fetch('/__qa/picture',{cache:'no-store'}).then((r)=>r.json()).then((s)=>show(s[screen])).catch(()=>{});
+const ask=()=>fetch('/__qa/picture',{cache:'no-store'}).then((r)=>r.json()).then((s)=>{seen=s;show(s[screen])}).catch(()=>{});
 ask();setInterval(ask,1000);
 `;
+// The desktop shows the last task's window, or (POST /__qa/desktop/home) its empty home screen.
 const DESKTOP_JS = clientJs(`const still=new Image();still.src='/owned-desktop.webp';
-setInterval(()=>{if(still.complete)ctx.drawImage(still,0,0,canvas.width,canvas.height)},100);`);
+const home=()=>{const g=ctx.createLinearGradient(0,0,2560,1600);g.addColorStop(0,'#cdc6ee');
+g.addColorStop(0.5,'#e8ecf5');g.addColorStop(1,'#a8d2ee');ctx.fillStyle=g;ctx.fillRect(0,0,2560,1600);
+ctx.fillStyle='#f3f4f8';ctx.fillRect(0,0,2560,48);ctx.fillStyle='rgba(255,255,255,0.72)';
+ctx.fillRect(780,1452,1000,116);};
+setInterval(()=>{if(seen.home)home();else if(still.complete)ctx.drawImage(still,0,0,canvas.width,canvas.height)},100);`);
 // The web browser's screen: a plain page, so a switch shows at a glance.
 const BROWSER_JS = clientJs(`const page=()=>{
 ctx.fillStyle='#f4f5f7';ctx.fillRect(0,0,2560,1600);ctx.fillStyle='#dfe3e8';ctx.fillRect(0,0,2560,150);
@@ -354,6 +362,7 @@ function runBrowser(on: boolean): void {
 }
 // Which screens' pictures are dropped (POST /__qa/picture/drop).
 const pictureDown = { desktop: false, browser: false };
+let desktopHome = false;
 const live = new LiveSessions();
 const frames = new FrameStore(HOME);
 let cellId = ulid();
@@ -564,6 +573,23 @@ async function endLive(how?: "done" | "crash") {
   live.stop(owned.id);
   await live.settled(owned.id);
 }
+// As the runner does: Auto's dot before the agent's first reply, the name a moment later.
+let firstLook: { title?: string; persona?: PersonaId; reason?: string } | undefined;
+function lookFirst(s: AgentSession) {
+  const look = firstLook;
+  if (!look) return;
+  if (settingsStore.get().autoPersona)
+    s.append(
+      "persona.choice",
+      look.persona
+        ? { persona: look.persona, by: "auto", ...(look.reason ? { reason: look.reason } : {}) }
+        : { persona: settingsStore.get().persona ?? "everyday", by: "default" },
+    );
+  setTimeout(() => {
+    if (look.title) s.append("session.title", { title: look.title, by: "auto" });
+  }, 300);
+}
+
 function newSession(
   title: string,
   task: string,
@@ -780,10 +806,16 @@ const stepImageJpeg = env.QA_STEP_IMAGE
       .toBuffer()
   : undefined;
 
+// QA_NARRATED=1: dot talks between its steps, as a real run does, rather than only before them.
+const narrated = env.QA_NARRATED === "1";
+
 function seedTask(s: AgentSession, finished: boolean) {
   const a: Append = (type, data, step) => {
     skew += type === "step.end" ? 1_100_000 : 320_000;
     s.append(type, data, step);
+  };
+  const narrate = (text: string) => {
+    if (narrated) a("message.assistant", { messageId: ulid(), text });
   };
   let frameNo = 0;
   const observe = (step: string) => {
@@ -862,6 +894,9 @@ function seedTask(s: AgentSession, finished: boolean) {
   a("action.result", { ok: true }, typing);
   observe(typing);
   a("step.end", { status: "ok" }, typing);
+  narrate(
+    "The table is open and the monthly totals are in. I'll check them against the raw data next.",
+  );
   const shell = ulid();
   a(
     "step.start",
@@ -899,6 +934,9 @@ function seedTask(s: AgentSession, finished: boolean) {
   a("tool.output", { stream: "stderr", chunk: "schema.json: no such file\n" }, failed);
   a("tool.end", { ok: false, exitCode: 2 }, failed);
   a("step.end", { status: "failed", note: "The command returned exit code 2." }, failed);
+  narrate(
+    "There's no schema file to validate against, so the **csvstat** check stands. Writing the report now.",
+  );
   a("key.use", {
     secretId: "weather",
     host: "api.weather.example",
@@ -1070,15 +1108,20 @@ function seedLongTask(s: AgentSession) {
       { id: "share", text: "Share it with the family album", status: "skipped" },
     ],
   });
+  const narrate = (text: string) => {
+    if (narrated) a("message.assistant", { messageId: ulid(), text });
+  };
   modelCall();
   shell("open", "Find an installed paint app", "/usr/bin/gimp\n/usr/bin/mypaint\n");
   gui("open", "click", "Opened the Applications menu");
   gui("open", "click", "Opened GIMP");
   gui("open", "wait", "Waited for GIMP to open");
+  narrate("GIMP is open. I'll make a 1200 × 900 canvas to draw on.");
   gui("canvas", "click", "Opened File ▸ New");
   gui("canvas", "type", "Typed 1200 in Width");
   gui("canvas", "type", "Typed 900 in Height");
   gui("canvas", "click", "Clicked OK");
+  narrate("The canvas is ready. Sketching the outline with the paintbrush, one part at a time.");
   gui("sketch", "key", "Pressed P for the paintbrush");
   for (const part of ["head", "left ear", "right ear", "body", "front legs", "back legs", "tail"])
     gui("sketch", "drag", `Drew the ${part}`);
@@ -1106,6 +1149,9 @@ function seedLongTask(s: AgentSession) {
   );
   a("step.end", { status: "ok" }, notes);
   modelCall();
+  narrate(
+    "The outline is done: head, ears, body, legs, tail and a face. Now I'll colour it in brown.",
+  );
   gui("colour", "click", "Opened the colour picker");
   gui(
     "colour",
@@ -1665,6 +1711,18 @@ const agent: AgentRoutesDeps = {
       await endLive();
       return true;
     },
+    // A side question answered from the task's own record, as the fast model reads it.
+    sideAnswer: async (id, question) => {
+      const { prompt } = sideQuestionPrompt(sideQuestionEvents(log.logFile(id)), question);
+      const step = /^\[\w+\] (.+)$/m.exec(prompt)?.[1];
+      return {
+        answer: step
+          ? `dot is still on its first step, **${step}**. Nothing has been bought or sent yet.`
+          : "Nothing has happened in this task yet.",
+        provider: "openai",
+        model: "gpt-6-luna",
+      };
+    },
     get: (key) => (session && key === session.id ? session : undefined),
     get sessions() {
       return new Map(session ? [[session.id, session]] : []);
@@ -1673,10 +1731,11 @@ const agent: AgentRoutesDeps = {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
       await endLive();
+      const continues = conversations.current() ?? undefined;
       session = newSession(
         task.slice(0, 60),
         task,
-        conversations.current() ?? undefined,
+        continues,
         undefined,
         options?.revises,
         options?.research ? (settingsStore.get().research ?? DEFAULT_RESEARCH_BUDGET) : undefined,
@@ -1687,6 +1746,7 @@ const agent: AgentRoutesDeps = {
       selection = planSelection();
       attachLive(session);
       session.append("message.user", { messageId: ulid(), kind: "task", text: task });
+      if (!continues) lookFirst(session);
       session.setStatus("running");
       session.append("agent.state", { state: "thinking" });
       const s = session;
@@ -1722,7 +1782,8 @@ const agent: AgentRoutesDeps = {
         return { sessionId: session.id, requestId: session.takeControl() };
       await endLive("done");
       const continues = conversations.current() ?? undefined;
-      const title = continues ? conversations.title(continues) : undefined;
+      const names = continues ? conversations.names(continues) : undefined;
+      const title = names?.user ?? names?.automatic ?? undefined;
       const owned = new AgentSession(log.createSession("You used the computer"), cellId, "", log);
       log.append(owned.id, {
         agent: "main",
@@ -1746,6 +1807,10 @@ const agent: AgentRoutesDeps = {
       return { sessionId: owned.id, requestId };
     },
     holds: (key) => !!holder && key === holder.id,
+    switchPersona: (key, persona) => {
+      if (!session || key !== session.id) throw new AgentError(409, "This task has ended.");
+      session.append("persona.choice", { persona, by: "user" });
+    },
     selectionOf: () =>
       chatgptState === "signed_in" && settingsMode === "chatgpt"
         ? { kind: "chatgpt", model: "sample-plan-model" }
@@ -2271,7 +2336,7 @@ routes.get("/cells/:cell/browser/:ticket/", (c) =>
 routes.get("/owned-browser.js", (c) =>
   c.body(BROWSER_JS, 200, { "content-type": "text/javascript" }),
 );
-routes.get("/__qa/picture", (c) => c.json(pictureDown));
+routes.get("/__qa/picture", (c) => c.json({ ...pictureDown, home: desktopHome }));
 routes.get("/owned-desktop.webp", (c) =>
   c.body(readFileSync(join(ASSETS, "frame-1.webp")), 200, { "content-type": "image/webp" }),
 );
@@ -3334,6 +3399,12 @@ routes.post("/__qa/picture/:state", (c) => {
     if (!screen || screen === name) pictureDown[name] = state === "drop";
   return c.json(pictureDown);
 });
+routes.post("/__qa/desktop/:shows", (c) => {
+  const shows = c.req.param("shows");
+  if (shows !== "home" && shows !== "window") return c.text("home or window", 400);
+  desktopHome = shows === "home";
+  return c.json({ ok: true });
+});
 routes.post("/__qa/step-end", (c) => {
   if (!session || !liveStep) return c.text("no open step", 409);
   endLiveStep();
@@ -3886,6 +3957,18 @@ routes.post("/__qa/claude-code/:state", (c) => {
   if (!["not_installed", "outdated", "signed_out", "signed_in"].includes(state))
     return c.text("unknown Claude Code state", 400);
   claudeCodeState = state as NonNullable<typeof claudeCodeState>;
+  return c.json({ ok: true });
+});
+// What the quick model answers a new conversation's first message: its name and, with Auto on,
+// its dot and why.
+routes.post("/__qa/first-look", async (c) => {
+  const body = (await c.req.json()) as { title?: string; persona?: string; reason?: string };
+  const persona = PersonaId.safeParse(body.persona);
+  firstLook = {
+    ...(body.title ? { title: body.title } : {}),
+    ...(persona.success ? { persona: persona.data } : {}),
+    ...(body.reason ? { reason: body.reason } : {}),
+  };
   return c.json({ ok: true });
 });
 routes.post("/__qa/plan-usage/:state", (c) => {

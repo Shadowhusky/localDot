@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 import type { ConversationEntry } from "@localdot/protocol";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { LiveFacts } from "../agent/conversation-list.ts";
 import { createApi } from "../lib/api.ts";
+import { FakeWebSocket } from "../testing/fake-websocket.ts";
 import { ConversationList } from "./ConversationList.tsx";
 
+beforeEach(() => vi.stubGlobal("WebSocket", FakeWebSocket));
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 const HOUR = 3_600_000;
@@ -75,7 +78,7 @@ function open(
 
 const rows = () => screen.getAllByRole("row");
 
-it("lists conversations by day, each with its status and the current one marked", async () => {
+it("lists conversations under way, then by day, each with its status and the current one marked", async () => {
   // Mid-afternoon, so an hour or two ago is still today whenever the suite runs.
   vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 9, 15) });
   const today = entry("Book the hotel", HOUR);
@@ -88,13 +91,14 @@ it("lists conversations by day, each with its status and the current one marked"
   });
   const list = await screen.findByRole("grid", { name: "Recent conversations" });
   expect([...list.querySelectorAll(".conversations-day")].map((head) => head.textContent)).toEqual([
+    "Active",
     "Today",
     "Yesterday",
     "Earlier",
   ]);
-  expect(list.textContent).toMatch(/^Today.*Yesterday.*Earlier/);
+  expect(list.textContent).toMatch(/^Active.*Today.*Yesterday.*Earlier/);
   expect(rows().map((row) => within(row).getByRole("img").getAttribute("aria-label"))).toEqual([
-    "Running",
+    "Working",
     "Done",
     "Failed",
     "Stopped",
@@ -205,4 +209,45 @@ it("deletes a conversation only after confirmation and refreshes the list", asyn
   await screen.findByText("No conversations yet");
   expect(deleted).toEqual([`/api/conversations/${previous.sessionId}`]);
   expect(onDeleted).toHaveBeenCalledWith(previous.sessions);
+});
+
+it("renames a conversation in place, and an emptied name gives back the automatic one", async () => {
+  const trip = entry("Kyoto autumn trip", HOUR);
+  const posted: { path: string; body: unknown }[] = [];
+  let title = trip.title;
+  const api = createApi("fixture", {
+    origin: "http://fixture.test",
+    fetchImpl: async (url, init) => {
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        posted.push({ path: new URL(String(url)).pathname, body });
+        title = body.title ?? "Kyoto autumn trip";
+        return new Response(null, { status: 204 });
+      }
+      return Response.json({ conversations: [{ ...trip, title }] });
+    },
+  });
+  open([], { api });
+  const renameTo = async (from: string, typed: string, key: "Enter" | "Escape" = "Enter") => {
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${from}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const field = screen.getByRole("textbox", { name: `New name for ${from}` });
+    expect(field).toHaveProperty("value", from);
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: typed } });
+    fireEvent.keyDown(field, { key });
+    fireEvent.blur(field);
+  };
+  await renameTo("Kyoto autumn trip", "  Mum's Kyoto trip ");
+  await screen.findByRole("button", { name: "Actions for Mum's Kyoto trip" });
+  expect(posted).toEqual([
+    { path: `/api/conversations/${trip.sessionId}/title`, body: { title: "Mum's Kyoto trip" } },
+  ]);
+  await renameTo("Mum's Kyoto trip", "Something else", "Escape");
+  await renameTo("Mum's Kyoto trip", "Mum's Kyoto trip");
+  expect(posted).toHaveLength(1);
+  await renameTo("Mum's Kyoto trip", "");
+  await screen.findByRole("button", { name: "Actions for Kyoto autumn trip" });
+  expect(posted.at(-1)?.body).toEqual({ title: null });
+  expect(posted).toHaveLength(2);
 });

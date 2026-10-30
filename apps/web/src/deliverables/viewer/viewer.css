@@ -872,6 +872,133 @@ div.viewer-json-row {
   width: 100%;
 }
 
+/* Changes: numbered diff lines on the code well, old and new numbers before each line, or the old
+   file beside the new one. Long lines wrap so both sides stay in view. */
+.viewer-changes {
+  overflow: hidden;
+}
+
+.viewer-diff-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--spacing) * 3) 0 calc(var(--spacing) * 6);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.viewer-diff-scroll:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+.viewer-diff-section + .viewer-diff-section {
+  margin-top: calc(var(--spacing) * 6);
+}
+
+.viewer-diff-title {
+  padding: 0 calc(var(--spacing) * 6) calc(var(--spacing) * 2);
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.viewer-diff {
+  display: grid;
+  color: var(--color-code-text);
+  font: var(--text-mono) / var(--text-mono--line-height) var(--font-mono);
+}
+
+.viewer-diff[data-layout="unified"] {
+  grid-template-columns: auto auto auto minmax(0, 1fr);
+}
+
+.viewer-diff[data-layout="split"] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.viewer-diff-row,
+.viewer-diff-cell {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.viewer-diff[data-layout="split"] .viewer-diff-cell {
+  grid-column: auto;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.viewer-diff[data-layout="split"] .viewer-diff-cell:nth-child(odd of .viewer-diff-cell) {
+  box-shadow: inset -1px 0 0 var(--color-hairline);
+}
+
+.viewer-diff-number {
+  min-width: calc(var(--spacing) * 10);
+  padding: 0 calc(var(--spacing) * 2);
+  color: var(--color-fg-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.viewer-diff-mark {
+  width: calc(var(--spacing) * 4);
+  color: var(--color-fg-3);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.viewer-diff-text {
+  min-width: 0;
+  padding-right: calc(var(--spacing) * 6);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.viewer-diff :is(.viewer-diff-row, .viewer-diff-cell)[data-kind="add"] {
+  background-color: var(--color-diff-add-bg);
+}
+
+.viewer-diff :is(.viewer-diff-row, .viewer-diff-cell)[data-kind="add"] .viewer-diff-mark {
+  color: var(--color-diff-add-fg);
+}
+
+.viewer-diff :is(.viewer-diff-row, .viewer-diff-cell)[data-kind="remove"] {
+  background-color: var(--color-diff-del-bg);
+}
+
+.viewer-diff :is(.viewer-diff-row, .viewer-diff-cell)[data-kind="remove"] .viewer-diff-mark {
+  color: var(--color-diff-del-fg);
+}
+
+.viewer-diff-row[data-kind="hunk"] {
+  margin-block: var(--spacing);
+  padding: 0 calc(var(--spacing) * 4);
+  background-color: var(--color-state-hover);
+  color: var(--color-fg-3);
+}
+
+.viewer-diff-row[data-kind="hunk"] > .viewer-diff-text {
+  grid-column: 1 / -1;
+}
+
+.viewer-diff-row[data-kind="note"] {
+  color: var(--color-fg-3);
+}
+
+.viewer-diff-cell[data-kind="empty"] {
+  background-color: var(--color-inset);
+}
+
+.viewer-diff-note {
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 6) 0;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
 /* The footer: between files on the left, getting the file on the right. */
 .viewer-footer {
   display: flex;

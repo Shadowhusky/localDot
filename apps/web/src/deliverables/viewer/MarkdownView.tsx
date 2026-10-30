@@ -1,48 +1,45 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo } from "react";
 import { SafeMarkdown } from "../../agent/SafeMarkdown.tsx";
-import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { CodeLines } from "./CodeLines.tsx";
-import { ViewerBar } from "./states.tsx";
+import { ViewerBar, ViewSwitch } from "./states.tsx";
+import { useViewChoice, type ViewChoice, viewItems } from "./views.ts";
+
+const OWN = viewItems("markdown", {});
 
 // Both views use the same already loaded text. Switching never fetches or executes its contents.
+// Without a `choice` of the viewer's, it offers Rendered and Source itself.
 export function MarkdownView({
   text,
   name,
   note,
-  initialMode = "rendered",
+  choice,
+  end,
   label,
 }: {
   text: string;
   name: string;
   note?: ReactNode;
-  initialMode?: "rendered" | "source";
+  choice?: ViewChoice;
+  end?: ReactNode;
   label?: string;
 }) {
-  const [mode, setMode] = useState<string>(initialMode);
+  const own = useViewChoice("markdown", OWN);
+  const shown = choice ?? own;
   const lines = useMemo(() => text.split("\n"), [text]);
   return (
     <>
-      <ViewerBar note={note}>
-        <SegmentedControl
-          size={28}
-          aria-label="Markdown view"
-          value={mode}
-          items={[
-            { value: "rendered", label: "Rendered" },
-            { value: "source", label: "Source" },
-          ]}
-          onValueChange={setMode}
-        />
+      <ViewerBar note={note} end={end}>
+        <ViewSwitch choice={shown} />
       </ViewerBar>
-      {mode === "rendered" ? (
+      {shown.value === "source" ? (
+        <div className="viewer-stage viewer-text">
+          <CodeLines lines={lines} name={name} wrap label={label ?? `Source of ${name}`} />
+        </div>
+      ) : (
         <div className="viewer-stage viewer-doc">
           <section className="viewer-doc-page" aria-label={`Rendered ${name}`}>
             <SafeMarkdown text={text} shortened="Showing the start of this file." />
           </section>
-        </div>
-      ) : (
-        <div className="viewer-stage viewer-text">
-          <CodeLines lines={lines} name={name} wrap label={label ?? `Source of ${name}`} />
         </div>
       )}
     </>

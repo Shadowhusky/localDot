@@ -87,20 +87,23 @@ const Chunk = memo(function Chunk({ first, lines }: { first: number; lines: Span
               {first + i}
             </span>
             <span className="viewer-code-text">
-              {line.length === 0
-                ? "\n"
-                : line.map((span, j) =>
-                    span.tone ? (
-                      <span key={j} className={TONES[span.tone]}>
-                        {span.text}
-                      </span>
-                    ) : (
-                      span.text
-                    ),
-                  )}
+              {line.length === 0 ? "\n" : <Tokens spans={line} />}
             </span>
           </div>
         ))}
     </div>
   );
 });
+
+// One line's text in its language's colours.
+export function Tokens({ spans }: { spans: readonly Span[] }) {
+  return spans.map((span, j) =>
+    span.tone ? (
+      <span key={j} className={TONES[span.tone]}>
+        {span.text}
+      </span>
+    ) : (
+      span.text
+    ),
+  );
+}

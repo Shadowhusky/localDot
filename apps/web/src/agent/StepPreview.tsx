@@ -8,11 +8,19 @@ import {
   useRef,
   useState,
 } from "react";
+import { useComputerDownloads } from "../deliverables/useComputerDownloads.ts";
+import { ChangesView } from "../deliverables/viewer/ChangesView.tsx";
 import { FileViewer } from "../deliverables/viewer/FileViewer.tsx";
 import { MarkdownView } from "../deliverables/viewer/MarkdownView.tsx";
 import { PictureView } from "../deliverables/viewer/PictureView.tsx";
-import type { ViewerEntry } from "../deliverables/viewer/scope.tsx";
+import {
+  type ComputerEntry,
+  resultDownloads,
+  type ViewerDownloads,
+  type ViewerEntry,
+} from "../deliverables/viewer/scope.tsx";
 import { ViewerLoading, ViewerMessage } from "../deliverables/viewer/states.tsx";
+import { TextBody } from "../deliverables/viewer/TextView.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { releaseThumbnail, thumbnailUrl } from "../session/thumbnails.ts";
 import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
@@ -25,7 +33,10 @@ import "../ui/step-preview.css";
 
 export type StepResource =
   | { kind: "file"; entry: ViewerEntry; label?: string }
-  | { kind: "text"; name: string; text: string; markdown?: boolean }
+  // Files on dot's computer, the viewer moving between them; `view` is the one it opens on.
+  | { kind: "files"; entries: readonly ComputerEntry[]; index: number; view?: string }
+  // Recorded output, a step's Markdown notes, or a patch with no file to read.
+  | { kind: "text"; name: string; text: string; markdown?: boolean; diff?: boolean }
   | { kind: "frame"; name: string; sessionId: string; frameId: string };
 const Context = createContext<{
   api: ApiClient | null;
@@ -33,6 +44,7 @@ const Context = createContext<{
   scale: number;
   open(resource: StepResource, trigger: HTMLElement): void;
   files: readonly ViewerEntry[];
+  downloads: ViewerDownloads<ComputerEntry>;
 } | null>(null);
 export function useStepPreviewEnvironment() {
   const context = useContext(Context);
@@ -115,7 +127,9 @@ export function StepPreviewScope({
         : [],
     [entry],
   );
-  const downloads = useResultDownloads(api, entry?.sessionId ?? null, downloadable);
+  const handed = useResultDownloads(api, entry?.sessionId ?? null, downloadable);
+  const downloads = useMemo(() => resultDownloads(handed), [handed]);
+  const computer = useComputerDownloads(api);
   const close = () => setSelection((was) => was && { ...was, open: false });
   const open = useCallback(
     (next: StepResource, trigger: HTMLElement) => {
@@ -128,8 +142,8 @@ export function StepPreviewScope({
     [sessionId],
   );
   const context = useMemo(
-    () => ({ files, api, sessionId, scale, open }),
-    [files, api, sessionId, scale, open],
+    () => ({ files, api, sessionId, scale, open, downloads: computer }),
+    [files, api, sessionId, scale, open, computer],
   );
   return (
     <Context.Provider value={context}>
@@ -150,6 +164,24 @@ export function StepPreviewScope({
               previewWidth={width}
               returnFocus={returnFocus}
             />
+          ) : resource?.kind === "files" ? (
+            <FileViewer
+              api={api}
+              entries={resource.entries}
+              index={resource.index}
+              view={resource.view}
+              open={selection.open}
+              downloads={computer}
+              onMac={false}
+              onIndex={(index) =>
+                setSelection(
+                  (was) => was && { ...was, resource: { ...resource, index, view: undefined } },
+                )
+              }
+              onClose={close}
+              previewWidth={width}
+              returnFocus={returnFocus}
+            />
           ) : (
             resource &&
             resource.kind !== "file" && (
@@ -159,7 +191,11 @@ export function StepPreviewScope({
                 returnFocus={returnFocus}
                 title={resource.name}
                 description={
-                  resource.kind === "frame" ? "Recorded screenshot" : "Recorded step output"
+                  resource.kind === "frame"
+                    ? "Recorded screenshot"
+                    : resource.diff
+                      ? "Recorded change"
+                      : "Recorded step output"
                 }
                 className="file-viewer step-preview-sheet"
                 style={width ? { left: 8, right: "auto", width } : undefined}
@@ -169,7 +205,10 @@ export function StepPreviewScope({
                 flush
                 footer={
                   resource.kind === "text" ? (
-                    <OutputCopy text={resource.text} label="Copy output" />
+                    <OutputCopy
+                      text={resource.text}
+                      label={resource.diff ? "Copy changes" : "Copy output"}
+                    />
                   ) : undefined
                 }
               >
@@ -177,12 +216,31 @@ export function StepPreviewScope({
                   <div className="viewer-pane">
                     {resource.kind === "frame" ? (
                       <FramePreview api={api} resource={resource} />
-                    ) : (
+                    ) : resource.diff ? (
+                      <ChangesView
+                        api={api}
+                        name={resource.name}
+                        changes={{ kind: "patches", patches: [{ patch: resource.text }] }}
+                      />
+                    ) : resource.markdown ? (
                       <MarkdownView
                         key={resource.name + resource.text}
                         text={resource.text}
                         name={resource.name}
-                        initialMode={resource.markdown ? "rendered" : "source"}
+                        label="Step output preview"
+                      />
+                    ) : (
+                      <TextBody
+                        key={resource.name + resource.text}
+                        name={resource.name}
+                        format="plain"
+                        reply={{
+                          kind: "text",
+                          from: "start",
+                          lines: resource.text.split("\n"),
+                          truncated: false,
+                        }}
+                        copy={false}
                         label="Step output preview"
                       />
                     )}

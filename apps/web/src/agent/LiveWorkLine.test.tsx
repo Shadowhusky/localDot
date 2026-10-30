@@ -34,16 +34,48 @@ const live = (label: string, extra: Partial<LiveWork> = {}): LiveWork => ({
   nowMs: 43_000,
   ...extra,
 });
-const summary = () => screen.getByRole("button", { expanded: false }).textContent?.trim();
+const trigger = () =>
+  document.querySelector<HTMLElement>(".thread-work-steps > .ui-disclosure-trigger");
+const summary = () => trigger()?.textContent?.trim();
+const fold = () => fireEvent.click(trigger() as HTMLElement);
 
-it("says what dot is doing while it works, with the turn's steps and time under a fold", () => {
+it("streams the steps of the run dot is at, open, and says what it is doing once they're folded", () => {
   render(<LiveWorkLine steps={steps} startMs={1000} live={live("Typing the total")} />);
-  expect(screen.getByText("Typing the total")).toBeTruthy();
   expect(summary()).toBe("Working · 3 steps · 1 failed · 0:42");
-  fireEvent.click(screen.getByRole("button", { expanded: false }));
+  expect(trigger()?.getAttribute("aria-expanded")).toBe("true");
   expect(
     screen.getAllByRole("listitem").map((item) => item.textContent?.replace(/\s+/g, " ")),
   ).toEqual(["Step a 0:01", "Step b 0:01", "Step c 0:01"]);
+  // The open list ends on what dot is doing, so the line under it waits for the fold.
+  expect(screen.queryByText("Typing the total")).toBeNull();
+  fold();
+  expect(screen.getByText("Typing the total")).toBeTruthy();
+  expect(screen.getByText("1 failed").className).toBe("thread-work-failed");
+});
+
+it("folds a run once dot moves on, unless the reader chose to keep it open", () => {
+  const view = render(<LiveWorkLine steps={steps} startMs={1000} live={live("Typing")} />);
+  view.rerender(<LiveWorkLine steps={steps} startMs={1000} live={null} />);
+  expect(trigger()?.getAttribute("aria-expanded")).toBe("false");
+  expect(summary()).toBe("Worked for 0:06 · 3 steps · 1 failed");
+  fold();
+  view.rerender(<LiveWorkLine steps={[...steps]} startMs={1000} live={null} ended="done" />);
+  expect(trigger()?.getAttribute("aria-expanded")).toBe("true");
+});
+
+it("shows a run with no steps yet as its summary alone, counting the turn", () => {
+  render(<LiveWorkLine steps={[]} startMs={1000} live={live("Thinking")} />);
+  expect(trigger()).toBeNull();
+  expect(document.querySelector(".thread-work-status")?.textContent?.trim()).toBe("Working · 0:42");
+});
+
+it("draws a single finished step as its own row, with no fold over it", () => {
+  render(<LiveWorkLine steps={[step("only", 1000)]} startMs={0} live={null} />);
+  expect(trigger()).toBeNull();
+  expect(screen.getByTestId("step-row").textContent).toContain("Step only");
+  cleanup();
+  render(<LiveWorkLine steps={[step("only", 1000)]} startMs={0} live={null} ended="stopped" />);
+  expect(summary()).toBe("Stopped after 0:02 · 1 step");
 });
 
 it("counts a running turn's time by itself from the page's clock", () => {
@@ -72,6 +104,7 @@ it("counts a running turn's time by itself from the page's clock", () => {
 it("holds each line at least a second, so quick steps never flicker past", () => {
   vi.useFakeTimers();
   const view = render(<LiveWorkLine steps={steps} startMs={1000} live={live("Clicking Save")} />);
+  fold();
   act(() => vi.advanceTimersByTime(HOLD_MS));
   view.rerender(<LiveWorkLine steps={steps} startMs={1000} live={live("Typing the name")} />);
   act(() => vi.advanceTimersByTime(10));
@@ -108,6 +141,7 @@ it("names the wait or the end instead of narrating, and stops the clock", () => 
 it("opens again on what dot does next, never on the words of the wait", () => {
   vi.useFakeTimers();
   const view = render(<LiveWorkLine steps={steps} startMs={1000} live={live("Clicking Save")} />);
+  fold();
   act(() => vi.advanceTimersByTime(HOLD_MS));
   view.rerender(
     <LiveWorkLine
@@ -139,7 +173,6 @@ it("keeps cost out of the steps summary because it belongs in turn metadata", ()
 it("keeps all earlier steps in the scrollable work block", () => {
   const history = Array.from({ length: 140 }, (_, i) => step(String(i), i * 1000));
   render(<LiveWorkLine steps={history} startMs={0} live={live("Reading the page")} />);
-  fireEvent.click(screen.getByRole("button", { expanded: false }));
   const scroll = screen.getByRole("region", { name: "Work history" });
   expect(scroll.querySelectorAll(".thread-work-window-row")).toHaveLength(140);
   expect(screen.getByText("Step 0")).toBeTruthy();
@@ -150,7 +183,6 @@ it("keeps all earlier steps in the scrollable work block", () => {
 it("keeps step descriptions visible in an earlier completed turn", () => {
   const history = [{ ...step("a", 1000), meta: "Chromium · Read the page title" }];
   const view = render(<LiveWorkLine steps={history} startMs={0} live={null} ended="done" />);
-  fireEvent.click(screen.getByRole("button", { expanded: false }));
   expect(screen.getByText("Chromium · Read the page title")).toBeTruthy();
   view.rerender(
     <LiveWorkLine
@@ -171,7 +203,6 @@ it("groups read-only work in Chat with visibly nested children and keeps failure
     step("current", 3000, "doing"),
   ];
   const view = render(<LiveWorkLine steps={history} startMs={0} live={live("Working")} />);
-  fireEvent.click(screen.getByRole("button", { expanded: false }));
   expect(screen.queryByText("Step read-a")).toBeNull();
   expect(screen.getByText("Step failure")).toBeTruthy();
   expect(screen.getByText("Step current")).toBeTruthy();
@@ -198,7 +229,6 @@ it("windows thousands of Chat steps while more steps arrive", () => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(390);
   const history = Array.from({ length: 3000 }, (_, i) => step(String(i), i * 1000));
   const view = render(<LiveWorkLine steps={history} startMs={0} live={live("Reading")} />);
-  fireEvent.click(screen.getByRole("button", { expanded: false }));
   const mounted = () => view.container.querySelectorAll(".thread-work-window-row").length;
   expect(mounted()).toBeGreaterThan(0);
   expect(mounted()).toBeLessThan(40);

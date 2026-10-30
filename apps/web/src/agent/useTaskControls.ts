@@ -400,9 +400,11 @@ export function useTaskControls(props: Props) {
         record.abort.signal,
       );
       if (!owned(record)) return;
+      // A task sharing its computer ends alone; the computer carries on with the others.
       setStopStatus({
-        phase:
-          outcome.revoked && outcome.paused
+        phase: outcome.ended
+          ? "idle"
+          : outcome.revoked && outcome.paused
             ? "paused"
             : outcome.closed && outcome.stopped
               ? "stopped"

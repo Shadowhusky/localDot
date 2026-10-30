@@ -5,6 +5,7 @@ import {
   LLM_PROVIDERS,
   type LocalDotLink,
   outfit,
+  PlanProvider,
   personaOf,
   type QuestionAnswerRequest,
   SessionIndexPage,
@@ -14,6 +15,10 @@ import {
 import { providerById, sameModelOptions } from "@localdot/providers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { CommandPalette, type PalettePage, usePaletteKeys } from "./actions/CommandPalette.tsx";
+import { SideNote } from "./actions/SideNote.tsx";
+import { useActions } from "./actions/useActions.ts";
+import { useAside } from "./actions/useAside.ts";
 import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
 import { useAskDraft } from "./agent/ask-draft.ts";
 import { composerReply } from "./agent/ask-form.ts";
@@ -88,10 +93,10 @@ import { listenForSessionLinks } from "./notify/session-link.ts";
 import { useAttention } from "./notify/useAttention.ts";
 import { useAttentionToasts } from "./notify/useAttentionToasts.ts";
 import { useOpenSession } from "./notify/useOpenSession.ts";
-import { useAppearance } from "./onboarding/appearance.ts";
 import { FinishSetup } from "./onboarding/FinishSetup.tsx";
 import { Onboarding } from "./onboarding/Onboarding.tsx";
 import { setupSteps } from "./onboarding/setup.ts";
+import { useAppearance } from "./onboarding/useAppearance.ts";
 import { useOnboarding } from "./onboarding/useOnboarding.ts";
 import { STEP_DOT } from "./onboarding/wizard.ts";
 import { PreviewNotice } from "./previews/PreviewNotice.tsx";
@@ -120,6 +125,7 @@ import {
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { nextChange, SessionNowContext, useNowMs } from "./session/useNowMs.ts";
 import { useSeenReporting } from "./session/useSeenReporting.ts";
+import { autoDotReason } from "./settings/AutoDot.tsx";
 import { matchingKeys } from "./settings/choices.ts";
 import { subscription } from "./settings/chooser.ts";
 import { useWhatDotKnows } from "./settings/memory/useWhatDotKnows.ts";
@@ -140,6 +146,7 @@ import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { useSignIn } from "./settings/useSignIn.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
+import { showActivityTab } from "./shell/activity-tabs.ts";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
 import { ChatToggle } from "./shell/ChatToggle.tsx";
 import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
@@ -170,6 +177,7 @@ import { type RailView, usePanelPreferences } from "./shell/panel-preferences.ts
 import { CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { ResizeHandle } from "./shell/ResizeHandle.tsx";
+import { SessionRail, useRailExpandedByDefault } from "./shell/SessionRail.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageExpand } from "./shell/StageExpand.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
@@ -181,7 +189,9 @@ import { useMobileScreen } from "./shell/useMobileScreen.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
 import { useStageConnection, useStagePicture } from "./stage/connection.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
+import { SharedScreen } from "./stage/SharedScreen.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
+import { screenMoveNote } from "./stage/StageNotice.tsx";
 import { useStreamPreference } from "./stage/stream-preference.ts";
 import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer, announce } from "./ui/Announcer.tsx";
@@ -195,7 +205,7 @@ import { TOUCH, useMediaQuery } from "./ui/media.ts";
 import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
-import { showToast, Toaster } from "./ui/Toast.tsx";
+import { dismissToast, showToast, Toaster } from "./ui/Toast.tsx";
 import { useHandler } from "./ui/useHandler.ts";
 import { WorkView } from "./work/WorkView.tsx";
 import { workCard } from "./work/work-view.ts";
@@ -731,6 +741,7 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const layout = useLayout();
+  const railByDefault = useRailExpandedByDefault(layout);
   const phone = layout === "phone";
   const mobileScreen = useMobileScreen(phone);
   const panelsButton = useRef<HTMLButtonElement>(null);
@@ -796,10 +807,17 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   // The top bar redraws only when what it shows changes, never with the task.
   const showRoutines = useRef(() => {});
+  const [palette, setPalette] = useState<PalettePage | null>(null);
+  const openPalette = useHandler((page: PalettePage) =>
+    setPalette((open) => (open === page && page === "actions" ? null : page)),
+  );
   const barMore = useMemo(
     () =>
       !phone && (
         <RowMenu label="More" size={32}>
+          <MenuItem icon="search" kbd={["Mod", "K"]} onSelect={() => openPalette("actions")}>
+            Search actions
+          </MenuItem>
           <MenuItem icon="repeat" onSelect={() => showRoutines.current()}>
             Routines
           </MenuItem>
@@ -813,7 +831,7 @@ function Theatre({ api }: { api: ApiClient }) {
           </MenuItem>
         </RowMenu>
       ),
-    [phone, stopAll.running, stopAll.run],
+    [phone, stopAll.running, stopAll.run, openPalette],
   );
   const island = useRef<HTMLDivElement>(null);
   const toastAnchor = useRef<HTMLDivElement>(null);
@@ -956,15 +974,14 @@ function Theatre({ api }: { api: ApiClient }) {
     if (pasteRefused) showToast({ title: pasteRefused, tone: "danger" });
   }, [pasteRefused]);
   const lastScreen = useRef(shownScreen);
+  const dotChose = !!selectedScreen;
   useEffect(() => {
     if (replayId || lastScreen.current === shownScreen) return;
     lastScreen.current = shownScreen;
-    showToast({
-      id: "screen",
-      title:
-        shownScreen === "browser" ? "dot moved to the web browser" : "dot is back on the desktop",
-    });
-  }, [replayId, shownScreen]);
+    const title = screenMoveNote(shownScreen, dotChose);
+    if (title) showToast({ id: "screen", title });
+    else dismissToast("screen");
+  }, [replayId, shownScreen, dotChose]);
   const browserProblem =
     !replayId && shownScreen === "browser" && !browserScreen.cell ? browserScreen.error : undefined;
   useEffect(() => {
@@ -1038,7 +1055,7 @@ function Theatre({ api }: { api: ApiClient }) {
     try {
       await deliverText(api, {
         cellId: cell.id,
-        sessionId: null,
+        sessionId: agent.sessionId,
         mode: "new",
         text: "Continue where you left off.",
       });
@@ -1156,8 +1173,6 @@ function Theatre({ api }: { api: ApiClient }) {
     setSettingsAt((previous) => ({ section: "computer", request: previous.request + 1 }));
   });
   useUpdateNotice(cell, hud.phase === "live" && !updateWait, computerUpdate);
-  // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
-  // the daemon says which, the choice is offered and the daemon has the last word.
   const taskStatus = agent.snapshot?.status;
   const recoveryWait =
     taskStatus === "paused" &&
@@ -1165,13 +1180,7 @@ function Theatre({ api }: { api: ApiClient }) {
     !agent.model.pendingAsk &&
     !agent.model.pendingTakeover &&
     !agent.snapshot?.approval;
-  const conversationReason = conversationBlockReason(
-    agent,
-    session.ended,
-    !!stoppingRun,
-    conversation.busy,
-    recoveryWait,
-  );
+  const conversationReason = conversationBlockReason(!!stoppingRun, conversation.busy);
   const computer = error ? { ...containedHud, caption: error } : containedHud;
   // A task feed out of touch for a moment says nothing; one that stays out says so in the island.
   const linkLost = useHeldFor(
@@ -1616,15 +1625,18 @@ function Theatre({ api }: { api: ApiClient }) {
       ),
     [attention.items],
   );
+  const currentTask = conversation.sessions.at(-1) ?? null;
   const liveFacts = useMemo(
     () => ({
-      live: session.sessionId && !session.ended ? session.sessionId : null,
-      idle: taskStatus === "idle",
+      // Until the task on show is read, its conversation's latest task stands for it, and it is
+      // not said to be at work.
+      live: session.sessionId ? (session.ended ? null : session.sessionId) : currentTask,
+      idle: taskStatus === undefined || taskStatus === "idle",
+      activity: foot?.label,
       needsYou,
     }),
-    [session.sessionId, session.ended, taskStatus, needsYou],
+    [session.sessionId, session.ended, currentTask, taskStatus, foot?.label, needsYou],
   );
-  const currentTask = conversation.sessions.at(-1) ?? null;
   const pickConversation = (id: string, sessions?: readonly string[]) => {
     setRailView("chat");
     if (yours) {
@@ -1636,7 +1648,7 @@ function Theatre({ api }: { api: ApiClient }) {
   };
   const conversationList = {
     api,
-    current: viewedConversation?.id ?? currentTask,
+    current: switching ? switching.to : (viewedConversation?.id ?? currentTask),
     facts: liveFacts,
     reason: yours ? undefined : conversationReason,
     onPick: pickConversation,
@@ -1646,6 +1658,12 @@ function Theatre({ api }: { api: ApiClient }) {
     },
     onReplay: () => selectReplay(LIBRARY),
   };
+  // The conversations rail, beside the stage while Watch shows on anything wider than a phone.
+  const railShown = !phone && !replayId && !full && !onboarding.open;
+  const railExpanded = panels.sessions ?? railByDefault;
+  const pickFromRail = useHandler(pickConversation);
+  const newFromRail = useHandler(newConversation.run);
+  const expandRail = useHandler((sessions: boolean) => updatePanels({ sessions }));
   const askOver = (layout: "island" | "sheet") =>
     askDraft && (
       <AskForm
@@ -1860,12 +1878,135 @@ function Theatre({ api }: { api: ApiClient }) {
       !replayId && <ChatToggle buttonRef={panelsButton} chat={chatVisible} onChat={toggleChat} />,
     [phone, replayId, chatVisible, toggleChat],
   );
+  const aside = useAside(api, agent.sessionId ?? null);
+  usePaletteKeys(openPalette, !onboarding.open);
+  const nothing = () => {};
+  const showView = (view: "chat" | "activity" | "routines") => {
+    if (replayId) selectReplay(null);
+    if (!phone) return setRailView(view);
+    setActivityOpen(view === "activity");
+    setRoutinesOpen(view === "routines");
+  };
+  const otherDots = useMemo(
+    () => [
+      ...(localDots.dots ?? [])
+        .filter((dot) => !dot.self)
+        .map((dot) => ({ id: dot.id, name: dot.name, open: () => switchToDot(localDots, dot) })),
+      ...(settings.saved?.localDots ?? NO_LINKS).map((link) => ({
+        id: link.url,
+        name: link.name,
+        open: () => window.location.assign(link.url),
+      })),
+    ],
+    [localDots, settings.saved?.localDots],
+  );
+  const commands = useActions({
+    api,
+    phone,
+    sessionId: agent.sessionId ?? null,
+    stop: {
+      reason: stopAction?.disabledReason ?? (stopAction ? undefined : "Nothing is running"),
+      run: taskStop,
+    },
+    continue: safety.canResume
+      ? { run: () => void safety.resume() }
+      : agent.interrupted && !controls.fenced
+        ? {
+            reason:
+              cell?.state === "ready" && !cell.paused ? undefined : "Turn on your computer first",
+            run: () => void carryOn(),
+          }
+        : agent.model.state?.state === "idle" && agent.model.state.reason === STALL.actionLimit
+          ? { run: () => void continueTask() }
+          : controls.canResumeTask
+            ? { run: () => void (modelChanged && recoveryWait ? carryOn() : controls.resume()) }
+            : { reason: "Nothing is paused", run: nothing },
+    take: { reason: yours ? "You have the computer" : takeBlocked, run: take },
+    handBack: {
+      reason: yours ? handBack.slot.reason : "dot has the computer",
+      run: () => void handBack.run(),
+    },
+    research: researchWait(agent) ?? (askDraft ? "Answer dot's question first" : undefined),
+    aside,
+    newConversation,
+    conversations: {
+      reason: conversationList.reason,
+      current: currentTask,
+      facts: liveFacts,
+      pick: pickConversation,
+      renamed: conversation.reload,
+    },
+    replay: {
+      reason: hasRecordings ? undefined : "No recordings yet",
+      run: () =>
+        selectReplay(
+          agent.sessionId && (agent.model.ended || task?.phase === "finished")
+            ? agent.sessionId
+            : LIBRARY,
+        ),
+    },
+    watch: {
+      reason: replayId ? undefined : "You're watching already",
+      run: () => selectReplay(null),
+    },
+    models: {
+      groups: modelChoices,
+      current: currentModel,
+      reason: !mainChoice
+        ? "Choose a model in Settings first"
+        : modelSaving
+          ? "Saving…"
+          : undefined,
+      choose: chooseModel,
+    },
+    persona: {
+      value: settings.saved?.persona ?? DEFAULT_PERSONA,
+      choose: (persona) => void settings.choosePersona(persona),
+    },
+    plans: settings.chatgpt.canStart || settings.claudeCode.canStart,
+    refreshUsage: planUsage.refresh,
+    report: (trigger, title) =>
+      report.start(trigger, {
+        title: title ?? (agent.sessionId ? "This task" : "localDot"),
+        context: agent.sessionId
+          ? { kind: "task", sessionId: agent.sessionId }
+          : { kind: "general" },
+      }),
+    view: showView,
+    files: {
+      reason: agent.model.results.length || agent.model.changes.length ? undefined : "No files yet",
+      run: () => {
+        showView("activity");
+        showActivityTab("files");
+      },
+    },
+    previews: {
+      reason: agent.sessionId ? undefined : "Start a task first",
+      run: () => {
+        showView("activity");
+        showActivityTab("previews");
+      },
+    },
+    chatPanel: phone ? undefined : { shown: chatVisible, toggle: toggleChat },
+    fullScreen: {
+      on: fullScreen.on,
+      reason: curtain.up || replayId ? "Turn on your computer first" : undefined,
+      run: fullScreen.on ? fullScreen.exit : fullScreen.enter,
+    },
+    settings: (trigger, section) => goToSettings(trigger, section),
+    appearance,
+    otherDots,
+    stopAll: { reason: stopAll.running ? "Stopping…" : undefined, run: () => void stopAll.run() },
+    newRoutine: (trigger) => newRoutine(trigger ?? undefined),
+    shortcuts: () => setPalette("shortcuts"),
+  });
   return (
     <SessionNowContext.Provider value={sessionTime.at}>
       <div
         ref={page}
         className={appStatus.control && !replayId ? "app control" : "app"}
         data-layout={layout}
+        data-sessions={railShown ? (railExpanded ? "expanded" : "collapsed") : undefined}
         data-screen-minimized={(!replayId && mobileScreen.minimized) || undefined}
         // Replay's rail takes the chat's column whether or not Watch shows the chat.
         data-chat-hidden={(!chatVisible && !replayId) || undefined}
@@ -1913,6 +2054,19 @@ function Theatre({ api }: { api: ApiClient }) {
           panels={panelsToggle}
         />
         <div className="watch" hidden={!!replayId} inert={!!replayId}>
+          {railShown && (
+            <SessionRail
+              api={api}
+              current={conversationList.current}
+              facts={liveFacts}
+              reason={conversationList.reason}
+              expanded={railExpanded}
+              onExpandedChange={expandRail}
+              onPick={pickFromRail}
+              onNew={newFromRail}
+              newReason={newConversation.reason}
+            />
+          )}
           {mobileScreen.minimized && (
             <div className="mobile-screen-restore">
               <Button icon="monitor" onClick={() => mobileScreen.setMinimized(false)}>
@@ -1996,10 +2150,24 @@ function Theatre({ api }: { api: ApiClient }) {
                     />
                     <Toaster anchor={toastAnchor} />
                     {/* A phone has no top bar: New conversation waits in the top corner, beside the
-                      island, whenever there is something to start afresh from. */}
+                      island, whenever there is something to start afresh from, and the
+                      conversations in the other, lit when one of them needs the user. */}
                     {phone && !newConversation.reason && (
                       <span className="island-new">
                         <NewConversationButton {...newConversation} />
+                      </span>
+                    )}
+                    {phone && (
+                      <span className="island-conversations">
+                        <IconButton
+                          icon="message-circle"
+                          size={32}
+                          variant="filled"
+                          round
+                          label="Conversations"
+                          attention={[...needsYou].some((id) => id !== currentTask)}
+                          onClick={() => setConversationsOpen(true)}
+                        />
                       </span>
                     )}
                   </>
@@ -2040,6 +2208,11 @@ function Theatre({ api }: { api: ApiClient }) {
                       anchor={dotAnchor}
                       value={settings.saved?.persona ?? DEFAULT_PERSONA}
                       onChange={(persona) => void settings.choosePersona(persona)}
+                      auto={{
+                        on: settings.saved?.autoPersona === true,
+                        onChange: (on) => void settings.chooseAutoPersona(on),
+                        disabledReason: autoDotReason(settings.saved?.main),
+                      }}
                       onClose={() => setChoosingDot(false)}
                     />
                     {full && !focus && (
@@ -2157,6 +2330,20 @@ function Theatre({ api }: { api: ApiClient }) {
                     !agent.model.retrying
                   }
                 />
+                <SharedScreen
+                  api={api}
+                  sessionId={session.resting ? null : session.sessionId}
+                  frameId={
+                    session.model.observes.findLast((look) => look.screen === "desktop")?.frameId ??
+                    null
+                  }
+                  elsewhere={
+                    !replayId &&
+                    shownScreen === "desktop" &&
+                    !!session.screenHolder &&
+                    session.screenHolder !== session.sessionId
+                  }
+                />
                 {!yours && !full && !focus && stageHud.live && (
                   <StageExpand
                     phone={phone}
@@ -2250,6 +2437,11 @@ function Theatre({ api }: { api: ApiClient }) {
                     <MoreMenu
                       onOpen={localDots.refresh}
                       items={[
+                        {
+                          label: "Search actions",
+                          icon: "search",
+                          run: () => openPalette("actions"),
+                        },
                         // The computer's controls take Activity's place in the toolbar.
                         ...(yours
                           ? [
@@ -2443,6 +2635,22 @@ function Theatre({ api }: { api: ApiClient }) {
                           onReport={report.start}
                         />
                       )}
+                      {aside.aside && (
+                        <SideNote
+                          aside={aside.aside}
+                          plans={PlanProvider.options.filter((plan) =>
+                            plan === "chatgpt"
+                              ? settings.chatgpt.canStart
+                              : settings.claudeCode.canStart,
+                          )}
+                          usage={planUsage.reply}
+                          modelName={names.name}
+                          onDismiss={aside.dismiss}
+                          onRetry={aside.retry}
+                          onModels={showModels}
+                          onSpending={(trigger) => showSettings(trigger, "spending")}
+                        />
+                      )}
                     </>
                   )
                 }
@@ -2485,6 +2693,7 @@ function Theatre({ api }: { api: ApiClient }) {
                       permissions={permissionChip}
                       taskAction={stopAction}
                       model={modelChip}
+                      actions={commands.actions}
                     />
                   )
                 }
@@ -2540,6 +2749,13 @@ function Theatre({ api }: { api: ApiClient }) {
               persona={{
                 value: settings.draft?.persona ?? settings.saved?.persona ?? DEFAULT_PERSONA,
                 onChange: settings.changePersona,
+                auto: {
+                  on: settings.draft?.autoPersona ?? settings.saved?.autoPersona === true,
+                  onChange: settings.changeAutoPersona,
+                  disabledReason: autoDotReason(
+                    settings.draft ? settings.draft.choices.main : settings.saved?.main,
+                  ),
+                },
               }}
               look={{
                 name: settings.draft?.name ?? settings.saved?.name ?? "",
@@ -2849,6 +3065,13 @@ function Theatre({ api }: { api: ApiClient }) {
           </ErrorBoundary>
         )}
         <PreviewNotice previews={previews} />
+        <CommandPalette
+          open={palette !== null}
+          page={palette ?? "actions"}
+          actions={commands.actions}
+          suggested={commands.suggested}
+          onClose={() => setPalette(null)}
+        />
         <Announcer />
       </div>
     </SessionNowContext.Provider>

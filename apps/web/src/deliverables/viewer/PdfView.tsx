@@ -10,7 +10,7 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { type ReactNode, useEffect, useState } from "react";
 import type { ApiClient } from "../../lib/api.ts";
 import { Button } from "../../ui/Button.tsx";
-import { type LoadedPages, loadPages, loadPreviewBytes } from "../api.ts";
+import { type KeptFile, type LoadedPages, loadPages, loadPreviewBytes } from "../api.ts";
 import { PagesView } from "./PagesView.tsx";
 import type { PageSize } from "./PdfPage.tsx";
 import { modeFor } from "./paging.ts";
@@ -50,36 +50,27 @@ export function PdfFile({ api, url, name }: { api: ApiClient; url: string; name:
 
 // An office document, deck or workbook as the PDF dot's computer makes of it: a minute or so the
 // first time for a long deck, then at once for that version.
-export function OfficePages(props: {
-  api: ApiClient;
-  sessionId: string;
-  name: string;
-  version: number | null;
-  lead?: ReactNode;
-}) {
+export function OfficePages(props: { api: ApiClient; file: KeptFile; lead?: ReactNode }) {
   const [attempt, setAttempt] = useState(0);
   return <OfficeAttempt key={attempt} {...props} retry={() => setAttempt((n) => n + 1)} />;
 }
 
 function OfficeAttempt({
   api,
-  sessionId,
-  name,
-  version,
+  file,
   lead,
   retry,
 }: {
   api: ApiClient;
-  sessionId: string;
-  name: string;
-  version: number | null;
+  file: KeptFile;
   lead?: ReactNode;
   retry(): void;
 }) {
+  const { sessionId, name, version } = file;
   const [loaded, setLoaded] = useState<LoadedPages | "failed" | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    loadPages(api, sessionId, name, version, controller.signal).then(
+    loadPages(api, { sessionId, name, version }, controller.signal).then(
       (pages) => !controller.signal.aborted && setLoaded(pages),
       () => !controller.signal.aborted && setLoaded("failed"),
     );

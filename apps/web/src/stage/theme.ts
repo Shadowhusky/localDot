@@ -28,24 +28,24 @@ export interface StageTheme {
 type ColorKey = Exclude<keyof StageTheme, "font">;
 
 const TOKENS: Record<ColorKey, string> = {
-  xenon: "--color-xenon",
-  attention: "--color-attention",
+  xenon: "--color-stage-xenon",
+  attention: "--color-stage-attention",
   cursorFill: "--color-cursor-fill",
   cursorRim: "--color-cursor-rim",
-  hudSolid: "--color-glass-solid",
-  hudLine: "--color-glass-line",
-  text: "--color-fg-1",
-  text2: "--color-fg-2",
+  hudSolid: "--color-stage-hud",
+  hudLine: "--color-stage-hud-line",
+  text: "--color-stage-fg-1",
+  text2: "--color-stage-fg-2",
   dragUnder: "--color-drag-under",
   shadeCursor: "--color-shade-cursor",
-  keyBevel: "--color-key-bevel",
-  void: "--color-void",
+  keyBevel: "--color-stage-key-bevel",
+  void: "--color-stage-void",
   glass: "--color-stage-glass",
   glyphLight: "--color-glyph-light",
   glyphMid: "--color-glyph-mid",
   glyphShade: "--color-glyph-shade",
-  spill: "--color-spill",
-  spillXenon: "--color-spill-xenon",
+  spill: "--color-stage-spill",
+  spillXenon: "--color-stage-spill-xenon",
 };
 
 export function parseCssColor(value: string): ThemeColor {

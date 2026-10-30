@@ -15,7 +15,11 @@ import { DotLoader } from "../dot/DotLoader.tsx";
 import type { ShowDotControl } from "../dot/show-dot.ts";
 import { KeysPanel, type KeysPanelProps } from "../keys/KeysPanel.tsx";
 import type { ApiClient } from "../lib/api.ts";
-import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
+import {
+  APPEARANCE_NAMES,
+  type AppearanceControl,
+  AppearancePicker,
+} from "../onboarding/AppearancePicker.tsx";
 import { PersonaPicker } from "../onboarding/PersonaPicker.tsx";
 import { FreshStartButton } from "../shell/FreshStartButton.tsx";
 import type { LocalDots } from "../shell/useLocalDots.ts";
@@ -37,6 +41,7 @@ import { AccessLinksSettings } from "./AccessLinksSettings.tsx";
 import { AccessoryPicker } from "./AccessoryPicker.tsx";
 import { AccountsSection } from "./AccountsSection.tsx";
 import { AppUpdateSettings } from "./AppUpdateSettings.tsx";
+import { AutoDot } from "./AutoDot.tsx";
 import { AlwaysAllowed, AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import { ClaudeCodePanel } from "./ClaudeCodePanel.tsx";
@@ -59,6 +64,7 @@ import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 import { NotificationsSection } from "./NotificationsSection.tsx";
 import { OtherLocalDots } from "./OtherLocalDots.tsx";
 import { PurposeCheck, type PurposeCheckControl } from "./PurposeCheck.tsx";
+import { RecordingStorageSettings } from "./RecordingStorage.tsx";
 import { RemoteAccessSettings } from "./RemoteAccessSettings.tsx";
 import { ReportProblem } from "./ReportProblem.tsx";
 import { RoleCard } from "./RoleCard.tsx";
@@ -103,8 +109,12 @@ export interface SettingsSheetProps {
   tip?: string;
   appearance?: AppearanceControl;
   showDot?: ShowDotControl;
-  // Which dot works the next task.
-  persona?: { value: PersonaId; onChange(value: PersonaId): void };
+  // Which dot works the next task, and whether Auto picks it for each new conversation.
+  persona?: {
+    value: PersonaId;
+    onChange(value: PersonaId): void;
+    auto: { on: boolean; onChange(on: boolean): void; disabledReason?: string };
+  };
   // What tells this localDot apart from the user's others: its name and its dot's accessory.
   look?: {
     name: string;
@@ -668,7 +678,7 @@ function SectionList({
     autonomy: props.loading ? "" : autonomyValue(props.autonomy),
     rules: countValue(props.rules?.rules.length),
     spending: props.loading ? "" : spendingValue(props.spending?.value, planOnly(props.choices)),
-    appearance: props.appearance?.value === "midnight" ? "Midnight" : "Graphite",
+    appearance: APPEARANCE_NAMES[props.appearance?.value ?? "graphite"],
     voice: props.voice ? routeLabel(props.voice.route) : "",
     notifications: notificationsValue(props.notifications?.device),
     accounts: props.accounts?.phase === "ready" ? countValue(props.accounts.sites.length) : "",
@@ -827,6 +837,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
       )}
       {props.remoteApi && <AccessLinksSettings api={props.remoteApi} />}
       {props.remoteApi && <RemoteAccessSettings api={props.remoteApi} />}
+      {props.remoteApi && <RecordingStorageSettings api={props.remoteApi} />}
       {props.remoteApi && props.dots && (
         <DotsOnThisComputer api={props.remoteApi} dots={props.dots} />
       )}
@@ -1151,7 +1162,14 @@ function SectionContent({
             Each dot brings the skills and habits for one kind of work, so a task carries only what
             it needs. Your choice applies from the next task.
           </p>
-          <PersonaPicker value={props.persona.value} onChange={props.persona.onChange} />
+          <Group>
+            <AutoDot className="ui-group-row" {...props.persona.auto} />
+          </Group>
+          <PersonaPicker
+            value={props.persona.value}
+            onChange={props.persona.onChange}
+            aria-label={props.persona.auto.on ? "When Auto can't pick" : "Your dot"}
+          />
           {props.look && <ThisLocalDot look={props.look} persona={props.persona.value} />}
         </>
       );
@@ -1216,6 +1234,12 @@ function Appearance({
     <>
       <div>
         <AppearancePicker appearance={appearance} aria-label="Theme" />
+        {appearance.value === "system" && (
+          <GroupNote>
+            Daylight while this device is light, {APPEARANCE_NAMES[appearance.dark]} while it's
+            dark.
+          </GroupNote>
+        )}
         {!appearance.saved && (
           <GroupNote>Applied for this visit. This browser couldn't save it.</GroupNote>
         )}

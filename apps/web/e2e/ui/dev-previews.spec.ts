@@ -9,6 +9,9 @@ runAt("c14", "c39", "w39");
 
 const HOST = "https://richards-mac-studio.tail849a6b.ts.net";
 const VITE = "http://localhost:5173/";
+// The page's clock stands at 09:01.
+const NOW = "2026-10-08T09:01:00.000Z";
+const APPEARANCES = ["graphite", "midnight"] as const;
 const READY: PreviewsStatus = {
   state: "ready",
   addresses: ["172.20.0.11"],
@@ -156,7 +159,18 @@ test("an address dot writes or a command prints opens as a preview in the tab th
   expect(daemon.requests).toEqual([{ url: VITE }, { url: "http://localhost:4173/" }]);
 });
 
-test("the Previews list opens and stops previews, and opens servers that never printed an address", async ({
+// The panel in both appearances, each one screenshot.
+async function shoot(page: Page, ui: { settle(): Promise<void> }, name: string) {
+  for (const appearance of APPEARANCES) {
+    await page.evaluate((value) => {
+      document.documentElement.dataset.appearance = value;
+    }, appearance);
+    await ui.settle();
+    await page.screenshot({ path: test.info().outputPath(`${name}-${appearance}.png`) });
+  }
+}
+
+test("the Previews list shows the web apps answering in dot's computer, and opens one", async ({
   page,
   ui,
 }) => {
@@ -164,37 +178,65 @@ test("the Previews list opens and stops previews, and opens servers that never p
     ...READY,
     previews: [opened(VITE, 4900).preview],
     servers: [
-      { port: 5173, url: VITE, name: "node" },
-      { port: 8000, url: "http://localhost:8000/", name: "python3" },
+      {
+        port: 5173,
+        url: VITE,
+        name: "node",
+        title: "Aegis X-47 viewer",
+        state: "answering",
+        seenAt: NOW,
+      },
+      {
+        port: 8000,
+        url: "http://localhost:8000/",
+        name: "python3",
+        state: "answering",
+        seenAt: NOW,
+      },
+      {
+        port: 8888,
+        url: "http://localhost:8888/",
+        name: "jupyter-lab",
+        title: "JupyterLab",
+        state: "not-answering",
+        seenAt: "2026-10-08T08:56:00.000Z",
+      },
     ],
   });
   await ui.open("running");
   await recordTabs(page);
   const panel = await previewsTab(page);
-  const open = panel.getByRole("button", { name: "Open preview of localhost:5173" });
-  await expect(open).toBeVisible();
-  await expect(panel.getByText("python3")).toBeVisible();
-  // A server already open as a preview is listed once, as the preview, named by its program.
-  await expect(panel.getByText("node", { exact: true })).toHaveCount(1);
-  await ui.settle();
-  await page.screenshot({ path: test.info().outputPath("previews-list.png") });
+  await expect(
+    panel.getByText("Web apps dot runs on its computer.", { exact: false }),
+  ).toBeVisible();
+  const list = panel.getByRole("region", { name: "Web apps in dot's computer" });
+  await expect(list.getByText("Aegis X-47 viewer")).toBeVisible();
+  await expect(list).toContainText("localhost:5173 · Running");
+  await expect(list).toContainText("python3 · Running");
+  await expect(list).toContainText("localhost:8888 · Not answering for 5 min");
+  await shoot(page, ui, "previews-list");
 
-  await open.click();
+  await list.getByRole("button", { name: "Open preview of localhost:5173" }).click();
   await expect(html(page)).toHaveAttribute("data-preview-tab", opened(VITE, 4900).open);
-  await panel.getByRole("button", { name: "Open preview of localhost:8000" }).click();
+  await list.getByRole("button", { name: "Open preview of localhost:8000" }).click();
   await expect(html(page)).toHaveAttribute(
     "data-preview-tab",
     opened("http://localhost:8000/", 4901).open,
   );
-  // The server just opened moves from the servers to the open previews.
-  await expect(panel.getByRole("button", { name: "Stop preview of localhost:8000" })).toBeVisible();
-  expect(daemon.requests).toEqual([{ url: VITE }, { port: 8000 }]);
+  expect(daemon.requests).toEqual([{ port: 5173 }, { port: 8000 }]);
 
-  await panel.getByRole("button", { name: "Stop preview of localhost:5173" }).click();
-  await expect.poll(() => daemon.stopped).toEqual(["p4900"]);
-  await expect(panel.getByRole("button", { name: "Stop preview of localhost:5173" })).toHaveCount(
-    0,
-  );
+  // Every device signed in to an app has to open it from localDot again.
+  await panel.getByRole("button", { name: "Sign out" }).click();
+  await expect.poll(() => daemon.stopped.sort()).toEqual(["p4900", "p4901"]);
+  await expect(panel.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+});
+
+test("the Previews list says when no web app is running", async ({ page, ui }) => {
+  await previewsDaemon(page, READY);
+  await ui.open("running");
+  const panel = await previewsTab(page);
+  await expect(panel.getByText("No web apps running")).toBeVisible();
+  await shoot(page, ui, "previews-empty");
 });
 
 test("a computer without the preview service says to update it, and a chip opens no tab", async ({

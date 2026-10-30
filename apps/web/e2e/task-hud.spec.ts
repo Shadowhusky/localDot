@@ -88,7 +88,7 @@ test("an approval puts the decision first and the thread says dot waits for you"
   await expect(control(page)).toHaveCount(1);
   await qa(page, "approval");
   await expectWaiting(page, "Needs your OK", true);
-  await expect(page.locator(".thread-live")).toContainText("Waiting for you");
+  await expect(page.locator(".thread-work[data-live]")).toContainText("Waiting for you");
 });
 
 test("after Send, dot has control again and a quiet task still warns", async ({ page }) => {
@@ -181,5 +181,5 @@ test("after Stop and Resume, the live computer keeps the stopped verdict", async
   await expect(island(page)).toHaveAttribute("data-shape", "ready");
   await expect(island(page).getByRole("button").first()).toHaveAccessibleName("Take control");
   await expect(control(page)).toHaveCount(0);
-  await expect(page.locator(".thread-live")).toContainText("Stopped after");
+  await expect(page.locator(".thread .thread-work").last()).toContainText("Stopped after");
 });

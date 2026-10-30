@@ -540,6 +540,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
             ...e.data,
             seq: model.takeovers.get(e.data.requestId)?.seq ?? e.seq,
             time: ulidTime(e.id),
+            at: model.takeovers.get(e.data.requestId)?.at ?? e.t,
           },
           L.takeovers,
         ),
@@ -554,7 +555,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           takeovers: put(
             model.takeovers,
             held.requestId,
-            { ...held, taken: { seq: e.seq, time: ulidTime(e.id) } },
+            { ...held, taken: { seq: e.seq, time: ulidTime(e.id), at: e.t } },
             L.takeovers,
           ),
         };
@@ -569,7 +570,13 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           ? put(
               model.takeovers,
               e.data.requestId,
-              { ...old, end: { ...e.data }, endSeq: e.seq, endTime: ulidTime(e.id) },
+              {
+                ...old,
+                end: { ...e.data },
+                endSeq: e.seq,
+                endTime: ulidTime(e.id),
+                endAt: e.t,
+              },
               L.takeovers,
             )
           : model.takeovers,
@@ -637,13 +644,19 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         next = { ...next, research: { ...model.research, sources } };
       }
       break;
+    case "persona.choice":
+      next = {
+        ...next,
+        dots: [...model.dots, { ...e.data, id: e.id, seq: e.seq }].slice(-L.dots),
+      };
+      break;
     case "routine.proposed":
       next = {
         ...next,
         routineProposals: put(
           model.routineProposals,
           e.data.routineId,
-          { ...e.data, id: e.id, seq: e.seq },
+          { ...e.data, id: e.id, seq: e.seq, at: e.t },
           L.routineProposals,
         ),
       };

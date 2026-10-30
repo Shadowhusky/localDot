@@ -29,6 +29,7 @@ import { type ApiClient, ApiError } from "../lib/api.ts";
 import type { StageHandle } from "../stage/Stage.tsx";
 import type { ReplaySource, ReplayStatus } from "../stage/worker-protocol.ts";
 import { WorkHistory } from "../work/work-view.ts";
+import { recordingSnapshot } from "./recording-source.ts";
 import { compareFrames, followRule, type ReplayCommand } from "./replay-view.ts";
 import { SeekGate } from "./seek-gate.ts";
 
@@ -418,7 +419,7 @@ export function useReplay(
         sessionId,
         origin: replayOrigin(api),
         authorization: api.authorization(),
-        video: hasVideo ? { upto: info.live ? info.upto : null } : null,
+        video: hasVideo ? recordingSnapshot(info) : null,
         gaps: info.manifest.gaps,
       };
       const key = JSON.stringify([
@@ -549,6 +550,13 @@ export function useReplay(
       if (message.type === "replay-status" || message.type === "replay-time") seeks.settled();
       if ("owner" in message && message.owner !== mediaOwner.current) return;
       if (message.type === "replay-status") change({ status: message.status.state });
+      // A finished video compacted while it was open: read its new size and open that.
+      if (
+        message.type === "replay-status" &&
+        message.status.state === "error" &&
+        !current.current.info?.live
+      )
+        void load(false);
       if (message.type === "replay-time") {
         if (
           pendingSeekTime.current !== null &&

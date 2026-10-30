@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DIFF_LIMITS, diffPreview } from "../deliverables/viewer/diff.ts";
 import { frameCrop } from "./ActivityDetails.tsx";
-import { DIFF_LIMITS, DiffViewer, diffPreview, numberLines } from "./DiffViewer.tsx";
+import { DiffViewer, numberLines } from "./DiffViewer.tsx";
 import type { AgentChange, AgentStep } from "./model.ts";
 import { TerminalViewer } from "./TerminalViewer.tsx";
 import { appendTerminal, emptyTerminal } from "./terminal-text.ts";

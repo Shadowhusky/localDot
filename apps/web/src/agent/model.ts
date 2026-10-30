@@ -24,6 +24,7 @@ export const AGENT_LIMITS = Object.freeze({
   takeovers: 64,
   results: 64,
   routineProposals: 16,
+  dots: 16,
   spendCalls: 2048,
   usageCalls: 2048,
   messageText: 20_000,
@@ -82,13 +83,15 @@ export type AgentQuestion = EventOf<"ask.request">["data"] & {
 };
 export type AgentTakeover = EventOf<"takeover.request">["data"] & {
   readonly seq?: number;
-  // Wall-clock ms of the hand-over and of its end.
+  // Wall-clock ms of the hand-over and of its end; `at` and `endAt` are their session times (µs).
   readonly time?: number;
+  readonly at?: number;
   // When the user took the computer dot handed over.
-  readonly taken?: { readonly seq: number; readonly time: number };
+  readonly taken?: { readonly seq: number; readonly time: number; readonly at?: number };
   readonly end?: EventOf<"takeover.end">["data"];
   readonly endSeq?: number;
   readonly endTime?: number;
+  readonly endAt?: number;
 };
 export interface AgentChange {
   readonly id: string;
@@ -111,10 +114,17 @@ export interface AgentResult {
   readonly summary: string;
   readonly files: readonly EventOf<"task.result">["data"]["files"][number][];
 }
+// The dot the task works as while Auto is on: Auto's pick, the default it fell back to, or the
+// user's switch.
+export type AgentDotChoice = EventOf<"persona.choice">["data"] & {
+  readonly id: string;
+  readonly seq: number;
+};
 // A routine dot drafted in this task; it runs only once the user saves it.
 export type RoutineProposal = EventOf<"routine.proposed">["data"] & {
   readonly id: string;
   readonly seq: number;
+  readonly at?: number;
 };
 // A research task: its budget, why gathering stopped, and its numbered sources in order.
 export interface AgentResearch {
@@ -222,6 +232,7 @@ export interface AgentModel {
   readonly completion?: "complete" | "blocked";
   // What started the task when the user did not: a routine or a follow-up.
   readonly origin?: SessionOrigin;
+  readonly dots: readonly AgentDotChoice[];
   readonly research: AgentResearch | null;
   readonly routineProposals: ReadonlyMap<string, RoutineProposal>;
   readonly usage: readonly UsageRow[];
@@ -284,6 +295,7 @@ export function emptyAgentModel(): AgentModel {
     changes: [],
     results: [],
     routineProposals: new Map(),
+    dots: [],
     research: null,
     usage: [],
     usageCalls: [],

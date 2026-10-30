@@ -15,7 +15,7 @@ vi.mock("./LiveWorkLine.tsx", async (load) => {
   return {
     ...real,
     LiveWorkLine(props: ComponentProps<typeof Line>) {
-      // The foot's line is the live one; the thread's rows are earlier turns.
+      // The latest run is the live one; the others are earlier turns.
       if (!props.live) drawn.work += 1;
       return <Line {...props} />;
     },
@@ -40,8 +40,24 @@ afterEach(() => {
 
 const message = (id: string, text: string) =>
   ({ id, role: "user", text, final: true }) as AgentMessage;
+// A step's entry is the same object while its step is, as the work-step cache keeps it.
+const entries = new Map<string, WorkStep["entry"]>();
+const entry = (key: string) => {
+  const kept = entries.get(key) ?? { key, row: { kind: "step", id: key, startT: 1 }, keys: [] };
+  entries.set(key, kept);
+  return kept;
+};
 const step = (key: string, state: WorkStep["state"] = "done") =>
-  ({ key, title: `Step ${key}`, meta: "", time: "", state, startT: 1, endT: 2 }) as WorkStep;
+  ({
+    key,
+    entry: entry(key),
+    title: `Step ${key}`,
+    meta: "",
+    time: "",
+    state,
+    startT: 1,
+    endT: 2,
+  }) as WorkStep;
 // The model keeps its messages and results; the thread's items around them are rebuilt by every
 // event, with new objects for the same steps.
 const first = message("1", "Draw a dog");

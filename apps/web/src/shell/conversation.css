@@ -124,6 +124,32 @@
   background-color: var(--color-separator);
 }
 
+/* The dot Auto chose: the dot in its outfit, why, and the way to change it. */
+.thread-dot {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+}
+
+.thread-dot-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.thread-dot-name {
+  color: var(--color-fg-2);
+  font-weight: var(--font-weight-medium);
+}
+
+.thread-dot-error {
+  display: block;
+  color: var(--color-danger-fg);
+}
+
 .thread-note {
   color: var(--color-fg-3);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
@@ -257,6 +283,12 @@
   font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
   letter-spacing: var(--text-reading--letter-spacing);
   overflow-wrap: anywhere;
+  transition: color var(--dur-fade) var(--ease-standard);
+}
+
+/* What dot says between its steps reads quieter than its answer, the words that end its turn. */
+.thread-message[data-narration] {
+  color: var(--color-fg-2);
 }
 
 /* Your message: the bubble with its copy button beside it, then a word on when it was sent. */
@@ -678,7 +710,8 @@
   outline: none;
 }
 
-/* What dot did this turn: what it is doing now, and the steps under a fold. */
+/* A run of dot's steps, between what it said: the steps under a fold, the pictures they showed and,
+   while dot works, what it is doing now. */
 .thread-work {
   display: grid;
   min-width: 0;
@@ -725,12 +758,6 @@
   content: attr(data-text);
   display: block;
   animation: thread-glint-hold var(--loop-shimmer) linear 3 both;
-}
-
-/* In the dock the line keeps to one line (below), and its light ends as it does. */
-.thread-live .thread-work-glint::before {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* The new line waits for the old one to leave, so the two never show over each other. */
@@ -832,6 +859,53 @@
   flex-direction: column;
   padding: 0 0 calc(var(--spacing) * 2);
   list-style: none;
+}
+
+/* Steps that failed, which dot may have worked around, stay in sight in a folded run's summary. */
+.thread-work-failed {
+  color: var(--color-danger-fg);
+}
+
+/* A single step reads as a run's summary does, in the same quiet line. */
+.thread-work[data-single] .activity-row-title {
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* A run that has no steps yet: its summary, where the fold's head will be. */
+.thread-work-status {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  min-height: calc(var(--spacing) * 8);
+  padding-block: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* What dot is doing now, under the run it adds to, in the steps' text column. */
+.thread-work-now .thread-work-line {
+  padding-inline-start: calc(var(--spacing) * 6);
+}
+
+/* The pictures a run showed, small under its steps in their text column; each opens large. */
+.thread-pictures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, calc(var(--spacing) * 26)));
+  gap: calc(var(--spacing) * 2);
+  margin: var(--spacing) 0 calc(var(--spacing) * 1.5);
+  padding: 0 0 0 calc(var(--spacing) * 6);
+  list-style: none;
+}
+
+.thread-pictures-more {
+  display: grid;
+  place-items: center;
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 /* A finished turn's last line: the model and what its calls reported, aligned with the
@@ -955,17 +1029,17 @@
   display: grid;
   gap: calc(var(--spacing) * 2);
   min-width: 0;
-  padding: var(--spacing) calc(var(--spacing) * 1.5) 0 calc(var(--spacing) * 2);
+  padding: var(--spacing) calc(var(--spacing) * 1.5) calc(var(--spacing) * 2)
+    calc(var(--spacing) * 2);
 }
 
-/* Under a preview: Revise, Compare and the version, the quiet buttons' ink on the preview's edge. */
+/* Under a preview: Revise, Compare and the version, their faces inside the preview's edges. */
 .deliverable-tools {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: calc(var(--spacing) * 1.5);
   min-width: 0;
-  margin-left: calc(var(--spacing) * -2.5);
 }
 
 .deliverable-version {
@@ -1251,18 +1325,6 @@
   padding-top: calc(var(--spacing) * 2);
 }
 
-.thread-live .thread-work {
-  padding-bottom: calc(var(--spacing) * 2);
-}
-
-/* Under the thread the work line keeps one line each, so its changing words never move the
-   composer; the whole text is in the HUD and in Activity. */
-.thread-live :is(.thread-work-text, .ui-disclosure-summary) {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
 .thread-jump {
   /* How much of the foot is in view, so the button keeps clear of it. */
   --thread-foot-shown: 0px;
@@ -1468,6 +1530,24 @@
   padding-inline-end: calc(var(--spacing) * 2.5);
   background-color: var(--color-inset);
   box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+
+/* A file the task's computer holds opens in the viewer; the whole chip is the press target. */
+.thread-bubble-files > .file-chip[data-opens] {
+  position: relative;
+  cursor: pointer;
+}
+
+.file-chip-hit {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+@media (hover: hover) {
+  .thread-bubble-files > .file-chip[data-opens]:hover {
+    background-color: var(--color-row-hover);
+  }
 }
 
 /* The composer: one card, the field over a row of its controls. What comes and goes in it (a key
@@ -1754,10 +1834,6 @@
 @media (--phone) {
   .rail-panel.rail-chat .thread-dock {
     padding: 0;
-  }
-
-  .rail-panel .thread-live {
-    padding-inline: calc(var(--spacing) * 4);
   }
 
   .thread-toolbar {
@@ -2181,30 +2257,6 @@
   max-height: 100%;
   display: flex;
   flex-direction: column;
-}
-.thread-foot .thread-live {
-  min-height: 0;
-  overflow: hidden;
-}
-/* The inline Working disclosure owns its scroll. Pass the available footer
-   height through the disclosure instead of nesting a second clipped scroller. */
-.thread-foot .thread-live > .ui-collapse-inner,
-.thread-live .thread-work,
-.thread-live .thread-work-steps,
-.thread-live .thread-work-steps > .ui-collapse > .ui-collapse-inner {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.thread-live .thread-work-now,
-.thread-live .ui-disclosure-trigger {
-  flex: none;
-}
-.thread-live .thread-work-steps > .ui-collapse {
-  min-height: 0;
-}
-.thread-live .thread-work-scroll {
-  flex: 0 1 auto;
 }
 .thread-foot .thread-toolbar {
   flex: none;

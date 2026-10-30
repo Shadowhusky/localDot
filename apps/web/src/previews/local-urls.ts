@@ -13,6 +13,8 @@ const SCAN_CHARS = 32_768;
 const FOUND = 6;
 const CANDIDATE = /https?:\/\/[\w\-.~:/?#[\]@!$&()*+,;=%]+/gi;
 const PRIVATE_IPV4 = /^(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}$/;
+// The name a computer has unless it was given one, which servers such as Jupyter print.
+const COMPUTER_NAME = /^[0-9a-f]{12}$/;
 
 export function localUrl(href: string, addresses: readonly string[] = []): LocalUrl | undefined {
   const target = previewTarget(href, addresses);
@@ -21,9 +23,12 @@ export function localUrl(href: string, addresses: readonly string[] = []): Local
   return { href: url.href, label: `${url.host}${target.path === "/" ? "" : target.path}`, target };
 }
 
-// A private network address may be the computer's own, which only its status can tell.
+// A private network address or a name like the computer's may be its own, which only its status
+// can tell.
 export function mayBeComputer(href: string): boolean {
-  return URL.canParse(href) && PRIVATE_IPV4.test(new URL(href).hostname);
+  if (!URL.canParse(href)) return false;
+  const { hostname } = new URL(href);
+  return PRIVATE_IPV4.test(hostname) || COMPUTER_NAME.test(hostname);
 }
 
 // Punctuation that ends a sentence around an address, and a bracket the address never opened.

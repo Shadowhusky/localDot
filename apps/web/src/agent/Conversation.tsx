@@ -21,7 +21,6 @@ import type { ModelNames } from "../settings/model-names.ts";
 import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
-import { Collapse } from "../ui/Disclosure.tsx";
 import { fadeIn } from "../ui/motion.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
@@ -29,9 +28,10 @@ import { answerSummary } from "./ask-form.ts";
 import { splitAttachments } from "./attachments.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { cancelQueuedMessage, steerQueuedMessage } from "./control-api.ts";
+import { DotChoice } from "./DotChoice.tsx";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
 import { HistoryPages } from "./HistoryPages.tsx";
-import { type LiveWork, LiveWorkLine, sameSteps } from "./LiveWorkLine.tsx";
+import { type LiveWork, LiveWorkLine, sameLive, sameSteps } from "./LiveWorkLine.tsx";
 import type { AgentMessage, AgentResult, AgentWords } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
@@ -102,6 +102,10 @@ interface ThreadContext {
   // The fields of the question dot is waiting on, drawn under it.
   ask?: ReactNode;
   latestWork: string | undefined;
+  // The conversation's latest dot choice, which the task at work can change.
+  latestDot: string | undefined;
+  // What dot is doing now, for the latest run of steps while its task has not ended.
+  live: LiveWork | null;
   onReplay?: () => void;
   replayTask?: (sessionId: string) => void;
   names?: ModelNames;
@@ -128,16 +132,22 @@ function useArriving(words: AgentWords | undefined, shown: AgentMessage): AgentM
 
 const MessageCard = memo(function MessageCard({
   message: shown,
+  narration = false,
   words,
   announce,
   queue,
   takeBack,
+  sessionId,
 }: {
   queue?: QueueActions;
   takeBack(message: AgentMessage): Promise<boolean> | null;
   message: AgentMessage;
+  // dot's words before more of its work, which read quieter than its answer.
+  narration?: boolean;
   words?: AgentWords;
   announce(text: string): void;
+  // The task the message went to, whose computer holds the files it carried.
+  sessionId?: string;
 }) {
   const message = useArriving(words, shown);
   const user = message.role === "user";
@@ -163,12 +173,18 @@ const MessageCard = memo(function MessageCard({
     <article
       className="thread-message"
       data-role={user ? "user" : "dot"}
+      data-narration={narration || undefined}
       data-streaming={!message.final || undefined}
       aria-label={user ? "You" : "dot"}
     >
       {user ? (
         <>
-          <UserBubble text={body} files={files} lead={copy} />
+          <UserBubble
+            text={body}
+            files={files}
+            lead={copy}
+            sessionId={message.sessionId ?? sessionId}
+          />
           {tag && (
             <div className="thread-queue">
               <p className="thread-tag">{tag}</p>
@@ -192,6 +208,8 @@ const MessageCard = memo(function MessageCard({
 
 const endedOf = (item: WorkItem, thread: ThreadContext) =>
   item.key === thread.latestWork ? thread.ended : undefined;
+const liveOf = (item: WorkItem, thread: ThreadContext) =>
+  item.key === thread.latestWork ? thread.live : null;
 
 function SteerMessage({
   messageId,
@@ -326,18 +344,22 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
     draw: ({ item, thread }) => (
       <MessageCard
         message={item.message}
+        narration={item.narration}
         words={thread.words}
         announce={thread.announce}
         queue={thread.queue}
         takeBack={thread.takeBack}
+        sessionId={thread.downloads.sessionId ?? undefined}
       />
     ),
     same: (was, now, then, thread) =>
       was.message === now.message &&
+      was.narration === now.narration &&
       then.announce === thread.announce &&
       then.words === thread.words &&
       then.queue === thread.queue &&
-      then.takeBack === thread.takeBack,
+      then.takeBack === thread.takeBack &&
+      then.downloads.sessionId === thread.downloads.sessionId,
   },
   question: {
     draw: ({ item, thread }) => (
@@ -384,6 +406,18 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
     draw: ({ item }) => <RoutineCard proposal={item.proposal} />,
     same: (was, now) => was.proposal === now.proposal,
   },
+  dot: {
+    draw: ({ item, thread }) => (
+      <DotChoice
+        choice={item.choice}
+        task={item.key === thread.latestDot ? thread.queue : undefined}
+      />
+    ),
+    same: (was, now, then, thread) =>
+      was.choice === now.choice &&
+      (was.key === then.latestDot ? then.queue : undefined) ===
+        (now.key === thread.latestDot ? thread.queue : undefined),
+  },
   origin: {
     draw: ({ item }) => (
       <p className="thread-divider">
@@ -412,7 +446,7 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       <LiveWorkLine
         steps={item.steps}
         startMs={item.startMs}
-        live={null}
+        live={liveOf(item, thread)}
         ended={endedOf(item, thread)}
         spend={item.spend}
         sessionId={item.sessionId}
@@ -424,6 +458,7 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       was.spend?.usd === now.spend?.usd &&
       was.spend?.estimated === now.spend?.estimated &&
       endedOf(was, then) === endedOf(now, thread) &&
+      sameLive(liveOf(was, then), liveOf(now, thread)) &&
       sameSteps(was.steps, now.steps),
   },
   meta: {
@@ -499,7 +534,7 @@ export interface ConversationProps {
   withdrawn?: readonly string[];
   visible?: boolean;
   ownerKey?: string;
-  // The latest turn's work while its task has not ended.
+  // What dot is doing now, while its task has not ended.
   live?: LiveWork | null;
   ended?: "done" | "stopped" | "interrupted" | "error";
   pendingAsk?: string | null;
@@ -574,10 +609,8 @@ export function Conversation({
   words,
   names,
 }: ConversationProps) {
-  // While its task is live, the latest turn's work line sits in the foot, always in view; once the
-  // turn is over it joins the thread as that turn's last row.
+  // The latest run of steps, which shows what dot is doing while its task is live.
   const latestWork = items.findLast((item) => item.kind === "work") as WorkItem | undefined;
-  const liveWork = live ? latestWork : undefined;
   // Messages Stop left unsent that the user took back into the composer here; `withdrawn` names
   // those taken back before, here or on another device.
   const [taken, setTaken] = useState<ReadonlySet<string>>(() => new Set());
@@ -598,14 +631,9 @@ export function Conversation({
       !ended &&
       item.message.sessionId === sessionId;
     const gone = (id: string) => taken.has(id) || withdrawn.includes(id);
-    const kept = items.filter(
-      (item) => item !== liveWork && !(item.kind === "message" && gone(item.message.id)),
-    );
+    const kept = items.filter((item) => !(item.kind === "message" && gone(item.message.id)));
     return [kept.filter((item) => !waits(item)), kept.filter(waits)];
-  }, [items, liveWork, ended, sessionId, taken, withdrawn]);
-  const lastLive = useRef<WorkItem | undefined>(undefined);
-  if (liveWork) lastLive.current = liveWork;
-  const footWork = liveWork ?? lastLive.current;
+  }, [items, ended, sessionId, taken, withdrawn]);
   const page = usePagedRows(shown, itemKey, ownerKey, { size: WINDOW, step: WINDOW / 2 });
   // Following the end, the end is held in the same frame as anything arrives, so nothing at the
   // end moves; a new row eases in where it lands instead.
@@ -951,11 +979,13 @@ export function Conversation({
     pendingAsk,
     ask,
     latestWork: latestWork?.key,
+    latestDot: items.findLast((item) => item.kind === "dot")?.key,
+    live,
     onReplay: onReplay && replay,
     replayTask: onReplayTask && replayTask,
     names,
   };
-  const empty = !shown.length && !liveWork && !queued.length;
+  const empty = !shown.length && !queued.length;
   const olderTasks = !!earlier?.more;
   // What setup has left reads from its top; the thread follows its end again once it has gone.
   const startShown = empty && !loading && !!start;
@@ -987,7 +1017,7 @@ export function Conversation({
           const target =
             event.target instanceof Element
               ? event.target.closest<HTMLButtonElement>(
-                  ".thread-work-steps > .ui-disclosure-trigger",
+                  ".thread-work-steps > .ui-disclosure-trigger, .thread-work > .activity-row > .activity-row-head",
                 )
               : null;
           if (target) follow.anchorTo(target, REVEAL_MARGIN);
@@ -1133,16 +1163,6 @@ export function Conversation({
       <div className="thread-foot" ref={foot} />
       {createPortal(
         <Outbox.Provider value={outbox}>
-          <Collapse open={!!liveWork && !covered} className="thread-live">
-            {footWork && (
-              <LiveWorkLine
-                steps={footWork.steps}
-                startMs={footWork.startMs}
-                live={liveWork ? live : null}
-                ended={ended}
-              />
-            )}
-          </Collapse>
           <div className="thread-toolbar">
             {!tools && lead}
             <div className="thread-composer" hidden={!!tools}>

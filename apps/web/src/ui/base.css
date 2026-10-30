@@ -12,6 +12,10 @@
     scrollbar-color: var(--color-scrollbar) transparent;
   }
 
+  :root[data-appearance="daylight"] {
+    color-scheme: light;
+  }
+
   /* Every scroller gets the thin themed bar. */
   * {
     scrollbar-width: thin;

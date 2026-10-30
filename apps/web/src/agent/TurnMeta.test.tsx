@@ -48,9 +48,9 @@ describe("a turn's meta line", () => {
     expect(metaLine(item(), names)).toBe("Claude Sonnet 5.5 · 1:12 · 20.6K tokens · $0.04");
   });
 
-  it("keeps cost with model usage and leaves duration to the work line", () => {
+  it("keeps cost with model usage and times the whole turn, under steps too", () => {
     expect(metaLine(item({ work: true, models: [sonnet, luna] }), names)).toBe(
-      "Claude Sonnet 5.5 · 25.1K tokens · $0.04",
+      "Claude Sonnet 5.5 · 1:12 · 25.1K tokens · $0.04",
     );
     expect(
       metaLine(item({ durationMs: undefined, usd: undefined, models: [], main: sonnet }), names),

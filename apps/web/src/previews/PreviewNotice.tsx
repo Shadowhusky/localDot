@@ -41,18 +41,27 @@ export function PreviewNotice({ previews }: { previews: Previews | null }) {
       open={!!notice}
       onClose={close}
       anchor={anchor}
-      title={shown.link ? "Your preview is ready" : TITLES[state ?? "ready"]}
+      title={
+        shown.copy && shown.link
+          ? "Copy the link"
+          : shown.link
+            ? "Your preview is ready"
+            : TITLES[state ?? "ready"]
+      }
       className="preview-notice"
     >
       <p className="preview-notice-text">
-        {shown.link
-          ? "Your browser kept it from opening a new tab."
-          : state
-            ? unavailable(state, shown.refusal?.message).message
-            : shown.refusal?.message}
+        {shown.copy && shown.link
+          ? "Your browser didn't let localDot copy it. Select it to copy it yourself: it opens the app once, within two minutes."
+          : shown.link
+            ? "Your browser kept it from opening a new tab."
+            : state
+              ? unavailable(state, shown.refusal?.message).message
+              : shown.refusal?.message}
       </p>
+      {shown.copy && shown.link && <p className="preview-notice-url">{shown.link}</p>}
       <div className="preview-notice-actions">
-        {shown.link && (
+        {shown.link && !shown.copy && (
           <a
             className="preview-notice-link"
             href={shown.link}
@@ -85,7 +94,9 @@ export function PreviewNotice({ previews }: { previews: Previews | null }) {
           <Button
             size="sm"
             onClick={() => {
-              if (shown.request) previews.open(shown.request, shown.anchor);
+              if (!shown.request) return;
+              if (shown.copy) previews.copy(shown.request, shown.anchor);
+              else previews.open(shown.request, shown.anchor);
             }}
           >
             Try again

@@ -1,5 +1,14 @@
 import "../ui/work-layout.css";
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { count } from "../copy/format.ts";
 import type { TaskRow } from "../session/status.ts";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
@@ -13,6 +22,7 @@ import { clock, groupReadSteps, hasDetails } from "./activity.ts";
 import { useStepPreviewEnvironment } from "./StepPreview.tsx";
 import type { WorkStep } from "./thread.ts";
 import { useFollowScroll } from "./useFollowScroll.ts";
+import { WorkPictures } from "./WorkPictures.tsx";
 
 export interface LiveWork {
   phase: "running" | "waiting" | "finished";
@@ -28,6 +38,8 @@ const PAUSED = new Set<TaskRow | undefined>(["pausing", "paused", "resuming", "r
 
 // Each line stays at least this long, so quick steps never flicker past unread.
 export const HOLD_MS = 1000;
+// An open run's list keeps at least this much room: about three steps.
+const MIN_ROOM = 120;
 
 interface Line {
   id: number;
@@ -95,18 +107,25 @@ export function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): b
   );
 }
 
+// What the line shows of the task's work now; the same while it says the same.
+export const sameLive = (was: LiveWork | null, now: LiveWork | null) =>
+  was?.phase === now?.phase &&
+  was?.row === now?.row &&
+  was?.label === now?.label &&
+  was?.nowMs === now?.nowMs;
+
 const sameLine = (was: LiveWorkLineProps, now: LiveWorkLineProps) =>
   sameSteps(was.steps, now.steps) &&
   was.startMs === now.startMs &&
   was.spend?.usd === now.spend?.usd &&
   was.spend?.estimated === now.spend?.estimated &&
-  was.live?.phase === now.live?.phase &&
-  was.live?.row === now.live?.row &&
-  was.live?.label === now.live?.label &&
-  was.live?.nowMs === now.live?.nowMs &&
+  sameLive(was.live, now.live) &&
   was.ended === now.ended &&
   was.sessionId === now.sessionId;
 
+// A run of steps between what dot said. The run dot is at stays open while it works, so its steps
+// stream in; the others fold to their summary unless the reader opened them. A single finished step
+// is its own row.
 export const LiveWorkLine = memo(function LiveWorkLine({
   steps,
   startMs,
@@ -114,26 +133,20 @@ export const LiveWorkLine = memo(function LiveWorkLine({
   ended,
   sessionId,
 }: LiveWorkLineProps) {
-  const [open, setOpen] = useState(false);
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? !!live;
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const node = root.current;
-    const body = node?.closest<HTMLElement>(".thread-body");
-    if (!open || !node || !body) return;
-    const live = !!node.closest(".thread-live");
-    const viewport = live ? body : body.querySelector<HTMLElement>(".thread-scroll");
-    const toolbar = live ? body.querySelector<HTMLElement>(".thread-toolbar") : null;
+    const viewport = node?.closest<HTMLElement>(".thread-scroll");
+    if (!open || !node || !viewport) return;
     const trigger = node.querySelector<HTMLElement>(".ui-disclosure-trigger");
-    const narration = node.querySelector<HTMLElement>(".thread-work-now");
     let frame = 0;
+    // The run's head stays in view with its list, which keeps room for a few steps however short
+    // the thread.
     const measure = () => {
-      const available =
-        (viewport?.clientHeight ?? 0) -
-        (toolbar?.offsetHeight ?? 0) -
-        (trigger?.offsetHeight ?? 0) -
-        (narration?.offsetHeight ?? 0) -
-        24;
-      node.style.setProperty("--work-history-room", `${Math.max(0, available)}px`);
+      const available = viewport.clientHeight - (trigger?.offsetHeight ?? 0) - 24;
+      node.style.setProperty("--work-history-room", `${Math.max(MIN_ROOM, available)}px`);
     };
     const schedule = () => {
       cancelAnimationFrame(frame);
@@ -141,8 +154,7 @@ export const LiveWorkLine = memo(function LiveWorkLine({
     };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
-    for (const element of [viewport, toolbar, trigger, narration])
-      if (element) observer?.observe(element);
+    for (const element of [viewport, trigger]) if (element) observer?.observe(element);
     return () => {
       cancelAnimationFrame(frame);
       observer?.disconnect();
@@ -165,6 +177,8 @@ export const LiveWorkLine = memo(function LiveWorkLine({
   const said = useRef(live?.label ?? "");
   if (running && live) said.current = live.label;
   const { lines, retire } = useHeldLines(said.current);
+  if (steps.length === 1 && !live && (!ended || ended === "done"))
+    return <OneStep step={steps[0] as WorkStep} sessionId={sessionId} />;
   const summary = running
     ? "Working"
     : waiting
@@ -178,13 +192,63 @@ export const LiveWorkLine = memo(function LiveWorkLine({
           : ended === "error"
             ? took("Ended", "after")
             : took("Worked", "for");
-  const meta = [count(steps.length, "step", "steps"), failed ? `${failed} failed` : ""]
-    .filter(Boolean)
-    .join(" · ");
   const counting = running && startMs !== null;
+  const face = (
+    <>
+      <StatusGlyph
+        className="thread-work-glyph"
+        state={
+          running
+            ? "doing"
+            : waiting
+              ? PAUSED.has(live?.row)
+                ? "skipped"
+                : "ask"
+              : ended === "stopped"
+                ? "skipped"
+                : ended === "error" || ended === "interrupted"
+                  ? "failed"
+                  : "done"
+        }
+      />
+      <span>
+        {summary}
+        {(steps.length > 0 || counting) && (
+          <span className="thread-work-meta num">
+            {steps.length > 0 && ` · ${count(steps.length, "step", "steps")}`}
+            {failed > 0 && (
+              <>
+                {" · "}
+                <span className="thread-work-failed">{failed} failed</span>
+              </>
+            )}
+            {counting && <RunningTime from={startMs} nowMs={live?.nowMs} lead=" · " />}
+          </span>
+        )}
+      </span>
+    </>
+  );
   return (
-    <div ref={root} className="thread-work" data-running={running || undefined}>
-      <Collapse open={running} className="thread-work-now">
+    <div
+      ref={root}
+      className="thread-work"
+      data-live={!!live || undefined}
+      data-running={running || undefined}
+    >
+      {steps.length ? (
+        <Disclosure
+          className="thread-work-steps"
+          summary={face}
+          open={open}
+          onOpenChange={setChosen}
+        >
+          <WorkHistory steps={steps} startMs={startMs} sessionId={sessionId} />
+        </Disclosure>
+      ) : (
+        <p className="thread-work-status">{face}</p>
+      )}
+      {/* What dot is doing now, while its steps are folded away; an open list ends on it. */}
+      <Collapse open={running && steps.length > 0 && !open} className="thread-work-now">
         <p className="thread-work-line">
           {lines.map((line) => (
             <span
@@ -202,54 +266,69 @@ export const LiveWorkLine = memo(function LiveWorkLine({
           ))}
         </p>
       </Collapse>
-      <Disclosure
-        className="thread-work-steps"
-        summary={
-          <>
-            <StatusGlyph
-              className="thread-work-glyph"
-              state={
-                running
-                  ? "doing"
-                  : waiting
-                    ? PAUSED.has(live?.row)
-                      ? "skipped"
-                      : "ask"
-                    : ended === "stopped"
-                      ? "skipped"
-                      : ended === "error" || ended === "interrupted"
-                        ? "failed"
-                        : "done"
-              }
-            />
-            <span>
-              {summary}
-              {meta && (
-                <span className="thread-work-meta num">
-                  {" · "}
-                  {meta}
-                  {counting && <RunningTime from={startMs} nowMs={live?.nowMs} lead=" · " />}
-                </span>
-              )}
-            </span>
-          </>
-        }
-        open={open}
-        onOpenChange={setOpen}
-      >
-        {steps.length ? (
-          <WorkHistory steps={steps} startMs={startMs} sessionId={sessionId} />
-        ) : (
-          <p className="thread-note">No steps yet.</p>
-        )}
-      </Disclosure>
+      {/* An open list unfolds each step's own pictures; a folded run shows them under its head. */}
+      {!open && <WorkPictures steps={steps} sessionId={sessionId} onMore={() => setChosen(true)} />}
     </div>
   );
 }, sameLine);
 
+// A step with the details it unfolds in place, where there is a task to read them from. A step that
+// has not changed is not drawn again as the steps after it arrive.
+const StepRow = memo(function StepRow({
+  id,
+  step,
+  sessionId,
+  open,
+  onToggle,
+}: {
+  id: string;
+  step: WorkStep;
+  sessionId?: string;
+  open: boolean;
+  onToggle(key: string, trigger: HTMLButtonElement): void;
+}) {
+  const preview = useStepPreviewEnvironment();
+  const detail = !!preview && hasDetails(step.entry, step.changes);
+  return (
+    <ActivityRow
+      id={id}
+      view={step.meta === step.title ? { ...step, meta: "" } : step}
+      open={open}
+      onToggle={detail ? (trigger) => onToggle(step.key, trigger) : undefined}
+    >
+      {detail && preview && (
+        <ActivityDetail
+          entry={step.entry}
+          changes={step.changes}
+          api={preview.api}
+          sessionId={sessionId ?? preview.sessionId}
+          scale={preview.scale}
+          replay={false}
+        />
+      )}
+    </ActivityRow>
+  );
+});
+
+function OneStep({ step, sessionId }: { step: WorkStep; sessionId?: string }) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const show = (_key: string, trigger: HTMLButtonElement) => {
+    setOpen(!open);
+    if (!open) revealOpened(trigger.closest(".activity-row"));
+  };
+  return (
+    <div className="thread-work" data-single="">
+      <StepRow id={id} step={step} sessionId={sessionId} open={open} onToggle={show} />
+      <WorkPictures steps={[step]} sessionId={sessionId} onMore={() => setOpen(true)} />
+    </div>
+  );
+}
+
 const estimateWorkStep = () => 56;
 const readGroupOf = (step: WorkStep) => step.readGroup;
-function WorkHistory({
+// Drawn again only when its steps are, not as the run's clock ticks.
+const WorkHistory = memo(function WorkHistory({
   steps,
   startMs,
   sessionId,
@@ -259,9 +338,16 @@ function WorkHistory({
   sessionId?: string;
 }) {
   const id = useId();
-  const preview = useStepPreviewEnvironment();
   const [opened, setOpened] = useState<string | null>(null);
   const follow = useFollowScroll(String(startMs), true);
+  const now = useRef({ follow, opened });
+  now.current = { follow, opened };
+  const toggle = useCallback((key: string, trigger: HTMLButtonElement) => {
+    now.current.follow.anchorTo(trigger);
+    const opening = now.current.opened !== key;
+    setOpened(opening ? key : null);
+    if (opening) revealOpened(trigger.closest(".activity-row"));
+  }, []);
   const list = useRef<HTMLOListElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const groups = useMemo(() => groupReadSteps(steps, readGroupOf), [steps]);
@@ -293,14 +379,13 @@ function WorkHistory({
       onScroll={follow.onScroll}
       {...follow.gestures()}
     >
-      <ol ref={list} className="thread-work-list" aria-label="Steps in this turn">
+      <ol ref={list} className="thread-work-list" aria-label="Steps">
         <li role="presentation" aria-hidden="true" style={{ height: virtual.before }} />
         {virtual.indexes.map((index) => {
           const item = display[index];
           if (!item) return null;
           const { step, group } = item;
           const open = !!group && expanded.has(group.key);
-          const detail = !!preview && !!step && hasDetails(step.entry, step.changes);
           return (
             <li
               key={item.key}
@@ -312,32 +397,13 @@ function WorkHistory({
               data-group-child={item.child || undefined}
             >
               {step ? (
-                <ActivityRow
+                <StepRow
                   id={`${id}-${step.key}`}
-                  view={step.meta === step.title ? { ...step, meta: "" } : step}
+                  step={step}
+                  sessionId={sessionId}
                   open={opened === step.key}
-                  onToggle={
-                    detail
-                      ? (trigger) => {
-                          follow.anchorTo(trigger);
-                          const opening = opened !== step.key;
-                          setOpened(opening ? step.key : null);
-                          if (opening) revealOpened(trigger.closest(".activity-row"));
-                        }
-                      : undefined
-                  }
-                >
-                  {detail && preview && (
-                    <ActivityDetail
-                      entry={step.entry}
-                      changes={step.changes}
-                      api={preview.api}
-                      sessionId={sessionId ?? preview.sessionId}
-                      scale={preview.scale}
-                      replay={false}
-                    />
-                  )}
-                </ActivityRow>
+                  onToggle={toggle}
+                />
               ) : (
                 group && (
                   <GroupHeading
@@ -366,4 +432,4 @@ function WorkHistory({
       </ol>
     </ScrollArea>
   );
-}
+});

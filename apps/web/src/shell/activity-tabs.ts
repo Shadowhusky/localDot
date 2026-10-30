@@ -1,4 +1,4 @@
-type Tab = "steps" | "files" | "sources" | "agents" | "previews";
+export type Tab = "steps" | "files" | "sources" | "agents" | "previews";
 const KEY = "localdot.activity-tabs.v1";
 const KEEP = 100;
 
@@ -34,3 +34,22 @@ export const activityTabs = {
     } catch {}
   },
 };
+
+type TabListener = (tab: Tab) => void;
+const tabListeners = new Set<TabListener>();
+let asked: Tab | null = null;
+
+// Another part of the page asks Activity for a tab: at once while it is on the page, else as it
+// comes.
+export function showActivityTab(tab: Tab): void {
+  asked = tabListeners.size ? null : tab;
+  for (const listener of tabListeners) listener(tab);
+}
+export function onActivityTab(listener: TabListener): () => void {
+  tabListeners.add(listener);
+  if (asked) listener(asked);
+  asked = null;
+  return () => {
+    tabListeners.delete(listener);
+  };
+}

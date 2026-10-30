@@ -19,14 +19,17 @@ function before(sessions: readonly string[], sessionId: string | null): readonly
   return at < 0 ? sessions : sessions.slice(0, at);
 }
 
-// Results of an earlier task download that task's files, and its steps unfold what it recorded.
+// Results of an earlier task download that task's files, its steps unfold what it recorded, and
+// the files its messages carried open from its computer.
 function owned(items: readonly ThreadItem[], sessionId: string): ThreadItem[] {
   return items.map((item) =>
     item.kind === "result" && item.result.sessionId !== sessionId
       ? { ...item, result: { ...item.result, sessionId } }
       : item.kind === "work"
         ? { ...item, sessionId }
-        : item,
+        : item.kind === "message" && !item.message.sessionId
+          ? { ...item, message: { ...item.message, sessionId } }
+          : item,
   );
 }
 
@@ -48,6 +51,8 @@ export async function readThread(
     model.results,
     model.takeovers.values(),
     model.routineProposals.values(),
+    undefined,
+    model.dots,
   );
   const steps = workSteps(timelineRows(stepRows(stage), stage.keyUses), model);
   return owned(

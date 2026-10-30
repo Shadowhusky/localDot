@@ -10,10 +10,12 @@ export function useVersions(
   sessionId: string,
   name: string,
   refresh: number,
+  wanted = true,
 ): FileVersion[] | null {
   const [versions, setVersions] = useState<FileVersion[] | null>(null);
   useEffect(() => {
     void refresh;
+    if (!wanted) return;
     const controller = new AbortController();
     loadVersions(api, sessionId, name, controller.signal).then(
       (reply) => {
@@ -22,6 +24,6 @@ export function useVersions(
       () => {},
     );
     return () => controller.abort();
-  }, [api, sessionId, name, refresh]);
+  }, [api, sessionId, name, refresh, wanted]);
   return versions;
 }

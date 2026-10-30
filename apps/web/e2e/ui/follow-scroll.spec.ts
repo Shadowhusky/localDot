@@ -98,9 +98,8 @@ test("small wheel steps back in the step list stay put while steps arrive", asyn
 }) => {
   const fixture = await ui.open("running");
   await page.request.post(`${fixture.origin}/__qa/steps?n=40`);
-  const work = page.locator(".thread-live .thread-work");
+  const work = page.locator(".thread-work[data-live]");
   await expect(work).toContainText("steps");
-  await work.getByRole("button", { expanded: false }).click();
   const steps = work.getByRole("region", { name: "Work history" });
   await atEnd(steps);
   await watch(steps);
@@ -122,6 +121,7 @@ test("a finger dragging a streaming chat or the step list back a little keeps it
   const thread = page.locator(".thread-scroll");
   await expect(thread.locator("article.thread-message").last()).toContainText("(30)");
   await atEnd(thread);
+  const streamed = Date.now() + 8000;
   await page.request.post(`${fixture.origin}/__qa/stream?ms=8000`);
   await expect(thread).toContainText("cell5");
   await watch(thread);
@@ -129,9 +129,13 @@ test("a finger dragging a streaming chat or the step list back a little keeps it
   await page.waitForTimeout(800);
   await stayedBack(page);
 
+  // Once dot has stopped talking, the reader goes back to the end, where the run dot is at
+  // streams its steps.
+  await page.waitForTimeout(Math.max(0, streamed + 500 - Date.now()));
+  await page.locator(".thread-jump").getByRole("button").click();
+  await atEnd(thread);
   await page.request.post(`${fixture.origin}/__qa/steps?n=40`);
-  const work = page.locator(".thread-live .thread-work");
-  await work.getByRole("button", { expanded: false }).click();
+  const work = page.locator(".thread-work[data-live]");
   const steps = work.getByRole("region", { name: "Work history" });
   await atEnd(steps);
   await watch(steps);

@@ -77,9 +77,27 @@
     text-underline-offset: 2px;
   }
 
+  .preview-notice-url {
+    margin-top: calc(var(--spacing) * 2);
+    color: var(--color-fg-1);
+    font: var(--text-mono) / var(--text-mono--line-height) var(--font-mono);
+    overflow-wrap: anywhere;
+    user-select: all;
+  }
+
   .previews-panel {
     display: grid;
     gap: calc(var(--spacing) * 4);
     padding-top: calc(var(--spacing) * 2);
+  }
+
+  .previews-intro {
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    text-wrap: pretty;
+  }
+
+  .preview-app-state[data-state="not-answering"] {
+    color: var(--color-attention);
   }
 }

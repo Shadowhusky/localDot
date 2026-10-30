@@ -29,6 +29,13 @@ export function awayWords(cause: AwayCause, screen: ScreenName) {
   }
 }
 
+// Only a move dot makes in its running task is news. With no task at work the page goes back to the
+// desktop by itself (a task ended, a new conversation began) and dot has not moved.
+export function screenMoveNote(to: ScreenName, dotChose: boolean): string | null {
+  if (!dotChose) return null;
+  return to === "browser" ? "dot moved to the web browser" : "dot is back on the desktop";
+}
+
 // Over the last picture while it is away: nothing for a blip (only a dip while dot changes
 // screens), then a word, then what is going on and a way to try again. The HUD and the screen toast
 // already say a gap and a switch, so only what lasts is announced.

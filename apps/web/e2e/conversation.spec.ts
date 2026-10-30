@@ -116,9 +116,9 @@ async function framesDuring(page: Page, act: () => Promise<unknown>): Promise<Fr
 }
 
 for (const [engine, size, options] of MATRIX) {
-  test(`dot's work shows under the thread, in the column's only scroller (${engine} ${size})`, async () => {
+  test(`dot's work shows in the thread, in the column's only scroller (${engine} ${size})`, async () => {
     const { browser, page, thread } = await open(engine, options);
-    const work = page.locator(".thread-live .thread-work");
+    const work = page.locator(".thread-work[data-live]");
     await expect(work).toContainText("Select the Net total cell");
     await expect(work.getByRole("button", { name: /Working · 6 steps/ })).toBeVisible();
     // Long enough to scroll, the thread is still the only thing in the column that does.
@@ -266,8 +266,11 @@ for (const [engine, size, options] of [
     await expect.poll(() => onScreen(page, raise)).toBe(true);
     // Only the composer lies past it, so there is nothing newer to jump to.
     await expect(page.locator(".thread-jump")).not.toHaveAttribute("data-shown");
+    // The run dot is at began after its last words: the one step since them.
     await expect(
-      page.locator(".thread-live").getByRole("button", { name: /Waiting for you · 6 steps/ }),
+      page
+        .locator(".thread-work[data-live]")
+        .getByRole("button", { name: /Waiting for you · 1 step/ }),
     ).toBeVisible();
     await raise.click();
     await expect(recovery).toHaveCount(0);
@@ -286,7 +289,7 @@ for (const [engine, size, options] of [
   // thread moves it, in or out of the thread or up and down.
   test(`a question, its answer and the task's end never move the composer (${engine} ${size})`, async () => {
     const { browser, page } = await open(engine, options);
-    await expect(page.locator(".thread-live .thread-work")).toBeVisible();
+    await expect(page.locator(".thread-work[data-live]")).toBeVisible();
     await page.waitForTimeout(600);
     const asked = await framesDuring(page, () => qa("ask"));
     const answered = await framesDuring(page, async () => {
@@ -312,8 +315,8 @@ test("new rows and streaming words never shift what sits under the thread", asyn
     viewport: { width: 1440, height: 1400 },
   });
   await expect(page.locator(".thread-foot > .thread-dock")).toHaveCount(1);
-  // Let the first picture settle: the work line opens under the thread as the task loads.
-  await expect(page.locator(".thread-live .thread-work")).toBeVisible();
+  // Let the first picture settle: the run dot is at opens in the thread as the task loads.
+  await expect(page.locator(".thread-work[data-live]")).toBeVisible();
   await page.waitForTimeout(800);
   // The thread sits on the composer and follows its end, so its rows rise as words and rows land
   // (design-v2 §8.4); the work line and the composer under it hold still.
@@ -338,7 +341,7 @@ test("new rows and streaming words never shift what sits under the thread", asyn
   await qa("say?stream=1&text=Checking that every month adds up before I write the summary");
   await expect(thread.locator(".thread-message").last()).toContainText("write the summary");
   await qa("steps?n=2&item=calc");
-  await expect(page.locator(".thread-live .thread-work")).toContainText("Fill area 2 with brown");
+  await expect(page.locator(".thread-work[data-live]")).toContainText("Fill area 2 with brown");
   await page.waitForTimeout(600);
   const shifts = await page.evaluate(
     () => (window as unknown as { threadShifts: unknown[] }).threadShifts,

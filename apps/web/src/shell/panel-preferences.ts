@@ -5,9 +5,12 @@ export interface PanelPreferences {
   chat: boolean;
   activity: boolean;
   view: RailView;
+  // The conversations rail is expanded to their names; null until the user chooses, when the
+  // layout decides.
+  sessions: boolean | null;
 }
 export const PANELS_KEY = "localdot.panels.v1";
-const DEFAULTS: PanelPreferences = { chat: true, activity: true, view: "chat" };
+const DEFAULTS: PanelPreferences = { chat: true, activity: true, view: "chat", sessions: null };
 
 export function readPanels(): PanelPreferences {
   try {
@@ -16,6 +19,7 @@ export function readPanels(): PanelPreferences {
       chat: typeof value?.chat === "boolean" ? value.chat : true,
       activity: typeof value?.activity === "boolean" ? value.activity : true,
       view: ["chat", "activity", "routines"].includes(value?.view) ? value.view : "chat",
+      sessions: typeof value?.sessions === "boolean" ? value.sessions : null,
     };
   } catch {
     return DEFAULTS;

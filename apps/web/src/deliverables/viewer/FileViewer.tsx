@@ -1,8 +1,11 @@
 // Configure schemas before importing them: zod must not probe Function() against the CSP.
 import "@localdot/protocol/csp";
 import {
+  type ComputerFileReply,
   canOpenOnMac,
+  computerFileName,
   fileExtension,
+  fileKind,
   isPresentation,
   type TextFormat,
   textFormat,
@@ -12,31 +15,49 @@ import {
 } from "@localdot/protocol";
 import {
   lazy,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
   Suspense,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
-import { FileName, type ResultDownloads } from "../../agent/ResultFiles.tsx";
+import { FileName } from "../../agent/ResultFiles.tsx";
 import { bytes } from "../../copy/format.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { matches, REDUCED_MOTION } from "../../ui/media.ts";
-import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Sheet } from "../../ui/Sheet.tsx";
-import { keptPreviewBase, previewBase, previewUrl } from "../api.ts";
+import {
+  type FileRef,
+  keptPreviewBase,
+  loadComputerFile,
+  onComputer,
+  previewBase,
+  previewUrl,
+} from "../api.ts";
 import { openHere } from "../open-here.ts";
+import { useVersions } from "../useVersions.ts";
+import { comparePair, findVersion } from "../versions.ts";
+import { type Changes, ChangesView } from "./ChangesView.tsx";
 import { MediaView } from "./MediaView.tsx";
 import { PageView } from "./PageView.tsx";
 import { PictureView } from "./PictureView.tsx";
-import { entryKey, type ShownVersion, type ViewerEntry } from "./scope.tsx";
-import { ViewerLoading, ViewerMessage } from "./states.tsx";
+import {
+  type AnyEntry,
+  anyEntryKey,
+  isComputerEntry,
+  type ShownVersion,
+  type ViewerDownloads,
+} from "./scope.tsx";
+import { ViewerBar, ViewerLoading, ViewerMessage, ViewSwitch } from "./states.tsx";
 import { TableView } from "./TableView.tsx";
 import { TextView } from "./TextView.tsx";
 import { viewerHears } from "./viewer-keys.ts";
+import { useViewChoice, type ViewChoice, viewBucket, viewItems } from "./views.ts";
 import { rubberband, swipeTurn } from "./zoom.ts";
 import "./viewer.css";
 
@@ -111,29 +132,65 @@ export function kindLabel(name: string): string {
 
 interface Item {
   key: string;
-  entry: ViewerEntry;
+  entry: AnyEntry;
   name: string;
-  sessionId: string;
-  version: number | null;
-  bytes: number;
+  file: FileRef;
+  // Unknown for a file on the computer until the computer says.
+  bytes: number | null;
   label?: number;
   // The file's own version, so a download needs no other.
   own: boolean;
 }
-function itemOf(entry: ViewerEntry, shown?: ShownVersion & { key: string }): Item {
-  const key = entryKey(entry);
+function itemOf(entry: AnyEntry, shown?: ShownVersion & { key: string }): Item {
+  const key = anyEntryKey(entry);
+  if (isComputerEntry(entry)) {
+    const name = computerFileName(entry.path);
+    return {
+      key,
+      entry,
+      name,
+      file: { sessionId: entry.sessionId, name, path: entry.path },
+      bytes: null,
+      own: true,
+    };
+  }
   const pick = shown?.key === key ? shown : undefined;
   const own = entry.file.version ?? null;
   return {
     key,
     entry,
     name: entry.file.name,
-    sessionId: pick?.sessionId ?? entry.sessionId,
-    version: pick ? pick.version : own,
+    file: {
+      sessionId: pick?.sessionId ?? entry.sessionId,
+      name: entry.file.name,
+      version: pick ? pick.version : own,
+    },
     bytes: pick?.bytes ?? entry.file.bytes,
     label: pick?.label,
     own: !pick || (pick.sessionId === entry.sessionId && pick.version === own),
   };
+}
+type About = ComputerFileReply | "failed";
+const UNREACHABLE: Partial<Record<string, string>> = {
+  computer_off: "Turn on your computer to get this file.",
+  busy: "Your computer is busy. Try again in a moment.",
+  missing: "This file is no longer on the computer.",
+};
+// What the computer says of a file on it: its size now, or why it can't be read.
+function useAbout(api: ApiClient, file: FileRef, attempt: number): About | null {
+  const [about, setAbout] = useState<{ key: string; about: About } | null>(null);
+  const key = onComputer(file) ? `${file.sessionId}/${file.path}/${attempt}` : "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key names the file and the attempt.
+  useEffect(() => {
+    if (!onComputer(file)) return;
+    const controller = new AbortController();
+    loadComputerFile(api, file, controller.signal).then(
+      (reply) => !controller.signal.aborted && setAbout({ key, about: reply }),
+      () => !controller.signal.aborted && setAbout({ key, about: "failed" }),
+    );
+    return () => controller.abort();
+  }, [api, key]);
+  return about?.key === key ? about.about : null;
 }
 
 // Whether something under `from` scrolls sideways in the direction a swipe would move it.
@@ -148,17 +205,19 @@ function scrollsAcross(from: EventTarget | null, dx: number, root: HTMLElement):
   return false;
 }
 
-export interface FileViewerProps {
+export interface FileViewerProps<E extends AnyEntry> {
   api: ApiClient;
-  entries: readonly ViewerEntry[];
+  entries: readonly E[];
   index: number;
   shown?: ShownVersion & { key: string };
   open: boolean;
-  downloads: Pick<ResultDownloads, "state" | "busy" | "request" | "sessionId">;
+  downloads: ViewerDownloads<E>;
   onMac: boolean;
   previewWidth?: number;
   displayName?: string;
   returnFocus?: RefObject<HTMLElement | null>;
+  // The view the file opens on, such as Changes from a change's own preview.
+  view?: string;
   onIndex(next: number): void;
   onClose(): void;
 }
@@ -166,7 +225,7 @@ export interface FileViewerProps {
 // The full preview: the file large in a wide sheet (a full-height sheet on a phone), with the arrow
 // keys, a swipe or the buttons moving between the files beside it, and Download and Open on Mac
 // always in reach.
-export function FileViewer({
+export function FileViewer<E extends AnyEntry>({
   api,
   entries,
   index,
@@ -177,10 +236,11 @@ export function FileViewer({
   previewWidth,
   displayName,
   returnFocus,
+  view,
   onIndex,
   onClose,
-}: FileViewerProps) {
-  const entry = entries[index] as ViewerEntry;
+}: FileViewerProps<E>) {
+  const entry = entries[index] as E;
   const item = itemOf(entry, shown);
   const total = entries.length;
   const root = useRef<HTMLDivElement>(null);
@@ -189,7 +249,7 @@ export function FileViewer({
   const go = (step: -1 | 1) => {
     const next = index + step;
     if (next < 0 || next >= total) return;
-    const key = entries[next] && entryKey(entries[next]);
+    const key = entries[next] && anyEntryKey(entries[next]);
     if (key) setEntered({ key, from: step });
     onIndex(next);
   };
@@ -279,11 +339,19 @@ export function FileViewer({
     if (turn !== 0) go(turn);
   };
 
-  const state = downloads.state(entry.resultId, entry.file);
+  const [attempt, setAttempt] = useState(0);
+  const about = useAbout(api, item.file, attempt);
+  const size =
+    item.bytes ?? (about && about !== "failed" && about.kind === "file" ? about.bytes : null);
+  const state = downloads.state(entry);
   const kind = viewerKind(item.name);
   // The arrows turn a document's own pages.
   const paged = kind === "pdf" || kind === "page";
-  const meta = [kindLabel(item.name), bytes(item.bytes), item.label ? `v${item.label}` : null]
+  const meta = [
+    kindLabel(item.name),
+    size === null ? null : bytes(size),
+    item.label ? `v${item.label}` : null,
+  ]
     .filter(Boolean)
     .join(" · ");
   const download = (
@@ -292,17 +360,17 @@ export function FileViewer({
       icon={state === "done" ? "check" : "download"}
       busy={state === "busy"}
       disabledReason={
-        !downloads.sessionId
-          ? "This task is no longer available."
-          : downloads.busy && state !== "busy"
-            ? "Another download is still running."
-            : undefined
+        downloads.blocked(entry) ??
+        (about && about !== "failed" && about.kind === "none"
+          ? UNREACHABLE[about.reason]
+          : undefined)
       }
       onClick={() =>
-        void downloads.request(
-          entry.resultId,
-          entry.file,
-          item.own ? undefined : { sessionId: item.sessionId, version: item.version },
+        downloads.request(
+          entry,
+          item.own || onComputer(item.file)
+            ? undefined
+            : { sessionId: item.file.sessionId, version: item.file.version },
         )
       }
     >
@@ -337,11 +405,14 @@ export function FileViewer({
         <span />
       )}
       <div className="viewer-actions">
-        {onMac && canOpenOnMac(item.name) && (
+        {onMac && !onComputer(item.file) && canOpenOnMac(item.name) && (
           <Button
             size="md"
             variant="secondary"
-            onClick={() => void openHere(api, item.sessionId, item.name, item.version)}
+            onClick={() =>
+              !onComputer(item.file) &&
+              void openHere(api, item.file.sessionId, item.name, item.file.version)
+            }
           >
             Open on Mac
           </Button>
@@ -384,12 +455,21 @@ export function FileViewer({
       >
         <div
           ref={pane}
-          key={`${item.key}/${item.sessionId}/${item.version ?? 0}`}
+          key={`${item.key}/${JSON.stringify(item.file)}`}
           className="viewer-pane"
           data-kind={kind}
           data-from={enteredFrom === 1 ? "right" : enteredFrom === -1 ? "left" : undefined}
         >
-          <ViewBody api={api} item={item} kind={kind} download={download} />
+          <ViewBody
+            api={api}
+            item={item}
+            kind={kind}
+            size={size}
+            about={about}
+            view={view}
+            download={download}
+            retry={() => setAttempt((n) => n + 1)}
+          />
         </div>
       </div>
     </Sheet>
@@ -397,64 +477,136 @@ export function FileViewer({
 }
 
 // A kept link shows the file at once; the daemon's answer replaces it if the daemon has restarted.
-function usePreviewUrl(api: ApiClient, item: Item, wanted: boolean): string | null | "failed" {
+function usePreviewUrl(api: ApiClient, file: FileRef, wanted: boolean): string | null | "failed" {
   const [url, setUrl] = useState<{ key: string; url: string | "failed" } | null>(null);
-  const key = `${item.sessionId}/${item.name}/${item.version ?? 0}`;
+  const key = JSON.stringify(file);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key names the file.
   useEffect(() => {
     if (!wanted) return;
     const controller = new AbortController();
     const show = (next: string) =>
       setUrl((was) => (was?.key === key && was.url === next ? was : { key, url: next }));
-    const kept = keptPreviewBase(api, item.sessionId);
-    if (kept) show(previewUrl(api, kept, item.name, item.version));
-    previewBase(api, item.sessionId, controller.signal).then(
-      (base) => !controller.signal.aborted && show(previewUrl(api, base, item.name, item.version)),
+    const kept = keptPreviewBase(api, file.sessionId);
+    if (kept) show(previewUrl(api, kept, file));
+    previewBase(api, file.sessionId, controller.signal).then(
+      (base) => !controller.signal.aborted && show(previewUrl(api, base, file)),
       () => !controller.signal.aborted && !kept && show("failed"),
     );
     return () => controller.abort();
-  }, [api, item.sessionId, item.name, item.version, key, wanted]);
+  }, [api, key, wanted]);
   return url?.key === key ? url.url : null;
 }
+
+// What changed in the file: the task's own edits of a file on the computer, or, for a text version
+// dot handed over, what changed from the version before it.
+function useChanges(api: ApiClient, item: Item): Changes | null {
+  const { entry, file, name } = item;
+  const kind = fileKind(name);
+  const versions = useVersions(
+    api,
+    file.sessionId,
+    name,
+    0,
+    !onComputer(file) && (kind === "text" || kind === "table"),
+  );
+  return useMemo(() => {
+    if (isComputerEntry(entry))
+      return entry.changes?.some((change) => change.patch)
+        ? { kind: "patches", patches: entry.changes }
+        : null;
+    if (onComputer(file) || !versions) return null;
+    const pair = comparePair(name, versions, findVersion(versions, file));
+    return pair
+      ? {
+          kind: "versions",
+          file: { sessionId: entry.sessionId, name, version: file.version },
+          from: pair[0],
+          to: pair[1],
+        }
+      : null;
+  }, [entry, file, name, versions]);
+}
+
+const ABOUT_TITLES: Record<string, string> = {
+  computer_off: "Turn on your computer to see this file",
+  busy: "Your computer is busy",
+  missing: "This file is no longer on the computer",
+  too_large: "Too large to preview",
+};
 
 function ViewBody({
   api,
   item,
   kind,
+  size,
+  about,
+  view,
   download,
+  retry,
 }: {
   api: ApiClient;
   item: Item;
   kind: ViewerKind;
-  download: React.ReactNode;
+  size: number | null;
+  about: About | null;
+  view?: string;
+  download: ReactNode;
+  retry(): void;
 }) {
+  const { name, file } = item;
+  const computer = onComputer(file);
+  const changes = useChanges(api, item);
+  const bucket = viewBucket(kind, name);
+  const items = useMemo(
+    () => viewItems(bucket, { pages: kind === "sheet" && !computer, changes: !!changes }),
+    [bucket, kind, computer, changes],
+  );
+  const choice = useViewChoice(bucket, items, view);
   const cap = CAPS[kind];
-  const tooLarge = cap !== undefined && item.bytes > cap;
+  const tooLarge = cap !== undefined && size !== null && size > cap;
+  const reachable = !computer || (about !== null && about !== "failed" && about.kind === "file");
   const drawn = ["picture", "svg", "pdf", "html", "audio", "video"].includes(kind);
-  const url = usePreviewUrl(api, item, drawn && !tooLarge);
-  const { name, sessionId, version } = item;
+  const url = usePreviewUrl(api, file, drawn && reachable && !tooLarge);
+  if (changes && choice.value === "changes")
+    return <ChangesView api={api} name={name} changes={changes} choice={choice} />;
+  if (!reachable)
+    return (
+      <Unreachable name={name} about={about} choice={choice} download={download} retry={retry} />
+    );
+  const lead = <ViewSwitch choice={choice} />;
   if (tooLarge)
     return (
-      <ViewerMessage name={name} title="Too large to preview" action={download}>
-        {bytes(item.bytes)} is more than this preview opens.
-      </ViewerMessage>
+      <>
+        {items.length > 1 && <ViewerBar>{lead}</ViewerBar>}
+        <ViewerMessage name={name} title="Too large to preview" action={download}>
+          {bytes(size)} is more than this preview opens.
+        </ViewerMessage>
+      </>
     );
   if (url === "failed") return <ViewerMessage name={name} title="Couldn't load the preview" />;
-  if (kind === "text" || kind === "details")
-    return (
-      <TextView api={api} sessionId={sessionId} name={name} version={version} download={download} />
-    );
-  if (kind === "table")
-    return <TableView api={api} sessionId={sessionId} name={name} version={version} />;
+  const source = choice.value === "source";
+  if (kind === "text" || kind === "details" || (source && (kind === "table" || kind === "svg")))
+    return <TextView api={api} file={file} download={download} choice={choice} />;
+  if (kind === "table") return <TableView api={api} file={file} lead={lead} />;
   if (kind === "sheet")
-    return <SheetView api={api} sessionId={sessionId} name={name} version={version} />;
-  if (kind === "page")
-    return (
+    return onComputer(file) || choice.value !== "pages" ? (
+      <TableView api={api} file={file} lead={lead} />
+    ) : (
       <Suspense fallback={<ViewerLoading label="Loading the pages" />}>
-        <OfficePages api={api} sessionId={sessionId} name={name} version={version} />
+        <OfficePages api={api} file={file} lead={lead} />
       </Suspense>
     );
-  if (kind === "html")
-    return <PageView api={api} url={url} sessionId={sessionId} name={name} version={version} />;
+  if (kind === "page")
+    return onComputer(file) ? (
+      <ViewerMessage name={name} title="No preview for this kind of file" action={download}>
+        Download it to open it in another app.
+      </ViewerMessage>
+    ) : (
+      <Suspense fallback={<ViewerLoading label="Loading the pages" />}>
+        <OfficePages api={api} file={file} />
+      </Suspense>
+    );
+  if (kind === "html") return <PageView api={api} url={url} file={file} choice={choice} />;
   if (url === null) return <ViewerLoading label="Loading the preview" />;
   if (kind === "pdf")
     return (
@@ -464,33 +616,51 @@ function ViewBody({
     );
   if (kind === "audio" || kind === "video")
     return <MediaView key={url} url={url} kind={kind} name={name} />;
-  return <PictureView key={url} src={url} name={name} />;
+  return <PictureView key={url} src={url} name={name} lead={lead} />;
 }
 
-// A workbook as its table, or as the pages it would print on, which dot's computer makes.
-function SheetView(props: {
-  api: ApiClient;
-  sessionId: string;
+// A file on the computer the viewer can't read now, and why.
+function Unreachable({
+  name,
+  about,
+  choice,
+  download,
+  retry,
+}: {
   name: string;
-  version: number | null;
+  about: About | null;
+  choice: ViewChoice;
+  download: ReactNode;
+  retry(): void;
 }) {
-  const [shown, setShown] = useState("table");
-  const lead = (
-    <SegmentedControl
-      size={28}
-      aria-label="Show"
-      value={shown}
-      items={[
-        { value: "table", label: "Table" },
-        { value: "pages", label: "Pages" },
-      ]}
-      onValueChange={setShown}
-    />
+  const reason = about && about !== "failed" && about.kind === "none" ? about.reason : null;
+  const again = (
+    <Button size="md" variant="secondary" onClick={retry}>
+      Try again
+    </Button>
   );
-  if (shown === "table") return <TableView {...props} lead={lead} />;
   return (
-    <Suspense fallback={<ViewerLoading label="Loading the pages" />}>
-      <OfficePages {...props} lead={lead} />
-    </Suspense>
+    <>
+      {choice.items.length > 1 && (
+        <ViewerBar>
+          <ViewSwitch choice={choice} />
+        </ViewerBar>
+      )}
+      {about === null ? (
+        <ViewerLoading label="Reading the file on your computer" />
+      ) : (
+        <ViewerMessage
+          name={name}
+          title={(reason && ABOUT_TITLES[reason]) || "Couldn't read this file"}
+          action={reason === "too_large" ? download : reason === "missing" ? undefined : again}
+        >
+          {reason === "missing"
+            ? "It was moved or deleted after the task listed it."
+            : reason === "computer_off"
+              ? "The file stays on your computer while it is off."
+              : undefined}
+        </ViewerMessage>
+      )}
+    </>
   );
 }

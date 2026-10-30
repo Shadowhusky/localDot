@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import type { AgentResult } from "../../agent/model.ts";
-import type { ResultDownloads } from "../../agent/ResultFiles.tsx";
+import type { DownloadVersion, FileState, ResultDownloads } from "../../agent/ResultFiles.tsx";
 import type { ApiClient } from "../../lib/api.ts";
 import { ErrorBoundary } from "../../ui/ErrorBoundary.tsx";
 import { showToast } from "../../ui/Toast.tsx";
@@ -22,6 +22,42 @@ export interface ShownVersion {
 }
 export const entryKey = (entry: Pick<ViewerEntry, "resultId" | "file">) =>
   `${entry.resultId}/${entry.file.name}`;
+// A file on dot's computer: one the user sent with a message, or one the task changed, with what
+// the task changed in it.
+export interface ComputerEntry {
+  sessionId: string;
+  path: string;
+  changes?: readonly FilePatch[];
+}
+export interface FilePatch {
+  patch?: string;
+  op?: "create" | "modify" | "delete";
+  truncated?: boolean;
+}
+export type AnyEntry = ViewerEntry | ComputerEntry;
+export const isComputerEntry = (entry: AnyEntry): entry is ComputerEntry => "path" in entry;
+export const anyEntryKey = (entry: AnyEntry) =>
+  isComputerEntry(entry) ? `computer:${entry.sessionId}:${entry.path}` : entryKey(entry);
+// How the viewer gets a file: its download's state, why it can't start now, and starting it.
+export interface ViewerDownloads<E extends AnyEntry = AnyEntry> {
+  state(entry: E): FileState | undefined;
+  blocked(entry: E): string | undefined;
+  request(entry: E, version?: DownloadVersion): void;
+}
+export function resultDownloads(
+  downloads: Pick<ResultDownloads, "state" | "busy" | "request" | "sessionId">,
+): ViewerDownloads<ViewerEntry> {
+  return {
+    state: (entry) => downloads.state(entry.resultId, entry.file),
+    blocked: (entry) =>
+      !downloads.sessionId
+        ? "This task is no longer available."
+        : downloads.busy && downloads.state(entry.resultId, entry.file) !== "busy"
+          ? "Another download is still running."
+          : undefined,
+    request: (entry, version) => void downloads.request(entry.resultId, entry.file, version),
+  };
+}
 
 const Context = createContext<((key: string, shown?: ShownVersion) => void) | null>(null);
 
@@ -63,6 +99,7 @@ export function FileViewerScope({
     [keys],
   );
   const index = viewing ? keys.indexOf(viewing.key) : -1;
+  const getting = useMemo(() => resultDownloads(downloads), [downloads]);
   return (
     <Context.Provider value={open}>
       {children}
@@ -74,7 +111,7 @@ export function FileViewerScope({
             index={index}
             shown={viewing.shown && { key: viewing.key, ...viewing.shown }}
             open={viewing.open}
-            downloads={downloads}
+            downloads={getting}
             onMac={onMac}
             onIndex={(next) => {
               const key = keys[next];

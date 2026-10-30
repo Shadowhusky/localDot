@@ -5,7 +5,7 @@ runAt("c14", "c39", "w39");
 const LONG =
   "Compare every flight to Lisbon for the first week of May, the late ones and the cheap ones, then book the best";
 
-test("a long conversation name never squeezes its status point or wraps its time", async ({
+test("a long conversation name never squeezes its status glyph or wraps its time", async ({
   page,
   ui,
 }) => {
@@ -46,6 +46,6 @@ test("a long conversation name never squeezes its status point or wraps its time
     }),
   );
   expect(rows.length).toBeGreaterThan(1);
-  for (const row of rows) expect(row).toEqual({ point: [8, 8], gap: 12, cut: true, lines: 1 });
+  for (const row of rows) expect(row).toEqual({ point: [16, 16], gap: 12, cut: true, lines: 1 });
   await page.screenshot({ path: test.info().outputPath("conversations-long.png") });
 });

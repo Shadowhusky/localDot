@@ -86,7 +86,11 @@ describe("research in the composer", () => {
     expect(f.requests).toEqual([
       {
         path: `/api/cells/${cellId}/agent`,
-        body: { task: "Which heat pumps work best below -15 C?", mode: "research" },
+        body: {
+          task: "Which heat pumps work best below -15 C?",
+          continues: null,
+          mode: "research",
+        },
       },
     ]);
     expect(f.toggle().getAttribute("aria-pressed")).toBe("false");
@@ -101,14 +105,14 @@ describe("research in the composer", () => {
     await act(async () => f.submit());
     expect(f.requests[0]).toEqual({
       path: `/api/cells/${cellId}/agent`,
-      body: { task: "Now compare their warranties", mode: "research" },
+      body: { task: "Now compare their warranties", continues: sessionId, mode: "research" },
     });
   });
   it("sends an ordinary task when research is off", async () => {
     const f = setup(fresh);
     f.input("Book a table for two");
     await act(async () => f.submit());
-    expect(f.requests[0]?.body).toEqual({ task: "Book a table for two" });
+    expect(f.requests[0]?.body).toEqual({ task: "Book a table for two", continues: null });
   });
   it("keeps its place but waits while dot works, and queues the next message", async () => {
     const f = setup(running);
@@ -149,6 +153,7 @@ describe("research in the composer", () => {
     await act(async () => f.submit());
     expect(f.requests[0]?.body).toEqual({
       task: "Compare the evidence on intermittent fasting and cite your sources",
+      continues: null,
       mode: "research",
     });
   });

@@ -142,7 +142,7 @@ test("New conversation starts afresh and stays new after a refresh", async ({
   if ((page.viewportSize()?.width ?? 0) < 700) {
     await page.getByRole("button", { name: "More" }).click();
     await page.getByRole("menuitem", { name: "New conversation" }).click();
-  } else await page.getByRole("button", { name: "New conversation" }).click();
+  } else await rail.getByRole("button", { name: "New conversation" }).click();
   await expect(rail.getByRole("heading", { name: "What should we do?" })).toBeVisible();
   await expect(rail.getByText(LATEST)).toHaveCount(0);
   await refresh(page);
@@ -158,7 +158,7 @@ test("New conversation starts afresh and stays new after a refresh", async ({
 
 test("New conversation waits while dot works", async ({ page, ui }) => {
   await ui.open("running");
-  await chat(page);
+  const rail = await chat(page);
   // In the rail's header; on a phone, first in More.
   if ((page.viewportSize()?.width ?? 0) < 700) {
     await page.getByRole("button", { name: "More" }).click();
@@ -167,7 +167,7 @@ test("New conversation waits while dot works", async ({ page, ui }) => {
       "true",
     );
   } else
-    await expect(page.getByRole("button", { name: "New conversation" })).toHaveAttribute(
+    await expect(rail.getByRole("button", { name: "New conversation" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );

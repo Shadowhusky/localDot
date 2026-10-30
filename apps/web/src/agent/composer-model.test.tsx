@@ -68,7 +68,10 @@ describe("a model chosen since the task started", () => {
     screen.getByRole("button", { name: "Send" });
     await f.send("Now do March");
     expect(f.requests).toEqual([
-      { path: `/api/cells/${cellId}/agent`, body: { task: "Now do March" } },
+      {
+        path: `/api/cells/${cellId}/agent`,
+        body: { task: "Now do March", continues: sessionId },
+      },
     ]);
   });
 

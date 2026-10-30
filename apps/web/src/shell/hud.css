@@ -340,7 +340,12 @@
   }
 }
 
-/* A phone's New conversation, level with the island in the strip over the picture. */
+/* A phone's New conversation, level with the island in the strip over the picture. The island
+   centres in the room left of it, so its controls never run under it. */
+.island-anchor:has(~ .island-new) {
+  left: calc(50% - (var(--island-h) + var(--spacing) * 2) / 2);
+}
+
 .island-new {
   position: absolute;
   top: calc(var(--_lower, 0px) - var(--island-h) - var(--island-gap));
@@ -350,6 +355,19 @@
 }
 
 .app[data-full] .island-new {
+  display: none;
+}
+
+/* A phone's conversations, level with New conversation in the other corner. */
+.island-conversations {
+  position: absolute;
+  top: calc(var(--_lower, 0px) - var(--island-h) - var(--island-gap));
+  left: 0;
+  z-index: var(--layer-island);
+  display: flex;
+}
+
+.app[data-full] .island-conversations {
   display: none;
 }
 

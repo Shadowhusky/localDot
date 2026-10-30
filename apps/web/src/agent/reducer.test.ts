@@ -43,6 +43,18 @@ describe("bounded agent projection", () => {
     expect(events.reduce(projectAgentEvent, model)).toBe(model);
     expect(events[0]?.data).toEqual({ messageId: message, text: "pre" });
   });
+  it("keeps when the computer changed hands, in session time, to place it among the steps", () => {
+    const model = reduce([
+      ev(1, "takeover.request", { requestId: takeover, reason: "login", note: "Sign in" }),
+      ev(2, "control.change", { holder: "user", reason: "handoff_request" }),
+      ev(3, "takeover.end", { requestId: takeover, by: "user" }),
+    ]);
+    expect(model.takeovers.get(takeover)).toMatchObject({
+      at: 1000,
+      taken: { seq: 2, at: 2000 },
+      endAt: 3000,
+    });
+  });
   it("keeps when a reply was whole and each call's tokens at its time, for the turn's line", () => {
     const usage = { role: "main", route: "anthropic", model: "claude-sonnet-5-5" };
     const model = reduce([

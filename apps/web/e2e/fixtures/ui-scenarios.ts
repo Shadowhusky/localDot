@@ -93,6 +93,15 @@ export const UI_SCENARIOS = {
     about: "A finished image read with a saved preview",
     boot: { QA_PHASE: "finished", QA_STEP_IMAGE: "1" },
   },
+  narrated: {
+    about:
+      "A finished task that talked between its steps: screenshots, an image read, a failed step and two files",
+    boot: { QA_PHASE: "finished", QA_STEP_IMAGE: "1", QA_NARRATED: "1" },
+  },
+  "long-run": {
+    about: "dot is deep in a long drawing task, talking between its batches of steps",
+    boot: { QA_ACTIVITY: "long", QA_NARRATED: "1" },
+  },
   done: {
     about: "The task finished with two files",
     boot: { QA_PHASE: "finished" },

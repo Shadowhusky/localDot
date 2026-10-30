@@ -105,6 +105,16 @@ const PLANNED: IconName[] = [
   "library",
   // Activity: the agents dot delegates to, on a tab too narrow for its name.
   "bot",
+  // The conversations rail's toggle, and each conversation's status in it.
+  "panel-left",
+  "status-working",
+  "status-waiting",
+  "status-needs-you",
+  "status-idle",
+  "status-paused",
+  "status-done",
+  "status-stopped",
+  "status-failed",
 ];
 
 describe("Icon", () => {

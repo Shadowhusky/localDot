@@ -148,6 +148,7 @@ export function ChatThread({
             model.takeovers.values(),
             model.routineProposals.values(),
             model.origin,
+            model.dots,
           )
         : [],
     [model],

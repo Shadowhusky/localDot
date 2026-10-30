@@ -94,11 +94,15 @@ export function researchWait(
   return working ? "Research starts with your next task." : undefined;
 }
 
-type Listener = () => void;
+type Listener = (question?: string) => void;
 const listeners = new Set<Listener>();
 // A phone's More menu asks the composer, which owns the message, to make it research.
 export function requestResearch(): void {
   for (const listener of listeners) listener();
+}
+// /research asks it to research this question at once.
+export function researchQuestion(question: string): void {
+  for (const listener of listeners) listener(question);
 }
 export function onResearchRequest(listener: Listener): () => void {
   listeners.add(listener);

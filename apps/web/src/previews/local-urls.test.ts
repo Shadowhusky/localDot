@@ -90,6 +90,10 @@ describe("addresses of servers in dot's computer", () => {
     expect(mayBeComputer("http://192.168.0.3/")).toBe(true);
     expect(mayBeComputer("http://8.8.8.8/")).toBe(false);
     expect(mayBeComputer("http://localhost:5173/")).toBe(false);
+    expect(mayBeComputer("http://3f2a9c1b7d4e:8888/lab")).toBe(true);
+    expect(localUrl("http://3f2a9c1b7d4e:8888/lab", [...COMPUTER, "3f2a9c1b7d4e"])?.label).toBe(
+      "3f2a9c1b7d4e:8888/lab",
+    );
     expect(mentionsPrivateAddress("Network: http://10.1.2.3:5173/")).toBe(true);
     expect(mentionsPrivateAddress("Local: http://localhost:5173/")).toBe(false);
   });

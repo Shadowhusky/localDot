@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { announce, withdraw } from "../ui/Announcer.tsx";
 import type { AwayCause, AwayLevel, ScreenName } from "./connection.ts";
-import { StageNotice } from "./StageNotice.tsx";
+import { StageNotice, screenMoveNote } from "./StageNotice.tsx";
 
 vi.mock("../ui/Announcer.tsx", () => ({ announce: vi.fn(), withdraw: vi.fn() }));
 
@@ -76,4 +76,11 @@ it("announces only a gap that lasts, once, and withdraws it once the picture is 
   view.rerender(<StageNotice connection={{ phase: "shown" }} />);
   expect(withdraw).toHaveBeenCalledExactlyOnceWith("stage");
   expect(announce).toHaveBeenCalledOnce();
+});
+
+it("says dot moved only when its running task chose the screen", () => {
+  expect(screenMoveNote("browser", true)).toBe("dot moved to the web browser");
+  expect(screenMoveNote("desktop", true)).toBe("dot is back on the desktop");
+  // A task that ended, or a new conversation, leaves the page on the desktop with dot still.
+  expect(screenMoveNote("desktop", false)).toBeNull();
 });

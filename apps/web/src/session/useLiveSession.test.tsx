@@ -153,10 +153,19 @@ function conversing(
   initial: { resting?: string | null; cell?: CellSummary | null; choice?: number } = {},
 ) {
   let live: string | null = null;
+  // A computer running several tasks, of which `live` is the chosen conversation's own.
+  let others: string[] | undefined;
   const fetchImpl = vi.fn<typeof fetch>(async (input) => {
     const path = new URL(String(input)).pathname;
-    if (path.endsWith("/live"))
+    if (path.endsWith("/live")) {
+      if (others)
+        return Response.json({
+          sessionId: live ?? others[0],
+          sessions: [...others, ...(live ? [live] : [])],
+          ...(live ? { current: live } : {}),
+        });
       return live ? Response.json({ sessionId: live }) : new Response(null, { status: 204 });
+    }
     return Response.json({ originMicros: 0, serverMicros: 0 });
   });
   const api = createApi("fixture", { origin: "http://127.0.0.1:4747", fetchImpl });
@@ -177,8 +186,9 @@ function conversing(
     FakeWebSocket.instances.findLast((socket) => socket.url.includes(`/sessions/${id}/`));
   return {
     view,
-    run: (id: string | null) => {
+    run: (id: string | null, elsewhere?: string[]) => {
       live = id;
+      others = elsewhere;
     },
     socketFor,
     play: async (id: string, ...events: string[]) => {
@@ -255,17 +265,24 @@ it("shows an older conversation chosen to continue in place of the one at rest",
   expect(f.socketFor(EARLIER)).toBeDefined();
 });
 
-it("keeps an explicit new conversation selected despite repeated polls for the previous live task", async () => {
+it("keeps an explicit new conversation selected while the previous one's task goes on", async () => {
   const f = conversing({ resting: SESSION, choice: 0 });
-  f.run(SESSION);
+  f.run(SESSION, []);
   await wait(1_000);
   expect(f.view.result.current.sessionId).toBe(SESSION);
+  f.run(null, [SESSION]);
   f.view.rerender({ cell: ready, resting: null, choice: 1 });
   await wait(10_000);
   expect(f.view.result.current.sessionId).toBeNull();
-  f.run(NEXT);
+  f.run(NEXT, [SESSION]);
   await wait(5_000);
   expect(f.view.result.current.sessionId).toBe(NEXT);
+  // Back in the first conversation, its task is still live.
+  f.run(SESSION, [NEXT]);
+  f.view.rerender({ cell: ready, resting: SESSION, choice: 2 });
+  await wait(5_000);
+  expect(f.view.result.current.sessionId).toBe(SESSION);
+  expect(f.view.result.current.resting).toBe(false);
 });
 
 it("pays no heed to an answer about the computer's task asked before a new conversation was chosen", async () => {

@@ -1,6 +1,7 @@
 import type { ActivitySpan, RecordingGap, RecordingInfo, ScreenName } from "@localdot/protocol";
 import { chapters, type SessionModel } from "@localdot/stage";
 import type { ApiClient } from "../lib/api.ts";
+import { recordingSnapshot } from "../replay/recording-source.ts";
 import { type ReplayState, replayOrigin } from "../replay/useReplay.ts";
 import type { ReplaySource } from "../stage/worker-protocol.ts";
 
@@ -32,7 +33,7 @@ export function recordingSource(
     authorization: at.authorization,
     video:
       info.servedBytes > 0 && !["none", "failed", "expired"].includes(info.manifest.state)
-        ? { upto: info.live ? info.upto : null }
+        ? recordingSnapshot(info)
         : null,
     gaps: info.manifest.gaps,
   };

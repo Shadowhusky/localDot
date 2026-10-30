@@ -1,4 +1,4 @@
-import { ScreenName, ULID_PATTERN } from "@localdot/protocol";
+import { type RecordingInfo, ScreenName, ULID_PATTERN } from "@localdot/protocol";
 import type { SessionModel, View } from "@localdot/stage";
 import { Input, MP4, UrlSource } from "mediabunny";
 import type { ReplaySource } from "../stage/worker-protocol.ts";
@@ -37,7 +37,19 @@ export function recordingUrl(source: ReplaySource): string {
       throw new RangeError("Invalid recording snapshot.");
     url.searchParams.set("upto", String(upto));
   }
+  const bytes = source.video?.bytes;
+  if (bytes !== undefined) {
+    if (!Number.isSafeInteger(bytes) || bytes < 0) throw new RangeError("Invalid recording size.");
+    url.searchParams.set("bytes", String(bytes));
+  }
   return url.toString();
+}
+
+// What a reader opens: a live recording's committed fragments, or a finished one's file at its
+// present size. Compaction can later replace that file with a smaller one, which the daemon then
+// refuses to mix into this reader's requests.
+export function recordingSnapshot(info: RecordingInfo): NonNullable<ReplaySource["video"]> {
+  return info.live ? { upto: info.upto } : { upto: null, bytes: info.servedBytes };
 }
 
 export function replayGeometry(
