@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { CodexLaunchError, type CodexTurnEpoch, RpcError } from "@localdot/codex-harness";
 import { parseEvent, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RETRY_NEXT } from "../native-tools.ts";
 import { redactor } from "../redact.ts";
 import { AgentSession } from "../session.ts";
 import { TranscriptStore } from "../transcript.ts";
@@ -623,8 +624,65 @@ describe("Codex authority, takeover and retirement", () => {
       expect(f.fake.launches).toHaveLength(1);
       expect(c.stopped).toBe(true);
       expect(f.events.some((e) => e.type === "step.end" && e.data.status === "blocked")).toBe(true);
+      expect(f.events.filter((e) => e.type === "agent.state").at(-1)?.data).toEqual({
+        state: "error",
+        reason: {
+          commandExecution:
+            "Codex started a command of its own instead of using localDot's shell; localDot stopped the task",
+          fileChange:
+            "Codex changed a file itself with apply_patch instead of using localDot's files; localDot stopped the task",
+          webSearch:
+            "Codex used its own web_search instead of localDot's tools, so localDot stopped the task",
+          foreign:
+            "Codex used mcp__foreign__x from another tool server, so localDot stopped the task",
+        }[type],
+        next: RETRY_NEXT,
+      });
     },
   );
+  it("goes on when Codex's own tool is refused, and stops when Codex keeps asking", async () => {
+    const f = fixture(),
+      run = f.run(),
+      c = await f.fake.nextLaunch(1);
+    await c.waitFor("turn/start");
+    const ask = () =>
+      c.notify("item/started", {
+        threadId: c.threadId,
+        turnId: c.turnId,
+        item: {
+          id: "resources",
+          type: "mcpToolCall",
+          server: "codex",
+          tool: "list_mcp_resources",
+          status: "inProgress",
+        },
+      });
+    ask();
+    ask();
+    f.endpoints[0]?.input.onResult?.(
+      "computer",
+      { ok: true, content: [{ type: "text", text: "Done." }] },
+      f.context(),
+    );
+    for (let n = 0; n < 5; n++) ask();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(c.stopped).toBe(false);
+    expect(f.events.filter((e) => e.type === "step.end").map((e) => e.data)).toEqual(
+      Array(7).fill({
+        status: "blocked",
+        note: "Codex asked for its own list_mcp_resources; localDot's server has no resources for it.",
+      }),
+    );
+    ask();
+    expect(await run).toBe(CODEX_GAVE_UP);
+    expect(f.fake.launches).toHaveLength(1);
+    expect(f.events.filter((e) => e.type === "agent.state").at(-1)?.data).toEqual({
+      state: "error",
+      reason:
+        "Codex kept asking for its own list_mcp_resources, which isn't one of localDot's tools, so localDot stopped the task",
+      next: RETRY_NEXT,
+    });
+  });
   it("discourages two sub-agents on fresh owned turns and ends the third", async () => {
     const f = fixture(),
       run = f.run();

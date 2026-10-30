@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   EARLIER_CHARS,
   EARLIER_LEFT_OUT,
   earlierRecord,
+  TaskStopReply,
   ulid,
 } from "@localdot/protocol";
 import { Hono } from "hono";
@@ -139,7 +140,7 @@ describe("the list of conversations", () => {
     const dog = await f.task("Draw a dog");
     f.end(dog, "error");
     const live = await f.task("Tidy my Downloads");
-    const listed = f.open().list();
+    const listed = f.open().list().conversations;
     expect(listed.map((entry) => entry.sessions)).toEqual([[live], [dog], [hotel, trip]]);
     expect(listed[2]).toMatchObject({
       sessionId: hotel,
@@ -154,7 +155,7 @@ describe("the list of conversations", () => {
   it("lists no more than it is asked for", async () => {
     const f = setup();
     for (let n = 0; n < 4; n++) await f.task(`Task ${n}`);
-    expect(f.open().list(2)).toHaveLength(2);
+    expect(f.open().list(2).conversations).toHaveLength(2);
   });
 
   it("names a conversation by the user's name, else dot's, else its first message", async () => {
@@ -162,7 +163,7 @@ describe("the list of conversations", () => {
     const trip = await f.task("plan 3 days kyoto pls, autumn, cheap");
     const name = (title: string | null, by: "auto" | "user") =>
       f.log.append(trip, { type: "session.title", agent: "main", data: { title, by } });
-    const listed = () => f.open().list()[0];
+    const listed = () => f.open().list().conversations[0];
     expect(listed()).toMatchObject({ title: "plan 3 days kyoto pls, autumn, cheap" });
     name("Kyoto autumn trip", "auto");
     expect(listed()?.title).toBe("Kyoto autumn trip");
@@ -194,7 +195,97 @@ describe("the list of conversations", () => {
     const hold = f.start("Kyoto autumn trip", trip);
     expect(f.open().isTask(hold)).toBe(false);
     expect(f.open().names(hold)).toEqual({ automatic: "Kyoto autumn trip", user: "Mum" });
-    expect(f.open().list()[0]).toMatchObject({ sessionId: trip, title: "Mum" });
+    expect(f.open().list().conversations[0]).toMatchObject({ sessionId: trip, title: "Mum" });
+  });
+});
+
+describe("organizing conversations", () => {
+  it("tags and pins a conversation by any of its tasks, and keeps both as it goes on", async () => {
+    const f = setup();
+    const first = await f.task("Plan the trip");
+    const second = await f.task("Book the hotel", first);
+    const other = await f.task("Draw a dog");
+    expect(f.open().organize(first, { tag: "blue" })).toEqual({
+      sessionId: second,
+      tag: "blue",
+      pinned: false,
+      archived: false,
+    });
+    expect(f.open().organize(second, { pinned: true })).toMatchObject({
+      tag: "blue",
+      pinned: true,
+    });
+    const third = await f.task("Find a restaurant", second);
+    const listed = f.open().list().conversations;
+    expect(listed.map((entry) => entry.sessionId)).toEqual([third, other]);
+    expect(listed[0]).toMatchObject({ tag: "blue", pinned: true });
+    expect(listed[1]).not.toHaveProperty("tag");
+    expect(listed[1]).not.toHaveProperty("pinned");
+    f.open().organize(third, { tag: null, pinned: false });
+    expect(f.open().list().conversations[0]).not.toHaveProperty("tag");
+    expect(ConversationList.parse(f.open().list())).toBeTruthy();
+  });
+
+  it("keeps those pinned before the rest are counted", async () => {
+    const f = setup();
+    const pinned = await f.task("Pinned long ago");
+    for (let n = 0; n < 3; n++) await f.task(`Task ${n}`);
+    f.open().organize(pinned, { pinned: true });
+    expect(
+      f
+        .open()
+        .list(2)
+        .conversations.map((entry) => entry.title),
+    ).toEqual(["Task 2", "Pinned long ago"]);
+  });
+
+  it("archives a conversation out of the list until it is unarchived or goes on", async () => {
+    const f = setup();
+    const trip = await f.task("Plan the trip");
+    const dog = await f.task("Draw a dog");
+    expect(f.open().organize(trip, { archived: true, tag: "green" })).toMatchObject({
+      archived: true,
+      tag: "green",
+    });
+    const shown = f.open().list();
+    expect(shown.conversations.map((entry) => entry.sessionId)).toEqual([dog]);
+    expect(shown.archivedCount).toBe(1);
+    const archived = f.open().list(undefined, true);
+    expect(archived.conversations).toEqual([
+      expect.objectContaining({ sessionId: trip, archived: true, tag: "green" }),
+    ]);
+    f.open().organize(trip, { archived: false });
+    expect(f.open().list()).toMatchObject({ archivedCount: 0 });
+    expect(
+      f
+        .open()
+        .list()
+        .conversations.map((entry) => entry.sessionId),
+    ).toEqual([dog, trip]);
+
+    f.open().organize(trip, { archived: true });
+    const more = await f.task("And a cat", trip);
+    const back = f.open().list();
+    expect(back.archivedCount).toBe(0);
+    expect(back.conversations[0]).toMatchObject({ sessionId: more, tag: "green" });
+    expect(back.conversations[0]).not.toHaveProperty("archived");
+  });
+
+  it("forgets deleted conversations and reads a broken file as nothing organized", async () => {
+    const f = setup();
+    const gone = await f.task("Plan the trip");
+    const kept = await f.task("Draw a dog");
+    f.open().organize(gone, { tag: "red" });
+    f.log.forget(gone);
+    f.open().organize(kept, { pinned: true });
+    const file = join(f.home, "conversations-organized.json");
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
+      v: 1,
+      conversations: { [kept]: { pinned: true } },
+    });
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    writeFileSync(file, "{broken");
+    expect(f.open().list().conversations[0]).not.toHaveProperty("pinned");
   });
 });
 
@@ -453,6 +544,15 @@ describe("conversation routes", () => {
         raiseBudget: vi.fn(),
         release: releases,
         liveStatus: (id: string) => statuses.get(id),
+        // A run ends as the runner's does: its session.end recorded, it settles and is let go.
+        stopRun: async (id: string) => {
+          const session = live.get(id);
+          if (!session) return false;
+          session.cancel();
+          f.end(id, "stopped");
+          live.delete(id);
+          return true;
+        },
       },
       conversations,
     } as unknown as AgentRoutesDeps);
@@ -539,6 +639,20 @@ describe("conversation routes", () => {
     expect(conversations.map((entry) => entry.sessions)).toEqual([[newer, older]]);
   });
 
+  it("lists the archived conversations apart, and counts them in the recent list", async () => {
+    const f = routes();
+    const archived = await f.task("Plan the trip");
+    const kept = await f.task("Draw a dog");
+    f.conversations.organize(archived, { archived: true });
+    const read = async (path: string) =>
+      ConversationList.parse(await (await f.send("GET", path)).json());
+    const recent = await read("/api/conversations");
+    expect(recent.conversations.map((entry) => entry.sessionId)).toEqual([kept]);
+    expect(recent.archivedCount).toBe(1);
+    const apart = await read("/api/conversations?archived=1");
+    expect(apart.conversations.map((entry) => entry.sessionId)).toEqual([archived]);
+  });
+
   it("refuses to continue a recording that does not exist", async () => {
     const f = routes();
     const reply = await f.send("POST", "/api/conversation/continue", { sessionId: ulid() });
@@ -578,6 +692,133 @@ describe("conversation routes", () => {
     expect((await edit(ulid())).status).toBe(409);
     expect((await edit(String(hat?.data.messageId), ulid())).status).toBe(404);
     expect((await edit("nope")).status).toBe(400);
+  });
+
+  // A task the runner holds, its message told the way the runner tells it.
+  const held = (f: ReturnType<typeof routes>, text: string, continues?: string) => {
+    const id = f.start(text, continues);
+    const session = new AgentSession(id, ulid(), text, f.log);
+    session.askTask();
+    f.live.set(id, session);
+    f.conversations.adopt(id);
+    return { id, session };
+  };
+  const stop = async (f: ReturnType<typeof routes>, id: string) => {
+    const reply = await f.send("POST", `/api/agent/sessions/${id}/stop?giveBack=1`);
+    expect(reply.status).toBe(200);
+    return TaskStopReply.parse(await reply.json()).messages.map((message) => message.text);
+  };
+
+  it("gives a new task's unanswered message back to the Stop, and leaves no empty conversation behind", async () => {
+    const f = routes();
+    const { id } = held(f, "Draw a dog");
+    expect(await stop(f, id)).toEqual(["Draw a dog"]);
+    expect(f.conversations.current()).toBeNull();
+    expect(f.log.hasSession(id)).toBe(false);
+    expect(f.conversations.list().conversations).toEqual([]);
+  });
+
+  it("hands a continuation's conversation back to the task it continued", async () => {
+    const f = routes();
+    const earlier = await f.task("Plan the trip");
+    f.reply(earlier, "Here is a plan.");
+    f.end(earlier, "done");
+    const { id } = held(f, "Book the hotel", earlier);
+    expect(await stop(f, id)).toEqual(["Book the hotel"]);
+    expect(f.conversations.current()).toBe(earlier);
+    expect(f.log.hasSession(id)).toBe(false);
+    expect(f.conversations.earlier(earlier)).toEqual([
+      "The user: Plan the trip",
+      "dot: Here is a plan.",
+    ]);
+  });
+
+  it("keeps a task dot answered, with its message, its record and its conversation", async () => {
+    const f = routes();
+    const { id, session } = held(f, "Draw a dog");
+    session.append("message.assistant", { messageId: ulid(), text: "Drawing it now." });
+    expect(await stop(f, id)).toEqual([]);
+    expect(f.conversations.current()).toBe(id);
+    expect(f.conversations.earlier(id)).toEqual([
+      "The user: Draw a dog",
+      "dot: Drawing it now.",
+      "(That task was stopped.)",
+    ]);
+    // Stop without asking gives nothing back, as before.
+    const other = held(f, "Something else");
+    const plain = await f.send("POST", `/api/agent/sessions/${other.id}/stop`);
+    expect(plain.status).toBe(204);
+    expect(f.log.hasSession(other.id)).toBe(true);
+  });
+});
+
+describe("what Stop gave back", () => {
+  const delivered = (
+    f: ReturnType<typeof setup>,
+    id: string,
+    text: string,
+    state: "withdrawn" | "cancelled" | "sent",
+  ) => {
+    const messageId = ulid();
+    f.log.append(id, {
+      type: "message.user",
+      agent: "main",
+      data: { messageId, text, kind: "followup" },
+    });
+    f.log.append(id, {
+      type: "message.delivery",
+      agent: "main",
+      data: { messageId, state, ...(state === "sent" ? {} : { reason: "stopped" as const }) },
+    });
+    return messageId;
+  };
+
+  it("is not in what a task continuing the conversation hears, which every model path reads", async () => {
+    const f = setup();
+    const first = await f.task("Draw a dog");
+    f.reply(first, "Here is a dog.");
+    delivered(f, first, "Make it brown", "withdrawn");
+    delivered(f, first, "Add a hat", "cancelled");
+    f.end(first, "stopped");
+    // A task whose every word came back says nothing at all, not even that it was stopped.
+    const empty = f.start("Paint it", first);
+    delivered(f, empty, "Paint it", "withdrawn");
+    f.end(empty, "stopped");
+    const turns = f.open().earlier(empty);
+    expect(turns).toEqual([
+      "The user: Draw a dog",
+      "dot: Here is a dog.",
+      "(That task was stopped.)",
+    ]);
+    expect(earlierRecord(turns)).not.toMatch(/brown|a hat|Paint it/);
+  });
+
+  it("removes only a settled task whose record shows nothing done", async () => {
+    const f = setup();
+    const quiet = f.start("Draw a dog");
+    delivered(f, quiet, "Draw a dog", "withdrawn");
+    const conversations = f.open();
+    // Not until it has ended.
+    expect(conversations.discard(quiet)).toBe(false);
+    f.end(quiet, "stopped");
+    expect(conversations.discard(quiet)).toBe(true);
+    expect(f.log.hasSession(quiet)).toBe(false);
+
+    const unsent = f.start("Draw a cat");
+    delivered(f, unsent, "Draw a cat", "cancelled");
+    f.end(unsent, "stopped");
+    expect(conversations.discard(unsent)).toBe(false);
+
+    const handled = f.start("Draw a bird");
+    delivered(f, handled, "Draw a bird", "withdrawn");
+    f.log.append(handled, {
+      type: "takeover.request",
+      agent: "main",
+      data: { requestId: ulid(), reason: "other", note: "", by: "user" },
+    });
+    f.end(handled, "stopped");
+    expect(conversations.discard(handled)).toBe(false);
+    expect(f.log.hasSession(handled)).toBe(true);
   });
 });
 

@@ -238,28 +238,82 @@ describe("Codex events under the shared session authority", () => {
       "mcpToolCall",
       { server: "localdot-x", tool: "computer", status: "inProgress" },
       "foreign_tool",
+      "mcp__localdot-x__computer",
+    ],
+    [
+      "mcpToolCall",
+      { server: "fake-auth-secret", tool: "computer", status: "inProgress" },
+      "foreign_tool",
+      "an unnamed tool",
     ],
     [
       "commandExecution",
       { command: "fake-auth-secret /private/tmp/private-capability/m.sock" },
       "command",
+      "shell",
     ],
-    ["collabAgentToolCall", {}, "sub_agent"],
-    ["subAgentActivity", {}, "sub_agent"],
-    ["webSearch", {}, "builtin_tool"],
-    ["imageGeneration", {}, "builtin_tool"],
-    ["imageView", {}, "builtin_tool"],
-    ["dynamicToolCall", {}, "builtin_tool"],
-  ] as const)("fences unsupported %s without echoing its payload", (type, fields, what) => {
+    ["collabAgentToolCall", {}, "sub_agent", "an unnamed tool"],
+    ["subAgentActivity", {}, "sub_agent", "an unnamed tool"],
+    ["webSearch", { query: "fake-auth-secret" }, "builtin_tool", "web_search"],
+    ["imageGeneration", {}, "builtin_tool", "image_generation"],
+    ["imageView", { path: "/private/tmp/private-capability/m.sock" }, "builtin_tool", "view_image"],
+  ] as const)("fences unsupported %s without echoing its payload", (type, fields, what, tool) => {
     const f = fixture();
     f.start();
     f.events.length = 0;
     const signals = f.item(type, fields);
-    expect(signals).toMatchObject([{ kind: "violation", what }]);
+    expect(signals).toMatchObject([{ kind: "violation", what, tool }]);
     expect(JSON.stringify(signals)).not.toContain("fake-auth-secret");
     f.delta("late");
     f.mapper.flush();
     expect(f.events).toEqual([]);
+  });
+  it("answers Codex's resource readers and dynamic tools as refused, and goes on", () => {
+    const f = fixture();
+    f.start();
+    f.events.length = 0;
+    expect(
+      f.item("mcpToolCall", { server: "codex", tool: "list_mcp_resources", status: "inProgress" }),
+    ).toEqual([
+      {
+        kind: "refused",
+        tool: "list_mcp_resources",
+        detail:
+          "Codex asked for its own list_mcp_resources; localDot's server has no resources for it.",
+      },
+    ]);
+    expect(
+      f.item(
+        "mcpToolCall",
+        { server: "codex", tool: "list_mcp_resources", status: "failed" },
+        true,
+      ),
+    ).toEqual([]);
+    expect(f.item("dynamicToolCall", { tool: "fake-auth-secret", status: "inProgress" })).toEqual([
+      {
+        kind: "refused",
+        tool: "an unnamed tool",
+        detail: "Codex asked for its own an unnamed tool; localDot has no dynamic tools.",
+      },
+    ]);
+    expect(
+      f.item("dynamicToolCall", { tool: "lookup", status: "failed", success: false }, true),
+    ).toEqual([]);
+    expect(f.events).toEqual([]);
+    f.delta("still here");
+    f.mapper.flush();
+    expect(f.events.map((e) => e.type)).toEqual(["message.delta"]);
+    // Only Codex's own resource readers count as refused; any other tool of its server ran.
+    expect(
+      f.item("mcpToolCall", { server: "codex", tool: "read_file", status: "inProgress" }),
+    ).toMatchObject([{ kind: "violation", what: "foreign_tool", tool: "mcp__codex__read_file" }]);
+  });
+  it("stops on a dynamic tool that a client other than localDot answered", () => {
+    const f = fixture();
+    f.start();
+    expect(
+      f.item("dynamicToolCall", { tool: "lookup", status: "completed", success: true }, true),
+    ).toMatchObject([{ kind: "violation", what: "builtin_tool", tool: "lookup" }]);
   });
   it("reports only applied file changes and ignores declined ones", () => {
     const f = fixture();

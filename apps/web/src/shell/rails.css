@@ -582,6 +582,59 @@
   }
 }
 
+/* The collapsed rail under the mouse (RailDock, useDockMagnify.ts): its marks magnify as the Dock's
+   do, growing away from the screen's edge, and their names show beside them over the page. While
+   magnifying, the list reaches past the rail so a grown mark stays under the pointer. */
+.sessions:has(> .sessions-dock) {
+  z-index: 6;
+  overflow: visible;
+}
+
+.sessions:has(> .sessions-dock) > .sessions-scroll {
+  position: relative;
+}
+
+.sessions:has(> .sessions-dock[data-magnify]) > .sessions-scroll {
+  margin-right: calc(var(--spacing) * -6);
+  padding-right: calc(var(--spacing) * 8);
+}
+
+.sessions:has(> .sessions-dock[data-magnify]) :is(.sessions-item, .sessions-group-label) {
+  transform-origin: 0 50%;
+}
+
+.sessions-dock {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.sessions-dock-name {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: calc(var(--spacing) * 60);
+  margin-left: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 1) calc(var(--spacing) * 2.5);
+  overflow: hidden;
+  border-radius: var(--radius-row);
+  background-color: var(--color-popover);
+  box-shadow: var(--shadow-overlay);
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.sessions-dock[data-magnify] > .sessions-dock-name {
+  transition: none;
+}
+
 /* Taking up another conversation (switch-motion.ts): the thread it leaves slides out the way the
    list moved and the new one comes in after it. The rest of the page stays as it is, live. */
 :root[data-switch] {

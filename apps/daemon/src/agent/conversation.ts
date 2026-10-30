@@ -13,7 +13,10 @@ import {
   CONVERSATION_TASKS,
   CONVERSATION_WITHDRAWN,
   type ConversationEntry,
+  type ConversationList,
+  type ConversationOrganizedEvent,
   type ConversationSnapshot,
+  ConversationTag,
   EARLIER_CHARS,
   EARLIER_LEFT_OUT,
   EARLIER_TURN_CHARS,
@@ -25,7 +28,7 @@ import {
   ulidTime,
 } from "@localdot/protocol";
 import { z } from "zod";
-import { parseLine } from "../event-file.ts";
+import { parseLine, readValid } from "../event-file.ts";
 import type { EventLog } from "../event-log.ts";
 import { PrivateFiles } from "./private-files.ts";
 import { taskCheckpoint } from "./task-checkpoint.ts";
@@ -42,6 +45,26 @@ const Withdrawn = z.strictObject({
   v: z.literal(1),
   messages: z.array(z.string().regex(ULID_PATTERN)),
 });
+// How the user organized each conversation, by its first task, which stays its own as it goes on.
+const ORGANIZED_FILE = "conversations-organized.json";
+const ORGANIZED_BYTES = 4 * 1024 * 1024;
+const Organized = z.strictObject({
+  tag: ConversationTag.optional(),
+  pinned: z.literal(true).optional(),
+  // Its latest task when it was archived: a task that goes on with it brings it back.
+  archived: z.string().regex(ULID_PATTERN).optional(),
+});
+type Organized = z.infer<typeof Organized>;
+const OrganizedFile = z.strictObject({
+  v: z.literal(1),
+  conversations: z.record(z.string().regex(ULID_PATTERN), Organized),
+});
+export type ConversationOrganization = Omit<ConversationOrganizedEvent, "type">;
+export interface OrganizeConversation {
+  tag?: ConversationTag | null;
+  pinned?: boolean;
+  archived?: boolean;
+}
 // A session.start and the task's first message sit in the first lines of a task's log.
 const HEAD_BYTES = 16 * 1024;
 const HEAD_EVENTS = 8;
@@ -63,8 +86,33 @@ const ENDINGS: Record<string, string> = {
   stopped: "(That task was stopped.)",
   error: "(That task ended with an error.)",
 };
+// A task whose record holds only these carried nothing out: what was said and taken back, dot
+// thinking, and looks at the screen.
+const NOTHING_DONE = new Set<LocalDotEvent["type"]>([
+  "session.start",
+  "session.title",
+  "persona.choice",
+  "message.user",
+  "message.delivery",
+  "agent.state",
+  "heartbeat",
+  "thought.delta",
+  "model.usage",
+  "model.retry",
+  "model.spend",
+  "subscription.usage",
+  "budget.exceeded",
+  "screen.switch",
+  "step.start",
+  "observe",
+  "step.end",
+  "session.end",
+]);
 
-export type ConversationLog = Pick<EventLog, "hasSession" | "logFile" | "listSessions" | "titles">;
+export type ConversationLog = Pick<
+  EventLog,
+  "hasSession" | "logFile" | "listSessions" | "titles" | "forget"
+>;
 
 interface TaskHead {
   continues: string | undefined;
@@ -99,11 +147,12 @@ const fieldText = (value: AskFieldRecord) =>
 
 // The conversation the next task continues. Each task names the one it continues in its
 // session.start, so a conversation is a chain of tasks that survives restarts and ends where a
-// task was deleted; only which chain is current is kept here.
+// task was deleted; only which chain is current, and how the user organized each, are kept here.
 export class Conversations {
   readonly #files: PrivateFiles;
   readonly #said = new Map<string, string[]>();
   readonly #heads = new Map<string, TaskHead>();
+  readonly #links = new Map<string, string | undefined>();
   constructor(
     home: string,
     private readonly log: ConversationLog,
@@ -169,6 +218,44 @@ export class Conversations {
     return text;
   }
 
+  // A task Stop emptied before it carried anything out: its conversation is again the one it
+  // continued, or a new one.
+  leave(sessionId: string): void {
+    if (this.current() !== sessionId) return;
+    const continues = this.#head(sessionId).find((event) => event.type === "session.start")?.data
+      .continues;
+    this.#write(continues && this.log.hasSession(continues) ? continues : null);
+  }
+
+  // Once it has settled, such a task leaves no record, as long as its log shows nothing done and
+  // every message in it given back. Nothing with a record of actions is ever removed.
+  discard(sessionId: string): boolean {
+    if (!this.has(sessionId)) return false;
+    const events = readValid(this.log.logFile(sessionId)).events;
+    const back = new Set(
+      events.flatMap((event) =>
+        event.type === "message.delivery" &&
+        event.data.state === "withdrawn" &&
+        event.data.reason === "stopped"
+          ? [event.data.messageId]
+          : [],
+      ),
+    );
+    if (
+      !events.some((event) => event.type === "session.end") ||
+      events.some(
+        (event) =>
+          !NOTHING_DONE.has(event.type) ||
+          (event.type === "message.user" && !back.has(event.data.messageId)),
+      )
+    )
+      return false;
+    this.log.forget(sessionId);
+    this.#said.delete(sessionId);
+    this.#heads.delete(sessionId);
+    return true;
+  }
+
   #withdrawn(sessionId: string): string[] {
     try {
       const text = this.#files.text(withdrawnFile(sessionId), WITHDRAWN_BYTES);
@@ -187,9 +274,22 @@ export class Conversations {
       if (sessions.length === max) return { sessions, more: true };
       seen.add(at);
       sessions.unshift(at);
-      at = this.#head(at).find((event) => event.type === "session.start")?.data.continues;
+      at = this.#continues(at);
     }
     return { sessions, more: false };
+  }
+
+  // The task a session continues, as its session.start says; that never changes once written.
+  #continues(sessionId: string): string | undefined {
+    if (this.#links.has(sessionId)) return this.#links.get(sessionId);
+    const start = this.#head(sessionId).find((event) => event.type === "session.start");
+    if (!start) return undefined;
+    this.#links.set(sessionId, start.data.continues);
+    for (const old of this.#links.keys()) {
+      if (this.#links.size <= KEPT_HEADS) break;
+      this.#links.delete(old);
+    }
+    return start.data.continues;
   }
 
   // What was said in the conversation up to and including this task, for the task that continues
@@ -225,12 +325,21 @@ export class Conversations {
     let ended = false;
     let completed = false;
     const events = this.#events(sessionId);
-    // A queued message reached dot when it was sent or steered, after what dot did while it waited;
-    // one the user withdrew or cancelled never did.
+    // A queued message reached dot when it was sent or steered, after what dot did while it waited.
+    // One the user withdrew or cancelled, or that Stop gave back or left unanswered, is not said.
+    const unsaid = new Set(
+      events.flatMap((event) =>
+        event.type === "message.delivery" &&
+        (event.data.state === "cancelled" || event.data.state === "withdrawn")
+          ? [event.data.messageId]
+          : [],
+      ),
+    );
     const waiting = new Map<string, string>();
     for (const event of events) {
       switch (event.type) {
         case "message.user":
+          if (unsaid.has(event.data.messageId)) break;
           if (event.data.queued) waiting.set(event.data.messageId, event.data.text);
           else turns.push(`The user: ${clip(event.data.text)}`);
           break;
@@ -289,8 +398,9 @@ export class Conversations {
         case "session.end": {
           ended = true;
           completed = event.data.reason === "done";
+          // A task whose every word was taken back is not mentioned at all.
           const ending = ENDINGS[event.data.reason];
-          if (ending) turns.push(ending);
+          if (ending && turns.length) turns.push(ending);
           break;
         }
       }
@@ -387,42 +497,133 @@ ${checkpoint}`);
     return null;
   }
 
-  // The recent conversations, newest first: each task joins the conversation of the newer task that
-  // continues it. The latest task's name names it, as the app's title does, and the oldest task
-  // read says what was first asked.
-  list(max = CONVERSATION_LIST): ConversationEntry[] {
-    const listed: ConversationEntry[] = [];
-    const continuedBy = new Map<string, ConversationEntry>();
+  // The recent conversations, newest first, or the archived ones, and how many are archived. Those
+  // pinned are kept before the rest are counted.
+  list(max = CONVERSATION_LIST, archived = false): Required<ConversationList> {
+    const records = this.#organized();
+    const found = this.#found().map((conversation) => ({
+      ...conversation,
+      ...this.#organization(conversation.sessions[0] ?? "", records),
+    }));
+    const shown = found.filter((conversation) => conversation.archived === archived);
+    const kept = new Set(
+      [...shown.filter((each) => each.pinned), ...shown.filter((each) => !each.pinned)].slice(
+        0,
+        max,
+      ),
+    );
+    return {
+      conversations: shown.filter((each) => kept.has(each)).map((each) => this.#entry(each)),
+      archivedCount: found.filter((each) => each.archived).length,
+    };
+  }
+
+  // The latest task of the conversation this task is part of.
+  latest(sessionId: string): string {
+    return (
+      this.#found().find((each) => each.sessions.includes(sessionId))?.sessions[0] ?? sessionId
+    );
+  }
+
+  // Tags, pins or archives the conversation this task is part of; what the change leaves out stays.
+  organize(sessionId: string, change: OrganizeConversation): ConversationOrganization {
+    const latest = this.latest(sessionId);
+    const root = this.#root(latest);
+    const records = this.#organized();
+    const was = records.get(root);
+    const tag = change.tag === undefined ? was?.tag : (change.tag ?? undefined);
+    const pinned = change.pinned ?? !!was?.pinned;
+    const archived = change.archived ?? was?.archived === latest;
+    const next: Organized = {
+      ...(tag ? { tag } : {}),
+      ...(pinned ? { pinned: true } : {}),
+      ...(archived ? { archived: latest } : {}),
+    };
+    if (Object.keys(next).length) records.set(root, next);
+    else records.delete(root);
+    for (const id of records.keys()) if (!this.log.hasSession(id)) records.delete(id);
+    this.#files.write(
+      ORGANIZED_FILE,
+      `${JSON.stringify({ v: 1, conversations: Object.fromEntries(records) })}\n`,
+    );
+    return { sessionId: latest, tag: tag ?? null, pinned, archived };
+  }
+
+  // The conversations among the newest sessions, newest first: each task joins the conversation of
+  // the newer task that continues it.
+  #found(): { sessions: string[]; startedAt: string }[] {
+    const found: { sessions: string[]; startedAt: string }[] = [];
+    const continuedBy = new Map<string, (typeof found)[number]>();
     for (const session of this.log.listSessions().slice(0, LIST_SCAN)) {
       const head = this.#facts(session.id);
       if (!head) continue;
-      const named = () => {
-        const { autoTitle, userTitle } = this.log.titles(session.id);
-        return (userTitle ?? autoTitle ?? head.title)?.trim().slice(0, 200) || null;
-      };
-      let entry = continuedBy.get(session.id);
+      let conversation = continuedBy.get(session.id);
       continuedBy.delete(session.id);
-      if (entry) {
-        if (entry.sessions.length < CONVERSATION_TASKS) entry.sessions.push(session.id);
-        entry.title ??= named();
-        entry.said = head.said ?? entry.said;
-      } else if (listed.length < max) {
-        const started = Date.parse(session.startedAt);
-        entry = {
-          sessionId: session.id,
-          sessions: [session.id],
-          title: named(),
-          said: head.said,
-          startedAt: new Date(
-            Number.isFinite(started) ? started : ulidTime(session.id),
-          ).toISOString(),
-          ended: this.#ending(session.id),
-        };
-        listed.push(entry);
+      if (conversation) conversation.sessions.push(session.id);
+      else {
+        conversation = { sessions: [session.id], startedAt: session.startedAt };
+        found.push(conversation);
       }
-      if (entry && head.continues) continuedBy.set(head.continues, entry);
+      if (head.continues) continuedBy.set(head.continues, conversation);
     }
-    return listed;
+    return found;
+  }
+
+  // The latest task's name names it, as the app's title does, and the oldest task read says what
+  // was first asked.
+  #entry(
+    conversation: { sessions: string[]; startedAt: string } & ConversationOrganization,
+  ): ConversationEntry {
+    const { sessionId, sessions, tag, pinned, archived } = conversation;
+    let title: string | null = null;
+    let said: string | null = null;
+    for (const id of sessions) {
+      const head = this.#facts(id);
+      if (!title) {
+        const { autoTitle, userTitle } = this.log.titles(id);
+        title = (userTitle ?? autoTitle ?? head?.title)?.trim().slice(0, 200) || null;
+      }
+      said = head?.said ?? said;
+    }
+    const started = Date.parse(conversation.startedAt);
+    return {
+      sessionId,
+      sessions: sessions.slice(0, CONVERSATION_TASKS),
+      title,
+      said,
+      startedAt: new Date(Number.isFinite(started) ? started : ulidTime(sessionId)).toISOString(),
+      ended: this.#ending(sessionId),
+      ...(tag ? { tag } : {}),
+      ...(pinned ? { pinned } : {}),
+      ...(archived ? { archived } : {}),
+    };
+  }
+
+  #organization(latest: string, records: Map<string, Organized>): ConversationOrganization {
+    const record = records.size ? records.get(this.#root(latest)) : undefined;
+    return {
+      sessionId: latest,
+      tag: record?.tag ?? null,
+      pinned: !!record?.pinned,
+      archived: record?.archived === latest,
+    };
+  }
+
+  #root(sessionId: string): string {
+    return this.chain(sessionId, Number.MAX_SAFE_INTEGER).sessions[0] ?? sessionId;
+  }
+
+  #organized(): Map<string, Organized> {
+    try {
+      const text = this.#files.text(ORGANIZED_FILE, ORGANIZED_BYTES);
+      return new Map(
+        text === undefined
+          ? []
+          : Object.entries(OrganizedFile.parse(JSON.parse(text)).conversations),
+      );
+    } catch {
+      return new Map();
+    }
   }
 
   // A task's chain link, what it was called when it started and its first message; null for a

@@ -241,7 +241,7 @@ describe("a new conversation's name", () => {
       inputTokens: 120,
       outputTokens: 9,
     });
-    expect(f.conversations.list()[0]?.title).toBe("Kyoto autumn trip");
+    expect(f.conversations.list().conversations[0]?.title).toBe("Kyoto autumn trip");
     session.post("followup", "Add a day in Nara");
     await until(() => f.run.mock.calls.length === 2);
     expect(f.asked).toHaveLength(1);
@@ -272,7 +272,7 @@ describe("a new conversation's name", () => {
       await until(() => f.asked.length === 1 && session.status === "idle");
       await new Promise<void>((r) => setImmediate(r));
       expect(f.titles(session.id)).toEqual([]);
-      expect(f.conversations.list()[0]?.title).toBe("Sort my receipts");
+      expect(f.conversations.list().conversations[0]?.title).toBe("Sort my receipts");
       session.stop();
       await f.live.settled(session.id);
     }
@@ -289,8 +289,8 @@ describe("a new conversation's name", () => {
       continues: first.id,
     });
     expect(f.asked).toHaveLength(1);
-    expect(f.conversations.list()).toHaveLength(1);
-    expect(f.conversations.list()[0]?.title).toBe("Named");
+    expect(f.conversations.list().conversations).toHaveLength(1);
+    expect(f.conversations.list().conversations[0]?.title).toBe("Named");
     next.stop();
     await f.live.settled(next.id);
   });
@@ -308,7 +308,7 @@ describe("a new conversation's name", () => {
     const next = await f.runner.start(f.cellId, "Now add a day in Nara");
     expect(f.events(next.id, "session.start")[0]?.data).toMatchObject({ title: "Named" });
     expect(f.titles(next.id)).toEqual([{ title: "Mum's trip", by: "user" }]);
-    expect(f.conversations.list()[0]?.title).toBe("Mum's trip");
+    expect(f.conversations.list().conversations[0]?.title).toBe("Mum's trip");
     await f.end(next);
     const held = await f.runner.hold(f.cellId);
     expect(f.events(held.sessionId, "session.start")[0]?.data).toMatchObject({

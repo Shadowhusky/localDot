@@ -36,6 +36,8 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   `?markdown=1` gives the result a summary with a heading, a list and bold words.
 - **Side questions:** `/btw` in the composer reaches the real side-question route, and the fixture
   answers it from the task's own record, as the Fast model reads it, with no model.
+- **Replies:** a new task's first reply comes 800 ms after it starts; `POST /__qa/reply?ms=<n>`
+  makes dot take longer, so a Stop can come before it has done anything.
 - **Plan usage:** `POST /__qa/plan-usage/<state>` sets what the plans used, as the model menu shows
   it: `normal`, `near`, `limit`, `stale`, `reset` or `unknown`. The `plan-usage` scenario signs in
   both plans and starts at `normal`.

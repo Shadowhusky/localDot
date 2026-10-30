@@ -10,24 +10,29 @@ import {
   useState,
 } from "react";
 import {
+  arrangeConversations,
   type ConversationRow,
   conversationRows,
   type LiveFacts,
-  pinActive,
+  type Organize,
+  organizeConversation,
   renameConversation,
   STATUS_LABEL,
   useRecentConversations,
   whenLabel,
 } from "../agent/conversation-list.ts";
-import type { ApiClient } from "../lib/api.ts";
+import { type ConversationMatch, searchConversations } from "../agent/conversation-search.ts";
+import { type ApiClient, ApiError } from "../lib/api.ts";
+import { Highlight } from "../replay/Highlight.tsx";
+import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
+import { TAG_NAMES, TagMark } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { isApple } from "../ui/Kbd.tsx";
-import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { matches, REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
 import { tokenMs } from "../ui/motion.ts";
 import { triggerProps } from "../ui/Popover.tsx";
@@ -36,8 +41,12 @@ import { SessionGlyph } from "../ui/SessionGlyph.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { useTooltip } from "../ui/Tooltip.tsx";
 import { useHandler } from "../ui/useHandler.ts";
+import { ConversationMenu } from "./ConversationMenu.tsx";
+import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import type { Layout } from "./layout.ts";
+import { RailSearch } from "./RailSearch.tsx";
 import { switchConversation } from "./switch-motion.ts";
+import { DOCK_POINTER, useDockMagnify } from "./useDockMagnify.ts";
 import "../ui/conversations-layout.css";
 import "./rails.css";
 
@@ -59,15 +68,28 @@ export interface SessionRailProps {
   onNew(): void;
   // Why a new conversation can't be started now.
   newReason?: string;
+  onDeleted?(sessions: readonly string[]): void;
 }
 
-// "Plan the trip, working, on screen, 2 min": what a screen reader calls a row.
+// "Plan the trip, blue tag, working, on screen, 2 min": what a screen reader calls a row.
 function rowName(row: ConversationRow, now: Date): string {
-  const parts = [row.title, STATUS_LABEL[row.status].toLowerCase()];
+  const parts = [row.title];
+  if (row.entry.tag) parts.push(`${TAG_NAMES[row.entry.tag].toLowerCase()} tag`);
+  parts.push(STATUS_LABEL[row.status].toLowerCase());
   if (row.entry.live?.onScreen) parts.push("on screen");
   parts.push(whenLabel(row.since, now).toLowerCase());
   return parts.join(", ");
 }
+
+// Names given here stand in until the list read after saving them comes back.
+const withNames = (
+  rows: ConversationRow[],
+  names: ReadonlyMap<string, { title: string; saved: boolean }>,
+) =>
+  rows.map((row) => {
+    const name = names.get(row.entry.sessionId);
+    return name ? { ...row, title: name.title || row.title } : row;
+  });
 
 // Until the user chooses, the rail shows names only where the stage keeps its size beside them: on
 // a wide screen, and on a tablet held sideways, where the stage is as wide as its height allows.
@@ -82,10 +104,12 @@ const isToggle = (event: globalThis.KeyboardEvent) =>
   (isApple() ? event.metaKey : event.ctrlKey) &&
   (event.code === "Backslash" || event.key === "\\");
 
-// The conversations beside the stage (left rail): those under way first, with what dot is doing
-// in each, then the rest, newest first. Collapsed it keeps only their status marks. It follows the
-// daemon's changes as they come and shares its list with the conversations popover. The arrows
-// move through the rows, Return takes one up, F2 renames one and Mod+\ collapses or expands it.
+// The conversations beside the stage (left rail): those pinned, then those under way, with what dot
+// is doing in each, then the rest, newest first, and those archived out of sight below. Collapsed it
+// keeps only their status marks and colour tags. A search at the top finds them by name and by what
+// was said in them. It follows the daemon's changes as they come and shares its list with the
+// conversations popover. The arrows move through the rows, Return takes one up, F2 renames one,
+// Shift+F10 or a right click opens its menu and Mod+\ collapses or expands the rail.
 export const SessionRail = memo(function SessionRail({
   api,
   current,
@@ -96,8 +120,19 @@ export const SessionRail = memo(function SessionRail({
   onPick,
   onNew,
   newReason,
+  onDeleted,
 }: SessionRailProps) {
   const recent = useRecentConversations(api, true);
+  const [query, setQuery] = useState("");
+  const searching = expanded && !!query.trim();
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const archive = useRecentConversations(
+    api,
+    expanded && (searching || (archiveOpen && recent.archivedCount > 0)),
+    "archived",
+  );
+  // Collapsed, the rail has no room for what a search finds, so it lets the search go.
+  if (!expanded && query) setQuery("");
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), AGE_TICK_MS);
@@ -125,18 +160,39 @@ export const SessionRail = memo(function SessionRail({
     );
   }, [recent.entries]);
   const rows = useMemo(
-    () =>
-      pinActive(conversationRows(recent.entries, facts)).map((row) => {
-        const name = names.get(row.entry.sessionId);
-        return name ? { ...row, title: name.title || row.title } : row;
-      }),
+    () => arrangeConversations(withNames(conversationRows(recent.entries, facts), names)),
     [recent.entries, facts, names],
   );
-  const active = rows.filter((row) => row.active);
-  const rest = rows.filter((row) => !row.active);
-  const order = rows.map((row) => row.entry.sessionId);
+  const archived = useMemo(
+    () => withNames(conversationRows(archive.entries, facts), names),
+    [archive.entries, facts, names],
+  );
+  const content = useTaskSearch(api, searching ? query : "");
+  const found = useMemo(
+    () =>
+      searching
+        ? {
+            recent: searchConversations(
+              [...rows.pinned, ...rows.active, ...rows.rest],
+              query,
+              content.tasks,
+            ),
+            archived: searchConversations(archived, query, content.tasks),
+          }
+        : null,
+    [searching, rows, archived, query, content.tasks],
+  );
+  const archivedShown = expanded && archiveOpen && !found ? archived : [];
+  const order = (
+    found
+      ? [...found.recent, ...found.archived].map((match) => match.row)
+      : [...rows.pinned, ...rows.active, ...rows.rest, ...archivedShown]
+  ).map((row) => row.entry.sessionId);
 
   const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const searchField = useRef<HTMLInputElement>(null);
+  const [seek, setSeek] = useState(false);
+  const resultsId = useId();
   const [editing, setEditing] = useState<string | null>(null);
   // A rename ended from the keyboard hands focus back to its row once the row is back.
   const refocus = useRef<string | null>(null);
@@ -180,6 +236,8 @@ export const SessionRail = memo(function SessionRail({
   const scroller = useRef<HTMLDivElement>(null);
   useFlip(scroller, order.join(" "));
   useSelectionGlide(scroller, current);
+  const docked = useMediaQuery(DOCK_POINTER) && !expanded;
+  useDockMagnify(scroller, docked);
 
   const [focused, setFocused] = useState<string | null>(null);
   const stop = order.includes(focused ?? "")
@@ -202,10 +260,15 @@ export const SessionRail = memo(function SessionRail({
     if (to !== undefined) {
       event.preventDefault();
       const id = order[Math.max(0, Math.min(order.length - 1, to))];
-      if (id) buttons.current.get(id)?.focus();
+      // Up from the first row goes back to the search.
+      if (to < 0 && expanded) searchField.current?.focus();
+      else if (id) buttons.current.get(id)?.focus();
     } else if (event.key === "F2" && expanded) {
       event.preventDefault();
       setEditing(row.entry.sessionId);
+    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      openMenu(row, event.currentTarget);
     }
   };
   const pick = (row: ConversationRow) => {
@@ -223,13 +286,32 @@ export const SessionRail = memo(function SessionRail({
 
   const actionAnchor = useRef<HTMLButtonElement | null>(null);
   const [action, setAction] = useState<ConversationRow | null>(null);
+  const openMenu = (row: ConversationRow, trigger: HTMLButtonElement) => {
+    actionAnchor.current = trigger;
+    setAction(row);
+  };
+  const [deleting, setDeleting] = useState<ConversationRow | null>(null);
+  const organize = (row: ConversationRow, change: Organize) =>
+    organizeConversation(api, row.entry.sessionId, change).catch((failure) =>
+      announce(
+        "conversation",
+        failure instanceof ApiError && failure.status === 409
+          ? "This conversation can't be archived while its task is under way."
+          : "That change couldn't be saved. Try again.",
+        "assertive",
+      ),
+    );
+  const running = (row: ConversationRow) =>
+    row.active || !!row.entry.live || row.entry.sessions.includes(facts.live ?? "");
 
-  const item = (row: ConversationRow) => (
+  const item = (row: ConversationRow, match?: ConversationMatch) => (
     <RailRow
       key={row.entry.sessionId}
       row={row}
+      match={match}
       now={now}
       expanded={expanded}
+      named={docked}
       current={row.entry.sessionId === current}
       tabStop={row.entry.sessionId === stop}
       blocked={reason && row.entry.sessionId !== current ? reason : undefined}
@@ -242,10 +324,7 @@ export const SessionRail = memo(function SessionRail({
       onFocus={() => setFocused(row.entry.sessionId)}
       onKeyDown={(event) => moveFocus(event, row)}
       onPick={() => pick(row)}
-      onMenu={(trigger) => {
-        actionAnchor.current = trigger;
-        setAction(row);
-      }}
+      onMenu={(trigger) => openMenu(row, trigger)}
       onRenamed={(title, fromKeys) => void rename(row, title, fromKeys)}
     />
   );
@@ -272,7 +351,15 @@ export const SessionRail = memo(function SessionRail({
         onClick={recent.retry}
       />
     );
-  else if (!recent.loading && rows.length === 0 && expanded)
+  else if (found && found.recent.length + found.archived.length === 0)
+    body = (
+      <EmptyState
+        layout="start"
+        icon="search"
+        title={content.pending ? "Searching…" : `Nothing matches “${query.trim()}”`}
+      />
+    );
+  else if (!recent.loading && order.length === 0 && recent.archivedCount === 0 && expanded)
     body = <EmptyState layout="start" title="No conversations yet" />;
 
   return (
@@ -287,39 +374,131 @@ export const SessionRail = memo(function SessionRail({
         />
       </div>
       <NewRow expanded={expanded} reason={newReason} onNew={onNew} />
-      <ScrollArea ref={scroller} className="sessions-scroll" fade="both">
+      <RailSearch
+        expanded={expanded}
+        query={query}
+        onQuery={setQuery}
+        onOpen={() => {
+          setSeek(true);
+          onExpandedChange(true);
+        }}
+        focusOnShow={seek}
+        onShown={() => setSeek(false)}
+        onDown={() => {
+          const id = order[0];
+          if (id) buttons.current.get(id)?.focus();
+        }}
+        onEnter={() => {
+          const first = found?.recent[0] ?? found?.archived[0];
+          if (first) pick(first.row);
+        }}
+        inputRef={searchField}
+        resultsId={resultsId}
+      />
+      <ScrollArea ref={scroller} id={resultsId} className="sessions-scroll" fade="both">
         {body}
-        {active.length > 0 && (
-          <RailGroup label="Active" expanded={expanded}>
-            {active.map(item)}
-          </RailGroup>
-        )}
-        {rest.length > 0 && (
-          <RailGroup label="Recent" expanded={expanded}>
-            {rest.map(item)}
-          </RailGroup>
+        {found ? (
+          <>
+            {found.recent.length > 0 && (
+              <RailGroup label="Results" expanded={expanded}>
+                {found.recent.map((match) => item(match.row, match))}
+              </RailGroup>
+            )}
+            {found.archived.length > 0 && (
+              <RailGroup label="Archived" expanded={expanded}>
+                {found.archived.map((match) => item(match.row, match))}
+              </RailGroup>
+            )}
+          </>
+        ) : (
+          <>
+            {rows.pinned.length > 0 && (
+              <RailGroup label="Pinned" expanded={expanded}>
+                {rows.pinned.map((row) => item(row))}
+              </RailGroup>
+            )}
+            {rows.active.length > 0 && (
+              <RailGroup label="Active" expanded={expanded}>
+                {rows.active.map((row) => item(row))}
+              </RailGroup>
+            )}
+            {rows.rest.length > 0 && (
+              <RailGroup label="Recent" expanded={expanded}>
+                {rows.rest.map((row) => item(row))}
+              </RailGroup>
+            )}
+            {expanded && recent.archivedCount > 0 && (
+              <ArchivedGroup
+                count={recent.archivedCount}
+                open={archiveOpen}
+                onToggle={() => setArchiveOpen((was) => !was)}
+              >
+                {archivedShown.map((row) => item(row))}
+              </ArchivedGroup>
+            )}
+          </>
         )}
       </ScrollArea>
-      <Menu
-        open={action !== null}
-        onClose={() => setAction(null)}
+      <ConversationMenu
+        entry={action?.entry ?? null}
         anchor={actionAnchor}
-        label="Conversation actions"
-        align="start"
-      >
-        <MenuItem
-          icon="type"
-          kbd={["F2"]}
-          onSelect={() => {
-            if (action) setEditing(action.entry.sessionId);
-          }}
-        >
-          Rename
-        </MenuItem>
-      </Menu>
+        onClose={() => setAction(null)}
+        side={expanded ? "bottom" : "right"}
+        running={!!action && running(action)}
+        renameKeys={["F2"]}
+        onRename={() => {
+          if (!action) return;
+          onExpandedChange(true);
+          setEditing(action.entry.sessionId);
+        }}
+        onOrganize={(change) => {
+          if (action) void organize(action, change);
+        }}
+        onDelete={() => setDeleting(action)}
+      />
+      <DeleteConversationDialog
+        api={api}
+        conversation={deleting?.entry ?? null}
+        anchor={actionAnchor}
+        onClose={() => setDeleting(null)}
+        onDeleted={onDeleted}
+      />
     </nav>
   );
 });
+
+function ArchivedGroup({
+  count,
+  open,
+  onToggle,
+  children,
+}: {
+  count: number;
+  open: boolean;
+  onToggle(): void;
+  children: ReactNode;
+}) {
+  const id = useId();
+  return (
+    <div>
+      <Button
+        variant="quiet"
+        size="sm"
+        className="sessions-archived"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onToggle}
+      >
+        <Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
+        <span className="sessions-group-name">Archived</span>
+        <span className="sessions-archived-count num">{count}</span>
+      </Button>
+      <ul id={id} className="sessions-list" aria-label="Archived">
+        {children}
+      </ul>
+    </div>
+  );
+}
 
 function RailGroup({
   label,
@@ -375,8 +554,12 @@ function NewRow({
 
 interface RailRowProps {
   row: ConversationRow;
+  // What a search found in it.
+  match?: ConversationMatch | undefined;
   now: Date;
   expanded: boolean;
+  // The rail's dock shows its name beside the mark, so it needs no tooltip.
+  named: boolean;
   current: boolean;
   tabStop: boolean;
   blocked?: string;
@@ -393,8 +576,10 @@ interface RailRowProps {
 
 function RailRow({
   row,
+  match,
   now,
   expanded,
+  named,
   current,
   tabStop,
   blocked,
@@ -409,8 +594,9 @@ function RailRow({
 }: RailRowProps) {
   const activityId = useId();
   const name = rowName(row, now);
+  const second = match?.snippet ?? row.activity;
   const { triggerProps: tip, tooltip } = useTooltip({
-    content: expanded || blocked ? undefined : row.title,
+    content: expanded || named || blocked ? undefined : row.title,
   });
   return (
     <li
@@ -432,23 +618,32 @@ function RailRow({
             tabIndex={tabStop ? 0 : -1}
             aria-label={name}
             aria-current={current || undefined}
-            aria-describedby={row.activity && expanded ? activityId : undefined}
-            aria-keyshortcuts={expanded ? "F2" : undefined}
+            aria-describedby={second && expanded ? activityId : undefined}
+            aria-keyshortcuts={expanded ? "F2 Shift+F10" : "Shift+F10"}
             disabledReason={blocked}
             onFocus={onFocus}
             onKeyDown={onKeyDown}
             onClick={onPick}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              onMenu(event.currentTarget);
+            }}
           >
-            <SessionGlyph status={row.status} />
-            <span className="sessions-title">{row.title}</span>
+            <span className="sessions-glyph">
+              <SessionGlyph status={row.status} />
+              <TagMark tag={row.entry.tag} />
+            </span>
+            <span className="sessions-title">
+              {match ? <Highlight text={match.title} /> : row.title}
+            </span>
             <span className="sessions-when num">
               {row.entry.live?.onScreen && <Icon name="monitor" size={12} />}
               {whenLabel(row.since, now)}
             </span>
-            {row.activity && (
+            {second && (
               <span className="sessions-activity" data-shown={expanded || undefined}>
                 <span id={activityId} className="sessions-activity-text">
-                  {row.activity}
+                  {match?.snippet ? <Highlight text={match.snippet} before={24} /> : second}
                 </span>
               </span>
             )}

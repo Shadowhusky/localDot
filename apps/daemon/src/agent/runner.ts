@@ -164,6 +164,8 @@ export interface TaskStartOptions {
   readonly research?: boolean;
   // The conversation's latest task, or null for a new one; left out, the current conversation.
   readonly continues?: string | null;
+  // The shared link the task's message came through.
+  readonly sender?: string;
 }
 export class AgentError extends Error {
   constructor(
@@ -315,7 +317,7 @@ interface Runtime {
   brain?: BrainCell;
   brainOpening?: Promise<void>;
   initialized: boolean;
-  failure?: { reason?: string; detail?: string };
+  failure?: { reason?: string; detail?: string; next?: string };
   completion?: "complete" | "blocked";
   providerNotice?: string;
   serial: Promise<void>;
@@ -808,7 +810,7 @@ export class AgentRunner {
           ...(revises?.success ? { revises: revises.data } : {}),
           ...(session.research ? { research: session.research.budget } : {}),
         });
-        session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
+        session.askTask(options.sender);
         if (named?.user) session.append("session.title", { title: named.user, by: "user" });
         if (!origin && !continues) this.#lookFirst(rt, task, !!settings.autoPersona);
         if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));
@@ -1858,7 +1860,7 @@ export class AgentRunner {
           const why = `${rt.failure.reason ?? "The task failed."}${rt.failure.detail ? ` ${rt.failure.detail}` : ""}`;
           session.append("message.assistant", {
             messageId: ulid(),
-            text: `I couldn't continue: ${why}${/[.!?]$/.test(why) ? "" : "."} Check Settings or choose another model, then send your message again.`,
+            text: `I couldn't continue: ${why}${/[.!?]$/.test(why) ? "" : "."} ${rt.failure.next ?? "Check Settings or choose another model, then send your message again."}`,
           });
           break;
         }

@@ -280,11 +280,11 @@ test("Stop releases user control and allows New conversation without Hand back",
   const response = page.waitForResponse(
     (reply) =>
       reply.request().method() === "POST" &&
-      /\/api\/agent\/sessions\/[^/]+\/stop$/.test(reply.url()),
+      /\/api\/agent\/sessions\/[^/]+\/stop(\?|$)/.test(reply.url()),
   );
   if (isPhone(page)) await page.getByTestId("hud-stop-session").click();
   else await form.getByRole("button", { name: "Stop task", exact: true }).click();
-  expect((await response).status()).toBe(204);
+  expect((await response).status()).toBe(200);
   await expect(form.getByRole("button", { name: "Stop task", exact: true })).toHaveCount(0);
   await expect(page.getByText("Couldn't confirm Stop. Check the task and try again.")).toHaveCount(
     0,
@@ -336,7 +336,7 @@ test("queued Edit moves the message into the draft and resends the edited messag
   await expect(original.getByText("After this task")).toBeVisible();
   await field.fill("My existing draft");
   await original.getByRole("button", { name: "Edit", exact: true }).click();
-  await expect(field).toHaveValue("My existing draft\n\nOriginal queued request");
+  await expect(field).toHaveValue("Original queued request\n\nMy existing draft");
   await expect(field).toBeFocused();
   await expect(original).toHaveCount(0);
   await field.fill("Revised queued request");

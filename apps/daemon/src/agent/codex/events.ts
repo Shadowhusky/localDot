@@ -15,6 +15,7 @@ import {
   turnOutcome,
 } from "@localdot/codex-harness";
 import { ULID_PATTERN, ulid } from "@localdot/protocol";
+import { toolLabel } from "../native-tools.ts";
 import type { Redactor } from "../redact.ts";
 import type { AgentSession, BrainGeneration } from "../session.ts";
 import { cut } from "../tools/deps.ts";
@@ -25,7 +26,10 @@ export type Violation = "command" | "file_applied" | "sub_agent" | "foreign_tool
 export type MapperSignal =
   | { kind: "turn_started"; turnId: string }
   | { kind: "turn_completed"; turn: Turn }
-  | { kind: "violation"; what: Violation; detail: string }
+  // `tool` is a plain name, or a fixed stand-in; never anything the call carried.
+  | { kind: "violation"; what: Violation; tool: string; detail: string }
+  // The model asked for a tool that is not localDot's and nothing outside localDot answered it.
+  | { kind: "refused"; tool: string; detail: string }
   | { kind: "usage"; data: SubscriptionUsageData };
 export interface CodexEventMapperOptions {
   readonly session: MapperSession;
@@ -67,13 +71,24 @@ const SAFE_ERROR_KINDS = new Set([
   "responseStreamDisconnected",
   "responseTooManyFailedAttempts",
 ]);
-const VIOLATION_TEXT: Record<Violation, string> = {
-  command: "Codex attempted a command outside localDot's tools.",
-  file_applied: "Codex applied a file change outside localDot's tools.",
-  sub_agent: "Codex attempted work outside the active task thread.",
-  foreign_tool: "Codex attempted a tool from another server.",
-  builtin_tool: "Codex attempted a built-in tool outside localDot's tools.",
+const VIOLATION_TEXT: Record<Violation, (tool: string) => string> = {
+  command: () => "Codex started a command of its own, outside localDot's tools.",
+  file_applied: () => "Codex applied a file change of its own, outside localDot's tools.",
+  sub_agent: () => "Codex attempted work outside the active task thread.",
+  foreign_tool: (tool) => `Codex used ${tool}, a tool from another server.`,
+  builtin_tool: (tool) => `Codex used its own ${tool}, outside localDot's tools.`,
 };
+// Codex's own readers of MCP resources. They reach only the configured servers, which are
+// localDot's endpoint alone, and it has no resources.
+const RESOURCE_TOOLS = new Set(["list_mcp_resources", "list_mcp_resource_templates"]);
+const CODEX_SERVER = "codex";
+// Built-ins that ran by the time their item starts: the hosted search and image tools run on the
+// server, and an image view has already read its file.
+const RAN = new Map([
+  ["webSearch", "web_search"],
+  ["imageGeneration", "image_generation"],
+  ["imageView", "view_image"],
+]);
 function prefix(text: string, max: number): string {
   let end = Math.min(max, text.length);
   if (end < text.length && /[\uD800-\uDBFF]/u.test(text[end - 1] ?? "")) end--;
@@ -190,10 +205,19 @@ export class CodexEventMapper {
   #signalResult(signal: MapperSignal): MapperSignal[] {
     return this.#active() ? [signal] : [];
   }
-  #violation(what: Violation): MapperSignal[] {
+  #violation(what: Violation, name?: unknown): MapperSignal[] {
     if (!this.#active()) return [];
+    const tool = toolLabel(name, this.#opts.redact);
     this.close();
-    return [{ kind: "violation", what, detail: VIOLATION_TEXT[what] }];
+    return [{ kind: "violation", what, tool, detail: VIOLATION_TEXT[what](tool) }];
+  }
+  #refused(name: unknown, answer: string): MapperSignal[] {
+    const tool = toolLabel(name, this.#opts.redact);
+    return this.#signalResult({
+      kind: "refused",
+      tool,
+      detail: `Codex asked for its own ${tool}; ${answer}`,
+    });
   }
   #item(id: string, phase: Item["phase"] = "final_answer"): Item {
     const existing = this.#items.get(id);
@@ -432,20 +456,32 @@ export class CodexEventMapper {
     if (item.type === "mcpToolCall") {
       const tool = McpToolCallItem.safeParse(item);
       if (!tool.success) return [];
-      if (tool.data.server !== MCP_SERVER_NAME) return this.#violation("foreign_tool");
+      if (tool.data.server === CODEX_SERVER && RESOURCE_TOOLS.has(tool.data.tool))
+        return completed
+          ? []
+          : this.#refused(tool.data.tool, "localDot's server has no resources for it.");
+      if (tool.data.server !== MCP_SERVER_NAME)
+        return this.#violation("foreign_tool", `mcp__${tool.data.server}__${tool.data.tool}`);
       this.#flush(true);
       this.#append("agent.state", { state: completed ? "thinking" : "acting" });
       return [];
     }
+    // localDot runs no dynamic tools: it answers each such call as failed (see approvals).
+    if (item.type === "dynamicToolCall") {
+      const name = (item as { tool?: unknown }).tool;
+      if (!completed) return this.#refused(name, "localDot has no dynamic tools.");
+      return (item as { success?: unknown }).success === true
+        ? this.#violation("builtin_tool", name)
+        : [];
+    }
     if (completed)
       return item.type === "fileChange" && item.status === "completed"
-        ? this.#violation("file_applied")
+        ? this.#violation("file_applied", "apply_patch")
         : [];
-    if (item.type === "commandExecution") return this.#violation("command");
+    if (item.type === "commandExecution") return this.#violation("command", "shell");
     if (item.type === "collabAgentToolCall" || item.type === "subAgentActivity")
       return this.#violation("sub_agent");
-    if (["webSearch", "imageGeneration", "imageView", "dynamicToolCall"].includes(item.type))
-      return this.#violation("builtin_tool");
-    return [];
+    const ran = RAN.get(item.type);
+    return ran ? this.#violation("builtin_tool", ran) : [];
   }
 }

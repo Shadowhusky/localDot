@@ -109,6 +109,8 @@ export const AgentState = event(
     reason: z.string().max(200).optional(),
     // What the model's provider said, for a reason that has more to tell.
     detail: z.string().max(200).optional(),
+    // What the user can do about an error whose cause is known.
+    next: z.string().max(200).optional(),
   }),
 );
 // Why a task waits on something other than its own Pause, question or approval. The app gives
@@ -369,7 +371,8 @@ export const MessageUser = event(
     files: z.array(z.string().max(255)).max(16).optional(),
   }),
 );
-// A queued message cancelled because its task stopped, not by the user, says so.
+// A message its task's Stop left unanswered says so: cancelled, it waits unsent for its writer to
+// take back; withdrawn, Stop gave it straight back to them.
 export const MessageDelivery = event(
   "message.delivery",
   z.object({

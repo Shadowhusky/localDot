@@ -33,11 +33,11 @@ const TEXT_MAX = 20_000;
 // bm25() can't run inside a subquery the planner flattens into an aggregate, so hits are
 // materialized first; each task's best row stands for it, and each daily note stands alone.
 const RANKED = `WITH hits AS MATERIALIZED (
-  SELECT CASE WHEN kind = 'note' THEN 'note:' || ref ELSE session_id END AS g, session_id, kind, at,
+  SELECT CASE WHEN kind = 'note' THEN 'note:' || ref ELSE session_id END AS g, session_id, kind, at, rowid AS rid,
     bm25(docs) * CASE kind WHEN 'title' THEN 3.0 WHEN 'summary' THEN 2.0 WHEN 'user' THEN 1.5 ELSE 1.0 END AS score,
     snippet(docs, 4, char(57344), char(57345), '…', 12) AS snip
   FROM docs WHERE docs MATCH ?1 AND (?2 IS NULL OR kind = ?2) AND (?3 IS NULL OR session_id <> ?3)
-) SELECT g, session_id, kind, at, MIN(score) AS score, snip FROM hits GROUP BY g ORDER BY score LIMIT ?4`;
+) SELECT g, session_id, kind, at, rid, MIN(score) AS score, snip FROM hits GROUP BY g ORDER BY score LIMIT ?4`;
 
 // What earlier tasks said, redacted before it is stored, in the daemon's index.sqlite.
 export class SearchIndex {
@@ -48,6 +48,7 @@ export class SearchIndex {
   readonly #row: StatementSync;
   readonly #progress: StatementSync;
   readonly #progressOf: StatementSync;
+  readonly #text: StatementSync | undefined;
   constructor(
     home: string,
     opts: { sessions: Pick<EventLog, "sessionInfo">; forceLike?: boolean },
@@ -80,6 +81,7 @@ export class SearchIndex {
       "INSERT INTO doc_progress(session_id, seq) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET seq = max(seq, excluded.seq)",
     );
     this.#progressOf = this.#db.prepare("SELECT seq FROM doc_progress WHERE session_id = ?");
+    if (this.mode === "fts") this.#text = this.#db.prepare("SELECT text FROM docs WHERE rowid = ?");
   }
   get #table() {
     return this.mode === "fts" ? "docs" : "docs_plain";
@@ -120,6 +122,16 @@ export class SearchIndex {
       return added;
     });
   }
+  // A message that never reached dot, or that Stop gave back, leaves the index; its key stays, so
+  // reading the task again never brings it back.
+  remove(sessionId: string, kind: SearchKind, ref: string): void {
+    this.#tx(() => {
+      this.#key.run(sessionId, kind, ref);
+      this.#db
+        .prepare(`DELETE FROM ${this.#table} WHERE session_id = ? AND kind = ? AND ref = ?`)
+        .run(sessionId, kind, ref);
+    });
+  }
   progressOf(sessionId: string): number {
     const row = this.#progressOf.get(sessionId) as { seq?: number } | undefined;
     return Number(row?.seq ?? 0);
@@ -154,9 +166,15 @@ export class SearchIndex {
               session_id: string;
               kind: SearchKind;
               at: string;
+              rid: number;
               snip: string;
             }[]
-          ).map((r) => ({ sessionId: r.session_id, kind: r.kind, at: r.at, snippet: r.snip }))
+          ).map((r) => ({
+            sessionId: r.session_id,
+            kind: r.kind,
+            at: r.at,
+            snippet: this.#redacted(r.rid, r.snip, terms),
+          }))
         : this.#like(terms, kind, exclude, limit * 2);
     const info = this.#sessions.sessionInfo(raw.flatMap((r) => (r.sessionId ? [r.sessionId] : [])));
     return raw
@@ -236,6 +254,14 @@ export class SearchIndex {
       .slice(0, limit);
   }
 
+  // Applies current redaction rules again to text an older version indexed, as recall does: a
+  // snippet of text that changes is taken afresh from the redacted text.
+  #redacted(rowid: number, snippet: string, terms: readonly string[]): string {
+    const text = (this.#text?.get(rowid) as { text?: string } | undefined)?.text ?? "";
+    const safe = redactForIndex(text);
+    return safe === text ? snippet : likeSnippet(safe, terms);
+  }
+
   #like(terms: readonly string[], kind: SearchKind | null, exclude: string | null, limit: number) {
     const where = terms.map(() => "text LIKE ? ESCAPE '\\'").join(" AND ");
     const rows = this.#db
@@ -259,7 +285,7 @@ export class SearchIndex {
         sessionId: r.session_id,
         kind: r.kind,
         at: r.at,
-        snippet: likeSnippet(r.text, terms),
+        snippet: likeSnippet(redactForIndex(r.text), terms),
       });
       if (out.length >= limit) break;
     }

@@ -55,6 +55,7 @@ function setup(
       facts: { live: SESSION, idle: false, needsYou: new Set() },
       pick: vi.fn(),
       renamed: vi.fn(),
+      remove: vi.fn(),
     },
     replay: doable(),
     watch: doable("You're watching already"),
@@ -115,6 +116,9 @@ describe("the actions", () => {
       "new",
       "resume",
       "rename",
+      "tag",
+      "pin",
+      "archive",
       "replay",
       "research",
       "model",
@@ -202,6 +206,60 @@ describe("the actions", () => {
       "Couldn't rename the conversation. Try again.",
     );
     expect(refused.input.conversations.renamed).not.toHaveBeenCalled();
+  });
+
+  it("tags, pins and archives the conversation, and asks before deleting it", async () => {
+    const f = setup({
+      conversations: {
+        current: SESSION,
+        facts: { live: null, needsYou: new Set() },
+        pick: vi.fn(),
+        renamed: vi.fn(),
+        remove: vi.fn(),
+      },
+    });
+    expect(f.find("tag").choices).toEqual([
+      { value: "none", label: "No tag", current: true },
+      { value: "red", label: "Red", current: false },
+      { value: "orange", label: "Orange", current: false },
+      { value: "yellow", label: "Yellow", current: false },
+      { value: "green", label: "Green", current: false },
+      { value: "blue", label: "Blue", current: false },
+      { value: "purple", label: "Purple", current: false },
+    ]);
+    await expect(
+      f.run("tag", { choice: { value: "blue", label: "Blue" } }),
+    ).resolves.toBeUndefined();
+    await expect(f.run("tag", { choice: { value: "none", label: "No tag" } })).resolves.toBe(
+      undefined,
+    );
+    expect(f.find("pin").title).toBe("Pin this conversation");
+    await f.run("pin");
+    expect(f.find("archive").unavailable).toBeUndefined();
+    await f.run("archive");
+    expect(f.calls.filter((call) => call.method === "POST")).toEqual([
+      { method: "POST", path: `/api/conversations/${SESSION}/tag`, body: { tag: "blue" } },
+      { method: "POST", path: `/api/conversations/${SESSION}/tag`, body: { tag: null } },
+      { method: "POST", path: `/api/conversations/${SESSION}/pin`, body: { pinned: true } },
+      { method: "POST", path: `/api/conversations/${SESSION}/archive`, body: { archived: true } },
+    ]);
+    const trigger = document.createElement("button");
+    f.run("delete-conversation", { trigger });
+    expect(f.input.conversations.remove).toHaveBeenCalledWith(trigger);
+
+    // While its task is under way it is neither archived nor deleted.
+    const busy = setup();
+    expect(busy.find("archive").unavailable).toBe(
+      "Stop the task before archiving its conversation",
+    );
+    expect(busy.find("delete-conversation").unavailable).toBe(
+      "Stop the task before deleting its conversation",
+    );
+    const none = setup({ conversations: { ...busy.input.conversations, current: null } });
+    for (const id of ["tag", "pin", "archive", "delete-conversation"])
+      expect(none.find(id).unavailable).toBe("Start a conversation first");
+    const refused = setup({}, () => new Response("live", { status: 409 }));
+    await expect(refused.run("pin")).resolves.toBe("That change couldn't be saved. Try again.");
   });
 
   it("remembers a fact in dot's notes, saying why when it can't", async () => {

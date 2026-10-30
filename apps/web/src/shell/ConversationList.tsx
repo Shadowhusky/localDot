@@ -13,28 +13,35 @@ import {
   useState,
 } from "react";
 import {
+  type ConversationGroup,
   type ConversationRow,
+  type ConversationView,
   conversationRows,
   groupConversations,
   type LiveFacts,
-  matchesConversation,
+  organizeConversation,
   STATUS_LABEL,
   useRecentConversations,
   whenLabel,
 } from "../agent/conversation-list.ts";
+import { searchConversations } from "../agent/conversation-search.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
-import { type ApiClient, ApiError } from "../lib/api.ts";
+import type { ApiClient } from "../lib/api.ts";
+import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
+import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
-import { Dialog } from "../ui/Dialog.tsx";
+import { TagMark } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
-import { Menu, MenuItem } from "../ui/Menu.tsx";
+import { MenuItem } from "../ui/Menu.tsx";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
 import { SessionGlyph } from "../ui/SessionGlyph.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
+import { ConversationMenu } from "./ConversationMenu.tsx";
+import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import "../ui/conversations-layout.css";
 import "./rails.css";
 
@@ -52,8 +59,8 @@ export interface ConversationListProps {
   onDeleted?(sessions: readonly string[]): void;
 }
 
-// The recent conversations, those under way first and the rest by day, a search over them and
-// the way into Replay for the rest. The search field keeps the focus while the arrows move through
+// The recent conversations, those pinned and those under way first and the rest by day, a search
+// over them, best first, and the way into Replay for the rest. The search field keeps the focus while the arrows move through
 // the rows, as a picker's does.
 export function ConversationList({
   api,
@@ -69,8 +76,6 @@ export function ConversationList({
   const actionAnchor = useRef<HTMLButtonElement | null>(null);
   const [action, setAction] = useState<ConversationRow | null>(null);
   const [deleting, setDeleting] = useState<ConversationRow | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   // The row whose name is being typed in place, and what is typed. An empty name gives the
   // conversation back its automatic one.
   const [renaming, setRenaming] = useState<{ id: string; name: string; was: string } | null>(null);
@@ -98,38 +103,31 @@ export function ConversationList({
       setRenameError("The new name couldn't be saved. Try again.");
     }
   };
-  const remove = async () => {
-    if (!deleting || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.del(`/api/conversations/${deleting.entry.sessionId}`);
-      onDeleted?.(deleting.entry.sessions);
-      setDeleting(null);
-      recent.retry();
-    } catch (failure) {
-      setError(
-        failure instanceof ApiError && failure.status === 409
-          ? "Stop this conversation's task before deleting it."
-          : "The conversation couldn't be deleted. Try again.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-  const recent = useRecentConversations(api, open);
+  // The archived conversations take the list's place until the user goes back.
+  const [view, setView] = useState<ConversationView>("recent");
+  if (!open && view !== "recent") setView("recent");
+  const recent = useRecentConversations(api, open, view);
   const [query, setQuery] = useState("");
   const matches = useTaskSearch(api, query);
   const [now] = useState(() => new Date());
-  const found = useMemo(() => new Set(matches.tasks.keys()), [matches.tasks]);
-  const rows = useMemo(
-    () =>
-      conversationRows(recent.entries, facts).filter((row) =>
-        matchesConversation(row.entry, query, found),
-      ),
-    [recent.entries, facts, query, found],
+  const all = useMemo(() => conversationRows(recent.entries, facts), [recent.entries, facts]);
+  const found = useMemo(
+    () => (query.trim() ? searchConversations(all, query, matches.tasks) : null),
+    [all, query, matches.tasks],
   );
-  const groups = useMemo(() => groupConversations(rows, now), [rows, now]);
+  const groups = useMemo(
+    (): ConversationGroup[] =>
+      found
+        ? found.length
+          ? [{ label: "Results", rows: found.map((match) => match.row) }]
+          : []
+        : groupConversations(all, now),
+    [found, all, now],
+  );
+  const marked = useMemo(
+    () => new Map(found?.map((match) => [match.row.entry.sessionId, match])),
+    [found],
+  );
   const ordered = useMemo(() => groups.flatMap((group) => group.rows), [groups]);
   const [active, setActive] = useState<string | null>(null);
   const activeRow =
@@ -203,6 +201,8 @@ export function ConversationList({
         }
       />
     );
+  else if (recent.entries.length === 0 && view === "archived")
+    body = <EmptyState title="Nothing archived" icon="archive" />;
   else if (recent.entries.length === 0)
     body = (
       <EmptyState title="No conversations yet" icon="message-circle">
@@ -244,6 +244,7 @@ export function ConversationList({
             );
           const id = row.entry.sessionId;
           const isCurrent = id === current;
+          const match = marked.get(id);
           return (
             <div
               key={id}
@@ -295,16 +296,29 @@ export function ConversationList({
                     disabledReason={!isCurrent ? reason : undefined}
                     onClick={() => pick(row)}
                   >
-                    <SessionGlyph
-                      status={row.status}
-                      label={STATUS_LABEL[row.status]}
-                      className="conversations-status"
-                    />
-                    <span className="conversations-title">{row.title}</span>
+                    <span className="conversations-glyph">
+                      <SessionGlyph
+                        status={row.status}
+                        label={STATUS_LABEL[row.status]}
+                        className="conversations-status"
+                      />
+                      <TagMark tag={row.entry.tag} />
+                    </span>
+                    <span className="conversations-title">
+                      {match ? <Highlight text={match.title} /> : row.title}
+                    </span>
                     <time className="conversations-when num" dateTime={row.since}>
                       {whenLabel(row.since, now)}
                     </time>
-                    {row.activity && <span className="conversations-activity">{row.activity}</span>}
+                    {(match?.snippet ?? row.activity) && (
+                      <span className="conversations-activity">
+                        {match?.snippet ? (
+                          <Highlight text={match.snippet} before={32} />
+                        ) : (
+                          row.activity
+                        )}
+                      </span>
+                    )}
                   </Button>
                 )}
               </div>
@@ -360,12 +374,23 @@ export function ConversationList({
       <div className="conversations-body" aria-busy={recent.loading || matches.pending}>
         {body}
       </div>
-      <Menu
-        open={action !== null}
-        onClose={() => setAction(null)}
+      <ConversationMenu
+        entry={action?.entry ?? null}
         anchor={actionAnchor}
-        label="Conversation actions"
+        onClose={() => setAction(null)}
         align="end"
+        running={!!action && (action.active || action.entry.sessions.includes(facts.live ?? ""))}
+        onRename={() => {
+          if (action)
+            setRenaming({ id: action.entry.sessionId, name: action.title, was: action.title });
+        }}
+        onOrganize={(change) => {
+          if (action)
+            organizeConversation(api, action.entry.sessionId, change).catch(() =>
+              announce("conversation", "That change couldn't be saved. Try again.", "assertive"),
+            );
+        }}
+        onDelete={() => setDeleting(action)}
       >
         <MenuItem
           icon="message-circle"
@@ -376,60 +401,31 @@ export function ConversationList({
         >
           Open conversation
         </MenuItem>
-        <MenuItem
-          icon="compose"
-          onSelect={() => {
-            if (action)
-              setRenaming({ id: action.entry.sessionId, name: action.title, was: action.title });
-          }}
-        >
-          Rename
-        </MenuItem>
-        <MenuItem
-          icon="trash"
-          disabledReason={
-            action?.entry.sessions.includes(facts.live ?? "")
-              ? "Stop this task before deleting its conversation."
-              : undefined
-          }
-          onSelect={() => {
-            setError(null);
-            setDeleting(action);
-          }}
-        >
-          Delete conversation
-        </MenuItem>
-      </Menu>
-      <Dialog
-        open={deleting !== null}
-        onClose={() => {
-          if (!busy) setDeleting(null);
-        }}
+      </ConversationMenu>
+      <DeleteConversationDialog
+        api={api}
+        conversation={deleting?.entry ?? null}
         anchor={actionAnchor}
-        title="Delete this conversation?"
-        description={
-          error ? (
-            <span role="alert">{error}</span>
-          ) : (
-            "Its messages, recordings and screenshots will be removed. This can't be undone."
-          )
-        }
-      >
-        <Button
-          variant="quiet"
-          disabledReason={busy ? "Deleting…" : undefined}
-          onClick={() => setDeleting(null)}
-        >
-          Cancel
-        </Button>
-        <Button variant="destructive" busy={busy} onClick={() => void remove()}>
-          Delete
-        </Button>
-      </Dialog>
+        onClose={() => setDeleting(null)}
+        onDeleted={onDeleted}
+      />
       <div className="conversations-foot" data-loading={recent.loading || undefined}>
-        <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
-          See all in Replay
-        </Button>
+        {view === "archived" ? (
+          <Button variant="quiet" size="sm" icon="chevron-left" onClick={() => setView("recent")}>
+            Recent conversations
+          </Button>
+        ) : (
+          <>
+            <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
+              See all in Replay
+            </Button>
+            {recent.archivedCount > 0 && (
+              <Button variant="quiet" size="sm" icon="archive" onClick={() => setView("archived")}>
+                Archived ({recent.archivedCount})
+              </Button>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

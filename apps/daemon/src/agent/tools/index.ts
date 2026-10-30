@@ -258,7 +258,11 @@ async function dispatchAdmitted(
   let result: ToolResult | undefined;
   try {
     if (!generation) throw new Error("No active brain generation");
-    lease = session.admit(generation, requestSignal);
+    // A look at the screen, as a brain's first one is, changes nothing: it answers nothing either.
+    lease =
+      name === "computer" && (rawInput as Partial<ComputerAction>).action === "screenshot"
+        ? session.admit(generation, requestSignal)
+        : session.admitCall(generation, requestSignal);
     const activeLease = lease;
     const step = ulid();
     ctx = {

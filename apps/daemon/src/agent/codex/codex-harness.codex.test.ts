@@ -758,7 +758,7 @@ describe(`actual pinned Codex ${CODEX_VERSION} offline acceptance`, { timeout: 6
     const h = await pinnedDriver(fixture, (_body, index) =>
       index === 0
         ? exec(
-            'const out = { names: ALL_TOOLS.map((tool) => tool.name) }; try { await tools.web__run({ search_query: [{ q: "inert" }] }); out.web = "ran"; } catch { out.web = "refused"; } try { await tools.mcp__foreign__computer({ action: "screenshot" }); out.foreign = "ran"; } catch { out.foreign = "refused"; } text(JSON.stringify(out));',
+            'const out = { names: ALL_TOOLS.map((tool) => tool.name) }; try { await tools.web__run({ search_query: [{ q: "inert" }] }); out.web = "ran"; } catch { out.web = "refused"; } try { await tools.mcp__foreign__computer({ action: "screenshot" }); out.foreign = "ran"; } catch { out.foreign = "refused"; } for (const name of ["list_mcp_resources", "list_mcp_resource_templates"]) { try { out[name] = String(await tools[name]({})); } catch (error) { out[name] = String(error); } } text(JSON.stringify(out));',
           )
         : done(index + 1),
     );
@@ -768,11 +768,35 @@ describe(`actual pinned Codex ${CODEX_VERSION} offline acceptance`, { timeout: 6
       names: string[];
       web: string;
       foreign: string;
+      list_mcp_resources: string;
+      list_mcp_resource_templates: string;
     };
     expect(out.web).toBe("refused");
     expect(out.foreign).toBe("refused");
+    // Codex's own resource readers reach only localDot's endpoint, which has no resources: they
+    // find nothing, and the task goes on rather than stopping.
+    expect(JSON.parse(out.list_mcp_resources)).toEqual({ resources: [] });
+    expect(JSON.parse(out.list_mcp_resource_templates)).toEqual({ resourceTemplates: [] });
+    expect(
+      h.notes
+        .map((note) => (note.params as { item?: { type?: string; server?: string } }).item)
+        .filter((item) => item?.type === "mcpToolCall" && item.server !== "localdot"),
+    ).toEqual([
+      expect.objectContaining({ server: "codex", tool: "list_mcp_resources" }),
+      expect.objectContaining({ server: "codex", tool: "list_mcp_resources" }),
+      expect.objectContaining({ server: "codex", tool: "list_mcp_resource_templates" }),
+      expect.objectContaining({ server: "codex", tool: "list_mcp_resource_templates" }),
+    ]);
     for (const name of out.names.filter((name) => name.startsWith("mcp__")))
       expect(name).toMatch(/^mcp__localdot__/);
+    // Codex's own tools that stay on in this pin; a new one must be reviewed before a pin change.
+    expect(out.names.filter((name) => !name.startsWith("mcp__localdot__")).sort()).toEqual([
+      "apply_patch",
+      "clock__curr_time",
+      "list_mcp_resource_templates",
+      "list_mcp_resources",
+      "read_mcp_resource",
+    ]);
     expect(out.names.some((name) => /plugin|connector|web__|spawn_agent/.test(name))).toBe(false);
     expect(h.calls.map((call) => call.tool)).toEqual(["done"]);
     for (const request of h.mock.requests)

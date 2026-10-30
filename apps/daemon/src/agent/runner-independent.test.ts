@@ -383,6 +383,8 @@ describe("conversation continuity", () => {
     const h = conversing();
     const first = await h.runner.start(h.cellId, "Draw a dog");
     await h.ready();
+    // dot answered, so Stop leaves the message said.
+    first.append("message.assistant", { messageId: ulid(), text: "Drawing it." });
     h.live.stop(first.id);
     await h.live.settled(first.id);
     expect(end(h.log, first.id)?.data).toEqual({ reason: "stopped" });
@@ -399,7 +401,11 @@ describe("conversation continuity", () => {
       const second = await restarted.start(h.cellId, "Use red instead");
       await until(() => boots.length === 1);
       expect(start(h.log, second.id)?.data).toMatchObject({ continues: first.id });
-      expect(boots[0]?.earlier).toEqual(["The user: Draw a dog", "(That task was stopped.)"]);
+      expect(boots[0]?.earlier).toEqual([
+        "The user: Draw a dog",
+        "dot: Drawing it.",
+        "(That task was stopped.)",
+      ]);
     } finally {
       await restarted.close();
     }

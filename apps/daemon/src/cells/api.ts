@@ -1,10 +1,11 @@
-import { ReplacementRequest, ULID_PATTERN } from "@localdot/protocol";
+import { ComputerSize, ReplacementRequest, ULID_PATTERN } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { ComputerResetRequest } from "../../../../packages/protocol/src/computer-reset.ts";
 import { ReplacementConflict } from "../agent/safety/replacement.ts";
 import type { createReplacementController } from "../agent/safety/replacement-controller.ts";
 import type { ComputerImportPort } from "../dots/computer-import.ts";
+import { type ComputerSizes, SizeRefused } from "./computer-size.ts";
 import { DockerError } from "./docker.ts";
 import {
   type CellApi,
@@ -31,6 +32,7 @@ export interface CellApiDeps {
   // Plain advice when Docker lacks the memory to run one more computer; `force` starts it anyway.
   capacity?(starting?: string): Promise<string | undefined>;
   importComputer?: ComputerImportPort;
+  size?: Pick<ComputerSizes, "view" | "change">;
 }
 
 export function cellRoutes(
@@ -45,6 +47,7 @@ export function cellRoutes(
     runtimeStatus,
     capacity,
     importComputer,
+    size,
   }: CellApiDeps,
 ): void {
   // A stream ticket lives only while its cell is ready (P2-R2): stopping, failing or removing the
@@ -217,6 +220,18 @@ export function cellRoutes(
     ),
   );
 
+  if (size) {
+    app.get("/api/computer-size", (c) => {
+      c.header("cache-control", "no-store");
+      return withSize(c, () => size.view());
+    });
+    app.put("/api/computer-size", bodyLimit({ maxSize: 1024 }), async (c) => {
+      const next = ComputerSize.safeParse(await c.req.json().catch(() => null));
+      if (!next.success) return c.text("Give the memory in bytes and a whole number of CPUs.", 400);
+      return withSize(c, () => size.change(next.data));
+    });
+  }
+
   app.post("/api/cells/:id/stream-ticket", (c) =>
     withCell(c, (id) => {
       const cell = cells.get(id);
@@ -239,6 +254,17 @@ function withCell(
   const id = c.req.param("id") ?? "";
   if (!ULID_PATTERN.test(id)) return c.text("invalid cell id", 400);
   return fn(id);
+}
+
+async function withSize(c: Context, fn: () => Promise<unknown>): Promise<Response> {
+  try {
+    return c.json(await fn());
+  } catch (err) {
+    if (err instanceof SizeRefused) return c.text(err.message, err.status);
+    if (err instanceof DockerError)
+      return c.text("Docker isn't answering, so the computer's size can't be changed now.", 503);
+    throw err;
+  }
 }
 
 // Docker's words when its address pools are used up, which several dots' computers can do.

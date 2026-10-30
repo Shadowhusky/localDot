@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ConversationEntry } from "@localdot/protocol";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { LiveFacts } from "../agent/conversation-list.ts";
 import { createApi } from "../lib/api.ts";
@@ -39,13 +39,18 @@ function daemon(conversations: ConversationEntry[] | Promise<never>, hits: strin
           title: null,
           startedAt: null,
           kind: "user",
-          snippet: "the boiler again",
+          snippet: "the \uE000boiler\uE001 again",
           at: new Date().toISOString(),
         })),
         complete: true,
         mode: "fts",
       });
-    return Response.json({ conversations: await conversations });
+    const listed = await conversations;
+    const archived = url.searchParams.get("archived") === "1";
+    return Response.json({
+      conversations: listed.filter((each) => !!each.archived === archived),
+      archivedCount: listed.filter((each) => each.archived).length,
+    });
   }) as typeof fetch;
   return createApi("a".repeat(43), { fetchImpl, origin: "http://127.0.0.1" });
 }
@@ -157,6 +162,37 @@ it("finds a conversation by words its tasks said, through the search index", asy
   await waitFor(() =>
     expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("Landlord")]),
   );
+  // What it said shows under its name, the words marked.
+  expect(screen.getByText("boiler").tagName).toBe("MARK");
+  expect(screen.getByText("Results")).toBeTruthy();
+});
+
+it("shows the archived conversations in the list's place, and goes back", async () => {
+  open([entry("Book the hotel", HOUR), { ...entry("Old taxes", 2 * HOUR), archived: true }]);
+  await screen.findByRole("grid");
+  expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("Book the hotel")]);
+  fireEvent.click(await screen.findByRole("button", { name: "Archived (1)" }));
+  await waitFor(() =>
+    expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("Old taxes")]),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Recent conversations" }));
+  await waitFor(() =>
+    expect(rows().map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Book the hotel"),
+    ]),
+  );
+});
+
+it("lists those pinned first, each row showing its colour tag", async () => {
+  const pinned = { ...entry("Taxes", 3 * HOUR), pinned: true, tag: "red" as const };
+  open([entry("Book the hotel", HOUR), pinned]);
+  await screen.findByRole("grid");
+  expect(screen.getAllByRole("presentation").map((day) => day.textContent)).toEqual([
+    "Pinned",
+    "Today",
+  ]);
+  expect(rows()[0]?.textContent).toContain("Taxes");
+  expect(rows()[0]?.querySelector(".ui-tag-mark")?.getAttribute("data-tag")).toBe("red");
 });
 
 it("keeps other conversations out of reach while the current task is at work", async () => {
@@ -250,4 +286,41 @@ it("renames a conversation in place, and an emptied name gives back the automati
   await screen.findByRole("button", { name: "Actions for Kyoto autumn trip" });
   expect(posted.at(-1)?.body).toEqual({ title: null });
   expect(posted).toHaveLength(2);
+});
+
+it("keeps a state the daemon pushed while a read from before it was on its way", async () => {
+  const trip = entry("Plan the trip", HOUR);
+  let hold: Promise<void> | undefined;
+  let release = () => {};
+  let reads = 0;
+  const api = createApi("fixture", {
+    origin: "http://fixture.test",
+    fetchImpl: async () => {
+      reads++;
+      // What the daemon knew when asked.
+      const reply = Response.json({ conversations: [trip] });
+      await hold;
+      return reply;
+    },
+  });
+  open([], { api });
+  await screen.findByRole("img", { name: "Done" });
+  hold = new Promise((resolve) => {
+    release = resolve;
+  });
+  window.dispatchEvent(new Event("focus"));
+  await waitFor(() => expect(reads).toBe(2));
+  const socket = FakeWebSocket.instances.findLast(
+    (each) => new URL(each.url).pathname === "/api/events" && !each.closed,
+  );
+  const live = { state: "needs-you", since: new Date().toISOString(), onScreen: false };
+  act(() =>
+    socket?.onmessage?.({
+      data: JSON.stringify({ type: "conversation.live", sessionId: trip.sessionId, live }),
+    }),
+  );
+  expect(screen.getByRole("img", { name: "Needs you" })).toBeTruthy();
+  await act(async () => release());
+  expect(screen.getByRole("img", { name: "Needs you" })).toBeTruthy();
+  expect(reads).toBe(2);
 });

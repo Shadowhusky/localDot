@@ -221,7 +221,10 @@ export async function saveSettings(
   const saved = AgentSettingsDocument.safeParse(
     await request(api, "PUT", "/api/agent/settings", 64 * 1024, signal, parsed.data),
   );
-  if (!saved.success || JSON.stringify(saved.data) !== JSON.stringify(parsed.data))
+  // The daemon keeps the model choices not in use itself, so only that list may come back changed.
+  const settled = (document: AgentSettingsDocument) =>
+    JSON.stringify({ ...document, models: undefined });
+  if (!saved.success || settled(saved.data) !== settled(parsed.data))
     throw new SettingsFailure(true);
   return saved.data;
 }

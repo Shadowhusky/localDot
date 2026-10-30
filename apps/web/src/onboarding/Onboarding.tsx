@@ -1,6 +1,7 @@
 import {
   type AgentSettingsDocument,
   type AutonomyPolicy,
+  type ComputerSize,
   DEFAULT_PERSONA,
   type PersonaId,
   personaOf,
@@ -21,7 +22,9 @@ import type { KeysController } from "../keys/useKeys.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ChatgptPanel } from "../settings/ChatgptPanel.tsx";
 import { ClaudeCodePanel } from "../settings/ClaudeCodePanel.tsx";
+import { useComputerSize } from "../settings/ComputerSize.tsx";
 import { matchingKeys, type RoleChoice } from "../settings/choices.ts";
+import { recommendedSize, sameSize, saveSize, sizeProblem } from "../settings/computer-size.ts";
 import type { ProviderIndex } from "../settings/settings-api.ts";
 import { useChatgpt } from "../settings/useChatgpt.ts";
 import { useClaudeCode } from "../settings/useClaudeCode.ts";
@@ -37,6 +40,7 @@ import {
   LocalStep,
   ModelStep,
   PermissionsStep,
+  SizeRow,
   SummaryStep,
   ThinksStep,
   WelcomeStep,
@@ -217,6 +221,17 @@ export function Onboarding(props: OnboardingProps) {
         ? draft.fastModel
         : (fastPick?.id ?? "");
   const keydOff = keys.health?.online === false;
+
+  // The computer's size, chosen on the last step: the recommended one unless the user set their own.
+  const [sizeView] = useComputerSize(shown === "turn-on" ? api : null);
+  const [sizeDraft, setSizeDraft] = useState<ComputerSize | null>(null);
+  const recommendedComputer = sizeView ? recommendedSize(sizeView) : null;
+  const chosenSize = sizeView
+    ? (sizeDraft ??
+      (sameSize(sizeView.size, sizeView.default)
+        ? (recommendedComputer ?? sizeView.size)
+        : sizeView.size))
+    : null;
 
   const advance = (extra: Partial<WizardProgress> = {}) =>
     control.update((now) => {
@@ -597,14 +612,37 @@ export function Onboarding(props: OnboardingProps) {
                   change: () => go("dot", "turn-on"),
                 },
               ]}
-            />
+            >
+              {sizeView && chosenSize && (
+                <SizeRow
+                  choice={{
+                    view: sizeView,
+                    size: chosenSize,
+                    recommended: recommendedComputer,
+                    onChange: setSizeDraft,
+                  }}
+                />
+              )}
+            </SummaryStep>
           ),
           primary: props.turnOn ? "Turn on your computer" : "Done",
           icon: props.turnOn ? "power" : undefined,
           reason: props.turnOn?.reason,
+          // The size is saved first, so the computer turned on here starts with it.
           run: () => {
-            props.turnOn?.run();
-            control.finish();
+            const finish = () => {
+              props.turnOn?.run();
+              control.finish();
+            };
+            if (!sizeView || !chosenSize || sameSize(chosenSize, sizeView.size)) return finish();
+            void run(
+              () =>
+                saveSize(api, chosenSize).then(
+                  () => null,
+                  (error: unknown) => sizeProblem(error),
+                ),
+              finish,
+            );
           },
         };
     }

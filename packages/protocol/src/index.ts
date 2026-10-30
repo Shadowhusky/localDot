@@ -8,6 +8,7 @@ export * from "./claude-code.ts";
 export * from "./computer-files.ts";
 export * from "./computer-operation.ts";
 export * from "./computer-reset.ts";
+export * from "./computer-size.ts";
 export * from "./connectors.ts";
 export * from "./conversation.ts";
 export * from "./credentials.ts";

@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
-import { ULID_PATTERN } from "@localdot/protocol";
+import { DEFAULT_COMPUTER_SIZE, ULID_PATTERN } from "@localdot/protocol";
 import { runtimeLayout } from "../runtime-layout.ts";
+import { browserLimits, type Limits } from "./computer-size.ts";
 import { egressNetworkSpec, internalNetworkSpec, NAME_PREFIX, type StreamOptions } from "./spec.ts";
 import type { BrowserCellRecord } from "./types.ts";
 
+// Memory and CPUs follow the dot's computer size (browserLimits). /dev/shm is a ceiling, not a
+// reservation, and what is written there counts against that memory, so it stays as it is.
 export const BROWSER_LIMITS = {
-  memoryBytes: 3 * 1024 ** 3,
-  nanoCpus: 2_000_000_000,
   pids: 1024,
   shmBytes: 512 * 1024 ** 2,
 } as const;
@@ -51,6 +52,7 @@ export function browserSpec(
   image: string,
   stream: StreamOptions,
   profileVolume: string,
+  limits: Limits = browserLimits(DEFAULT_COMPUTER_SIZE),
   timezone: string | undefined = hostBrowserTimezone(),
 ) {
   const d = record.docker;
@@ -83,9 +85,7 @@ export function browserSpec(
       CapDrop: ["ALL"],
       SecurityOpt: ["no-new-privileges", `seccomp=${SECCOMP}`],
       Init: true,
-      Memory: BROWSER_LIMITS.memoryBytes,
-      MemorySwap: BROWSER_LIMITS.memoryBytes,
-      NanoCpus: BROWSER_LIMITS.nanoCpus,
+      ...limits,
       PidsLimit: BROWSER_LIMITS.pids,
       ShmSize: BROWSER_LIMITS.shmBytes,
       Tmpfs: {

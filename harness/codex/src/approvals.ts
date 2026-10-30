@@ -211,7 +211,12 @@ export function decideServerRequest(
         verdict: "declined",
         result: {
           success: false,
-          contentItems: [{ type: "inputText", text: "localDot has no dynamic tools" }],
+          contentItems: [
+            {
+              type: "inputText",
+              text: "localDot has no dynamic tools. Use localDot's tools (mcp__localdot__…) instead.",
+            },
+          ],
         },
       };
     default:

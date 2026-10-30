@@ -192,7 +192,8 @@ separate interaction.
 ## Stop, replay and recovery
 
 **Stop task** cancels the run and its queued messages, withdraws agent control and waits for
-in-flight work to drain before a new conversation can take ownership. It does not leave a paused
+in-flight work to drain before a new conversation can take ownership. Messages dot had not acted
+on yet go back into your composer and leave the conversation. It does not leave a paused
 task holding the computer, shut down the desktop, or discard its browser. The next conversation reuses that computer. Sending a message during user control hands control back and steers the task immediately. The CLI emergency Stop and Stop computer remain separate controls. Do not treat an
 interrupted upload or release as proof that the receiving side saw no bytes.
 

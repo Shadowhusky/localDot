@@ -21,15 +21,23 @@ const FACE: Partial<Record<Wearable, Place>> = {
 interface Mount {
   pivot: Place;
   follow: Place;
+  // How far its plate rises above the top of the ball, in frame units.
+  crown: number;
 }
 const HEAD: Partial<Record<Wearable, Mount>> = {
-  cap: { pivot: [0, -15], follow: [0.5, 1] },
-  beret: { pivot: [-2, -18], follow: [0.5, 1] },
-  mortarboard: { pivot: [0, -14], follow: [0.5, 1] },
+  cap: { pivot: [0, -15], follow: [0.5, 1], crown: 5.5 },
+  beret: { pivot: [-2, -18], follow: [0.5, 1], crown: 4.25 },
+  mortarboard: { pivot: [0, -14], follow: [0.5, 1], crown: 3 },
   // The cups sit on the outline, where a turn only carries them round the back.
-  headphones: { pivot: [0, -21], follow: [0.2, 0.4] },
-  bow: { pivot: [-11, -17], follow: [0.6, 1] },
+  headphones: { pivot: [0, -21], follow: [0.2, 0.4], crown: 2 },
+  bow: { pivot: [-11, -17], follow: [0.6, 1], crown: 0 },
 };
+
+// How far what dot wears on its head rises above the ball, in frame units, so a place with
+// something just above it can keep the gap a bare head has.
+export function crown(list: readonly Wearable[]): number {
+  return Math.max(0, ...list.map((name) => HEAD[name]?.crown ?? 0));
+}
 // The most a turn tilts or foreshortens what the head wears; past this a plate reads as warped.
 const STRETCH = 0.08;
 

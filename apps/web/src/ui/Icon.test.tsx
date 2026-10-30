@@ -90,8 +90,13 @@ const PLANNED: IconName[] = [
   // First-run setup: the ChatGPT plan and coding plans (design-v2 §11 A0).
   "message-circle",
   "code",
-  // What dot knows: a fact it always reads.
+  // What dot knows: a fact it always reads; a conversation pinned to the top of the list.
   "pin",
+  "pin-off",
+  // A conversation archived out of the list, and back, and its colour tag.
+  "archive",
+  "archive-restore",
+  "tag",
   // Settings: the user's connected apps.
   "plug",
   // Export: stepping a custom speed.

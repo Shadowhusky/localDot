@@ -263,6 +263,26 @@ describe("bounded agent projection", () => {
       stopped: true,
     });
   });
+  it("marks a message Stop gave back, whether dot had it or it waited", () => {
+    const [task, waiting] = [id(10004), id(10005)];
+    const model = reduce([
+      ev(0, "message.user", { messageId: task, text: "Draw a dog", kind: "task" }),
+      ev(1, "message.user", {
+        messageId: waiting,
+        text: "Then a hat",
+        kind: "followup",
+        queued: true,
+      }),
+      ev(2, "message.delivery", { messageId: task, state: "withdrawn", reason: "stopped" }),
+      ev(3, "message.delivery", { messageId: waiting, state: "withdrawn", reason: "stopped" }),
+    ]);
+    for (const id of [task, waiting])
+      expect(model.messages.get(id)).toMatchObject({
+        queued: false,
+        delivery: "withdrawn",
+        stopped: true,
+      });
+  });
   it("projects plans, memory changes and file patches without mutating older snapshots", () => {
     const original = reduce([
       ev(0, "plan.set", { items: [{ id: "p", text: "Review", status: "todo" }] }),

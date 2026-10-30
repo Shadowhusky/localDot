@@ -107,9 +107,18 @@ export interface TooltipOptions {
   description?: ReactNode;
   // Pressing the trigger opens it at once, by touch too: for a reason the control can't otherwise show.
   showOnPress?: boolean;
+  // A trigger at the end of something wide lines the tip's end up with its own, so the tip grows
+  // inwards over what it is about rather than past it.
+  align?: "center" | "end";
 }
 
-export function useTooltip({ content, kbd, description, showOnPress = false }: TooltipOptions) {
+export function useTooltip({
+  content,
+  kbd,
+  description,
+  showOnPress = false,
+  align = "center",
+}: TooltipOptions) {
   const id = useId();
   const popup = useRef<HTMLDivElement>(null);
   const [view, setView] = useState(CLOSED);
@@ -170,7 +179,8 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
     const { offsetWidth: width, offsetHeight: height } = element;
     const top = view.side === "top" ? anchor.top - GAP - height : anchor.bottom + GAP;
     const centre = anchor.left + anchor.width / 2;
-    const left = Math.min(Math.max(centre - width / 2, EDGE), window.innerWidth - EDGE - width);
+    const start = align === "end" ? anchor.right - width : centre - width / 2;
+    const left = Math.min(Math.max(start, EDGE), window.innerWidth - EDGE - width);
     element.style.top = `${Math.round(top)}px`;
     element.style.left = `${Math.round(left)}px`;
     element.style.transformOrigin = `${Math.round(centre - left)}px ${view.side === "top" ? "100%" : "0"}`;

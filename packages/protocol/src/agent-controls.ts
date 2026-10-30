@@ -115,3 +115,10 @@ export const StopOutcome = z.strictObject({
     .max(4),
 });
 export type StopOutcome = z.infer<typeof StopOutcome>;
+// A task's Stop, asked to give back: the stopper's own messages dot had not acted on yet, oldest
+// first, which leave the conversation for their composer.
+export const TaskStopReply = z.strictObject({
+  messages: z.array(z.strictObject({ messageId: Id, text: z.string().min(1).max(8000) })).max(256),
+});
+export type TaskStopReply = z.infer<typeof TaskStopReply>;
+export type GivenBack = TaskStopReply["messages"][number];

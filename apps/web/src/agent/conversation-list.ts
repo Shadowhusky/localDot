@@ -1,9 +1,12 @@
 import {
   type ConversationEntry,
   ConversationList,
+  type ConversationLive,
   ConversationLiveEvent,
+  ConversationOrganizedEvent,
+  type ConversationTag,
 } from "@localdot/protocol";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import { openSocket } from "../lib/socket.ts";
 import type { SessionStatus } from "../ui/SessionGlyph.tsx";
@@ -37,7 +40,7 @@ export interface ConversationRow {
 }
 
 export interface ConversationGroup {
-  label: "Active" | "Today" | "Yesterday" | "Earlier";
+  label: "Results" | "Pinned" | "Active" | "Today" | "Yesterday" | "Earlier";
   rows: ConversationRow[];
 }
 
@@ -74,27 +77,24 @@ export function conversationTitle(entry: Pick<ConversationEntry, "title" | "said
   return entry.title?.trim() || entry.said?.trim() || "Untitled conversation";
 }
 
-// Every word of the search is in the title or the first message, or the search index found the
-// words in one of the conversation's tasks.
-export function matchesConversation(
-  entry: ConversationEntry,
-  query: string,
-  found: ReadonlySet<string> = new Set(),
-): boolean {
-  const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return true;
-  const text = `${entry.title ?? ""} ${entry.said ?? ""}`.toLocaleLowerCase();
-  return words.every((word) => text.includes(word)) || entry.sessions.some((id) => found.has(id));
-}
-
 const startOfDay = (date: Date) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 const daysBetween = (at: Date, now: Date) =>
   Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000);
 
-// Conversations under way first, then the rest, each newest first as the daemon lists them.
-export function pinActive(rows: readonly ConversationRow[]): ConversationRow[] {
-  return [...rows.filter((row) => row.active), ...rows.filter((row) => !row.active)];
+// Those the user pinned first, whatever they are doing, then those under way, then the rest, each
+// newest first as the daemon lists them.
+export function arrangeConversations(rows: readonly ConversationRow[]): {
+  pinned: ConversationRow[];
+  active: ConversationRow[];
+  rest: ConversationRow[];
+} {
+  const unpinned = rows.filter((row) => !row.entry.pinned);
+  return {
+    pinned: rows.filter((row) => row.entry.pinned),
+    active: unpinned.filter((row) => row.active),
+    rest: unpinned.filter((row) => !row.active),
+  };
 }
 
 export function groupConversations(
@@ -102,6 +102,7 @@ export function groupConversations(
   now: Date,
 ): ConversationGroup[] {
   const groups: ConversationGroup[] = [
+    { label: "Pinned", rows: [] },
     { label: "Active", rows: [] },
     { label: "Today", rows: [] },
     { label: "Yesterday", rows: [] },
@@ -109,7 +110,9 @@ export function groupConversations(
   ];
   for (const row of rows) {
     const days = daysBetween(new Date(row.entry.startedAt), now);
-    groups[row.active ? 0 : days <= 0 ? 1 : days === 1 ? 2 : 3]?.rows.push(row);
+    groups[row.entry.pinned ? 0 : row.active ? 1 : days <= 0 ? 2 : days === 1 ? 3 : 4]?.rows.push(
+      row,
+    );
   }
   return groups.filter((group) => group.rows.length > 0);
 }
@@ -166,8 +169,57 @@ export function renameConversation(
   return api.post(`/api/conversations/${sessionId}/title`, { title: title?.trim() || null });
 }
 
+// How the user files a conversation: a colour tag, pinned to the top, or archived out of the list.
+export type Organize =
+  | { tag: ConversationTag | null }
+  | { pinned: boolean }
+  | { archived: boolean };
+
+type Filing = Partial<{ tag: ConversationTag | null; pinned: boolean; archived: boolean }>;
+
+const organized = (entry: ConversationEntry, change: Filing): ConversationEntry => {
+  const { tag, pinned, archived, ...rest } = { ...entry, ...change };
+  return {
+    ...rest,
+    ...(tag ? { tag } : {}),
+    ...(pinned ? { pinned } : {}),
+    ...(archived ? { archived } : {}),
+  };
+};
+
+const withLive = (entry: ConversationEntry, live: ConversationLive | undefined) => {
+  const { live: _was, ...rest } = entry;
+  return live ? { ...rest, live } : rest;
+};
+
+// Shows the change in every list at once, then saves it; whatever the daemon then says, each list
+// reads itself again. A refusal is thrown for the caller to say.
+export async function organizeConversation(
+  api: ApiClient,
+  sessionId: string,
+  change: Organize,
+): Promise<void> {
+  const lists = [...(stores.get(api)?.values() ?? [])];
+  for (const list of lists) list.patch(sessionId, change);
+  const route = "tag" in change ? "tag" : "pinned" in change ? "pin" : "archive";
+  try {
+    await api.post(`/api/conversations/${sessionId}/${route}`, change);
+  } finally {
+    for (const list of lists) list.refresh();
+  }
+}
+
+// After a conversation was deleted.
+export function readConversationsAgain(api: ApiClient): void {
+  for (const list of stores.get(api)?.values() ?? []) list.refresh();
+}
+
+// The recent conversations, or those archived.
+export type ConversationView = "recent" | "archived";
+
 export interface RecentConversations {
   entries: readonly ConversationEntry[];
+  archivedCount: number;
   // Nothing read yet.
   loading: boolean;
   failed: boolean;
@@ -176,6 +228,7 @@ export interface RecentConversations {
 
 interface ListState {
   entries: readonly ConversationEntry[] | null;
+  archivedCount: number;
   failed: boolean;
 }
 
@@ -183,24 +236,33 @@ interface ListStore {
   state: ListState;
   subscribe(onChange: () => void): () => void;
   read(): void;
+  // A read, or another once the one under way is in.
+  refresh(): void;
+  patch(sessionId: string, change: Filing): void;
   // While anyone uses it the list follows the daemon; the returned function lets go.
   use(): () => void;
 }
 
-const stores = new WeakMap<ApiClient, ListStore>();
+const stores = new WeakMap<ApiClient, Map<ConversationView, ListStore>>();
 
-// One list for each daemon, shared by every list on show, so the rail and the popover always agree.
-// While one is on show it follows /api/events, which pushes each conversation's state as it
-// changes. It reads the whole list as each list opens, when a change names a conversation it does
-// not hold or ends one, when the socket comes back, when the page is looked at again, and every
-// 30 s besides, for a change the socket missed. A read that a change outdates is read again.
-function listStore(api: ApiClient): ListStore {
-  const known = stores.get(api);
+// One list of each view for each daemon, shared by every list on show, so the rail and the popover
+// always agree. While one is on show it follows /api/events, which pushes each conversation's state
+// as it changes. It reads the whole list as each list opens, when a change names a conversation it
+// does not hold, ends one or moves one in or out of the view, when the socket comes back, when the
+// page is looked at again, and every 30 s besides, for a change the socket missed. A read that a
+// change outdates is read again.
+function listStore(api: ApiClient, view: ConversationView): ListStore {
+  const views = stores.get(api) ?? new Map<ConversationView, ListStore>();
+  stores.set(api, views);
+  const known = views.get(view);
   if (known) return known;
+  const path = view === "archived" ? "/api/conversations?archived=1" : "/api/conversations";
   const listeners = new Set<() => void>();
   let users = 0;
   let reading: AbortController | null = null;
   let outdated = false;
+  // States pushed while a read is on its way, which the daemon may have answered before them.
+  let pushed = new Map<string, ConversationLive | undefined>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stop: (() => void) | null = null;
   const set = (state: ListState) => {
@@ -214,15 +276,23 @@ function listStore(api: ApiClient): ListStore {
   const read = () => {
     reading?.abort();
     outdated = false;
+    pushed = new Map();
     const controller = new AbortController();
     reading = controller;
     if (store.state.failed) set({ ...store.state, failed: false });
     api
-      .get("/api/conversations", { signal: controller.signal })
-      .then((data) => ConversationList.parse(data).conversations)
+      .get(path, { signal: controller.signal })
+      .then((data) => ConversationList.parse(data))
       .then(
-        (entries) => {
-          if (!controller.signal.aborted) set({ entries, failed: false });
+        ({ conversations, archivedCount = 0 }) => {
+          if (!controller.signal.aborted)
+            set({
+              entries: conversations.map((entry) =>
+                pushed.has(entry.sessionId) ? withLive(entry, pushed.get(entry.sessionId)) : entry,
+              ),
+              archivedCount,
+              failed: false,
+            });
         },
         () => {
           if (!controller.signal.aborted) set({ ...store.state, failed: true });
@@ -239,16 +309,32 @@ function listStore(api: ApiClient): ListStore {
     if (reading) outdated = true;
     else read();
   };
+  const held = (sessionId: string) => {
+    const at = store.state.entries?.findIndex((entry) => entry.sessionId === sessionId) ?? -1;
+    return { at, entry: store.state.entries?.[at] };
+  };
   const change = ({ sessionId, live }: ConversationLiveEvent) => {
-    const entries = store.state.entries;
-    const at = entries?.findIndex((entry) => entry.sessionId === sessionId) ?? -1;
-    const entry = entries?.[at];
-    if (entries && entry) {
-      const { live: _was, ...rest } = entry;
-      set({ entries: entries.with(at, live ? { ...rest, live } : rest), failed: false });
-    }
+    if (reading) pushed.set(sessionId, live);
+    const { at, entry } = held(sessionId);
+    if (store.state.entries && entry)
+      set({
+        ...store.state,
+        entries: store.state.entries.with(at, withLive(entry, live)),
+        failed: false,
+      });
     // How it ended, or a conversation the list doesn't hold yet, is only in a fresh read.
     if (!entry || !live) refresh();
+  };
+  const patch = (sessionId: string, change: Filing) => {
+    const { at, entry } = held(sessionId);
+    if (store.state.entries && entry)
+      set({ ...store.state, entries: store.state.entries.with(at, organized(entry, change)) });
+  };
+  const reorganized = ({ sessionId, tag, pinned, archived }: ConversationOrganizedEvent) => {
+    const { entry } = held(sessionId);
+    // One that comes into the view or leaves it, and the count of those archived, need a read.
+    if (entry && !!entry.archived === archived) patch(sessionId, { tag, pinned });
+    else refresh();
   };
   const start = () => {
     let opened = false;
@@ -267,8 +353,10 @@ function listStore(api: ApiClient): ListStore {
           } catch {
             return;
           }
-          const parsed = ConversationLiveEvent.safeParse(value);
-          if (parsed.success) change(parsed.data);
+          const live = ConversationLiveEvent.safeParse(value);
+          if (live.success) change(live.data);
+          const filed = ConversationOrganizedEvent.safeParse(value);
+          if (filed.success) reorganized(filed.data);
         },
       },
     });
@@ -288,12 +376,14 @@ function listStore(api: ApiClient): ListStore {
     };
   };
   const store: ListStore = {
-    state: { entries: null, failed: false },
+    state: { entries: null, archivedCount: 0, failed: false },
     subscribe(onChange) {
       listeners.add(onChange);
       return () => listeners.delete(onChange);
     },
     read,
+    refresh,
+    patch,
     use() {
       if (users++ === 0) stop = start();
       read();
@@ -304,18 +394,31 @@ function listStore(api: ApiClient): ListStore {
       };
     },
   };
-  stores.set(api, store);
+  views.set(view, store);
   return store;
 }
 
-// The recent conversations, kept current while the list is open. What was read before stays on
-// show while it is read again, so the rows never blink.
-export function useRecentConversations(api: ApiClient, open: boolean): RecentConversations {
-  const store = listStore(api);
-  const { entries, failed } = useSyncExternalStore(store.subscribe, () => store.state);
+// The recent conversations, or those archived, kept current while the list is open. What was read
+// before stays on show while it is read again, so the rows never blink; one just archived or
+// unarchived leaves at once.
+export function useRecentConversations(
+  api: ApiClient,
+  open: boolean,
+  view: ConversationView = "recent",
+): RecentConversations {
+  const store = listStore(api, view);
+  const { entries, archivedCount, failed } = useSyncExternalStore(
+    store.subscribe,
+    () => store.state,
+  );
   useEffect(() => (open ? store.use() : undefined), [store, open]);
+  const shown = useMemo(
+    () => entries?.filter((entry) => !!entry.archived === (view === "archived")) ?? NONE,
+    [entries, view],
+  );
   return {
-    entries: entries ?? NONE,
+    entries: shown,
+    archivedCount,
     loading: entries === null && !failed,
     failed: failed && entries === null,
     retry: store.read,

@@ -100,6 +100,23 @@ it("gives the camera a new frame's size before the render that uploads it", asyn
   expect(p.frameSize).toBeNull();
 });
 
+it("takes a new canvas size only in the render that draws into it", async () => {
+  const p = await presenter();
+  const calls: string[] = [];
+  vi.spyOn(p.app.renderer, "resize").mockImplementation((w, h) => {
+    calls.push(`resize ${w}x${h}`);
+  });
+  vi.spyOn(p.app.renderer, "render").mockImplementation(() => {
+    calls.push("render");
+  });
+  p.setViewport(800, 500);
+  p.setViewport(780, 488);
+  expect(calls).toEqual([]);
+  p.render();
+  p.render();
+  expect(calls).toEqual(["resize 780x488", "render", "render"]);
+});
+
 it("counts the frames it paints, not those a newer one superseded", async () => {
   const p = await presenter();
   const superseded = [frame(1280, 800), frame(1280, 800)];

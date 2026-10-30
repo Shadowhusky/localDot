@@ -376,7 +376,8 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "message.delivery": {
       const message = model.messages.get(e.data.messageId);
       const reached = e.data.state === "sent" || e.data.state === "steering";
-      const stopped = e.data.state === "cancelled" && e.data.reason === "stopped";
+      // Stop left it unanswered: unsent (cancelled), or given back to its writer (withdrawn).
+      const stopped = e.data.reason === "stopped";
       if (message)
         next = {
           ...next,

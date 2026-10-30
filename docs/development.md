@@ -364,6 +364,17 @@ Authorization header and JSON request bodies:
   `sessionId`. Follow-ups use `POST /api/agent/sessions/<id>/messages` with
   `{"kind":"followup","text":"…"}`; use `"steer"` to redirect current work. Do not automatically
   resend a mutation if its reply is lost: reconcile the session and event log first.
+- `POST /api/agent/sessions/<id>/stop` ends a task's run (204). With `?giveBack=1` it answers 200
+  `{"messages":[{"messageId","text"}]}`: the stopper's own messages dot had not acted on yet (no
+  words of its own and no tool call but a screenshot since), oldest first. The daemon decides
+  this as Stop ends the run, so a tool call starts before it or never. Those messages are
+  `message.delivery` `withdrawn` with reason `stopped`: they leave the thread on every device, the
+  context a later task continues from, and search. Anyone else's (the owner's, when a shared link
+  stops its task) are `cancelled`, `stopped`, left for an Edit. A task that gave back everything
+  and did nothing hands its conversation back to the task it continued, or to a new one, and
+  once settled its record is removed, provided its log holds nothing but messages, thinking and
+  looks at the screen. Other Stops (the CLI's, Shut down, Stop everything) leave unanswered
+  messages unsent with Edit.
 - Questions and hand-back require the current `askId` or `requestId` from the session snapshot.
   Completed files are downloaded from `/api/agent/sessions/<id>/files/<name>`, as attachments.
 - `POST /api/conversations/<id>/title` with `{"title":"…"}` (1–80 characters once trimmed, one
@@ -372,6 +383,15 @@ Authorization header and JSON request bodies:
   400, an unknown task 404. The user's name wins over dot's until cleared. Shared links can't
   rename. `POST /api/agent/sessions/<id>/persona` with `{"persona":"coder"}` switches a running
   task's dot: its agent carries on from its saved history with that dot's skills and role.
+- `POST /api/conversations/<id>/tag` with `{"tag":"blue"}` (`red`, `orange`, `yellow`, `green`,
+  `blue`, `purple`, or `null` to take it off), `/pin` with `{"pinned":true}` and `/archive` with
+  `{"archived":true}` organize the conversation that task belongs to, as rename does, and answer
+  204. They are kept by the conversation's first task in `<home>/conversations-organized.json`, so
+  they last as it goes on, except archiving: a new task in an archived conversation brings it back.
+  A conversation with a task under way can't be archived (409). Each change goes to every open
+  app as a `conversation.organized` event on `/api/events`. `GET /api/conversations` leaves the
+  archived ones out, keeps those pinned before the rest are counted, and says how many are
+  archived (`archivedCount`); `?archived=1` lists them. Shared links can't organize or delete.
 
 A new conversation's first message gets one short call to a quick model beside the task
 (`agent/first-look.ts`): the fast model, else the main model at its least thinking (Claude Code's
@@ -580,7 +600,12 @@ web searches, page reads and numbered sources.
 The desktop Chromium and developer tools share one container budget. Its default is
 4 GiB RAM plus at most 256 MiB swap (Docker `MemorySwap` is the combined total),
 not unlimited memory and not a reservation from the Docker VM. The VM still needs
-capacity for the separate browser, brain and other containers. Available swap is
+capacity for the separate browser, brain and other containers. Settings › Your computer
+(`GET`/`PUT /api/computer-size`, kept in `<home>/computer-size.json`) sizes one dot's computer
+in 0.5 GB steps and whole CPUs, at least 2 GB and 2 CPUs, up to Docker's memory less 2 GiB and
+what other running dots hold. The web browser gets three quarters of the memory and half the
+CPUs. Changes apply live; less memory than the desktop uses now waits for its next start.
+Available swap is
 bounded by the VM's own swap configuration. Sustained oversized workloads can
 still exhaust these limits; reuse preview servers and limit build/test concurrency.
 `work_context` now reports the container's cgroup v2 working set, limit, swap and

@@ -1,17 +1,22 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  ArchiveConversation,
+  type ConversationOrganizedEvent,
   DeleteSessionsRequest,
   type DeleteSessionsResult,
   emptyManifest,
+  PinConversation,
   RenameConversation,
   recordingDirectory,
   type ScreenName,
+  TagConversation,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import type { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { Conversations } from "../agent/conversation.ts";
+import type { ZodType } from "zod";
+import { Conversations, type OrganizeConversation } from "../agent/conversation.ts";
 import { errorCode } from "../error-code.ts";
 import { type EventLog, UnknownSessionError } from "../event-log.ts";
 import type { LiveSessions } from "../gateway/live.ts";
@@ -30,6 +35,7 @@ export interface ReplayRoutesDeps {
   live?: Pick<LiveSessions, "cellOf">;
   retention?: RetentionPolicy;
   framesMaxAgeDays?: number;
+  publish?(event: ConversationOrganizedEvent): void;
 }
 function requestedScreen(request: Request): ScreenName | null {
   const values = new URL(request.url).searchParams.getAll("screen");
@@ -170,6 +176,7 @@ function videoResponse(view: RecordingView, request: Request): Response {
   return new Response(body, { status, headers });
 }
 export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
+  const isLive = (task: string) => deps.recorder.isLive(task) || !!deps.live?.cellOf(task);
   const validate = async (
     c: Parameters<Parameters<Hono["use"]>[1]>[0],
     next: () => Promise<void>,
@@ -299,8 +306,7 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
     const { sessions } = conversations.chain(id, Number.MAX_SAFE_INTEGER);
     // Preflight the whole chain before deleting any part of it. No await separates
     // this check from deletion, so a live run cannot enter between them.
-    if (sessions.some((task) => deps.recorder.isLive(task) || deps.live?.cellOf(task)))
-      return c.text("conversation is live", 409);
+    if (sessions.some(isLive)) return c.text("conversation is live", 409);
     const current = conversations.current();
     for (const task of sessions) {
       deps.eventLog.forget(task);
@@ -322,8 +328,8 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
     if (!parsed.success) return c.text("invalid name", 400);
     const { title } = parsed.data;
     // Any of its tasks finds the conversation, whose newest task the rest continue.
-    const latest = conversations.list().find((entry) => entry.sessions.includes(id))?.sessionId;
-    for (const task of conversations.chain(latest ?? id, Number.MAX_SAFE_INTEGER).sessions)
+    for (const task of conversations.chain(conversations.latest(id), Number.MAX_SAFE_INTEGER)
+      .sessions)
       if (conversations.isTask(task) && (deps.eventLog.titles(task).userTitle ?? null) !== title)
         deps.eventLog.append(task, {
           agent: "main",
@@ -332,9 +338,37 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
         });
     return c.body(null, 204);
   });
+  // A conversation's colour tag, its pin and whether it is archived, kept beside its name and told
+  // to every viewer. The owner's alone, as its name is. One under way is never archived: it would
+  // leave the list while dot works in it.
+  const organize = <T>(
+    path: string,
+    schema: ZodType<T>,
+    change: (body: T) => OrganizeConversation,
+  ) =>
+    app.post(`/api/conversations/:id/${path}`, bodyLimit({ maxSize: 1024 }), async (c) => {
+      if (c.get("remoteGrant")) return c.text("Only the owner organizes conversations", 403);
+      const id = c.req.param("id");
+      const conversations = new Conversations(deps.home, deps.eventLog);
+      if (!ULID_PATTERN.test(id) || !conversations.has(id))
+        return c.text("conversation not found", 404);
+      const parsed = schema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) return c.text("invalid request", 400);
+      const wanted = change(parsed.data);
+      if (
+        wanted.archived &&
+        conversations.chain(conversations.latest(id), Number.MAX_SAFE_INTEGER).sessions.some(isLive)
+      )
+        return c.text("conversation is live", 409);
+      deps.publish?.({ type: "conversation.organized", ...conversations.organize(id, wanted) });
+      return c.body(null, 204);
+    });
+  organize("tag", TagConversation, ({ tag }) => ({ tag }));
+  organize("pin", PinConversation, ({ pinned }) => ({ pinned }));
+  organize("archive", ArchiveConversation, ({ archived }) => ({ archived }));
   // No await separates the live check from the deletion, so a run cannot start between them.
   const remove = (id: string): "deleted" | "live" => {
-    if (deps.recorder.isLive(id) || deps.live?.cellOf(id)) return "live";
+    if (isLive(id)) return "live";
     if (deps.eventLog.hasSession(id) || deps.eventLog.hasPendingDeletion(id))
       deps.eventLog.forget(id);
     deps.index.invalidate(id);

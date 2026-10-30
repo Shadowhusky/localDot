@@ -21,10 +21,11 @@ import {
 import { connectorDescriptors, type McpCallResult, toCallToolResult } from "../codex/mcp-tools.ts";
 import type { NativePauseReceipt } from "../codex/native-pause.ts";
 import { NativeRetirement } from "../native-retirement.ts";
+import { RETRY_NEXT, toolList, UNNAMED_TOOL } from "../native-tools.ts";
 import { type Redactor, redactor } from "../redact.ts";
 import type { AgentSession, BrainGeneration } from "../session.ts";
 import type { TranscriptStore } from "../transcript.ts";
-import { ClaudeCodeEventMapper, type ClaudeSignal, type Violation } from "./events.ts";
+import { ClaudeCodeEventMapper, type ClaudeSignal } from "./events.ts";
 import { type LocaldotCall, localdotServer } from "./mcp-server.ts";
 import { claudeCodeOptions } from "./options.ts";
 import { type ClaudeCodeLaunch, ClaudeCodeUnavailable } from "./setup.ts";
@@ -36,6 +37,12 @@ const NUDGE =
   "If the requested outcome is complete, call the localdot done tool with completion.status complete and observed evidence. If work is waiting for another actor, processing, loading or a timer, use done with completion.status waiting or computer wait, then inspect and continue. Waiting is not completion or a blocker. Use ask_user only for missing user information; otherwise continue the task.";
 const PNG_HEADER = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_PROMPT_BYTES = 256 * 1024;
+// Rounds of refused calls to other tools, with no localDot tool call between, before localDot stops.
+const MAX_REFUSALS = 3;
+const MAX_LEARNED = 64;
+// Claude Code shows it to Claude as a message from the user, so it says who it is from.
+const unavailable = (tools: readonly string[]) =>
+  `From localDot, not the user: ${tools.join(", ")} ${tools.length > 1 ? "are" : "is"} not available here. Use only localDot's tools (mcp__localdot__…) for this task.`;
 const SIGNED_OUT = new Set([
   "authentication_failed",
   "oauth_org_not_allowed",
@@ -89,7 +96,9 @@ type CycleResult =
       kind: "done" | "retired" | "control" | "crashed" | "signed_out" | "plan_limit" | "safety";
       detail?: string;
     }
-  | { kind: "violation"; what: Violation }
+  | { kind: "offered"; tools: string[]; unnamed: boolean; version?: string }
+  | { kind: "violation"; what: "foreign_tool" | "refused"; tool: string }
+  | { kind: "violation"; what: "sub_agent" }
   | { kind: "retry" | "failed"; message: string };
 interface ActiveCycle {
   finish(result: CycleResult): void;
@@ -171,6 +180,8 @@ export class ClaudeCodeDriver {
   readonly #pauseReceipts = new WeakMap<AgentSession, NativePauseReceipt>();
   readonly #resumeNotes = new WeakMap<AgentSession, string>();
   readonly #retirement: NativeRetirement;
+  // Built-ins a newer Claude Code turned on, switched off by name in every later run.
+  readonly #learned = new Set<string>();
   constructor(deps: ClaudeCodeDriverDeps) {
     this.#deps = Object.freeze({ ...deps });
     this.#retirement = new NativeRetirement(deps.onRetired);
@@ -264,7 +275,8 @@ export class ClaudeCodeDriver {
       redact = d.redactorFor?.(session) ?? redactor([]);
     let recap = input.resume,
       next = "",
-      retries = 0;
+      retries = 0,
+      relaunched = false;
     const stopped = () => owner.active?.finish({ kind: "retired" });
     session.abort.signal.addEventListener("abort", stopped, { once: true });
     try {
@@ -283,6 +295,7 @@ export class ClaudeCodeDriver {
           recap,
           next,
           redact,
+          [...this.#learned],
           {
             publish: (cycle) => {
               owner.active = cycle;
@@ -318,13 +331,40 @@ export class ClaudeCodeDriver {
           retries = 0;
           continue;
         }
-        if (result.kind === "violation") {
-          this.#state(
+        if (result.kind === "offered") {
+          // A Claude Code update can turn a new built-in on. Switch it off by name and start
+          // again, once; one that stays on could run without localDot's approval.
+          const fresh = result.tools.filter((tool) => !this.#learned.has(tool));
+          if (
+            !relaunched &&
+            !result.unnamed &&
+            fresh.length &&
+            this.#learned.size + fresh.length <= MAX_LEARNED
+          ) {
+            relaunched = true;
+            for (const tool of fresh) this.#learned.add(tool);
+            console.warn(
+              `claude code ${result.version ?? "(unknown version)"} offers its own ${fresh.join(", ")}; switching it off and starting again (task ${session.id})`,
+            );
+            continue;
+          }
+          const tools = [...result.tools, ...(result.unnamed ? [UNNAMED_TOOL] : [])];
+          this.#stop(
             session,
-            "error",
+            `Claude Code${result.version ? ` ${result.version}` : ""} turns on its own tool ${toolList(tools)}, which localDot couldn't switch off, so localDot stopped the task`,
+            "Update Claude Code, or choose another model in Settings, then send your message again.",
+          );
+          return CLAUDE_CODE_GAVE_UP;
+        }
+        if (result.kind === "violation") {
+          this.#stop(
+            session,
             result.what === "sub_agent"
               ? "Claude Code started a sub-agent; localDot stopped the task"
-              : "Claude Code used a tool that is not localDot's; localDot stopped the task",
+              : result.what === "refused"
+                ? `Claude kept asking for ${result.tool}, which isn't one of localDot's tools, so localDot stopped the task`
+                : `Claude Code used its own tool ${result.tool} instead of localDot's, so localDot stopped the task`,
+            RETRY_NEXT,
           );
           return CLAUDE_CODE_GAVE_UP;
         }
@@ -389,6 +429,13 @@ export class ClaudeCodeDriver {
     if (state !== "error") session.setStatus(state);
     session.append("agent.state", { state, reason, ...(detail ? { detail } : {}) });
   }
+  // A stop over a tool that is not localDot's: what happened and what the user can do about it.
+  #stop(session: AgentSession, reason: string, next: string): void {
+    const said = reason.length > 200 ? `${reason.slice(0, 199)}…` : reason;
+    console.error(`claude code: ${said} (task ${session.id})`);
+    if (session.stopped || session.controlHeld) return;
+    session.append("agent.state", { state: "error", reason: said, next });
+  }
   async #pause(session: AgentSession, reason: string, detail?: string): Promise<void> {
     await session.waitForControl();
     const after = session.inboxSequence;
@@ -420,6 +467,7 @@ export class ClaudeCodeDriver {
     recap: boolean,
     suffix: string,
     redact: Redactor,
+    disallowed: readonly string[],
     owner: { publish(cycle: ActiveCycle): void; retire(): void },
   ): Promise<CycleResult> {
     const d = this.#deps,
@@ -441,6 +489,7 @@ export class ClaudeCodeDriver {
       admitting = true,
       nudged = false,
       acting = false,
+      refusals = 0,
       basis = "",
       returned = "";
     const settledWaiters = new Set<() => void>();
@@ -480,6 +529,7 @@ export class ClaudeCodeDriver {
           "crashed",
           "signed_out",
           "plan_limit",
+          "offered",
           "violation",
         ].includes(candidate.kind)
       )
@@ -623,6 +673,7 @@ export class ClaudeCodeDriver {
             const { basedOn: _ignored, ...rest } = args as Record<string, unknown>;
             toolInput = { ...rest, basedOn: seen };
           }
+          refusals = 0;
           if (!acting) {
             acting = true;
             guarded("agent.state", { state: "acting" });
@@ -668,12 +719,37 @@ export class ClaudeCodeDriver {
       calls = work;
       return work;
     };
+    // Claude Code refused the model's call to a tool that is not localDot's: nothing ran. Show it,
+    // tell the model to use localDot's tools and go on, unless it keeps asking.
+    const refused = (tools: string[]) => {
+      const note = `Claude asked for ${toolList(tools)}, which isn't one of localDot's tools, and Claude Code refused it.`;
+      console.warn(
+        `claude code: refused Claude's call to ${tools.join(", ")} (task ${session.id})`,
+      );
+      const step = ulid();
+      try {
+        if (current()) {
+          session.append("step.start", { kind: "think" }, step);
+          session.append("tool.start", { tool: "claude-code.disabled", title: note }, step);
+          session.append("tool.end", { ok: false }, step);
+          session.append("step.end", { status: "blocked", note }, step);
+        }
+      } catch {
+        finish({ kind: "failed", message: "The Claude Code task could not record an event." });
+        return;
+      }
+      if (++refusals >= MAX_REFUSALS)
+        finish({ kind: "violation", what: "refused", tool: tools[0] ?? UNNAMED_TOOL });
+      else send(unavailable(tools));
+    };
     const onSignal = (event: ClaudeSignal) => {
       if (event.kind === "started") clearTimeout(startupTimer);
       else if (event.kind === "turn") {
         basis = returned;
         acting = false;
-      } else if (event.kind === "violation") finish({ kind: "violation", what: event.what });
+      } else if (event.kind === "offered") finish(event);
+      else if (event.kind === "refused") refused(event.tools);
+      else if (event.kind === "violation") finish(event);
       else if (event.kind === "consumed") for (const uuid of event.uuids) pending.delete(uuid);
       else if (event.kind === "error") {
         if (SIGNED_OUT.has(event.error)) finish({ kind: "signed_out" });
@@ -809,6 +885,7 @@ export class ClaudeCodeDriver {
           server: localdotServer(call, !!session.research, () =>
             connectorDescriptors(session.connectors),
           ),
+          disallowed,
           abort,
           spawn,
         }),

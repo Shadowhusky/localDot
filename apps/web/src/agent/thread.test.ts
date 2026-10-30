@@ -345,6 +345,15 @@ describe("the steps of each turn", () => {
     ]);
   });
 
+  it("leaves out what Stop gave back, as it leaves out what Edit took back", () => {
+    const items = threadItems([
+      message("task", 1, "user", { delivery: "withdrawn", stopped: true }),
+      message("then", 2, "user", { kind: "followup", delivery: "withdrawn", stopped: true }),
+      message("unsent", 3, "user", { kind: "followup", delivery: "cancelled", stopped: true }),
+    ]);
+    expect(items.map((item) => item.key)).toEqual(["message-unsent"]);
+  });
+
   it("says what each turn's model calls cost on its last run, an estimate if any call was", () => {
     const items = threadItems([
       message("task", 1),
