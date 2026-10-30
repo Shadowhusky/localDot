@@ -238,6 +238,12 @@ T03 (UI plan §4.1). Files: `src/ui/tokens.css`, `base.css`, `motion.css`; tests
   the void on the first frame that is; WebKit drew a styled frame before a script placed after the
   stylesheets had run. The app then follows `prefers-color-scheme` and other tabs
   (`followAppearance`). The export page keeps Graphite.
+- **Tags.** A conversation's colour tag reads `--color-tag-*` (red, orange, yellow, green, blue,
+  purple): one set for both dark appearances, a deeper one in Daylight, each at least 3:1 on the
+  house, a lit row and a popover. None is xenon or attention, so a tag never reads as who has the
+  computer or as a call for the user. It is a 3 px bar at the row's leading edge (`TagMark`),
+  inside the status glyph's box, so it never covers the glyph and moves with it; a corner dot was
+  tried and read as an unread badge.
 - **Modes.** `prefers-contrast: more` brightens fg-2 and fg-3, turns hairlines into field lines, makes
   the HUD solid and widens the focus ring to 3 px. `prefers-reduced-transparency` makes the HUD solid.
   `motion.css` maps every duration into 120–150 ms under reduced motion.
