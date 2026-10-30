@@ -16,7 +16,7 @@ import {
   webUrl,
 } from "@localdot/protocol";
 import { BrowserClientError } from "../../browser/client.ts";
-import { ScreenUnavailableError } from "../../browser/screen-controller.ts";
+import { BrowserInUseError, ScreenUnavailableError } from "../../browser/screen-controller.ts";
 import type { TaskConnectorTool } from "../../connectors/hub.ts";
 import { splitIntent } from "../../connectors/intent.ts";
 import type { ToolPolicy } from "../policy.ts";
@@ -30,7 +30,7 @@ import { askUserTool, requestTakeoverTool } from "./ask.ts";
 import { browserNavigateTool, browserReadTool } from "./browser.ts";
 import { browserActTool } from "./browser-act.ts";
 import { browserUploadTool } from "./browser-upload.ts";
-import { computerTool } from "./computer.ts";
+import { computerTool, untilPaused } from "./computer.ts";
 import { connectorFacts, connectorTool } from "./connector.ts";
 import { apiRequestTool, credentialsTool } from "./credentials.ts";
 import { append, fail, intentOf, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
@@ -126,6 +126,17 @@ function blocked(
   session.append("tool.end", { ok: false }, step);
   session.append("step.end", { status: "blocked", note: clipText(note, 500) }, step);
 }
+
+// What acts on or reads the screen takes its turn on the computer, which its tasks share.
+const ON_SCREEN = new Set<string>([
+  "computer",
+  "find",
+  "browser_read",
+  "browser_navigate",
+  "browser_act",
+  "browser_upload",
+  "switch_screen",
+]);
 
 // One tool call from the brain: the v1 table, the input's schema, the user's action limit and the
 // policy seam come first, in that order; only then does anything reach the computer or the user.
@@ -331,6 +342,18 @@ async function dispatchAdmitted(
     if (refusal) return { status: 200, result: fail(refusal) };
     const stopped = researchRefusal(session, name, frozen);
     if (stopped) return { status: 200, result: fail(stopped) };
+    if (ON_SCREEN.has(name) && deps.tools.computer) {
+      const waiting = untilPaused(session, ctx.signal);
+      try {
+        ctx.turn = await deps.tools.computer.take(session.id, session.cellId, waiting.signal);
+      } catch (error) {
+        if (session.safetyPause && !session.stopped) throw new PausedStepError();
+        throw error;
+      } finally {
+        waiting.end();
+      }
+      ctx.check();
+    }
     if (
       [
         "computer",
@@ -351,23 +374,27 @@ async function dispatchAdmitted(
     // only resolve on the desktop.
     const page = name === "browser_navigate" && webUrl((frozen as BrowserNavigateInput).url);
     const shown = session.screens?.selection.screen;
+    let shared = false;
     if (page && opensInWebBrowser(page) && shown === "desktop") {
       try {
         await session.switchScreen("browser", lease);
       } catch (error) {
         ctx.check();
-        if (!(error instanceof ScreenUnavailableError)) throw error;
-        return {
-          status: 200,
-          result: {
-            recovery: { kind: "unavailable", surface: "browser", retry: "after_change" },
-            ...fail(
-              error.status
-                ? `${error.message} Then open the page again with browser_navigate; don't ask for credentials again.`
-                : `The browser is temporarily unavailable${error.problem ? ` (${error.problem.replace(/\.$/u, "")})` : ""}. Saved sign-ins are still kept. Retry browser_navigate once it is ready; do not open a second browser or ask for credentials again.`,
-            ),
-          },
-        };
+        // Another task has the web browser: the page opens in the desktop's Chromium.
+        if (error instanceof BrowserInUseError) shared = true;
+        else if (!(error instanceof ScreenUnavailableError)) throw error;
+        else
+          return {
+            status: 200,
+            result: {
+              recovery: { kind: "unavailable", surface: "browser", retry: "after_change" },
+              ...fail(
+                error.status
+                  ? `${error.message} Then open the page again with browser_navigate; don't ask for credentials again.`
+                  : `The browser is temporarily unavailable${error.problem ? ` (${error.problem.replace(/\.$/u, "")})` : ""}. Saved sign-ins are still kept. Retry browser_navigate once it is ready; do not open a second browser or ask for credentials again.`,
+              ),
+            },
+          };
       }
       ctx.check();
     } else if (page && !opensInWebBrowser(page) && shown === "browser") {
@@ -551,6 +578,16 @@ async function dispatchAdmitted(
         break;
     }
     result = withResearchNote(session, name, frozen, result);
+    if (shared)
+      result = {
+        ...result,
+        content: [
+          text(
+            "Another task is using the web browser, so this opened in the desktop's Chromium, which keeps no sign-ins.",
+          ),
+          ...result.content,
+        ],
+      };
     // Containment intentionally stopped the session; its terminal refusal has no image/event.
     if (session.stopped)
       return {
@@ -609,6 +646,7 @@ async function dispatchAdmitted(
     };
   } finally {
     ctx?.screen?.finish();
+    await ctx?.turn?.release().catch(() => {});
     lease?.finish();
   }
 }

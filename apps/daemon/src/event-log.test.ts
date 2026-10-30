@@ -415,6 +415,41 @@ describe("EventLog", () => {
     );
   });
 
+  it("names a session as its session.title events say, through an index rebuilt from them", () => {
+    const dir = home();
+    const first = new EventLog(dir);
+    const id = first.createSession("fix the login bug pls");
+    const name = (title: string | null, by: "auto" | "user") =>
+      first.append(id, { agent: "main", type: "session.title", data: { title, by } });
+    name("Login bug fix", "auto");
+    name("Auth outage", "user");
+    name("Login redirect fix", "auto");
+    expect(first.sessionInfo([id]).get(id)?.title).toBe("Auth outage");
+    first.close();
+    for (const suffix of ["", "-journal", "-wal", "-shm"])
+      rmSync(join(dir, `index.sqlite${suffix}`), { force: true });
+    writeFileSync(
+      join(dir, "sessions", id, "session.json"),
+      `${JSON.stringify({ id, title: "fix the login bug pls", startedAt: new Date().toISOString() })}\n`,
+    );
+    const second = new EventLog(dir);
+    expect(second.listSessions().find((s) => s.id === id)?.title).toBe("Auth outage");
+    expect(second.titles(id)).toEqual({
+      autoTitle: "Login redirect fix",
+      userTitle: "Auth outage",
+    });
+    second.append(id, { agent: "main", type: "session.title", data: { title: null, by: "user" } });
+    expect(second.sessionInfo([id]).get(id)?.title).toBe("Login redirect fix");
+    expect(() =>
+      second.append(id, {
+        agent: "main",
+        type: "session.title",
+        data: { title: null, by: "auto" },
+      }),
+    ).toThrow();
+    second.close();
+  });
+
   it("orders sessions that start in the same millisecond by id, highest first", () => {
     const dir = home();
     const low = ulid(1_759_312_800_000, (n) => new Uint8Array(n));

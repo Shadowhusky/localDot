@@ -85,7 +85,7 @@ function fixture(cell: Partial<CellSummary> | null = {}) {
       queueMicrotask(() => finish(id, "stopped"));
       return true;
     }),
-    live: (c: string) => live.get(c),
+    live: (c: string) => [...live].flatMap(([cell, id]) => (cell === c ? [id] : [])),
     busy: (c: string) => {
       const id = live.get(c);
       return id !== undefined && !idle.has(id);
@@ -588,9 +588,9 @@ describe("routine launcher", () => {
 function stopAllDeps(f: ReturnType<typeof fixture>) {
   return {
     cells: f.cells,
-    live: { get: (c: string) => f.live.get(c) },
+    live: { sessionsOn: (c: string) => f.runner.live(c) },
     killSwitch: {
-      stopSession: async () => ({
+      contain: async () => ({
         revoked: true,
         paused: true,
         closed: false,

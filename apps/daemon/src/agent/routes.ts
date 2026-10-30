@@ -28,6 +28,7 @@ import {
   PauseRequest,
   PeopleReply,
   Person,
+  PersonaId,
   PersonChangeReply,
   PersonRevision,
   QuestionAnswerRequest,
@@ -88,6 +89,7 @@ import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
 import { PausedStepError } from "./safety/step-barrier.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
+import { SIDE_QUESTION_CHARS, SideQuestionError } from "./side-question.ts";
 import type { SkillInfo } from "./skills.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
 import { userUploadRoutes } from "./user-upload-routes.ts";
@@ -117,6 +119,9 @@ export interface AgentRoutesDeps {
         | "hold"
         | "holds"
         | "signIn"
+        | "sideAnswer"
+        | "switchPersona"
+        | "liveStatus"
       >
     >;
   conversations?: Pick<
@@ -168,13 +173,19 @@ const text = (max: number) =>
     .refine((s) => s.isWellFormed() && !s.includes("\0"));
 const nonempty = (max: number) => text(max).refine((s) => s.trim().length > 0);
 // research: dot reads many sources and writes a cited report.
-const Task = z.strictObject({ task: nonempty(8000), mode: z.literal("research").optional() });
+const Task = z.strictObject({
+  task: nonempty(8000),
+  mode: z.literal("research").optional(),
+  // The conversation's latest task, or null for a new conversation; left out, the current one.
+  continues: z.string().regex(ULID_PATTERN).nullable().optional(),
+});
 const Message = z.strictObject({ text: nonempty(8000), kind: z.enum(["steer", "followup"]) });
 const Budget = BudgetRaiseRequest;
+const SideQuestion = z.strictObject({ question: nonempty(SIDE_QUESTION_CHARS) });
 
 class RouteError extends Error {
   constructor(
-    readonly status: 400 | 403 | 404 | 409 | 413 | 415 | 499 | 503,
+    readonly status: 400 | 403 | 404 | 409 | 413 | 415 | 499 | 502 | 503,
     message: string,
   ) {
     super(message);
@@ -627,6 +638,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           : c.req.raw.signal;
         const startOptions = {
           ...(parsed.mode === "research" ? { research: true } : {}),
+          ...(parsed.continues !== undefined ? { continues: parsed.continues } : {}),
           ...(reservation
             ? {
                 main: reservation.model,
@@ -657,29 +669,26 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   );
   const conversations = deps.conversations;
   if (conversations) {
-    // A finished task waiting for a follow-up ends, so the next message starts the chosen one.
-    const release = async (signal: AbortSignal) => {
-      try {
-        await deps.runner.release?.(signal, conversations.current());
-      } catch (error) {
-        if (error instanceof AgentError) throw new RouteError(409, error.message);
-        throw error;
-      }
-      check(signal);
-    };
+    // Choosing a conversation only changes what the app shows: every task goes on.
     app.get(
       "/api/conversation",
       route((c) => c.json(conversations.snapshot())),
     );
     app.get(
       "/api/conversations",
-      route((c) => c.json({ conversations: conversations.list() })),
+      route((c) =>
+        c.json({
+          conversations: conversations.list().map((entry) => {
+            const live = deps.runner.liveStatus?.(entry.sessionId);
+            return live ? { ...entry, live } : entry;
+          }),
+        }),
+      ),
     );
     app.post(
       "/api/conversation/new",
       route(async (c) => {
         await empty(c.req.raw);
-        await release(c.req.raw.signal);
         conversations.begin();
         return c.json(conversations.snapshot());
       }),
@@ -688,11 +697,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       "/api/conversation/continue",
       route(async (c) => {
         const { sessionId } = await json(c.req.raw, ContinueConversation);
-        if (!conversations.has(sessionId)) throw new RouteError(404, "no such task");
-        if (conversations.current() !== sessionId) {
-          await release(c.req.raw.signal);
-          if (!conversations.select(sessionId)) throw new RouteError(404, "no such task");
-        }
+        if (!conversations.select(sessionId)) throw new RouteError(404, "no such task");
         return c.json(conversations.snapshot());
       }),
     );
@@ -745,6 +750,32 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       } else if (parsed.kind === "followup") s.enqueue(text);
       else s.post(parsed.kind, text);
       return c.body(null, 202);
+    }),
+  );
+  // One at a time for each task; the answer goes back to the user alone.
+  const asking = new Set<string>();
+  app.post(
+    "/api/agent/sessions/:id/side-question",
+    route(async (c) => {
+      const id = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(id)) throw new RouteError(400, "invalid task id");
+      const { question } = await json(c.req.raw, SideQuestion);
+      const text = redact(question, id, undefined, SIDE_QUESTION_CHARS);
+      if (!deps.runner.sideAnswer) throw new RouteError(503, "side questions are unavailable");
+      if (asking.has(id)) throw new RouteError(409, "busy");
+      asking.add(id);
+      const late = AbortSignal.timeout(90_000);
+      try {
+        return c.json(
+          await deps.runner.sideAnswer(id, text, AbortSignal.any([c.req.raw.signal, late])),
+        );
+      } catch (error) {
+        if (error instanceof SideQuestionError) throw new RouteError(error.status, error.problem);
+        if (late.aborted) throw new RouteError(502, "no-answer");
+        throw error;
+      } finally {
+        asking.delete(id);
+      }
     }),
   );
   app.post(
@@ -1017,6 +1048,23 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         throw new RouteError(409, "task is not available to change its budget");
       await deps.runner.raiseBudget(s.id, parsed.budgetUSD);
       check(c.req.raw.signal);
+      return c.body(null, 204);
+    }),
+  );
+  // The dot this task works as, when the user changes the one Auto chose.
+  app.post(
+    "/api/agent/sessions/:id/persona",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const { persona } = await json(c.req.raw, z.strictObject({ persona: PersonaId }));
+      check(c.req.raw.signal);
+      if (!deps.runner.switchPersona) throw new RouteError(503, "Changing dot is unavailable");
+      try {
+        deps.runner.switchPersona(s.id, persona);
+      } catch (error) {
+        if (error instanceof AgentError) throw new RouteError(409, error.message);
+        throw error;
+      }
       return c.body(null, 204);
     }),
   );

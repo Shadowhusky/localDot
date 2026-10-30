@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ConversationList,
+  type ConversationLive,
   ConversationSnapshot,
   EARLIER_CHARS,
   EARLIER_LEFT_OUT,
@@ -14,7 +15,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventLog } from "../event-log.ts";
 import { Conversations } from "./conversation.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./routes.ts";
-import { AgentError } from "./runner.ts";
 import { AgentSession } from "./session.ts";
 
 const owned: { home: string; log: EventLog }[] = [];
@@ -155,6 +155,63 @@ describe("the list of conversations", () => {
     const f = setup();
     for (let n = 0; n < 4; n++) await f.task(`Task ${n}`);
     expect(f.open().list(2)).toHaveLength(2);
+  });
+
+  it("names a conversation by the user's name, else dot's, else its first message", async () => {
+    const f = setup();
+    const trip = await f.task("plan 3 days kyoto pls, autumn, cheap");
+    const name = (title: string | null, by: "auto" | "user") =>
+      f.log.append(trip, { type: "session.title", agent: "main", data: { title, by } });
+    const listed = () => f.open().list()[0];
+    expect(listed()).toMatchObject({ title: "plan 3 days kyoto pls, autumn, cheap" });
+    name("Kyoto autumn trip", "auto");
+    expect(listed()?.title).toBe("Kyoto autumn trip");
+    name("Kyoto with Mum", "user");
+    name("Kyoto on a budget", "auto");
+    expect(listed()).toMatchObject({
+      title: "Kyoto with Mum",
+      said: "plan 3 days kyoto pls, autumn, cheap",
+    });
+    name(null, "user");
+    expect(listed()?.title).toBe("Kyoto on a budget");
+  });
+
+  it("hands on the latest task's names, past the user's own time on the computer", async () => {
+    const f = setup();
+    const trip = await f.task("plan 3 days kyoto pls");
+    expect(f.open().names(trip)).toEqual({ automatic: "plan 3 days kyoto pls" });
+    f.log.append(trip, {
+      type: "session.title",
+      agent: "main",
+      data: { title: "Kyoto autumn trip", by: "auto" },
+    });
+    f.log.append(trip, {
+      type: "session.title",
+      agent: "main",
+      data: { title: "Mum", by: "user" },
+    });
+    await tick();
+    const hold = f.start("Kyoto autumn trip", trip);
+    expect(f.open().isTask(hold)).toBe(false);
+    expect(f.open().names(hold)).toEqual({ automatic: "Kyoto autumn trip", user: "Mum" });
+    expect(f.open().list()[0]).toMatchObject({ sessionId: trip, title: "Mum" });
+  });
+});
+
+describe("a conversation's dot", () => {
+  it("is the last one chosen in its tasks, newest first", async () => {
+    const f = setup();
+    const choose = (id: string, persona: "coder" | "design", by: "auto" | "user") =>
+      f.log.append(id, { type: "persona.choice", agent: "main", data: { persona, by } });
+    const first = await f.task("Build a landing page");
+    expect(f.open().persona(first)).toBeUndefined();
+    choose(first, "coder", "auto");
+    const next = await f.task("Make it prettier", first);
+    expect(f.open().persona(next)).toBe("coder");
+    choose(first, "design", "user");
+    expect(f.open().persona(next)).toBe("design");
+    const other = await f.task("Something else");
+    expect(f.open().persona(other)).toBeUndefined();
   });
 });
 
@@ -381,19 +438,21 @@ describe("a message Stop left unsent", () => {
 });
 
 describe("conversation routes", () => {
-  function routes(release: () => Promise<void> = async () => {}) {
+  function routes() {
     const f = setup();
     const conversations = f.open();
     const app = new Hono();
-    const releases = vi.fn(release);
-    // The tasks the runner still holds.
+    const releases = vi.fn(async () => {});
+    // The tasks the runner still holds, and their live status.
     const live = new Map<string, AgentSession>();
+    const statuses = new Map<string, ConversationLive>();
     agentRoutes(app, {
       runner: {
         start: vi.fn(),
         get: (id: string) => live.get(id),
         raiseBudget: vi.fn(),
         release: releases,
+        liveStatus: (id: string) => statuses.get(id),
       },
       conversations,
     } as unknown as AgentRoutesDeps);
@@ -403,7 +462,7 @@ describe("conversation routes", () => {
         headers: { "content-type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-    return { ...f, conversations, releases, live, send };
+    return { ...f, conversations, releases, live, statuses, send };
   }
 
   it("shows the current conversation, starts a new one and continues an older one", async () => {
@@ -418,32 +477,56 @@ describe("conversation routes", () => {
     const fresh = await f.send("POST", "/api/conversation/new");
     expect(fresh.status).toBe(200);
     expect(await fresh.json()).toEqual({ sessions: [], more: false });
-    expect(f.releases).toHaveBeenCalledTimes(1);
-    expect(f.releases).toHaveBeenLastCalledWith(expect.any(AbortSignal), newer);
     expect(f.conversations.current()).toBeNull();
     const continued = await f.send("POST", "/api/conversation/continue", { sessionId: older });
     expect(continued.status).toBe(200);
     expect(await continued.json()).toEqual({ sessions: [older], more: false });
-    expect(f.releases).toHaveBeenCalledTimes(2);
-    expect(f.releases).toHaveBeenLastCalledWith(expect.any(AbortSignal), null);
     expect(f.conversations.current()).toBe(older);
   });
 
-  it("leaves a working task and the current conversation alone", async () => {
-    const f = routes(async () => {
-      throw new AgentError(409, "Finish or stop the current task first.");
-    });
+  it("moves between conversations without ending a task in any of them", async () => {
+    const f = routes();
     const current = await f.task("Draw a dog");
     const other = await f.task("Something else");
     f.conversations.adopt(current);
-    const fresh = await f.send("POST", "/api/conversation/new");
-    expect(fresh.status).toBe(409);
-    expect(await fresh.text()).toBe("Finish or stop the current task first.");
+    expect((await f.send("POST", "/api/conversation/new")).status).toBe(200);
+    expect(f.conversations.current()).toBeNull();
     const continued = await f.send("POST", "/api/conversation/continue", { sessionId: other });
-    expect(continued.status).toBe(409);
-    expect(f.conversations.current()).toBe(current);
-    const same = await f.send("POST", "/api/conversation/continue", { sessionId: current });
-    expect(same.status).toBe(200);
+    expect(continued.status).toBe(200);
+    expect(f.conversations.current()).toBe(other);
+    expect(f.releases).not.toHaveBeenCalled();
+  });
+
+  it("follows a task that started only while its conversation is still the current one", async () => {
+    const f = routes();
+    const first = await f.task("Draw a dog");
+    f.conversations.adopt(first, null);
+    expect(f.conversations.current()).toBe(first);
+    f.conversations.begin();
+    const late = await f.task("Add a hat", first);
+    f.conversations.adopt(late, first);
+    expect(f.conversations.current()).toBeNull();
+    const fresh = await f.task("Something new");
+    f.conversations.adopt(fresh, null);
+    expect(f.conversations.current()).toBe(fresh);
+  });
+
+  it("says which conversations have a live task, and what it is doing", async () => {
+    const f = routes();
+    const resting = await f.task("Plan the trip");
+    const working = await f.task("Draw a dog");
+    const live: ConversationLive = {
+      state: "waiting-for-computer",
+      since: "2026-10-30T10:00:00.000Z",
+      onScreen: false,
+      activity: "Open the drawing app",
+    };
+    f.statuses.set(working, live);
+    const { conversations } = ConversationList.parse(
+      await (await f.send("GET", "/api/conversations")).json(),
+    );
+    expect(conversations.find((entry) => entry.sessionId === working)?.live).toEqual(live);
+    expect(conversations.find((entry) => entry.sessionId === resting)).not.toHaveProperty("live");
   });
 
   it("lists the recent conversations", async () => {

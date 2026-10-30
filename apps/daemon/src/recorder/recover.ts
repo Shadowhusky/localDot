@@ -88,7 +88,7 @@ function formatOf(value: unknown): StreamFormat | undefined {
 
 // Inspect only the small suffix; a finished multi-hour video must not be loaded into memory.
 // RecordingFs injects every write. Its real descriptors can also use an optional injected reader.
-function hasFinalMfra(video: string, endOffset: number, fs: RecordingFs): boolean {
+export function hasFinalMfra(video: string, endOffset: number, fs: RecordingFs = nodeFs): boolean {
   if (!fs.existsSync(video)) return false;
   const size = fs.statSync(video).size;
   if (size < endOffset + 16) return false;

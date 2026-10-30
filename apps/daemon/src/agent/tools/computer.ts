@@ -225,7 +225,7 @@ function pointerNote(a: ComputerStep, outcome: ActionOutcome): string | undefine
 }
 
 // A hold ends when the task is paused: nobody is left to let go of the keys.
-function untilPaused(session: AgentSession, signal: AbortSignal) {
+export function untilPaused(session: AgentSession, signal: AbortSignal) {
   const paused = new AbortController();
   const over = new AbortController();
   const watching = AbortSignal.any([signal, over.signal]);

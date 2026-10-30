@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -12,7 +13,14 @@ import { join } from "node:path";
 import { emptyManifest, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { readManifest, writeManifest } from "../recorder/manifest.ts";
-import { retentionFromEnv, sweepRecordings } from "./retention.ts";
+import {
+  FRAMES_MAX_AGE_DAYS,
+  framesMaxAgeFromEnv,
+  recordingStorage,
+  retentionFromEnv,
+  sweepFrames,
+  sweepRecordings,
+} from "./retention.ts";
 
 const roots: string[] = [];
 const megabyte = 1024 * 1024;
@@ -107,6 +115,8 @@ describe("recording retention", () => {
     const oldest = recording(home, megabyte, "2026-10-01T00:00:00.000Z");
     const middle = recording(home, 2 * megabyte, "2026-10-02T00:00:00.000Z");
     const newest = recording(home, 3 * megabyte, "2026-10-03T00:00:00.000Z");
+    mkdirSync(join(oldest.directory, ".compact"));
+    writeFileSync(join(oldest.directory, ".compact", "encoded.mp4"), "a compaction under way");
     const result = sweepRecordings({
       home,
       now,
@@ -128,6 +138,7 @@ describe("recording retention", () => {
     });
     expect(existsSync(join(oldest.directory, "journal"))).toBe(false);
     expect(existsSync(join(oldest.directory, "fragments.jsonl"))).toBe(false);
+    expect(existsSync(join(oldest.directory, ".compact"))).toBe(false);
     for (const path of [
       "events.jsonl",
       "frames/observe.webp",
@@ -135,6 +146,28 @@ describe("recording retention", () => {
       "summary.json",
     ])
       expect(readFileSync(join(oldest.session, path), "utf8")).toContain("retained");
+  });
+
+  it("totals what finished videos take and what re-encoding them saved", () => {
+    const home = setup();
+    recording(home, megabyte, "2026-10-03T00:00:00.000Z");
+    const compacted = recording(home, 2 * megabyte, "2026-10-04T00:00:00.000Z");
+    writeManifest(compacted.directory, {
+      ...compacted.manifest,
+      compacted: { sourceBytes: 5 * megabyte },
+    });
+    recording(home, megabyte, "2026-08-01T00:00:00.000Z");
+    const policy = { maxBytes: 20 * megabyte, maxAgeDays: 30 };
+    sweepRecordings({ home, now, policy, isLive: () => false });
+    expect(recordingStorage(home, policy)).toEqual({
+      videos: 2,
+      bytes: 3 * megabyte,
+      savedBytes: 3 * megabyte,
+      ...policy,
+      framesBytes: 3 * "retained frame".length,
+      framesMaxAgeDays: FRAMES_MAX_AGE_DAYS,
+    });
+    expect(recordingStorage(join(home, "missing"), policy).videos).toBe(0);
   });
 
   it("expires old recordings but never touches a live session", () => {
@@ -192,5 +225,58 @@ describe("recording retention", () => {
         isLive: () => false,
       }),
     ).toThrow(RangeError);
+  });
+});
+
+describe("screenshot retention", () => {
+  function task(home: string, startedAt: string, summary: unknown = undefined) {
+    const id = ulid();
+    const session = join(home, "sessions", id);
+    const [cover, a, b] = [ulid(), ulid(), ulid()];
+    mkdirSync(join(session, "frames"), { recursive: true });
+    mkdirSync(join(session, "thumbs"));
+    writeFileSync(join(session, "session.json"), JSON.stringify({ id, startedAt }));
+    writeFileSync(join(session, "events.jsonl"), "kept events");
+    for (const frame of [cover, a, b])
+      writeFileSync(join(session, "frames", `${frame}.webp`), "a screenshot");
+    writeFileSync(join(session, "thumbs", `${a}.webp`), "a thumbnail");
+    writeFileSync(
+      join(session, "summary.json"),
+      JSON.stringify(summary === undefined ? { id, coverFrameId: cover } : summary),
+    );
+    const frames = () => readdirSync(join(session, "frames")).sort();
+    return { id, session, cover, frames };
+  }
+
+  it("keeps only the cover of a finished task's screenshots past their age, and nothing else goes", () => {
+    const home = setup();
+    const old = task(home, "2026-03-01T00:00:00.000Z");
+    const recent = task(home, "2026-09-01T00:00:00.000Z");
+    const live = task(home, "2026-03-01T00:00:00.000Z");
+    const unsummarized = task(home, "2026-03-01T00:00:00.000Z", "not yet");
+    const coverless = task(home, "2026-03-01T00:00:00.000Z", { coverFrameId: ulid() });
+    const before = [recent, live, unsummarized, coverless].map((each) => each.frames());
+    const swept = sweepFrames({ home, maxAgeDays: 180, now, isLive: (id) => id === live.id });
+    expect(swept).toEqual({ sessions: [old.id], freedBytes: 2 * "a screenshot".length });
+    expect(old.frames()).toEqual([`${old.cover}.webp`]);
+    expect(readdirSync(join(old.session, "thumbs"))).toHaveLength(1);
+    expect(readFileSync(join(old.session, "events.jsonl"), "utf8")).toBe("kept events");
+    expect([recent, live, unsummarized, coverless].map((each) => each.frames())).toEqual(before);
+    expect(sweepFrames({ home, maxAgeDays: 180, now, isLive: () => false })).toEqual({
+      sessions: [live.id],
+      freedBytes: 2 * "a screenshot".length,
+    });
+    expect(
+      sweepFrames({ home: join(home, "missing"), maxAgeDays: 180, now, isLive: () => false }),
+    ).toEqual({ sessions: [], freedBytes: 0 });
+  });
+
+  it("takes its age from the environment, and refuses an invalid one", () => {
+    expect(framesMaxAgeFromEnv({})).toBe(180);
+    expect(framesMaxAgeFromEnv({ LOCALDOT_FRAMES_MAX_DAYS: "365" })).toBe(365);
+    expect(framesMaxAgeFromEnv({ LOCALDOT_FRAMES_MAX_DAYS: "0" })).toBe(180);
+    expect(() => sweepFrames({ home: setup(), maxAgeDays: 0, now, isLive: () => false })).toThrow(
+      RangeError,
+    );
   });
 });

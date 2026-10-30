@@ -33,6 +33,7 @@ import { type AgentRoutesDeps, agentRoutes } from "./routes.ts";
 import { AgentError, type TaskStartOptions } from "./runner.ts";
 import { AgentSession } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
+import { SideQuestionError } from "./side-question.ts";
 import { plainForm } from "./tools/ask.ts";
 
 const CELL = "01JXYZ0000000000000000CE11";
@@ -553,6 +554,45 @@ describe("agent user routes", () => {
         .status,
     ).toBe(204);
     expect(await plain).toEqual({ declined: true, by: "user" });
+  });
+  it("answers a side question for the user alone, redacted, one at a time, saying why it can't", async () => {
+    const f = await setup();
+    const gate = deferred();
+    const sideAnswer = vi.fn(async (_id: string, question: string) => {
+      await gate.promise;
+      return { answer: `About: ${question}`, provider: "claude-code", model: "haiku" };
+    });
+    f.deps.runner.sideAnswer = sideAnswer;
+    const asked = f.send("POST", endpoint("side-question"), {
+      question: "Is credential-fixture safe?",
+    });
+    await vi.waitFor(() => expect(sideAnswer).toHaveBeenCalledOnce());
+    const again = await f.send("POST", endpoint("side-question"), { question: "And now?" });
+    expect(again.status).toBe(409);
+    gate.resolve();
+    const reply = await asked;
+    expect(reply.status).toBe(200);
+    expect(await reply.json()).toEqual({
+      answer: "About: Is [redacted] safe?",
+      provider: "claude-code",
+      model: "haiku",
+    });
+    // Nothing reaches the task: no message, no event.
+    expect(f.events).toEqual([]);
+    expect(f.session.delivered).toBe(0);
+    for (const question of ["", " ", "x".repeat(2001), `key sk-ant-api03-${"a".repeat(90)}`])
+      expect((await f.send("POST", endpoint("side-question"), { question })).status).toBe(400);
+    expect(
+      (await f.send("POST", "/api/agent/sessions/nope/side-question", { question: "Hi" })).status,
+    ).toBe(400);
+    sideAnswer.mockRejectedValueOnce(new SideQuestionError(409, "no-fast-model"));
+    const none = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+    expect([none.status, await none.text()]).toEqual([409, "no-fast-model"]);
+    sideAnswer.mockRejectedValueOnce(new SideQuestionError(502, "no-answer"));
+    expect((await f.send("POST", endpoint("side-question"), { question: "Hi" })).status).toBe(502);
+    sideAnswer.mockRejectedValueOnce(new AgentError(404, "no such task"));
+    expect((await f.send("POST", endpoint("side-question"), { question: "Hi" })).status).toBe(404);
+    expect(sideAnswer).toHaveBeenCalledTimes(4);
   });
   it("a message hands control back and reaches the model as steering before it resumes", async () => {
     const f = await setup();

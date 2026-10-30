@@ -13,6 +13,7 @@ export function deliverablesFor(
   d: {
     computers(): readonly { id: string; state: string; paused?: boolean }[];
     access(cellId: string, signal: AbortSignal): ComputerAccess | "busy" | undefined;
+    cellOf(sessionId: string): string | undefined;
     start: ReviseDeps["start"];
     upload: ReviseDeps["access"];
     redactUserText: ReviseDeps["redactUserText"];
@@ -26,5 +27,6 @@ export function deliverablesFor(
     previews: new Previews(home, computerConverter({ computers: d.computers, access: d.access })),
     opener: macOpener(),
     revise: { start: d.start, access: d.upload, redactUserText: d.redactUserText },
+    computer: { cellOf: d.cellOf, access: d.access },
   };
 }

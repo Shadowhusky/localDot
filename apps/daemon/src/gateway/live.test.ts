@@ -216,3 +216,67 @@ it("a prepared task finalizes after Stop even when the recording hook was still 
   await live.settled("task");
   expect(calls).toEqual(["finalize", "recording closed"]);
 });
+
+describe("tasks sharing a computer", () => {
+  const forever = (signal: AbortSignal) =>
+    new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+
+  it("runs several tasks at once and puts the computer's doings down to the one acting", async () => {
+    const live = new LiveSessions();
+    live.start("cell", "a", forever);
+    live.start("cell", "b", forever);
+    expect(live.sessionsOn("cell")).toEqual(["a", "b"]);
+    expect(live.busy("cell")).toBe(true);
+    expect(live.get("cell")).toBe("b");
+    const turn = await live.lease("cell").acquire("a");
+    expect(live.get("cell")).toBe("a");
+    turn.release();
+    expect(live.get("cell")).toBe("a");
+    live.stop("a");
+    await live.settled("a");
+    expect(live.sessionsOn("cell")).toEqual(["b"]);
+    expect(live.get("cell")).toBe("b");
+    expect(live.admitIdleOperation("cell")).toBeUndefined();
+    live.stop("b");
+    await live.settled("b");
+    expect(live.busy("cell")).toBe(false);
+  });
+
+  it("ends a stopped task's waits for the computer and leaves the others' alone", async () => {
+    const live = new LiveSessions();
+    live.start("cell", "a", forever);
+    live.start("cell", "b", forever);
+    live.start("cell", "c", forever);
+    const held = await live.lease("cell").acquire("a");
+    const b = live.lease("cell").acquire("b");
+    const c = live.lease("cell").acquire("c");
+    live.stop("b");
+    await live.settled("b");
+    await expect(b).rejects.toBeDefined();
+    held.release();
+    expect((await c).sessionId).toBe("c");
+    for (const id of ["a", "c"]) {
+      live.stop(id);
+      await live.settled(id);
+    }
+    expect(live.lease("cell").holder).toBeUndefined();
+  });
+
+  it("gives the web browser to one task at a time until it lets go or ends", async () => {
+    const live = new LiveSessions();
+    live.start("cell", "a", forever);
+    live.start("cell", "b", forever);
+    expect(live.claimBrowser("cell", "a")).toBe(true);
+    expect(live.claimBrowser("cell", "a")).toBe(true);
+    expect(live.claimBrowser("cell", "b")).toBe(false);
+    expect(live.browserHolder("cell")).toBe("a");
+    live.releaseBrowser("cell", "b");
+    expect(live.browserHolder("cell")).toBe("a");
+    live.stop("a");
+    await live.settled("a");
+    expect(live.browserHolder("cell")).toBeUndefined();
+    expect(live.claimBrowser("cell", "b")).toBe(true);
+    live.stop("b");
+    await live.settled("b");
+  });
+});

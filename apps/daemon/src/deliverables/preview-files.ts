@@ -24,7 +24,7 @@ const MEDIA: Readonly<Record<string, string>> = Object.freeze({
   mov: "video/quicktime",
   webm: "video/webm",
 });
-const BASE = {
+export const BASE = {
   "x-content-type-options": "nosniff",
   "cache-control": "no-store",
   "referrer-policy": "no-referrer",
@@ -34,6 +34,11 @@ const BASE = {
 export const INERT_POLICY = "default-src 'none'; sandbox";
 // An SVG draws its own styles and embedded pictures, and nothing else, even opened on its own.
 export const SVG_POLICY = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox";
+export const SECURE = {
+  "x-content-type-options": "nosniff",
+  "content-security-policy": INERT_POLICY,
+  "cache-control": "no-store",
+};
 
 // A page dot made: no script, form, plugin, frame, font or connection; pictures only embedded or
 // from the same task's files, stylesheets inline or from them; framed only by localDot; sandboxed.
@@ -60,7 +65,7 @@ interface Served {
   text?: (text: string, signal: AbortSignal) => Quieted | Promise<Quieted>;
 }
 
-const REFUSED = {
+export const REFUSED = {
   "not shown": [415, "not shown"],
   "too complex": [415, "too complex to preview"],
   busy: [503, "busy"],
@@ -145,7 +150,7 @@ export function previewFileRoutes(
   });
 }
 
-function servedAs(
+export function servedAs(
   name: string,
   origin: string,
   base: string,

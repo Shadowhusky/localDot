@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ShellInput, ToolResult } from "@localdot/protocol";
 import {
   ShellCleanupUncertainError,
@@ -91,8 +92,12 @@ export async function shellTool(
       candidates.prefix,
       input.cwd,
     );
+    // Windows the command's programs open are this task's.
+    const id = randomUUID();
+    deps.computer?.owners(ctx.session.cellId).shell(id, ctx.session.id);
     const done = await desktop.shell(
       {
+        id,
         command: ctx.localCleanup?.command ?? input.command,
         ...(input.cwd ? { cwd: input.cwd } : {}),
         timeoutMs: (input.timeout_sec ?? 120) * 1000,

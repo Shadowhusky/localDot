@@ -326,6 +326,34 @@ describe("daemon browser client", () => {
     );
   });
 
+  it("opens a blank tab with the holder's permit alone and refuses a reply that names no tab", async () => {
+    let reply: unknown;
+    const requests: { method?: string; path?: string; body: unknown }[] = [];
+    const f = await fixture((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk) => chunks.push(chunk));
+      request.on("end", () => {
+        requests.push({
+          method: request.method,
+          path: request.url,
+          body: JSON.parse(Buffer.concat(chunks).toString()),
+        });
+        send(response, reply);
+      });
+    });
+    reply = { tabId: f.tab };
+    expect(await f.client.openTab(f.permit, f.scope)).toBe(f.tab);
+    expect(requests).toEqual([{ method: "POST", path: "/tabs", body: { permit: f.permit } }]);
+    for (reply of [{ tabId: "page-1" }, { tabId: f.tab, url: "about:blank" }, {}])
+      await expect(f.client.openTab(f.permit, f.scope)).rejects.toThrow(
+        expect.objectContaining({ code: "reply" }),
+      );
+    await expect(
+      f.client.openTab({ ...f.permit, instance: randomUUID() }, f.scope),
+    ).rejects.toThrow(expect.objectContaining({ code: "stale" }));
+    expect(requests).toHaveLength(4);
+  });
+
   it("parses a bounded browser observation and strict tab list", async () => {
     let reply: unknown;
     const f = await fixture((_request, response) => send(response, reply));

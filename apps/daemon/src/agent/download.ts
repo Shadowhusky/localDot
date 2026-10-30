@@ -12,6 +12,10 @@ export class DownloadError extends Error {
   }
 }
 
+export function attachment(name: string): string {
+  return `attachment; filename*=UTF-8''${encodeURIComponent(name).replaceAll("'", "%27").replaceAll("(", "%28").replaceAll(")", "%29").replaceAll("*", "%2A")}`;
+}
+
 // Application-owned storage: reject static links and changed file identity before serving from
 // the opened descriptor. Like PrivateFiles, this is not openat confinement against a malicious
 // same-UID process that concurrently replaces application-owned ancestor directories.
@@ -51,7 +55,7 @@ export function downloadFile(
     signal.throwIfAborted();
     const headers = {
       "content-type": "application/octet-stream",
-      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name).replaceAll("'", "%27").replaceAll("(", "%28").replaceAll(")", "%29").replaceAll("*", "%2A")}`,
+      "content-disposition": attachment(name),
       "x-content-type-options": "nosniff",
       "cache-control": "no-store",
     };

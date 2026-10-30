@@ -8,10 +8,19 @@ import {
   type ServerResponse,
 } from "node:http";
 import { type AddressInfo, connect } from "node:net";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { previewTarget } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
-import { cookieName, deviceHeaders, ENTRY_PATH, PreviewSite, serverHeaders } from "./site.ts";
+import type { Route } from "./rewrite.ts";
+import {
+  cookieName,
+  deviceHeaders,
+  ENTRY_PATH,
+  PreviewSite,
+  type SiteOptions,
+  serverHeaders,
+} from "./site.ts";
 import { ForwarderRefused } from "./tunnel.ts";
 
 const FRONT = "100.91.187.75";
@@ -49,7 +58,14 @@ async function devServer(handle?: (req: IncomingMessage, res: ServerResponse) =>
 
 async function site(
   upstream: number,
-  options: { reused?: boolean; now?: () => number; connect?: () => Promise<never> } = {},
+  options: {
+    reused?: boolean;
+    now?: () => number;
+    connect?: () => Promise<never>;
+    ports?: number[];
+    hop?: SiteOptions["hop"];
+    navigateMs?: number;
+  } = {},
 ) {
   const port = await freePort();
   const target = previewTarget(`http://localhost:${upstream}/`);
@@ -58,9 +74,13 @@ async function site(
     port,
     target,
     hosts: () => new Set([`${FRONT}:${port}`]),
-    connect: options.connect ?? (async () => connect(upstream, "127.0.0.1")),
+    connect:
+      options.connect ?? (async (to) => connect(Number(to.dial.split(":").at(-1)), "127.0.0.1")),
+    computer: () => ({ addresses: [], ports: new Set([upstream, ...(options.ports ?? [])]) }),
+    hop: options.hop ?? (() => Promise.reject(new Error("no hops here"))),
     reused: options.reused ?? false,
     now: options.now,
+    navigateMs: options.navigateMs,
   });
   await preview.listen();
   closers.push(() => preview.close());
@@ -145,7 +165,10 @@ describe("signing a device in", () => {
     const secret = preview.mint("/app?tab=2");
     const { answer, cookie } = await signIn(port, host, secret);
     expect(answer.status).toBe(200);
-    expect(JSON.parse(answer.body)).toEqual({ next: "/app?tab=2" });
+    expect(JSON.parse(answer.body)).toEqual({
+      next: "/app?tab=2",
+      server: `localhost:${dev.port}`,
+    });
     expect(answer.headers["set-cookie"]?.[0]).toMatch(
       new RegExp(`^${cookieName(port)}=[A-Za-z0-9_-]{43}; Path=/; Secure; HttpOnly; SameSite=Lax$`),
     );
@@ -179,7 +202,8 @@ describe("signing a device in", () => {
   it("clears what another server stored on a reused port, once per device", async () => {
     const { preview, port, host } = await site((await devServer()).port, { reused: true });
     const first = await signIn(port, host, preview.mint("/"));
-    expect(first.answer.headers["clear-site-data"]).toBe('"cache", "storage"');
+    // Not "cache": browsers walk their whole disk cache for it, seconds before the page can open.
+    expect(first.answer.headers["clear-site-data"]).toBe('"storage"');
     const again = await signIn(port, host, preview.mint("/"), { cookie: first.cookie });
     expect(again.answer.headers["clear-site-data"]).toBeUndefined();
   });
@@ -187,7 +211,7 @@ describe("signing a device in", () => {
   it("keeps a path that starts with two slashes on this origin", async () => {
     const { preview, port, host } = await site((await devServer()).port);
     const { answer } = await signIn(port, host, preview.mint("//evil.example/x"));
-    expect(JSON.parse(answer.body)).toEqual({ next: "/evil.example/x" });
+    expect(JSON.parse(answer.body)).toMatchObject({ next: "/evil.example/x" });
   });
 });
 
@@ -243,21 +267,27 @@ describe("what the server sees", () => {
 describe("what the device sees", () => {
   const target = previewTarget("http://localhost:3000/");
   if (!target) throw new Error("bad target");
+  const route: Route = {
+    front: `${FRONT}:4900`,
+    target,
+    computer: { addresses: [], ports: new Set([3000, 3001]) },
+  };
 
-  it("sends redirects to the server's own address back to the preview's", () => {
-    const pairs = (location: string) =>
-      deviceHeaders(["Location", location], `${FRONT}:4900`, target, false);
+  it("sends redirects to the computer's servers where they open on the device", () => {
+    const pairs = (location: string) => deviceHeaders(["Location", location], route, false);
     expect(pairs("http://localhost:3000/login?next=%2F#top")).toEqual([
       "Location",
       `https://${FRONT}:4900/login?next=%2F#top`,
+      "Cache-Control",
+      "no-cache",
     ]);
-    expect(pairs("http://127.0.0.1:3000/x")).toEqual(["Location", `https://${FRONT}:4900/x`]);
-    expect(pairs("/relative")).toEqual(["Location", "/relative"]);
-    expect(pairs("http://localhost:3001/x")).toEqual(["Location", "http://localhost:3001/x"]);
-    expect(pairs("https://accounts.example/auth")).toEqual([
-      "Location",
-      "https://accounts.example/auth",
-    ]);
+    expect(pairs("http://127.0.0.1:3000/x")[1]).toBe(`https://${FRONT}:4900/x`);
+    expect(pairs("/relative")[1]).toBe("/relative");
+    expect(pairs("http://localhost:3001/x")[1]).toBe(
+      `https://${FRONT}:4900/__localdot/to/http/localhost/3001/x`,
+    );
+    expect(pairs("http://localhost:3002/x")[1]).toBe("http://localhost:3002/x");
+    expect(pairs("https://accounts.example/auth")[1]).toBe("https://accounts.example/auth");
   });
 
   it("drops what would reach past this preview and keeps the rest as sent", () => {
@@ -268,6 +298,8 @@ describe("what the device sees", () => {
           "sid=1; Path=/",
           "Set-Cookie",
           `${cookieName(4900)}=forged; Path=/; Secure`,
+          "Set-Cookie",
+          "auth=2; Domain=localhost; SameSite=None",
           "Strict-Transport-Security",
           "max-age=31536000",
           "Alt-Svc",
@@ -278,12 +310,51 @@ describe("what the device sees", () => {
           "chunked",
           "Content-Security-Policy",
           "default-src 'self'",
+          "Cache-Control",
+          "max-age=60",
         ],
-        `${FRONT}:4900`,
-        target,
+        route,
         false,
       ),
-    ).toEqual(["Set-Cookie", "sid=1; Path=/", "Content-Security-Policy", "default-src 'self'"]);
+    ).toEqual([
+      "Set-Cookie",
+      "sid=1; Path=/",
+      "Set-Cookie",
+      "auth=2; SameSite=None; Secure",
+      "Content-Security-Policy",
+      "default-src 'self'",
+      "Cache-Control",
+      "max-age=60",
+    ]);
+  });
+
+  it("drops the server's length and encoding from a body it rewrote", () => {
+    expect(
+      deviceHeaders(
+        [
+          "Content-Type",
+          "text/html",
+          "Content-Length",
+          "10",
+          "Content-Encoding",
+          "br",
+          "ETag",
+          "x",
+        ],
+        route,
+        false,
+        "gzip",
+      ),
+    ).toEqual([
+      "Content-Type",
+      "text/html",
+      "ETag",
+      "x",
+      "Content-Encoding",
+      "gzip",
+      "Cache-Control",
+      "no-cache",
+    ]);
   });
 
   it("passes bodies through untouched, binary included", async () => {
@@ -313,12 +384,185 @@ describe("what the device sees", () => {
     const signedIn = await signIn(down.port, down.host, down.preview.mint("/"));
     const page = await send(down.port, "/", { host: down.host, cookie: signedIn.cookie });
     expect(page.status).toBe(502);
-    expect(page.body).toContain("Nothing is answering at localhost:1 in your computer");
+    expect(page.body).toContain("Nothing is answering at localhost:1");
+    expect(page.body).toContain('<a href="">Try again</a>');
     const own = await site(1, {
       connect: () => Promise.reject(new ForwarderRefused("refused-port")),
     });
     const ownCookie = (await signIn(own.port, own.host, own.preview.mint("/"))).cookie;
     expect((await send(own.port, "/", { host: own.host, cookie: ownCookie })).status).toBe(403);
+  });
+});
+
+describe("what pages name", () => {
+  it("rewrites the computer's addresses in a page and keeps a compressed one compressed", async () => {
+    let api = 0;
+    const dev = await devServer((req, res) => {
+      if (req.url !== "/") return false;
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "content-encoding": "gzip",
+      });
+      res.end(
+        gzipSync(
+          `<a href="http://localhost:${dev.port}/about">About</a><script>fetch("http://127.0.0.1:${api}/items")</script>`,
+        ),
+      );
+      return true;
+    });
+    api = (await devServer()).port;
+    const { preview, port, host } = await site(dev.port, { ports: [api] });
+    const { cookie } = await signIn(port, host, preview.mint("/"));
+    const answer = await new Promise<{ headers: IncomingHttpHeaders; body: Buffer }>((resolve) => {
+      request({ host: "127.0.0.1", port, path: "/", headers: { host, cookie } }, (res) => {
+        const parts: Buffer[] = [];
+        res.on("data", (chunk) => parts.push(chunk));
+        res.on("end", () => resolve({ headers: res.headers, body: Buffer.concat(parts) }));
+      }).end();
+    });
+    expect(answer.headers["content-encoding"]).toBe("gzip");
+    expect(answer.headers["content-length"]).toBeUndefined();
+    expect(gunzipSync(answer.body).toString()).toBe(
+      `<a href="https://${host}/about">About</a><script>fetch("https://${host}/__localdot/to/http/127.0.0.1/${api}/items")</script>`,
+    );
+  });
+});
+
+describe("a slow page", () => {
+  it("is cut off with what to do, while a page's own requests may take as long as they need", async () => {
+    const dev = await devServer((req) => req.url === "/slow");
+    const { preview, port, host } = await site(dev.port, { navigateMs: 150 });
+    const { cookie } = await signIn(port, host, preview.mint("/"));
+    const page = await send(port, "/slow", {
+      host,
+      cookie,
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-dest": "document",
+    });
+    expect(page.status).toBe(504);
+    expect(page.body).toContain(`localhost:${dev.port} didn't answer within`);
+    expect(page.body).toContain('<a href="">Try again</a>');
+    const request = send(port, "/slow", { host, cookie, "sec-fetch-mode": "cors" });
+    const early = await Promise.race([
+      request.then(() => "answered"),
+      new Promise((resolve) => setTimeout(() => resolve("waiting"), 400)),
+    ]);
+    expect(early).toBe("waiting");
+  });
+
+  it("never waits behind the event streams other pages hold open", async () => {
+    const dev = await devServer((req, res) => {
+      if (req.url !== "/events") return false;
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+      res.write("data: hello\n\n");
+      return true;
+    });
+    const { preview, port, host } = await site(dev.port);
+    const { cookie } = await signIn(port, host, preview.mint("/"));
+    const streams = await Promise.all(
+      Array.from(
+        { length: 12 },
+        () =>
+          new Promise<IncomingMessage>((resolve) => {
+            const req = request(
+              { host: "127.0.0.1", port, path: "/events", headers: { host, cookie } },
+              (res) => res.once("data", () => resolve(res)),
+            );
+            req.end();
+            closers.push(() => req.destroy());
+          }),
+      ),
+    );
+    expect(streams).toHaveLength(12);
+    const page = await send(port, "/", { host, cookie });
+    expect(page.status).toBe(200);
+  });
+});
+
+describe("another server in the computer", () => {
+  it("answers a page's requests through the via path, as from the page's own server", async () => {
+    const page = await devServer();
+    const api = await devServer((req, res) => {
+      if (req.url !== "/start") return false;
+      res.writeHead(302, { location: "/next" });
+      res.end();
+      return true;
+    });
+    const { preview, port, host } = await site(page.port, { ports: [api.port] });
+    const { cookie } = await signIn(port, host, preview.mint("/"));
+    const via = `/__localdot/to/http/localhost/${api.port}`;
+    const answer = await send(port, `${via}/items?x=1`, {
+      host,
+      cookie,
+      origin: `https://${host}`,
+      "sec-fetch-mode": "cors",
+    });
+    expect(JSON.parse(answer.body)).toEqual({ url: "/items?x=1", method: "GET" });
+    expect(api.seen.at(-1)).toMatchObject({
+      host: `localhost:${api.port}`,
+      origin: `http://localhost:${page.port}`,
+    });
+    expect((await send(port, `${via}/start`, { host, cookie })).headers.location).toBe(
+      `${via}/next`,
+    );
+    expect(page.seen).toHaveLength(0);
+  });
+
+  it("opens as a preview of its own when the device goes there, unless another site sent it", async () => {
+    const page = await devServer();
+    const api = await devServer();
+    const hops: string[] = [];
+    const { preview, port, host } = await site(page.port, {
+      ports: [api.port],
+      hop: async (to, from) => {
+        hops.push(`${to.host}${to.path} from ${from}`);
+        return `https://${FRONT}:4901/__localdot/preview#secret`;
+      },
+    });
+    const { cookie } = await signIn(port, host, preview.mint("/"));
+    const navigate = { host, cookie, "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
+    const via = `/__localdot/to/http/localhost/${api.port}/dashboard?tab=2`;
+    const answer = await send(port, via, { ...navigate, "sec-fetch-site": "same-origin" });
+    expect(answer.status).toBe(303);
+    expect(answer.headers.location).toBe(`https://${FRONT}:4901/__localdot/preview#secret`);
+    expect(hops).toEqual([`localhost:${api.port}/dashboard?tab=2 from ${host}`]);
+    expect((await send(port, via, { ...navigate, "sec-fetch-site": "cross-site" })).status).toBe(
+      403,
+    );
+    // A form posted there reaches the server through this preview, its body with it.
+    const posted = await send(port, via, navigate, "POST", "name=dot");
+    expect(JSON.parse(posted.body)).toEqual({ url: "/dashboard?tab=2", method: "POST" });
+    expect((await send(port, "/__localdot/to/http/example.com/80/", { host, cookie })).status).toBe(
+      400,
+    );
+    expect(hops).toHaveLength(1);
+    expect(api.seen).toHaveLength(1);
+  });
+
+  it("carries a socket to it through the via path", async () => {
+    const page = await devServer();
+    const api = await devServer();
+    const sockets = new WebSocketServer({ server: api.server });
+    closers.push(() => sockets.close());
+    const origins: (string | undefined)[] = [];
+    sockets.on("connection", (socket, req) => {
+      origins.push(req.headers.origin);
+      socket.on("message", (data) => socket.send(`api:${data}`));
+    });
+    const { preview, port, host } = await site(page.port, { ports: [api.port] });
+    const { cookie } = await signIn(port, host, preview.mint("/"));
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/__localdot/to/http/localhost/${api.port}/ws`,
+      {
+        headers: { host, cookie, origin: `https://${host}` },
+      },
+    );
+    closers.push(() => socket.terminate());
+    await once(socket, "open");
+    socket.send("hi");
+    const [reply] = await once(socket, "message");
+    expect(String(reply)).toBe("api:hi");
+    expect(origins).toEqual([`http://localhost:${page.port}`]);
   });
 });
 

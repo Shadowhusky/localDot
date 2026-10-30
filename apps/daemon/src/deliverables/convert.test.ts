@@ -44,6 +44,9 @@ function fakeComputer(
         if (!bytes) throw new Error("not found");
         return new Response(bytes).body as ReadableStream<Uint8Array>;
       },
+      readFile: async () => {
+        throw new Error("a conversion reads no file");
+      },
     },
   };
   return { access, files, commands, abort, released };

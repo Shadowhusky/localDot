@@ -19,8 +19,11 @@ const TOKEN = "t".repeat(43);
 const FRONT = "100.91.187.75";
 const ASKED = `${FRONT}:4744`;
 const cleanup: (() => unknown)[] = [];
+// What the computer lists as listening: the servers each test starts.
+const running: { address: string; port: number; name?: string }[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
+  running.length = 0;
 });
 
 async function listening<T extends Server | ReturnType<typeof createTcpServer>>(server: T) {
@@ -98,6 +101,7 @@ async function dot(
     now?: () => number;
     idleMs?: number;
     sweepEveryMs?: number;
+    checkMs?: number;
     size?: number;
   } = {},
 ) {
@@ -106,7 +110,7 @@ async function dot(
     token: TOKEN,
     addresses: () => ["172.20.0.11"],
     ownPorts: new Set([7700]),
-    listening: options.listening ?? (async () => []),
+    listening: options.listening ?? (async () => running),
   });
   cells.forwarder(await listening(forwarder));
   const served: string[] = [];
@@ -124,6 +128,7 @@ async function dot(
     now: options.now,
     idleMs: options.idleMs,
     sweepEveryMs: options.sweepEveryMs,
+    checkMs: options.checkMs,
   });
   cleanup.push(() => previews.close());
   return { previews, cells, range, served };
@@ -137,6 +142,7 @@ async function devServer() {
     res.end(`<p>dev ${req.url}</p>`);
   });
   const port = await listening(server);
+  running.push({ address: "127.0.0.1", port, name: "node" });
   return { server, port, seen };
 }
 
@@ -180,8 +186,11 @@ async function enter(link: string) {
     host,
     next: JSON.parse(answer.body).next as string,
     cookie: String(answer.headers["set-cookie"]?.[0]).split(";")[0] ?? "",
+    clears: answer.headers["clear-site-data"],
   };
 }
+
+const portOf = (opened: { open: string }) => Number(new URL(opened.open).port);
 
 const refusal = (promise: Promise<unknown>) =>
   promise.then(
@@ -262,8 +271,9 @@ describe("opening a preview", () => {
     cleanup.push(() => squatter.close());
     const first = await previews.open(SESSION, { url: `http://localhost:${dev.port}/` }, ASKED);
     expect(new URL(first.open).port).toBe(String(range.to));
+    const other = await devServer();
     expect(
-      await refusal(previews.open(SESSION, { url: "http://localhost:1/" }, ASKED)),
+      await refusal(previews.open(SESSION, { url: `http://localhost:${other.port}/` }, ASKED)),
     ).toMatchObject({
       status: 503,
     });
@@ -279,6 +289,13 @@ describe("opening a preview", () => {
       expect(await refusal(previews.open(SESSION, { url }, ASKED)), url).toMatchObject({
         status: 400,
       });
+    expect(
+      await refusal(previews.open(SESSION, { url: "http://172.20.0.11:5173/" }, ASKED)),
+    ).toEqual({
+      status: 409,
+      message: "Nothing is running at 172.20.0.11:5173 in your computer. Start it, then try again.",
+    });
+    running.push({ address: "172.20.0.11", port: 5173 });
     const own = await previews.open(SESSION, { url: "http://172.20.0.11:5173/" }, ASKED);
     expect(own.preview.target).toBe("http://172.20.0.11:5173/");
   });
@@ -316,9 +333,11 @@ describe("opening a preview", () => {
     const status = await previews.status(SESSION, ASKED);
     expect(status.servers).toEqual(
       [
-        { port: tls, url: `http://localhost:${tls}/` },
+        { port: tls, url: `https://localhost:${tls}/` },
         { port: dev.port, url: `http://localhost:${dev.port}/`, name: "node" },
-      ].sort((a, b) => a.port - b.port),
+      ]
+        .sort((a, b) => a.port - b.port)
+        .map((server) => ({ ...server, state: "answering", seenAt: expect.any(String) })),
     );
     const opened = await previews.open(SESSION, { port: tls }, ASKED);
     expect(opened.preview.target).toBe(`https://localhost:${tls}/`);
@@ -335,12 +354,23 @@ describe("opening a preview", () => {
 });
 
 describe("what previews say they can do", () => {
-  it("is ready with the computer's servers and addresses", async () => {
+  it("is ready with the web servers that answer in the computer, and its addresses", async () => {
+    const dev = await devServer();
+    let greeted = 0;
+    const mail = createTcpServer((socket) => {
+      greeted++;
+      socket.end("220 mail ready\r\n");
+    });
+    const quiet = createTcpServer(() => {});
+    let now = 0;
     const { previews } = await dot({
+      now: () => now,
+      checkMs: 300,
       listening: async () => [
-        { address: "127.0.0.1", port: 5173, name: "node" },
-        { address: "::1", port: 5173, name: "node" },
-        { address: "172.20.0.11", port: 8000 },
+        { address: "127.0.0.1", port: dev.port, name: "node" },
+        { address: "::1", port: dev.port, name: "node" },
+        { address: "0.0.0.0", port: await listening(mail), name: "smtpd" },
+        { address: "127.0.0.1", port: await listening(quiet), name: "stuck" },
         { address: "10.1.2.3", port: 9000 },
       ],
     });
@@ -349,10 +379,71 @@ describe("what previews say they can do", () => {
       addresses: ["172.20.0.11"],
       previews: [],
       servers: [
-        { port: 5173, url: "http://localhost:5173/", name: "node" },
-        { port: 8000, url: "http://172.20.0.11:8000/" },
+        {
+          port: dev.port,
+          url: `http://localhost:${dev.port}/`,
+          name: "node",
+          state: "answering",
+          seenAt: expect.any(String),
+        },
       ],
     });
+    // The check never reached the app (Node refuses its request itself); only the one read of its
+    // first page's title does.
+    expect(dev.seen.filter((headers) => headers["content-length"])).toEqual([]);
+    // A server that speaks something else is asked once, at http and at https, and then left alone.
+    now += 60_000;
+    await previews.status(SESSION, ASKED);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(greeted).toBe(2);
+  });
+
+  it("names a server by its first page's title", async () => {
+    const dev = createServer((_req, res) => {
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.end("<!doctype html><title>\n  Shop &amp; Co\n</title><p>hi</p>");
+    });
+    running.push({ address: "0.0.0.0", port: await listening(dev) });
+    const { previews } = await dot();
+    await previews.status(SESSION, ASKED);
+    await expect
+      .poll(async () => (await previews.status(SESSION, ASKED)).servers[0]?.title)
+      .toBe("Shop & Co");
+  });
+
+  it("drops a server once it stops listening, and lists one that stops answering as such", async () => {
+    let now = 1_000_000;
+    let answering = true;
+    const server = createTcpServer((socket) => {
+      socket.on("data", () => {
+        if (answering) socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+      });
+    });
+    const port = await listening(server);
+    running.push({ address: "127.0.0.1", port, name: "node" });
+    const { previews } = await dot({ now: () => now, checkMs: 200 });
+    await previews.open(SESSION, { port }, ASKED);
+    const first = await previews.status(SESSION, ASKED);
+    expect(first.servers).toMatchObject([{ port, state: "answering" }]);
+    expect(first.previews).toHaveLength(1);
+
+    answering = false;
+    now += 11_000;
+    await previews.status(SESSION, ASKED);
+    now += 1;
+    await expect
+      .poll(async () => (await previews.status(SESSION, ASKED)).servers)
+      .toMatchObject([{ port, state: "not-answering", seenAt: new Date(1_000_000).toISOString() }]);
+    now += 11 * 60_000;
+    await expect.poll(async () => (await previews.status(SESSION, ASKED)).servers).toEqual([]);
+
+    answering = true;
+    running.length = 0;
+    now += 11_000;
+    const gone = await previews.status(SESSION, ASKED);
+    expect(gone.servers).toEqual([]);
+    // Its preview is no longer listed, and comes back with the server.
+    expect(gone.previews).toEqual([]);
   });
 
   it("asks to turn the computer on, update it or set up Tailscale", async () => {
@@ -408,6 +499,146 @@ describe("what previews say they can do", () => {
     expect(await refusal(previews.status("01JXYZ0000000000000000NONE"))).toMatchObject({
       status: 404,
     });
+  });
+});
+
+describe("the block's ports", () => {
+  it("gives a server back the port it had, and another the port unused longest", async () => {
+    let now = 0;
+    const one = await devServer();
+    const two = await devServer();
+    const three = await devServer();
+    const { previews, range } = await dot({ now: () => now, size: 3 });
+    const open = (dev: { port: number }) =>
+      previews.open(SESSION, { url: `http://localhost:${dev.port}/` }, ASKED);
+    const a = await open(one);
+    const b = await open(two);
+    now += 1_000;
+    previews.stop(SESSION, b.preview.id);
+    now += 1_000;
+    previews.stop(SESSION, a.preview.id);
+    expect(portOf(await open(three))).toBe(range.from + 2);
+    const again = await open(two);
+    expect(portOf(again)).toBe(range.from + 1);
+    // The port served nothing else in between: nothing of another server's is left to clear.
+    expect((await enter(again.open)).clears).toBeUndefined();
+    expect(portOf(await open(one))).toBe(range.from);
+  });
+
+  it("takes the port of a preview whose server has gone when every port is in use", async () => {
+    let now = 0;
+    const one = await devServer();
+    const two = await devServer();
+    const { previews, range } = await dot({ now: () => now, size: 1 });
+    await previews.open(SESSION, { url: `http://localhost:${one.port}/` }, ASKED);
+    running.splice(0, 1);
+    now += 60_000;
+    await previews.status(SESSION, ASKED);
+    const next = await previews.open(SESSION, { url: `http://localhost:${two.port}/` }, ASKED);
+    expect(portOf(next)).toBe(range.from);
+    expect((await enter(next.open)).clears).toBe('"storage"');
+  });
+});
+
+describe("a web app through the computer's forwarder", () => {
+  it("follows its redirects, links, requests, events and sockets, and opens its other server", async () => {
+    let apiPort = 0;
+    let webPort = 0;
+    const origins: (string | undefined)[] = [];
+    const api = createServer((req, res) => {
+      origins.push(req.headers.origin);
+      if (req.url === "/events") {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write("data: first\n\n");
+        return;
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ item: `http://localhost:${apiPort}/items/1` }));
+    });
+    const sockets = new WebSocketServer({ server: api });
+    cleanup.push(() => sockets.close());
+    sockets.on("connection", (socket) =>
+      socket.on("message", (data) => socket.send(`api:${data}`)),
+    );
+    apiPort = await listening(api);
+    const web = createServer((req, res) => {
+      if (req.url === "/" || req.url === "/to-api") {
+        const to =
+          req.url === "/" ? `http://localhost:${webPort}/home` : `http://127.0.0.1:${apiPort}/`;
+        res.writeHead(302, { location: to });
+        return void res.end();
+      }
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "set-cookie": "sid=1; Domain=localhost; Path=/",
+      });
+      res.end(
+        `<a href="http://localhost:${webPort}/about">About</a> <a target="_blank" href="http://0.0.0.0:${apiPort}/docs">API</a> <script>new WebSocket("ws://localhost:${apiPort}/live")</script>`,
+      );
+    });
+    webPort = await listening(web);
+    running.push(
+      { address: "0.0.0.0", port: apiPort, name: "python3" },
+      { address: "127.0.0.1", port: webPort, name: "node" },
+    );
+    const { previews } = await dot();
+    const device = await enter((await previews.open(SESSION, { port: webPort }, ASKED)).open);
+    const own = `https://${device.host}`;
+    const via = `/__localdot/to/http/localhost/${apiPort}`;
+    const get = (path: string, extra: Record<string, string> = {}) =>
+      fetchVia(device.port, path, { host: device.host, cookie: device.cookie, ...extra });
+
+    expect((await get("/")).headers.location).toBe(`${own}/home`);
+    const home = await get("/home");
+    expect(home.body).toBe(
+      `<a href="${own}/about">About</a> <a target="_blank" href="${own}${via}/docs">API</a> <script>new WebSocket("wss://${device.host}${via}/live")</script>`,
+    );
+    expect(home.headers["set-cookie"]).toEqual(["sid=1; Path=/"]);
+
+    const item = await get(`${via}/items`, { origin: own, "sec-fetch-mode": "cors" });
+    expect(JSON.parse(item.body)).toEqual({ item: `${own}${via}/items/1` });
+    // As the computer's own browser would send it from the web server's page.
+    expect(origins).toEqual([`http://localhost:${webPort}`]);
+
+    const event = await new Promise<string>((resolve) => {
+      const req = request(
+        {
+          host: "127.0.0.1",
+          port: device.port,
+          path: `${via}/events`,
+          headers: { host: device.host, cookie: device.cookie, accept: "text/event-stream" },
+        },
+        (res) => res.once("data", (chunk: Buffer) => resolve(chunk.toString())),
+      );
+      req.end();
+      cleanup.push(() => req.destroy());
+    });
+    expect(event).toBe("data: first\n\n");
+
+    const socket = new WebSocket(`ws://127.0.0.1:${device.port}${via}/live`, {
+      headers: { host: device.host, cookie: device.cookie, origin: own },
+    });
+    cleanup.push(() => socket.terminate());
+    await once(socket, "open");
+    socket.send("hi");
+    expect(String((await once(socket, "message"))[0])).toBe("api:hi");
+
+    const away = new URL((await get("/to-api")).headers.location ?? "");
+    expect(away.href).toBe(`${own}/__localdot/to/http/127.0.0.1/${apiPort}/`);
+    const hop = await get(away.pathname, {
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-dest": "document",
+      "sec-fetch-site": "same-origin",
+    });
+    expect(hop.status).toBe(303);
+    const other = await enter(hop.headers.location ?? "");
+    expect(other.port).not.toBe(device.port);
+    const there = await fetchVia(other.port, other.next, {
+      host: other.host,
+      cookie: other.cookie,
+    });
+    expect(JSON.parse(there.body)).toEqual({ item: `https://${other.host}/items/1` });
+    expect((await previews.status(SESSION, ASKED)).previews).toHaveLength(2);
   });
 });
 

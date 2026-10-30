@@ -4,7 +4,7 @@ import type { DesktopdTools } from "../desktopd/tools-client.ts";
 import type { Converted, Converter } from "./previews.ts";
 
 export interface ComputerAccess {
-  tools: Pick<DesktopdTools, "putFile" | "shell" | "fetchFile">;
+  tools: Pick<DesktopdTools, "putFile" | "shell" | "fetchFile" | "readFile">;
   signal: AbortSignal;
   check(): void;
   release(): void;

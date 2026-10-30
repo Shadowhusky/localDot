@@ -10,8 +10,8 @@ import type { RoutineStore } from "./store.ts";
 
 export interface StopAllDeps {
   cells: Pick<CellApi, "list">;
-  live: Pick<LiveSessions, "get">;
-  killSwitch: Pick<KillSwitch, "stopSession" | "stopIdleCell">;
+  live: Pick<LiveSessions, "sessionsOn">;
+  killSwitch: Pick<KillSwitch, "contain" | "stopIdleCell">;
   store: Pick<RoutineStore, "pauseAllActive" | "get">;
   launcher: Pick<RoutineLauncher, "cancelAll">;
   scheduler: Pick<RoutineScheduler, "replan">;
@@ -34,11 +34,11 @@ export async function stopAll(deps: StopAllDeps, by: "user" | "cli"): Promise<St
       .list()
       .filter((cell) => cell.state !== "removed")
       .map(async (cell) => {
-        const sessionId = deps.live.get(cell.id);
-        if (sessionId) {
-          const outcome = await deps.killSwitch.stopSession(sessionId).catch(() => null);
+        const live = deps.live.sessionsOn(cell.id);
+        if (live[0]) {
+          const outcome = await deps.killSwitch.contain(live[0]).catch(() => null);
           if (outcome !== undefined) {
-            sessions.push({ sessionId, cellId: cell.id, outcome });
+            for (const sessionId of live) sessions.push({ sessionId, cellId: cell.id, outcome });
             return;
           }
         }

@@ -5,6 +5,7 @@ import type { DesktopdClient } from "../../desktopd/client.ts";
 import type { NativeDevice } from "../../desktopd/registry.ts";
 import type { DesktopdTools } from "../../desktopd/tools-client.ts";
 import type { ActionContext, ActionGateway, NativeScreenBinding } from "../../gateway/gateway.ts";
+import type { ComputerTurn, ComputerTurns } from "../computer-turn.ts";
 import type { FramePng } from "../frame-png.ts";
 import type { MemoryStore } from "../memory.ts";
 import type { PeopleStore } from "../people.ts";
@@ -37,6 +38,8 @@ export interface ToolDeps {
   };
   gateway: Pick<ActionGateway, "run" | "observe" | "cursorOf"> &
     Partial<Pick<ActionGateway, "find">>;
+  // Turns on the computer, one action at a time across the tasks sharing it.
+  computer?: Pick<ComputerTurns, "take" | "owners">;
   // Installed with the session's screen controller; one private binding per admitted tool.
   bindScreen?(session: AgentSession, lease: ScreenLease): NativeScreenBinding;
   // The cell's scale, to bring the gateway's device-pixel cursor back to model pixels.
@@ -106,6 +109,7 @@ export interface ToolCallContext {
   localCleanup?: import("../safety/local-cleanup.ts").LocalCleanup;
   screen?: ScreenLease;
   nativeScreen?: NativeScreenBinding;
+  turn?: ComputerTurn;
   // The call's last Activity step was stopped before it did anything.
   stepCancelled?: boolean;
 }
@@ -124,6 +128,10 @@ export function screenContext(ctx: ToolCallContext): ActionContext {
     step: ctx.step,
     signal: ctx.signal,
     ...(ctx.nativeScreen ? { screen: ctx.nativeScreen } : {}),
+    // Other tasks' windows are on the desktop; the web browser works for one task at a time.
+    ...(ctx.turn && ctx.screen?.selection.screen !== "browser"
+      ? { foreign: ctx.turn.foreign, hidden: ctx.turn.hidden }
+      : {}),
   };
 }
 

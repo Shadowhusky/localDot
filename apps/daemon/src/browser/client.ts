@@ -64,6 +64,7 @@ const health = identity.extend({
 const tabs = z.strictObject({
   tabs: z.array(z.strictObject({ id: z.uuid(), ready: z.boolean() })).max(256),
 });
+const openedTab = z.strictObject({ tabId: z.uuid() });
 const observation = z.strictObject({
   frame: ObserveResult.extend({
     width: z.literal(1280),
@@ -265,6 +266,22 @@ export class BrowserClient {
 
   tabs(scope: BrowserScope): Promise<z.infer<typeof tabs>> {
     return this.#json("GET", "/tabs", undefined, scope, 3000, tabs, 65536);
+  }
+
+  // A blank tab in front of the others; the earlier tabs stay open behind it.
+  async openTab(permit: BrowserActionPermit, scope: BrowserScope): Promise<string> {
+    const capability = parse(BrowserActionPermit, permit);
+    this.#identity(capability);
+    const reply = await this.#json(
+      "POST",
+      "/tabs",
+      { permit: capability },
+      scope,
+      15000,
+      openedTab,
+      4096,
+    );
+    return reply.tabId;
   }
 
   // Cookie domains and how many cookies each holds; browserd never returns cookie values.

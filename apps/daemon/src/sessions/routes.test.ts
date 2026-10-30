@@ -141,6 +141,88 @@ describe("replay APIs", () => {
     expect(conversations.current()).toBeNull();
     expect(f.log.hasSession(f.seed.sessionId)).toBe(true);
   });
+  it("renames a whole conversation by any of its tasks, and gives it back its automatic name", async () => {
+    const f = await setup();
+    const task = (continues?: string) => {
+      const id = f.log.createSession("plan the trip");
+      f.log.append(id, {
+        type: "session.start",
+        agent: "main",
+        data: {
+          screen: { w: 1280, h: 800, scale: 1 },
+          os: "linux",
+          title: "plan the trip",
+          ...(continues ? { continues } : {}),
+        },
+      });
+      f.log.append(id, {
+        type: "message.user",
+        agent: "main",
+        data: { messageId: ulid(), text: "plan the trip", kind: "task" },
+      });
+      return id;
+    };
+    const first = task(),
+      latest = task(first);
+    f.log.append(first, {
+      type: "session.title",
+      agent: "main",
+      data: { title: "Lisbon weekend", by: "auto" },
+    });
+    const rename = (id: string, body: unknown) =>
+      f.request(`/api/conversations/${id}/title`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const titles = () => [first, latest].map((id) => f.log.sessionInfo([id]).get(id)?.title);
+    const card = async (id: string) =>
+      ((await (await f.request(`/api/sessions/${id}/card`)).json()) as { title: string }).title;
+
+    expect((await rename(first, { title: "  Mum's 60th in Lisbon " })).status).toBe(204);
+    expect(titles()).toEqual(["Mum's 60th in Lisbon", "Mum's 60th in Lisbon"]);
+    expect(await card(first)).toBe("Mum's 60th in Lisbon");
+    expect(new Conversations(f.home, f.log).list()[0]?.title).toBe("Mum's 60th in Lisbon");
+    // The same name again records nothing new; dot's later name never takes over.
+    const events = f.log.read(latest).length;
+    expect((await rename(latest, { title: "Mum's 60th in Lisbon" })).status).toBe(204);
+    expect(f.log.read(latest)).toHaveLength(events);
+    f.log.append(first, {
+      type: "session.title",
+      agent: "main",
+      data: { title: "Lisbon city break", by: "auto" },
+    });
+    expect(titles()[0]).toBe("Mum's 60th in Lisbon");
+
+    expect((await rename(latest, { title: null })).status).toBe(204);
+    expect(titles()).toEqual(["Lisbon city break", "plan the trip"]);
+    expect(await card(first)).toBe("Lisbon city break");
+
+    for (const body of [
+      {},
+      { title: "" },
+      { title: "   " },
+      { title: "x".repeat(81) },
+      { title: "two\nlines" },
+      { title: "bell\u0007" },
+      { title: 4 },
+      { title: "ok", extra: true },
+    ])
+      expect((await rename(latest, body)).status).toBe(400);
+    expect((await rename(latest, { title: "x".repeat(80) })).status).toBe(204);
+    // The user's own time on the computer keeps its own name in Replay.
+    const hold = f.log.createSession("You used the computer");
+    f.log.append(hold, {
+      type: "session.start",
+      agent: "main",
+      data: { screen: { w: 1280, h: 800, scale: 1 }, os: "linux", continues: latest },
+    });
+    expect((await rename(hold, { title: "Lisbon" })).status).toBe(204);
+    expect(titles()).toEqual(["Lisbon", "Lisbon"]);
+    expect(f.log.sessionInfo([hold]).get(hold)?.title).toBe("You used the computer");
+    expect((await rename(ulid(), { title: "Nowhere" })).status).toBe(404);
+    expect((await rename("not-a-task", { title: "Nowhere" })).status).toBe(404);
+  });
   it("serves each physical recording's bytes, range and metadata independently", async () => {
     const { home, seed, request } = await setup();
     const sessionId = seed.sessionId;
@@ -194,6 +276,14 @@ describe("replay APIs", () => {
       const head = await request(`${base}/video.mp4?screen=${screen}`, { method: "HEAD" });
       expect(Number(head.headers.get("content-length"))).toBe(info.servedBytes);
       expect(await head.text()).toBe("");
+      // A reader names the size it opened, so a video compaction replaced is refused, not mixed.
+      const opened = `${base}/video.mp4?screen=${screen}&bytes=`;
+      expect(
+        (await request(`${opened}${info.servedBytes}`, { headers: { range: "bytes=20-95" } }))
+          .status,
+      ).toBe(206);
+      expect((await request(`${opened}${info.servedBytes + 1}`)).status).toBe(409);
+      expect((await request(`${opened}-1`)).status).toBe(400);
     }
     expect(new Uint8Array(await (await request(`${base}/video.mp4`)).arrayBuffer())).toEqual(
       bytes.get("desktop"),

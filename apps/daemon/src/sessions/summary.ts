@@ -21,7 +21,7 @@ import {
   ULID_PATTERN,
   ulidTime,
 } from "@localdot/protocol";
-import { UnknownSessionError } from "../event-log.ts";
+import { type SessionMeta, shownTitle, UnknownSessionError } from "../event-log.ts";
 import { hasRecordingData, readManifest } from "../recorder/manifest.ts";
 import { streamEventLines } from "./ndjson.ts";
 export interface SessionSummaryFile extends SessionCard {
@@ -85,15 +85,23 @@ export async function summarizeSession(
   let coverFrameId: string | null = null;
   let screen: SessionCard["screen"] = null;
   let origin: SessionOrigin | undefined;
+  let named: Pick<SessionMeta, "autoTitle" | "userTitle"> = {};
   for await (const line of streamEventLines(file)) {
     const e = parseEvent(JSON.parse(line));
-    last = e.t;
+    // A rename can come long after the task ended; it is not part of the task's time.
+    if (e.type !== "session.title") last = e.t;
     switch (e.type) {
       case "session.start":
         first = e.t;
         screen = e.data.screen;
         title = e.data.title ?? title;
         origin = e.data.origin ?? origin;
+        break;
+      case "session.title":
+        named = {
+          ...named,
+          [e.data.by === "auto" ? "autoTitle" : "userTitle"]: e.data.title ?? undefined,
+        };
         break;
       case "session.end":
         endedAt = e.t;
@@ -113,7 +121,7 @@ export async function summarizeSession(
   return {
     ...SessionCard.parse({
       id,
-      title,
+      title: shownTitle({ title, ...named }),
       startedAt,
       durationMs: Math.max(0, Math.floor(((endedAt ?? last) - first) / 1000)),
       verdict,

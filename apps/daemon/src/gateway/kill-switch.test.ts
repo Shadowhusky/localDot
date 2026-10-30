@@ -241,6 +241,55 @@ describe("KillSwitch.stopSession", () => {
   });
 });
 
+describe("Stop on a computer several tasks share", () => {
+  const OTHER = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0M";
+
+  it("ends only that task and leaves the computer running for the others", async () => {
+    const { cells, live, id, desktop, wiring } = await readyCell();
+    const ended: string[] = [];
+    const killSwitch = new KillSwitch({
+      live,
+      keyd: wiring,
+      cells,
+      endTask: async (sessionId) => {
+        ended.push(sessionId);
+        live.stop(sessionId);
+        await live.settled(sessionId);
+        return true;
+      },
+    });
+    live.start(id, SESSION, untilAborted);
+    live.start(id, OTHER, untilAborted);
+    expect(await killSwitch.stopSession(SESSION)).toEqual({
+      revoked: false,
+      paused: false,
+      closed: false,
+      stopped: false,
+      ended: true,
+      errors: [],
+    });
+    expect(ended).toEqual([SESSION]);
+    expect(live.sessionsOn(id)).toEqual([OTHER]);
+    expect(desktop()?.paused).toBeFalsy();
+    expect(keyd.cells.get(id)?.revoked).toBeFalsy();
+    // The computer's last task stops it, as Stop always has.
+    expect(await killSwitch.stopSession(OTHER)).toMatchObject({ revoked: true, paused: true });
+    expect(desktop()?.paused).toBe(true);
+  });
+
+  it("contains every task on the computer and freezes it once", async () => {
+    const { live, killSwitch, id, desktop } = await readyCell(30);
+    live.start(id, SESSION, untilAborted);
+    live.start(id, OTHER, untilAborted);
+    const stopping = killSwitch.contain(SESSION);
+    expect(killSwitch.pendingStop(OTHER)).toBe(stopping);
+    expect(await stopping).toMatchObject({ revoked: true, paused: true });
+    await live.settled(OTHER);
+    expect(live.sessionsOn(id)).toEqual([]);
+    expect(desktop()?.paused).toBe(true);
+  });
+});
+
 describe("KillSwitch.resume", () => {
   it("watches a resumed computer again, so a crash is restarted", async () => {
     const { cells, live, killSwitch, id, desktop } = await readyCell();

@@ -27,6 +27,8 @@ export interface GatewayRoutesDeps {
   frames?: FrameStore;
   live?: LiveSessions;
   prepareDesktopTask?(cellId: string, sessionId: string, signal: AbortSignal): Promise<void>;
+  // The latest task of the conversation the app shows.
+  conversation?(): string | null;
   killSwitch?: Pick<KillSwitch, "stopSession" | "resume"> & Partial<Pick<KillSwitch, "isBusy">>;
 }
 
@@ -139,7 +141,24 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     const id = c.req.param("id") ?? "";
     if (!ULID_PATTERN.test(id)) return c.text("invalid computer id", 400);
     const sessionId = deps.live?.get(id);
-    return sessionId ? c.json({ sessionId }) : c.body(null, 204);
+    // Every task the computer runs, oldest first; `sessionId` is the one acting or last to act,
+    // `current` the one of the conversation the app shows and `holder` the one on the screen now.
+    const sessions = deps.live?.sessionsOn(id) ?? [];
+    const holder = deps.live?.lease(id).holder;
+    let current: string | null | undefined;
+    try {
+      current = deps.conversation?.();
+    } catch {
+      current = undefined;
+    }
+    return sessionId
+      ? c.json({
+          sessionId,
+          sessions,
+          ...(current && sessions.includes(current) ? { current } : {}),
+          ...(holder ? { holder } : {}),
+        })
+      : c.body(null, 204);
   });
 
   app.post("/api/sessions/:id/stop", async (c) => {

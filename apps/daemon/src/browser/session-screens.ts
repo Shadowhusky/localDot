@@ -6,6 +6,7 @@ import type { CellApi } from "../cells/orchestrator.ts";
 import type { CellSummary } from "../cells/types.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
+import type { LiveSessions } from "../gateway/live.ts";
 import type { ScreenRecordings } from "../recorder/screen-recordings.ts";
 import { BrowserClient, type BrowserScope, checkManualBrowserInput } from "./client.ts";
 import type { BrowserDownloadCollector } from "./download-collector.ts";
@@ -29,6 +30,9 @@ export class SessionScreens {
       registry: Pick<DesktopdRegistry, "for">;
       downloads?: Pick<BrowserDownloadCollector, "collect">;
       pendingStop?(sessionId: string): Promise<StopOutcome> | undefined;
+      live?: Pick<LiveSessions, "claimBrowser" | "releaseBrowser" | "browserHolder">;
+      // Ends a finished task that only waits for a follow-up; false when it is still at work.
+      makeWay?(sessionId: string, signal: AbortSignal): Promise<boolean>;
       report?(message: string): void;
       now(): number;
     },
@@ -46,12 +50,13 @@ export class SessionScreens {
       : undefined;
   }
 
-  install(session: AgentSession, cell: CellSummary): void {
+  install(session: AgentSession, cell: CellSummary, freshTab = false): void {
     if (session.cellId !== cell.id) throw new Error("The session computer changed.");
     session.attachScreens(
       new ScreenController({
         sessionId: session.id,
         parentCellId: cell.id,
+        freshTab,
         desktopGeometry: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
         desktopReady: () => {
           const current = this.deps.cells.get(cell.id);
@@ -112,6 +117,18 @@ export class SessionScreens {
         fenceRecording: () => this.deps.recordings.fence(session.id),
         publish: (event) => session.append("screen.switch", event),
         fenceSession: () => session.stop(),
+        ...(this.deps.live
+          ? {
+              claimBrowser: async (signal: AbortSignal) => {
+                const live = this.deps.live;
+                if (!live || live.claimBrowser(cell.id, session.id)) return true;
+                const holder = live.browserHolder(cell.id);
+                if (!holder || !(await this.deps.makeWay?.(holder, signal))) return false;
+                return live.claimBrowser(cell.id, session.id);
+              },
+              releaseBrowser: () => this.deps.live?.releaseBrowser(cell.id, session.id),
+            }
+          : {}),
         contain: async () => {
           const stopping = this.deps.pendingStop?.(session.id);
           if (stopping) {

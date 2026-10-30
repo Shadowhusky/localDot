@@ -278,7 +278,7 @@ describe("overlapping runs", () => {
           return { id };
         },
         end: () => true,
-        live: () => undefined,
+        live: () => [],
         busy: () => false,
         parked: () => false,
         post: () => false,

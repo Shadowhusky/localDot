@@ -41,6 +41,16 @@ describe("observation thumbnails", () => {
     expect(await thumbs.path(sessionId, ids[0] as string)).toBe(path);
     expect(statSync(path).mtimeMs).toBe(before.mtimeMs);
   });
+  it("keeps serving a thumbnail made before its screenshot went with age", async () => {
+    const { home, sessionId, ids, thumbs } = await setup(2);
+    const [made, unmade] = ids as [string, string];
+    const path = await thumbs.path(sessionId, made);
+    for (const frameId of ids)
+      rmSync(join(home, "sessions", sessionId, "frames", `${frameId}.webp`));
+    expect(await thumbs.path(sessionId, made)).toBe(path);
+    expect(await thumbs.path(sessionId, unmade)).toBeUndefined();
+  });
+
   it("returns no thumbnail for missing or invalid frame ids", async () => {
     const { sessionId, thumbs } = await setup();
     expect(await thumbs.path(sessionId, ulid())).toBeUndefined();

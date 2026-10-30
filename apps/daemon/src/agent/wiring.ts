@@ -63,6 +63,7 @@ import type { KeydClient } from "../keyd/client.ts";
 import { JudgeCell } from "../keyd/judge-cell.ts";
 import { ModelCatalog } from "../keyd/model-catalog.ts";
 import type { KeydMonitor } from "../keyd/monitor.ts";
+import { QuickModel } from "../keyd/quick-model.ts";
 import { ServiceKeys } from "../keyd/service-keys.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
@@ -86,6 +87,7 @@ import { CodexDriver } from "./codex/driver.ts";
 import { codexInstructions } from "./codex/instructions.ts";
 import { openMcpEndpoint } from "./codex/mcp-endpoint.ts";
 import { ChatgptSetup, SANDBOX_REASONS, SETUP_UNSAVED } from "./codex/setup.ts";
+import { ComputerTurns } from "./computer-turn.ts";
 import { Conversations } from "./conversation.ts";
 import { ExperienceRecorder } from "./experience-recorder.ts";
 import { FramePng } from "./frame-png.ts";
@@ -99,7 +101,7 @@ import { PrivateFiles } from "./private-files.ts";
 import { RecentActivity } from "./recent-activity.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
-import { AgentError, AgentRunner } from "./runner.ts";
+import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
 import { ConnectionApprovals } from "./safety/connections.ts";
 import { NativeTasks } from "./safety/native-tasks.ts";
 import { PurposeService } from "./safety/purpose-service.ts";
@@ -132,7 +134,7 @@ export interface AgentWiringDeps {
   docker: DockerClient;
   keyd: KeydClient;
   monitor: Pick<KeydMonitor, "health">;
-  killSwitch: Pick<KillSwitch, "stopSession" | "isBusy">;
+  killSwitch: Pick<KillSwitch, "contain" | "isBusy">;
   // Remembers the computers a service stop froze, so the next start thaws them.
   shutdownFreezes?: Pick<import("../cells/shutdown-freezes.ts").ShutdownFreezes, "record">;
   keydPorts: PortRange;
@@ -151,6 +153,7 @@ export interface AgentWiringDeps {
   // Earlier tasks for the recall tool, from the search index.
   recall?: ToolDeps["recall"];
   notesChanged?(file: string): void;
+  liveChanged?: AgentRunnerDeps["liveChanged"];
 }
 export const BUILTIN_SKILLS = runtimeLayout.skills;
 // A native harness hands memory to the model here.
@@ -246,7 +249,7 @@ export function createAgent(d: AgentWiringDeps) {
         cell.fenced ||
         cell.replacementPending ||
         d.killSwitch.isBusy(cellId) ||
-        d.live.get(cellId) !== sessionId ||
+        d.live.cellOf(sessionId) !== cellId ||
         desktop(cellId) !== tools
       )
         throw new AgentError(409, "the computer changed");
@@ -292,6 +295,10 @@ export function createAgent(d: AgentWiringDeps) {
     ports: { reserve: () => brains.reservePort(), release: (port) => brains.releasePort(port) },
   });
   const judgeCell = new JudgeCell({
+    keyd: d.keyd,
+    ports: { reserve: () => brains.reservePort(), release: (port) => brains.releasePort(port) },
+  });
+  const quickModel = new QuickModel({
     keyd: d.keyd,
     ports: { reserve: () => brains.reservePort(), release: (port) => brains.releasePort(port) },
   });
@@ -433,6 +440,13 @@ export function createAgent(d: AgentWiringDeps) {
         cancel: () => auth.installer.cancel(),
       }
     : undefined;
+  const turns = new ComputerTurns({
+    live: d.live,
+    windows: (id) => {
+      const client = d.registry.for(id)?.client;
+      return client?.windows ? (request, signal) => client.windows(request, signal) : undefined;
+    },
+  });
   const dispatch: DispatchDeps = {
     ...(d.policy ? { policy: d.policy } : {}),
     tools: {
@@ -440,6 +454,7 @@ export function createAgent(d: AgentWiringDeps) {
       recallExperience: (query, id) => memory.recallMemory(query, id),
       uploads: { desktop, transfers },
       gateway: d.gateway,
+      computer: turns,
       bindScreen: d.sessionScreens?.bind.bind(d.sessionScreens),
       logins: d.keyd,
       scaleOf: (id) => d.cells.get(id)?.scale,
@@ -775,7 +790,9 @@ export function createAgent(d: AgentWiringDeps) {
     installSkills,
     prepareDesktop: (session) => prepareDesktop(session.cellId, session.id, session.abort.signal),
     waitForUploads: (id, signal) => transfers.wait(id, signal),
-    stopSession: (id) => d.killSwitch.stopSession(id),
+    stopSession: (id) => d.killSwitch.contain(id),
+    computer: turns,
+    ...(d.liveChanged ? { liveChanged: d.liveChanged } : {}),
     ...(claudeDriver && claudeSetup
       ? {
           claudeCode: {
@@ -790,6 +807,7 @@ export function createAgent(d: AgentWiringDeps) {
         }
       : {}),
     jev: (secretId, body, signal) => purposeService.post(secretId, body, signal),
+    quickModel: (role, system, prompt, signal) => quickModel.ask(role, system, prompt, signal),
     ...(driver && auth
       ? {
           codex: {
@@ -912,7 +930,7 @@ export function createAgent(d: AgentWiringDeps) {
         !ready ||
         session.stopped ||
         runner.get(session.id) !== session ||
-        d.live.get(session.cellId) !== session.id ||
+        d.live.cellOf(session.id) !== session.cellId ||
         current?.state !== "ready" ||
         current.paused ||
         current.fenced ||
@@ -1156,7 +1174,7 @@ export function createAgent(d: AgentWiringDeps) {
       } catch (error) {
         failedPreparations.add(cellId);
         d.fences?.capture(cellId, sessionId, "api");
-        await d.killSwitch.stopSession(sessionId).catch(() => undefined);
+        await d.killSwitch.contain(sessionId).catch(() => undefined);
         throw error;
       }
     },

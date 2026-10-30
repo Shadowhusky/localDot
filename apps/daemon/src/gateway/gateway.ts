@@ -10,6 +10,7 @@ import {
   type Point,
   type Rect,
   type Target,
+  type WindowInfo,
 } from "@localdot/protocol";
 import { toDevice } from "@localdot/providers";
 import {
@@ -30,6 +31,7 @@ import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "./frames.ts";
 import { animationKeepsTarget, frameLuma, lumaRegionChanged } from "./freshness.ts";
 import { type NativeActionIdentity, partOf, sameNativeIdentity } from "./identity.ts";
+import { maskFrame } from "./mask.ts";
 import { type OnsetTable, onsetKind } from "./onset-table.ts";
 import type { RingOnsetPolicy } from "./ring-onset.ts";
 import {
@@ -67,6 +69,8 @@ export const CHANGED_WHILE_DECIDING =
 // A page element found by its node is no longer the one listed: gone, covered, off screen or
 // renamed.
 export const ELEMENT_GONE = "that element is no longer on the page as it was read";
+export const ANOTHER_TASKS_WINDOW =
+  "that is another task's window, so nothing was done; act only in your own windows";
 
 export type GuiAction =
   | {
@@ -186,6 +190,10 @@ export interface ActionContext {
   // for the next press). The owner calls `release` before anyone else gets the screen; the
   // returned function forgets it once it is gone.
   holdInput?(release: () => Promise<void>): () => void;
+  // Private daemon callbacks: the window belongs to another task working on the same computer,
+  // and what of a capture with these windows the task may not see (screen pixels).
+  foreign?(window: number | null): boolean;
+  hidden?(windows: readonly WindowInfo[]): Promise<readonly Rect[]>;
   sessionId: string;
   cellId: string;
   agent?: string;
@@ -291,7 +299,7 @@ export class ActionGateway {
   // Each screen's newest frame: its desktopd keeps that frame's device-resolution pixels.
   readonly #lastFrame = new Map<
     string,
-    { frameId: string; sessionId: string; device: NativeDevice; digest: string }
+    { frameId: string; sessionId: string; device: NativeDevice; digest: string; masked?: boolean }
   >();
 
   constructor(private readonly deps: GatewayDeps) {}
@@ -495,7 +503,11 @@ export class ActionGateway {
     const d = await this.#ready(ctx);
     const o = await d.client.observe(ctx.signal);
     this.#check(ctx);
-    const image = Buffer.from(o.image, "base64");
+    const hidden = (await ctx.hidden?.(o.windows)) ?? [];
+    this.#check(ctx);
+    const scale = ctx.screen?.scale ?? this.deps.cells.get(ctx.cellId)?.scale ?? 1;
+    const image = await maskFrame(Buffer.from(o.image, "base64"), hidden, scale);
+    this.#check(ctx);
     this.deps.frames.save(ctx.sessionId, o.frameId, image);
     this.#append(ctx, "observe", { frameId: o.frameId, width: o.width, height: o.height });
     this.#cursor.set(ctx.cellId, o.pointer);
@@ -504,6 +516,7 @@ export class ActionGateway {
       sessionId: ctx.sessionId,
       device: d,
       digest: createHash("sha256").update(image).digest("hex"),
+      masked: hidden.length > 0,
     });
     return { frameId: o.frameId, pointer: o.pointer };
   }
@@ -523,7 +536,8 @@ export class ActionGateway {
         this.#lastFrame.delete(cellId);
         return undefined;
       }
-      if (last.sessionId !== sessionId || !last.device.client.zoom) return undefined;
+      // The device keeps the frame unmasked: a masked one is only enlarged.
+      if (last.sessionId !== sessionId || last.masked || !last.device.client.zoom) return undefined;
       if (cell.state !== "ready" || cell.paused || cell.fenced || cell.replacementPending)
         return undefined;
       return await last.device.client.zoom({ frameId, region }, signal);
@@ -1306,6 +1320,8 @@ export class ActionGateway {
         "stale",
         "the approved action or target changed; look again before acting",
       );
+    if (ctx.foreign?.(fresh.window) || ctx.foreign?.(fresh.drop?.window ?? null))
+      throw new Cancelled("preflight", ANOTHER_TASKS_WINDOW);
     const observed = this.#lastFrame.get(ctx.cellId);
     const owned = observed?.sessionId === ctx.sessionId ? observed : undefined;
     const admission = ctx.beforeEffect?.(

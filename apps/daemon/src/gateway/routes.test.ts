@@ -324,7 +324,7 @@ describe("puppet, live and frame routes", () => {
     const { sessionId } = (await started.json()) as { sessionId: string };
     expect(
       await (await app.request(url(`/api/cells/${id}/live`), { headers: bearer })).json(),
-    ).toEqual({ sessionId });
+    ).toEqual({ sessionId, sessions: [sessionId] });
     expect(
       (
         await app.request(url(`/api/cells/${id}/puppet`), {
