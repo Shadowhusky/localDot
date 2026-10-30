@@ -606,6 +606,10 @@
             "detail": {
               "type": "string",
               "maxLength": 200
+            },
+            "next": {
+              "type": "string",
+              "maxLength": 200
             }
           },
           "required": [

@@ -39,6 +39,21 @@ export const ConversationName = z
 export const RenameConversation = z.strictObject({ title: ConversationName.nullable() });
 export type RenameConversation = z.infer<typeof RenameConversation>;
 
+// A colour the user gives a conversation to tell it apart at a glance, as Finder's tags.
+export const CONVERSATION_TAGS = ["red", "orange", "yellow", "green", "blue", "purple"] as const;
+export const ConversationTag = z.enum(CONVERSATION_TAGS);
+export type ConversationTag = z.infer<typeof ConversationTag>;
+// null takes the tag off.
+export const TagConversation = z.strictObject({ tag: ConversationTag.nullable() });
+export type TagConversation = z.infer<typeof TagConversation>;
+// Pinned, it is listed above the rest whatever its age.
+export const PinConversation = z.strictObject({ pinned: z.boolean() });
+export type PinConversation = z.infer<typeof PinConversation>;
+// Archived, it leaves the list until it is unarchived or goes on. A conversation under way can't be
+// archived.
+export const ArchiveConversation = z.strictObject({ archived: z.boolean() });
+export type ArchiveConversation = z.infer<typeof ArchiveConversation>;
+
 export const LIVE_ACTIVITY_CHARS = 120;
 // A conversation whose latest task is live: working, waiting for its turn on the computer it shares,
 // waiting on the user, at rest after its answer, or paused. `onScreen`: it holds the computer now.
@@ -74,14 +89,29 @@ export const ConversationEntry = z.strictObject({
   // How its latest task ended; null while it runs, or when it was cut short.
   ended: z.enum(["done", "stopped", "error"]).nullable(),
   live: ConversationLive.optional(),
+  tag: ConversationTag.optional(),
+  pinned: z.boolean().optional(),
+  archived: z.boolean().optional(),
 });
 export type ConversationEntry = z.infer<typeof ConversationEntry>;
 
-// The recent conversations, newest first.
+// The recent conversations, newest first, or the archived ones; and how many are archived.
 export const ConversationList = z.strictObject({
   conversations: z.array(ConversationEntry).max(CONVERSATION_LIST),
+  archivedCount: z.number().int().min(0).optional(),
 });
 export type ConversationList = z.infer<typeof ConversationList>;
+
+// The user tagged, pinned, archived or unarchived a conversation, on the app's own channel. Named
+// by its latest task.
+export const ConversationOrganizedEvent = z.strictObject({
+  type: z.literal("conversation.organized"),
+  sessionId: SessionId,
+  tag: ConversationTag.nullable(),
+  pinned: z.boolean(),
+  archived: z.boolean(),
+});
+export type ConversationOrganizedEvent = z.infer<typeof ConversationOrganizedEvent>;
 
 // What was said before the task, one line per turn ("The user: …", "dot: …"), oldest first.
 export const EarlierTurns = z
