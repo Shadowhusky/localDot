@@ -252,12 +252,24 @@ it("marks a child's prompt for Anthropic's cache and keys OpenAI's cache by the 
   };
   const ephemeral = { anthropic: { cacheControl: { type: "ephemeral" } } };
   const anthropic = model();
-  await drain(harnessModel(options, anthropic, () => {}, "anthropic"));
+  await drain(
+    harnessModel(options, anthropic, () => {}, {
+      client: "anthropic",
+      model: "claude-sonnet-5-5",
+      route: "anthropic",
+    }),
+  );
   const prompt = anthropic.doStreamCalls[0]?.prompt ?? [];
   expect(prompt[0]).toMatchObject({ role: "system", providerOptions: ephemeral });
   expect(prompt.at(-1)).toMatchObject({ role: "user", providerOptions: ephemeral });
   const openai = model();
-  await drain(harnessModel(options, openai, () => {}, "openai"));
+  await drain(
+    harnessModel(options, openai, () => {}, {
+      client: "openai",
+      model: "gpt-6-luna",
+      route: "openai",
+    }),
+  );
   expect(openai.doStreamCalls[0]?.providerOptions).toEqual({
     openai: { promptCacheKey: "child-session" },
   });

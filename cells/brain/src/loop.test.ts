@@ -682,7 +682,7 @@ describe("Agent", () => {
         { role: "main", attempt: 1, waitMs: 2000, status: 529, message: "overloaded" },
         {
           role: "main",
-          attempt: 0,
+          attempt: 2,
           waitMs: 0,
           status: 529,
           message: "overloaded",

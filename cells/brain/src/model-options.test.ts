@@ -2,8 +2,8 @@ import type { ModelBinding, ModelOptions } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { type AssistantContent, generateText, jsonSchema, type ModelMessage, tool } from "ai";
 import { describe, expect, it } from "vitest";
-import { settleOldTurns } from "./context.ts";
-import { editsOlderTurns, languageModel } from "./models.ts";
+import { cachedPrompt, settleOldTurns } from "./context.ts";
+import { cacheKeyOptions, editsOlderTurns, languageModel, marksCache } from "./models.ts";
 import { binding } from "./testing/scripted.ts";
 
 // Exercise each installed SDK, stopping at its network boundary. Expectations are HTTP fields,
@@ -143,9 +143,17 @@ const cases: [string, string, ModelOptions, Record<string, unknown>][] = [
     { reasoningEffort: "max" },
     { reasoning: { effort: "max" } },
   ],
+  ["togetherai", "moonshotai/Kimi-K3", { reasoningEffort: "high" }, { reasoning_effort: "high" }],
   [
     "togetherai",
     "moonshotai/Kimi-K3",
+    { reasoningEffort: "none" },
+    { reasoning: { enabled: false } },
+  ],
+  ["togetherai", "zai-org/GLM-5.3", { reasoningEffort: "medium" }, { reasoning_effort: "medium" }],
+  [
+    "togetherai",
+    "MiniMaxAI/MiniMax-M3",
     { reasoningEffort: "enabled" },
     { reasoning: { enabled: true } },
   ],
@@ -213,6 +221,107 @@ const cases: [string, string, ModelOptions, Record<string, unknown>][] = [
     ],
   ),
   ["ollama", "gpt-oss:20b", { reasoningEffort: "high" }, { reasoning_effort: "high" }],
+  // Reviewed 2026-10-31 (docs/providers.md).
+  ...["moonshotai", "moonshotai-cn"].flatMap(
+    (p): [string, string, ModelOptions, Record<string, unknown>][] => [
+      [p, "kimi-k3.1-pro", { reasoningEffort: "low" }, { reasoning_effort: "low" }],
+      [p, "kimi-k3", { reasoningEffort: "max" }, { reasoning_effort: "max" }],
+    ],
+  ),
+  ...["zai", "zhipuai"].flatMap((p): [string, string, ModelOptions, Record<string, unknown>][] => [
+    [p, "glm-5.3", { reasoningEffort: "high" }, { reasoning_effort: "high" }],
+    [
+      p,
+      "glm-5.2",
+      { reasoningEffort: "max" },
+      { thinking: { type: "enabled" }, reasoning_effort: "max" },
+    ],
+  ]),
+  ["minimax", "MiniMax-M3.1-Flash", { reasoningEffort: "low" }, { reasoning_effort: "low" }],
+  [
+    "minimax-coding-plan",
+    "MiniMax-M3",
+    { reasoningEffort: "none" },
+    { thinking: { type: "disabled" } },
+  ],
+  [
+    "alibaba",
+    "qwen3.8-max",
+    { reasoningEffort: "xhigh" },
+    { enable_thinking: true, reasoning_effort: "xhigh" },
+  ],
+  ["alibaba", "qwen3.8-flash", { reasoningEffort: "none" }, { enable_thinking: false }],
+  ["alibaba-cn", "kimi-k3", { reasoningEffort: "low" }, { reasoning_effort: "low" }],
+  ["alibaba-cn", "glm-5.2", { reasoningEffort: "none" }, { enable_thinking: false }],
+  [
+    "alibaba-cn",
+    "deepseek-v4-pro",
+    { reasoningEffort: "max" },
+    { enable_thinking: true, reasoning_effort: "max" },
+  ],
+  [
+    "fireworks-ai",
+    "accounts/fireworks/models/minimax-m3p1-flash",
+    { reasoningEffort: "xhigh" },
+    { reasoning_effort: "xhigh" },
+  ],
+  ["deepinfra", "zai-org/GLM-5.3", { reasoningEffort: "max" }, { reasoning_effort: "max" }],
+  ["siliconflow", "zai-org/GLM-5.3", { reasoningEffort: "low" }, { reasoning_effort: "low" }],
+  [
+    "siliconflow-cn",
+    "deepseek-ai/DeepSeek-V4-Pro",
+    { reasoningEffort: "max" },
+    { reasoning_effort: "max" },
+  ],
+  ["volcengine", "glm-5-3-flash-260828", { reasoningEffort: "high" }, { reasoning_effort: "high" }],
+  [
+    "volcengine",
+    "doubao-seed-1-8-251228",
+    { reasoningEffort: "none" },
+    { thinking: { type: "disabled" } },
+  ],
+  ["cerebras", "qwen-3.8-27b", { reasoningEffort: "none" }, { reasoning_effort: "none" }],
+  ["groq", "qwen/qwen3.6-27b", { reasoningEffort: "none" }, { reasoning_effort: "none" }],
+  ["xai", "grok-4.3", { reasoningEffort: "none" }, { reasoning: { effort: "none" } }],
+  ["mistral", "zai-glm-5-3", { reasoningEffort: "max" }, { reasoning_effort: "max" }],
+  ["mistral", "zai-glm-5-3", { reasoningEffort: "low" }, { reasoning_effort: "low" }],
+  ["mistral", "mistral-large-4", { reasoningEffort: "medium" }, { reasoning_effort: "medium" }],
+  ["mistral", "mistral-medium-latest", { reasoningEffort: "high" }, { reasoning_effort: "high" }],
+  [
+    "openai",
+    "gpt-6.1-terra",
+    { reasoningEffort: "none", verbosity: "high" },
+    { reasoning: { effort: "none" }, text: { verbosity: "high" } },
+  ],
+  ["openai", "gpt-5.3-codex", { reasoningEffort: "xhigh" }, { reasoning: { effort: "xhigh" } }],
+  ["openai", "gpt-5.5-pro", { reasoningEffort: "xhigh" }, { reasoning: { effort: "xhigh" } }],
+  ["openai-compatible", "gpt-5.6-sol", { reasoningEffort: "none" }, { reasoning_effort: "none" }],
+  [
+    "anthropic",
+    "claude-haiku-5-5",
+    { reasoningEffort: "none" },
+    { thinking: { type: "disabled" } },
+  ],
+  [
+    "google",
+    "gemini-4-argon",
+    { reasoningEffort: "medium" },
+    { generationConfig: { thinkingConfig: { thinkingLevel: "medium" } } },
+  ],
+  [
+    "google",
+    "gemini-3.7-flash",
+    { reasoningEffort: "high" },
+    { generationConfig: { thinkingConfig: { thinkingLevel: "high" } } },
+  ],
+  [
+    "openrouter",
+    "moonshotai/kimi-k3.1-pro",
+    { reasoningEffort: "high" },
+    { reasoning: { effort: "high" } },
+  ],
+  ["openrouter", "z-ai/glm-5.3", { reasoningEffort: "max" }, { reasoning: { effort: "max" } }],
+  ["openrouter", "x-ai/grok-4.7", { reasoningEffort: "xhigh" }, { reasoning: { effort: "xhigh" } }],
 ];
 describe("model option wire contracts", () => {
   it.each(cases)("%s / %s sends options accepted by its endpoint", async (p, m, o, expected) => {
@@ -223,11 +332,134 @@ describe("model option wire contracts", () => {
       await request("anthropic", "claude-sonnet-4-5", { thinkingBudget: 8192 }, 2000),
     ).toMatchObject({ max_tokens: 2000, thinking: { type: "enabled", budget_tokens: 1024 } });
   });
+  it("leaves out what each endpoint refuses or no longer takes", async () => {
+    const k3 = await request("moonshotai", "kimi-k3.1-pro", { reasoningEffort: "high" });
+    expect(k3).not.toHaveProperty("thinking");
+    const off = await request("anthropic", "claude-haiku-5-5", { reasoningEffort: "none" });
+    expect(off).not.toHaveProperty("output_config");
+    expect(
+      await request("togetherai", "moonshotai/Kimi-K3", { reasoningEffort: "high" }),
+    ).not.toHaveProperty("reasoning");
+    // An On saved before Together listed K3's levels is K3's default thinking.
+    const saved = await request("togetherai", "moonshotai/Kimi-K3", { reasoningEffort: "enabled" });
+    expect(saved).not.toHaveProperty("reasoning");
+    expect(saved).not.toHaveProperty("reasoning_effort");
+    await expect(request("zai", "glm-5.3", { reasoningEffort: "none" })).rejects.toThrow(
+      /does not support that reasoning effort/,
+    );
+    await expect(
+      request("anthropic", "claude-opus-5-5", { reasoningEffort: "none" }),
+    ).rejects.toThrow(/does not support that reasoning effort/);
+    await expect(
+      request("openai-compatible", "gpt-5.6-sol", { reasoningEffort: "high" }),
+    ).rejects.toThrow(/does not support that reasoning effort/);
+  });
   it("sends no new settings for old configurations", async () => {
     const body = await request("deepseek", "deepseek-flash");
     expect(body).not.toHaveProperty("reasoning_effort");
     expect(body).not.toHaveProperty("thinking");
   });
+});
+
+describe("prompt caching on the wire", () => {
+  // One loop turn as the brain sends it: the cached prompt, the task's key, a tool and history.
+  async function turn(provider: string, model: string, history: ModelMessage[] = []) {
+    const spec = providerById(provider);
+    if (!spec) throw new Error(provider);
+    const b = {
+      ...binding(),
+      provider,
+      client: spec.client,
+      route: spec.keyd === "openai-compatible" ? "custom-key" : spec.keyd,
+      model,
+      maxOutputTokens: 16000,
+    };
+    let body: Record<string, unknown> | undefined;
+    const prompt = cachedPrompt(
+      "System prompt",
+      [{ role: "user", content: "Start" }, ...history],
+      "",
+      marksCache(b),
+    );
+    await expect(
+      generateText({
+        model: languageModel(b, async (_url, init) => {
+          body = JSON.parse(String(init?.body));
+          throw new Error("captured request");
+        }),
+        ...prompt,
+        tools: { shell: tool({ inputSchema: jsonSchema({ type: "object" }) }) },
+        providerOptions: cacheKeyOptions(b, "task-1"),
+        maxRetries: 0,
+      }),
+    ).rejects.toThrow();
+    return body as Record<string, unknown>;
+  }
+  it.each([
+    ["openai", "gpt-6-luna"],
+    ["xai", "grok-4.7"],
+    ["mistral", "mistral-large-4"],
+    ["moonshotai", "kimi-k3.1-pro"],
+    ["moonshotai-cn", "kimi-k3"],
+    ["togetherai", "moonshotai/Kimi-K3"],
+    ["fireworks-ai", "accounts/fireworks/models/kimi-k3"],
+    ["deepinfra", "zai-org/GLM-5.3"],
+    ["cerebras", "qwen-3.8-27b"],
+  ])("gives %s the task's prompt_cache_key", async (provider, model) => {
+    expect(await turn(provider, model)).toMatchObject({ prompt_cache_key: "task-1" });
+  });
+  it.each([
+    ["zai", "glm-5.3"],
+    ["deepseek", "deepseek-flash"],
+    ["minimax", "MiniMax-M3.1-Flash"],
+    ["alibaba", "qwen3.8-max"],
+    ["openrouter", "moonshotai/kimi-k3.1-pro"],
+  ])("sends %s no cache key it doesn't document", async (provider, model) => {
+    expect(await turn(provider, model)).not.toHaveProperty("prompt_cache_key");
+  });
+  it("marks Claude's prompt for caching through OpenRouter, and no other model there", async () => {
+    const claude = JSON.stringify(await turn("openrouter", "anthropic/claude-sonnet-5.5"));
+    expect(claude.match(/"cache_control":\{"type":"ephemeral"\}/g)?.length).toBe(2);
+    expect(JSON.stringify(await turn("openrouter", "google/gemini-3.8-flash"))).not.toContain(
+      "cache_control",
+    );
+  });
+  it.each([
+    ["ollama", "gpt-oss:20b", "reasoning", "reasoning_content"],
+    ["cerebras", "qwen-3.8-27b", "reasoning", "reasoning_content"],
+    // Kimi K3 must have the whole message back, its thinking included, between tool calls.
+    ["moonshotai", "kimi-k3.1-pro", "reasoning_content", "reasoning"],
+    ["zai", "glm-5.3", "reasoning_content", "reasoning"],
+  ])(
+    "returns %s's earlier thinking in the field it reads",
+    async (provider, model, field, other) => {
+      const body = await turn(provider, model, [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "[thought]" },
+            { type: "tool-call", toolCallId: "call_1", toolName: "shell", input: {} },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call_1",
+              toolName: "shell",
+              output: { type: "text", value: "ran" },
+            },
+          ],
+        },
+      ]);
+      const assistant = (body.messages as Record<string, unknown>[]).find(
+        (m) => m.role === "assistant",
+      );
+      expect(assistant).toMatchObject({ [field]: "[thought]" });
+      expect(assistant).not.toHaveProperty(other);
+    },
+  );
 });
 
 describe("speed on the wire", () => {
