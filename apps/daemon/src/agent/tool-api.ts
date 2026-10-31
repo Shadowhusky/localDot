@@ -215,6 +215,8 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
     } catch {
       return c.text("transcript append refused", 409);
     }
+    // The brain acknowledges what it has put in its history, which its next model call reads.
+    if (request.inboxAfter !== undefined) session.heard(request.inboxAfter);
     return c.body(null, 204);
   });
   app.get("/v1/inbox", async (c) => {

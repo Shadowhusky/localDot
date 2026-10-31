@@ -108,4 +108,31 @@ describe("a task on a computer other tasks share", () => {
     expect(f.actions).toHaveLength(0);
     await acting.release();
   });
+
+  it("ends the wait for another task's turn when the user sends a message, doing nothing", async () => {
+    const f = setup();
+    const acting = await f.turns.take(f.other, f.cellId, AbortSignal.timeout(2000));
+    const click = f.call("computer", CLICK);
+    await settle();
+    expect(f.live.lease(f.cellId).waiting()).toEqual([f.session.id]);
+    f.session.post("steer", "Click Cancel instead");
+    const { result } = await click;
+    expect(result.ok).toBe(false);
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringContaining("the user sent a new message while this waited for its turn"),
+    });
+    expect(f.live.lease(f.cellId).waiting()).toEqual([]);
+    expect(f.actions).toHaveLength(0);
+    await acting.release();
+    // With the computer free and the message answered, the next action runs.
+    expect((await f.call("computer", CLICK)).result.ok).toBe(true);
+    expect(f.actions).toHaveLength(1);
+  });
+
+  it("doesn't let a message waiting for dot stop an action whose turn is free", async () => {
+    const f = setup();
+    f.session.post("steer", "Then close the dialog");
+    expect((await f.call("computer", CLICK)).result.ok).toBe(true);
+    expect(f.actions).toHaveLength(1);
+  });
 });

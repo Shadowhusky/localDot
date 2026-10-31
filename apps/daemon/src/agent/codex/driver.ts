@@ -1150,6 +1150,9 @@ export class CodexDriver {
       check();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       for (const item of initial) pending.delete(item.messageId);
+      // The turn's input holds everything stored so far. A steer later in the turn has no sign of
+      // when Codex reads it, so it counts as unheard until a wait has ended for it.
+      session.heard(session.delivered);
       clearTimeout(startupTimer);
       void inboxLoop().catch(() => {
         if (!current()) loss();

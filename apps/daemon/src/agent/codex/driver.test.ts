@@ -425,6 +425,27 @@ describe("Codex conversation and durable input recovery", () => {
     f.done();
     expect(await run).toBe(CODEX_DONE);
   });
+  it("ends a wait for a steer sent into the running turn, not for what the turn began with", async () => {
+    const f = fixture();
+    const spoke = () => {
+      const listening = f.session.listenForUser(new AbortController().signal);
+      listening.end();
+      return listening.spoke;
+    };
+    f.session.post("steer", "Prefer trains");
+    const run = f.run(),
+      first = await f.fake.nextLaunch(1);
+    await first.waitFor("turn/start");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(spoke()).toBe(false);
+    f.session.post("steer", "Under 100 euros");
+    await first.waitFor("turn/steer");
+    // Codex has it, but no sign says when its model reads it: the next wait ends, once.
+    expect(spoke()).toBe(true);
+    expect(spoke()).toBe(false);
+    f.done();
+    expect(await run).toBe(CODEX_DONE);
+  });
   it.each(["refused", "uncertain"])(
     "recovers %s steering from one durable record on a fresh connection",
     async (mode) => {

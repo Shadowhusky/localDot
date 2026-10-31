@@ -2,7 +2,15 @@ import { basename } from "node:path";
 import type { DoneInput, ToolResult } from "@localdot/protocol";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import { abortable } from "../session.ts";
-import { append, cut, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import {
+  append,
+  cut,
+  fail,
+  listenForUser,
+  type ToolCallContext,
+  type ToolDeps,
+  text,
+} from "./deps.ts";
 export async function doneTool(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -24,13 +32,22 @@ export async function doneTool(
     append(ctx, "step.start", { kind: "think", intent: cut(ctx.redact(completion.evidence), 120) });
     append(ctx, "tool.start", { tool: "done", title: "Waiting for progress" });
     const requests = ctx.session.requests.length;
+    const listening = listenForUser(ctx);
     let waited = 0;
-    while (waited < ms && ctx.session.requests.length === requests) {
-      if (ctx.session.safetyPause) throw new PausedStepError();
-      const interval = Math.min(1000, ms - waited);
-      await abortable(deps.sleep(interval, ctx.signal), ctx.signal);
-      ctx.check();
-      waited += interval;
+    try {
+      while (waited < ms && ctx.session.requests.length === requests && !listening.spoke) {
+        if (ctx.session.safetyPause) throw new PausedStepError();
+        const interval = Math.min(1000, ms - waited);
+        try {
+          await abortable(deps.sleep(interval, listening.signal), listening.signal);
+        } catch (error) {
+          if (!listening.spoke) throw error;
+        }
+        ctx.check();
+        waited += interval;
+      }
+    } finally {
+      listening.end();
     }
     if (ctx.session.safetyPause) throw new PausedStepError();
     append(ctx, "tool.end", { ok: true });
@@ -39,7 +56,7 @@ export async function doneTool(
       ok: true,
       content: [
         text(
-          ctx.session.requests.length !== requests
+          listening.spoke || ctx.session.requests.length !== requests
             ? "A new user instruction arrived. The task remains active; apply that instruction before continuing."
             : `Waited ${waited / 1000} seconds. The task remains active and unfinished. Inspect the current state, act when the next step is available, and keep waiting when needed until the user's requested outcome is verified. Another actor's turn or a pending process is not task completion.`,
         ),

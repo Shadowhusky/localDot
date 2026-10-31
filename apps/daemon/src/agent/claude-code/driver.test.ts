@@ -726,6 +726,41 @@ describe("Claude Code driver", () => {
     expect(await result).toBe(CLAUDE_CODE_DONE);
   });
 
+  it("ends a wait for the user's message until a request of Claude Code's takes it in", async () => {
+    const f = fixture();
+    // A tool that waits as localDot's do: until the user says something dot hasn't heard.
+    f.dispatch.mockImplementation(async (session, _generation, name, _id, _input, signal) => {
+      if (name === "done") return { ok: true, final: true, content: [] };
+      const listening = session.listenForUser(signal);
+      if (!listening.signal.aborted)
+        await new Promise((resolve) =>
+          listening.signal.addEventListener("abort", resolve, { once: true }),
+        );
+      return { ok: true, content: [{ type: "text", text: listening.spoke ? "cut" : "stopped" }] };
+    });
+    const result = f.run();
+    const fake = await f.started();
+    const waiting = fake.call("computer", { action: "wait", ms: 30000 });
+    await until(() => f.dispatch.mock.calls.length === 1);
+    f.session.post("steer", "Make it brown");
+    expect((await waiting).content).toEqual([{ type: "text", text: "cut" }]);
+    await until(() => fake.prompts.length === 2);
+    // Claude Code took it in with a request: a wait dot starts after that runs on.
+    fake.emit({ ...turn(), user_message_uuid: fake.prompts[1]?.uuid });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const listening = f.session.listenForUser(new AbortController().signal);
+    expect(listening.spoke).toBe(false);
+    listening.end();
+    // A message sent while Claude Code is still thinking ends the wait it then asks for, at once.
+    f.session.post("steer", "And add a hat");
+    await until(() => fake.prompts.length === 3);
+    expect((await fake.call("computer", { action: "wait", ms: 30000 })).content).toEqual([
+      { type: "text", text: "cut" },
+    ]);
+    await fake.call("done", { summary: "ok" });
+    await result;
+  });
+
   it("nudges once when a reply ends without done, then rests", async () => {
     const f = fixture();
     const result = f.run();

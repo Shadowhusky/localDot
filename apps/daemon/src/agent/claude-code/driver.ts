@@ -477,7 +477,8 @@ export class ClaudeCodeDriver {
       retired = deferred<void>(),
       inputs = new Inputs();
     const signal = AbortSignal.any([session.abort.signal, generation.signal, lifetime.signal]);
-    const pending = new Set<string>(),
+    // The user's messages sent to Claude Code that no request has taken in yet, by their inbox seq.
+    const pending = new Map<string, number>(),
       children = new Set<{ child: SpawnedProcess; exited: Promise<void> }>();
     let result: CycleResult | undefined,
       query: ReturnType<QueryFn> | undefined,
@@ -635,9 +636,9 @@ export class ClaudeCodeDriver {
       return texts;
     };
     // A message of the user's stays pending until Claude Code says a reply took it in.
-    const send = (content: SDKUserMessage["message"]["content"], fromUser = false) => {
+    const send = (content: SDKUserMessage["message"]["content"], seq?: number) => {
       const uuid = inputs.push(content);
-      if (uuid && fromUser) pending.add(uuid);
+      if (uuid && seq !== undefined) pending.set(uuid, seq);
     };
     const call: LocaldotCall = (name, args, callSignal) => {
       if (!current()) return Promise.resolve(inactive());
@@ -750,7 +751,13 @@ export class ClaudeCodeDriver {
       } else if (event.kind === "offered") finish(event);
       else if (event.kind === "refused") refused(event.tools);
       else if (event.kind === "violation") finish(event);
-      else if (event.kind === "consumed") for (const uuid of event.uuids) pending.delete(uuid);
+      else if (event.kind === "consumed")
+        for (const uuid of event.uuids) {
+          const seq = pending.get(uuid);
+          if (seq === undefined) continue;
+          pending.delete(uuid);
+          session.heard(seq);
+        }
       else if (event.kind === "error") {
         if (SIGNED_OUT.has(event.error)) finish({ kind: "signed_out" });
         else if (
@@ -787,7 +794,7 @@ export class ClaudeCodeDriver {
         for (const item of persist(batch.items)) {
           check();
           nudged = false;
-          send(redact(item.text), true);
+          send(redact(item.text), item.seq);
         }
       }
     };
@@ -861,6 +868,7 @@ export class ClaudeCodeDriver {
           },
         },
       ]);
+      session.heard(session.delivered);
       const spawn = (options: SpawnOptions): SpawnedProcess => {
         if (fenced) throw new Error("The Claude Code run was retired.");
         const child = d.spawn(options, session);
