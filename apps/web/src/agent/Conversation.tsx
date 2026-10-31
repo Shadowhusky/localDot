@@ -1006,6 +1006,16 @@ export function Conversation({
     field.setRangeText(text, 0, field.value.length, "end");
     field.dispatchEvent(new Event("input", { bubbles: true }));
   };
+  // How far the jump button reaches up into the thread from its bottom edge, shown or not.
+  const jumpReach = () => {
+    const view = scroller.current,
+      column = body.current,
+      button = jump.current;
+    if (!view || !column || !button) return 0;
+    return (
+      view.getBoundingClientRect().bottom - column.getBoundingClientRect().top - button.offsetTop
+    );
+  };
   const content = (
     <div className="thread-body" ref={body} data-covered={covered || undefined}>
       <ScrollArea
@@ -1020,7 +1030,17 @@ export function Conversation({
                   ".thread-work-steps > .ui-disclosure-trigger, .thread-work > .activity-row > .activity-row-head",
                 )
               : null;
-          if (target) follow.anchorTo(target, REVEAL_MARGIN);
+          if (!target) return;
+          follow.anchorTo(target, REVEAL_MARGIN);
+          // A run of steps the reader unfolds comes into view down to its end, clear of the jump
+          // button that leaving the end brings, its head kept in view.
+          const run = target.parentElement;
+          if (run?.matches(".thread-work-steps:not([data-open])"))
+            follow.show(
+              run,
+              REVEAL_MARGIN,
+              Math.max(REVEAL_MARGIN, jumpReach() + REVEAL_MARGIN / 2),
+            );
         }}
         onScroll={() => {
           seeEnd();

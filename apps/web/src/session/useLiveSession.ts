@@ -31,6 +31,8 @@ export interface LiveSession {
   resting: boolean;
   // Which task to show is settled: the conversation is read and the computer has said what it runs.
   known: boolean;
+  // The computer has said what it runs since the user last chose a conversation.
+  answered: boolean;
   // The task acting on the computer's screen now, which may be another conversation's.
   screenHolder: string | null;
   stop(): void;
@@ -99,6 +101,8 @@ export function useLiveSession(
   const [screenHolder, setScreenHolder] = useState<string | null>(null);
   // The computer that has answered whether it runs a task.
   const [answered, setAnswered] = useState<string | null>(null);
+  // The choice the computer's latest answer came after.
+  const [answeredChoice, setAnsweredChoice] = useState(choice);
   const [agentFeed] = useState(createAgentFeed);
   const [version, setVersion] = useState(0);
   const [ended, setEnded] = useState(false);
@@ -204,6 +208,7 @@ export function useLiveSession(
             : null;
         if (!cancelled && asked === choices.current) {
           if (first) setAnswered(cellId);
+          setAnsweredChoice(chosen.current);
           first = false;
           setShown((now) => {
             if (found)
@@ -440,6 +445,7 @@ export function useLiveSession(
     ended: owned && (ended || atRest),
     resting: atRest,
     known,
+    answered: !cellId || !ready || answeredChoice === choice,
     screenHolder,
     stop,
     check,

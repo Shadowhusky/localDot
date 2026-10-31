@@ -21,6 +21,8 @@ const TAIL_MS = 300;
 const SWIPE = 10;
 // A jump to the end takes this long, eased like --ease-enter, toward the end as each frame finds it.
 const JUMP_MS = 360;
+// An element unfolding into view is followed at most this long, however long it keeps growing.
+const SHOW_MS = 1500;
 const eased = (progress: number) => 1 - (1 - progress) ** 4;
 
 // The keys that scroll a list holding the focus, and which way.
@@ -86,6 +88,13 @@ function offsetIn(element: HTMLElement, scroller: HTMLElement): number {
 
 const topOf = (element: HTMLElement, scroller: HTMLElement) =>
   offsetIn(element, scroller) - scroller.scrollTop;
+
+// How far down the view must go for the end of `box` to sit `bottom` px inside its bottom, but no
+// further than keeps its top `top` px inside the view's top. Zero or less: nothing to bring in.
+function hiddenBelow(box: DOMRect, view: HTMLElement, top: number, bottom: number): number {
+  const edge = view.getBoundingClientRect().top;
+  return Math.min(box.bottom + bottom - edge - view.clientHeight, box.top - top - edge);
+}
 
 // Within reach of the end; what arrived since the gesture began moved the end, not the reader.
 const near = (element: HTMLElement, gesture: Gesture) =>
@@ -428,6 +437,44 @@ export function useFollowScroll(owner: string, follow: boolean) {
       t.anchor = element;
       t.anchorAt = offsetIn(element, view);
       return true;
+    },
+    // An element the reader has just unfolded is followed down into view as it unfolds, until its
+    // end sits `bottom` px inside the view's bottom, or its top `margin` px inside the view's top
+    // when there is no room for both. The view only moves down, and only as far as that takes;
+    // eased like a jump, and stopped like one by the reader taking hold of the list. It is held
+    // there after.
+    show(element: HTMLElement, margin = 0, bottom = margin) {
+      const t = tracking.current,
+        view = t.element;
+      if (!view) return;
+      stopJump();
+      setPin(false);
+      const glide = { frame: 0, from: view.scrollTop, start: performance.now() };
+      let height = Number.NaN;
+      let still = 0;
+      const step = () => {
+        if (t.jump !== glide) return;
+        const box = element.getBoundingClientRect();
+        const hidden = hiddenBelow(box, view, margin, bottom);
+        const elapsed = performance.now() - glide.start;
+        const progress = reducedMotion() ? 1 : Math.min(1, elapsed / JUMP_MS);
+        if (hidden > 0) {
+          const goal = view.scrollTop + hidden;
+          put(Math.max(view.scrollTop, glide.from + (goal - glide.from) * eased(progress)));
+        }
+        // Done once it has stopped unfolding.
+        still = Math.abs(box.height - height) < 0.5 ? still + 1 : 0;
+        height = box.height;
+        if ((progress < 1 || still < 2) && elapsed < SHOW_MS) {
+          glide.frame = requestAnimationFrame(step);
+          return;
+        }
+        t.jump = null;
+        t.anchor = element;
+        t.anchorAt = offsetIn(element, view);
+      };
+      t.jump = glide;
+      glide.frame = requestAnimationFrame(step);
     },
     // Stops following the end before the reader is moved elsewhere on purpose, such as a page.
     release() {

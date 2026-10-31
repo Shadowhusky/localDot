@@ -3,9 +3,13 @@ import sharp from "sharp";
 import { expect, runAt, test } from "./harness.ts";
 
 // The stage keeps its picture while the columns around it change, and the collapsed rail magnifies
-// under the mouse as the macOS Dock does. Chromium only: frames come from its screencast.
-runAt("c14");
+// under the mouse as the macOS Dock does. Chromium only, as frames come from its screencast, but
+// for the flows tagged @webkit.
+runAt("c14", "w14");
 test.use({ fixedClock: false, reducedMotion: "no-preference" });
+test.beforeEach(({ browserName }) => {
+  test.skip(browserName !== "chromium" && !test.info().tags.includes("@webkit"), "Chromium only");
+});
 
 const PANELS = "localdot.panels.v1";
 
@@ -289,6 +293,79 @@ test("follows the mouse on every frame, eases in and out, and a click takes up t
   await page.mouse.down();
   await page.mouse.up();
   expect((await continued).postDataJSON()).toEqual({ sessionId: under?.id });
+});
+
+interface LensFrame {
+  switching: boolean;
+  scales: number[];
+}
+
+test("a click takes up a magnified mark and the lens stays until the mouse leaves", {
+  tag: "@webkit",
+}, async ({ page, ui }) => {
+  await ui.open("conversations");
+  await livePicture(page);
+  const rest = await marks(page);
+  const x = ((rest[0]?.left ?? 0) + (rest[0]?.right ?? 0)) / 2;
+  const current = () =>
+    rail(page).locator(".sessions-item[data-current]").getAttribute("data-flip");
+  // Each frame's marks, and whether a conversation is being taken up (switch-motion.ts).
+  await page.evaluate(() => {
+    const seen: LensFrame[] = [];
+    (window as unknown as { lens_: typeof seen }).lens_ = seen;
+    const tick = () => {
+      seen.push({
+        switching: document.documentElement.hasAttribute("data-switch"),
+        scales: [...document.querySelectorAll<HTMLElement>(".sessions-item")].map(
+          (row) => Number.parseFloat(row.style.scale) || 1,
+        ),
+      });
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  const frames = () =>
+    page.evaluate(() => (window as unknown as { lens_: LensFrame[] }).lens_.splice(0));
+  const largest = (frame?: LensFrame) =>
+    frame ? frame.scales.indexOf(Math.max(...frame.scales)) : -1;
+  const click = async (n: number, then?: () => Promise<void>) => {
+    await page.mouse.move(x, pointerY(rest, n), { steps: 4 });
+    await expect.poll(async () => (await looks(page))[n]?.scale).toBeGreaterThan(1.6);
+    const under = (await looks(page))[n];
+    await frames();
+    const continued = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/conversation/continue",
+    );
+    await page.mouse.down();
+    await page.mouse.up();
+    await then?.();
+    expect((await continued).postDataJSON()).toEqual({ sessionId: under?.id });
+    await expect.poll(current).toBe(under?.id);
+    await expect(page.locator("html[data-switch]")).toHaveCount(0);
+    await page.waitForTimeout(200);
+    const seen = await frames();
+    expect(seen.some((frame) => frame.switching)).toBe(true);
+    // Not one frame lets the lens go.
+    for (const frame of seen) expect(Math.max(...frame.scales)).toBeGreaterThan(1.6);
+    return seen;
+  };
+
+  // Under a still mouse, the mark it took up stays magnified through the switch.
+  const still = await click(3);
+  expect(largest(still.at(-1))).toBe(3);
+
+  // A mouse moving on along the rail through the switch takes the lens with it.
+  const moving = await click(1, () => page.mouse.move(x, pointerY(rest, 5), { steps: 2 }));
+  expect(largest(moving.findLast((frame) => frame.switching))).toBe(5);
+
+  // Out of the rail, the lens goes.
+  await page.mouse.move(x + 400, pointerY(rest, 5), { steps: 3 });
+  await expect
+    .poll(async () => (await looks(page)).map((look) => look.scale))
+    .toEqual(rest.map(() => 1));
+  await expect.poll(async () => Object.values(await names(page))).toEqual(rest.map(() => 0));
 });
 
 test("keeps the grown marks in view where the list scrolls", async ({ page, ui }) => {

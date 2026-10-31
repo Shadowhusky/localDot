@@ -24,6 +24,7 @@ import { composerReply } from "./agent/ask-form.ts";
 import { BrowserSignIn } from "./agent/BrowserSignIn.tsx";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { endTaskRun } from "./agent/control-api.ts";
+import { conversationTitle, knownConversation } from "./agent/conversation-list.ts";
 import { conversationBlockReason } from "./agent/conversation-state.ts";
 import { useTaskStalled } from "./agent/heartbeat.ts";
 import { KeysLockedCard } from "./agent/KeysLockedCard.tsx";
@@ -193,9 +194,11 @@ import { useMobileScreen } from "./shell/useMobileScreen.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
 import { useStageConnection, useStagePicture } from "./stage/connection.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
-import { SharedScreen } from "./stage/SharedScreen.tsx";
+import { SharedScreen, useSharedLook } from "./stage/SharedScreen.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { screenMoveNote } from "./stage/StageNotice.tsx";
+import { SwitchCover } from "./stage/SwitchCover.tsx";
+import { useStageSwitch } from "./stage/stage-switch.ts";
 import { useStreamPreference } from "./stage/stream-preference.ts";
 import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer, announce } from "./ui/Announcer.tsx";
@@ -715,20 +718,31 @@ function Theatre({ api }: { api: ApiClient }) {
   }, [switching, choosing]);
   const choices = useRef(0);
   const { startNew, continueFrom } = conversation;
+  // The stage's side of the choice: what it covers with until the conversation's own screen is in.
+  const stageSwitch = useStageSwitch();
+  const { begin: beginStageSwitch, end: endStageSwitch } = stageSwitch;
+  const stageSwitchFacts = useRef<(to: string | null) => { title?: string; same: boolean }>(() => ({
+    same: false,
+  }));
   const choose = useCallback(
     async (to: string | null) => {
       setViewedConversation(null);
       const request = ++choices.current;
       setSwitching({ to });
       setReveal((value) => value + 1);
+      const { title, same } = stageSwitchFacts.current(to);
+      beginStageSwitch(to, title, same);
+      // Where dot moved in the conversation left behind is no news in the one taken up.
+      dismissToast("screen");
       const done = await (to ? continueFrom(to) : startNew());
       if (!done && request === choices.current) {
         setSwitching(null);
+        endStageSwitch();
         setReveal((value) => value + 1);
       }
       return done;
     },
-    [startNew, continueFrom],
+    [startNew, continueFrom, beginStageSwitch, endStageSwitch],
   );
   const selectedScreen = agent.watchScreen;
   const shownScreen = selectedScreen?.screen ?? "desktop";
@@ -979,13 +993,15 @@ function Theatre({ api }: { api: ApiClient }) {
   }, [pasteRefused]);
   const lastScreen = useRef(shownScreen);
   const dotChose = !!selectedScreen;
+  const switchingStage = stageSwitch.active;
   useEffect(() => {
     if (replayId || lastScreen.current === shownScreen) return;
     lastScreen.current = shownScreen;
-    const title = screenMoveNote(shownScreen, dotChose);
+    // A conversation just taken up shows the screen it was on: dot has not moved.
+    const title = switchingStage ? null : screenMoveNote(shownScreen, dotChose);
     if (title) showToast({ id: "screen", title });
     else dismissToast("screen");
-  }, [replayId, shownScreen, dotChose]);
+  }, [replayId, shownScreen, dotChose, switchingStage]);
   const browserProblem =
     !replayId && shownScreen === "browser" && !browserScreen.cell ? browserScreen.error : undefined;
   useEffect(() => {
@@ -1160,7 +1176,14 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const now = sessionTime.now;
   const stalled = useTaskStalled(agent, !replayId);
-  const task = shownTask ? taskHud(session.model, now, facts) : null;
+  // A conversation just taken up reads its task's history before the island says how it stands,
+  // rather than an empty task's "Working" and "Task interrupted" on the way. Meanwhile it keeps the
+  // word of a finished task left behind, which offers nothing to press.
+  const readingTask = stageSwitch.active && agent.history !== true;
+  const ownTask = shownTask && !readingTask ? taskHud(session.model, now, facts) : null;
+  const finishedTask = useRef<typeof ownTask>(null);
+  if (!readingTask) finishedTask.current = ownTask?.phase === "finished" ? ownTask : null;
+  const task = readingTask ? finishedTask.current : ownTask;
   const work = footWork(task);
   const foot =
     work && atWork(work.row)
@@ -1228,6 +1251,8 @@ function Theatre({ api }: { api: ApiClient }) {
   // From the moment a message is sent until the task's first word, dot is shown thinking.
   const [sendingSince, setSendingSince] = useState<number | null>(null);
   const onSending = useCallback((on: boolean) => setSendingSince(on ? Date.now() : null), []);
+  // A message sent in the conversation left behind is not this one's.
+  if (stageSwitch.active && sendingSince !== null) setSendingSince(null);
   const sendingAnswered = baseStatus.row !== "ready" && baseStatus.row !== "done";
   useEffect(() => {
     if (sendingSince === null) return;
@@ -1291,6 +1316,37 @@ function Theatre({ api }: { api: ApiClient }) {
   };
   const curtain = useCurtain(opening ? "checking" : appStatus.computer, !!replayId);
   useStopToast(controls.stopStatus, controls.recheck, curtain.up);
+  const sharedLook = useSharedLook(
+    api,
+    session.resting ? null : session.sessionId,
+    session.model.observes.findLast((look) => look.screen === "desktop")?.frameId ?? null,
+    !replayId &&
+      shownScreen === "desktop" &&
+      !!session.screenHolder &&
+      session.screenHolder !== session.sessionId,
+  );
+  // A conversation just taken up is settled once its thread is on show, the computer has said what
+  // it runs, and the task's history (and, while it runs, its status) says which screen it shows.
+  const stageCover = stageSwitch.see({
+    settled:
+      !switching &&
+      session.answered &&
+      (!session.sessionId ||
+        (agent.history === true && (session.resting || agent.availability !== "loading"))),
+    presented: picture === "live" && !sharedLook.waiting,
+    yielded: curtain.up || !!replayId || mobileScreen.minimized || (phone && settings.open),
+  });
+  // The computer as it is, which is what a conversation at rest or a new one shows: taking one up
+  // keeps the picture rather than covering it.
+  const plainDesktop =
+    shownScreen === "desktop" && picture === "live" && !sharedLook.url && !curtain.up && !replayId;
+  stageSwitchFacts.current = (to) => {
+    const entry = to ? knownConversation(api, to) : undefined;
+    return {
+      title: to ? entry && conversationTitle(entry) : NEW_TITLE,
+      same: plainDesktop && (to === null || (!!entry && !entry.live)),
+    };
+  };
   const stageBox = useRef<HTMLDivElement>(null);
   const fullScreen = useFullScreen({
     available: !curtain.up && !replayId,
@@ -2332,7 +2388,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   candidate={currentWork}
                   display={displayControl}
                   hideControls={full || focus}
-                  restoring={opening || curtain.up}
+                  restoring={opening || curtain.up || !!stageCover}
                   enabled={
                     !!agent.sessionId &&
                     !replayId &&
@@ -2349,20 +2405,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     !agent.model.retrying
                   }
                 />
-                <SharedScreen
-                  api={api}
-                  sessionId={session.resting ? null : session.sessionId}
-                  frameId={
-                    session.model.observes.findLast((look) => look.screen === "desktop")?.frameId ??
-                    null
-                  }
-                  elsewhere={
-                    !replayId &&
-                    shownScreen === "desktop" &&
-                    !!session.screenHolder &&
-                    session.screenHolder !== session.sessionId
-                  }
-                />
+                <SharedScreen look={sharedLook} />
                 {!yours && !full && !focus && stageHud.live && (
                   <StageExpand
                     phone={phone}
@@ -2370,6 +2413,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     onMinimize={phone ? () => mobileScreen.setMinimized(true) : undefined}
                   />
                 )}
+                <SwitchCover state={stageCover} onShowComputer={endStageSwitch} />
               </StageFrame>
             </ErrorBoundary>
           </main>

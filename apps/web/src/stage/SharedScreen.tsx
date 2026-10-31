@@ -1,19 +1,22 @@
 import { useEffect, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 
-interface SharedScreenProps {
-  api: ApiClient;
-  // The task on show, while it is live, and its newest look at the desktop.
-  sessionId: string | null;
-  frameId: string | null;
-  // Another task is acting on the computer's screen now.
-  elsewhere: boolean;
+export interface SharedLook {
+  // The task's last look at the desktop, once read.
+  url: string | null;
+  // It is still on the way: a conversation just taken up waits for it.
+  waiting: boolean;
 }
 
-// While another task has the screen, the task on show is seen as it last saw the desktop: its own
-// windows, with every other task's covered.
-export function SharedScreen({ api, sessionId, frameId, elsewhere }: SharedScreenProps) {
-  const [shown, setShown] = useState<{ key: string; url: string } | null>(null);
+// While another task (`elsewhere`) acts on the computer's screen, the live task on show is seen as
+// it last saw the desktop, in its newest look (`frameId`).
+export function useSharedLook(
+  api: ApiClient,
+  sessionId: string | null,
+  frameId: string | null,
+  elsewhere: boolean,
+): SharedLook {
+  const [read, setRead] = useState<{ key: string; url: string | null } | null>(null);
   const key = sessionId && frameId ? `/api/sessions/${sessionId}/frames/${frameId}` : null;
   useEffect(() => {
     if (!elsewhere || !key) return;
@@ -25,20 +28,32 @@ export function SharedScreen({ api, sessionId, frameId, elsewhere }: SharedScree
         signal: controller.signal,
       })
       .then(async (response) => {
-        if (!response.ok) return;
+        if (!response.ok) {
+          setRead({ key, url: null });
+          return;
+        }
         url = URL.createObjectURL(await response.blob());
-        setShown({ key, url });
+        setRead({ key, url });
       })
-      .catch(() => {});
+      .catch(() => {
+        // A look that can't be read leaves the live picture on show, rather than a wait.
+        if (!controller.signal.aborted) setRead({ key, url: null });
+      });
     return () => {
       controller.abort();
       if (url) URL.revokeObjectURL(url);
     };
   }, [api, key, elsewhere]);
-  if (!elsewhere || !shown || shown.key !== key) return null;
+  if (!elsewhere || !key) return { url: null, waiting: false };
+  return read?.key === key ? { url: read.url, waiting: false } : { url: null, waiting: true };
+}
+
+// The task's own windows, with every other task's covered.
+export function SharedScreen({ look }: { look: SharedLook }) {
+  if (!look.url) return null;
   return (
     <div className="shared-screen">
-      <img className="shared-screen-frame" src={shown.url} alt="" />
+      <img className="shared-screen-frame" src={look.url} alt="" />
       <p className="shared-screen-note" role="status">
         Another task is using the screen. This is where this task left it.
       </p>

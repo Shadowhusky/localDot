@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useRef } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useFollowScroll } from "./useFollowScroll.ts";
 
@@ -322,4 +323,113 @@ it("lands a jump on the end as it moves", async () => {
   fireEvent.scroll(element);
   expect(following()).toBe(true);
   expect(element.scrollTop).toBe(end());
+});
+
+// A view whose run of steps the reader unfolds.
+function Unfolding({ bottom }: { bottom?: number }) {
+  const follow = useFollowScroll("task", true);
+  const run = useRef<HTMLLIElement>(null);
+  return (
+    <>
+      <div ref={follow.ref} data-testid="view" onScroll={follow.onScroll} {...follow.gestures()}>
+        <ul>
+          <li ref={run} />
+        </ul>
+      </div>
+      <output data-testid="pinned">{String(follow.pinned)}</output>
+      <button type="button" onClick={() => run.current && follow.show(run.current, 16, bottom)}>
+        Unfold
+      </button>
+    </>
+  );
+}
+
+// The run sits `at` px down the content, `height` px tall (as the time finds it while it unfolds),
+// in the 200 px view at the top of the page; the reader has scrolled to 500.
+function unfolding(at: number, height: number | ((ms: number) => number), bottom?: number) {
+  vi.useFakeTimers({
+    toFake: [
+      "setTimeout",
+      "clearTimeout",
+      "requestAnimationFrame",
+      "cancelAnimationFrame",
+      "performance",
+    ],
+  });
+  render(<Unfolding bottom={bottom} />);
+  const { element, scroll } = view();
+  const run = element.querySelector("li") as HTMLElement;
+  const start = performance.now();
+  const box = () => {
+    const tall = typeof height === "number" ? height : height(performance.now() - start);
+    const top = at - element.scrollTop;
+    return { top, bottom: top + tall, height: tall } as DOMRect;
+  };
+  element.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+  run.getBoundingClientRect = box;
+  scroll(500);
+  const frames = async (ms: number) => {
+    await act(async () => {
+      vi.advanceTimersByTime(ms);
+    });
+  };
+  fireEvent.click(screen.getByRole("button", { name: "Unfold" }));
+  return { element, frames };
+}
+
+it("brings an unfolded run's end into view, eased, and no further", async () => {
+  // Its head 150 px down the view, its end 70 px past the view's bottom.
+  const { element, frames } = unfolding(650, 120);
+  await frames(100);
+  expect(element.scrollTop).toBeGreaterThan(500);
+  expect(element.scrollTop).toBeLessThan(586);
+  await frames(1000);
+  // The end 16 px inside the view's bottom.
+  expect(element.scrollTop).toBe(586);
+  expect(following()).toBe(false);
+});
+
+it("brings a run's end up clear of what lies over the view's bottom", async () => {
+  const { element, frames } = unfolding(650, 120, 60);
+  await frames(1000);
+  expect(element.scrollTop).toBe(630);
+});
+
+it("keeps the head of a run taller than the view in view", async () => {
+  const { element, frames } = unfolding(650, 400);
+  await frames(1500);
+  // Its head 16 px inside the view's top, the rest under it.
+  expect(element.scrollTop).toBe(634);
+});
+
+it("leaves the view where it is when nothing of the run is hidden", async () => {
+  const { element, frames } = unfolding(520, 100);
+  await frames(1500);
+  expect(element.scrollTop).toBe(500);
+});
+
+it("follows a run down as it unfolds, until it has", async () => {
+  const { element, frames } = unfolding(650, (ms) => Math.min(120, (ms / 470) * 120));
+  await frames(200);
+  const midway = element.scrollTop;
+  expect(midway).toBeGreaterThan(500);
+  expect(midway).toBeLessThan(586);
+  await frames(1500);
+  expect(element.scrollTop).toBe(586);
+});
+
+it("jumps to an unfolded run's end under reduced motion", async () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: true, media: query }));
+  const { element, frames } = unfolding(650, 120);
+  await frames(20);
+  expect(element.scrollTop).toBe(586);
+});
+
+it("stops bringing a run into view once the reader scrolls back", async () => {
+  const { element, frames } = unfolding(650, 120);
+  await frames(100);
+  fireEvent.wheel(element, { deltaY: -8 });
+  const left = element.scrollTop;
+  await frames(1500);
+  expect(element.scrollTop).toBe(left);
 });
