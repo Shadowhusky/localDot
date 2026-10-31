@@ -1840,7 +1840,7 @@
     position: relative;
     display: flex;
     align-items: flex-end;
-    gap: 0;
+    gap: calc(var(--spacing) * 2);
     padding: calc(var(--spacing) * 2) var(--spacing)
       max(calc(var(--spacing) * 2), env(safe-area-inset-bottom));
     background-color: var(--_toolbar);
@@ -1873,8 +1873,11 @@
     min-width: 0;
   }
 
+  /* A 36 px face with a 44 px reach, centred where a 44 px button would be: its hover and press
+     face stays 8 px clear of the field without narrowing it. */
   .toolbar-button {
     --_icon-fg: var(--color-fg-1);
+    margin-block-end: var(--spacing);
   }
 }
 

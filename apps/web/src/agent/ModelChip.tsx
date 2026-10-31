@@ -34,7 +34,7 @@ export interface ModelMenuProps {
   onChoose(option: ModelOption): void;
   // Given what the menu opened from, which takes the focus back when Settings closes.
   onManage(trigger: HTMLElement): void;
-  // How much of each subscription plan is used, shown for the plans the menu offers.
+  // How much of each subscription plan is used, shown for the plan the chosen model runs on.
   usage?: PlanUsageFeed;
 }
 
@@ -73,10 +73,9 @@ function ModelMenuBody({
   const [draft, setDraft] = useState<ModelOption | undefined>(() =>
     selected ? { ...selected, choice: choice ?? selected.choice } : undefined,
   );
-  // The plans on offer, the one the chosen model runs on first.
-  const plans = PlanProvider.options
-    .filter((provider) => choices.some((option) => option.choice.provider === provider))
-    .sort((a, b) => Number(b === draft?.choice.provider) - Number(a === draft?.choice.provider));
+  // Only the plan the chosen model spends: another plan the menu offers, or one signed in beside a
+  // model billed by the call, says nothing about the model in use.
+  const plan = PlanProvider.options.find((provider) => provider === draft?.choice.provider);
   const dirty =
     draft &&
     (draft.id !== current ||
@@ -119,7 +118,7 @@ function ModelMenuBody({
           onChange={(choice) => setDraft({ ...draft, choice })}
         />
       )}
-      {usage?.reply && plans.length > 0 && <PlanUsageList reply={usage.reply} providers={plans} />}
+      {usage?.reply && plan && <PlanUsageList reply={usage.reply} providers={[plan]} />}
       <div className="model-config-actions">
         <Button
           variant="quiet"

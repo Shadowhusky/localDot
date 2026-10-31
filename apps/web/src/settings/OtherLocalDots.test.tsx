@@ -108,3 +108,84 @@ it("only signs in again with a fresh link for a localDot already listed", () => 
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   expect(open).toHaveBeenCalledOnce();
 });
+
+it("keeps or forgets a localDot only this browser has come from, and forgets what leaves the list", () => {
+  const changes: LocalDotLink[][] = [];
+  const forgotten: string[] = [];
+  const STUDIO = "https://studio.example.ts.net:4744";
+  function Harness() {
+    const [links, setLinks] = useState<LocalDotLink[]>([OFFICE]);
+    // Until the list here is saved, the one this browser has still has the studio.
+    const known = [
+      { ...OFFICE, persona: "coder" as const, browserOnly: false },
+      { name: "Studio Mac", url: STUDIO, accessory: "cap" as const, browserOnly: true },
+    ];
+    return (
+      <OtherLocalDots
+        links={links}
+        known={known}
+        onChange={(next) => {
+          changes.push(next);
+          setLinks(next);
+        }}
+        onForget={(url) => forgotten.push(url)}
+      />
+    );
+  }
+  render(<Harness />);
+  expect(screen.getByText("studio.example.ts.net:4744 · Only in this browser")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Forget Studio Mac" }));
+  expect(forgotten).toEqual([STUDIO]);
+  fireEvent.click(screen.getByRole("button", { name: "Keep Studio Mac in the list" }));
+  expect(changes.at(-1)).toEqual([OFFICE, { name: "Studio Mac", url: STUDIO }]);
+  expect(screen.queryByText(/Only in this browser/)).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit Office PC" }));
+  type("Address", "office2.example.ts.net:4750");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove Studio Mac" }));
+  expect(forgotten).toEqual([STUDIO, OFFICE.url, STUDIO]);
+});
+
+it("keeps no more than the list can hold", () => {
+  const full = Array.from({ length: 12 }, (_, i) => ({
+    name: `Dot ${i}`,
+    url: `https://dot${i}.example`,
+  }));
+  render(
+    <OtherLocalDots
+      links={full}
+      known={[{ name: "Studio Mac", url: "https://studio.example", browserOnly: true }]}
+      onChange={vi.fn()}
+    />,
+  );
+  expect(
+    screen
+      .getByRole("button", { name: "Keep Studio Mac in the list" })
+      .getAttribute("aria-disabled"),
+  ).toBe("true");
+});
+
+it("keeps a localDot reached at a loopback address only in this browser", () => {
+  const onChange = vi.fn();
+  render(
+    <OtherLocalDots
+      links={[OFFICE]}
+      known={[
+        { name: "Studio Mac", url: "http://127.0.0.1:4750", browserOnly: true },
+        { name: "Laptop", url: "https://laptop.tail849a6b.ts.net", browserOnly: true },
+      ]}
+      onChange={onChange}
+    />,
+  );
+  const studio = screen.getByRole("button", { name: "Keep Studio Mac in the list" });
+  expect(studio.getAttribute("aria-disabled")).toBe("true");
+  expect(document.body.textContent).toContain("Its address works only on this device");
+  fireEvent.click(studio);
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Keep Laptop in the list" }));
+  expect(onChange).toHaveBeenCalledWith([
+    OFFICE,
+    { name: "Laptop", url: "https://laptop.tail849a6b.ts.net" },
+  ]);
+});

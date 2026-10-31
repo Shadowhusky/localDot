@@ -19,7 +19,14 @@ import { canFocus, firstField, focusWithoutScroll } from "./focus.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
 import type { IconName } from "./icons.ts";
-import { LayerPortal, useBehind, useExit, useLayer, useLeaving } from "./LayerStack.tsx";
+import {
+  LayerPortal,
+  onOutsideClick,
+  useBehind,
+  useExit,
+  useLayer,
+  useLeaving,
+} from "./LayerStack.tsx";
 import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "./media.ts";
 import { useScrim } from "./scrim.ts";
 import { lockScroll } from "./scroll-lock.ts";
@@ -69,6 +76,9 @@ export interface SheetProps {
   // inspector sits beside the page, so the HUD's Stop and approvals stay in reach, and a bottom sheet,
   // which covers a phone's screen, is modal.
   modal?: boolean;
+  // Beside the page, a click outside it closes it too, as the dim area closes a modal sheet: for a
+  // passing look at something, not a place where work is kept.
+  closeOutside?: boolean;
   // Where focus goes back to when the sheet closes; by default what had it before opening.
   returnFocus?: RefObject<HTMLElement | null>;
   closeLabel?: string;
@@ -119,6 +129,7 @@ function SheetLayer({
   side = "auto",
   dirty = false,
   modal: asked,
+  closeOutside = false,
   returnFocus,
   closeLabel = "Close",
   page = "main",
@@ -257,6 +268,11 @@ function SheetLayer({
   });
   const behind = useBehind(entry);
   const scrim = useScrim(requestClose);
+
+  useEffect(
+    () => (entry && closeOutside && !modal ? onOutsideClick(entry, requestClose) : undefined),
+    [entry, closeOutside, modal, requestClose],
+  );
 
   useEffect(() => (modal ? lockScroll() : undefined), [modal]);
 

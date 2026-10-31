@@ -184,6 +184,8 @@ it("shows the archived conversations in the list's place, and goes back", async 
 });
 
 it("lists those pinned first, each row showing its colour tag", async () => {
+  // Mid-afternoon, so an hour ago is still today whenever the suite runs.
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 9, 15) });
   const pinned = { ...entry("Taxes", 3 * HOUR), pinned: true, tag: "red" as const };
   open([entry("Book the hotel", HOUR), pinned]);
   await screen.findByRole("grid");

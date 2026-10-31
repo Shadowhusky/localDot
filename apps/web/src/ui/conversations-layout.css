@@ -95,6 +95,11 @@
     transition: opacity var(--dur-hover) var(--ease-standard);
   }
 
+  /* Its reach stays within its own row, so a press by the edge of the row above lands on that row. */
+  .sessions-more::after {
+    inset-block: calc(-1px - var(--spacing) * 1.5);
+  }
+
   .sessions-item:is(:focus-within, [data-menu]) > .sessions-more {
     opacity: 1;
   }

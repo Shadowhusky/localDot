@@ -124,6 +124,26 @@ describe("the lens", () => {
     }
   });
 
+  it("lets the list scroll under a still pointer, its marks moving with it and through the lens", () => {
+    const spans = marks(40, 0);
+    const below = 190;
+    let was: { shown: number[]; focus: number } | null = null;
+    for (let top = 300; top <= 420; top++) {
+      const look = lens(spans, top + below, 1, { top, bottom: top + 380 }, REACH);
+      const shown = spans.map((span, n) => middle(span) + (look.spans[n]?.offset ?? 0) - top);
+      if (was) {
+        // A pixel of scroll moves every mark up the view, by as much as it is grown there.
+        for (const [n, at] of shown.entries()) {
+          expect(at - (was.shown[n] ?? 0)).toBeLessThanOrEqual(-1 + 1e-3);
+          expect(at - (was.shown[n] ?? 0)).toBeGreaterThanOrEqual(-MAX_SCALE - 1e-3);
+        }
+        // The lens stays under the pointer: what it magnifies is what the list brings under it.
+        expect(look.focus - top).toBeCloseTo(was.focus, 3);
+      }
+      was = { shown, focus: look.focus - top };
+    }
+  });
+
   it("moves the marks smoothly as the pointer moves", () => {
     for (const { spans, room } of scrolling) {
       let was = lens(spans, room.top, 1, room, REACH);

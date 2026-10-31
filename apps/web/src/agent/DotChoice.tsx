@@ -1,6 +1,7 @@
 import { PERSONAS, type PersonaId } from "@localdot/protocol";
 import { useRef, useState } from "react";
 import { Dot } from "../dot/Dot.tsx";
+import { useOutfit } from "../dot/wearing.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
@@ -24,6 +25,7 @@ export function DotChoice({
   // The task at work, when this line is the conversation's latest choice.
   task?: { api: ApiClient; sessionId: string };
 }) {
+  const wearables = useOutfit(choice.persona);
   const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -46,7 +48,7 @@ export function DotChoice({
   };
   return (
     <div className="thread-dot">
-      <Dot size={24} wearables={PERSONAS[choice.persona].wearables} />
+      <Dot size={24} wearables={wearables} />
       <p className="thread-dot-text">
         <span className="thread-dot-name">{dotChoiceLine(choice)}</span>
         {choice.reason && ` · ${choice.reason}`}

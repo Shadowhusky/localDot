@@ -1,5 +1,6 @@
-import type { DotSummary, LocalDotLink } from "@localdot/protocol";
+import { type DotSummary, outfit } from "@localdot/protocol";
 import { useRef, useState } from "react";
+import { Dot } from "../dot/Dot.tsx";
 import { DOT_STATE_WORD } from "../settings/dot-copy.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -7,21 +8,24 @@ import { Menu, MenuGroup, MenuItem } from "../ui/Menu.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
 import { showToast } from "../ui/Toast.tsx";
 import { localDotHost } from "./local-dots.ts";
+import type { OtherLocalDot } from "./localdot-handoff.ts";
 import { StopDotDialog } from "./StopDotDialog.tsx";
 import { type LocalDots, switchToDot } from "./useLocalDots.ts";
 
 // The wordmark as a menu of the user's localDots: the dots on this computer, each with its state,
-// then the others the user listed, each opened at its own address in this tab.
+// then the user's others, each by its name and its dot's look, opened at its own address in this tab.
 export function LocalDotSwitcher({
   name,
   others,
   here,
+  onOpen,
   onManage,
   onAddHere,
 }: {
   name?: string;
-  others: readonly LocalDotLink[];
+  others: readonly OtherLocalDot[];
   here?: LocalDots;
+  onOpen(url: string): void;
   onManage(trigger: HTMLElement): void;
   // Settings' place for adding a dot on this computer, offered when this installation can.
   onAddHere?(trigger: HTMLElement): void;
@@ -92,14 +96,13 @@ export function LocalDotSwitcher({
               </MenuItem>
             )}
             {others.map((link) => (
-              <MenuItem
-                key={link.url}
-                textValue={link.name}
-                onSelect={() => window.location.assign(link.url)}
-              >
-                <span className="bar-brand-item">
-                  <span>{link.name}</span>
-                  <span className="bar-brand-host">{localDotHost(link.url)}</span>
+              <MenuItem key={link.url} textValue={link.name} onSelect={() => onOpen(link.url)}>
+                <span className="bar-brand-other">
+                  <Dot size={24} wearables={outfit(link.persona, link.accessory)} />
+                  <span className="bar-brand-item">
+                    <span>{link.name}</span>
+                    <span className="bar-brand-host">{localDotHost(link.url)}</span>
+                  </span>
                 </span>
               </MenuItem>
             ))}

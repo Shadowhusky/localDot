@@ -1,6 +1,8 @@
-import type { LocalDotLink } from "@localdot/protocol";
+import { type LocalDotLink, outfit } from "@localdot/protocol";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { Dot } from "../dot/Dot.tsx";
 import {
+  deviceOnly,
   localDotHost,
   localDotLink,
   localDotNameProblem,
@@ -8,6 +10,7 @@ import {
   localDotProblem,
   signInLink,
 } from "../shell/local-dots.ts";
+import type { OtherLocalDot } from "../shell/localdot-handoff.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote, GroupRow } from "../ui/Group.tsx";
@@ -31,13 +34,31 @@ function onEnter(save: () => void, cancel?: () => void) {
   };
 }
 
-// The user's other localDots, which the localDot menu opens: each by name at its own address.
+const LIST_MAX = 12;
+
+// Why one this browser came from can't join the list every device shares, or undefined when it can.
+function keepReason(url: string, links: readonly LocalDotLink[]): string | undefined {
+  if (deviceOnly(url)) return "Its address works only on this device";
+  if (links.length >= LIST_MAX) return "The list is full";
+}
+
+// What that localDot's dot wears there, once this browser has come from it.
+const Look = ({ entry }: { entry?: OtherLocalDot }) => (
+  <Dot size={24} wearables={outfit(entry?.persona, entry?.accessory)} />
+);
+
+// The user's other localDots, which the localDot menu opens: each by name at its own address. Those
+// this browser has come from but the list doesn't have yet follow, to keep or forget.
 export function OtherLocalDots({
   links,
   onChange,
+  known = [],
+  onForget = () => {},
 }: {
   links: readonly LocalDotLink[];
   onChange(links: LocalDotLink[]): void;
+  known?: readonly OtherLocalDot[];
+  onForget?(url: string): void;
 }) {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
@@ -83,12 +104,14 @@ export function OtherLocalDots({
               onCancel={() => close(link.url)}
               onSave={(next) => {
                 onChange(links.map((other) => (other.url === link.url ? next : other)));
+                if (next.url !== link.url) onForget(link.url);
                 close(next.url);
               }}
             />
           ) : (
             <GroupRow
               key={link.url}
+              leading={<Look entry={known.find((entry) => entry.url === link.url)} />}
               label={link.name}
               detail={localDotHost(link.url)}
               trailing={
@@ -111,7 +134,10 @@ export function OtherLocalDots({
                     variant="quiet"
                     size="sm"
                     aria-label={`Remove ${link.name}`}
-                    onClick={() => onChange(links.filter((other) => other.url !== link.url))}
+                    onClick={() => {
+                      onChange(links.filter((other) => other.url !== link.url));
+                      onForget(link.url);
+                    }}
                   >
                     Remove
                   </Button>
@@ -120,6 +146,37 @@ export function OtherLocalDots({
             />
           ),
         )}
+        {known
+          .filter((entry) => entry.browserOnly && !links.some((link) => link.url === entry.url))
+          .map((entry) => (
+            <GroupRow
+              key={entry.url}
+              leading={<Look entry={entry} />}
+              label={entry.name}
+              detail={`${localDotHost(entry.url)} · Only in this browser`}
+              trailing={
+                <>
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    aria-label={`Keep ${entry.name} in the list`}
+                    disabledReason={keepReason(entry.url, links)}
+                    onClick={() => onChange([...links, { name: entry.name, url: entry.url }])}
+                  >
+                    Keep
+                  </Button>
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    aria-label={`Forget ${entry.name}`}
+                    onClick={() => onForget(entry.url)}
+                  >
+                    Forget
+                  </Button>
+                </>
+              }
+            />
+          ))}
         {!editing && (
           <>
             <Field
@@ -174,7 +231,8 @@ export function OtherLocalDots({
       </Group>
       <GroupNote>
         Switch to one from the localDot menu at the top left. Paste a sign-in link from that
-        computer to sign this browser in there as you add it.
+        computer to sign this browser in there as you add it. A localDot you switch here from is
+        listed in this browser too.
       </GroupNote>
     </div>
   );

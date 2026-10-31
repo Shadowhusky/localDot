@@ -157,6 +157,7 @@ function AnchoredLayer({
           event.preventDefault();
           if (!closing) onClose();
         }}
+        onContextMenu={(event) => event.preventDefault()}
       />
       <div
         {...panelProps}

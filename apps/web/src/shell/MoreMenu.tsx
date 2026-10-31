@@ -30,7 +30,7 @@ export function MoreMenu({
     <>
       <IconButton
         ref={button}
-        size={44}
+        size={36}
         round
         className="toolbar-button"
         icon="more-horizontal"

@@ -441,6 +441,7 @@ export function FileViewer<E extends AnyEntry>({
       style={previewWidth ? { left: 8, right: "auto", width: previewWidth } : undefined}
       size="wide"
       modal={!previewWidth}
+      closeOutside
       flush
       detents={LARGE}
       footer={footer}

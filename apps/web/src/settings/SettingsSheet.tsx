@@ -22,6 +22,7 @@ import {
 } from "../onboarding/AppearancePicker.tsx";
 import { PersonaPicker } from "../onboarding/PersonaPicker.tsx";
 import { FreshStartButton } from "../shell/FreshStartButton.tsx";
+import type { OtherLocalDot } from "../shell/localdot-handoff.ts";
 import type { LocalDots } from "../shell/useLocalDots.ts";
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { STREAM_PREFERENCES } from "../stage/stream-quality.ts";
@@ -121,10 +122,13 @@ export interface SettingsSheetProps {
     name: string;
     accessory?: Accessory;
     others: readonly LocalDotLink[];
+    // The user's other localDots as this browser knows them, with how each looks.
+    known?: readonly OtherLocalDot[];
     problem?: string;
     onName(value: string): void;
     onAccessory(value: Accessory | undefined): void;
     onOthers(value: LocalDotLink[]): void;
+    onForget?(url: string): void;
   };
   voice?: VoiceControl;
   // How this browser's live view gives way when the connection or the device slows.
@@ -1007,7 +1011,12 @@ function ThisLocalDot({
       <div className="settings-accessories">
         <AccessoryPicker persona={persona} value={look.accessory} onChange={look.onAccessory} />
       </div>
-      <OtherLocalDots links={look.others} onChange={look.onOthers} />
+      <OtherLocalDots
+        links={look.others}
+        onChange={look.onOthers}
+        known={look.known}
+        onForget={look.onForget}
+      />
     </div>
   );
 }
@@ -1169,6 +1178,7 @@ function SectionContent({
           </Group>
           <PersonaPicker
             value={props.persona.value}
+            accessory={props.look?.accessory}
             onChange={props.persona.onChange}
             aria-label={props.persona.auto.on ? "When Auto can't pick" : "Your dot"}
           />

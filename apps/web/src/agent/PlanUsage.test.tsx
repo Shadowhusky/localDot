@@ -165,10 +165,7 @@ describe("plan usage in the model menu", () => {
       within(panel)
         .getAllByRole("region")
         .map((region) => region.textContent),
-    ).toEqual([
-      "Claude planUsage appears after the first reply.",
-      "ChatGPT planUsage appears after the first reply.",
-    ]);
+    ).toEqual(["Claude planUsage appears after the first reply."]);
     cleanup();
     open(feed([], ["claude-code"]).usage);
     expect(plan(screen.getByRole("dialog"), /^Claude plan$/).textContent).toContain(
@@ -183,19 +180,38 @@ describe("plan usage in the model menu", () => {
     expect(within(panel).queryByRole("region")).toBeNull();
   });
 
-  it("shows nothing for models billed by the call", () => {
+  it("shows nothing for a model billed by the call, though the menu offers a plan", () => {
     const { usage } = feed([claude([42, 12])]);
     render(
       <ModelChip
         name="Claude Sonnet 5.5"
-        groups={[apiGroup]}
+        groups={[apiGroup, claudeGroup, chatgptGroup]}
         current="sonnet"
+        choice={{ provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" }}
         onChoose={vi.fn()}
         onManage={vi.fn()}
         usage={usage}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /^Model/ }));
-    expect(within(screen.getByRole("dialog")).queryByRole("region")).toBeNull();
+    const panel = screen.getByRole("dialog");
+    expect(within(panel).queryByRole("region")).toBeNull();
+    fireEvent.click(within(panel).getByRole("combobox", { name: "Model" }));
+    fireEvent.click(screen.getByRole("option", { name: "Claude Sonnet" }));
+    expect(within(panel).getAllByRole("region")).toHaveLength(1);
+    expect(plan(panel, /^Claude plan · Max$/)).toBeTruthy();
+  });
+
+  it("shows the plan of the model chosen in the menu, and only that one", () => {
+    const { usage } = feed([claude([42, 12])]);
+    const { panel } = open(usage, [claudeGroup, chatgptGroup]);
+    expect(within(panel).getAllByRole("region")).toHaveLength(1);
+    expect(plan(panel, /^Claude plan · Max$/)).toBeTruthy();
+    fireEvent.click(within(panel).getByRole("combobox", { name: "Model" }));
+    fireEvent.click(screen.getByRole("option", { name: "Sample plan model" }));
+    expect(within(panel).getAllByRole("region")).toHaveLength(1);
+    expect(plan(panel, /^ChatGPT plan$/).textContent).toContain(
+      "Usage appears after the first reply.",
+    );
   });
 });

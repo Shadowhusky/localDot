@@ -603,6 +603,12 @@
   transform-origin: 0 50%;
 }
 
+/* The marks grow and part within the list's own height: what the lens pushes past either end is
+   clipped there, so magnifying never gives the list more to scroll. */
+.sessions:has(> .sessions-dock[data-magnify]) .sessions-lists {
+  overflow-y: clip;
+}
+
 .sessions-dock {
   position: absolute;
   inset: 0;

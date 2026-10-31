@@ -22,17 +22,11 @@ test("the model menu shows each plan's limits, near, reached, stale, reset and u
       expect(set.ok()).toBe(true);
       await chip.click();
       await expect(panel).toBeVisible();
-      await expect(chatgpt).toBeVisible();
-      if (state === "unknown") {
+      // The ChatGPT plan is signed in too, but the chosen model spends only the Claude plan.
+      await expect(chatgpt).toHaveCount(0);
+      if (state === "unknown")
         await expect(claude).toContainText("Usage appears after the first reply.");
-        await expect(chatgpt).toContainText("Usage appears after the first reply.");
-      } else {
-        await expect(claude.getByRole("heading")).toHaveText("Claude plan · Max");
-        await expect(chatgpt.getByRole("meter", { name: "5-hour limit" })).toHaveAttribute(
-          "aria-valuetext",
-          "23% used",
-        );
-      }
+      else await expect(claude.getByRole("heading")).toHaveText("Claude plan · Max");
       const session = claude.getByRole("meter", { name: "5-hour limit" });
       const week = claude.getByRole("meter", { name: "Weekly limit" });
       switch (state) {

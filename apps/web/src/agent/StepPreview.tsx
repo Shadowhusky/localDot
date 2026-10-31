@@ -201,6 +201,7 @@ export function StepPreviewScope({
                 style={width ? { left: 8, right: "auto", width } : undefined}
                 size="wide"
                 modal={!width}
+                closeOutside
                 detents={LARGE}
                 flush
                 footer={

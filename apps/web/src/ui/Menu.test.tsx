@@ -256,4 +256,16 @@ describe("Menu", () => {
     wait(300);
     expect(screen.queryByRole("menu")).toBeNull();
   });
+
+  it("a right press outside only closes it too, and never shows the browser's own menu", () => {
+    render(<Harness />);
+    const menu = openWithKeyboard();
+    const catcher = menu.parentElement?.querySelector(".ui-catcher");
+    if (!catcher) throw new Error("no catcher");
+    expect(fireEvent.pointerDown(catcher, { button: 2 })).toBe(false);
+    expect(fireEvent.contextMenu(catcher)).toBe(false);
+    fireEvent.pointerUp(catcher, { button: 2 });
+    wait(300);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
 });

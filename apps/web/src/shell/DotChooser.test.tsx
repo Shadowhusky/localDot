@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { Accessory } from "@localdot/protocol";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -7,13 +8,14 @@ import { DotChooser } from "./DotChooser.tsx";
 
 afterEach(cleanup);
 
-const chooser = (auto: Parameters<typeof DotChooser>[0]["auto"]) => {
+const chooser = (auto: Parameters<typeof DotChooser>[0]["auto"], accessory?: Accessory) => {
   const onChange = vi.fn();
   render(
     <DotChooser
       open
       anchor={createRef<HTMLElement>()}
       value="coder"
+      accessory={accessory}
       onChange={onChange}
       auto={auto}
       onClose={vi.fn()}
@@ -30,6 +32,21 @@ it("lists every dot with the chosen one checked, and saves a new choice", () => 
   fireEvent.click(screen.getByRole("radio", { name: "Finance" }));
   expect(onChange).toHaveBeenCalledWith("finance");
   expect(dialog.textContent).toContain("Your choice applies from the next task.");
+});
+
+it("shows each dot wearing this localDot's accessory, in place of a hat it would wear", () => {
+  chooser({ on: false, onChange: vi.fn() }, "cap");
+  const worn = [...document.querySelectorAll(".persona-preview")].map((preview) =>
+    [...preview.querySelectorAll<HTMLElement>("[data-wear]")].map((img) => img.dataset.wear).sort(),
+  );
+  expect(worn).toEqual([
+    ["cap"],
+    ["cap", "hoodie"],
+    ["cap", "mustache"],
+    ["cap", "suit"],
+    ["cap", "round-glasses"],
+    ["cap", "scarf"],
+  ]);
 });
 
 it("turns Auto on, saying what it costs, and keeps the chosen dot for when it can't pick", () => {
