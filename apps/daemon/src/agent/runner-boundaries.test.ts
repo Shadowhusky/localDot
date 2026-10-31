@@ -490,6 +490,27 @@ describe("recovery preserves daemon-owned control", () => {
     await h.health({ online: true, bootId: "boot-a" });
     expect((await session.inbox(0, 0)).items.map((i) => i.kind)).toEqual(["resume"]);
   });
+  it("logs a stalled model call once, with what went wrong", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const h = setup();
+      const session = await h.runner.start(h.cellId, "Task");
+      await h.ready();
+      const detail =
+        "200: The reply broke off before it ended: Failed to process successful response; terminated; other side closed (UND_ERR_SOCKET)";
+      for (let i = 0; i < 2; i++)
+        session.append("agent.state", { state: "paused", reason: "model unavailable", detail });
+      expect(warn.mock.calls.filter(([line]) => String(line).includes("paused"))).toEqual([
+        [`task ${session.id} paused (model unavailable): ${detail}`],
+      ]);
+      const notices = h.log.read(session.id).filter((e) => e.type === "message.assistant");
+      expect(notices.map((e) => e.data.text)).toEqual([
+        `The model is not responding after several attempts. Check its connection, or choose another model and continue.\n\nDetails: ${detail}`,
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
   it("survives takeover caller crash, keyd changes and user messages until explicit handback", async () => {
     const h = setup();
     const session = await h.runner.start(h.cellId, "Task");

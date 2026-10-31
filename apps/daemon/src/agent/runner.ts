@@ -412,6 +412,10 @@ export class AgentRunner {
         if (notice && rt.providerNotice !== notice) {
           rt.providerNotice = notice;
           rt.session.append("message.assistant", { messageId: ulid(), text: notice });
+          // The brain's own log stays empty; this line is where a stalled model call is traced.
+          console.warn(
+            `task ${id} paused (${event.data.reason})${event.data.detail ? `: ${event.data.detail}` : ""}`,
+          );
         }
         if (rt.selection.kind === "chatgpt" && event.data.reason === "chatgpt account changed") {
           const generation = this.deps.codex?.authGeneration?.();

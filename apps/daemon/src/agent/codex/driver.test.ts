@@ -6,6 +6,7 @@ import { RETRY_NEXT } from "../native-tools.ts";
 import { redactor } from "../redact.ts";
 import { AgentSession } from "../session.ts";
 import { TranscriptStore } from "../transcript.ts";
+import { AccountError, TASK_BUSY } from "./account.ts";
 import {
   CODEX_CRASHED,
   CODEX_DONE,
@@ -1507,5 +1508,49 @@ describe("daemon-owned auth Resume handoff", () => {
       f.session.stop();
       await run.catch(() => {});
     }
+  });
+});
+
+describe("a ChatGPT start that fails", () => {
+  const states = (f: ReturnType<typeof fixture>) =>
+    f.events.filter((e) => e.type === "agent.state").map((e) => e.data);
+
+  it("says the screen step stopped it and logs the cause without the task's words", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = fixture();
+    f.observe.mockRejectedValueOnce(
+      new Error("Find the weather: frame fake-private-diagnostic lost"),
+    );
+    expect(await f.run()).toBe(CODEX_GAVE_UP);
+    expect(states(f)).toContainEqual({
+      state: "error",
+      reason: "The ChatGPT task could not start.",
+      detail: "The computer's screen couldn't be read.",
+      next: "Wait until the computer is ready, then send your message again.",
+    });
+    expect(errors).toHaveBeenCalledWith(
+      `ChatGPT could not start (screen): Error: [task]: frame [redacted] lost (task ${f.session.id})`,
+    );
+  });
+
+  it("says another task has the account, which takes one ChatGPT task at a time", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = fixture();
+    f.fake.auth.acquireTask = async () => {
+      throw new AccountError(409, TASK_BUSY);
+    };
+    expect(await f.run()).toBe(CODEX_GAVE_UP);
+    expect(states(f)).toEqual([
+      {
+        state: "error",
+        reason: "Another task is using your ChatGPT account.",
+        detail: "Only one ChatGPT task works at a time.",
+        next: "Send your message again once it's done, or choose another model in Settings.",
+      },
+    ]);
+    expect(errors).toHaveBeenCalledWith(
+      `ChatGPT could not continue: AccountError: ${TASK_BUSY} (task ${f.session.id})`,
+    );
+    expect(f.fake.launches).toHaveLength(0);
   });
 });

@@ -102,10 +102,14 @@ export class PrivateRecords<T> {
     }
   }
   list(): T[] {
+    return this.entries().map(([, record]) => record);
+  }
+  // Each record with the identity it is saved under.
+  entries(): [string, T][] {
     this.#directory(this.dir);
     const entries = readdirSync(this.dir, { withFileTypes: true });
     if (entries.length > MAX_RECORDS) throw new Error("safety record capacity exhausted");
-    const out: T[] = [];
+    const out: [string, T][] = [];
     for (const entry of entries) {
       if (/^\.record-[0-9A-HJKMNP-TV-Z]{26}\.tmp$/.test(entry.name)) {
         const st = lstatSync(join(this.dir, entry.name));
@@ -119,9 +123,10 @@ export class PrivateRecords<T> {
         !entry.name.endsWith(".json")
       )
         throw new Error("unexpected safety record");
-      const record = this.read(entry.name.slice(0, -5));
+      const id = entry.name.slice(0, -5),
+        record = this.read(id);
       if (!record) throw new Error("safety record disappeared");
-      out.push(record);
+      out.push([id, record]);
     }
     return out;
   }
