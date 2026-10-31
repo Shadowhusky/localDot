@@ -363,7 +363,12 @@ Authorization header and JSON request bodies:
 - `POST /api/cells/<id>/agent` with `{"task":"…"}` starts on a ready computer and returns a
   `sessionId`. Follow-ups use `POST /api/agent/sessions/<id>/messages` with
   `{"kind":"followup","text":"…"}`; use `"steer"` to redirect current work. Do not automatically
-  resend a mutation if its reply is lost: reconcile the session and event log first.
+  resend a mutation if its reply is lost: reconcile the session and event log first. A steer that
+  dot's model hasn't taken in yet ends the wait dot is in, on every model path, within a second: a
+  `computer` wait (a batch stops after it), `done` waiting for progress, a `shell` command's opening
+  `sleep` (only while it is still sleeping, before anything after it has run; the command is stopped
+  as Stop stops one), and the wait for its turn on a computer another task is using (the action is
+  then not done). Each message ends one wait; actions already under way finish.
 - `POST /api/agent/sessions/<id>/stop` ends a task's run (204). With `?giveBack=1` it answers 200
   `{"messages":[{"messageId","text"}]}`: the stopper's own messages dot had not acted on yet (no
   words of its own and no tool call but a screenshot since), oldest first. The daemon decides
@@ -400,7 +405,10 @@ conversation in at most six words, recorded as a `session.title` event that the 
 Replay and search results show; until it comes, or when it never does, the first message is the
 name. The task never waits for it. With **Auto** on (`autoPersona`), the same call also picks the
 dot, and the task waits up to 4 seconds for it before installing skills and starting its agent,
-falling back to the chosen dot (`persona.choice`). A ChatGPT plan has no call to spare: its one
+falling back to the chosen dot (`persona.choice` `default`). A pick that comes later still counts
+while dot has neither said nor done anything and isn't waiting on the user: it is recorded as a
+second `persona.choice` (`auto`), and a different dot takes over as a switch does, from the saved
+history. A ChatGPT plan has no call to spare: its one
 Codex process is the task's. The agent's own first reply can't do this: Claude Code and Codex shape
 their own output, and the dot's skills and role must be in place before that agent starts. Follow-up
 tasks keep the conversation's names and dot without asking again.

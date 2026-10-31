@@ -444,7 +444,12 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
 - **Modal or beside.** A modal sheet dims the page, traps focus and locks scroll; one beside the page
   does none of these. By default an inspector sits beside the page, so the HUD's Stop and incoming
   approvals stay in reach while Settings is open (§4.2), and a bottom sheet, which covers a phone, is
-  modal; `modal` overrides either. A sheet beside the page has no dim area to dismiss it by.
+  modal; `modal` overrides either. A sheet beside the page has no dim area to dismiss it by. One that
+  is only a passing look, such as a step's or a file's preview beside the chat, closes on a click
+  outside it instead (`closeOutside`): the press must start there too, with only tooltips open above
+  the sheet, so the press that opened it, a press that closes its own menu or popover, a drag (a
+  selection, a resize) and a splitter at its edge never close it. Settings and the other inspectors
+  keep this off, so the page beside them stays live and unsaved edits are never at stake.
 - **Triggers.** `triggerProps("menu" | "dialog", open)` gives the control that opens a menu or popover
   its `aria-haspopup` and `aria-expanded`; the latter also keeps it lit while open. The control still
   passes its ref as `anchor`. A popover holds Tab, so it is `aria-modal`.
