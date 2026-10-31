@@ -2,8 +2,8 @@ import { ModelOptions, type ModelSpeed, type ReasoningEffort } from "@localdot/p
 import { providerById } from "./registry.ts";
 import { speedTiers } from "./speeds.ts";
 
-// Reviewed against the vendor references in docs/model-options.md. A reasoning model is not
-// necessarily configurable. Unknown families deliberately keep the provider default.
+// Reviewed against the vendor references in docs/providers.md (2026-10-31). A reasoning model is
+// not necessarily configurable. Unknown families deliberately keep the provider default.
 export type ThinkingWire =
   | "binary-effort"
   | "effort"
@@ -26,20 +26,25 @@ export interface ModelControls {
 const basic = ["low", "medium", "high"] as const;
 const full = [...basic, "xhigh", "max"] as const;
 const toggle = ["none", "enabled"] as const;
+// Kimi K3, GLM 5.3 and their hosts: three levels and no off switch.
+const lowHighMax = ["low", "high", "max"] as const;
 const unknown: ModelControls = { efforts: [] };
 const effort = (
   efforts: readonly ReasoningEffort[],
   wire: ThinkingWire = "effort",
 ): ModelControls => ({ efforts, wire });
 function openai(model: string): ModelControls {
-  if (/^gpt-6-(?:sol|luna)(?:-|$)/.test(model))
+  // A gateway's GPT-6 "pro" ID is OpenAI's pro reasoning mode, whose levels aren't published.
+  if (/^gpt-6.*-pro(?:-|$)/.test(model)) return unknown;
+  if (/^gpt-6-(?:sol|luna)(?:-|$)|^gpt-6\.1-terra(?:-|$)/.test(model))
     return { ...effort(["none", ...full]), verbosity: true };
   if (/^gpt-6-astra(?:-|$)|^gpt-6\.1-sol(?:-|$)/.test(model))
     return { ...effort(full), verbosity: true };
   if (/^gpt-5\.6(?:-|$)/.test(model)) return { ...effort(["none", ...full]), verbosity: true };
+  if (/^gpt-5\.3-codex(?:-max)?$/.test(model)) return effort([...basic, "xhigh"]);
   if (/^gpt-5(?:[.-]|$)/.test(model) && !/chat|search|codex/.test(model)) {
     if (/^gpt-5-pro(?:-|$)/.test(model)) return effort(["high"]);
-    if (/^gpt-5\.[234]-pro/.test(model)) return effort(["medium", "high", "xhigh"]);
+    if (/^gpt-5\.[2-5]-pro/.test(model)) return effort(["medium", "high", "xhigh"]);
     if (/^gpt-5\.[7-9]/.test(model)) return unknown;
     const newer = /^gpt-5\.[2-5]/.test(model);
     return {
@@ -59,8 +64,11 @@ function openai(model: string): ModelControls {
 }
 function claude(model: string): ModelControls {
   const m = model.replaceAll(".", "-");
-  if (/claude-(?:opus-4-[78]|(?:opus|sonnet|haiku|fable|mythos)-5)/.test(m))
-    return effort(full, "anthropic");
+  // Fable 5, Opus 5.5 and Sonnet 5.5 always think (Sonnet 5.5's lowest setting still notes
+  // between tools); the others take thinking disabled.
+  if (/claude-(?:fable-5|(?:opus|sonnet)-5-5|mythos-5)/.test(m)) return effort(full, "anthropic");
+  if (/claude-(?:opus-4-[78]|(?:opus|sonnet|haiku)-5)/.test(m))
+    return effort(["none", ...full], "anthropic");
   if (/claude-(?:opus|sonnet)-4-6/.test(m)) return effort([...basic, "max"], "anthropic");
   if (/claude-opus-4-5/.test(m)) return { ...effort(basic, "anthropic-budget"), budget: true };
   if (/claude-(?:3-7-sonnet|(?:sonnet|opus)-4|haiku-4-5)/.test(m))
@@ -87,6 +95,169 @@ export function choiceControls(
     ? { ...controls, speeds: ["standard", ...tiers.map((tier) => tier.speed)] }
     : controls;
 }
+// One model family on one API: the pattern its lower-case ID matches and what that API accepts
+// for it. The first family that matches wins, so an exclusion is a family with no controls.
+type Family = readonly [RegExp, ModelControls];
+const family = (families: readonly Family[], model: string): ModelControls =>
+  families.find(([pattern]) => pattern.test(model))?.[1] ?? unknown;
+const gemini: readonly Family[] = [
+  [/^gemini-2\.5-pro/, { ...effort([], "google-budget"), budget: true }],
+  [/^gemini-2\.5-flash/, { ...effort(["none"], "google-budget"), budget: true }],
+  [/^gemini-3-pro/, effort(["low", "high"], "google-level")],
+  [/^gemini-(?:4-argon|3\.1-pro|3\.[78]-(?:pro|flash))/, effort(basic, "google-level")],
+  [/image/, unknown],
+  [/^gemini-(?:3-flash|3\.[156]-flash)/, effort(["minimal", ...basic], "google-level")],
+];
+// K3 and K3.1 always think, at `reasoning_effort`; K2.7 Code always thinks with no setting.
+const kimi: readonly Family[] = [
+  [/^kimi-k3/, effort(lowHighMax)],
+  [/^kimi-k2\.[56]/, effort(toggle, "thinking")],
+];
+// GLM 5.3 always thinks; 5.2 also takes `thinking.type` and maps low and medium to high.
+const glm: readonly Family[] = [
+  [/^glm-5\.3/, effort(lowHighMax)],
+  [/^glm-5\.2/, effort(["none", "high", "max"], "deepseek")],
+  [/^glm-(?:4\.[567]|5(?:\.1)?(?:$|-)|5v-turbo)/, effort(toggle, "thinking")],
+];
+// Model Studio's own Qwen families and the other vendors' models it serves, each in its own words
+// there: `enable_thinking`, then `reasoning_effort` or `thinking_budget`, never both.
+const dashscope: readonly Family[] = [
+  [/thinking|instruct|coder|image|max-preview|^kimi\/|kimi-k2\.7|minimax/, unknown],
+  [/^qwen3\.8-omni/, effort(["none", "minimal", ...full])],
+  [
+    /^qwen3\.8-(?:max|flash)/,
+    { ...effort(["none", "low", "medium", "xhigh"], "enable-thinking"), budget: true },
+  ],
+  [
+    /^qwen(?:3(?:\.[5678])?|-(?:plus|turbo|flash))/,
+    { ...effort(toggle, "enable-thinking"), budget: true },
+  ],
+  [/^kimi-k3/, effort(lowHighMax)],
+  [/^kimi-k2\.[56]/, { ...effort(toggle, "enable-thinking"), budget: true }],
+  [/^glm-5\.3/, effort(lowHighMax)],
+  [/^glm-5(?:\.[12])?$/, effort(["none", "high", "max"], "enable-thinking")],
+  [/^deepseek-v4/, effort(["none", "low", "high", "max"], "enable-thinking")],
+];
+// M3.1 Flash always thinks at `reasoning_effort`; M3's adaptive thinking can only be turned off.
+const minimax: readonly Family[] = [
+  [/^minimax-m3\.1-flash(?:-preview)?$/, effort(full)],
+  [/^minimax-m3$/, effort(["none"], "thinking")],
+];
+const siliconflow: readonly Family[] = [
+  [/glm-5\.3/, effort(lowHighMax)],
+  [/deepseek-v4-(?:pro|flash)$|glm-5\.2$/, effort(["high", "max"])],
+  [/deepseek-v3\.1$/, effort(["none"], "enable-thinking")],
+  [
+    /qwen3-(?:8b|14b|32b|30b-a3b|235b-a22b)$|hunyuan-a13b-instruct|glm-(?:5v-turbo|4\.[56]v)|deepseek-v3\.(?:1-terminus|2)/,
+    { ...effort(toggle, "enable-thinking"), budget: true },
+  ],
+];
+// Gateway vocabulary takes precedence over the model vendor's, and a catalog's reasoning boolean
+// is never evidence of a parameter.
+const FAMILIES: Readonly<Record<string, readonly Family[]>> = {
+  google: gemini,
+  "google-vertex": gemini,
+  deepseek: [
+    [/^deepseek-(?:flash|pro|v4)/, effort(["none", "low", "high", "max"], "deepseek")],
+    [/^deepseek-(?:chat|reasoner)$/, effort(toggle, "thinking")],
+  ],
+  xai: [
+    [/^grok-4\.[67]/, effort([...basic, "xhigh"])],
+    [/^grok-4\.5/, effort(basic)],
+    [/^grok-4\.3(?:-|$)/, effort(["none", ...basic])],
+  ],
+  groq: [
+    [/gpt-oss/, effort(basic)],
+    [/qwen3\.8-27b/, effort(["none", ...basic])],
+    [/qwen3\.6-27b/, effort(["none"])],
+  ],
+  mistral: [
+    [/^zai-glm-5-3$/, effort(["low", "high", "max"])],
+    [/^mistral-large-4(?:-0)?$/, effort(basic)],
+    [
+      /^mistral-(?:small-(?:latest|4|2603)|medium-(?:latest|2604|3[.-]5))$/,
+      effort(["none", "high"]),
+    ],
+  ],
+  "fireworks-ai": [
+    [/minimax-m3p1-flash/, effort(full)],
+    [/gpt-oss|(?:minimax-)?m2(?:[.-]|$)/, effort(basic)],
+    [/qwen3[.-]8/, effort(["none", ...full])],
+    [/deepseek-v4|kimi-k3/, effort(["none", "low", "high", "max"])],
+    [/glm-5[.-]2/, effort(["none", "high", "max"])],
+    [/deepseek-v3[.p-][12]|glm-(?:4[.-][567]|5[.-]1)/, effort(toggle, "binary-effort")],
+    [/thinking|instruct|coder/, unknown],
+    [/qwen3(?:-|\.)/, effort(["none", ...basic])],
+  ],
+  deepinfra: [
+    [/glm-5\.3/, effort(lowHighMax)],
+    [
+      /deepseek-v4-(?:flash-0731|pro-0813)|glm-5\.2|kimi-k3|ling-3\.0-flash/,
+      effort(["none", ...basic]),
+    ],
+  ],
+  volcengine: [
+    [
+      /^doubao-seed-(?:evolving$|2-[01]-(?:pro|lite|mini|turbo|code-preview)-|character-260628)/,
+      effort(["none", ...basic], "deepseek"),
+    ],
+    [/^deepseek-v4-(?:pro|flash)/, effort(["none", "low", "high", "max"], "deepseek")],
+    [/^glm-5-2-260617$/, effort(["none", "high", "max"], "deepseek")],
+    [/^glm-5-3-flash-/, effort(lowHighMax)],
+    [/^doubao-seed-1-8-/, effort(["none", ...basic], "deepseek")],
+  ],
+  cohere: [[/^command-a-reasoning/, effort(["none", "high"])]],
+  siliconflow,
+  "siliconflow-cn": siliconflow,
+  togetherai: [
+    [/gpt-oss/, effort(basic)],
+    [/kimi-k3/, effort(["none", ...lowHighMax], "together")],
+    [/deepseek-v4-pro/, effort(["none", "high", "max"], "together")],
+    [/glm-5\.3/, effort(["low", "medium", "high", "max"])],
+    [/minimax-m3|deepseek-v4|glm-5\.2|qwen3\.(?:5|6)/, effort(toggle, "together")],
+  ],
+  cerebras: [
+    [/gpt-oss/, effort(basic)],
+    [/^qwen-3\.8-27b$/, effort(["none", ...basic])],
+    [/glm-5\.3-flash/, effort(["low", "high", "max"])],
+    [/glm-4\.[67]/, effort(["none"])],
+  ],
+  moonshotai: kimi,
+  "moonshotai-cn": kimi,
+  zai: glm,
+  zhipuai: glm,
+  alibaba: dashscope,
+  "alibaba-cn": dashscope,
+  "alibaba-token-plan": dashscope,
+  "alibaba-coding-plan": dashscope,
+  minimax,
+  "minimax-coding-plan": minimax,
+  ollama: [[/gpt-oss/, effort(basic)]],
+  // localDot always supplies tools. GPT-6 Sol/Luna and GPT-5.6 chat take them only at none (even
+  // the default effort refuses them); Astra and 6.1 need a Responses endpoint for tool use. Other
+  // IDs are read as OpenAI's own.
+  "openai-compatible": [
+    [/^gpt-(?:6-(?:sol|luna)|5\.6)(?:-|$)/, effort(["none"])],
+    [/^gpt-6/, unknown],
+  ],
+};
+// OpenRouter's unified `reasoning` object, for the vendors whose families it maps.
+// Its model list narrows these per model (discovery.ts). It refuses `none` for Claude.
+const OPENROUTER: Readonly<Record<string, (model: string) => ModelControls>> = {
+  openai,
+  anthropic: (model) => {
+    const c = claude(model);
+    return { ...c, efforts: c.efforts.filter((e) => e !== "none") };
+  },
+  google: (model) => family(gemini, model),
+  deepseek: (model) => family(FAMILIES.deepseek ?? [], model),
+  "x-ai": (model) => family(FAMILIES.xai ?? [], model),
+  moonshotai: (model) => family(kimi, model),
+  "z-ai": (model) => family(glm, model),
+  qwen: (model) => family(dashscope, model),
+  minimax: (model) => family(minimax, model),
+  mistralai: (model) => family(FAMILIES.mistral ?? [], model),
+};
 function reasoningControls(provider: string, modelId: string): ModelControls {
   const model = modelId.toLowerCase();
   const client = providerById(provider)?.client;
@@ -103,134 +274,34 @@ function reasoningControls(provider: string, modelId: string): ModelControls {
     if (/^(opus|sonnet|fable|best)$/.test(model)) return effort(full);
     if (model === "haiku") return unknown;
     const c = claude(model);
-    return c.wire === "anthropic" || /opus-4[.-]5/.test(model) ? effort(c.efforts) : unknown;
+    return c.wire === "anthropic" || /opus-4[.-]5/.test(model)
+      ? effort(c.efforts.filter((e) => e !== "none"))
+      : unknown;
   }
   if (client === "anthropic" || client === "anthropic-compatible") return claude(model);
   if (client === "openai" || client === "azure") return openai(model);
-  if (client === "google") {
-    if (/^gemini-2\.5-(?:pro|flash)/.test(model))
-      return { ...effort(model.includes("pro") ? [] : ["none"], "google-budget"), budget: true };
-    if (/^gemini-3-pro/.test(model)) return effort(["low", "high"], "google-level");
-    if (/^gemini-3\.1-pro|^gemini-3\.8-(?:pro|flash)/.test(model))
-      return effort(basic, "google-level");
-    if (/^gemini-(?:3-flash|3\.[156]-flash)/.test(model) && !/image/.test(model))
-      return effort(["minimal", ...basic], "google-level");
-    return unknown;
-  }
-  if (provider === "deepseek") {
-    if (/^deepseek-(?:flash|pro|v4)/.test(model))
-      return effort(["none", "low", "high", "max"], "deepseek");
-    if (/^deepseek-(?:chat|reasoner)$/.test(model)) return effort(toggle, "thinking");
-  }
-  if (provider === "xai") {
-    if (/^grok-4\.[67]/.test(model)) return effort([...basic, "xhigh"]);
-    if (/^grok-4\.5/.test(model)) return effort(basic);
-    return unknown;
-  }
-  if (provider === "groq") {
-    if (/gpt-oss/.test(model)) return effort(basic);
-    if (/qwen3\.[68]-27b/.test(model)) return effort(["none", ...basic]);
-    return unknown;
-  }
-  if (provider === "mistral") {
-    if (/^zai-glm-5-3/.test(model)) return effort(["low", "high", "max"]);
-    if (/^mistral-small-(?:latest|4|2603)/.test(model)) return effort(["none", "high"]);
-    return unknown;
-  }
   if (provider === "openrouter") {
-    const bare = model.replace(/^[^/]+\//, "").replace(/:.*$/, "");
-    const c = model.startsWith("openai/")
-      ? openai(bare)
-      : model.startsWith("anthropic/")
-        ? claude(bare)
-        : model.startsWith("google/")
-          ? modelControls("google", bare)
-          : model.startsWith("deepseek/")
-            ? modelControls("deepseek", bare)
-            : unknown;
-    if (c.wire) return { ...c, wire: "openrouter", verbosity: false };
-    return unknown;
+    const [vendor = "", bare = ""] = model.replace(/:.*$/, "").split("/");
+    const c = OPENROUTER[vendor]?.(bare) ?? unknown;
+    return c.wire ? { ...c, wire: "openrouter", verbosity: false } : unknown;
   }
-  if (provider === "fireworks-ai") {
-    if (/gpt-oss|(?:minimax-)?m2(?:[.-]|$)/.test(model)) return effort(basic);
-    if (/qwen3[.-]8/.test(model)) return effort(["none", ...full]);
-    if (/deepseek-v4|kimi-k3/.test(model)) return effort(["none", "low", "high", "max"]);
-    if (/glm-5[.-]2/.test(model)) return effort(["none", "high", "max"]);
-    if (/deepseek-v3[.p-][12]|glm-(?:4[.-][567]|5[.-]1)/.test(model))
-      return effort(toggle, "binary-effort");
-    if (/qwen3(?:-|\.)/.test(model) && !/thinking|instruct|coder/.test(model))
-      return effort(["none", ...basic]);
-    return unknown;
-  }
-  if (provider === "deepinfra")
-    return /deepseek-v4-(?:flash-0731|pro-0813)|glm-5\.2|kimi-k3|ling-3\.0-flash/.test(model)
-      ? effort(["none", ...basic])
-      : unknown;
-  if (provider === "volcengine") {
-    if (
-      /^doubao-seed-(?:evolving$|2-[01]-(?:pro|lite|mini|turbo|code-preview)-|character-260628)/.test(
-        model,
-      )
-    )
-      return effort(["none", ...basic], "deepseek");
-    if (/^deepseek-v4-(?:pro|flash)/.test(model))
-      return effort(["none", "low", "high", "max"], "deepseek");
-    if (model === "glm-5-2-260617") return effort(["none", "high", "max"], "deepseek");
-    return unknown;
-  }
-  if (provider === "cohere")
-    return /^command-a-reasoning/.test(model) ? effort(["none", "high"]) : unknown;
-  if (["siliconflow", "siliconflow-cn"].includes(provider)) {
-    if (/deepseek-v3\.1$/.test(model)) return effort(["none"], "enable-thinking");
-    if (
-      /qwen3-(?:8b|14b|32b|30b-a3b|235b-a22b)$|hunyuan-a13b-instruct|glm-(?:5v-turbo|4\.[56]v)|deepseek-v3\.(?:1-terminus|2)/.test(
-        model,
-      )
-    )
-      return { ...effort(toggle, "enable-thinking"), budget: true };
-    return unknown;
-  }
-  if (provider === "togetherai") {
-    if (/gpt-oss/.test(model)) return effort(basic);
-    if (/minimax-m3|deepseek-v4|glm-5\.2|kimi-k3|qwen3\.(?:5|6)/.test(model))
-      return effort(toggle, "together");
-    return unknown;
-  }
-  if (provider === "cerebras") {
-    if (/gpt-oss/.test(model)) return effort(basic);
-    if (/glm-4\.[67]/.test(model)) return effort(["none"]);
-    return unknown;
-  }
-  if (["moonshotai", "moonshotai-cn"].includes(provider))
-    return /^kimi-k2\.[56]/.test(model) ? effort(toggle, "thinking") : unknown;
-  if (["zai", "zhipuai"].includes(provider))
-    return /^glm-(?:4\.[567]|5(?:[.-][12])?(?:$|-))/.test(model) && !/^glm-5\.3/.test(model)
-      ? effort(toggle, "thinking")
-      : unknown;
-  if (["alibaba", "alibaba-cn", "alibaba-token-plan", "alibaba-coding-plan"].includes(provider)) {
-    if (
-      /^qwen(?:3(?:\.[568])?|-(?:plus|turbo))/.test(model) &&
-      !/thinking|instruct|coder|image/.test(model)
-    )
-      return { ...effort(toggle, "enable-thinking"), budget: true };
-    return unknown;
-  }
-  if (["minimax", "minimax-coding-plan"].includes(provider))
-    return model === "minimax-m3.1-flash-preview" ? effort(full) : unknown;
-  if (provider === "ollama") return /gpt-oss/.test(model) ? effort(basic) : unknown;
-  if (provider === "openai-compatible") {
-    // localDot always supplies tools. GPT-6 Sol/Luna chat supports them only at none;
-    // Astra and 6.1 Sol need a Responses endpoint for tool use.
-    if (/^gpt-6-(?:sol|luna)(?:-|$)/.test(model)) return effort(["none"]);
-    if (/^gpt-6/.test(model)) return unknown;
-    return openai(model);
-  }
-  // Perplexity and LM Studio have
-  // endpoint/model-specific contracts. Add only documented combinations, never infer from
-  // the catalog's reasoning boolean or send a parameter merely because the endpoint is compatible.
+  const families = FAMILIES[provider];
+  if (provider === "openai-compatible")
+    return families?.find(([pattern]) => pattern.test(model))?.[1] ?? openai(model);
+  if (families) return family(families, model);
+  // Perplexity, LM Studio and the providers M8 brings have endpoint- or model-specific
+  // contracts. Add only documented combinations, never infer from the catalog's reasoning
+  // boolean or send a parameter merely because the endpoint is compatible.
   return unknown;
 }
 
+// An On saved while a model offered only Off and On is its default thinking, which it now takes as
+// levels: every model that moved from the switch to levels thinks by default.
+function savedOn(effort: ReasoningEffort | undefined, c: ModelControls): boolean {
+  return (
+    effort === "enabled" && !c.efforts.includes("enabled") && c.efforts.some((e) => e !== "none")
+  );
+}
 export function modelOptionsProblem(
   provider: string,
   model: string,
@@ -243,7 +314,11 @@ export function modelOptionsProblem(
   if (!parsed.success) return "Invalid model options.";
   const o = parsed.data,
     c = modelControls(provider, model, discovered);
-  if (o.reasoningEffort !== undefined && !c.efforts.includes(o.reasoningEffort))
+  if (
+    o.reasoningEffort !== undefined &&
+    !c.efforts.includes(o.reasoningEffort) &&
+    !savedOn(o.reasoningEffort, c)
+  )
     return "This model does not support that reasoning effort.";
   if (o.thinkingBudget !== undefined && (!c.budget || o.thinkingBudget > outputCap - 1024))
     return "Choose a thinking budget that leaves at least 1,024 tokens for the answer.";
@@ -304,15 +379,17 @@ export function modelProviderOptions(
   const problem = modelOptionsProblem(provider, model, options, 16000, discovered);
   if (problem) throw new Error(problem);
   const c = modelControls(provider, model, discovered),
-    e = options.reasoningEffort,
+    e = savedOn(options.reasoningEffort, c) ? undefined : options.reasoningEffort,
     budget = options.thinkingBudget;
+  // An effort level, as opposed to switching thinking off or on.
+  const level = e === "none" || e === "enabled" ? undefined : e;
   const out: Record<string, Wire> = options.speed ? speedOptions(provider, options.speed, cap) : {};
   if (options.verbosity) out.textVerbosity = options.verbosity;
   if (e === undefined && budget === undefined) return out;
   switch (c.wire) {
     case "anthropic":
-      out.thinking = { type: "adaptive" };
-      if (e) out.effort = e;
+      out.thinking = { type: e === "none" ? "disabled" : "adaptive" };
+      if (level) out.effort = level;
       break;
     case "anthropic-budget":
       if (e === "none") out.thinking = { type: "disabled" };
@@ -336,9 +413,11 @@ export function modelProviderOptions(
     case "enable-thinking":
       out.enable_thinking = e !== "none";
       if (budget !== undefined) out.thinking_budget = budget;
+      if (level) out.reasoningEffort = level;
       break;
     case "together":
-      out.reasoning = { enabled: e !== "none" };
+      if (level) out.reasoningEffort = level;
+      else out.reasoning = { enabled: e !== "none" };
       break;
     case "openrouter":
       out.reasoning =

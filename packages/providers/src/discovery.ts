@@ -31,10 +31,18 @@ const row = z.object({
   display_name: z.string().max(200).optional(),
   capabilities: z.unknown().optional(),
   supported_parameters: z.array(z.string().max(100)).max(128).optional(),
+  reasoning: z.unknown().optional(),
   max_input_tokens: z.number().int().positive().optional().nullable(),
   max_tokens: z.number().int().positive().optional().nullable(),
   inputTokenLimit: z.number().int().positive().optional(),
   outputTokenLimit: z.number().int().positive().optional(),
+});
+// OpenRouter's per-model reasoning: `supported_efforts` null takes every gateway level, an absent
+// one none; `mandatory` refuses `none`.
+const openrouter = z.object({
+  supported_efforts: z.array(z.string().max(20)).max(16).nullish(),
+  supports_max_tokens: z.boolean().optional(),
+  mandatory: z.boolean().optional(),
 });
 // Parse only documented capability fields. A reasoning boolean is not an effort enum.
 // In particular OpenAI/DeepSeek's model list does not disclose effort or speed levels.
@@ -56,7 +64,7 @@ export function discoveredControls(
     const efforts: import("@localdot/protocol").ReasoningEffort[] = c.effort.supported
       ? (["low", "medium", "high", "xhigh", "max"] as const).filter((e) => c.effort[e]?.supported)
       : [];
-    if (budget && c.thinking.types.disabled?.supported) efforts.unshift("none");
+    if (c.thinking.types.disabled?.supported && (budget || adaptive)) efforts.unshift("none");
     return {
       ...base,
       efforts: ReasoningEffort.array().parse(efforts),
@@ -71,12 +79,34 @@ export function discoveredControls(
     const reasoning =
       item.supported_parameters.includes("reasoning") ||
       item.supported_parameters.includes("reasoning.effort");
+    const levels = openrouter.safeParse(item.reasoning);
+    if (!reasoning || !levels.success)
+      return {
+        ...base,
+        efforts: reasoning ? base.efforts : [],
+        budget: reasoning && !!base.budget,
+        verbosity: false,
+        wire: reasoning ? base.wire : undefined,
+      };
+    const { supported_efforts: listed, mandatory, supports_max_tokens } = levels.data;
+    const named =
+      listed === undefined
+        ? []
+        : listed === null
+          ? base.wire
+            ? base.efforts
+            : ["low", "medium", "high"]
+          : listed;
+    const efforts = ReasoningEffort.options.filter((e) =>
+      e === "none" ? !mandatory && named.length > 0 : named.includes(e),
+    );
+    const budget = supports_max_tokens === true;
     return {
       ...base,
-      efforts: reasoning ? base.efforts : [],
-      budget: reasoning && !!base.budget,
+      efforts,
+      budget,
       verbosity: false,
-      wire: reasoning ? base.wire : undefined,
+      wire: efforts.length || budget ? "openrouter" : undefined,
     };
   }
 }
