@@ -147,9 +147,35 @@ export function useDockMagnify(list: RefObject<HTMLElement | null>, on: boolean)
       if (!still) layer.toggleAttribute("data-magnify", true);
       kick();
     };
+    // A view transition gives the page's root the pointer until it ends, so taking up a conversation
+    // (switch-motion.ts) would take the pointer off the list without its moving. The lens holds and
+    // follows it by where it is on the page until the page has it back.
+    const root = document.documentElement;
+    let held = false;
+    const over = (event: PointerEvent) => {
+      const box = scroller.getBoundingClientRect();
+      return (
+        event.clientX >= box.left &&
+        event.clientX < box.right &&
+        event.clientY >= box.top &&
+        event.clientY < box.bottom
+      );
+    };
     const leave = (event: PointerEvent) => {
       if (event.pointerType !== "mouse") return;
-      inside = false;
+      held = event.relatedTarget === root && over(event);
+      inside = held;
+      kick();
+    };
+    const roam = (event: PointerEvent) => {
+      if (!held || event.pointerType !== "mouse") return;
+      const target = event.target instanceof Node ? event.target : null;
+      if (target === root && over(event)) {
+        move(event);
+        return;
+      }
+      held = target === root;
+      inside = !!target && scroller.contains(target);
       kick();
     };
     const focus = (event: FocusEvent) => {
@@ -169,6 +195,8 @@ export function useDockMagnify(list: RefObject<HTMLElement | null>, on: boolean)
     scroller.addEventListener("focusin", focus);
     scroller.addEventListener("focusout", blur);
     scroller.addEventListener("scroll", kick, { passive: true });
+    root.addEventListener("pointerover", roam);
+    root.addEventListener("pointermove", roam);
     // Rows that come, go or move, a row's menu opening or closing, and a list that changes height
     // place the marks again.
     const rows = new MutationObserver(kick);
@@ -191,6 +219,8 @@ export function useDockMagnify(list: RefObject<HTMLElement | null>, on: boolean)
       scroller.removeEventListener("focusin", focus);
       scroller.removeEventListener("focusout", blur);
       scroller.removeEventListener("scroll", kick);
+      root.removeEventListener("pointerover", roam);
+      root.removeEventListener("pointermove", roam);
       for (const element of scroller.querySelectorAll<HTMLElement>(
         ".sessions-item[data-flip], .sessions-group-label",
       )) {

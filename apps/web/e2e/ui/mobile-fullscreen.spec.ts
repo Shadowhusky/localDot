@@ -116,6 +116,7 @@ async function focusLayout(page: Page) {
       conversations: edges(".island-conversations"),
       newConversation: edges(".island-new"),
       dot: edges(".narrator-dock"),
+      press: edges(".narrator-dot"),
       line: edges(".narration"),
       picture: edges(".stage-box"),
       controls: edges(".focus-controls"),
@@ -138,8 +139,24 @@ function expectWithin(edges: Edges, size: Size, insets: Insets, name: string) {
   expect(edges.bottom, `${name} bottom`).toBeLessThanOrEqual(size.height - insets.bottom + 0.5);
 }
 
-// A short phone gives the band's room to the work while dot works (app.css), which leaves no line.
-const bandHidden = (size: Size) => size.width < 700 && size.height < 650;
+// dot and its line beside the picture, held sideways, inside the screen and its safe areas.
+function expectBeside(layout: FocusLayout, size: Size, insets: Insets) {
+  const picture = present(layout.picture, "the picture");
+  const dot = present(layout.dot, "dot");
+  const line = present(layout.line, "dot's line");
+  for (const [edges, name] of [
+    [dot, "dot"],
+    [line, "dot's line"],
+  ] as const) {
+    expectWithin(edges, size, insets, name);
+    expect(edges.right, `${name} left of the picture`).toBeLessThanOrEqual(picture.left);
+    expect(edges.top, `${name} level with the picture`).toBeGreaterThanOrEqual(picture.top - 0.5);
+    expect(edges.bottom, `${name} level with the picture`).toBeLessThanOrEqual(
+      picture.bottom + 0.5,
+    );
+  }
+  expect(line.top, "dot's line under dot").toBeGreaterThanOrEqual(dot.bottom);
+}
 
 function expectClearPill(layout: FocusLayout, size: Size, insets: Insets = NO_INSETS) {
   const upright = size.height > size.width;
@@ -164,16 +181,17 @@ function expectClearPill(layout: FocusLayout, size: Size, insets: Insets = NO_IN
   expect(picture.top - pill.bottom, "room under the pill").toBeGreaterThanOrEqual(gap);
   if (!upright) {
     expect(pill.top - insets.top, "room over the pill").toBeGreaterThanOrEqual(gap);
+    expectBeside(layout, size, insets);
     return;
   }
-  const line = bandHidden(size) ? layout.line : present(layout.line, "dot's line");
-  if (line) {
-    expect(pill.top - line.bottom, "room over the pill").toBeGreaterThanOrEqual(gap);
-    expect(left.top - line.bottom, "room over the corner buttons").toBeGreaterThanOrEqual(gap);
-    const dot = present(layout.dot, "dot");
-    expectWithin(dot, size, insets, "dot");
-    expect(line.top, "dot's line under dot").toBeGreaterThanOrEqual(dot.bottom);
-  }
+  // Only a phone too short for any of dot's line shows dot alone.
+  const dot = present(layout.dot, "dot");
+  expectWithin(dot, size, insets, "dot");
+  const above = layout.line ?? dot;
+  expect(pill.top - above.bottom, "room over the pill").toBeGreaterThanOrEqual(gap);
+  expect(left.top - above.bottom, "room over the corner buttons").toBeGreaterThanOrEqual(gap);
+  if (layout.line)
+    expect(layout.line.top, "dot's line under dot").toBeGreaterThanOrEqual(dot.bottom);
   const controls = present(layout.controls, "the controls");
   const hint = present(layout.hint, "the hint");
   expect(controls.top - picture.bottom, "room under the picture").toBeGreaterThanOrEqual(gap);
@@ -194,15 +212,66 @@ const LANDSCAPE: Size[] = [
   { width: 844, height: 390 },
   { width: 932, height: 430 },
 ];
+// dot's width and height at each size: on the shortest it gives way to its line, down to 48.
+const DOT: Record<string, number> = {
+  "320x568": 64,
+  "320x700": 111,
+  "375x667": 77.3,
+  "390x844": 120,
+  "430x745": 99.1,
+  "430x932": 120,
+  "568x320": 79,
+  "844x390": 88,
+  "932x430": 88,
+};
 
-// The running task in full screen as an iPhone shows it: Safari has no full screen for the page.
-async function runningFullScreen(page: Page, ui: Harness) {
-  await page.addInitScript(() => {
+function expectDotSize(
+  layout: FocusLayout,
+  size: Size,
+  expected = DOT[`${size.width}x${size.height}`],
+) {
+  const dot = present(layout.dot, "dot");
+  const name = `dot at ${size.width} × ${size.height}`;
+  expect(dot.right - dot.left, name).toBeCloseTo(expected ?? Number.NaN, 0);
+  expect(dot.bottom - dot.top, name).toBeCloseTo(expected ?? Number.NaN, 0);
+}
+
+// The press on dot covers its ball, the middle three quarters of its frame.
+function expectPressOnBall(layout: FocusLayout, size: Size) {
+  const dot = present(layout.dot, "dot");
+  const press = present(layout.press, "the press on dot");
+  const inset = (dot.right - dot.left) / 8;
+  const ball = {
+    left: dot.left + inset,
+    top: dot.top + inset,
+    right: dot.right - inset,
+    bottom: dot.bottom - inset,
+  };
+  const across = Math.min(ball.right, press.right) - Math.max(ball.left, press.left);
+  const down = Math.min(ball.bottom, press.bottom) - Math.max(ball.top, press.top);
+  const covered =
+    (Math.max(0, across) * Math.max(0, down)) /
+    ((ball.right - ball.left) * (ball.bottom - ball.top));
+  expect(covered, `the press on dot's ball at ${size.width} × ${size.height}`).toBeGreaterThan(0.9);
+}
+
+// How many lines dot's line shows, as full screen sets them in 1rem each.
+const lines = (layout: FocusLayout) =>
+  layout.line ? Math.round((layout.line.bottom - layout.line.top) / 16) : 0;
+
+// As an iPhone: Safari has no full screen for the page.
+function withoutFullscreenApi(page: Page) {
+  return page.addInitScript(() => {
     Object.defineProperty(Element.prototype, "requestFullscreen", {
       configurable: true,
       value: undefined,
     });
   });
+}
+
+// The running task in full screen as an iPhone shows it.
+async function runningFullScreen(page: Page, ui: Harness) {
+  await withoutFullscreenApi(page);
   const fixture = await ui.open("running");
   await ui.picture();
   await ui.settle();
@@ -237,6 +306,8 @@ test("full screen keeps the status pill clear of the corner buttons, dot's line 
   ui,
 }) => {
   const { app, pill, post, shown } = await runningFullScreen(page, ui);
+  // While dot works, a short phone's band gives way to the thread outside full screen (app.css).
+  await expect(page.locator(".thread-work[data-live]")).toBeAttached();
   const line = page.locator(".narration-line:not([data-leaving])");
   const shoot = (name: string) => page.screenshot({ path: test.info().outputPath(`${name}.png`) });
   const everySize = async (state: string, check?: (layout: FocusLayout, size: Size) => void) => {
@@ -247,6 +318,8 @@ test("full screen keeps the status pill clear of the corner buttons, dot's line 
       for (const size of [...PORTRAIT, ...LANDSCAPE]) {
         const layout = await shown(size);
         expectClearPill(layout, size);
+        expectDotSize(layout, size);
+        expectPressOnBall(layout, size);
         check?.(layout, size);
         await shoot(`${state}-${appearance}-${size.width}x${size.height}`);
       }
@@ -263,9 +336,8 @@ test("full screen keeps the status pill clear of the corner buttons, dot's line 
   await expect(line).toContainText(LONG_LINE);
   await expect(page.locator(".island-label")).toContainText("quarterly revenue total");
   await everySize("long", (layout, size) => {
-    if (bandHidden(size)) return;
-    const wrapped = present(layout.line, "dot's line");
-    expect(wrapped.bottom - wrapped.top, "the long line wraps").toBeGreaterThan(24);
+    expect(lines(layout), "the long line wraps").toBeGreaterThan(1);
+    expect(lines(layout), "within its clamp").toBeLessThanOrEqual(size.height > size.width ? 3 : 4);
   });
 
   // Faded after a still moment, the pill leaves everything around it where it was.
@@ -282,14 +354,96 @@ test("full screen keeps the status pill clear of the corner buttons, dot's line 
   }
 });
 
+// Shorter than an iPhone SE's screen, as Safari's toolbars leave it: dot keeps 48 and its line gives
+// up a line at a time, then goes.
+const SHORTER: [Size, number][] = [
+  [{ width: 375, height: 548 }, 2],
+  [{ width: 320, height: 500 }, 2],
+  [{ width: 320, height: 480 }, 1],
+  [{ width: 320, height: 454 }, 0],
+];
+
+test("full screen on a shorter phone keeps dot and as much of its line as fits", async ({
+  page,
+  ui,
+}) => {
+  const { post, shown } = await runningFullScreen(page, ui);
+  await post(`/__qa/say?text=${encodeURIComponent(LONG_LINE)}`);
+  await expect(page.locator(".narration-line:not([data-leaving])")).toContainText(LONG_LINE);
+  for (const appearance of ["graphite", "daylight"] as const) {
+    await page.evaluate((value) => {
+      document.documentElement.dataset.appearance = value;
+    }, appearance);
+    for (const [size, shownLines] of SHORTER) {
+      const layout = await shown(size);
+      expectClearPill(layout, size);
+      expectDotSize(layout, size, 48);
+      expectPressOnBall(layout, size);
+      expect(lines(layout), `dot's line at ${size.width} × ${size.height}`).toBe(shownLines);
+      await page.screenshot({
+        path: test.info().outputPath(`shorter-${appearance}-${size.width}x${size.height}.png`),
+      });
+    }
+  }
+});
+
+test("a tap on dot in full screen opens the chooser", async ({ page, ui }) => {
+  const { app, shown } = await runningFullScreen(page, ui);
+  const chooser = page.getByRole("dialog", { name: "Your dot" });
+  for (const size of [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+    { width: 844, height: 390 },
+  ]) {
+    const layout = await shown(size);
+    expectPressOnBall(layout, size);
+    const dot = present(layout.dot, "dot");
+    await page.touchscreen.tap((dot.left + dot.right) / 2, (dot.top + dot.bottom) / 2);
+    await expect(chooser).toBeVisible();
+    await ui.settle();
+    await page.screenshot({
+      path: test.info().outputPath(`chooser-${size.width}x${size.height}.png`),
+    });
+    // A sheet upright on a phone, a popover beside dot on a wider screen held sideways.
+    await page.keyboard.press("Escape");
+    await expect(chooser).toBeHidden();
+    await expect(app).toHaveAttribute("data-focus", "");
+  }
+});
+
+test("a short phone gives dot's band to the thread while dot works, except in full screen", async ({
+  page,
+  ui,
+}) => {
+  await withoutFullscreenApi(page);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await ui.open("running");
+  await ui.picture();
+  await ui.settle();
+  await expect(page.locator(".thread-work[data-live]")).toBeAttached();
+  const band = page.locator(".stage-band");
+  await expect(band).toBeHidden();
+  await page.locator(".stage-expand").getByRole("button", { name: "Full screen" }).tap();
+  await expect(page.locator(".app")).toHaveAttribute("data-focus", "");
+  await expect(page.locator(".narrator-dock")).toBeVisible();
+  await page.getByRole("button", { name: "Exit full screen" }).tap();
+  await expect(page.getByRole("form", { name: "Message dot" })).toBeVisible();
+  await expect(band).toBeHidden();
+});
+
 test("full screen keeps clear of an iPhone's safe areas", async ({ page, ui, browserName }) => {
   test.skip(browserName !== "chromium", "Safe areas are emulated through Chromium's DevTools");
   const { post, shown } = await runningFullScreen(page, ui);
   await post(`/__qa/say?text=${encodeURIComponent(LONG_LINE)}`);
   await expect(page.locator(".narration-line:not([data-leaving])")).toContainText(LONG_LINE);
   const cdp = await page.context().newCDPSession(page);
-  // The status bar and home indicator upright, the notch sideways.
+  // The status bar and home indicator upright, the notch sideways; an iPhone SE's status bar over
+  // the app added to its Home Screen.
   for (const [size, insets] of [
+    [
+      { width: 320, height: 568 },
+      { top: 20, right: 0, bottom: 0, left: 0 },
+    ],
     [
       { width: 390, height: 844 },
       { top: 47, right: 0, bottom: 34, left: 0 },

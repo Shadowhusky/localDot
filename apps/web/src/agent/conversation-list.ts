@@ -454,3 +454,14 @@ export function useRecentConversations(
 }
 
 const NONE: readonly ConversationEntry[] = [];
+
+// A recent conversation as the list last read it, without following the list.
+export function knownConversation(
+  api: ApiClient,
+  sessionId: string,
+): ConversationEntry | undefined {
+  return stores
+    .get(api)
+    ?.get("recent")
+    ?.state.entries?.find((entry) => entry.sessionId === sessionId);
+}

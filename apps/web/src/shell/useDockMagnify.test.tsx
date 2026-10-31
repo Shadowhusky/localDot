@@ -117,6 +117,57 @@ it("holds the marks still and unnamed while a row's menu is open", async () => {
   expect(scales()).toEqual(marks.map(() => ""));
 });
 
+// Taking up a conversation runs a view transition, which gives the page's root the pointer until it
+// ends, though the pointer hasn't moved.
+function switching() {
+  const view = rail();
+  vi.spyOn(view.list, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    right: 56,
+    bottom: 600,
+  } as DOMRect);
+  const root = document.documentElement;
+  const at = (mark: number, clientX = 20) => ({
+    pointerType: "mouse",
+    clientX,
+    clientY: 32 + mark * 38 + 18,
+  });
+  view.mouse("pointerMove", 1);
+  view.frames(40);
+  fireEvent.pointerLeave(view.list, { ...at(1), relatedTarget: root });
+  const largest = () => {
+    const grown = view.scales().map(Number);
+    return grown.indexOf(Math.max(...grown));
+  };
+  return { ...view, root, at, largest };
+}
+
+it("keeps the lens through a view transition and follows the pointer there until it leaves", () => {
+  const { marks, root, at, largest, scales, frames } = switching();
+  frames(40);
+  expect(largest()).toBe(1);
+  expect(Number(scales()[1])).toBeGreaterThan(1.7);
+  expect(marks[1]?.hasAttribute("data-under")).toBe(true);
+
+  fireEvent.pointerMove(root, at(3));
+  frames(40);
+  expect(largest()).toBe(3);
+  expect(Number(scales()[3])).toBeGreaterThan(1.7);
+
+  fireEvent.pointerMove(root, at(3, 300));
+  frames(60);
+  expect(scales()).toEqual(marks.map(() => ""));
+});
+
+it("lets the lens go once the page has the pointer back off the list", () => {
+  const { marks, scales, frames } = switching();
+  frames(10);
+  fireEvent.pointerOver(document.body, { pointerType: "mouse", clientX: 300, clientY: 100 });
+  frames(60);
+  expect(scales()).toEqual(marks.map(() => ""));
+});
+
 it("eases in rather than jumping to its full size", () => {
   const { scales, frames, mouse } = rail();
   mouse("pointerMove", 2);

@@ -369,29 +369,44 @@
   place-items: center;
 }
 
+/* dot over its line, the press on dot in dot's own cell. dot leaves room under it for its line's
+   four lines, down to 48 px: beside the shortest phone's picture held sideways, 155 px, it is 79. */
 .app[data-focus] .narrator {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  --_dock: max(48px, min(88px, 100cqh - var(--spacing) * 3 - var(--text-callout--line-height) * 4));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  align-content: center;
   gap: calc(var(--spacing) * 3);
   min-width: 0;
+  container-type: size;
 }
 
 .app[data-focus] .narrator-dock {
   position: relative;
   top: auto;
   left: auto;
-  flex: none;
-  width: 88px;
-  height: 88px;
+  grid-area: 1 / 1;
+  width: var(--_dock);
+  height: var(--_dock);
+}
+
+/* Over the ball, and never smaller than a finger. */
+.app[data-focus] .narrator-dot {
+  position: relative;
+  top: auto;
+  left: auto;
+  grid-area: 1 / 1;
+  align-self: center;
+  width: max(44px, var(--_dock) * 0.75);
+  height: max(44px, var(--_dock) * 0.75);
 }
 
 .app[data-focus] .narration {
   display: block;
   position: relative;
   inset: auto;
-  flex: none;
+  grid-area: 2 / 1;
   min-width: 0;
   width: 100%;
   height: auto;
@@ -486,20 +501,22 @@
     padding-top: clamp(calc(var(--spacing) * 5), 4dvh, calc(var(--spacing) * 8));
   }
 
+  /* A short phone's dot gives its line three lines' room, down to 48 px. */
   .app[data-focus] .narrator {
-    flex-direction: column;
-    justify-content: flex-end;
-    padding: var(--spacing) calc(var(--spacing) * 4) calc(var(--spacing) * 4);
+    --_dock: max(
+      48px,
+      min(
+        clamp(64px, calc(var(--_margin) - var(--_strip) - 100px), 120px),
+        calc(100cqh - var(--spacing) * 2 - var(--text-callout--line-height) * 3)
+      )
+    );
+    align-content: end;
+    padding: max(var(--spacing), env(safe-area-inset-top)) calc(var(--spacing) * 4)
+      calc(var(--spacing) * 4);
     gap: calc(var(--spacing) * 2);
   }
 
-  .app[data-focus] .narrator-dock {
-    width: clamp(64px, calc(var(--_margin) - var(--_strip) - 100px), 120px);
-    height: clamp(64px, calc(var(--_margin) - var(--_strip) - 100px), 120px);
-  }
-
   .app[data-focus] .narration {
-    flex: none;
     width: 100%;
     max-width: 32rem;
     min-height: var(--text-callout--line-height);
@@ -513,6 +530,28 @@
   .app[data-focus] .narration-line {
     -webkit-line-clamp: 3;
     line-clamp: 3;
+  }
+
+  /* Shorter still, as Safari's toolbars leave an iPhone SE, dot keeps 48 px and its line gives up a
+     line at a time, then goes. A line takes 1rem; dot and the gap under it, 56 px. */
+  @container (height < calc(56px + 3rem)) {
+    .app[data-focus] .narration-line {
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+    }
+  }
+
+  @container (height < calc(56px + 2rem)) {
+    .app[data-focus] .narration-line {
+      -webkit-line-clamp: 1;
+      line-clamp: 1;
+    }
+  }
+
+  @container (height < calc(56px + 1rem)) {
+    .app[data-focus] .narration {
+      display: none;
+    }
   }
 
   .app[data-focus] .focus-controls {
@@ -1095,4 +1134,66 @@
   color: var(--color-fg-2);
   font-size: var(--text-body);
   text-align: center;
+}
+
+/* Taking up another conversation (stage/stage-switch.ts): until its own screen is in, the stage
+   shows a calm likeness of a screen under the conversation's name, over whatever the stage held
+   from before, then fades away off the picture (Presence). */
+.switch-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--spacing) * 6);
+  border-radius: inherit;
+  background-color: var(--color-raised);
+  pointer-events: none;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+@starting-style {
+  .switch-cover {
+    opacity: 0;
+  }
+}
+
+.switch-cover-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  width: 40%;
+  min-width: 0;
+}
+
+.switch-cover-window {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+}
+
+.switch-cover-title {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switch-cover-card {
+  pointer-events: auto;
+}
+
+@media (--phone) {
+  .switch-cover {
+    padding: calc(var(--spacing) * 3);
+  }
+
+  .switch-cover-screen {
+    width: 56%;
+    gap: calc(var(--spacing) * 2);
+  }
 }
