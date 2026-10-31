@@ -490,6 +490,27 @@ describe("recovery preserves daemon-owned control", () => {
     await h.health({ online: true, bootId: "boot-a" });
     expect((await session.inbox(0, 0)).items.map((i) => i.kind)).toEqual(["resume"]);
   });
+  it("logs a stalled model call once, with what went wrong", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const h = setup();
+      const session = await h.runner.start(h.cellId, "Task");
+      await h.ready();
+      const detail =
+        "200: The reply broke off before it ended: Failed to process successful response; terminated; other side closed (UND_ERR_SOCKET)";
+      for (let i = 0; i < 2; i++)
+        session.append("agent.state", { state: "paused", reason: "model unavailable", detail });
+      expect(warn.mock.calls.filter(([line]) => String(line).includes("paused"))).toEqual([
+        [`task ${session.id} paused (model unavailable): ${detail}`],
+      ]);
+      const notices = h.log.read(session.id).filter((e) => e.type === "message.assistant");
+      expect(notices.map((e) => e.data.text)).toEqual([
+        `The model is not responding after several attempts. Check its connection, or choose another model and continue.\n\nDetails: ${detail}`,
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
   it("survives takeover caller crash, keyd changes and user messages until explicit handback", async () => {
     const h = setup();
     const session = await h.runner.start(h.cellId, "Task");
@@ -554,6 +575,21 @@ it("retains Stop ownership for late uncertainty until the actual tool settles", 
   lease.finish();
   await h.live.settled(session.id);
   expect(h.runner.get(session.id)).toBeUndefined();
+});
+
+it.each([
+  ["no receipt came in the wait after Stop; stopped 39.6 s in", true],
+  ["token=abc/def\nsecond line", false],
+])("logs which check left the computer held, only in plain words (%#)", async (why, shown) => {
+  const h = setup();
+  const session = await h.runner.start(h.cellId, "Task");
+  await h.ready();
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  await h.runner.contain(session, "shell_execution_uncertain", why);
+  expect(errors).toHaveBeenCalledWith(
+    `computer recovery required: ${h.cellId}, task ${session.id} (shell_execution_uncertain${shown ? `: ${why}` : ""})`,
+  );
+  errors.mockRestore();
 });
 
 it("rejects a held takeover and a paused/busy cell before durable budget raise, then preserves task spend and frozen model identity", async () => {

@@ -1,5 +1,6 @@
 import {
   type KeyboardEvent,
+  type MouseEvent,
   memo,
   type ReactNode,
   useEffect,
@@ -72,7 +73,7 @@ export interface SessionRailProps {
 }
 
 // "Plan the trip, blue tag, working, on screen, 2 min": what a screen reader calls a row.
-function rowName(row: ConversationRow, now: Date): string {
+export function conversationLabel(row: ConversationRow, now: Date): string {
   const parts = [row.title];
   if (row.entry.tag) parts.push(`${TAG_NAMES[row.entry.tag].toLowerCase()} tag`);
   parts.push(STATUS_LABEL[row.status].toLowerCase());
@@ -183,11 +184,10 @@ export const SessionRail = memo(function SessionRail({
     [searching, rows, archived, query, content.tasks],
   );
   const archivedShown = expanded && archiveOpen && !found ? archived : [];
-  const order = (
-    found
-      ? [...found.recent, ...found.archived].map((match) => match.row)
-      : [...rows.pinned, ...rows.active, ...rows.rest, ...archivedShown]
-  ).map((row) => row.entry.sessionId);
+  const listed = found
+    ? [...found.recent, ...found.archived].map((match) => match.row)
+    : [...rows.pinned, ...rows.active, ...rows.rest, ...archivedShown];
+  const order = listed.map((row) => row.entry.sessionId);
 
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const searchField = useRef<HTMLInputElement>(null);
@@ -289,6 +289,21 @@ export const SessionRail = memo(function SessionRail({
   const openMenu = (row: ConversationRow, trigger: HTMLButtonElement) => {
     actionAnchor.current = trigger;
     setAction(row);
+  };
+  // A right click anywhere along a row opens its menu: on any part of it, in the gaps between rows
+  // and beside it, where the dock's lens already shows it as the mark under the pointer. The rest of
+  // the list has no menu, and the browser's own would only stand in for one. A name being typed
+  // keeps the browser's.
+  const menuAt = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("input, textarea")) return;
+    event.preventDefault();
+    const item =
+      target?.closest<HTMLElement>("[data-flip]") ??
+      rowLevelWith(event.currentTarget, event.clientY);
+    const row = listed.find((each) => each.entry.sessionId === item?.dataset.flip);
+    const trigger = row && buttons.current.get(row.entry.sessionId);
+    if (row && trigger) openMenu(row, trigger);
   };
   const [deleting, setDeleting] = useState<ConversationRow | null>(null);
   const organize = (row: ConversationRow, change: Organize) =>
@@ -395,49 +410,57 @@ export const SessionRail = memo(function SessionRail({
         inputRef={searchField}
         resultsId={resultsId}
       />
-      <ScrollArea ref={scroller} id={resultsId} className="sessions-scroll" fade="both">
-        {body}
-        {found ? (
-          <>
-            {found.recent.length > 0 && (
-              <RailGroup label="Results" expanded={expanded}>
-                {found.recent.map((match) => item(match.row, match))}
-              </RailGroup>
-            )}
-            {found.archived.length > 0 && (
-              <RailGroup label="Archived" expanded={expanded}>
-                {found.archived.map((match) => item(match.row, match))}
-              </RailGroup>
-            )}
-          </>
-        ) : (
-          <>
-            {rows.pinned.length > 0 && (
-              <RailGroup label="Pinned" expanded={expanded}>
-                {rows.pinned.map((row) => item(row))}
-              </RailGroup>
-            )}
-            {rows.active.length > 0 && (
-              <RailGroup label="Active" expanded={expanded}>
-                {rows.active.map((row) => item(row))}
-              </RailGroup>
-            )}
-            {rows.rest.length > 0 && (
-              <RailGroup label="Recent" expanded={expanded}>
-                {rows.rest.map((row) => item(row))}
-              </RailGroup>
-            )}
-            {expanded && recent.archivedCount > 0 && (
-              <ArchivedGroup
-                count={recent.archivedCount}
-                open={archiveOpen}
-                onToggle={() => setArchiveOpen((was) => !was)}
-              >
-                {archivedShown.map((row) => item(row))}
-              </ArchivedGroup>
-            )}
-          </>
-        )}
+      <ScrollArea
+        ref={scroller}
+        id={resultsId}
+        className="sessions-scroll"
+        fade="both"
+        onContextMenu={menuAt}
+      >
+        <div className="sessions-lists">
+          {body}
+          {found ? (
+            <>
+              {found.recent.length > 0 && (
+                <RailGroup label="Results" expanded={expanded}>
+                  {found.recent.map((match) => item(match.row, match))}
+                </RailGroup>
+              )}
+              {found.archived.length > 0 && (
+                <RailGroup label="Archived" expanded={expanded}>
+                  {found.archived.map((match) => item(match.row, match))}
+                </RailGroup>
+              )}
+            </>
+          ) : (
+            <>
+              {rows.pinned.length > 0 && (
+                <RailGroup label="Pinned" expanded={expanded}>
+                  {rows.pinned.map((row) => item(row))}
+                </RailGroup>
+              )}
+              {rows.active.length > 0 && (
+                <RailGroup label="Active" expanded={expanded}>
+                  {rows.active.map((row) => item(row))}
+                </RailGroup>
+              )}
+              {rows.rest.length > 0 && (
+                <RailGroup label="Recent" expanded={expanded}>
+                  {rows.rest.map((row) => item(row))}
+                </RailGroup>
+              )}
+              {expanded && recent.archivedCount > 0 && (
+                <ArchivedGroup
+                  count={recent.archivedCount}
+                  open={archiveOpen}
+                  onToggle={() => setArchiveOpen((was) => !was)}
+                >
+                  {archivedShown.map((row) => item(row))}
+                </ArchivedGroup>
+              )}
+            </>
+          )}
+        </div>
       </ScrollArea>
       <ConversationMenu
         entry={action?.entry ?? null}
@@ -593,7 +616,7 @@ function RailRow({
   onRenamed,
 }: RailRowProps) {
   const activityId = useId();
-  const name = rowName(row, now);
+  const name = conversationLabel(row, now);
   const second = match?.snippet ?? row.activity;
   const { triggerProps: tip, tooltip } = useTooltip({
     content: expanded || named || blocked ? undefined : row.title,
@@ -624,10 +647,6 @@ function RailRow({
             onFocus={onFocus}
             onKeyDown={onKeyDown}
             onClick={onPick}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              onMenu(event.currentTarget);
-            }}
           >
             <span className="sessions-glyph">
               <SessionGlyph status={row.status} />
@@ -704,6 +723,22 @@ function RenameField({
       }}
     />
   );
+}
+
+// The row level with `y` on the page in `list`, as it shows now, or one the gap beside it parts
+// from the next: the gap is 2 px, and up to half as wide again where the dock magnifies.
+function rowLevelWith(list: HTMLElement, y: number): HTMLElement | undefined {
+  let nearest: HTMLElement | undefined;
+  let away = 2;
+  for (const item of list.querySelectorAll<HTMLElement>(".sessions-item[data-flip]")) {
+    const box = item.getBoundingClientRect();
+    const distance = Math.max(0, box.top - y, y - box.bottom);
+    if (distance < away) {
+      nearest = item;
+      away = distance;
+    }
+  }
+  return nearest;
 }
 
 // The selected row's light glides from the row it lit before, so taking up another conversation

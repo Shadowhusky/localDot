@@ -33,7 +33,15 @@ import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool, untilPaused } from "./computer.ts";
 import { connectorFacts, connectorTool } from "./connector.ts";
 import { apiRequestTool, credentialsTool } from "./credentials.ts";
-import { append, fail, intentOf, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import {
+  append,
+  fail,
+  intentOf,
+  listenForUser,
+  type ToolCallContext,
+  type ToolDeps,
+  text,
+} from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
 import { findTool } from "./find.ts";
@@ -62,6 +70,8 @@ const outOfTime = (): DispatchOutcome => ({
   status: 200,
   result: fail("The tool was cancelled or could not complete."),
 });
+const UNRUN =
+  "Not done: the user sent a new message while this waited for its turn on the computer. Read it, then decide whether to do this.";
 
 const STEP_KIND: Record<ToolName, string> = {
   work_context: "think",
@@ -348,12 +358,24 @@ async function dispatchAdmitted(
     if (stopped) return { status: 200, result: fail(stopped) };
     if (ON_SCREEN.has(name) && deps.tools.computer) {
       const waiting = untilPaused(session, ctx.signal);
+      // Another task's turn can be long; the user's message ends the wait for it, not a turn.
+      const queued = deps.tools.computer.busy(session.id, session.cellId)
+        ? listenForUser(ctx, waiting.signal)
+        : undefined;
       try {
-        ctx.turn = await deps.tools.computer.take(session.id, session.cellId, waiting.signal);
+        ctx.turn = await deps.tools.computer.take(
+          session.id,
+          session.cellId,
+          waiting.signal,
+          false,
+          queued?.signal,
+        );
       } catch (error) {
         if (session.safetyPause && !session.stopped) throw new PausedStepError();
+        if (queued?.spoke && !session.stopped) return { status: 200, result: fail(UNRUN) };
         throw error;
       } finally {
+        queued?.end();
         waiting.end();
       }
       ctx.check();

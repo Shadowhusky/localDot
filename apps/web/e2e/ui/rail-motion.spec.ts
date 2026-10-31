@@ -320,6 +320,211 @@ test("keeps the grown marks in view where the list scrolls", async ({ page, ui }
   }
 });
 
+// The fixture's conversations six times over, each copy with ids and a name of its own, so the
+// collapsed rail's list scrolls at full height.
+async function longList(page: Page) {
+  const copy = (id: string, n: number) => `${id.slice(0, 23)}Z${String(n).padStart(2, "0")}`;
+  await page.route("**/api/conversations", async (route) => {
+    const reply = await route.fetch().catch(() => undefined);
+    if (!reply) return route.abort().catch(() => {});
+    const list = await reply.json();
+    const conversations = list.conversations as { sessionId: string; sessions: string[] }[];
+    await route.fulfill({
+      json: {
+        ...list,
+        conversations: [0, 1, 2, 3, 4, 5].flatMap((n) =>
+          conversations.map((entry) =>
+            n === 0
+              ? entry
+              : {
+                  ...entry,
+                  sessionId: copy(entry.sessionId, n),
+                  sessions: entry.sessions.map((id) => copy(id, n)),
+                  title: `Copy ${n} of ${entry.sessionId.slice(-4)}`,
+                },
+          ),
+        ),
+      },
+    });
+  });
+}
+
+// Each mark painted a colour of its own, so a frame shows where every mark is.
+const paint = (page: Page) =>
+  rail(page)
+    .locator(".sessions-item")
+    .evaluateAll((rows) => {
+      for (const [n, row] of rows.entries())
+        (row as HTMLElement).style.backgroundColor = `rgb(${200 - 4 * n}, ${40 + 4 * n}, 255)`;
+    });
+
+// The painted marks down the column at `x` of a frame, from `from` to `to`: each one's place in
+// the list, its top and how tall it shows.
+async function painted(png: Buffer, x: number, from: number, to: number) {
+  const { data, info } = await sharp(png)
+    .extract({ left: x, top: from, width: 1, height: to - from })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const runs: { n: number; top: number; height: number }[] = [];
+  for (let y = 0; y < info.height; y++) {
+    const [r = 0, g = 0, b = 0] = data.subarray(y * info.channels, y * info.channels + 3);
+    const n = Math.round((200 - r) / 4);
+    if (b < 250 || Math.abs(40 + 4 * n - g) > 1 || Math.abs(200 - 4 * n - r) > 1) continue;
+    const last = runs.at(-1);
+    if (last?.n === n && last.top + last.height >= from + y - 1)
+      last.height = from + y + 1 - last.top;
+    else runs.push({ n, top: from + y, height: 1 });
+  }
+  return runs;
+}
+
+test("scrolls under the lens at any speed, the marks moving with the list and the lens on what passes under it", async ({
+  page,
+  ui,
+}) => {
+  await longList(page);
+  await ui.open("conversations");
+  await livePicture(page);
+  const rows = rail(page).locator(".sessions-item");
+  await expect(rows).toHaveCount(42);
+  await paint(page);
+  const scroller = rail(page).locator(".sessions-scroll");
+  const box = await scroller.boundingBox();
+  if (!box) throw new Error("no list");
+  const atRest = await scroller.evaluate((element) => {
+    element.scrollTop = 200;
+    return { height: element.scrollHeight, end: element.scrollHeight - element.clientHeight };
+  });
+  const rest = await looks(page);
+  const x = ((rest[0]?.left ?? 0) + (rest[0]?.right ?? 0)) / 2;
+  const y = Math.round(box.y + box.height / 2);
+  await page.mouse.move(x, y, { steps: 4 });
+  await page.waitForTimeout(600);
+
+  // The list as the page shows it after each frame's scroll, read once the lens has placed the
+  // marks for it.
+  await scroller.evaluate((element) => {
+    const seen: { top: number; marks: { top: number; bottom: number }[] }[] = [];
+    (window as unknown as { scrolled_: typeof seen }).scrolled_ = seen;
+    element.addEventListener("scroll", () =>
+      requestAnimationFrame(() =>
+        seen.push({
+          top: element.scrollTop,
+          marks: [...element.querySelectorAll(".sessions-item")].map((row) => {
+            const { top, bottom } = row.getBoundingClientRect();
+            return { top, bottom };
+          }),
+        }),
+      ),
+    );
+  });
+  let small = 0;
+  const shots = await screencast(
+    page,
+    async () => {
+      const from = await scroller.evaluate((element) => element.scrollTop);
+      // A trackpad's slow drag, two pixels at a time; a quicker swipe, a few pixels every frame;
+      // then a mouse wheel's notches.
+      for (let n = 0; n < 12; n++) {
+        await page.mouse.wheel(0, 2);
+        await page.waitForTimeout(24);
+      }
+      await page.waitForTimeout(200);
+      small = (await scroller.evaluate((element) => element.scrollTop)) - from;
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Input.synthesizeScrollGesture", {
+        x,
+        y,
+        yDistance: -200,
+        speed: 600,
+        gestureSourceType: "mouse",
+      });
+      await cdp.detach();
+      await page.waitForTimeout(200);
+      for (let n = 0; n < 3; n++) {
+        await page.mouse.wheel(0, 100);
+        await page.waitForTimeout(60);
+      }
+    },
+    500,
+  );
+  const from = Math.round(box.y) + 18;
+  const to = Math.round(box.y + box.height) - 18;
+  const columns: Awaited<ReturnType<typeof painted>>[] = [];
+  for (const [n, shot] of shots.entries()) {
+    await sharp(shot)
+      .extract({ left: 0, top: 0, width: 420, height: 900 })
+      .toFile(test.info().outputPath(`scroll-${String(n).padStart(3, "0")}.png`));
+    columns.push(await painted(shot, Math.round(rest[0]?.left ?? 8) + 4, from, to));
+  }
+  await test.info().attach("marks per frame", {
+    body: columns.map((runs) => runs.map((run) => `${run.n}@${run.top}`).join(" ")).join("\n"),
+  });
+  // Every small step scrolled the list.
+  expect(small).toBeGreaterThanOrEqual(23);
+
+  const frames = (
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          scrolled_: { top: number; marks: { top: number; bottom: number }[] }[];
+        }
+      ).scrolled_.splice(0),
+    )
+  ).filter((frame, n, all) => n === 0 || frame.top !== all[n - 1]?.top);
+  expect(frames.length).toBeGreaterThan(10);
+  // From frame to frame, the marks beyond the lens move up the page exactly as far as the list
+  // scrolled: none holds still, none jumps back.
+  for (let n = 1; n < frames.length; n++) {
+    const was = frames[n - 1];
+    const now = frames[n];
+    if (!was || !now) continue;
+    for (const [k, mark] of now.marks.entries()) {
+      const before = was.marks[k];
+      if (!before || [mark, before].some((each) => Math.abs(middleOf(each) - y) < 220)) continue;
+      if (mark.bottom < box.y || before.top > box.y + box.height) continue;
+      expect(mark.top - before.top).toBeCloseTo(was.top - now.top, 0);
+    }
+  }
+
+  expect(shots.length).toBeGreaterThan(10);
+  let moving = 0;
+  for (const [n, runs] of columns.entries()) {
+    // No blank frame: the list shows in every one.
+    expect(runs.length, `marks in frame ${n}`).toBeGreaterThan(8);
+    // And no mark ever moves back down the page while the list scrolls on.
+    const moved = runs.flatMap((run) => {
+      const before = columns[n - 1]?.find((each) => each.n === run.n);
+      return before && before.top > from && run.top > from ? [run.top - before.top] : [];
+    });
+    for (const step of moved) expect(step, `a mark in frame ${n}`).toBeLessThanOrEqual(1);
+    if (moved.some((step) => step < 0)) moving++;
+  }
+  // The list moves on the page with every small step and every frame of the swipe, rather than
+  // holding still and then jumping.
+  expect(moving).toBeGreaterThan(20);
+
+  // The lens is on the mark the list brought under the pointer.
+  await page.waitForTimeout(400);
+  const shown = await looks(page);
+  const under = shown.find((look) => look.top <= y && y < look.bottom);
+  expect(under?.scale).toBeGreaterThan(1.6);
+  expect(Math.max(...shown.map((look) => look.scale))).toBe(under?.scale);
+
+  // At the end of the list the lens adds no room to scroll into.
+  for (let n = 0; n < 4; n++) {
+    await page.mouse.wheel(0, 1200);
+    await page.waitForTimeout(120);
+  }
+  await page.waitForTimeout(300);
+  expect(
+    await scroller.evaluate((element) => ({
+      height: element.scrollHeight,
+      end: element.scrollTop,
+    })),
+  ).toEqual(atRest);
+});
+
 test.describe("under reduced motion", () => {
   test.use({ reducedMotion: "reduce" });
 

@@ -160,6 +160,19 @@ export class ControlHeldError extends Error {
     this.name = "ControlHeldError";
   }
 }
+export class UserSpokeError extends Error {
+  constructor() {
+    super("the user sent a message");
+    this.name = "UserSpokeError";
+  }
+}
+// One wait of dot's, listening for the user: `signal` also aborts, with a UserSpokeError, once
+// they say something dot hasn't taken in.
+export interface UserListener {
+  readonly signal: AbortSignal;
+  readonly spoke: boolean;
+  end(): void;
+}
 
 // Resolves after `ms`, or as soon as `signal` aborts.
 function pause(ms: number, signal: AbortSignal): Promise<void> {
@@ -302,6 +315,11 @@ export class AgentSession {
   #emptied = false;
   // Notes to dot that are not the user's words: they never wake a task waiting for them.
   readonly #notes = new Set<number>();
+  // The inbox as far as dot's model has taken it in, and the newest message that already ended a
+  // wait of dot's: a message ends one wait at most.
+  #heard = 0;
+  #cut = 0;
+  readonly #listeners = new Set<() => void>();
   // dot's next input waits for a fresh look at the screen, which the user has had.
   #lookFirst = false;
   // The task met locked saved keys; the conversation offers to unlock them until they open.
@@ -502,6 +520,10 @@ export class AgentSession {
   }
   get delivered(): number {
     return this.#delivered;
+  }
+  // dot has said something of its own or begun an action in this task.
+  get acted(): boolean {
+    return this.#acted;
   }
   get inboxSequence(): number {
     return this.#seq;
@@ -1045,9 +1067,10 @@ export class AgentSession {
     this.#senders.set(messageId, sender ?? null);
   }
   post(kind: InboxItem["kind"], text: string, sender?: string): InboxItem {
-    const item = this.#deliverInbox(kind, text, ulid(), true);
-    if (kind !== "resume") this.#senders.set(item.messageId, sender ?? null);
-    return item;
+    const messageId = ulid();
+    // Known as the user's before it lands, so a wait it ends hears it as theirs.
+    if (kind !== "resume") this.#senders.set(messageId, sender ?? null);
+    return this.#deliverInbox(kind, text, messageId, true);
   }
   #deliverInbox(
     kind: InboxItem["kind"],
@@ -1172,6 +1195,42 @@ export class AgentSession {
   }
   freshLook(): void {
     this.#lookFirst = false;
+  }
+  // dot's model has taken in the inbox through `seq`: the brain acknowledged it, or Claude Code or
+  // Codex sent it with a request.
+  heard(seq: number): void {
+    if (seq > this.#heard) this.#heard = Math.min(seq, this.#seq);
+  }
+  // For one wait of dot's: ends it as soon as the user says something dot hasn't taken in, at once
+  // when they already have. Each message ends one wait at most, so a wait dot starts once it has
+  // heard the message runs its course.
+  listenForUser(signal: AbortSignal): UserListener {
+    const spoke = new AbortController();
+    const end = () => {
+      this.#listeners.delete(listen);
+      signal.removeEventListener("abort", end);
+    };
+    const listen = () => {
+      const from = Math.max(this.#heard, this.#cut);
+      const said = this.#inbox.findLast(
+        (item) => item.seq > from && item.kind === "steer" && this.#senders.has(item.messageId),
+      );
+      if (!said || this.stopped) return;
+      this.#cut = said.seq;
+      end();
+      spoke.abort(new UserSpokeError());
+    };
+    this.#listeners.add(listen);
+    signal.addEventListener("abort", end, { once: true });
+    if (signal.aborted) end();
+    else listen();
+    return {
+      signal: AbortSignal.any([signal, spoke.signal]),
+      get spoke() {
+        return spoke.signal.aborted;
+      },
+      end,
+    };
   }
   async waitForUser(waitMs: number, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
@@ -1909,5 +1968,6 @@ export class AgentSession {
   }
   #wake(): void {
     for (const wake of [...this.#waiters]) wake();
+    for (const listen of [...this.#listeners]) listen();
   }
 }

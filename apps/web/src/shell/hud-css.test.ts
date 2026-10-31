@@ -26,9 +26,10 @@ it("lifts the island over a sheet's scrim, so Stop and Take control stay in reac
 
 it("hangs the island its height and a gap over the stage, clear of the picture", () => {
   expect(hud).toMatch(
-    /\.island-anchor \{[^}]*top: calc\(var\(--_lower, 0px\) - var\(--island-h\) - var\(--island-gap\)\);/,
+    /\.island-anchor \{[^}]*top: calc\(var\(--_lower, 0px\) - var\(--island-h\) - var\(--_island-gap\)\);/,
   );
   expect(px(tokens, "--island-gap")).toBeGreaterThan(0);
+  expect(frame).toMatch(/\.app \{\s*--_island-gap: var\(--island-gap\);\s*\}/);
 });
 
 it("keeps the island in one place whatever the state: nothing moves it onto the picture", () => {
@@ -54,7 +55,7 @@ it("keeps a strip for the island over the stage, under the top bar or the phone'
 
 it("gives a full screen stage the screen under the island's strip", () => {
   expect(frame).toMatch(
-    /\.app\[data-full\] \.stage-col \{[^}]*--_strip: calc\([^;]*var\(--island-h\) \+ var\(--island-gap\)\);[^}]*padding: var\(--_strip\) 0 calc\(var\(--spacing\) \* 16\);/,
+    /\.app\[data-full\] \.stage-col \{[^}]*--_strip: calc\([^;]*var\(--island-h\) \+ var\(--_island-gap\)\);[^}]*padding: var\(--_strip\) 0 calc\(var\(--spacing\) \* 16\);/,
   );
   expect(frame).toMatch(/width: min\(100vw, \(100dvh - var\(--_strip\) - 64px\) \* 1\.6\);/);
 });

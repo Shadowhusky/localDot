@@ -63,6 +63,19 @@ export function localDotLink(name: string, typed: string): LocalDotLink | null {
   return { name: name.trim() || fallback.slice(0, 40), url: url.origin };
 }
 
+// An address that means whichever device opens it: localhost and its subdomains, 127.0.0.0/8 and
+// [::1]. Right for this browser, but on another device it is that device's own computer.
+export function deviceOnly(url: string): boolean {
+  if (!URL.canParse(url)) return false;
+  const host = new URL(url).hostname.replace(/\.$/, "");
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "[::1]" ||
+    /^127(?:\.\d{1,3}){3}$/.test(host)
+  );
+}
+
 export const localDotHost = (url: string) => {
   try {
     return new URL(url).host;

@@ -457,6 +457,44 @@ it("tags, pins and archives from a row's menu, opened from the keyboard or a rig
   ]);
 });
 
+it("opens a row's menu from a right click anywhere along it, and never the browser's on the list", async () => {
+  const trip = entry("Plan the trip", HOURS(1));
+  const dog = entry("Draw a dog", HOURS(2));
+  rail([trip, dog]);
+  await screen.findByRole("button", { name: /^Draw a dog/ });
+  // The rows as the page lays them out: 36 px tall, 2 px apart, under a group label.
+  for (const [n, item] of [...nav().querySelectorAll<HTMLElement>(".sessions-item")].entries())
+    item.getBoundingClientRect = () => new DOMRect(8, 160 + 38 * n, 240, 36);
+  const list = nav().querySelector<HTMLElement>(".sessions-scroll");
+  if (!list) throw new Error("no list");
+  // Whose menu the click opened, if any; it closes again.
+  const opened = () => {
+    const id = nav().querySelector("[data-menu]")?.getAttribute("data-flip") ?? null;
+    if (id) fireEvent.keyDown(menu(), { key: "Escape" });
+    return id;
+  };
+
+  // Over the time at its end, where its actions button waits unseen.
+  expect(
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Actions for Draw a dog" })),
+  ).toBe(false);
+  expect(opened()).toBe(dog.sessionId);
+  // In the gap below a row and beside it, by the rail's edge.
+  expect(fireEvent.contextMenu(list, { clientX: 4, clientY: 197 })).toBe(false);
+  expect(opened()).toBe(trip.sessionId);
+  expect(fireEvent.contextMenu(list, { clientX: 4, clientY: 220 })).toBe(false);
+  expect(opened()).toBe(dog.sessionId);
+  // A group's label is no row: neither menu shows.
+  expect(fireEvent.contextMenu(within(nav()).getByText("Recent"), { clientY: 140 })).toBe(false);
+  expect(opened()).toBeNull();
+
+  // A name being typed keeps the browser's menu, to cut and paste.
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Plan the trip/ }), { key: "F2" });
+  expect(fireEvent.contextMenu(screen.getByRole("textbox", { name: "Conversation name" }))).toBe(
+    true,
+  );
+});
+
 it("follows the tags, pins and archives other viewers make", async () => {
   const trip = entry("Plan the trip", HOURS(1));
   const dog = entry("Draw a dog", HOURS(2));

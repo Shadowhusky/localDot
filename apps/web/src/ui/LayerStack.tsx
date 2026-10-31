@@ -146,6 +146,43 @@ export function pushLayer(entry: LayerEntry): () => void {
   };
 }
 
+// Further than this between press and release is a drag, not a click.
+const SLOP = 10;
+// A splitter beside a layer moves the layer's edge.
+const SPLITTER = 'hr, [role="separator"]';
+
+// Runs `close` on a click outside a layer that sits beside the page, as a click on the dim area
+// closes a modal one. The press must start out there with nothing but tooltips open above the
+// layer, so the click that opened it never counts, and a press that only closes a menu or popover
+// opened above it is spent on that. A drag (a selection, a resize) and a splitter do not count.
+export function onOutsideClick(entry: LayerEntry, close: () => void): () => void {
+  let from: { x: number; y: number } | null = null;
+  const outside = (target: EventTarget | null) =>
+    target instanceof Element &&
+    !(entry.root()?.contains(target) ?? true) &&
+    !target.closest(SPLITTER);
+  const down = (event: PointerEvent) => {
+    const index = stack.indexOf(entry);
+    const topmost = index >= 0 && stack.slice(index + 1).every((above) => !above.panel());
+    from =
+      event.button === 0 && topmost && outside(event.target)
+        ? { x: event.clientX, y: event.clientY }
+        : null;
+  };
+  const click = (event: MouseEvent) => {
+    const start = from;
+    from = null;
+    if (!start || !outside(event.target)) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) <= SLOP) close();
+  };
+  document.addEventListener("pointerdown", down, true);
+  document.addEventListener("click", click, true);
+  return () => {
+    document.removeEventListener("pointerdown", down, true);
+    document.removeEventListener("click", click, true);
+  };
+}
+
 // True while a modal layer is open above this one: the layer below is pushed back.
 export function useBehind(entry: LayerEntry | undefined): boolean {
   return useSyncExternalStore(subscribe, () => {

@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { Hono } from "hono";
 import { afterEach, expect, it, vi } from "vitest";
 import { addToolRoutes } from "../../../../cells/desktop/desktopd/src/tools/routes.ts";
@@ -58,6 +60,36 @@ it("Take control stops an active command and drains its cleanup result without q
   expect(output).toHaveBeenCalledOnce();
   await f.tools.close();
 });
+it("Stop during a quiet command confirms its end on a computer that answers seconds late", async () => {
+  const f = fixture(),
+    stop = new AbortController(),
+    id = randomUUID();
+  const late = new TransformStream<Uint8Array, Uint8Array>({
+    async transform(chunk, controller) {
+      await sleep(3000);
+      controller.enqueue(chunk);
+    },
+  });
+  const tools = new DesktopdTools({ baseUrl: "http://desktop.test", token: "fixture" }, (async (
+    url,
+    init,
+  ) => {
+    const response = await f.transport(url, init);
+    if (new URL(String(url)).pathname === "/shell")
+      return new Response(response.body?.pipeThrough(late), response);
+    await sleep(3000);
+    return response;
+  }) as typeof fetch);
+  const work = tools.shell({ id, command: "sleep 30" }, () => {}, stop.signal);
+  const running = () =>
+    f.app.request("/shell/result", { method: "POST", body: JSON.stringify({ id }) });
+  await vi.waitFor(async () => expect((await running()).status).toBe(202));
+  stop.abort();
+  expect(await work).toMatchObject({ done: true, exitCode: null, signal: "SIGKILL" });
+  expect(f.requests).toEqual(["/shell", "/shell/stop"]);
+  await tools.close();
+  await f.tools.close();
+}, 15_000);
 it("handles cancellation before response headers arrive", async () => {
   const f = fixture(),
     stop = new AbortController(),

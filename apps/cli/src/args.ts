@@ -433,7 +433,7 @@ Computers and tasks:
                                 Erase that computer's home and browser profile; create a replacement
   localdot reset-computer --cell <id> --request <id> --status
                                 Check a reset without resuming it
-  localdot recover --cell <id>  Explain recovery for an old native task
+  localdot recover --cell <id>  Explain how to recover a held computer
   localdot recover --cell <id> --confirm-native-exit
                                 Record your confirmation that the old native task is gone
 

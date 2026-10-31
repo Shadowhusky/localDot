@@ -1,6 +1,6 @@
-import { APICallError } from "ai";
+import { APICallError, TypeValidationError } from "ai";
 import { expect, it } from "vitest";
-import { providerFailure } from "./provider-failure.ts";
+import { failureMessage, providerFailure } from "./provider-failure.ts";
 
 const error = (statusCode: number, body: unknown = {}, responseHeaders = {}) =>
   new APICallError({
@@ -27,4 +27,31 @@ it.each([401, 429, 500, 503])("does not call an ordinary %s a credit limit", (st
   expect(
     providerFailure(error(status, { error: { message: "Please retry shortly" } })),
   ).toBeUndefined();
+});
+it("keeps an ordinary failure's message as it was", () => {
+  const refused = new APICallError({
+    url: "http://llm.ldot/provider",
+    message: "Cannot connect to API: connect ECONNREFUSED",
+    requestBodyValues: {},
+    cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+  });
+  expect(failureMessage(refused)).toBe("Cannot connect to API: connect ECONNREFUSED");
+  expect(failureMessage(error(503))).toBe("Request failed");
+  expect(failureMessage("plain")).toBe("plain");
+});
+it("names a 200 reply that could not be read without quoting it", () => {
+  const invalid = new APICallError({
+    url: "http://llm.ldot/provider",
+    message: "Invalid JSON response",
+    requestBodyValues: {},
+    statusCode: 200,
+    responseBody: '{"choices":"PRIVATE-TEXT"}',
+    cause: TypeValidationError.wrap({
+      value: { choices: "PRIVATE-TEXT" },
+      cause: new Error("choices: expected array"),
+    }),
+  });
+  expect(failureMessage(invalid)).toBe(
+    "The reply could not be read: Invalid JSON response; not the expected shape; choices: expected array",
+  );
 });

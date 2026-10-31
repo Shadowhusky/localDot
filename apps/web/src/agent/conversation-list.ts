@@ -1,4 +1,5 @@
 import {
+  CONVERSATION_TAGS,
   type ConversationEntry,
   ConversationList,
   type ConversationLive,
@@ -95,6 +96,33 @@ export function arrangeConversations(rows: readonly ConversationRow[]): {
     active: unpinned.filter((row) => row.active),
     rest: unpinned.filter((row) => !row.active),
   };
+}
+
+// How soon a conversation under way wants the user: one asking for them first, then those at work.
+const URGENCY: Record<ConversationStatus, number> = {
+  "needs-you": 0,
+  working: 1,
+  waiting: 2,
+  idle: 3,
+  paused: 4,
+  done: 5,
+  stopped: 5,
+  failed: 5,
+};
+
+// The conversations under way, most urgent first, each kind newest first as the daemon lists them.
+export function liveConversations(rows: readonly ConversationRow[]): ConversationRow[] {
+  return rows
+    .filter((row) => row.active)
+    .map((row, at) => ({ row, at }))
+    .sort((a, b) => URGENCY[a.row.status] - URGENCY[b.row.status] || a.at - b.at)
+    .map(({ row }) => row);
+}
+
+// The colour tags given to any of `rows`, in the order the swatches show them.
+export function tagsInUse(rows: readonly ConversationRow[]): ConversationTag[] {
+  const used = new Set(rows.map((row) => row.entry.tag));
+  return CONVERSATION_TAGS.filter((tag) => used.has(tag));
 }
 
 export function groupConversations(

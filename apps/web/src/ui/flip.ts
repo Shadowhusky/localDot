@@ -20,10 +20,11 @@ function glide(
 
 // When `order` changes, each item marked `data-flip="<key>"` inside `container` glides from where it
 // was to its new place, and a newcomer grows in where it lands (FLIP). Places are read against the
-// scroller's content, so scrolling or a resize between orders moves nothing. Under reduced motion
-// items take their places at once and newcomers only fade in.
+// scroller's content, so scrolling or a resize between orders moves nothing; across, against the
+// item's own layout, so a row of cards that scrolls sideways moves nothing either. Under reduced
+// motion items take their places at once and newcomers only fade in.
 export function useFlip(container: RefObject<HTMLElement | null>, order: string): void {
-  const places = useRef(new Map<string, number>());
+  const places = useRef(new Map<string, { x: number; y: number }>());
   const shown = useRef<string | null>(null);
   useLayoutEffect(() => {
     const element = container.current;
@@ -31,14 +32,17 @@ export function useFlip(container: RefObject<HTMLElement | null>, order: string)
     const origin = element.getBoundingClientRect().top - element.scrollTop;
     const items = [...element.querySelectorAll<HTMLElement>("[data-flip]")];
     const now = new Map(
-      items.map((item) => [item.dataset.flip ?? "", item.getBoundingClientRect().top - origin]),
+      items.map((item) => [
+        item.dataset.flip ?? "",
+        { x: item.offsetLeft, y: item.getBoundingClientRect().top - origin },
+      ]),
     );
     if (shown.current && shown.current !== order && typeof element.animate === "function") {
       const style = getComputedStyle(element);
       const still = matches(REDUCED_MOTION);
       for (const item of items) {
         const was = places.current.get(item.dataset.flip ?? "");
-        const is = now.get(item.dataset.flip ?? "") ?? 0;
+        const is = now.get(item.dataset.flip ?? "") ?? { x: 0, y: 0 };
         if (was === undefined)
           glide(
             item,
@@ -51,10 +55,18 @@ export function useFlip(container: RefObject<HTMLElement | null>, order: string)
             tokenMs(style, still ? "--dur-fade" : "--dur-default", still ? 150 : 470),
             style,
           );
-        else if (!still && Math.abs(was - is) > 0.5)
+        else if (!still && (Math.abs(was.y - is.y) > 0.5 || Math.abs(was.x - is.x) > 0.5))
           glide(
             item,
-            [{ transform: `translateY(${was - is}px)` }, { transform: "none" }],
+            [
+              {
+                transform:
+                  Math.abs(was.x - is.x) > 0.5
+                    ? `translate(${was.x - is.x}px, ${was.y - is.y}px)`
+                    : `translateY(${was.y - is.y}px)`,
+              },
+              { transform: "none" },
+            ],
             tokenMs(style, "--dur-default", 470),
             style,
           );

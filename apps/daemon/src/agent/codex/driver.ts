@@ -24,10 +24,12 @@ import {
 } from "@localdot/protocol";
 import { z } from "zod";
 import { NativeRetirement } from "../native-retirement.ts";
+import { InputRefused, loggedCause, type StartupStep, startupFailure } from "../native-startup.ts";
 import { RETRY_NEXT } from "../native-tools.ts";
 import { type Redactor, redactor } from "../redact.ts";
 import type { AgentSession, BrainGeneration } from "../session.ts";
 import type { TranscriptStore } from "../transcript.ts";
+import { AccountError, TASK_BUSY } from "./account.ts";
 import { CodexEventMapper, type Violation } from "./events.ts";
 import type {
   McpCallContext,
@@ -172,7 +174,8 @@ type CycleResult =
         | "safety";
     }
   | { kind: "violation"; what: Violation | "refused"; tool?: string }
-  | { kind: "retry" | "failed"; message: string };
+  | { kind: "retry"; message: string }
+  | { kind: "failed"; message: string; detail?: string; next?: string };
 interface ActiveCycle {
   finish(result: CycleResult): void;
   fence(): void;
@@ -492,7 +495,7 @@ export class CodexDriver {
           continue;
         }
         if (result.kind === "failed") {
-          this.#state(session, "error", result.message);
+          this.#state(session, "error", result.message, result.next, result.detail);
           return CODEX_GAVE_UP;
         }
         retries = 0;
@@ -519,7 +522,18 @@ export class CodexDriver {
         throw cause;
       }
       if (session.stopped) return CODEX_DONE;
-      this.#state(session, "error", "The ChatGPT task could not continue.");
+      console.error(
+        `ChatGPT could not continue: ${loggedCause(cause, redact, session.task)} (task ${session.id})`,
+      );
+      if (cause instanceof AccountError && cause.message === TASK_BUSY)
+        this.#state(
+          session,
+          "error",
+          "Another task is using your ChatGPT account.",
+          "Send your message again once it's done, or choose another model in Settings.",
+          "Only one ChatGPT task works at a time.",
+        );
+      else this.#state(session, "error", "The ChatGPT task could not continue.");
       return CODEX_GAVE_UP;
     } finally {
       active?.fence();
@@ -535,10 +549,16 @@ export class CodexDriver {
     state: "paused" | "idle" | "error",
     reason: string,
     next?: string,
+    detail?: string,
   ): void {
     if (session.stopped || session.controlHeld) return;
     if (state !== "error") session.setStatus(state);
-    session.append("agent.state", { state, reason, ...(next ? { next } : {}) });
+    session.append("agent.state", {
+      state,
+      reason,
+      ...(detail ? { detail } : {}),
+      ...(next ? { next } : {}),
+    });
   }
   async #release(session: AgentSession, lease: CodexDriverLease): Promise<void> {
     try {
@@ -572,7 +592,7 @@ export class CodexDriver {
     const text = redact(
       `localDot restarted you, so the earlier conversation is gone.${earlier ? `\n${earlier}` : ""}\nThe task: ${session.task}\nThe plan so far:\n${session.plan.length ? session.plan.map((item) => `[${marks[item.status]}] ${item.text}`).join("\n") : "(no plan yet)"}${user.length ? `\nWhat the user said since the task:\n${user.map((m) => m.content).join("\n")}` : ""}${last ? `\nYour last message to the user: ${last}` : ""}\nUse the full screenshot in this turn to see where things stand, then continue.${suffix ? `\n${suffix}` : ""}${this.#resumeNotes.get(session) ? `\n${this.#resumeNotes.get(session)}` : ""}`,
     );
-    if (Buffer.byteLength(text) > MAX_PROMPT_BYTES) throw new Error("The task recap is too large.");
+    if (Buffer.byteLength(text) > MAX_PROMPT_BYTES) throw new InputRefused("size");
     return text;
   }
   async #cycle(
@@ -725,7 +745,11 @@ export class CodexDriver {
     const fail = (cause: CodexLaunchError) => {
       if (["process_exited", "transport_failed", "startup_failed"].includes(cause.code))
         finish({ kind: "crashed" });
-      else finish({ kind: "failed", message: "The ChatGPT connection could not start." });
+      else {
+        if (current())
+          console.error(`ChatGPT could not start: Codex ${cause.code} (task ${session.id})`);
+        finish({ kind: "failed", message: "The ChatGPT connection could not start." });
+      }
     };
     const register = (holder: TaskConnection) => {
       if (holders.has(holder)) return;
@@ -910,7 +934,7 @@ export class CodexDriver {
         const batch = items.slice(offset, offset + 64);
         for (const item of batch)
           if (item.kind !== "resume" && redact(item.text) !== item.text)
-            throw new Error("Protected input cannot be persisted.");
+            throw new InputRefused("secret");
         const messages = batch
           .filter((i) => i.kind !== "resume")
           .map((item) => ({
@@ -984,11 +1008,13 @@ export class CodexDriver {
         }
       }
     };
+    let step: StartupStep = "screens";
     const startup = (async () => {
       check();
       await session.prepareScreens(generation);
       check();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
+      step = "launch";
       endpoint = await d.openEndpoint({
         session,
         generation,
@@ -1031,6 +1057,7 @@ export class CodexDriver {
       register(launched);
       check();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
+      step = "connection";
       await request(
         "initialize",
         { clientInfo: { name: "localdot", title: "localDot", version: "0.0.0" } },
@@ -1059,11 +1086,11 @@ export class CodexDriver {
       if (thread.model !== model || thread.approvalsReviewer !== "user")
         throw new Error("Unexpected Codex thread configuration.");
       mainThread = thread.thread.id;
+      step = "history";
       session.restoreDelivered(d.transcripts);
       check();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
-      if (redact(session.task) !== session.task)
-        throw new Error("Protected task input cannot be persisted.");
+      if (redact(session.task) !== session.task) throw new InputRefused("secret");
       if (
         !d.transcripts
           .read(session.id)
@@ -1088,10 +1115,10 @@ export class CodexDriver {
               .filter((part) => part !== undefined)
               .join("\n\n"),
           );
-      if (Buffer.byteLength(text) > MAX_PROMPT_BYTES)
-        throw new Error("The task input is too large.");
+      if (Buffer.byteLength(text) > MAX_PROMPT_BYTES) throw new InputRefused("size");
       check();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
+      step = "screen";
       const observation = await d.observe(session, generation, signal);
       check();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
@@ -1104,6 +1131,7 @@ export class CodexDriver {
       )
         throw new Error("Invalid full screenshot.");
       const image = Buffer.from(observation.png);
+      step = "connection";
       epochAbort = new AbortController();
       epoch = Object.freeze({
         id: generation.id,
@@ -1150,6 +1178,9 @@ export class CodexDriver {
       check();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       for (const item of initial) pending.delete(item.messageId);
+      // The turn's input holds everything stored so far. A steer later in the turn has no sign of
+      // when Codex reads it, so it counts as unheard until a wait has ended for it.
+      session.heard(session.delivered);
       clearTimeout(startupTimer);
       void inboxLoop().catch(() => {
         if (!current()) loss();
@@ -1162,7 +1193,19 @@ export class CodexDriver {
         loss();
         if (!result) finish({ kind: "failed", message: "The ChatGPT connection was retired." });
       } else if (cause instanceof CodexLaunchError) fail(cause);
-      else finish({ kind: "failed", message: "The ChatGPT task could not start." });
+      else
+        finish({
+          kind: "failed",
+          ...startupFailure({
+            harness: "ChatGPT",
+            message: "The ChatGPT task could not start.",
+            step,
+            cause,
+            sessionId: session.id,
+            redact,
+            task: session.task,
+          }),
+        });
     });
     const outcome = await completion.promise;
     fence();

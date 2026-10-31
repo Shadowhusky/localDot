@@ -29,7 +29,7 @@ import { PurposeGate } from "../safety/purpose.ts";
 import { AgentSession } from "../session.ts";
 import { browserActTool } from "./browser-act.ts";
 import { computerTool, UNCHANGED } from "./computer.ts";
-import type { ToolCallContext, ToolDeps } from "./deps.ts";
+import { type ToolCallContext, type ToolDeps, USER_SPOKE } from "./deps.ts";
 
 const grey = (paint?: Rect) => {
   const pixels = Buffer.alloc(1280 * 800, 100);
@@ -350,6 +350,64 @@ describe("screenshot economy", () => {
     const s = await setup();
     const result = await computerTool(s.deps, s.ctx, { action: "wait", ms: 10 });
     expect(images(result.content)).toHaveLength(1);
+  });
+
+  it("ends within a second when the user sends a message, and says so", async () => {
+    const s = await setup();
+    const original = s.deps.gateway.run.bind(s.deps.gateway);
+    const run = vi.spyOn(s.deps.gateway, "run").mockImplementation(async (ctx, action) => {
+      const result = await original(ctx, action);
+      if (run.mock.calls.length === 2) s.session.post("steer", "Use the other account");
+      return result;
+    });
+    const result = await computerTool(s.deps, s.ctx, {
+      action: "wait",
+      ms: 30000,
+      basedOn: s.basis,
+    });
+    expect(result.ok).toBe(true);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(texts(result.content)).toContain(USER_SPOKE);
+  });
+
+  it("doesn't start when a message came while dot chose to wait", async () => {
+    const s = await setup();
+    s.session.post("steer", "Stop waiting, open the report");
+    const run = vi.spyOn(s.deps.gateway, "run");
+    const result = await computerTool(s.deps, s.ctx, { action: "wait", ms: 30000 });
+    expect(run).not.toHaveBeenCalled();
+    expect(texts(result.content)).toContain(USER_SPOKE);
+    // That message has ended a wait: the next one runs its course.
+    const next = await computerTool(s.deps, s.ctx, { action: "wait", ms: 2000 });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(texts(next.content)).not.toContain(USER_SPOKE);
+  });
+
+  it("stops a batch at a wait the user cut short, leaving the steps after it undone", async () => {
+    const s = await setup();
+    s.fake.script.hitTest = (p) => hit(field(p, "Name"));
+    s.fake.script.focused = () => hit(field({ x: 300, y: 200 }, "Name"));
+    const original = s.deps.gateway.run.bind(s.deps.gateway);
+    vi.spyOn(s.deps.gateway, "run").mockImplementation(async (ctx, action) => {
+      const result = await original(ctx, action);
+      if (action.verb === "wait") s.session.post("steer", "Type Hale instead");
+      return result;
+    });
+    const result = await computerTool(s.deps, s.ctx, {
+      action: "batch",
+      steps: [
+        { action: "click", point: { x: 300, y: 200 }, button: "left", count: 1 },
+        { action: "wait", ms: 10000 },
+        { action: "type", text: "Robin" },
+      ],
+      basedOn: s.basis,
+    });
+    expect(result.ok).toBe(false);
+    expect(s.inputs().map((c) => c.path)).toEqual(["/input"]);
+    expect(texts(result.content)).toContain(USER_SPOKE);
+    expect(texts(result.content)).toContain(
+      "The batch stopped at step 2 of 3 (wait); the steps after it were not done.",
+    );
   });
 });
 

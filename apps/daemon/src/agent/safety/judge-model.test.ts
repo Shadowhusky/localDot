@@ -116,6 +116,15 @@ describe("the fast model as judge", () => {
     });
     const plain = body(of("anthropic", "anthropic", "claude-haiku-4-5"), "none");
     expect(plain).not.toHaveProperty("thinking");
+    expect(body(of("anthropic", "anthropic", "claude-haiku-5-5"), "none")).toMatchObject({
+      thinking: { type: "disabled" },
+    });
+    expect(body(of("anthropic", "anthropic", "claude-opus-5-5"), "low")).toMatchObject({
+      output_config: { effort: "low" },
+    });
+    expect(body(of("moonshotai", "openai-compatible", "kimi-k3.1-pro"), "low")).toMatchObject({
+      reasoning_effort: "low",
+    });
     // A level the model doesn't offer, or no level, leaves the request as it was.
     expect(body(of("openai", "openai", "gpt-5-mini"), "none")).not.toHaveProperty("reasoning");
     expect(body(of("openai", "openai", "gpt-5-mini"), undefined)).not.toHaveProperty("reasoning");

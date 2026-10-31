@@ -32,6 +32,21 @@ import { inspectDesktopUpload, readDesktopUpload } from "./upload-client.ts";
 
 export const MAX_TRANSFER_BYTES = 100 * 1024 * 1024;
 const JSON_BYTES = 32 * 1024 * 1024;
+// A loaded computer can take seconds to answer. After Stop, the command's own reply gets this long
+// to bring its receipt, and a lost reply's receipt is looked up for as long; each request in
+// between gets ATTEMPT_MS and is retried until then.
+const CONFIRM_MS = 30_000;
+const ATTEMPT_MS = 5000;
+const RETRY_MS = 250;
+const transient = (status: number) => status >= 500 || status === 408 || status === 429;
+type ShellChecks = Omit<ShellDiagnosis, "failed" | "lookup" | "ms">;
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
 const PutResult = z.strictObject({
   path: z.string().max(1024),
   bytes: z.number().int().nonnegative(),
@@ -46,14 +61,66 @@ export class ShellCleanupUncertainError extends DesktopdError {
   }
 }
 
+// A reply's status, or why there was none.
+export type ShellReply = number | "timeout" | "unreachable" | "malformed";
+// Why a command's end could not be confirmed: the check that failed first, what the receipt lookup
+// heard, and when, in ms since the request. Only names and numbers: never the command, its output
+// or the computer's words.
+export interface ShellDiagnosis {
+  failed:
+    | "request"
+    | "stream"
+    | "deadline"
+    | "stop"
+    | "stop_refused"
+    | "reply"
+    | "output"
+    | "closed";
+  lookup: "unsupported" | "skipped" | "tried";
+  ms: number;
+  stoppedAtMs?: number;
+  stops: number;
+  stopReply?: ShellReply;
+  lookups: number;
+  lookupReply?: ShellReply;
+}
+
 // A request may have reached the cell even when its response was lost. The runner must contain
 // this uncertainty through Stop; it must not automatically replay an arbitrary command.
 export class ShellExecutionUncertainError extends DesktopdError {
   readonly code = "shell_execution_uncertain";
-  constructor() {
+  constructor(readonly diagnosis?: ShellDiagnosis) {
     super(502, "could not confirm the command result", "/shell");
     this.name = "ShellExecutionUncertainError";
   }
+}
+
+const FAILED: Record<ShellDiagnosis["failed"], string> = {
+  request: "the command request got no reply",
+  stream: "the command's reply broke off",
+  deadline: "the command's deadline passed",
+  stop: "no receipt came in the wait after Stop",
+  stop_refused: "the stop request was refused",
+  reply: "the command's reply was malformed",
+  output: "its output could not be taken in",
+  closed: "the connection to the computer closed",
+};
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+const answer = (r: ShellReply | undefined) =>
+  r === 202 ? "still running" : r === 404 ? "unknown command" : String(r ?? "none");
+// One line for the log and the task's step: which check failed, and when.
+export function describeShellDiagnosis(d: ShellDiagnosis): string {
+  return [
+    FAILED[d.failed],
+    ...(d.stoppedAtMs === undefined ? [] : [`stopped ${seconds(d.stoppedAtMs)} in`]),
+    ...(d.stops ? [`${d.stops} stop requests, last ${answer(d.stopReply)}`] : []),
+    d.lookup === "unsupported"
+      ? "the computer keeps no receipts"
+      : d.lookup === "skipped"
+        ? "no receipt lookup"
+        : `${d.lookups} receipt checks, last ${answer(d.lookupReply)}`,
+    `gave up ${seconds(d.ms)} in`,
+  ].join("; ");
 }
 
 async function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -236,13 +303,44 @@ export class DesktopdTools {
     const input = ShellRequest.parse({ ...req, id });
     signal?.throwIfAborted();
     this.#lifetime.signal.throwIfAborted();
+    const started = performance.now();
+    const since = () => Math.round(performance.now() - started);
     // Do not abort this response on a user handoff: it carries proof of command cleanup.
     const scope = this.#scope(input.timeoutMs + 10_000);
-    let cancellation: (() => void) | undefined;
-    let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
+    const checks: ShellChecks = { stops: 0, lookups: 0 };
+    let failed: ShellDiagnosis["failed"] | undefined;
+    const giveUp = (why: ShellDiagnosis["failed"]) => {
+      failed ??= why;
+      scope.abort();
+    };
+    let answered = false;
+    let stopping = false;
+    let confirmation: ReturnType<typeof setTimeout> | undefined;
+    const confirmWithin = (ms: number) => {
+      clearTimeout(confirmation);
+      confirmation = setTimeout(() => giveUp("stop"), ms);
+    };
+    const stop = () => {
+      if (!answered || stopping) return;
+      stopping = true;
+      // 404 may race with an already-ended command. Only the original stream's valid terminal
+      // result below is proof; this acknowledgement never is. A command the computer no longer
+      // runs leaves its reply a moment to bring the receipt before it is looked up.
+      void this.#stop(id, scope.signal, checks).then(
+        (status) => {
+          if (scope.signal.aborted) return;
+          if (status === undefined) giveUp("stop_refused");
+          else if (status === 404) confirmWithin(ATTEMPT_MS);
+        },
+        () => {},
+      );
+    };
     const abort = () => {
-      cancellationTimer ??= setTimeout(() => scope.abort(), 5000);
-      cancellation?.();
+      if (checks.stoppedAtMs === undefined) {
+        checks.stoppedAtMs = since();
+        confirmWithin(CONFIRM_MS);
+      }
+      stop();
     };
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
@@ -250,25 +348,12 @@ export class DesktopdTools {
     let protocolFailure: DesktopdError | undefined;
     let resultLookup = false;
     let consumerFailed = false;
+    let receiving = false;
     try {
       const res = await this.#send("/shell", scope, JSON.stringify(input), "application/json");
       resultLookup = res.headers.get("x-localdot-shell-result") === "1";
-      let cancellationSent = false;
-      cancellation = () => {
-        if (cancellationSent) return;
-        cancellationSent = true;
-        const cancelScope = this.#scope(2000);
-        void this.#send("/shell/stop", cancelScope, JSON.stringify({ id }), "application/json")
-          .then(async (reply) => {
-            await textBody(reply, cancelScope.signal, 4096);
-            // 404 may race with an already-ended command. Only the original stream's
-            // valid terminal result below is proof; this acknowledgement never is.
-            if (reply.status !== 204 && reply.status !== 404) scope.abort();
-          })
-          .catch(() => scope.abort())
-          .finally(() => cancelScope.abort());
-      };
-      if (signal?.aborted) cancellation();
+      answered = true;
+      if (signal?.aborted) stop();
       if (!res.ok) {
         const detail = await textBody(res, scope.signal, 4096);
         protocolFailure = new DesktopdError(
@@ -288,7 +373,9 @@ export class DesktopdTools {
       let outputBytes = 0;
       let result: ShellDone | undefined;
       for (;;) {
+        receiving = true;
         const chunk = await readChunk(reader, scope.signal);
+        receiving = false;
         scope.signal.throwIfAborted();
         wireBytes += chunk.value?.byteLength ?? 0;
         if (wireBytes > JSON_BYTES) throw new ShellExecutionUncertainError();
@@ -337,17 +424,35 @@ export class DesktopdTools {
       // Only failures created from this response are trusted. An output consumer can throw
       // an arbitrary DesktopdError after the command has already run.
       if (protocolFailure !== undefined && error === protocolFailure) throw error;
+      failed ??= consumerFailed
+        ? "output"
+        : this.#lifetime.signal.aborted
+          ? "closed"
+          : scope.signal.aborted
+            ? "deadline"
+            : !answered
+              ? "request"
+              : receiving
+                ? "stream"
+                : "reply";
       // Close the failed transport (which cancels a still-running command), then ask only
       // for this request's terminal receipt. Never replay a side-effecting command.
       scope.abort();
-      if (resultLookup && !consumerFailed && !this.#lifetime.signal.aborted) {
-        const recovered = await this.#shellResult(id);
+      // A reply that never came cannot say whether the computer keeps receipts; asking is safe.
+      const lookup: ShellDiagnosis["lookup"] =
+        answered && !resultLookup
+          ? "unsupported"
+          : consumerFailed || this.#lifetime.signal.aborted
+            ? "skipped"
+            : "tried";
+      if (lookup === "tried") {
+        const recovered = await this.#shellResult(id, checks);
         if (recovered) return { ...recovered, outputIncomplete: true };
       }
-      throw new ShellExecutionUncertainError();
+      throw new ShellExecutionUncertainError({ failed, lookup, ms: since(), ...checks });
     } finally {
       signal?.removeEventListener("abort", abort);
-      clearTimeout(cancellationTimer);
+      clearTimeout(confirmation);
       scope.abort();
       if (reader) {
         void reader.cancel().catch(() => {});
@@ -356,39 +461,74 @@ export class DesktopdTools {
     }
   }
 
-  async #shellResult(id: string): Promise<ShellDone | undefined> {
-    const scope = this.#scope(5000);
+  // Retries what got no answer while the wait lasts. A command the computer does not know, a reply
+  // that makes no sense, or one still running when the wait ends has no receipt: still uncertain.
+  async #shellResult(id: string, checks: ShellChecks): Promise<ShellDone | undefined> {
+    const scope = this.#scope(CONFIRM_MS);
     try {
       // Explicit cancellation also covers a response transport that ignored abort.
-      const stop = await this.#send(
-        "/shell/stop",
-        scope,
-        JSON.stringify({ id }),
-        "application/json",
-      );
-      await textBody(stop, scope.signal, 4096);
-      if (stop.status !== 204 && stop.status !== 404) return undefined;
+      if (!(await this.#stop(id, scope.signal, checks))) return undefined;
       for (;;) {
-        const reply = await this.#send(
-          "/shell/result",
-          scope,
-          JSON.stringify({ id }),
-          "application/json",
-        );
-        const body = await textBody(reply, scope.signal, 16384);
-        if (reply.status === 200) {
-          const receipt = z
-            .strictObject({ id: z.literal(id), result: ShellDone.strict() })
-            .parse(JSON.parse(body));
-          return receipt.result;
+        checks.lookups++;
+        const reply = await this.#ask("/shell/result", id, scope.signal, 16384);
+        checks.lookupReply = typeof reply === "string" ? reply : reply.status;
+        if (typeof reply !== "string") {
+          // A receipt whose body broke off is kept by the computer; ask again.
+          if (reply.status === 200 && reply.body !== undefined) {
+            const receipt = z
+              .strictObject({ id: z.literal(id), result: ShellDone.strict() })
+              .safeParse(parseJson(reply.body));
+            if (!receipt.success) checks.lookupReply = "malformed";
+            return receipt.data?.result;
+          }
+          if (![200, 202].includes(reply.status) && !transient(reply.status)) return undefined;
         }
-        if (reply.status !== 202) return undefined;
-        await untilAborted(new Promise((resolve) => setTimeout(resolve, 100)), scope.signal);
+        await untilAborted(new Promise((resolve) => setTimeout(resolve, RETRY_MS)), scope.signal);
       }
     } catch {
-      return undefined; // Missing, malformed or unreachable is still uncertain.
+      return undefined;
     } finally {
       scope.abort();
+    }
+  }
+
+  // Asks the computer to stop a command until it answers: 204 stopping, 404 already ended or
+  // unknown, undefined when it refuses. The answer only says the request arrived: the command's
+  // receipt is what proves it ended.
+  async #stop(id: string, until: AbortSignal, checks: ShellChecks): Promise<204 | 404 | undefined> {
+    for (;;) {
+      checks.stops++;
+      const reply = await this.#ask("/shell/stop", id, until, 4096);
+      checks.stopReply = typeof reply === "string" ? reply : reply.status;
+      if (typeof reply !== "string") {
+        if (reply.status === 204 || reply.status === 404) return reply.status;
+        if (!transient(reply.status)) return undefined;
+      }
+      await untilAborted(new Promise((resolve) => setTimeout(resolve, RETRY_MS)), until);
+    }
+  }
+
+  // One small request about a command, with its own deadline: its status, and its body unless that
+  // broke off. Throws only when `until` ends.
+  async #ask(
+    path: "/shell/stop" | "/shell/result",
+    id: string,
+    until: AbortSignal,
+    limit: number,
+  ): Promise<{ status: number; body?: string } | "timeout" | "unreachable"> {
+    const attempt = this.#scope(ATTEMPT_MS, until);
+    let status: number | undefined;
+    try {
+      const reply = await this.#send(path, attempt, JSON.stringify({ id }), "application/json");
+      status = reply.status;
+      return { status, body: await textBody(reply, attempt.signal, limit) };
+    } catch {
+      until.throwIfAborted();
+      this.#lifetime.signal.throwIfAborted();
+      if (status !== undefined) return { status };
+      return attempt.signal.aborted ? "timeout" : "unreachable";
+    } finally {
+      attempt.abort();
     }
   }
 

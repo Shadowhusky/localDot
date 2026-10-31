@@ -12,7 +12,7 @@ import type { PeopleStore } from "../people.ts";
 import type { Redactor } from "../redact.ts";
 import type { EffectPermit } from "../safety/authorize.ts";
 import { screenOf } from "../safety/autonomy.ts";
-import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
+import type { AgentSession, BrainGeneration, ToolLease, UserListener } from "../session.ts";
 import type { Transfers } from "../transfers.ts";
 import type { WebAccess } from "../web/cell.ts";
 
@@ -39,7 +39,7 @@ export interface ToolDeps {
   gateway: Pick<ActionGateway, "run" | "observe" | "cursorOf"> &
     Partial<Pick<ActionGateway, "find">>;
   // Turns on the computer, one action at a time across the tasks sharing it.
-  computer?: Pick<ComputerTurns, "take" | "owners">;
+  computer?: Pick<ComputerTurns, "take" | "owners" | "busy">;
   // Installed with the session's screen controller; one private binding per admitted tool.
   bindScreen?(session: AgentSession, lease: ScreenLease): NativeScreenBinding;
   // The cell's scale, to bring the gateway's device-pixel cursor back to model pixels.
@@ -79,9 +79,11 @@ export interface ToolDeps {
     scope: { signal: AbortSignal; check(): void },
   ): Promise<{ path: string; bytes: number; version?: number }>;
   // Called after synchronous session.stop(); must still revoke/freeze already-fenced sessions.
+  // `why` is the failed check, for the log: names and numbers only.
   stopForUncertainty(
     session: AgentSession,
     reason: "shell_cleanup_uncertain" | "shell_execution_uncertain" | "memory_write_uncertain",
+    why?: string,
   ): Promise<void>;
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
   askTimeoutMs?: number;
@@ -139,6 +141,16 @@ export function fail(message: string): ToolResult {
   return { ok: false, content: [text(message)] };
 }
 
+// What dot hears when the user's message ends one of its waits; the message itself follows.
+export const USER_SPOKE = "Stopped waiting early: the user sent a new message.";
+// A wait of dot's that the user's new message ends early. The brain's delegated agents (their
+// calls are named `sub-…`) don't hear the user, so their waits run their course.
+export function listenForUser(ctx: ToolCallContext, signal = ctx.signal): UserListener {
+  return ctx.callId.startsWith("sub-")
+    ? { signal, spoke: false, end: () => {} }
+    : ctx.session.listenForUser(signal);
+}
+
 // The tail of long output: the end of a log is where the error usually is.
 export function tail(s: string, max: number): string {
   return s.length <= max ? s : `… (${s.length - max} earlier characters cut)\n${s.slice(-max)}`;
@@ -173,10 +185,11 @@ export async function contain(
   deps: ToolDeps,
   ctx: ToolCallContext,
   reason: Parameters<ToolDeps["stopForUncertainty"]>[1],
+  why?: string,
 ): Promise<ToolResult> {
   ctx.session.stop();
   try {
-    await deps.stopForUncertainty(ctx.session, reason);
+    await deps.stopForUncertainty(ctx.session, reason, why);
   } catch {
     /* Access stays fenced even when containment fails. */
   }

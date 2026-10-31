@@ -3,7 +3,6 @@ import {
   DEFAULT_PERSONA,
   isJevKey,
   LLM_PROVIDERS,
-  type LocalDotLink,
   outfit,
   PlanProvider,
   personaOf,
@@ -153,6 +152,7 @@ import { ChatThread, type NewConversation, NewConversationButton } from "./shell
 import { ChatToggle } from "./shell/ChatToggle.tsx";
 import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
 import { ConversationList, ConversationsButton } from "./shell/ConversationList.tsx";
+import { ConversationsBubble } from "./shell/ConversationsBubble.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
 import { ApprovalDecision, DecisionSheetPresence } from "./shell/DecisionIsland.tsx";
@@ -173,6 +173,7 @@ import {
 } from "./shell/island.ts";
 import { LocalDotSwitcher } from "./shell/LocalDotSwitcher.tsx";
 import { useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
+import { forgetLocalDot, useOtherLocalDots } from "./shell/localdot-handoff.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { atWork, longThinkAt, narrationLine } from "./shell/narration.ts";
@@ -240,14 +241,13 @@ const LIBRARY = "library";
 const replayAddress = (selected: string | null) =>
   selected && (selected === LIBRARY || ULID_PATTERN.test(selected)) ? selected : null;
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
-const LIST_DETENTS = ["large"] as const;
+const LIST_DETENTS = ["medium", "large"] as const;
 // A chosen conversation that never comes on show once the daemon has taken the choice (another
 // task holds the computer) stops waiting.
 const SWITCH_MAX_MS = 3000;
 const ALREADY_NEW = "This is a new conversation";
 const NEW_TITLE = "New conversation";
 const NO_SESSIONS: readonly string[] = [];
-const NO_LINKS: readonly LocalDotLink[] = [];
 const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
 const CONFIRMING_LINE = "Checking that your last input reached the computer…";
 const SLOW_LINE = "This is taking longer than usual. Stop me if it looks stuck.";
@@ -482,6 +482,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const freshStart = useFreshStart(api, cell, selectReady);
   const keys = useKeys(api);
   const settings = useSettings(api);
+  const otherLocalDots = useOtherLocalDots(settings.saved);
   const planUsage = usePlanUsage(api, settings.chatgpt.canStart || settings.claudeCode.canStart);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a saved-key revision invalidates the independently cached provider metadata
   useEffect(() => {
@@ -493,7 +494,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const worn = useMemo(() => outfit(persona, accessory), [persona, accessory]);
   const dotAnchor = useRef<HTMLElement | null>(null);
   const [choosingDot, setChoosingDot] = useState(false);
-  useEffect(() => setWearing(worn), [worn]);
+  useEffect(() => setWearing(worn, accessory), [worn, accessory]);
   const rules = useRules(api, settings.open);
   const providerIndex = settings.index;
   const accountModels = settings.chatgpt.models;
@@ -1865,13 +1866,14 @@ function Theatre({ api }: { api: ApiClient }) {
       saved ? (
         <LocalDotSwitcher
           name={saved.name}
-          others={saved.localDots ?? NO_LINKS}
+          others={otherLocalDots.list}
           here={localDots}
+          onOpen={otherLocalDots.open}
           onManage={(trigger) => goToSettings(trigger, "dot")}
           onAddHere={(trigger) => goToSettings(trigger, "computer")}
         />
       ) : undefined,
-    [saved, localDots, goToSettings],
+    [saved, otherLocalDots, localDots, goToSettings],
   );
   const chooseMode = useHandler((mode: "watch" | "replay") =>
     selectReplay(mode === "watch" ? null : LIBRARY),
@@ -1903,13 +1905,13 @@ function Theatre({ api }: { api: ApiClient }) {
       ...(localDots.dots ?? [])
         .filter((dot) => !dot.self)
         .map((dot) => ({ id: dot.id, name: dot.name, open: () => switchToDot(localDots, dot) })),
-      ...(settings.saved?.localDots ?? NO_LINKS).map((link) => ({
+      ...otherLocalDots.list.map((link) => ({
         id: link.url,
         name: link.name,
-        open: () => window.location.assign(link.url),
+        open: () => otherLocalDots.open(link.url),
       })),
     ],
-    [localDots, settings.saved?.localDots],
+    [localDots, otherLocalDots],
   );
   const commands = useActions({
     api,
@@ -2177,14 +2179,12 @@ function Theatre({ api }: { api: ApiClient }) {
                     )}
                     {phone && (
                       <span className="island-conversations">
-                        <IconButton
-                          icon="message-circle"
-                          size={32}
-                          variant="filled"
-                          round
-                          label="Conversations"
+                        <ConversationsBubble
+                          api={api}
+                          facts={liveFacts}
+                          current={conversationList.current}
                           attention={[...needsYou].some((id) => id !== currentTask)}
-                          onClick={() => setConversationsOpen(true)}
+                          onOpen={() => setConversationsOpen(true)}
                         />
                       </span>
                     )}
@@ -2225,6 +2225,7 @@ function Theatre({ api }: { api: ApiClient }) {
                       open={choosingDot}
                       anchor={dotAnchor}
                       value={settings.saved?.persona ?? DEFAULT_PERSONA}
+                      accessory={accessory}
                       onChange={(persona) => void settings.choosePersona(persona)}
                       auto={{
                         on: settings.saved?.autoPersona === true,
@@ -2442,7 +2443,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   phone && (
                     <IconButton
                       className="toolbar-button"
-                      size={44}
+                      size={36}
                       round
                       icon="list"
                       label="Activity"
@@ -2528,11 +2529,11 @@ function Theatre({ api }: { api: ApiClient }) {
                           startsGroup: index === 0,
                           run: () => switchToDot(localDots, dot),
                         })),
-                        ...(settings.saved?.localDots ?? []).map((link, index) => ({
+                        ...otherLocalDots.list.map((link, index) => ({
                           label: `Switch to ${link.name}`,
                           icon: "monitor" as const,
                           startsGroup: index === 0,
-                          run: () => window.location.assign(link.url),
+                          run: () => otherLocalDots.open(link.url),
                         })),
                         {
                           label: mobileScreen.minimized ? "Show screen" : "Minimize screen",
@@ -2783,7 +2784,9 @@ function Theatre({ api }: { api: ApiClient }) {
                 onName: (name) => settings.changeLook({ name }),
                 onAccessory: (accessory) => settings.changeLook({ accessory }),
                 others: settings.draft?.localDots ?? settings.saved?.localDots ?? [],
+                known: otherLocalDots.list,
                 onOthers: (localDots) => settings.changeLook({ localDots }),
+                onForget: forgetLocalDot,
               }}
               voice={{
                 prefs: voicePrefs.value,
@@ -3013,10 +3016,12 @@ function Theatre({ api }: { api: ApiClient }) {
             title="Conversations"
             doneLabel="Done"
             detents={LIST_DETENTS}
+            flush
             className="conversations-sheet"
           >
             <ConversationList
               {...conversationList}
+              layout="sheet"
               open={conversationsOpen}
               onPick={(id, sessions) => {
                 setConversationsOpen(false);

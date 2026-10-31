@@ -58,9 +58,16 @@ import {
 import type { EventSink } from "./events.ts";
 import { driveHarness, type HarnessRequest } from "./harness.ts";
 import { harnessModel } from "./harness-model.ts";
-import { editsOlderTurns, imagesInToolResults, rawTier, servedTier } from "./models.ts";
+import {
+  cacheKeyOptions,
+  editsOlderTurns,
+  imagesInToolResults,
+  marksCache,
+  rawTier,
+  servedTier,
+} from "./models.ts";
 import { type PlanLine, reminder, screenHands, systemPrompt } from "./prompt.ts";
-import { providerFailure } from "./provider-failure.ts";
+import { failureMessage, providerFailure } from "./provider-failure.ts";
 import type { ToolClient } from "./tool-client.ts";
 import { toolSet } from "./tools.ts";
 
@@ -133,8 +140,18 @@ interface Call {
   error?: unknown;
 }
 
+// A 2xx failed while its reply was read: the provider took the request, and the stream broke off
+// (an upstream reset, or keyd ending the relay when a key changes) or could not be parsed.
 const RETRYABLE = (status: number | undefined) =>
-  status === undefined || status === 408 || status === 409 || status === 429 || status >= 500;
+  status === undefined ||
+  (status >= 200 && status < 300) ||
+  status === 408 ||
+  status === 409 ||
+  status === 429 ||
+  status >= 500;
+// How DeepSeek ends a reply its servers cut short, out of capacity or interrupted: the SDK reports
+// either as finished, so the partial reply is dropped and tried again.
+const CUT_SHORT = new Set(["insufficient_system_resource", "aborted"]);
 // A busy or unreachable model is tried again after 2, 4, 8 … s, at most a minute apart, or after
 // what its Retry-After asks if longer, up to five minutes.
 const RETRY_FIRST_MS = 2000;
@@ -428,7 +445,7 @@ export class Agent {
                   },
                 });
               },
-              binding.client,
+              binding,
             );
           })();
         },
@@ -800,17 +817,15 @@ export class Agent {
           .join("\n\n"),
         history,
         reminder(this.#plan, progressDue),
-        binding.client === "anthropic",
+        marksCache(binding),
       );
       try {
         const result = streamText({
           model: this.#model(),
           ...prompt,
           tools: toolSet(binding, !!boot.research, boot.connectors, this.#harnessRequest.tools),
-          // OpenAI routes a request by this key to the server that has its prefix cached.
-          ...(binding.client === "openai"
-            ? { providerOptions: { openai: { promptCacheKey: boot.sessionId } } }
-            : {}),
+          // The provider routes a request by this key to the server that has its prefix cached.
+          providerOptions: cacheKeyOptions(binding, boot.sessionId),
           maxOutputTokens: binding.maxOutputTokens,
           maxRetries: 0,
           abortSignal: signal,
@@ -860,6 +875,8 @@ export class Agent {
                 ...(speed ? { speed } : {}),
               },
             });
+            if (part.rawFinishReason && CUT_SHORT.has(part.rawFinishReason))
+              throw new Error(`The provider stopped the reply partway (${part.rawFinishReason})`);
           }
         }
         if (opening) say(opening);
@@ -873,7 +890,7 @@ export class Agent {
         if (signal.aborted) return "stopped";
         sink.endText();
         const status = APICallError.isInstance(err) ? err.statusCode : undefined;
-        const message = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+        const message = failureMessage(err);
         if (status === 409 && APICallError.isInstance(err) && err.responseBody) {
           let paused = false;
           try {
@@ -930,8 +947,6 @@ export class Agent {
           continue;
         }
         if (this.#role === "main" && this.#o.models.local && boot.models.local) {
-          this.#role = "local";
-          attempt = 0;
           sink.push({
             type: "model.retry",
             data: {
@@ -943,6 +958,8 @@ export class Agent {
               fallback: boot.models.local.model,
             },
           });
+          this.#role = "local";
+          attempt = 0;
           continue;
         }
         if (!(await this.#waitForResume(STALL.modelUnavailable, signal, detail))) return "stopped";

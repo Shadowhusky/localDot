@@ -38,6 +38,8 @@ export interface CodexAccount {
   logout(): Promise<void>;
   refresh(): Promise<ChatgptStatus>;
 }
+// The account runs one Codex process at a time, so it takes one ChatGPT task at a time.
+export const TASK_BUSY = "A ChatGPT task is already using the account.";
 export class AccountError extends Error {
   constructor(
     readonly status: 409 | 503,

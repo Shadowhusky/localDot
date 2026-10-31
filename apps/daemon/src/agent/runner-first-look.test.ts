@@ -371,9 +371,80 @@ describe("Auto's dot", () => {
     await until(() => f.runs.length === 1);
     expect(f.order).toEqual(["skills:finance", "agent"]);
     expect(f.choices(session.id)).toEqual([{ persona: "finance", by: "default" }]);
+    session.append("message.assistant", { messageId: ulid(), text: "Looking at the test." });
     late.resolve(reply({ title: "Failing test fix", dot: "coder" }));
     await until(() => f.titles(session.id).length === 1);
+    // dot has spoken as Finance: a pick this late changes nothing.
     expect(f.runner.roleOf(session.id)).toBe(PERSONAS.finance.guidance);
+    expect(f.choices(session.id)).toEqual([{ persona: "finance", by: "default" }]);
+    session.stop();
+    await f.live.settled(session.id);
+  });
+
+  it("still switches to a late pick before dot's first word or action, from its history", async () => {
+    const f = setup(auto);
+    const late = deferred<string>();
+    f.answer(() => late.promise);
+    f.hold(true);
+    const session = await f.runner.start(f.cellId, "Fix the failing test");
+    await until(() => f.waits.length === 1);
+    f.waits[0]?.();
+    await until(() => f.runs.length === 1);
+    f.hold(false);
+    late.resolve(reply({ title: "Failing test fix", dot: "coder", reason: "Code work" }));
+    await until(() => f.runs.length === 2);
+    expect(f.runs).toEqual([
+      { resume: false, role: PERSONAS.finance.guidance },
+      { resume: true, role: PERSONAS.coder.guidance },
+    ]);
+    expect(f.order).toEqual(["skills:finance", "agent", "skills:coder", "agent"]);
+    expect(f.choices(session.id)).toEqual([
+      { persona: "finance", by: "default" },
+      { persona: "coder", by: "auto", reason: "Code work" },
+    ]);
+    session.stop();
+    await f.live.settled(session.id);
+  });
+
+  it("records a late pick of the default dot without restarting the agent", async () => {
+    const f = setup(auto);
+    const late = deferred<string>();
+    f.answer(() => late.promise);
+    f.hold(true);
+    const session = await f.runner.start(f.cellId, "Reconcile the Q3 ledger");
+    await until(() => f.waits.length === 1);
+    f.waits[0]?.();
+    await until(() => f.runs.length === 1);
+    late.resolve(reply({ title: "Q3 ledger", dot: "finance", reason: "Numbers" }));
+    await until(() => f.choices(session.id).length === 2);
+    expect(f.choices(session.id).at(-1)).toEqual({
+      persona: "finance",
+      by: "auto",
+      reason: "Numbers",
+    });
+    await new Promise<void>((r) => setTimeout(r, 20));
+    expect(f.runs).toHaveLength(1);
+    session.stop();
+    await f.live.settled(session.id);
+  });
+
+  it("keeps the user's own switch over a pick that comes after it", async () => {
+    const f = setup(auto);
+    const late = deferred<string>();
+    f.answer(() => late.promise);
+    f.hold(true);
+    const session = await f.runner.start(f.cellId, "Draw a logo");
+    await until(() => f.waits.length === 1);
+    f.waits[0]?.();
+    await until(() => f.runs.length === 1);
+    f.runner.switchPersona(session.id, "design");
+    await until(() => f.runs.length === 2);
+    late.resolve(reply({ title: "Logo", dot: "coder" }));
+    await until(() => f.titles(session.id).length === 1);
+    await new Promise<void>((r) => setTimeout(r, 20));
+    expect(f.runner.roleOf(session.id)).toBe(PERSONAS.design.guidance);
+    expect(f.choices(session.id).at(-1)).toEqual({ persona: "design", by: "user" });
+    expect(f.runs).toHaveLength(2);
     session.stop();
     await f.live.settled(session.id);
   });

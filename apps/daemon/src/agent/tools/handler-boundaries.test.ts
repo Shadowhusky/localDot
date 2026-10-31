@@ -2,6 +2,7 @@ import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DesktopdError } from "../../desktopd/client.ts";
 import {
+  describeShellDiagnosis,
   ShellCleanupUncertainError,
   ShellExecutionUncertainError,
 } from "../../desktopd/tools-client.ts";
@@ -352,6 +353,34 @@ describe("taint and containment", () => {
       ).toHaveLength(0);
     },
   );
+  it("says in the step and to containment which check left a stopped command unconfirmed", async () => {
+    const h = setup();
+    const desktop = required(h.tools.desktop(h.session.cellId));
+    h.tools.desktop = () => desktop;
+    const diagnosis = {
+      failed: "stop",
+      lookup: "tried",
+      ms: 70_123,
+      stoppedAtMs: 39_600,
+      stops: 2,
+      stopReply: 204,
+      lookups: 118,
+      lookupReply: 202,
+    } as const;
+    vi.spyOn(desktop, "shell").mockRejectedValue(new ShellExecutionUncertainError(diagnosis));
+    const containment = vi.spyOn(h.tools, "stopForUncertainty").mockResolvedValue();
+    const call = h.call("shell", { command: "sleep 40; echo done" });
+    expect((await call).result).toMatchObject({ ok: false, final: true });
+    const why =
+      "no receipt came in the wait after Stop; stopped 39.6 s in; 2 stop requests, last 204; 118 receipt checks, last still running; gave up 70.1 s in";
+    expect(describeShellDiagnosis(diagnosis)).toBe(why);
+    expect(containment).toHaveBeenCalledWith(h.session, "shell_execution_uncertain", why);
+    const ends = h.events().filter((e) => e.type === "step.end");
+    expect(ends.at(-1)?.data).toEqual({
+      status: "failed",
+      note: `Stopped: the command's end could not be confirmed (${why}). The computer is held for recovery.`,
+    });
+  });
   it.each([
     [ShellCleanupUncertainError, "generation"],
     [ShellExecutionUncertainError, "generation"],
@@ -482,7 +511,7 @@ describe("bounded redaction and final publication", () => {
     expect(
       (await h.call("remember", { file: "USER.md", op: "append", text: "Confirmed" })).result,
     ).toMatchObject({ ok: false, final: true });
-    expect(stop).toHaveBeenCalledWith(h.session, "memory_write_uncertain");
+    expect(stop).toHaveBeenCalledWith(h.session, "memory_write_uncertain", undefined);
     expect(h.session.stopped).toBe(true);
   });
   it("redacts plan, file metadata, error and final-summary events", async () => {

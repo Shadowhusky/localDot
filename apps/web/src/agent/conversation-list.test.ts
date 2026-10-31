@@ -7,7 +7,9 @@ import {
   conversationStatus,
   conversationTitle,
   groupConversations,
+  liveConversations,
   renameConversation,
+  tagsInUse,
   whenLabel,
 } from "./conversation-list.ts";
 
@@ -141,6 +143,61 @@ describe("a conversation's row", () => {
       ["live", "older live"],
       ["new", "old"],
     ]);
+  });
+});
+
+describe("the conversations under way", () => {
+  const live = (title: string, state: NonNullable<ConversationEntry["live"]>["state"]) =>
+    entry({ title, ended: null, live: { state, since: at(0), onScreen: false } });
+
+  it("puts one asking for the user first, then those at work, waiting, at rest and paused", () => {
+    const rows = conversationRows(
+      [
+        live("paused", "paused"),
+        entry({ title: "done" }),
+        live("idle", "idle"),
+        live("working", "working"),
+        live("waiting", "waiting-for-computer"),
+        live("asking", "needs-you"),
+        live("working too", "working"),
+        entry({ title: "pinned live", pinned: true, ended: null, live: undefined }),
+      ],
+      QUIET,
+    );
+    expect(liveConversations(rows).map((row) => row.title)).toEqual([
+      "asking",
+      "working",
+      "working too",
+      "waiting",
+      "idle",
+      "paused",
+    ]);
+  });
+
+  it("counts a question waiting over a finished task as one asking for the user", () => {
+    const asked = entry({ title: "asked", ended: null });
+    const rows = conversationRows([live("working", "working"), asked], {
+      live: null,
+      needsYou: new Set([asked.sessionId]),
+    });
+    expect(liveConversations(rows).map((row) => row.title)).toEqual(["asked", "working"]);
+  });
+});
+
+describe("tags in use", () => {
+  it("lists each tag given once, in the swatches' order", () => {
+    const rows = conversationRows(
+      [
+        entry({ tag: "purple" }),
+        entry({}),
+        entry({ tag: "red" }),
+        entry({ tag: "purple" }),
+        entry({ tag: "green", archived: true }),
+      ],
+      QUIET,
+    );
+    expect(tagsInUse(rows)).toEqual(["red", "green", "purple"]);
+    expect(tagsInUse([])).toEqual([]);
   });
 });
 

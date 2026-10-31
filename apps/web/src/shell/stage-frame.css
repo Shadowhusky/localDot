@@ -448,10 +448,20 @@
   text-align: center;
 }
 
+/* The gap between the status pill's strip and the picture, which full screen held upright widens. */
+.app {
+  --_island-gap: var(--island-gap);
+}
+
 /* Focus mode held upright, after Full screen (design-v2 §8.5 turned on its side): the picture across
    the screen's width at its middle, dot and its current narration above it, the controls in a row under it with
    a word on turning the phone for a bigger picture. */
 @media (orientation: portrait) {
+  /* The status pill and the buttons beside it stand a little further off the picture. */
+  .app[data-focus] {
+    --_island-gap: calc(var(--spacing) * 3);
+  }
+
   .app[data-focus] .stage-band,
   .app[data-focus] .stage-side {
     --_margin: calc((100dvh - (100vw - 16px) / 1.6) / 2);
@@ -461,10 +471,12 @@
     height: var(--_margin);
   }
 
+  /* dot and its line stand over the pill's strip, never in it. */
   .app[data-focus] .stage-band {
+    --_strip: calc(var(--island-h) + var(--_island-gap));
     top: auto;
-    bottom: calc(100% + 24px);
-    height: max(0px, calc(var(--_margin) - 24px));
+    bottom: calc(100% + var(--_strip));
+    height: max(0px, calc(var(--_margin) - var(--_strip)));
   }
 
   .app[data-focus] .stage-side {
@@ -482,8 +494,8 @@
   }
 
   .app[data-focus] .narrator-dock {
-    width: clamp(64px, calc(var(--_margin) - 124px), 120px);
-    height: clamp(64px, calc(var(--_margin) - 124px), 120px);
+    width: clamp(64px, calc(var(--_margin) - var(--_strip) - 100px), 120px);
+    height: clamp(64px, calc(var(--_margin) - var(--_strip) - 100px), 120px);
   }
 
   .app[data-focus] .narration {
@@ -631,7 +643,7 @@
    square-cornered, its rim inside the screen's edge. The house fades away behind it as it travels;
    the band folds, dot moves into the island and the control strip floats over the picture's foot. */
 .app[data-full] .stage-col {
-  --_strip: calc(var(--spacing) * 3 + var(--island-h) + var(--island-gap));
+  --_strip: calc(var(--spacing) * 3 + var(--island-h) + var(--_island-gap));
   position: fixed;
   inset: 0;
   z-index: var(--layer-island);

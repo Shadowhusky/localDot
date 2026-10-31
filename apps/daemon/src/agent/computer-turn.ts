@@ -46,15 +46,26 @@ export class ComputerTurns {
     return owners;
   }
 
+  // Another task is acting on the computer: a turn taken now waits for it.
+  busy(sessionId: string, cellId: string): boolean {
+    const holder = this.deps.live.lease(cellId).holder;
+    return holder !== undefined && holder !== sessionId;
+  }
+
+  // `waiting` ends only the wait for the turn, never the turn once it is taken.
   async take(
     sessionId: string,
     cellId: string,
     signal: AbortSignal,
     user = false,
+    waiting = signal,
   ): Promise<ComputerTurn> {
     const lease = this.deps.live.lease(cellId);
     const owners = this.owners(cellId);
-    let grant: ComputerGrant | undefined = await lease.acquire(sessionId, { signal, user });
+    let grant: ComputerGrant | undefined = await lease.acquire(sessionId, {
+      signal: waiting,
+      user,
+    });
     try {
       await this.#raise(sessionId, cellId, signal);
     } catch (error) {

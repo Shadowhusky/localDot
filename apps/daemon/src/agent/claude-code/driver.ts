@@ -21,6 +21,7 @@ import {
 import { connectorDescriptors, type McpCallResult, toCallToolResult } from "../codex/mcp-tools.ts";
 import type { NativePauseReceipt } from "../codex/native-pause.ts";
 import { NativeRetirement } from "../native-retirement.ts";
+import { InputRefused, loggedCause, type StartupStep, startupFailure } from "../native-startup.ts";
 import { RETRY_NEXT, toolList, UNNAMED_TOOL } from "../native-tools.ts";
 import { type Redactor, redactor } from "../redact.ts";
 import type { AgentSession, BrainGeneration } from "../session.ts";
@@ -99,7 +100,8 @@ type CycleResult =
   | { kind: "offered"; tools: string[]; unnamed: boolean; version?: string }
   | { kind: "violation"; what: "foreign_tool" | "refused"; tool: string }
   | { kind: "violation"; what: "sub_agent" }
-  | { kind: "retry" | "failed"; message: string };
+  | { kind: "retry"; message: string }
+  | { kind: "failed"; message: string; detail?: string; next?: string };
 interface ActiveCycle {
   finish(result: CycleResult): void;
   pauseAtBoundary(
@@ -392,7 +394,7 @@ export class ClaudeCodeDriver {
           continue;
         }
         if (result.kind === "failed") {
-          this.#state(session, "error", result.message);
+          this.#state(session, "error", result.message, result.detail, result.next);
           return CLAUDE_CODE_GAVE_UP;
         }
         retries = 0;
@@ -410,6 +412,9 @@ export class ClaudeCodeDriver {
         throw cause;
       }
       if (session.stopped) return CLAUDE_CODE_DONE;
+      console.error(
+        `Claude Code could not continue: ${loggedCause(cause, redact, session.task)} (task ${session.id})`,
+      );
       this.#state(session, "error", "The Claude Code task could not continue.");
       return CLAUDE_CODE_GAVE_UP;
     } finally {
@@ -424,10 +429,16 @@ export class ClaudeCodeDriver {
     state: "paused" | "idle" | "error",
     reason: string,
     detail?: string,
+    next?: string,
   ): void {
     if (session.stopped || session.controlHeld) return;
     if (state !== "error") session.setStatus(state);
-    session.append("agent.state", { state, reason, ...(detail ? { detail } : {}) });
+    session.append("agent.state", {
+      state,
+      reason,
+      ...(detail ? { detail } : {}),
+      ...(next ? { next } : {}),
+    });
   }
   // A stop over a tool that is not localDot's: what happened and what the user can do about it.
   #stop(session: AgentSession, reason: string, next: string): void {
@@ -456,7 +467,7 @@ export class ClaudeCodeDriver {
     const text = redact(
       `localDot restarted you, so the earlier conversation is gone.${earlier ? `\n${earlier}` : ""}\nThe task: ${session.task}\nThe plan so far:\n${session.plan.length ? session.plan.map((item) => `[${marks[item.status]}] ${item.text}`).join("\n") : "(no plan yet)"}${user.length ? `\nWhat the user said since the task:\n${user.map((m) => m.content).join("\n")}` : ""}${last ? `\nYour last message to the user: ${last}` : ""}\nUse the full screenshot in this turn to see where things stand, then continue.${suffix ? `\n${suffix}` : ""}${note ? `\n${note}` : ""}`,
     );
-    if (Buffer.byteLength(text) > MAX_PROMPT_BYTES) throw new Error("The task recap is too large.");
+    if (Buffer.byteLength(text) > MAX_PROMPT_BYTES) throw new InputRefused("size");
     return text;
   }
   async #cycle(
@@ -477,7 +488,8 @@ export class ClaudeCodeDriver {
       retired = deferred<void>(),
       inputs = new Inputs();
     const signal = AbortSignal.any([session.abort.signal, generation.signal, lifetime.signal]);
-    const pending = new Set<string>(),
+    // The user's messages sent to Claude Code that no request has taken in yet, by their inbox seq.
+    const pending = new Map<string, number>(),
       children = new Set<{ child: SpawnedProcess; exited: Promise<void> }>();
     let result: CycleResult | undefined,
       query: ReturnType<QueryFn> | undefined,
@@ -613,7 +625,7 @@ export class ClaudeCodeDriver {
         const batch = items.slice(offset, offset + 64);
         for (const item of batch)
           if (item.kind !== "resume" && redact(item.text) !== item.text)
-            throw new Error("Protected input cannot be persisted.");
+            throw new InputRefused("secret");
         session.appendTranscript(
           d.transcripts,
           generation,
@@ -635,9 +647,9 @@ export class ClaudeCodeDriver {
       return texts;
     };
     // A message of the user's stays pending until Claude Code says a reply took it in.
-    const send = (content: SDKUserMessage["message"]["content"], fromUser = false) => {
+    const send = (content: SDKUserMessage["message"]["content"], seq?: number) => {
       const uuid = inputs.push(content);
-      if (uuid && fromUser) pending.add(uuid);
+      if (uuid && seq !== undefined) pending.set(uuid, seq);
     };
     const call: LocaldotCall = (name, args, callSignal) => {
       if (!current()) return Promise.resolve(inactive());
@@ -750,7 +762,13 @@ export class ClaudeCodeDriver {
       } else if (event.kind === "offered") finish(event);
       else if (event.kind === "refused") refused(event.tools);
       else if (event.kind === "violation") finish(event);
-      else if (event.kind === "consumed") for (const uuid of event.uuids) pending.delete(uuid);
+      else if (event.kind === "consumed")
+        for (const uuid of event.uuids) {
+          const seq = pending.get(uuid);
+          if (seq === undefined) continue;
+          pending.delete(uuid);
+          session.heard(seq);
+        }
       else if (event.kind === "error") {
         if (SIGNED_OUT.has(event.error)) finish({ kind: "signed_out" });
         else if (
@@ -787,15 +805,17 @@ export class ClaudeCodeDriver {
         for (const item of persist(batch.items)) {
           check();
           nudged = false;
-          send(redact(item.text), true);
+          send(redact(item.text), item.seq);
         }
       }
     };
+    let step: StartupStep = "screens";
     const startup = (async () => {
       check();
       await session.prepareScreens(generation);
       check();
       if (session.safetyPause) throw new Error("Startup is fenced by Pause.");
+      step = "install";
       let launch: ClaudeCodeLaunch;
       try {
         launch = await d.launch();
@@ -810,9 +830,9 @@ export class ClaudeCodeDriver {
       }
       check();
       mapper.plan = launch.plan;
+      step = "history";
       session.restoreDelivered(d.transcripts);
-      if (redact(session.task) !== session.task)
-        throw new Error("Protected task input cannot be persisted.");
+      if (redact(session.task) !== session.task) throw new InputRefused("secret");
       if (
         !d.transcripts
           .read(session.id)
@@ -835,8 +855,8 @@ export class ClaudeCodeDriver {
               .filter((part) => part !== undefined)
               .join("\n\n"),
           );
-      if (Buffer.byteLength(prompt) > MAX_PROMPT_BYTES)
-        throw new Error("The task input is too large.");
+      if (Buffer.byteLength(prompt) > MAX_PROMPT_BYTES) throw new InputRefused("size");
+      step = "screen";
       const observation = await d.observe(session, generation, signal);
       check();
       if (session.safetyPause) throw new Error("Startup is fenced by Pause.");
@@ -849,6 +869,7 @@ export class ClaudeCodeDriver {
       )
         throw new Error("Invalid full screenshot.");
       basis = returned = observation.frameId;
+      step = "launch";
       session.tainted = true;
       send([
         text(prompt),
@@ -861,6 +882,7 @@ export class ClaudeCodeDriver {
           },
         },
       ]);
+      session.heard(session.delivered);
       const spawn = (options: SpawnOptions): SpawnedProcess => {
         if (fenced) throw new Error("The Claude Code run was retired.");
         const child = d.spawn(options, session);
@@ -909,10 +931,22 @@ export class ClaudeCodeDriver {
       void inboxLoop().catch(() => {
         if (current()) finish({ kind: "failed", message: "The task input could not be saved." });
       });
-    })().catch(() => {
+    })().catch((cause) => {
       if (result) return;
-      if (!current()) loss();
-      else finish({ kind: "failed", message: "Claude Code could not start." });
+      if (!current()) return loss();
+      if (session.safetyPause) return;
+      finish({
+        kind: "failed",
+        ...startupFailure({
+          harness: "Claude Code",
+          message: "Claude Code could not start.",
+          step,
+          cause,
+          sessionId: session.id,
+          redact,
+          task: session.task,
+        }),
+      });
     });
     const outcome = await completion.promise;
     fence();

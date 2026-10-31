@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
-import { LocalDotEvent } from "@localdot/protocol";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { LocalDotEvent, outfit } from "@localdot/protocol";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { setWearing } from "../dot/wearing.ts";
 import { createApi } from "../lib/api.ts";
 import { DotChoice, dotChoiceLine } from "./DotChoice.tsx";
 import { type AgentDotChoice, emptyAgentModel } from "./model.ts";
 import { projectAgentEvent } from "./reducer.ts";
 import { threadItems } from "./thread.ts";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setWearing([]);
+});
 
 const ID = "01M4ECBR5X0R92SYA389FM3Q00";
 const ev = (seq: number, type: string, data: unknown) =>
@@ -78,4 +82,18 @@ it("changes the task's dot from the line while it works, and only then", async (
   cleanup();
   render(<DotChoice choice={coder} />);
   expect(screen.queryByRole("button", { name: "Change" })).toBeNull();
+});
+
+it("draws the chosen dot in its own outfit with this localDot's accessory", () => {
+  setWearing(outfit("coder", "cap"), "cap");
+  render(<DotChoice choice={{ ...coder, persona: "research", by: "default" }} />);
+  const worn = () =>
+    [...document.querySelectorAll<HTMLElement>(".thread-dot [data-wear]")]
+      .map((img) => img.dataset.wear)
+      .sort();
+  expect(worn()).toEqual(["cap", "round-glasses"]);
+  act(() => setWearing(outfit("coder", "bow"), "bow"));
+  expect(worn()).toEqual(["bow", "mortarboard", "round-glasses"]);
+  act(() => setWearing(outfit("coder")));
+  expect(worn()).toEqual(["mortarboard", "round-glasses"]);
 });

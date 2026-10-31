@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { ShellInput, ToolResult } from "@localdot/protocol";
+import { clipText, type ShellInput, type ToolResult } from "@localdot/protocol";
 import {
+  describeShellDiagnosis,
   ShellCleanupUncertainError,
   ShellExecutionUncertainError,
 } from "../../desktopd/tools-client.ts";
@@ -15,9 +16,11 @@ import {
   contain,
   fail,
   intentOf,
+  listenForUser,
   type ToolCallContext,
   type ToolDeps,
   text,
+  USER_SPOKE,
 } from "./deps.ts";
 
 // The model sees a long output's start and its end: a build's first error and its summary.
@@ -25,6 +28,26 @@ const LOG_MAX = 256 * 1024,
   MODEL_HEAD = 4 * 1024,
   MODEL_TAIL = 12 * 1024,
   FLUSH = 8 * 1024;
+// A message that comes this close to the end of a command's opening sleep lets the command go on.
+const SLEEP_MARGIN_MS = 1000;
+const WORD = String.raw`[^\s;&|<>()$\`"'\\#]+`;
+// `cd`, `export` and assignments, which run at once, then `;`, `&&` or a new line.
+const SETUP = new RegExp(
+  String.raw`^\s*(?:(?:cd|export)(?:[ \t]+${WORD})+|[A-Za-z_][A-Za-z0-9_]*=${WORD}?)[ \t]*(?:;|&&|\n)`,
+);
+const SLEEP = /^\s*sleep[ \t]+(\d+(?:\.\d+)?)([smh]?)[ \t]*(?:;|&&|\n|$)/;
+const UNIT = { "": 1000, s: 1000, m: 60_000, h: 3_600_000 } as const;
+
+// How long a command sleeps before anything else in it runs, as in `sleep 90; echo waited` or
+// `cd app && sleep 30 && curl …`; undefined when it doesn't start with a plain sleep.
+export function openingSleepMs(command: string): number | undefined {
+  let rest = command;
+  for (let setup = SETUP.exec(rest); setup; setup = SETUP.exec(rest))
+    rest = rest.slice(setup[0].length);
+  const sleep = SLEEP.exec(rest);
+  if (!sleep?.[1]) return undefined;
+  return Math.round(Number(sleep[1]) * UNIT[(sleep[2] ?? "") as keyof typeof UNIT]);
+}
 function prefix(s: string, bytes: number): string {
   const b = Buffer.from(s);
   if (b.length <= bytes) return s;
@@ -92,28 +115,64 @@ export async function shellTool(
       candidates.prefix,
       input.cwd,
     );
+    const command = ctx.localCleanup?.command ?? input.command;
+    // Only a command's opening sleep listens for the user: nothing else has run by then, and
+    // nothing after it will once the command is stopped.
+    const sleepMs = openingSleepMs(command);
+    const listening =
+      sleepMs !== undefined && sleepMs > SLEEP_MARGIN_MS ? listenForUser(ctx) : undefined;
+    if (listening?.spoke) {
+      append(ctx, "tool.end", { ok: false });
+      append(ctx, "step.end", { status: "cancelled" });
+      return fail(
+        "Not run: the user sent a new message before this command began. Read it, then decide whether to run it.",
+      );
+    }
+    const started = performance.now();
+    const closing = listening
+      ? setTimeout(() => listening.end(), (sleepMs ?? 0) - SLEEP_MARGIN_MS)
+      : undefined;
     // Windows the command's programs open are this task's.
     const id = randomUUID();
     deps.computer?.owners(ctx.session.cellId).shell(id, ctx.session.id);
-    const done = await desktop.shell(
-      {
-        id,
-        command: ctx.localCleanup?.command ?? input.command,
-        ...(input.cwd ? { cwd: input.cwd } : {}),
-        timeoutMs: (input.timeout_sec ?? 120) * 1000,
-      },
-      (c) => {
-        ctx.check();
-        outputBytes += Buffer.byteLength(c.chunk);
-        if (outputBytes > 1024 * 1024) throw new ShellExecutionUncertainError();
-        ctx.session.tainted = true;
-        if (redaction) {
-          for (const part of redaction.push(c)) consume(part.chunk, part.stream);
-        } else rawFallback += c.chunk;
-      },
-      ctx.signal,
-    );
+    let done: Awaited<ReturnType<typeof desktop.shell>>;
+    try {
+      done = await desktop.shell(
+        {
+          id,
+          command,
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+          timeoutMs: (input.timeout_sec ?? 120) * 1000,
+        },
+        (c) => {
+          ctx.check();
+          outputBytes += Buffer.byteLength(c.chunk);
+          if (outputBytes > 1024 * 1024) throw new ShellExecutionUncertainError();
+          ctx.session.tainted = true;
+          if (redaction) {
+            for (const part of redaction.push(c)) consume(part.chunk, part.stream);
+          } else rawFallback += c.chunk;
+        },
+        listening?.signal ?? ctx.signal,
+      );
+    } finally {
+      clearTimeout(closing);
+      listening?.end();
+    }
     ctx.check();
+    if (listening?.spoke) {
+      const slept = Math.round((performance.now() - started) / 1000);
+      append(ctx, "tool.end", { ok: false });
+      append(ctx, "step.end", { status: "cancelled" });
+      return {
+        ok: true,
+        content: [
+          text(
+            `${USER_SPOKE} The command was stopped ${slept} s into its opening ${Math.round((sleepMs ?? 0) / 1000)} s sleep, before anything after the sleep ran. Read the message, then decide whether to run the rest.`,
+          ),
+        ],
+      };
+    }
     if (redaction) {
       for (const part of redaction.finish()) consume(part.chunk, part.stream);
     } else consume(ctx.redact(rawFallback), "stdout");
@@ -158,11 +217,33 @@ export async function shellTool(
       ],
     };
   } catch (error) {
-    if (error instanceof ShellCleanupUncertainError)
+    if (error instanceof ShellCleanupUncertainError) {
+      held(ctx, "the command's processes could not be confirmed ended");
       return contain(deps, ctx, "shell_cleanup_uncertain");
-    if (error instanceof ShellExecutionUncertainError)
-      return contain(deps, ctx, "shell_execution_uncertain");
+    }
+    if (error instanceof ShellExecutionUncertainError) {
+      const why = error.diagnosis && describeShellDiagnosis(error.diagnosis);
+      held(ctx, `the command's end could not be confirmed${why ? ` (${why})` : ""}`);
+      return contain(deps, ctx, "shell_execution_uncertain", why);
+    }
     ctx.check();
     throw error;
+  }
+}
+
+// The step says why the computer is held, whether or not the task was already stopped.
+function held(ctx: ToolCallContext, why: string): void {
+  try {
+    ctx.session.append("tool.end", { ok: false }, ctx.step);
+    ctx.session.append(
+      "step.end",
+      {
+        status: "failed",
+        note: clipText(ctx.redact(`Stopped: ${why}. The computer is held for recovery.`), 500),
+      },
+      ctx.step,
+    );
+  } catch {
+    /* Containment goes ahead whether or not the journal takes the note. */
   }
 }

@@ -8,14 +8,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const OFFICE = { name: "Office PC", url: "https://office.example:4750", browserOnly: false };
+
 it("names this localDot and opens another at its own address, or Settings to add one", () => {
-  const assign = vi.fn();
-  vi.spyOn(window, "location", "get").mockReturnValue({ ...window.location, assign });
+  const onOpen = vi.fn();
   const onManage = vi.fn();
   render(
     <LocalDotSwitcher
       name="Studio Mac"
-      others={[{ name: "Office PC", url: "https://office.example:4750" }]}
+      others={[
+        OFFICE,
+        {
+          name: "Lab",
+          url: "https://lab.example:4750",
+          persona: "coder",
+          accessory: "cap",
+          browserOnly: true,
+        },
+      ]}
+      onOpen={onOpen}
       onManage={onManage}
     />,
   );
@@ -24,8 +35,10 @@ it("names this localDot and opens another at its own address, or Settings to add
   const menu = screen.getByRole("menu", { name: "localDots" });
   expect(menu.textContent).toContain("Studio Mac");
   expect(menu.textContent).toContain("office.example:4750");
+  // Each other localDot by its dot as well as its name.
+  expect(screen.getByRole("menuitem", { name: /Lab/ }).querySelector(".dot")).not.toBeNull();
   fireEvent.click(screen.getByRole("menuitem", { name: /Office PC/ }));
-  expect(assign).toHaveBeenCalledWith("https://office.example:4750");
+  expect(onOpen).toHaveBeenCalledWith("https://office.example:4750");
   fireEvent.click(trigger);
   fireEvent.click(screen.getByRole("menuitem", { name: "Add or manage localDots…" }));
   expect(onManage).toHaveBeenCalledWith(trigger);
@@ -50,8 +63,9 @@ it("lists the dots on this computer and switches to one, asking before stopping 
   render(
     <LocalDotSwitcher
       name="Main"
-      others={[{ name: "Office PC", url: "https://office.example:4750" }]}
+      others={[OFFICE]}
       here={here}
+      onOpen={vi.fn()}
       onManage={vi.fn()}
       onAddHere={onAddHere}
     />,

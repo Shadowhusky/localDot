@@ -29,6 +29,7 @@ import {
   type ChatgptStatus,
   loginFor,
   modelsFor,
+  TASK_BUSY,
 } from "./account.ts";
 import type { CodexDriverLease, TaskLaunch } from "./driver.ts";
 import { subscriptionUsage } from "./usage.ts";
@@ -222,10 +223,7 @@ export class CodexAuthOwner {
     if (this.#attempt && kind !== "login")
       throw new AccountError(409, "Finish or cancel the ChatGPT sign-in first.");
     if (this.#entries.size || this.#reservation)
-      throw new AccountError(
-        409,
-        this.#reservation?.kind === "task" ? "A ChatGPT task is already using the account." : BUSY,
-      );
+      throw new AccountError(409, this.#reservation?.kind === "task" ? TASK_BUSY : BUSY);
     const abort = new AbortController(),
       combined = AbortSignal.any([signal, abort.signal]);
     const entry: Entry = {

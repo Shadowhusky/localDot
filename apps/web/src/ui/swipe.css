@@ -1,0 +1,129 @@
+/* A row a finger slides aside (SwipeActions.tsx): its faces fill exactly what the row uncovers,
+   each anchored to the edge it is revealed from, so a face's glyph rides in with the row. */
+@layer kit {
+  .ui-swipe {
+    --_offset: 0px;
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .ui-swipe-content {
+    position: relative;
+    z-index: 1;
+    touch-action: pan-y;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    transition: scale var(--dur-snappy) var(--ease-spring);
+  }
+
+  /* While a finger holds still on it, the row sinks a little, as iOS's do before their menu. */
+  .ui-swipe[data-holding] > .ui-swipe-content {
+    scale: 0.97;
+    transition-duration: var(--dur-gentle);
+    transition-timing-function: var(--ease-standard);
+  }
+
+  .ui-swipe-faces {
+    position: absolute;
+    inset-block: 0;
+    display: flex;
+    overflow: hidden;
+    visibility: hidden;
+  }
+
+  .ui-swipe[data-moved] > .ui-swipe-faces {
+    visibility: visible;
+  }
+
+  .ui-swipe-faces[data-side="leading"] {
+    left: 0;
+    justify-content: flex-start;
+    width: max(0px, var(--_offset));
+  }
+
+  .ui-swipe-faces[data-side="trailing"] {
+    right: 0;
+    width: max(0px, calc(var(--_offset) * -1));
+  }
+
+  .ui-swipe-face {
+    display: flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: flex-start;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    background-color: var(--color-control-pressed);
+    color: var(--color-fg-1);
+    font:
+      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      flex-grow var(--dur-snappy) var(--ease-spring),
+      background-color var(--dur-hover) var(--ease-standard);
+  }
+
+  .ui-swipe-faces[data-side="leading"] > .ui-swipe-face {
+    justify-content: flex-end;
+  }
+
+  /* The action a long swipe carries out is the strongest face, as a primary button is. */
+  .ui-swipe-face[data-primary] {
+    background-color: var(--color-fg-1);
+    color: var(--color-void);
+  }
+
+  .ui-swipe-face:active {
+    background-color: var(--color-control-hover);
+  }
+
+  .ui-swipe-face[data-primary]:active {
+    background-color: var(--color-fg-2);
+  }
+
+  .ui-swipe-face-inner {
+    display: grid;
+    flex: none;
+    justify-items: center;
+    gap: var(--spacing);
+    width: 76px;
+  }
+
+  /* Past the commit line the first action takes the whole row and its glyph ticks. */
+  .ui-swipe[data-armed] .ui-swipe-face:not([data-primary]) {
+    flex-grow: 0;
+  }
+
+  .ui-swipe[data-armed] .ui-swipe-face[data-primary] .ui-icon {
+    animation: ui-swipe-tick var(--dur-snappy) var(--ease-spring);
+  }
+
+  @keyframes ui-swipe-tick {
+    35% {
+      scale: 1.35;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ui-swipe[data-holding] > .ui-swipe-content {
+      scale: none;
+    }
+
+    .ui-swipe[data-armed] .ui-swipe-face[data-primary] .ui-icon {
+      animation: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .ui-swipe-face {
+      border: 1px solid ButtonText;
+    }
+  }
+}

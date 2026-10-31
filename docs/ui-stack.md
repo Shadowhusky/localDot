@@ -444,7 +444,12 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
 - **Modal or beside.** A modal sheet dims the page, traps focus and locks scroll; one beside the page
   does none of these. By default an inspector sits beside the page, so the HUD's Stop and incoming
   approvals stay in reach while Settings is open (§4.2), and a bottom sheet, which covers a phone, is
-  modal; `modal` overrides either. A sheet beside the page has no dim area to dismiss it by.
+  modal; `modal` overrides either. A sheet beside the page has no dim area to dismiss it by. One that
+  is only a passing look, such as a step's or a file's preview beside the chat, closes on a click
+  outside it instead (`closeOutside`): the press must start there too, with only tooltips open above
+  the sheet, so the press that opened it, a press that closes its own menu or popover, a drag (a
+  selection, a resize) and a splitter at its edge never close it. Settings and the other inspectors
+  keep this off, so the page beside them stays live and unsaved edits are never at stake.
 - **Triggers.** `triggerProps("menu" | "dialog", open)` gives the control that opens a menu or popover
   its `aria-haspopup` and `aria-expanded`; the latter also keeps it lit while open. The control still
   passes its ref as `anchor`. A popover holds Tab, so it is `aria-modal`.
@@ -615,6 +620,61 @@ rest of the kit. No screen uses them yet. `feedback.css` adds 1.9 kB gz to the a
   `export/ExportSheet.tsx` and `settings/ChatgptPanel.tsx` with `Progress`. The usage popover
   (`agent/UsageFooter.tsx`) already draws each plan window with `Meter`, its name as the label and
   "N% used" as the value, and only the reset time under it.
+
+## Phone conversations
+
+A phone has no rail, so its conversations are a sheet (`ConversationList` with `layout="sheet"`),
+opened from the bubble in the corner over the picture (`ConversationsBubble`) or from More. The
+desktop rail magnifies marks under a pointer; a phone has no pointer to follow, so it magnifies what
+a finger holds and puts what is live where a thumb is. Files: `shell/LiveDeck.tsx`,
+`shell/ConversationPeek.tsx`, `shell/ConversationsBubble.tsx`, `ui/SwipeActions.tsx` with
+`ui/row-swipe.ts` and `ui/long-press.ts`, styles in `ui/conversation-switcher.css` and `ui/swipe.css`;
+unit tests beside them and in `shell/ConversationList-sheet.test.tsx`, e2e in
+`e2e/ui/mobile-conversations.spec.ts` (c39, w39, and the rail at c14).
+
+- **Live first.** While other conversations are under way, the bubble wears a ring of arcs, one for
+  each in its status glyph's colour (xenon at work, amber waiting on the user, fg-2 otherwise), as a
+  second Live Activity sits beside the Dynamic Island; its description says "2 others under way, 1
+  needs you". The one on show is left out: the island already speaks for it.
+- **Thumb reach.** The sheet opens at the medium detent, so the stage stays in view and the search,
+  the cards and the first rows sit in the lower half of the screen; drag or scroll up for the rest.
+  More (bottom right) opens the same sheet for a hand that can't reach the top corner.
+- **Cards under way.** Above the rows, a deck of cards, one per conversation under way, the one asking
+  for the user first, then those at work, waiting, at rest and paused (`liveConversations`). Each
+  says its status, its name in two lines and, as a Live Activity does, what dot is doing now (or what
+  it waits for). A tap takes it up. The deck scrolls sideways a card at a time with the browser's own
+  momentum, and, where scroll-driven animations exist and motion is allowed, cards coming in from the
+  edge grow and brighten as they come, a lens that follows the thumb (`animation-timeline: view()`).
+  Those under way are not listed again below; a search lists everything as results.
+- **Swipe a row.** Right shows Pin (Unpin); left shows More and Archive (Unarchive in the archived
+  list; Archive is left out while the task runs). A long swipe past 55% of the row crosses a commit
+  line: the first face fills the row and its glyph ticks, the visual stand-in for iOS's haptic, and
+  letting go there carries it out. Archive slides the row away first, then the rows below glide up
+  (`useFlip`, now across as well as down). Only a drag past the line commits, never a flick short of
+  it; a flick never carries a row across home to the other side. The row follows the finger 1:1, is
+  projected on release (deceleration .998) and springs from where it is at the finger's speed, so it
+  can be caught mid-flight. Mouse presses and presses within 20 px of the screen's sides are left
+  alone: the latter are Safari's back and forward swipe.
+- **Hold to magnify.** A finger held still 450 ms (a right click, or Android's own long press) sinks
+  the row, then grows it in place into a card that says all of it, its whole name, what dot is doing,
+  what was first asked, how many tasks and since when, its tag, while the sheet dims and blurs
+  behind, and the row's menu opens under it, as iOS's preview does. The card is placed so it and the
+  menu fit. The click its lifting sends is spent wherever it lands, so a menu item that came up under
+  the finger is never chosen by letting go. Escape or a tap outside shrinks it back into its row.
+- **Tags.** The tags in use show as chips under the search; one tap shows only that colour, in the
+  cards and the rows, another shows them all. Rows and cards keep the leading-edge tag bar.
+- **Every gesture has a button.** Each row and card keeps its Actions button, which opens the same
+  menu (rename, pin, archive, tags, delete), and every name a screen reader hears says the status and
+  tag. The swipe faces are hidden from assistive technology and the keyboard.
+- **Reduced motion.** Swipes and springs land at once, the hold does not sink, the peek fades, the
+  commit glyph does not tick and the deck's lens is off; a drag still follows the finger.
+- **Rejected.** A sideways swipe on the stage or the island strip to change conversation: the stage
+  takes the user's own touches when they hold the computer, the strip is out of a thumb's reach and
+  shares the screen's edges with Safari's back swipe, and a gesture with no visible sign is found by
+  few; the deck gives the same switch in one visible tap. Pull-down search: in a sheet a pull down
+  from the top lowers or closes the sheet. iOS-style app-switcher cards with thumbnails: a
+  conversation has no picture of its own, only the one computer's. A touch "dock" scrubbed along the
+  bubble: the bubble is at the top, out of a thumb's reach.
 
 ## Guards
 

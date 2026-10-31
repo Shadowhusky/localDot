@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Menu, MenuItem } from "./Menu.tsx";
@@ -24,7 +24,7 @@ function wait(ms: number) {
   });
 }
 
-function Harness({ modal = true }: { modal?: boolean }) {
+function Harness({ modal = true, closeOutside }: { modal?: boolean; closeOutside?: boolean }) {
   const more = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -36,9 +36,11 @@ function Harness({ modal = true }: { modal?: boolean }) {
         Open settings
       </button>
       <p>Closed {closed}</p>
+      <hr aria-orientation="vertical" aria-label="Conversation width" />
       <Sheet
         open={open}
         modal={modal}
+        closeOutside={closeOutside}
         dirty={name !== SAVED}
         title="Models and settings"
         closeLabel="Close settings"
@@ -277,6 +279,52 @@ describe("Sheet", () => {
     render(<Harness modal={false} />);
     open();
     pressEscape(screen.getByLabelText("Name"));
+    expect(closedCount()).toBe("Closed 1");
+  });
+
+  it("beside the page, closes on a click outside it only when asked to", () => {
+    render(<Harness modal={false} />);
+    open();
+    const page = screen.getByText(/^Closed/);
+    fireEvent.pointerDown(page, { button: 0 });
+    fireEvent.click(page);
+    expect(closedCount()).toBe("Closed 0");
+    cleanup();
+    render(<Harness modal={false} closeOutside />);
+    const trigger = screen.getByRole("button", { name: "Open settings" });
+    // The press that opened it began before it was there.
+    fireEvent.pointerDown(trigger, { button: 0 });
+    open();
+    expect(closedCount()).toBe("Closed 0");
+    fireEvent.pointerDown(screen.getByText(/^Closed/), { button: 0 });
+    fireEvent.click(screen.getByText(/^Closed/));
+    expect(closedCount()).toBe("Closed 1");
+  });
+
+  it("beside the page, keeps open for a drag, a splitter, a press begun inside or a menu above", () => {
+    render(<Harness modal={false} closeOutside />);
+    const sheet = open();
+    const page = screen.getByText(/^Closed/);
+    // Text selected inside it and let go outside.
+    fireEvent.pointerDown(screen.getByLabelText("Name"), { button: 0 });
+    fireEvent.click(document.body);
+    // A selection or drag across the page.
+    fireEvent.pointerDown(page, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.click(page, { clientX: 80, clientY: 10 });
+    // The splitter at its edge.
+    const splitter = screen.getByRole("separator", { name: "Conversation width" });
+    fireEvent.pointerDown(splitter, { button: 0 });
+    fireEvent.click(splitter);
+    // A press outside while its menu is open closes only the menu.
+    fireEvent.click(within(sheet).getByRole("button", { name: "Model actions" }));
+    expect(screen.getByRole("menu", { name: "Model actions" })).toBeTruthy();
+    fireEvent.pointerDown(page, { button: 0 });
+    fireEvent.click(page);
+    expect(closedCount()).toBe("Closed 0");
+    pressEscape(screen.getByRole("menu", { name: "Model actions" }));
+    wait(1000);
+    fireEvent.pointerDown(page, { button: 0 });
+    fireEvent.click(page);
     expect(closedCount()).toBe("Closed 1");
   });
 });

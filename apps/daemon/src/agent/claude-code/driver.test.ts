@@ -1,7 +1,5 @@
-import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { PassThrough } from "node:stream";
-import type { Options, SDKUserMessage, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
+import type { SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import {
   MAX_BATCH_STEPS,
   offeredTools,
@@ -9,11 +7,10 @@ import {
   type ToolResult,
   ulid,
 } from "@localdot/protocol";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RETRY_NEXT } from "../native-tools.ts";
 import { redactor } from "../redact.ts";
+import { NativeCleanupPending } from "../safety/native-tasks.ts";
 import { AgentSession } from "../session.ts";
 import { TranscriptStore } from "../transcript.ts";
 import {
@@ -26,6 +23,7 @@ import {
 } from "./driver.ts";
 import { BUILT_IN_TOOLS, LOCALDOT_TOOLS } from "./options.ts";
 import { ClaudeCodeUnavailable } from "./setup.ts";
+import { FakeChild, FakeRun } from "./testing/fake-claude-code.ts";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jC3sAAAAASUVORK5CYII=",
@@ -70,94 +68,13 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-class FakeChild extends EventEmitter {
-  exitCode: number | null = null;
-  signalCode: NodeJS.Signals | null = null;
-  killed = false;
-  readonly stdin = new PassThrough();
-  readonly stdout = new PassThrough();
-  kill(signal: NodeJS.Signals): boolean {
-    if (this.killed) return true;
-    this.killed = true;
-    queueMicrotask(() => {
-      this.signalCode = signal;
-      this.emit("exit", null, signal);
-    });
-    return true;
-  }
-}
-// One mocked Claude Code process: the SDK's query, its prompt stream and its MCP connection.
-class FakeRun {
-  readonly prompts: SDKUserMessage[] = [];
-  readonly child: FakeChild;
-  readonly #queue: unknown[] = [];
-  #wake: (() => void) | undefined;
-  #ended = false;
-  closed = false;
-  #mcp: Client | undefined;
-  constructor(
-    prompt: AsyncIterable<SDKUserMessage>,
-    readonly options: Options,
-  ) {
-    void (async () => {
-      for await (const message of prompt) this.prompts.push(message);
-    })();
-    this.child = options.spawnClaudeCodeProcess?.({
-      command: options.pathToClaudeCodeExecutable ?? "",
-      args: [],
-      cwd: options.cwd,
-      env: options.env ?? {},
-      signal: new AbortController().signal,
-    }) as unknown as FakeChild;
-  }
-  readonly query = {
-    close: () => {
-      this.closed = true;
-      this.child.kill("SIGTERM");
-      this.end();
-    },
-    [Symbol.asyncIterator]: () => ({
-      next: async (): Promise<IteratorResult<unknown>> => {
-        for (;;) {
-          if (this.#queue.length) return { done: false, value: this.#queue.shift() };
-          if (this.#ended) return { done: true, value: undefined };
-          await new Promise<void>((resolve) => {
-            this.#wake = resolve;
-          });
-        }
-      },
-    }),
-  };
-  emit(...messages: unknown[]): void {
-    this.#queue.push(...messages);
-    this.#wake?.();
-  }
-  end(): void {
-    this.#ended = true;
-    this.#wake?.();
-  }
-  async mcp(): Promise<Client> {
-    if (this.#mcp) return this.#mcp;
-    const server = this.options.mcpServers?.localdot;
-    if (server?.type !== "sdk" || !("instance" in server)) throw new Error("no server");
-    const [client, transport] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(transport);
-    this.#mcp = new Client({ name: "fixture", version: "1.0.0" });
-    await this.#mcp.connect(client);
-    return this.#mcp;
-  }
-  async call(name: string, args: Record<string, unknown>) {
-    return (await this.mcp()).callTool({ name, arguments: args });
-  }
-}
-
 const firstText = (run: FakeRun) =>
   (run.prompts[0]?.message.content as { text?: string }[] | undefined)?.[0]?.text ?? "";
-function fixture(deps: Partial<ClaudeCodeDriverDeps> = {}) {
+function fixture(deps: Partial<ClaudeCodeDriverDeps> = {}, task = "Draw a dog") {
   const home = mkdtempSync("/tmp/ld-claude-driver-"),
     transcripts = new TranscriptStore(home),
     events: { type: string; data: Record<string, unknown> }[] = [];
-  const session = new AgentSession(ulid(), ulid(), "Draw a dog", {
+  const session = new AgentSession(ulid(), ulid(), task, {
     append: (_id, draft) => {
       const event = parseEvent({ v: 1, id: ulid(), seq: events.length, t: 0, ...draft });
       events.push({ type: event.type, data: event.data } as never);
@@ -726,6 +643,41 @@ describe("Claude Code driver", () => {
     expect(await result).toBe(CLAUDE_CODE_DONE);
   });
 
+  it("ends a wait for the user's message until a request of Claude Code's takes it in", async () => {
+    const f = fixture();
+    // A tool that waits as localDot's do: until the user says something dot hasn't heard.
+    f.dispatch.mockImplementation(async (session, _generation, name, _id, _input, signal) => {
+      if (name === "done") return { ok: true, final: true, content: [] };
+      const listening = session.listenForUser(signal);
+      if (!listening.signal.aborted)
+        await new Promise((resolve) =>
+          listening.signal.addEventListener("abort", resolve, { once: true }),
+        );
+      return { ok: true, content: [{ type: "text", text: listening.spoke ? "cut" : "stopped" }] };
+    });
+    const result = f.run();
+    const fake = await f.started();
+    const waiting = fake.call("computer", { action: "wait", ms: 30000 });
+    await until(() => f.dispatch.mock.calls.length === 1);
+    f.session.post("steer", "Make it brown");
+    expect((await waiting).content).toEqual([{ type: "text", text: "cut" }]);
+    await until(() => fake.prompts.length === 2);
+    // Claude Code took it in with a request: a wait dot starts after that runs on.
+    fake.emit({ ...turn(), user_message_uuid: fake.prompts[1]?.uuid });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const listening = f.session.listenForUser(new AbortController().signal);
+    expect(listening.spoke).toBe(false);
+    listening.end();
+    // A message sent while Claude Code is still thinking ends the wait it then asks for, at once.
+    f.session.post("steer", "And add a hat");
+    await until(() => fake.prompts.length === 3);
+    expect((await fake.call("computer", { action: "wait", ms: 30000 })).content).toEqual([
+      { type: "text", text: "cut" },
+    ]);
+    await fake.call("done", { summary: "ok" });
+    await result;
+  });
+
   it("nudges once when a reply ends without done, then rests", async () => {
     const f = fixture();
     const result = f.run();
@@ -851,4 +803,86 @@ it("keeps late tool cleanup as a recovery receipt without resuming the timed-out
     drain.resolve();
     vi.useRealTimers();
   }
+});
+
+describe("a Claude Code start that fails", () => {
+  it("names an earlier task's unconfirmed exit and logs the cause", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = fixture({
+      spawn: () => {
+        throw new NativeCleanupPending();
+      },
+    });
+    expect(await f.run()).toBe(CLAUDE_CODE_GAVE_UP);
+    expect(f.states()).toEqual([
+      {
+        state: "error",
+        reason: "Claude Code could not start.",
+        detail: "An earlier Claude Code task on this computer hasn't been confirmed stopped.",
+        next: "Run localdot doctor to check the computer, then send your message again.",
+      },
+    ]);
+    expect(errors).toHaveBeenCalledWith(
+      `Claude Code could not start (launch): NativeCleanupPending: previous native task cleanup is unconfirmed (task ${f.session.id})`,
+    );
+  });
+
+  it.each([
+    [
+      "install",
+      { launch: vi.fn(async () => Promise.reject(new Error("EPERM reading the install"))) },
+      "localDot couldn't check the installation.",
+    ],
+    [
+      "history",
+      {
+        transcripts: {
+          read: () => {
+            throw new SyntaxError(`Unexpected token in JSON at "Draw a dog"`);
+          },
+        } as never,
+      },
+      "The task's history couldn't be read or saved.",
+    ],
+    [
+      "screen",
+      {
+        observe: vi.fn(async () =>
+          Promise.reject(new Error("Draw a dog: the frame fake-private-diagnostic was lost")),
+        ),
+      },
+      "The computer's screen couldn't be read.",
+    ],
+  ] satisfies [string, Partial<ClaudeCodeDriverDeps>, string][])(
+    "says the %s step stopped it, logging no task words or secrets",
+    async (step, deps, detail) => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      const f = fixture(deps);
+      expect(await f.run()).toBe(CLAUDE_CODE_GAVE_UP);
+      expect(f.states()).toEqual([
+        expect.objectContaining({ state: "error", reason: "Claude Code could not start.", detail }),
+      ]);
+      const logged = errors.mock.calls.map((call) => String(call[0]));
+      expect(logged).toContainEqual(
+        expect.stringMatching(new RegExp(`^Claude Code could not start \\(${step}\\): `)),
+      );
+      expect(logged.join("\n")).not.toMatch(/Draw a dog|fake-private-diagnostic/);
+      expect(f.runs).toHaveLength(0);
+    },
+  );
+
+  it("refuses a task with a key in it before anything starts", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = fixture({}, "Use fake-private-diagnostic to sign in");
+    expect(await f.run()).toBe(CLAUDE_CODE_GAVE_UP);
+    expect(f.states()).toEqual([
+      {
+        state: "error",
+        reason: "Claude Code could not start.",
+        detail: "The task includes a key or token, which localDot doesn't pass on.",
+        next: "Send the task again without it.",
+      },
+    ]);
+    expect(f.observe).not.toHaveBeenCalled();
+  });
 });

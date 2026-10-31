@@ -23,7 +23,16 @@ import { authorizePrepared, runsUnasked } from "../safety/authorize.ts";
 import { decideAutonomy } from "../safety/autonomy.ts";
 import { nativeActionFacts } from "../safety/classify.ts";
 import type { AgentSession } from "../session.ts";
-import { append, frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import {
+  append,
+  frame,
+  listenForUser,
+  screenContext,
+  type ToolCallContext,
+  type ToolDeps,
+  text,
+  USER_SPOKE,
+} from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
 const LOOK_AGAIN =
@@ -259,6 +268,8 @@ export interface InputRun {
   needsUser?: true;
   // The element it was to act on is not there as listed.
   gone?: true;
+  // A wait the user's new message ended early.
+  spoke?: true;
   recovery?: ToolResult["recovery"];
 }
 
@@ -390,29 +401,45 @@ export async function runInput(
   };
   let outcome: ActionOutcome;
   let waitedFrameId: string | undefined;
+  let spoke = false;
   try {
-    if (action.verb === "wait" && deps.png.same) {
+    if (action.verb === "wait") {
       // A wait is bounded observation, not a blind sleep. Compare against the last
-      // delivered frame so a change that arrived before the call returns immediately.
-      const watchContext = { ...selected, signal: nativeContext.signal };
-      const initial = await deps.gateway.observe(watchContext);
-      ctx.check();
-      const baseline = session.lastFrameId ?? initial.frameId;
-      waitedFrameId = initial.frameId;
-      outcome = { ok: true };
-      let remaining = action.ms;
-      while (remaining > 0 && deps.png.same(session.id, baseline, waitedFrameId)) {
-        ctx.check();
-        nativeContext.signal?.throwIfAborted();
-        const interval = Math.min(remaining, 1000);
-        const started = performance.now();
-        outcome = await deps.gateway.run(nativeContext, { ...action, ms: interval });
-        ctx.check();
-        if (!outcome.ok) break;
-        const current = await deps.gateway.observe(watchContext);
-        ctx.check();
-        waitedFrameId = current.frameId;
-        remaining -= Math.max(interval, performance.now() - started);
+      // delivered frame so a change that arrived before the call returns immediately. A new
+      // message from the user ends it within a second.
+      const same = deps.png.same;
+      const listening = listenForUser(ctx, nativeContext.signal ?? ctx.signal);
+      try {
+        const watchContext = { ...selected, signal: nativeContext.signal };
+        let baseline: string | undefined;
+        if (same) {
+          const initial = await deps.gateway.observe(watchContext);
+          ctx.check();
+          baseline = session.lastFrameId ?? initial.frameId;
+          waitedFrameId = initial.frameId;
+        }
+        const unchanged = () =>
+          !same || !baseline || !waitedFrameId || same(session.id, baseline, waitedFrameId);
+        outcome = { ok: true };
+        let remaining = action.ms;
+        while (remaining > 0 && !listening.spoke && unchanged()) {
+          ctx.check();
+          nativeContext.signal?.throwIfAborted();
+          const interval = Math.min(remaining, 1000);
+          const started = performance.now();
+          outcome = await deps.gateway.run(nativeContext, { ...action, ms: interval });
+          ctx.check();
+          if (!outcome.ok) break;
+          if (same) {
+            const current = await deps.gateway.observe(watchContext);
+            ctx.check();
+            waitedFrameId = current.frameId;
+          }
+          remaining -= Math.max(interval, performance.now() - started);
+        }
+        spoke = listening.spoke;
+      } finally {
+        listening.end();
       }
     } else outcome = await deps.gateway.run(nativeContext, action);
   } finally {
@@ -433,7 +460,9 @@ export async function runInput(
   if (action.verb === "wait" && outcome.ok) {
     const frameId = waitedFrameId ?? (await deps.gateway.observe(selected)).frameId;
     ctx.check();
-    return { ok: true, notes: [], frameId };
+    return spoke
+      ? { ok: true, notes: [text(USER_SPOKE)], frameId, spoke: true }
+      : { ok: true, notes: [], frameId };
   }
   const notes: ToolResult["content"] = [];
   const note = keyboardNote(a, outcome) ?? pointerNote(a, outcome);
@@ -550,6 +579,11 @@ async function batch(deps: ToolDeps, ctx: ToolCallContext, a: ComputerAction): P
       return finish(false, run.stale ? "stale" : undefined);
     }
     notes.push(...run.notes);
+    // The steps after a wait the user cut short were planned without their message.
+    if (run.spoke && i < steps.length - 1) {
+      notes.push(text(`The batch stopped at ${which}; the steps after it were not done.`));
+      return finish(false, "unrun");
+    }
   }
   return finish(true);
 

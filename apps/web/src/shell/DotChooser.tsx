@@ -1,4 +1,4 @@
-import type { PersonaId } from "@localdot/protocol";
+import type { Accessory, PersonaId } from "@localdot/protocol";
 import type { RefObject } from "react";
 import { PersonaPicker } from "../onboarding/PersonaPicker.tsx";
 import { AutoDot, dotChoiceNote } from "../settings/AutoDot.tsx";
@@ -13,6 +13,7 @@ export function DotChooser({
   open,
   anchor,
   value,
+  accessory,
   onChange,
   auto,
   onClose,
@@ -20,6 +21,7 @@ export function DotChooser({
   open: boolean;
   anchor: RefObject<HTMLElement | null>;
   value: PersonaId;
+  accessory: Accessory | undefined;
   onChange(value: PersonaId): void;
   auto: { on: boolean; onChange(on: boolean): void; disabledReason?: string };
   onClose(): void;
@@ -28,7 +30,7 @@ export function DotChooser({
   const choices = (
     <>
       <AutoDot {...auto} />
-      <PersonaPicker layout="rows" value={value} onChange={onChange} />
+      <PersonaPicker layout="rows" value={value} accessory={accessory} onChange={onChange} />
       <p className="persona-note">{dotChoiceNote(auto.on && !auto.disabledReason)}</p>
     </>
   );

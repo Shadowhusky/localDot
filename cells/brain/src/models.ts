@@ -93,6 +93,9 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
           b.controls,
           b.maxPrice,
         );
+        // Mistral's effort goes in the body (baseModel): its package refuses the levels it
+        // doesn't list and drops the field for model IDs it doesn't know.
+        if (b.client === "mistral") delete options.reasoningEffort;
         return {
           ...params,
           maxOutputTokens:
@@ -171,6 +174,8 @@ function baseModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageMod
   const baseURL = gatewayBaseURL(b.route);
   const key = local ? undefined : b.surrogate;
   const apiKey = key ?? "missing";
+  // The level the settings chose, which some packages drop for model IDs they don't list.
+  const level = b.options?.reasoningEffort === "enabled" ? undefined : b.options?.reasoningEffort;
   switch (b.client) {
     case "anthropic":
       return createAnthropic({ baseURL, apiKey, fetch })(b.model);
@@ -184,8 +189,10 @@ function baseModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageMod
         createOpenAI({
           baseURL,
           apiKey,
-          fetch:
-            tier && providerById(b.provider ?? "")?.custom ? withServiceTier(fetch, tier) : fetch,
+          fetch: withFields(fetch, {
+            ...(tier && providerById(b.provider ?? "")?.custom ? { service_tier: tier } : {}),
+            ...(level ? { reasoning: { effort: level } } : {}),
+          }),
         }).responses(b.model),
         "openai",
         b.reasoning || b.options?.reasoningEffort !== undefined,
@@ -197,7 +204,11 @@ function baseModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageMod
       // The package's language model is xAI's Responses API, which reports usage unasked.
       return stateless(createXai({ baseURL, apiKey, fetch })(b.model), "xai", b.reasoning);
     case "mistral":
-      return createMistral({ baseURL, apiKey, fetch })(b.model);
+      return createMistral({
+        baseURL,
+        apiKey,
+        fetch: withFields(fetch, level ? { reasoning_effort: level } : {}),
+      })(b.model);
     case "deepseek":
       return createDeepSeek({ baseURL, apiKey, fetch })(b.model);
     case "groq":
@@ -216,7 +227,11 @@ function baseModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageMod
       // /openai/v1, so the package sends POST <route>/responses with no api-version; the model is
       // the deployment's name.
       return stateless(
-        createAzure({ baseURL, apiKey, fetch }).responses(b.model),
+        createAzure({
+          baseURL,
+          apiKey,
+          fetch: withFields(fetch, level ? { reasoning: { effort: level } } : {}),
+        }).responses(b.model),
         "azure",
         b.reasoning || b.options?.reasoningEffort !== undefined,
       );
@@ -229,20 +244,46 @@ function baseModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageMod
         ...(key ? { apiKey: key } : {}),
         fetch,
         includeUsage: true,
+        ...(REASONING_FIELD.has(b.provider ?? b.client)
+          ? { transformRequestBody: asReasoning }
+          : {}),
       })(b.model);
   }
 }
 
-// The OpenAI package sends priority only for model IDs it knows as OpenAI's own, and a custom
-// endpoint names its models as it likes: one its user says takes OpenAI's tiers gets the tier
-// whatever the model is called.
-function withServiceTier(fetch: typeof globalThis.fetch, tier: string): typeof globalThis.fetch {
+// Ollama and Cerebras read a turn's earlier thinking from `reasoning`; the package sends it back
+// as `reasoning_content`, which they ignore.
+const REASONING_FIELD = new Set(["ollama", "cerebras"]);
+function asReasoning(body: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(body.messages)) return body;
+  return {
+    ...body,
+    messages: body.messages.map((message: Record<string, unknown>) => {
+      if (message.role !== "assistant" || message.reasoning_content === undefined) return message;
+      const { reasoning_content: reasoning, ...rest } = message;
+      return { ...rest, reasoning };
+    }),
+  };
+}
+
+// Top-level fields a package leaves out of the body because it sends them only for the model IDs
+// and values it lists: the OpenAI package's priority tier (a custom endpoint names its models as it
+// likes, so one its user says takes OpenAI's tiers gets the tier whatever the model is called) and
+// efforts newer than the package (GPT-6.1 Terra's none), and every Mistral effort but high and none.
+function withFields(
+  fetch: typeof globalThis.fetch,
+  fields: Record<string, JSONValue>,
+): typeof globalThis.fetch {
+  if (!Object.keys(fields).length) return fetch;
   return (input, init) => {
     const body = init?.body;
-    if (typeof body !== "string" || body.includes('"service_tier"')) return fetch(input, init);
+    if (typeof body !== "string") return fetch(input, init);
+    const sent = JSON.parse(body) as Record<string, unknown>;
+    const missing = Object.entries(fields).filter(([key]) => !(key in sent));
+    if (!missing.length) return fetch(input, init);
     return fetch(input, {
       ...init,
-      body: JSON.stringify({ ...JSON.parse(body), service_tier: tier }),
+      body: JSON.stringify({ ...sent, ...Object.fromEntries(missing) }),
     });
   };
 }
@@ -266,6 +307,35 @@ export function servedTier(
     if (typeof report === "string") return servedSpeed(report);
   }
   return servedSpeed(headers?.["x-gemini-service-tier"] ?? chatTier);
+}
+
+// Claude caches a prompt only up to the blocks marked for it, on Anthropic's API and through
+// OpenRouter alike; the other APIs cache a repeated prefix on their own.
+export function marksCache(b: Pick<ModelBinding, "client" | "model">): boolean {
+  return (
+    b.client === "anthropic" || (b.client === "openrouter" && b.model.startsWith("anthropic/"))
+  );
+}
+
+// The task's key for the server that holds its cached prefix, where the API takes one: OpenAI,
+// xAI and Mistral through their packages, and the compatible endpoints that document
+// `prompt_cache_key`.
+const CACHE_KEYS = new Set([
+  "moonshotai",
+  "moonshotai-cn",
+  "togetherai",
+  "fireworks-ai",
+  "deepinfra",
+  "cerebras",
+]);
+export function cacheKeyOptions(
+  b: Pick<ModelBinding, "client" | "provider" | "route">,
+  key: string,
+): Record<string, Record<string, JSONValue>> | undefined {
+  if (b.client === "openai" || b.client === "xai" || b.client === "mistral")
+    return { [b.client]: { promptCacheKey: key } };
+  if (b.client === "openai-compatible" && CACHE_KEYS.has(b.provider ?? ""))
+    return { [b.route]: { prompt_cache_key: key } };
 }
 
 // Only Anthropic's tool results carry images (screenshots, as the computer tool expects); every

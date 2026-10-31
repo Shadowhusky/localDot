@@ -37,6 +37,8 @@ export interface Lens {
 // stay in it while the rail has room, the rail sliding into the room it has. When it hasn't, the
 // end nearer the pointer stays and the far end gives; halfway, both give evenly. A slide moves the
 // mark under the pointer too, so the focus is found where the mark it magnifies most lands under it.
+// The ends kept are the list's own where they show and the view's edges where it runs past them, so
+// a list scrolled under a still pointer moves on through the lens a pixel at a time.
 export function lens(
   spans: readonly Span[],
   pointer: number,
@@ -46,9 +48,8 @@ export function lens(
   maxScale = MAX_SCALE,
 ): Lens {
   const gain = amount * (maxScale - 1);
-  const kept = spans.filter((span) => span.top >= view.top && span.bottom <= view.bottom);
-  const first = kept[0]?.top ?? view.top;
-  const last = kept.at(-1)?.bottom ?? view.bottom;
+  const first = Math.max(view.top, spans[0]?.top ?? view.top);
+  const last = Math.min(view.bottom, spans.at(-1)?.bottom ?? view.bottom);
   // Near an end (half the reach, or less on a short rail), that end stays whole. Between, the cut
   // moves from one end to the other over a stretch as long as all the growth, so the slide never
   // falls back as fast as the focus moves on.
@@ -61,7 +62,7 @@ export function lens(
     const high = view.bottom - at(last);
     const top = Math.min(1, Math.max(0, (last - hold - focus) / blend));
     const slide = low <= high ? Math.min(Math.max(0, low), high) : top * low + (1 - top) * high;
-    return { at, slide: kept.length ? slide : 0 };
+    return { at, slide: spans.length ? slide : 0 };
   };
   // So where the focus lands always moves on with it, and the one under the pointer is found by
   // halving.

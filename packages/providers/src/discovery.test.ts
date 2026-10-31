@@ -70,6 +70,67 @@ describe("live provider capabilities", () => {
         ?.efforts,
     ).toEqual([]);
   });
+  it("offers Off where the Models API lists thinking disabled beside adaptive", () => {
+    const off = {
+      ...capabilities,
+      thinking: {
+        supported: true,
+        types: { adaptive: support(true), enabled: support(false), disabled: support(true) },
+      },
+    };
+    const controls = discoveredControls("anthropic", "claude-haiku-5-5", { capabilities: off });
+    expect(controls?.efforts).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+    expect(
+      modelProviderOptions("anthropic", "claude-haiku-5-5", { reasoningEffort: "none" }, controls),
+    ).toEqual({ thinking: { type: "disabled" } });
+  });
+  it("narrows OpenRouter's levels to each model's own list and keeps Off from mandatory thinkers", () => {
+    const listed = (id: string, reasoning: unknown) =>
+      discoveredControls("openrouter", id, { supported_parameters: ["reasoning"], reasoning });
+    const flash = listed("google/gemini-3.5-flash", {
+      supported_efforts: ["high", "medium", "low", "minimal"],
+      default_effort: "medium",
+      mandatory: true,
+    });
+    expect(flash).toMatchObject({
+      efforts: ["minimal", "low", "medium", "high"],
+      wire: "openrouter",
+      budget: false,
+    });
+    expect(
+      listed("moonshotai/kimi-k3.1-pro", { supported_efforts: ["max", "high", "low"] })?.efforts,
+    ).toEqual(["none", "low", "high", "max"]);
+    // Null takes every gateway level: the family's own where it is known, else the common three.
+    expect(listed("z-ai/glm-5.3", { supported_efforts: null, mandatory: true })?.efforts).toEqual([
+      "low",
+      "high",
+      "max",
+    ]);
+    expect(listed("someone/new-model", { supported_efforts: null })?.efforts).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+    ]);
+    expect(listed("moonshotai/kimi-k2.6", { supported_efforts: null })?.efforts).toEqual([
+      "none",
+      "enabled",
+    ]);
+    // No effort selection: only a budget, where the model takes one.
+    expect(
+      listed("anthropic/claude-sonnet-4.5", { supports_max_tokens: true, mandatory: false }),
+    ).toMatchObject({ efforts: [], budget: true, wire: "openrouter" });
+    expect(
+      modelProviderOptions(
+        "openrouter",
+        "moonshotai/kimi-k3.1-pro",
+        { reasoningEffort: "low" },
+        listed("moonshotai/kimi-k3.1-pro", { supported_efforts: ["max", "high", "low"] }),
+      ),
+    ).toEqual({ reasoning: { effort: "low" } });
+    // Without the reasoning object, the bundled family rules stay.
+    expect(listed("moonshotai/kimi-k3", undefined)?.efforts).toEqual(["low", "high", "max"]);
+  });
   it("updates capabilities and limits without trusting API prices, destinations or request keys", () => {
     const catalog = normalizeCatalog(MODELS_DEV_FIXTURE, "2026-10-20T00:00:00.000Z");
     const before = catalog.providers.anthropic?.models["claude-sonnet-5-5"];

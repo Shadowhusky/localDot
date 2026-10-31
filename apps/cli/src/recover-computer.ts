@@ -1,6 +1,10 @@
 import { join } from "node:path";
 import { ULID_PATTERN } from "../../../packages/protocol/src/ids.ts";
-import { ComputerFences } from "../../daemon/src/agent/safety/fences.ts";
+import {
+  ComputerFences,
+  type FenceRecord,
+  savedFence,
+} from "../../daemon/src/agent/safety/fences.ts";
 import { NativeConfirmations } from "../../daemon/src/agent/safety/native-confirmations.ts";
 import { nativeTaskState } from "../../daemon/src/agent/safety/native-tasks.ts";
 import { findDockerSocket } from "../../daemon/src/doctor-socket.ts";
@@ -17,9 +21,25 @@ export async function runRecoverComputer(
   io: ConsoleIO,
 ): Promise<number> {
   if (!ULID_PATTERN.test(context.cellId)) return 2;
+  let saved: FenceRecord | undefined;
+  try {
+    saved = savedFence(context.home, context.cellId);
+  } catch {
+    // Unreadable records get the native steps; confirming re-reads them under the service lock.
+  }
+  const replace =
+    "Open localDot and choose Replace computer: the new computer keeps this one's saved apps and files.";
+  if (saved?.executor === "api") {
+    const held = `This computer is held because localDot could not confirm how a task's last step or its cleanup ended. It was not a native task, so there is no native exit to confirm. ${replace}`;
+    if (context.confirmNativeExit) io.err(held);
+    else io.out(held);
+    return context.confirmNativeExit ? 1 : 0;
+  }
   if (!context.confirmNativeExit) {
     io.out(
-      `This computer is waiting for confirmation that its old native task has stopped. If you have independently checked that it is gone, run:\n  localdot recover --cell ${context.cellId} --confirm-native-exit\nThis records your confirmation and preserves the computer's data. It does not kill a task whose identity is unknown.`,
+      saved?.nativeRetired
+        ? `The old native task's exit is already confirmed. ${replace}`
+        : `This computer is waiting for confirmation that its old native task has stopped. If you have independently checked that it is gone, run:\n  localdot recover --cell ${context.cellId} --confirm-native-exit\nThis records your confirmation and preserves the computer's data. It does not kill a task whose identity is unknown.`,
     );
     return 0;
   }

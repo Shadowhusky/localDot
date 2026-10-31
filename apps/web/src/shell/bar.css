@@ -101,6 +101,18 @@
   display: grid;
 }
 
+/* Another localDot: its dot, wearing what it wears there, where the other items have their icon,
+   so its name lines up with theirs. */
+.ui-menu-item:has(.bar-brand-other) > .ui-menu-text {
+  margin-inline-start: calc(var(--spacing) * -7.5);
+}
+
+.bar-brand-other {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+}
+
 .bar-brand-host {
   color: var(--color-fg-3);
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);

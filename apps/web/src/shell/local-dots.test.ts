@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  deviceOnly,
   localDotHost,
   localDotLink,
   localDotNameProblem,
@@ -82,4 +83,30 @@ describe("another localDot's address", () => {
     expect(localDotNameProblem("")).toBeNull();
     expect(localDotNameProblem("<Office>")).toBe("Use up to 40 letters, numbers and punctuation.");
   });
+});
+
+it("tells an address that means whichever device opens it from one that names a computer", () => {
+  for (const url of [
+    "http://127.0.0.1:4750",
+    "http://127.1.2.3:4750",
+    "http://127.1:4750",
+    "http://localhost:4750",
+    "http://LOCALHOST.:4750",
+    "https://studio.localhost",
+    "http://[::1]:4750",
+    "http://[0:0:0:0:0:0:0:1]:4750",
+  ])
+    expect(deviceOnly(url), url).toBe(true);
+  for (const url of [
+    "https://100.91.187.75:4744",
+    "https://100.111.145.104",
+    "https://studio.tail849a6b.ts.net",
+    `https://${"a1".repeat(16)}--dot.localdot.dev`,
+    "http://192.168.1.20:4750",
+    "http://128.0.0.1:4750",
+    "https://localhost.example.com",
+    "https://127.0.0.1.nip.io",
+    "not an address",
+  ])
+    expect(deviceOnly(url), url).toBe(false);
 });

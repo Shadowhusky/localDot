@@ -34,6 +34,8 @@ function thinking(b: ModelBinding, effort: ReasoningEffort | undefined): Record<
         : { reasoning_effort: effort };
     case "openrouter":
       return { reasoning: { effort } };
+    case "anthropic":
+      return off ? { thinking: { type: "disabled" } } : { output_config: { effort } };
     case "binary-effort":
       return off ? { reasoning_effort: "none" } : {};
     case "deepseek":
@@ -77,6 +79,7 @@ export function completionCall(
         body: {
           model: b.model,
           max_tokens: OUTPUT_TOKENS,
+          ...think,
           system,
           messages: [
             {

@@ -1,0 +1,486 @@
+/* A phone's conversations (ConversationList's sheet layout, LiveDeck, ConversationPeek and the
+   bubble that opens them). In the utilities layer, as conversations-layout.css is, so the kit
+   button's own layout and the legacy rows' rules stay beneath it. */
+@layer utilities {
+  /* The sheet: search and tag filter stay put, the cards and rows scroll under them. */
+  /* It fills the sheet without lending the sheet its own height, so a longer list never squeezes
+     the sheet's header. */
+  .conversations[data-layout="sheet"] {
+    flex: 1 1 auto;
+    gap: calc(var(--spacing) * 2);
+    height: 0;
+    min-height: 0;
+    padding-top: var(--spacing);
+  }
+
+  .conversations[data-layout="sheet"] > :is(.conversations-search, .conversations-note) {
+    margin-inline: calc(var(--spacing) * 5);
+  }
+
+  .conversations[data-layout="sheet"] > .conversations-body {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+    padding: 0 calc(var(--spacing) * 2) calc(var(--spacing) * 6 + env(safe-area-inset-bottom));
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .conversations[data-layout="sheet"] .conversations-day {
+    padding-inline: calc(var(--spacing) * 3);
+  }
+
+  .conversations[data-layout="sheet"] .conversations-foot {
+    padding-top: calc(var(--spacing) * 4);
+    border-top: 0;
+  }
+
+  /* The tags in use, each a filter: a tap shows only that colour, another shows them all. */
+  .conversations-tags {
+    display: flex;
+    flex: none;
+    gap: calc(var(--spacing) * 2);
+    padding: 0 calc(var(--spacing) * 5);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .conversations-tag.ui-button {
+    --_bg: transparent;
+    --_bg-hover: var(--color-control);
+    --_bg-pressed: var(--color-control-hover);
+    --_fg: var(--color-fg-2);
+    flex: none;
+    gap: calc(var(--spacing) * 1.5);
+    min-height: 0;
+    padding-inline: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3);
+    border-radius: var(--radius-full);
+    box-shadow: inset 0 0 0 1px var(--color-separator);
+  }
+
+  .conversations-tag.ui-button::after {
+    inset: calc(var(--spacing) * -2) calc(var(--spacing) * -1);
+  }
+
+  .conversations-tag.ui-button > .ui-button-content {
+    gap: calc(var(--spacing) * 1.5);
+  }
+
+  .conversations-tag.ui-button[aria-pressed="true"] {
+    --_bg: var(--color-fg-1);
+    --_bg-hover: var(--color-fg-1);
+    --_bg-pressed: var(--color-fg-2);
+    --_fg: var(--color-void);
+    --_fg-hover: var(--color-void);
+    box-shadow: none;
+  }
+
+  /* A row slides on its own surface, so its light and its press move with it over the faces. */
+  .conversations[data-layout="sheet"] .conversations-row {
+    display: block;
+    height: auto;
+    min-height: 0;
+    padding: 0;
+    background-color: transparent;
+  }
+
+  .conversations[data-layout="sheet"] .conversations-row:not(:has(> .ui-swipe)) {
+    display: grid;
+    min-height: calc(var(--spacing) * 13);
+    padding-inline: calc(var(--spacing) * 3) var(--spacing);
+  }
+
+  .conversations-swipe {
+    border-radius: var(--radius-group);
+  }
+
+  .conversations-swipe > .ui-swipe-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 32px;
+    align-items: center;
+    min-height: calc(var(--spacing) * 13);
+    padding-inline: calc(var(--spacing) * 3) var(--spacing);
+    border-radius: inherit;
+    transition:
+      background-color var(--dur-hover) var(--ease-standard),
+      scale var(--dur-snappy) var(--ease-spring);
+  }
+
+  .conversations-row[data-current] > .conversations-swipe > .ui-swipe-content {
+    background-color: var(--color-selected);
+  }
+
+  /* The whole row lights under a finger, at once, rather than its button alone. */
+  .conversations[data-layout="sheet"] .conversations-pick.ui-button {
+    --_bg-hover: transparent;
+    --_bg-pressed: transparent;
+  }
+
+  @media (hover: hover) {
+    .conversations-row > .conversations-swipe > .ui-swipe-content:hover {
+      background-color: var(--color-state-hover);
+    }
+  }
+
+  .conversations-row[data-menu] > .conversations-swipe > .ui-swipe-content,
+  .conversations-row > .conversations-swipe[data-holding] > .ui-swipe-content,
+  .conversations-row > .conversations-swipe > .ui-swipe-content:active {
+    background-color: var(--color-state-pressed);
+  }
+
+  /* The conversations under way: cards a thumb flicks along, a card at a time. */
+  .live-deck {
+    margin-bottom: calc(var(--spacing) * 1);
+  }
+
+  .live-deck-head {
+    display: flex;
+    align-items: baseline;
+    gap: calc(var(--spacing) * 1.5);
+  }
+
+  .live-deck-count {
+    color: var(--color-fg-3);
+    font-weight: var(--font-weight-medium);
+  }
+
+  .live-deck-cards {
+    --_gap: calc(var(--spacing) * 2);
+    --_card: calc((100% - var(--_gap)) / 2.3);
+    display: grid;
+    grid-auto-columns: var(--_card);
+    grid-auto-flow: column;
+    gap: var(--_gap);
+    margin: 0 calc(var(--spacing) * -2);
+    padding: var(--spacing) calc(var(--spacing) * 4) calc(var(--spacing) * 2);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    list-style: none;
+    scroll-padding-inline: calc(var(--spacing) * 4);
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+
+  .live-deck-cards[data-count="1"] {
+    --_card: 100%;
+  }
+
+  .live-deck-cards[data-count="2"] {
+    --_card: calc((100% - var(--_gap)) / 2);
+  }
+
+  .live-card {
+    display: grid;
+    min-width: 0;
+    scroll-snap-align: start;
+  }
+
+  /* Cards coming in from the deck's edge grow and brighten as they come, a lens that follows
+     the thumb, as the desktop rail's dock follows the pointer. */
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      .live-deck-cards:not([data-count="1"], [data-count="2"]) > .live-card {
+        animation: live-card-lens linear both;
+        animation-timeline: view(inline);
+      }
+    }
+  }
+
+  @keyframes live-card-lens {
+    from {
+      opacity: 0.55;
+      scale: 0.9;
+    }
+
+    28%,
+    72% {
+      opacity: 1;
+      scale: 1;
+    }
+
+    to {
+      opacity: 0.55;
+      scale: 0.9;
+    }
+  }
+
+  .live-card-body {
+    position: relative;
+    display: grid;
+    border-radius: var(--radius-lg);
+    background-color: var(--color-raised-2);
+    box-shadow: var(--shadow-edge);
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    transition: scale var(--dur-snappy) var(--ease-spring);
+  }
+
+  .live-card-body:has(> .live-card-open[data-pressed]) {
+    scale: 0.97;
+  }
+
+  .live-card-body[data-holding] {
+    scale: 0.95;
+    transition-duration: var(--dur-gentle);
+    transition-timing-function: var(--ease-standard);
+  }
+
+  .live-card-body[data-current] {
+    box-shadow:
+      var(--shadow-edge),
+      inset 0 0 0 var(--stroke-ring) var(--color-fg-3);
+  }
+
+  .live-card-open.ui-button {
+    --_bg: transparent;
+    --_bg-hover: var(--color-state-hover);
+    --_bg-pressed: var(--color-state-pressed);
+    --_fg: var(--color-fg-1);
+    display: grid;
+    align-content: start;
+    justify-content: stretch;
+    height: auto;
+    min-height: calc(var(--spacing) * 24);
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3) calc(var(--spacing) * 3)
+      calc(var(--spacing) * 3.5);
+    border-radius: inherit;
+    text-align: start;
+    white-space: normal;
+  }
+
+  .live-card-open.ui-button > .ui-button-content {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: calc(var(--spacing) * 1.5);
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+  }
+
+  /* A name typed in place takes the card's words' room. */
+  .live-card-rename {
+    display: grid;
+    align-content: center;
+    min-height: calc(var(--spacing) * 24);
+    padding: calc(var(--spacing) * 3);
+  }
+
+  .live-card-state {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 1.5);
+    min-width: 0;
+    padding-inline-end: calc(var(--spacing) * 6);
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+  }
+
+  .live-card-word {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .live-card-body[data-status="needs-you"] .live-card-word {
+    color: var(--color-fg-1);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .live-card-title {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--color-fg-1);
+    font: var(--font-weight-medium) var(--text-row) / var(--text-row--line-height) var(--font-ui);
+    letter-spacing: var(--text-row--letter-spacing);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .live-card-line {
+    display: -webkit-box;
+    margin-top: auto;
+    overflow: hidden;
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .live-card-more {
+    position: absolute;
+    top: calc(var(--spacing) * 2);
+    right: calc(var(--spacing) * 2);
+  }
+
+  .live-card-body > .ui-tag-mark {
+    top: calc(var(--spacing) * 3);
+    left: calc(var(--spacing) * 1);
+    height: calc(var(--spacing) * 5);
+    translate: none;
+  }
+
+  /* A held conversation magnified (ConversationPeek): the list dims and blurs behind it. */
+  .peek-scrim {
+    position: absolute;
+    inset: 0;
+    background-color: var(--color-scrim);
+    pointer-events: none;
+    backdrop-filter: blur(calc(var(--blur-glass) / 3));
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  @starting-style {
+    .peek-scrim {
+      opacity: 0;
+    }
+  }
+
+  .ui-layer[data-closing] > .peek-scrim {
+    opacity: 0;
+    transition-duration: var(--dur-exit);
+  }
+
+  .peek-card {
+    position: absolute;
+    top: 0;
+    right: calc(var(--spacing) * 4);
+    left: calc(var(--spacing) * 4);
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+    max-width: 480px;
+    margin-inline: auto;
+    padding: calc(var(--spacing) * 4) calc(var(--spacing) * 4) calc(var(--spacing) * 4)
+      calc(var(--spacing) * 5);
+    border-radius: var(--radius-xl);
+    background-color: var(--color-popover);
+    box-shadow: var(--shadow-overlay);
+    color: var(--color-fg-1);
+    pointer-events: none;
+    transform-origin: 0 0;
+    visibility: hidden;
+  }
+
+  .peek-card[data-placed] {
+    visibility: visible;
+  }
+
+  .peek-card > .ui-tag-mark {
+    top: calc(var(--spacing) * 4.5);
+    left: calc(var(--spacing) * 2);
+    height: calc(var(--spacing) * 5);
+    translate: none;
+  }
+
+  .peek-state {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 1.5);
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height)
+      var(--font-ui);
+  }
+
+  .peek-word {
+    color: var(--color-fg-1);
+  }
+
+  .peek-screen {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing);
+    margin-inline-start: auto;
+  }
+
+  .peek-title {
+    font:
+      var(--text-title-2--font-weight) var(--text-title-2) / var(--text-title-2--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-2--letter-spacing);
+    overflow-wrap: anywhere;
+  }
+
+  .peek-activity {
+    color: var(--color-fg-1);
+    font: var(--text-row) / var(--text-row--line-height) var(--font-ui);
+    letter-spacing: var(--text-row--letter-spacing);
+  }
+
+  .peek-said {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--color-fg-2);
+    font: var(--text-row) / var(--text-row--line-height) var(--font-ui);
+    letter-spacing: var(--text-row--letter-spacing);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  .peek-facts {
+    padding-top: calc(var(--spacing) * 2);
+    border-top: 1px solid var(--color-separator);
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+  }
+
+  /* The phone's way in, over the picture: a ring of the other conversations under way around it,
+     one arc each in its status's colour, as a Live Activity sits beside the Dynamic Island. */
+  .conversations-bubble {
+    position: relative;
+    display: grid;
+    place-items: center;
+  }
+
+  .conversations-ring {
+    position: absolute;
+    inset: calc(var(--spacing) * -1);
+    overflow: visible;
+    pointer-events: none;
+    rotate: -90deg;
+  }
+
+  .conversations-ring circle {
+    fill: none;
+    stroke: var(--color-fg-2);
+    stroke-linecap: round;
+    stroke-width: 2px;
+    transition:
+      stroke-dasharray var(--dur-default) var(--ease-spring),
+      stroke-dashoffset var(--dur-default) var(--ease-spring),
+      stroke var(--dur-default) var(--ease-standard);
+  }
+
+  .conversations-ring circle[data-status="working"] {
+    stroke: var(--color-xenon);
+  }
+
+  .conversations-ring circle[data-status="needs-you"] {
+    stroke: var(--color-attention);
+  }
+
+  /* A row's tag sits 2 px in from its swiping surface's edge. */
+  .conversations[data-layout="sheet"] .conversations-glyph > .ui-tag-mark {
+    left: calc(var(--spacing) * -2.5);
+  }
+
+  @media (forced-colors: active) {
+    .live-card-body,
+    .peek-card {
+      border: 1px solid CanvasText;
+    }
+
+    .conversations-ring circle {
+      stroke: CanvasText;
+    }
+  }
+}

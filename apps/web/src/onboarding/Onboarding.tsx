@@ -568,7 +568,13 @@ export function Onboarding(props: OnboardingProps) {
         return {
           title: "Which dot do you need most?",
           sub: "Each one brings the skills for its kind of work. You can switch any time.",
-          body: <PersonaPicker value={draft.persona} onChange={(persona) => change({ persona })} />,
+          body: (
+            <PersonaPicker
+              value={draft.persona}
+              accessory={saved?.accessory}
+              onChange={(persona) => change({ persona })}
+            />
+          ),
           primary: "Continue",
           run: savePersona,
         };

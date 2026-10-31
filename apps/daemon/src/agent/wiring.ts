@@ -496,7 +496,7 @@ export function createAgent(d: AgentWiringDeps) {
           }
         : {}),
       saveOutput: (id, name, source, scope) => outputs.save(id, name, source, scope),
-      stopForUncertainty: (session, reason) => runner.contain(session, reason),
+      stopForUncertainty: (session, reason, why) => runner.contain(session, reason, why),
       sleep: (ms, signal) => sleep(ms, undefined, { signal }),
       ...(d.routines ? { routines: d.routines } : {}),
       connectors,
@@ -730,14 +730,18 @@ export function createAgent(d: AgentWiringDeps) {
         query: (params) => claudeQuery(params),
         launch: () => claudeSetup.launch(),
         spawn: (options, session) =>
-          nativeTasks.spawn(session.cellId, session.id, () =>
-            spawn(options.command, options.args, {
-              cwd: options.cwd,
-              env: options.env,
-              signal: options.signal,
-              detached: true,
-              stdio: ["pipe", "pipe", "ignore"],
-            }),
+          nativeTasks.spawn(
+            session.cellId,
+            session.id,
+            () =>
+              spawn(options.command, options.args, {
+                cwd: options.cwd,
+                env: options.env,
+                signal: options.signal,
+                detached: true,
+                stdio: ["pipe", "pipe", "ignore"],
+              }),
+            (other) => d.live.cellOf(other) === session.cellId,
           ),
         dispatch: async (session, generation, name, callId, input, signal) =>
           (

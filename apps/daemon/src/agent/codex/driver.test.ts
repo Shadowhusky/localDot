@@ -6,6 +6,7 @@ import { RETRY_NEXT } from "../native-tools.ts";
 import { redactor } from "../redact.ts";
 import { AgentSession } from "../session.ts";
 import { TranscriptStore } from "../transcript.ts";
+import { AccountError, TASK_BUSY } from "./account.ts";
 import {
   CODEX_CRASHED,
   CODEX_DONE,
@@ -422,6 +423,27 @@ describe("Codex conversation and durable input recovery", () => {
       turn = await second.waitFor("turn/start");
     expect(JSON.stringify(turn.params)).toContain("also hotels");
     expect(JSON.stringify(turn.params)).not.toContain(steer.messageId);
+    f.done();
+    expect(await run).toBe(CODEX_DONE);
+  });
+  it("ends a wait for a steer sent into the running turn, not for what the turn began with", async () => {
+    const f = fixture();
+    const spoke = () => {
+      const listening = f.session.listenForUser(new AbortController().signal);
+      listening.end();
+      return listening.spoke;
+    };
+    f.session.post("steer", "Prefer trains");
+    const run = f.run(),
+      first = await f.fake.nextLaunch(1);
+    await first.waitFor("turn/start");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(spoke()).toBe(false);
+    f.session.post("steer", "Under 100 euros");
+    await first.waitFor("turn/steer");
+    // Codex has it, but no sign says when its model reads it: the next wait ends, once.
+    expect(spoke()).toBe(true);
+    expect(spoke()).toBe(false);
     f.done();
     expect(await run).toBe(CODEX_DONE);
   });
@@ -1486,5 +1508,49 @@ describe("daemon-owned auth Resume handoff", () => {
       f.session.stop();
       await run.catch(() => {});
     }
+  });
+});
+
+describe("a ChatGPT start that fails", () => {
+  const states = (f: ReturnType<typeof fixture>) =>
+    f.events.filter((e) => e.type === "agent.state").map((e) => e.data);
+
+  it("says the screen step stopped it and logs the cause without the task's words", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = fixture();
+    f.observe.mockRejectedValueOnce(
+      new Error("Find the weather: frame fake-private-diagnostic lost"),
+    );
+    expect(await f.run()).toBe(CODEX_GAVE_UP);
+    expect(states(f)).toContainEqual({
+      state: "error",
+      reason: "The ChatGPT task could not start.",
+      detail: "The computer's screen couldn't be read.",
+      next: "Wait until the computer is ready, then send your message again.",
+    });
+    expect(errors).toHaveBeenCalledWith(
+      `ChatGPT could not start (screen): Error: [task]: frame [redacted] lost (task ${f.session.id})`,
+    );
+  });
+
+  it("says another task has the account, which takes one ChatGPT task at a time", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = fixture();
+    f.fake.auth.acquireTask = async () => {
+      throw new AccountError(409, TASK_BUSY);
+    };
+    expect(await f.run()).toBe(CODEX_GAVE_UP);
+    expect(states(f)).toEqual([
+      {
+        state: "error",
+        reason: "Another task is using your ChatGPT account.",
+        detail: "Only one ChatGPT task works at a time.",
+        next: "Send your message again once it's done, or choose another model in Settings.",
+      },
+    ]);
+    expect(errors).toHaveBeenCalledWith(
+      `ChatGPT could not continue: AccountError: ${TASK_BUSY} (task ${f.session.id})`,
+    );
+    expect(f.fake.launches).toHaveLength(0);
   });
 });

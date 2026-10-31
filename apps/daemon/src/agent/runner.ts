@@ -309,8 +309,10 @@ interface Runtime {
   // The dot chosen when the task started, or the user's switch; its skills and instructions hold
   // from the agent's next start.
   persona?: PersonaId;
-  // Auto's pick for a new conversation, or nothing once it is too late to wait for one.
-  choosing?: Promise<FirstLook>;
+  // Auto's pick for a new conversation, undefined when it did not come in time to wait for.
+  choosing?: Promise<FirstLook | undefined>;
+  // The first look itself, while a pick that comes late may still change the dot.
+  looking?: Promise<FirstLook>;
   limits: AgentLimits;
   skills: SkillSummary[];
   epoch: number;
@@ -410,6 +412,10 @@ export class AgentRunner {
         if (notice && rt.providerNotice !== notice) {
           rt.providerNotice = notice;
           rt.session.append("message.assistant", { messageId: ulid(), text: notice });
+          // The brain's own log stays empty; this line is where a stalled model call is traced.
+          console.warn(
+            `task ${id} paused (${event.data.reason})${event.data.detail ? `: ${event.data.detail}` : ""}`,
+          );
         }
         if (rt.selection.kind === "chatgpt" && event.data.reason === "chatgpt account changed") {
           const generation = this.deps.codex?.authGeneration?.();
@@ -850,7 +856,7 @@ export class AgentRunner {
     }
   }
   // A new conversation's name and, with Auto, its dot, from one quick call beside the task. The
-  // name comes when it comes; the dot only counts if it comes before the agent starts.
+  // name comes when it comes; the dot counts if it comes before dot first says or does anything.
   #lookFirst(rt: Runtime, task: string, auto: boolean): void {
     const ask = this.#quick(rt);
     if (!ask) return;
@@ -868,11 +874,47 @@ export class AgentRunner {
     if (!auto) return;
     const answered = new AbortController();
     const late = (this.deps.sleep ?? sleep)(DOT_WAIT_MS, answered.signal).then(
-      (): FirstLook => ({}),
-      (): FirstLook => ({}),
+      () => undefined,
+      () => undefined,
     );
+    rt.looking = looked;
     rt.choosing = Promise.race([looked, late]);
     void looked.then(() => answered.abort());
+  }
+  // Auto's pick after the task started as the user's default. It still counts while dot has
+  // neither said nor done anything and nothing waits on the user: another dot takes over as the
+  // user's switch does, from the saved history.
+  #lateDot(rt: Runtime, look: FirstLook): void {
+    const { session } = rt;
+    if (!rt.looking) return;
+    rt.looking = undefined;
+    if (
+      !look.persona ||
+      session.stopped ||
+      session.acted ||
+      session.controlHeld ||
+      session.pendingAsk ||
+      session.pendingApproval ||
+      session.safetyPause
+    )
+      return;
+    try {
+      session.append("persona.choice", {
+        persona: look.persona,
+        by: "auto",
+        ...(look.reason ? { reason: look.reason } : {}),
+      });
+    } catch {
+      console.error("the conversation's dot could not be saved");
+      return;
+    }
+    if ((rt.persona ?? DEFAULT_PERSONA) === look.persona) return;
+    rt.persona = look.persona;
+    if (session.generation) {
+      rt.epoch += 1;
+      session.retireBrain(session.generation, "restarted");
+      rt.backoff?.abort();
+    }
   }
   // The fast model, else the main one at its least thinking. A ChatGPT plan has none to spare: its
   // one Codex process is the task's.
@@ -918,6 +960,8 @@ export class AgentRunner {
       session.safetyPause
     )
       throw new AgentError(409, "Finish what dot is waiting on, then change its dot.");
+    // The user's choice wins over a pick of Auto's still on its way.
+    rt.looking = undefined;
     if ((rt.persona ?? DEFAULT_PERSONA) === persona) return;
     rt.persona = persona;
     session.append("persona.choice", { persona, by: "user" });
@@ -1582,13 +1626,14 @@ export class AgentRunner {
     }
   }
   // Handler uncertainty cannot skip containment merely because it already fenced the session.
-  contain(session: AgentSession, reason: string): Promise<void> {
+  // `why` says which check failed; only plain names and numbers reach the log.
+  contain(session: AgentSession, reason: string, why?: string): Promise<void> {
     const rt = this.#runtime.get(session.id);
     session.stop();
     this.#blockedCells.add(session.cellId);
     if (!this.deps.fences?.record(session.cellId))
       console.error(
-        `computer recovery required: ${session.cellId}, task ${session.id} (${/^[a-z_]{1,64}$/.test(reason) ? reason : "cleanup_uncertain"})`,
+        `computer recovery required: ${session.cellId}, task ${session.id} (${/^[a-z_]{1,64}$/.test(reason) ? reason : "cleanup_uncertain"}${why && /^[\w .,;']{1,400}$/.test(why) ? `: ${why}` : ""})`,
       );
     this.deps.fences?.capture(
       session.cellId,
@@ -1782,13 +1827,15 @@ export class AgentRunner {
       if (rt.choosing) {
         const pick = await abortable(rt.choosing, session.abort.signal);
         rt.choosing = undefined;
-        if (pick.persona) rt.persona = pick.persona;
+        if (pick?.persona) rt.persona = pick.persona;
         session.append(
           "persona.choice",
-          pick.persona
+          pick?.persona
             ? { persona: pick.persona, by: "auto", ...(pick.reason ? { reason: pick.reason } : {}) }
             : { persona: rt.persona ?? DEFAULT_PERSONA, by: "default" },
         );
+        if (pick) rt.looking = undefined;
+        else void rt.looking?.then((look) => this.#lateDot(rt, look));
       }
       let dressed = rt.persona;
       let skills = await this.deps.installSkills(session.cellId, session.abort.signal, dressed);
