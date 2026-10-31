@@ -12,11 +12,16 @@ import {
 import { addToolRoutes } from "../../../../cells/desktop/desktopd/src/tools/routes.ts";
 import {
   DesktopdTools,
+  describeShellDiagnosis,
   ShellCleanupUncertainError,
   ShellExecutionUncertainError,
 } from "./tools-client.ts";
 
 const token = "d".repeat(43);
+function required<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("fixture missing value");
+  return value;
+}
 const clients: DesktopdTools[] = [];
 const homes: string[] = [];
 afterEach(async () => {
@@ -662,6 +667,147 @@ describe("verified recovery after shell connection loss", () => {
     const tools = client(answer(new Response("desktop_memory_pressure", { status: 503 })));
     await expect(tools.shell({ command: "true" }, () => {})).rejects.toThrow(
       "command was not started",
+    );
+  });
+});
+
+describe("confirming a command's end on a slow computer", () => {
+  const receipts = { "x-localdot-shell-result": "1" };
+  const silent = () => new Response(new ReadableStream(), { headers: receipts });
+  const lost = () =>
+    new Response(
+      new ReadableStream({
+        start(c) {
+          c.error(new Error("connection reset"));
+        },
+      }),
+      { headers: receipts },
+    );
+  const commandId = (init?: RequestInit) => JSON.parse(String(init?.body)).id as string;
+  const path = (url: unknown) => new URL(String(url)).pathname;
+  const uncertainty = (work: Promise<unknown>) =>
+    work.then(
+      () => {
+        throw new Error("expected uncertainty");
+      },
+      (error: unknown) => {
+        if (error instanceof ShellExecutionUncertainError) return error;
+        throw error;
+      },
+    );
+  it("keeps the command's reply open while an unanswered stop is retried", async () => {
+    vi.useFakeTimers();
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    const stops = vi.fn(() => new Promise<Response>(() => {}));
+    const tools = client((async (url) => {
+      if (path(url) === "/shell/stop") return stops();
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            body = c;
+          },
+        }),
+        { headers: receipts },
+      );
+    }) as typeof fetch);
+    const stop = new AbortController();
+    const work = tools.shell({ command: "sleep 600" }, () => {}, stop.signal);
+    await vi.advanceTimersByTimeAsync(0);
+    stop.abort();
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(stops.mock.calls.length).toBeGreaterThan(1);
+    body.enqueue(bytes(lines({ ...done, exitCode: null, signal: "SIGKILL" })));
+    body.close();
+    const result = await work;
+    expect(result).toMatchObject({ exitCode: null, signal: "SIGKILL" });
+    expect(result.outputIncomplete).toBeUndefined();
+  });
+  it("looks up a lost reply's receipt through requests that fail or time out", async () => {
+    vi.useFakeTimers();
+    const stops = [
+      () => Promise.reject(new TypeError("fetch failed")),
+      () => new Response(null, { status: 204 }),
+    ];
+    const results = [
+      () => new Response("busy", { status: 503 }),
+      () => new Promise<Response>(() => {}),
+      () => new Response("running", { status: 202 }),
+      (id: string) => Response.json({ id, result: done }),
+    ];
+    const tools = client((async (url, init) => {
+      if (path(url) === "/shell") return lost();
+      const next = (path(url) === "/shell/stop" ? stops : results).shift();
+      if (!next) throw new Error("unexpected request");
+      return next(commandId(init));
+    }) as typeof fetch);
+    const work = tools.shell({ command: "true" }, () => {});
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(work).resolves.toMatchObject({ exitCode: 0, outputIncomplete: true });
+    expect([stops.length, results.length]).toEqual([0, 0]);
+  });
+  it("stays uncertain, saying why, while the command still runs after the wait", async () => {
+    vi.useFakeTimers();
+    const tools = client((async (url) =>
+      path(url) === "/shell"
+        ? silent()
+        : path(url) === "/shell/stop"
+          ? new Response(null, { status: 204 })
+          : new Response("running", { status: 202 })) as typeof fetch);
+    const stop = new AbortController();
+    let settled = false;
+    const caught = uncertainty(
+      tools.shell({ command: "sleep 600" }, () => {}, stop.signal),
+    ).finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    stop.abort();
+    await vi.advanceTimersByTimeAsync(55_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const error = await caught;
+    expect(error.diagnosis).toMatchObject({
+      failed: "stop",
+      lookup: "tried",
+      stopReply: 204,
+      lookupReply: 202,
+    });
+    expect(error.diagnosis?.stoppedAtMs).toBeDefined();
+    expect(describeShellDiagnosis(required(error.diagnosis))).toMatch(
+      /^no receipt came in the wait after Stop; stopped \d+\.\d s in; 2 stop requests, last 204; \d+ receipt checks, last still running; gave up \d+\.\d s in$/,
+    );
+  });
+  it("does not wait out a command the computer does not know", async () => {
+    vi.useFakeTimers();
+    const tools = client((async (url) =>
+      path(url) === "/shell" ? lost() : new Response("unknown", { status: 404 })) as typeof fetch);
+    const caught = uncertainty(tools.shell({ command: "true" }, () => {}));
+    await vi.advanceTimersByTimeAsync(100);
+    expect((await caught).diagnosis).toMatchObject({
+      failed: "stream",
+      lookup: "tried",
+      stops: 1,
+      lookups: 1,
+      lookupReply: 404,
+    });
+  });
+  it("names a lost request and a computer that keeps no receipts", async () => {
+    vi.useFakeTimers();
+    const unanswered = client((async () => {
+      throw new TypeError("fetch failed");
+    }) as typeof fetch);
+    const caught = uncertainty(unanswered.shell({ command: "true" }, () => {}));
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect((await caught).diagnosis).toMatchObject({
+      failed: "request",
+      lookup: "tried",
+      stopReply: "unreachable",
+    });
+    const older = client(answer(() => new Response("")));
+    const noReceipts = await uncertainty(older.shell({ command: "true" }, () => {}));
+    expect(noReceipts.diagnosis).toMatchObject({ failed: "reply", lookup: "unsupported" });
+    expect(describeShellDiagnosis(required(noReceipts.diagnosis))).toContain(
+      "the computer keeps no receipts",
     );
   });
 });

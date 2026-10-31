@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { ULID_PATTERN } from "@localdot/protocol";
 import { z } from "zod";
 import { sessionEnded } from "../../event-file.ts";
@@ -16,6 +18,16 @@ export const FenceRecord = z.strictObject({
   replacementRequest: Id.optional(),
 });
 export type FenceRecord = z.infer<typeof FenceRecord>;
+function owned(raw: unknown, id: string): FenceRecord {
+  const record = FenceRecord.parse(raw);
+  if (record.cellId !== id) throw new Error("fence owner mismatch");
+  return record;
+}
+// One computer's saved fence, read without the recovery scan that loading ComputerFences runs.
+export function savedFence(home: string, cellId: string): FenceRecord | undefined {
+  if (!existsSync(join(home, "safety", "fences"))) return undefined;
+  return new PrivateRecords(home, "fences", owned).read(cellId);
+}
 // A fence is permanent. Failure to persist/read it closes admission; nothing in replacement removes it.
 export class ComputerFences {
   readonly #held = new Map<string, FenceRecord>();
@@ -35,11 +47,7 @@ export class ComputerFences {
         NativeBoot.parse(boot);
         this.#boots = new NativeBootRecords(home);
       }
-      this.#records = new PrivateRecords(home, "fences", (raw, id) => {
-        const record = FenceRecord.parse(raw);
-        if (record.cellId !== id) throw new Error("fence owner mismatch");
-        return record;
-      });
+      this.#records = new PrivateRecords(home, "fences", owned);
       for (const record of this.#records.list()) {
         this.#held.set(record.cellId, Object.freeze(record));
         this.#durable.add(record.cellId);

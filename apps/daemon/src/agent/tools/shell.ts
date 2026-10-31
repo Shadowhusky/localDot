@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { ShellInput, ToolResult } from "@localdot/protocol";
+import { clipText, type ShellInput, type ToolResult } from "@localdot/protocol";
 import {
+  describeShellDiagnosis,
   ShellCleanupUncertainError,
   ShellExecutionUncertainError,
 } from "../../desktopd/tools-client.ts";
@@ -216,11 +217,33 @@ export async function shellTool(
       ],
     };
   } catch (error) {
-    if (error instanceof ShellCleanupUncertainError)
+    if (error instanceof ShellCleanupUncertainError) {
+      held(ctx, "the command's processes could not be confirmed ended");
       return contain(deps, ctx, "shell_cleanup_uncertain");
-    if (error instanceof ShellExecutionUncertainError)
-      return contain(deps, ctx, "shell_execution_uncertain");
+    }
+    if (error instanceof ShellExecutionUncertainError) {
+      const why = error.diagnosis && describeShellDiagnosis(error.diagnosis);
+      held(ctx, `the command's end could not be confirmed${why ? ` (${why})` : ""}`);
+      return contain(deps, ctx, "shell_execution_uncertain", why);
+    }
     ctx.check();
     throw error;
+  }
+}
+
+// The step says why the computer is held, whether or not the task was already stopped.
+function held(ctx: ToolCallContext, why: string): void {
+  try {
+    ctx.session.append("tool.end", { ok: false }, ctx.step);
+    ctx.session.append(
+      "step.end",
+      {
+        status: "failed",
+        note: clipText(ctx.redact(`Stopped: ${why}. The computer is held for recovery.`), 500),
+      },
+      ctx.step,
+    );
+  } catch {
+    /* Containment goes ahead whether or not the journal takes the note. */
   }
 }

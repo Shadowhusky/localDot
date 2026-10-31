@@ -496,7 +496,7 @@ export function createAgent(d: AgentWiringDeps) {
           }
         : {}),
       saveOutput: (id, name, source, scope) => outputs.save(id, name, source, scope),
-      stopForUncertainty: (session, reason) => runner.contain(session, reason),
+      stopForUncertainty: (session, reason, why) => runner.contain(session, reason, why),
       sleep: (ms, signal) => sleep(ms, undefined, { signal }),
       ...(d.routines ? { routines: d.routines } : {}),
       connectors,

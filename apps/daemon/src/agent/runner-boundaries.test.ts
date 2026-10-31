@@ -577,6 +577,21 @@ it("retains Stop ownership for late uncertainty until the actual tool settles", 
   expect(h.runner.get(session.id)).toBeUndefined();
 });
 
+it.each([
+  ["no receipt came in the wait after Stop; stopped 39.6 s in", true],
+  ["token=abc/def\nsecond line", false],
+])("logs which check left the computer held, only in plain words (%#)", async (why, shown) => {
+  const h = setup();
+  const session = await h.runner.start(h.cellId, "Task");
+  await h.ready();
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  await h.runner.contain(session, "shell_execution_uncertain", why);
+  expect(errors).toHaveBeenCalledWith(
+    `computer recovery required: ${h.cellId}, task ${session.id} (shell_execution_uncertain${shown ? `: ${why}` : ""})`,
+  );
+  errors.mockRestore();
+});
+
 it("rejects a held takeover and a paused/busy cell before durable budget raise, then preserves task spend and frozen model identity", async () => {
   const h = setup();
   const session = await h.runner.start(h.cellId, "Task");

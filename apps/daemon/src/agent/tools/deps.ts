@@ -79,9 +79,11 @@ export interface ToolDeps {
     scope: { signal: AbortSignal; check(): void },
   ): Promise<{ path: string; bytes: number; version?: number }>;
   // Called after synchronous session.stop(); must still revoke/freeze already-fenced sessions.
+  // `why` is the failed check, for the log: names and numbers only.
   stopForUncertainty(
     session: AgentSession,
     reason: "shell_cleanup_uncertain" | "shell_execution_uncertain" | "memory_write_uncertain",
+    why?: string,
   ): Promise<void>;
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
   askTimeoutMs?: number;
@@ -183,10 +185,11 @@ export async function contain(
   deps: ToolDeps,
   ctx: ToolCallContext,
   reason: Parameters<ToolDeps["stopForUncertainty"]>[1],
+  why?: string,
 ): Promise<ToolResult> {
   ctx.session.stop();
   try {
-    await deps.stopForUncertainty(ctx.session, reason);
+    await deps.stopForUncertainty(ctx.session, reason, why);
   } catch {
     /* Access stays fenced even when containment fails. */
   }
