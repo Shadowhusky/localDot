@@ -77,6 +77,11 @@ export function ModelOptionsFields({
     );
     onChange({ ...choice, options: Object.keys(next).length ? next : undefined });
   };
+  // An On saved before the model offered levels is its default thinking (modelOptionsProblem).
+  const effortValue =
+    options.reasoningEffort === "enabled" && !controls.efforts.includes("enabled")
+      ? ""
+      : (options.reasoningEffort ?? "");
   const items = [
     { value: "", label: "Provider default" },
     ...controls.efforts.map((value) => ({ value, label: effortLabel(value) })),
@@ -115,11 +120,7 @@ export function ModelOptionsFields({
     return (
       <div className="model-options-fields" data-compact="">
         {controls.efforts.length > 0 && (
-          <EffortSlider
-            value={options.reasoningEffort ?? ""}
-            items={items}
-            onChange={changeEffort}
-          />
+          <EffortSlider value={effortValue} items={items} onChange={changeEffort} />
         )}
         {controls.verbosity && (
           <EffortSlider
@@ -152,7 +153,7 @@ export function ModelOptionsFields({
         <Field label="Reasoning effort" inline className="ui-group-row">
           <Select
             appearance="inline"
-            value={options.reasoningEffort ?? ""}
+            value={effortValue}
             items={items}
             onValueChange={changeEffort}
           />

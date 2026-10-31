@@ -2,7 +2,11 @@
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: the search field takes the keys for every row.
 // biome-ignore-all lint/a11y/useSemanticElements: a listbox's groups are ARIA groups; a fieldset cannot sit in one.
 
-import { CONVERSATION_NAME_CHARS, RenameConversation } from "@localdot/protocol";
+import {
+  CONVERSATION_NAME_CHARS,
+  type ConversationTag,
+  RenameConversation,
+} from "@localdot/protocol";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -19,29 +23,36 @@ import {
   conversationRows,
   groupConversations,
   type LiveFacts,
+  liveConversations,
+  type Organize,
   organizeConversation,
   STATUS_LABEL,
+  tagsInUse,
   useRecentConversations,
   whenLabel,
 } from "../agent/conversation-list.ts";
 import { searchConversations } from "../agent/conversation-search.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
-import type { ApiClient } from "../lib/api.ts";
+import { type ApiClient, ApiError } from "../lib/api.ts";
 import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
-import { TagMark } from "../ui/ConversationTag.tsx";
+import { TAG_NAMES, TagDot, TagMark } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
+import { useFlip } from "../ui/flip.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { MenuItem } from "../ui/Menu.tsx";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
 import { SessionGlyph } from "../ui/SessionGlyph.tsx";
+import { type SwipeAction, SwipeActions } from "../ui/SwipeActions.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { ConversationMenu } from "./ConversationMenu.tsx";
+import { ConversationPeek, type Peek } from "./ConversationPeek.tsx";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
+import { LiveDeck } from "./LiveDeck.tsx";
 import "../ui/conversations-layout.css";
 import "./rails.css";
 
@@ -57,6 +68,9 @@ export interface ConversationListProps {
   onPick(sessionId: string, sessions?: readonly string[]): void;
   onReplay(): void;
   onDeleted?(sessions: readonly string[]): void;
+  // A popover's compact list, or a phone's sheet: the conversations under way as cards over the
+  // rest, rows a finger swipes to pin or archive and holds to preview, and a filter by colour tag.
+  layout?: "popover" | "sheet";
 }
 
 // The recent conversations, those pinned and those under way first and the rest by day, a search
@@ -71,9 +85,11 @@ export function ConversationList({
   onPick,
   onReplay,
   onDeleted,
+  layout = "popover",
 }: ConversationListProps) {
+  const sheet = layout === "sheet";
   const listId = useId();
-  const actionAnchor = useRef<HTMLButtonElement | null>(null);
+  const actionAnchor = useRef<HTMLElement | null>(null);
   const [action, setAction] = useState<ConversationRow | null>(null);
   const [deleting, setDeleting] = useState<ConversationRow | null>(null);
   // The row whose name is being typed in place, and what is typed. An empty name gives the
@@ -111,9 +127,22 @@ export function ConversationList({
   const matches = useTaskSearch(api, query);
   const [now] = useState(() => new Date());
   const all = useMemo(() => conversationRows(recent.entries, facts), [recent.entries, facts]);
+  // The sheet's colour filter, kept only while a conversation still has that tag.
+  const [tag, setTag] = useState<ConversationTag | null>(null);
+  const tags = useMemo(() => (sheet ? tagsInUse(all) : []), [sheet, all]);
+  const tagged = tag && tags.includes(tag) ? tag : null;
+  const shown = useMemo(
+    () => (tagged ? all.filter((row) => row.entry.tag === tagged) : all),
+    [all, tagged],
+  );
   const found = useMemo(
-    () => (query.trim() ? searchConversations(all, query, matches.tasks) : null),
-    [all, query, matches.tasks],
+    () => (query.trim() ? searchConversations(shown, query, matches.tasks) : null),
+    [shown, query, matches.tasks],
+  );
+  // On the sheet the conversations under way are cards above the rest, until a search.
+  const live = useMemo(
+    () => (sheet && !found ? liveConversations(shown) : []),
+    [sheet, found, shown],
   );
   const groups = useMemo(
     (): ConversationGroup[] =>
@@ -121,8 +150,8 @@ export function ConversationList({
         ? found.length
           ? [{ label: "Results", rows: found.map((match) => match.row) }]
           : []
-        : groupConversations(all, now),
-    [found, all, now],
+        : groupConversations(live.length ? shown.filter((row) => !row.active) : shown, now),
+    [found, shown, live, now],
   );
   const marked = useMemo(
     () => new Map(found?.map((match) => [match.row.entry.sessionId, match])),
@@ -136,6 +165,7 @@ export function ConversationList({
     ordered[0];
   const optionId = (row: ConversationRow) => `${listId}-${row.entry.sessionId}`;
   const list = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const flat = useMemo(
     () =>
       groups.flatMap((group) => [
@@ -152,13 +182,83 @@ export function ConversationList({
   const activeKey = activeRow?.entry.sessionId;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the active row is the trigger.
   useEffect(() => {
-    list.current
-      ?.querySelector("[data-active]")
-      ?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    const row = list.current?.querySelector<HTMLElement>("[data-active]");
+    const port = body.current;
+    // The sheet opens at its top, with the cards under way in view, and follows only the keys. It
+    // scrolls only its list: scrolling the row into view would move the sheet too.
+    if (sheet && !active) return;
+    if (!sheet || !row || !port) {
+      row?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      return;
+    }
+    const box = row.getBoundingClientRect();
+    const view = port.getBoundingClientRect();
+    if (box.top < view.top) port.scrollTop -= view.top - box.top;
+    else if (box.bottom > view.bottom) port.scrollTop += box.bottom - view.bottom;
   }, [activeKey]);
   const pick = (row: ConversationRow) => {
     if (reason && row.entry.sessionId !== current) return;
     onPick(row.entry.sessionId, row.entry.sessions);
+  };
+  const running = (row: ConversationRow) =>
+    row.active || !!row.entry.live || row.entry.sessions.includes(facts.live ?? "");
+  const organize = (row: ConversationRow, change: Organize) =>
+    organizeConversation(api, row.entry.sessionId, change).catch((failure) =>
+      announce(
+        "conversation",
+        failure instanceof ApiError && failure.status === 409
+          ? "This conversation can't be archived while its task is under way."
+          : "That change couldn't be saved. Try again.",
+        "assertive",
+      ),
+    );
+  // A row or card held, or its More: it grows into its preview, and the menu opens under that.
+  const [peek, setPeek] = useState<Peek | null>(null);
+  const peekCard = useRef<HTMLDivElement>(null);
+  const openPeek = (row: ConversationRow, from: HTMLElement) => {
+    setAction(null);
+    setPeek({ row, from });
+  };
+  const closeMenu = () => {
+    setAction(null);
+    setPeek(null);
+  };
+  // The cards, day headings, rows and the foot all glide to their new places together.
+  useFlip(
+    sheet ? body : NO_BODY,
+    [...live.map((row) => row.entry.sessionId), ...flat.map((item) => item.key)].join(" "),
+  );
+  const swipes = (row: ConversationRow) => {
+    const pinned = !!row.entry.pinned;
+    const pin: SwipeAction = {
+      label: pinned ? "Unpin" : "Pin",
+      icon: pinned ? "pin-off" : "pin",
+      onAction: () => void organize(row, { pinned: !pinned }),
+    };
+    const more: SwipeAction = {
+      label: "More",
+      icon: "more-horizontal",
+      onAction: () => {
+        const from = document.getElementById(optionId(row));
+        if (from) openPeek(row, from);
+      },
+    };
+    // Archiving or bringing back takes the row out of the list on show.
+    const file: SwipeAction =
+      view === "archived"
+        ? {
+            label: "Unarchive",
+            icon: "archive-restore",
+            leaves: true,
+            onAction: () => void organize(row, { archived: false }),
+          }
+        : {
+            label: "Archive",
+            icon: "archive",
+            leaves: true,
+            onAction: () => void organize(row, { archived: true }),
+          };
+    return { leading: pin, trailing: running(row) ? [more] : [file, more] };
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -186,11 +286,41 @@ export function ConversationList({
     }
   };
 
-  let body: ReactNode;
+  // The name being typed in place, in its row or its card. An empty name gives the conversation
+  // back its automatic one.
+  const renameField = (row: ConversationRow) =>
+    renaming && (
+      <TextField
+        size="sm"
+        className="conversations-rename"
+        aria-label={`New name for ${row.title}`}
+        placeholder="Automatic name"
+        maxLength={CONVERSATION_NAME_CHARS}
+        autoComplete="off"
+        enterKeyHint="done"
+        autoFocus
+        value={renaming.name}
+        onChange={(event) => setRenaming({ ...renaming, name: event.target.value })}
+        onBlur={() => void rename()}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void rename();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            setRenaming(null);
+          }
+        }}
+      />
+    );
+
+  let content: ReactNode;
   if (recent.loading)
-    body = <DotLoader className="conversations-loading" label="Loading your conversations" />;
+    content = <DotLoader className="conversations-loading" label="Loading your conversations" />;
   else if (recent.failed)
-    body = (
+    content = (
       <EmptyState
         title="Conversations couldn't load"
         icon="circle-alert"
@@ -202,21 +332,30 @@ export function ConversationList({
       />
     );
   else if (recent.entries.length === 0 && view === "archived")
-    body = <EmptyState title="Nothing archived" icon="archive" />;
+    content = <EmptyState title="Nothing archived" icon="archive" />;
   else if (recent.entries.length === 0)
-    body = (
+    content = (
       <EmptyState title="No conversations yet" icon="message-circle">
         Each conversation with dot is kept here.
       </EmptyState>
     );
-  else if (ordered.length === 0)
-    body = matches.pending ? (
+  else if (ordered.length === 0 && live.length === 0 && (found || tagged))
+    content = matches.pending ? (
       <DotLoader className="conversations-loading" label="Searching conversations" />
-    ) : (
+    ) : found ? (
       <EmptyState layout="start" icon="search" title={`No conversations match “${query.trim()}”`} />
+    ) : (
+      tagged && (
+        <EmptyState
+          layout="start"
+          icon="tag"
+          title={`No conversations have the ${TAG_NAMES[tagged].toLowerCase()} tag`}
+        />
+      )
     );
+  else if (ordered.length === 0) content = null;
   else
-    body = (
+    content = (
       <div
         ref={list}
         id={listId}
@@ -236,6 +375,7 @@ export function ConversationList({
                 key={item.key}
                 ref={windowed.measure}
                 data-index={index}
+                data-flip={sheet ? `day ${item.label}` : undefined}
                 role="presentation"
                 className="conversations-day"
               >
@@ -245,50 +385,11 @@ export function ConversationList({
           const id = row.entry.sessionId;
           const isCurrent = id === current;
           const match = marked.get(id);
-          return (
-            <div
-              key={id}
-              ref={windowed.measure}
-              data-index={index}
-              aria-rowindex={ordered.indexOf(row) + 1}
-              id={optionId(row)}
-              role="row"
-              aria-selected={row === activeRow}
-              aria-current={isCurrent || undefined}
-              aria-disabled={(!!reason && !isCurrent) || undefined}
-              className="conversations-row"
-              data-active={row === activeRow || undefined}
-              data-current={isCurrent || undefined}
-              onPointerMove={() => {
-                if (id !== activeKey) setActive(id);
-              }}
-            >
+          const cells = (
+            <>
               <div role="gridcell" className="conversations-main">
                 {renaming?.id === id ? (
-                  <TextField
-                    size="sm"
-                    className="conversations-rename"
-                    aria-label={`New name for ${row.title}`}
-                    placeholder="Automatic name"
-                    maxLength={CONVERSATION_NAME_CHARS}
-                    autoComplete="off"
-                    enterKeyHint="done"
-                    autoFocus
-                    value={renaming.name}
-                    onChange={(event) => setRenaming({ ...renaming, name: event.target.value })}
-                    onBlur={() => void rename()}
-                    onKeyDown={(event) => {
-                      if (event.nativeEvent.isComposing) return;
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void rename();
-                      } else if (event.key === "Escape") {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setRenaming(null);
-                      }
-                    }}
-                  />
+                  renameField(row)
                 ) : (
                   <Button
                     variant="quiet"
@@ -330,10 +431,48 @@ export function ConversationList({
                   {...triggerProps("menu", action?.entry.sessionId === id)}
                   onClick={(event) => {
                     actionAnchor.current = event.currentTarget;
+                    setPeek(null);
                     setAction(row);
                   }}
                 />
               </div>
+            </>
+          );
+          return (
+            <div
+              key={id}
+              ref={windowed.measure}
+              data-index={index}
+              data-flip={sheet ? id : undefined}
+              aria-rowindex={ordered.indexOf(row) + 1}
+              id={optionId(row)}
+              role="row"
+              aria-selected={row === activeRow}
+              aria-current={isCurrent || undefined}
+              aria-disabled={(!!reason && !isCurrent) || undefined}
+              className="conversations-row"
+              data-active={row === activeRow || undefined}
+              data-current={isCurrent || undefined}
+              data-menu={action?.entry.sessionId === id || undefined}
+              onPointerMove={(event) => {
+                // A finger moving over the rows is scrolling them, not choosing one.
+                if (id !== activeKey && event.pointerType === "mouse") setActive(id);
+              }}
+            >
+              {sheet && renaming?.id !== id ? (
+                <SwipeActions
+                  className="conversations-swipe"
+                  {...swipes(row)}
+                  onHold={() => {
+                    const from = document.getElementById(optionId(row));
+                    if (from) openPeek(row, from);
+                  }}
+                >
+                  {cells}
+                </SwipeActions>
+              ) : (
+                cells
+              )}
             </div>
           );
         })}
@@ -341,8 +480,33 @@ export function ConversationList({
       </div>
     );
 
+  const foot = (
+    <div
+      className="conversations-foot"
+      data-loading={recent.loading || undefined}
+      data-flip={sheet ? "foot" : undefined}
+    >
+      {view === "archived" ? (
+        <Button variant="quiet" size="sm" icon="chevron-left" onClick={() => setView("recent")}>
+          Recent conversations
+        </Button>
+      ) : (
+        <>
+          <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
+            See all in Replay
+          </Button>
+          {recent.archivedCount > 0 && (
+            <Button variant="quiet" size="sm" icon="archive" onClick={() => setView("archived")}>
+              Archived ({recent.archivedCount})
+            </Button>
+          )}
+        </>
+      )}
+    </div>
+  );
+
   return (
-    <div className="conversations">
+    <div className="conversations" data-layout={layout}>
       <TextField
         size="sm"
         className="conversations-search"
@@ -371,24 +535,67 @@ export function ConversationList({
           {renameError}
         </p>
       )}
-      <div className="conversations-body" aria-busy={recent.loading || matches.pending}>
-        {body}
+      {tags.length > 0 && (
+        <div className="conversations-tags" role="group" aria-label="Show only a colour tag">
+          {tags.map((each) => (
+            <Button
+              key={each}
+              variant="quiet"
+              size="sm"
+              className="conversations-tag"
+              aria-pressed={tagged === each}
+              onClick={() => setTag(tagged === each ? null : each)}
+            >
+              <TagDot tag={each} />
+              {TAG_NAMES[each]}
+            </Button>
+          ))}
+        </div>
+      )}
+      <div ref={body} className="conversations-body" aria-busy={recent.loading || matches.pending}>
+        {live.length > 0 && (
+          <LiveDeck
+            rows={live}
+            current={current}
+            now={now}
+            reason={reason}
+            menuFor={peek ? undefined : action?.entry.sessionId}
+            renaming={renaming?.id}
+            renameField={renameField}
+            onPick={pick}
+            onMenu={(row, trigger) => {
+              actionAnchor.current = trigger;
+              setPeek(null);
+              setAction(row);
+            }}
+            onPeek={openPeek}
+          />
+        )}
+        {content}
+        {sheet && foot}
       </div>
+      <ConversationPeek
+        peek={peek}
+        now={now}
+        cardRef={peekCard}
+        onPlaced={() => {
+          if (!peek) return;
+          actionAnchor.current = peekCard.current;
+          setAction(peek.row);
+        }}
+      />
       <ConversationMenu
         entry={action?.entry ?? null}
         anchor={actionAnchor}
-        onClose={() => setAction(null)}
-        align="end"
-        running={!!action && (action.active || action.entry.sessions.includes(facts.live ?? ""))}
+        onClose={closeMenu}
+        align={peek ? "start" : "end"}
+        running={!!action && running(action)}
         onRename={() => {
           if (action)
             setRenaming({ id: action.entry.sessionId, name: action.title, was: action.title });
         }}
         onOrganize={(change) => {
-          if (action)
-            organizeConversation(api, action.entry.sessionId, change).catch(() =>
-              announce("conversation", "That change couldn't be saved. Try again.", "assertive"),
-            );
+          if (action) void organize(action, change);
         }}
         onDelete={() => setDeleting(action)}
       >
@@ -409,27 +616,12 @@ export function ConversationList({
         onClose={() => setDeleting(null)}
         onDeleted={onDeleted}
       />
-      <div className="conversations-foot" data-loading={recent.loading || undefined}>
-        {view === "archived" ? (
-          <Button variant="quiet" size="sm" icon="chevron-left" onClick={() => setView("recent")}>
-            Recent conversations
-          </Button>
-        ) : (
-          <>
-            <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
-              See all in Replay
-            </Button>
-            {recent.archivedCount > 0 && (
-              <Button variant="quiet" size="sm" icon="archive" onClick={() => setView("archived")}>
-                Archived ({recent.archivedCount})
-              </Button>
-            )}
-          </>
-        )}
-      </div>
+      {!sheet && foot}
     </div>
   );
 }
+
+const NO_BODY = { current: null };
 
 // The rail header's way to the recent conversations: a popover from the button.
 export function ConversationsButton(props: Omit<ConversationListProps, "open">) {

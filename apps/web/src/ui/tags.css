@@ -1,27 +1,27 @@
 /* A conversation's colour tag (ConversationTag.tsx): a short bar at its row's leading edge, beside
    the status glyph and never over it, and the swatches that choose it in the row's menu. */
 @layer kit {
-  :is(.ui-tag-mark, .ui-tag-swatch)[data-tag="red"] {
+  :is(.ui-tag-mark, .ui-tag-swatch, .ui-tag-dot)[data-tag="red"] {
     --_tag: var(--color-tag-red);
   }
 
-  :is(.ui-tag-mark, .ui-tag-swatch)[data-tag="orange"] {
+  :is(.ui-tag-mark, .ui-tag-swatch, .ui-tag-dot)[data-tag="orange"] {
     --_tag: var(--color-tag-orange);
   }
 
-  :is(.ui-tag-mark, .ui-tag-swatch)[data-tag="yellow"] {
+  :is(.ui-tag-mark, .ui-tag-swatch, .ui-tag-dot)[data-tag="yellow"] {
     --_tag: var(--color-tag-yellow);
   }
 
-  :is(.ui-tag-mark, .ui-tag-swatch)[data-tag="green"] {
+  :is(.ui-tag-mark, .ui-tag-swatch, .ui-tag-dot)[data-tag="green"] {
     --_tag: var(--color-tag-green);
   }
 
-  :is(.ui-tag-mark, .ui-tag-swatch)[data-tag="blue"] {
+  :is(.ui-tag-mark, .ui-tag-swatch, .ui-tag-dot)[data-tag="blue"] {
     --_tag: var(--color-tag-blue);
   }
 
-  :is(.ui-tag-mark, .ui-tag-swatch)[data-tag="purple"] {
+  :is(.ui-tag-mark, .ui-tag-swatch, .ui-tag-dot)[data-tag="purple"] {
     --_tag: var(--color-tag-purple);
   }
 
@@ -36,6 +36,15 @@
     background-color: var(--_tag);
     translate: 0 -50%;
     pointer-events: none;
+  }
+
+  /* A tag's colour beside its name, as the phone's filter shows it. */
+  .ui-tag-dot {
+    flex: none;
+    width: calc(var(--spacing) * 2.5);
+    height: calc(var(--spacing) * 2.5);
+    border-radius: var(--radius-full);
+    background-color: var(--_tag);
   }
 
   .ui-tag-swatches {
@@ -109,6 +118,7 @@
 
   @media (forced-colors: active) {
     .ui-tag-mark,
+    .ui-tag-dot,
     .ui-tag-swatch::before {
       forced-color-adjust: none;
     }

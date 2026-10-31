@@ -73,7 +73,7 @@ export interface SessionRailProps {
 }
 
 // "Plan the trip, blue tag, working, on screen, 2 min": what a screen reader calls a row.
-function rowName(row: ConversationRow, now: Date): string {
+export function conversationLabel(row: ConversationRow, now: Date): string {
   const parts = [row.title];
   if (row.entry.tag) parts.push(`${TAG_NAMES[row.entry.tag].toLowerCase()} tag`);
   parts.push(STATUS_LABEL[row.status].toLowerCase());
@@ -616,7 +616,7 @@ function RailRow({
   onRenamed,
 }: RailRowProps) {
   const activityId = useId();
-  const name = rowName(row, now);
+  const name = conversationLabel(row, now);
   const second = match?.snippet ?? row.activity;
   const { triggerProps: tip, tooltip } = useTooltip({
     content: expanded || named || blocked ? undefined : row.title,

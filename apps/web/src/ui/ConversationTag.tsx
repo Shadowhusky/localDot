@@ -19,6 +19,11 @@ export function TagMark({ tag }: { tag?: ConversationTag | undefined }) {
   return tag ? <span className="ui-tag-mark" data-tag={tag} aria-hidden="true" /> : null;
 }
 
+// A tag's colour as a dot beside its name. The name says the tag; this only shows it.
+export function TagDot({ tag }: { tag: ConversationTag }) {
+  return <span className="ui-tag-dot" data-tag={tag} aria-hidden="true" />;
+}
+
 const ITEMS = "[role=menuitem], [role=menuitemradio]";
 
 // The tags as one row of swatches in a menu, as Finder's: none first, the chosen one ringed. Left and

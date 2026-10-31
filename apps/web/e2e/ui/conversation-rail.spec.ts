@@ -227,15 +227,17 @@ test("a phone opens its conversations from the corner, those under way first", a
   await expect(rail(page)).toHaveCount(0);
   await page.getByRole("button", { name: "Conversations", exact: true }).click();
   const sheet = page.getByRole("dialog", { name: "Conversations" });
-  const list = sheet.getByRole("grid", { name: "Recent conversations" });
-  await expect(list.getByRole("row").first()).toContainText("Compare flights");
-  await expect(list.locator(".conversations-day").first()).toHaveText("Active");
+  // Those under way are cards above the rest, the one waiting on the user first.
+  const deck = sheet.getByRole("region", { name: /^Under way/ });
   expect(
-    await list
-      .getByRole("img")
-      .evaluateAll((glyphs) => glyphs.slice(0, 4).map((glyph) => glyph.getAttribute("aria-label"))),
-  ).toEqual(["Working", "Needs you", "Waiting for the computer", "Paused"]);
-  await expect(list.getByText("Comparing the 9:40 and 11:15 fares")).toBeVisible();
+    await deck
+      .getByRole("button", { name: /, 2 min$/ })
+      .evaluateAll((cards) => cards.map((card) => card.ariaLabel?.split(",").at(-2)?.trim())),
+  ).toEqual(["needs you", "on screen", "waiting for the computer", "paused"]);
+  await expect(deck.getByText("Comparing the 9:40 and 11:15 fares")).toBeVisible();
+  const list = sheet.getByRole("grid", { name: "Recent conversations" });
+  await expect(list.locator(".conversations-day").first()).toHaveText("Today");
+  await expect(list.getByRole("row")).toHaveCount(3);
 });
 
 // The rail beside the stage at a laptop's width, a small laptop's and a phone's, in both

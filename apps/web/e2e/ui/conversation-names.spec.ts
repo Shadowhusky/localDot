@@ -77,17 +77,21 @@ test("Auto picks the dot and dot names the conversation; the user changes both",
   );
 
   const list = await conversations(page);
-  const row = list.getByRole("row").filter({ hasText: TITLE });
+  // On a phone the conversation under way is a card above the list, and is renamed in it.
+  const named = isPhone(page)
+    ? page.getByRole("region", { name: /^Under way/ }).getByRole("listitem")
+    : list.getByRole("row");
+  const row = named.filter({ hasText: TITLE });
   await expect(row).toHaveCount(1);
   await row.getByRole("button", { name: `Actions for ${TITLE}` }).click();
   await page.getByRole("menuitem", { name: "Rename" }).click();
-  const field = list.getByRole("textbox", { name: `New name for ${TITLE}` });
+  const field = page.getByRole("textbox", { name: `New name for ${TITLE}` });
   await expect(field).toBeFocused();
   await expect(page.getByRole("menu", { name: "Conversation actions" })).toBeHidden();
   await field.fill(RENAMED);
   await shot(page, ui, "conversations-rename");
   await field.press("Enter");
-  await expect(list.getByRole("row").filter({ hasText: RENAMED })).toHaveCount(1);
+  await expect(named.filter({ hasText: RENAMED })).toHaveCount(1);
   await shot(page, ui, "conversations-renamed");
   if (!isPhone(page)) await expect(page.locator(".bar-title")).toHaveText(RENAMED);
 

@@ -152,6 +152,7 @@ import { ChatThread, type NewConversation, NewConversationButton } from "./shell
 import { ChatToggle } from "./shell/ChatToggle.tsx";
 import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
 import { ConversationList, ConversationsButton } from "./shell/ConversationList.tsx";
+import { ConversationsBubble } from "./shell/ConversationsBubble.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
 import { ApprovalDecision, DecisionSheetPresence } from "./shell/DecisionIsland.tsx";
@@ -240,7 +241,7 @@ const LIBRARY = "library";
 const replayAddress = (selected: string | null) =>
   selected && (selected === LIBRARY || ULID_PATTERN.test(selected)) ? selected : null;
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
-const LIST_DETENTS = ["large"] as const;
+const LIST_DETENTS = ["medium", "large"] as const;
 // A chosen conversation that never comes on show once the daemon has taken the choice (another
 // task holds the computer) stops waiting.
 const SWITCH_MAX_MS = 3000;
@@ -2178,14 +2179,12 @@ function Theatre({ api }: { api: ApiClient }) {
                     )}
                     {phone && (
                       <span className="island-conversations">
-                        <IconButton
-                          icon="message-circle"
-                          size={32}
-                          variant="filled"
-                          round
-                          label="Conversations"
+                        <ConversationsBubble
+                          api={api}
+                          facts={liveFacts}
+                          current={conversationList.current}
                           attention={[...needsYou].some((id) => id !== currentTask)}
-                          onClick={() => setConversationsOpen(true)}
+                          onOpen={() => setConversationsOpen(true)}
                         />
                       </span>
                     )}
@@ -3017,10 +3016,12 @@ function Theatre({ api }: { api: ApiClient }) {
             title="Conversations"
             doneLabel="Done"
             detents={LIST_DETENTS}
+            flush
             className="conversations-sheet"
           >
             <ConversationList
               {...conversationList}
+              layout="sheet"
               open={conversationsOpen}
               onPick={(id, sessions) => {
                 setConversationsOpen(false);

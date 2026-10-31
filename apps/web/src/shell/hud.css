@@ -7,7 +7,7 @@
    cover a field dot will fill drops under it (--_lower). */
 .island-anchor {
   position: absolute;
-  top: calc(var(--_lower, 0px) - var(--island-h) - var(--island-gap));
+  top: calc(var(--_lower, 0px) - var(--island-h) - var(--_island-gap));
   left: 50%;
   z-index: var(--layer-island);
   width: 0;
@@ -348,7 +348,7 @@
 
 .island-new {
   position: absolute;
-  top: calc(var(--_lower, 0px) - var(--island-h) - var(--island-gap));
+  top: calc(var(--_lower, 0px) - var(--island-h) - var(--_island-gap));
   right: 0;
   z-index: var(--layer-island);
   display: flex;
@@ -361,7 +361,7 @@
 /* A phone's conversations, level with New conversation in the other corner. */
 .island-conversations {
   position: absolute;
-  top: calc(var(--_lower, 0px) - var(--island-h) - var(--island-gap));
+  top: calc(var(--_lower, 0px) - var(--island-h) - var(--_island-gap));
   left: 0;
   z-index: var(--layer-island);
   display: flex;
@@ -375,7 +375,30 @@
    margin instead. It fades after a still moment and comes back at a touch, or at once when dot needs
    the user. */
 .app[data-focus] .island-anchor {
+  /* The pill keeps to the strip between the buttons in its corners, a clear gap from each, and
+     shortens its label rather than run under them. Only the pill and its notes take a touch. */
+  --_beside: calc(var(--island-h) + var(--spacing) * 3);
+  left: var(--_beside);
+  right: var(--_beside);
+  width: auto;
+  pointer-events: none;
   transition: opacity var(--dur-default) var(--ease-standard);
+}
+
+.app[data-focus] .island-anchor > * {
+  pointer-events: auto;
+}
+
+.app[data-focus] .island {
+  right: 0;
+  width: max-content;
+  max-width: 100%;
+  margin-inline: auto;
+  translate: none;
+}
+
+.app[data-focus] .island-notices {
+  left: 50%;
 }
 
 .app[data-still] .island-anchor {
@@ -383,6 +406,7 @@
 }
 
 .app[data-focus] .island-row {
+  max-width: 100%;
   padding-inline: calc(var(--spacing) * 3);
 }
 
