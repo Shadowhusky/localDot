@@ -29,6 +29,9 @@ vi.mock("../desktopd/tools-client.ts", () => ({
     async close() {
       this.closed = true;
     }
+    async retire() {
+      this.closed = true;
+    }
     async putFile(
       path: string,
       source: ReadableStream<Uint8Array>,

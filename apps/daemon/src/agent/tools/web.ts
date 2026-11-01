@@ -70,11 +70,15 @@ export async function webSearchTool(
   ctx.check();
   ctx.session.tainted = true;
   if (!outcome.hits.length) {
+    const none = kind === "images" ? "No relevant images found." : "No results.";
     append(ctx, "tool.end", { ok: false });
-    append(ctx, "step.end", { status: "failed", note: "No search engine gave results." });
+    append(ctx, "step.end", {
+      status: "failed",
+      note: kind === "images" ? none : "No search engine gave results.",
+    });
     return fail(
       ctx.redact(
-        `No results. ${outcome.problems.join("; ")}. Try other words, or search in the web browser with browser_navigate.`,
+        `${none} ${outcome.problems.join("; ")}. Try other words, or search in the web browser with browser_navigate.`,
       ),
     );
   }

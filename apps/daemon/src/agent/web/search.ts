@@ -8,6 +8,7 @@ import { type WebAccess, WebError } from "./cell.ts";
 import { ENGINES, type Engine, SearchBlocked, type SearchHit, thumbnailUrl } from "./engines.ts";
 import { decodeText } from "./html.ts";
 import { toJpeg } from "./picture.ts";
+import { relevantTo } from "./relevance.ts";
 
 const PAGE_BYTES = 3 * 1024 * 1024;
 const PICTURE_BYTES = 4 * 1024 * 1024;
@@ -40,6 +41,7 @@ async function ask(
   web: WebAccess,
   engine: Engine,
   query: string,
+  keep: (hit: SearchHit) => boolean,
   signal: AbortSignal,
 ): Promise<SearchHit[]> {
   const reply = await web.get(engine.address(query), {
@@ -50,7 +52,9 @@ async function ask(
   if (reply.status !== 200) throw new NoResults(`answered ${reply.status}`);
   const found = engine.read(decodeText(reply.body, reply.contentType));
   if (!found.length) throw new NoResults("found nothing");
-  return found;
+  const kept = found.filter(keep);
+  if (!kept.length) throw new NoResults("found only unrelated results");
+  return kept;
 }
 
 // Results from the first engine that answers, filled in from the next while there are too few;
@@ -66,11 +70,13 @@ export async function webSearch(
   const hits: SearchHit[] = [];
   const seen = new Set<string>();
   const problems: string[] = [];
+  // An image engine that can't match a query may fill its page with pictures it shows anyone.
+  const keep = kind === "images" ? relevantTo(input.query) : () => true;
   for (const engine of engines[kind]) {
     if (hits.length >= want) break;
     let found: SearchHit[];
     try {
-      found = await ask(web, engine, input.query, signal);
+      found = await ask(web, engine, input.query, keep, signal);
     } catch (error) {
       signal.throwIfAborted();
       problems.push(`${engine.host} ${why(error)}`);
