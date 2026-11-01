@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "2a8b6fc964a5513a04b69e2d435b8f4ff50205f00dc42c5c1561a3745cdcb2b5",
+  "inputSha256": "3de46720a24c8e645665c7dd179b0d09641bc977f51c0b43fa27f7e1f268c297",
   "inputs": {
     ".github/workflows/ci.yml": "444e8dbee1509f8dbf417e7d9a2d0568309760d85dc75d2909355f1dd3f6cffd",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -1140,7 +1140,7 @@
     "scripts/check-codex-release.test.mjs": "5059f6f5cfec1e1a7c05c9990399059ad87db1a8ae8c21dc98d93869a5cef5ac",
     "vitest.codex-signin.config.ts": "bfd0b18169a8c3ec68c6fb8010492c9e74a2e2d04853c8f49f628dd964568606",
     "vitest.codex.config.ts": "f71b4a2d58b66941f3a310f61aee317977af404468d5b57dbf782ac28624c134",
-    "vitest.config.ts": "c49b2c68bc985ccce5a9ce88e4be0d3a2653615a6702ce9a16a436de3c8fd182"
+    "vitest.config.ts": "bb4b3811574845d5d6d7ddfa2f4b636c14ffaf90876868a42cd5c111cfd2dff6"
   },
   "generatedSchema": {
     "codexVersion": "0.154.0",
@@ -1194,7 +1194,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "69892ae20f33d5a8dc08932adcc9983b7cdd40ad1783f0e4a21ee62f602952b8",
+  "reportSha256": "9a9f6f298f18a8ebe5b0c2c44722ae473af543090a5e90d0bbeb34056b43be32",
   "exit": {
     "code": 0,
     "signal": null
