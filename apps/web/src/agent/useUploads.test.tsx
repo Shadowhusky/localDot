@@ -71,7 +71,7 @@ describe("user-owned resumable attachment queue", () => {
     await act(async () => pending.resolve("~/Downloads/large.zip"));
     expect(f.result.current.rows[0]?.phase).toBe("complete");
   });
-  it("resumes the same File and upload ID after offline or page suspension", async () => {
+  it("resumes the same File and upload ID after page suspension", async () => {
     const late = Promise.withResolvers<string>();
     transfer.uploadFile.mockReturnValueOnce(late.promise).mockResolvedValue("~/Downloads/data.zip");
     const f = setup(),
@@ -87,6 +87,34 @@ describe("user-owned resumable attachment queue", () => {
     expect(f.result.current.rows[0]?.phase).toBe("complete");
     await act(async () => late.resolve("~/wrong-late-reply"));
     expect(f.result.current.rows[0]?.path).toBe("~/Downloads/data.zip");
+  });
+  it("uploads while the browser guesses it is offline, and an offline event pauses nothing", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const late = Promise.withResolvers<string>();
+    transfer.uploadFile.mockReturnValue(late.promise);
+    const f = setup();
+    act(() => f.result.current.select([file("data.zip")]));
+    expect(f.result.current.problem).toBeNull();
+    const signal = transfer.uploadFile.mock.calls[0]?.[3] as AbortSignal;
+    act(() => window.dispatchEvent(new Event("offline")));
+    expect(signal.aborted).toBe(false);
+    expect(f.result.current.rows[0]?.phase).toBe("uploading");
+    await act(async () => late.resolve("~/Downloads/data.zip"));
+    expect(f.result.current.rows[0]?.phase).toBe("complete");
+  });
+  it("with the offline guess, a lost upload is uncertain and the online event retries it", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    transfer.uploadFile
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue("~/Downloads/a.zip");
+    const f = setup();
+    act(() => f.result.current.select([file("a.zip")]));
+    await waitFor(() => expect(f.result.current.rows[0]?.phase).toBe("uncertain"));
+    await act(async () => window.dispatchEvent(new Event("online")));
+    await waitFor(() => expect(f.result.current.rows[0]?.phase).toBe("complete"));
+    expect(transfer.uploadFile.mock.calls[1]?.[4].id).toBe(
+      transfer.uploadFile.mock.calls[0]?.[4].id,
+    );
   });
   it("keeps the source for explicit Retry after interrupted network attempts", async () => {
     transfer.uploadFile

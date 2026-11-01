@@ -871,3 +871,74 @@ it("takes the computer with no task live through the computer's own route, then 
   f.update({ cell: { ...ready, id: COMPUTER, paused: true } });
   expect(f.result.current.canTakeComputer).toBe(false);
 });
+
+// The browser's online flag guesses at internet access; localDot is often on localhost or a tailnet.
+it("answers, takes, resumes and stops while the browser guesses it is offline", async () => {
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  const late = Promise.withResolvers<Response>();
+  const fetchImpl = vi.fn<typeof fetch>(async (url) =>
+    String(url).endsWith("/stop")
+      ? Response.json(
+          { revoked: true, paused: true, closed: false, stopped: false, errors: [] },
+          { status: 202 },
+        )
+      : String(url).endsWith("/resume")
+        ? late.promise
+        : String(url).endsWith("/takeover")
+          ? new Response(JSON.stringify({ requestId: ID }), { status: 202 })
+          : new Response(null, { status: 204 }),
+  );
+  const f = fixture(fetchImpl);
+  expect(f.result.current.canAnswer).toBe(true);
+  expect(f.result.current.canTakeComputer).toBe(true);
+  await act(async () => {
+    expect(await f.result.current.answer({ askId: ID, option: "A" })).toBe(true);
+  });
+  expect(f.result.current.status?.phase).toBe("checking");
+  const g = fixture(fetchImpl);
+  g.update({ agent: { ...g.props.agent, snapshot: { ...snapshotOf(g), status: "running" } } });
+  expect(g.result.current.canTake).toBe(true);
+  await act(async () => {
+    expect(await g.result.current.take()).toBe(true);
+  });
+  const h = fixture(fetchImpl);
+  pauseFixture(h, true);
+  expect(h.result.current.canResumeTask).toBe(true);
+  let resuming: Promise<boolean> | undefined;
+  act(() => {
+    resuming = h.result.current.resume();
+  });
+  const signal = fetchImpl.mock.calls.at(-1)?.[1]?.signal;
+  act(() => window.dispatchEvent(new Event("offline")));
+  expect(signal?.aborted, "an offline event does not cancel a request in flight").toBe(false);
+  await act(async () => {
+    late.resolve(new Response(null, { status: 204 }));
+    expect(await resuming).toBe(true);
+  });
+  expect(h.result.current.status?.phase).toBe("checking");
+  await act(async () => {
+    await h.result.current.stop();
+  });
+  expect(h.result.current.stopStatus.phase).toBe("paused");
+});
+it("with the offline guess, a lost reply is still uncertain and a lost feed still blocks", async () => {
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  const fetchImpl = vi.fn<typeof fetch>(async () => {
+    throw new TypeError("Failed to fetch");
+  });
+  const f = fixture(fetchImpl);
+  await act(async () => {
+    expect(await f.result.current.answer({ askId: ID, option: "A" })).toBe(false);
+  });
+  expect(f.result.current.status?.phase).toBe("uncertain");
+  expect(f.result.current.canAnswer).toBe(false);
+  await act(async () => {
+    await f.result.current.stop();
+  });
+  expect(f.result.current.stopStatus.phase).toBe("unconfirmed");
+  const g = fixture(fetchImpl);
+  act(() => g.invalidate({ connection: "lost" }));
+  g.update({ agent: { ...g.props.agent } });
+  expect(g.result.current.canAnswer).toBe(false);
+  expect(g.result.current.canTake).toBe(false);
+});

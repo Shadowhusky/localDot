@@ -1106,3 +1106,99 @@ it("keeps the actual replacement refusal visible through missing status polls", 
   expect(f.result.current.error).not.toContain("private details");
   expect(f.result.current.error).not.toContain("Try Replace computer again");
 });
+// The browser's online flag guesses at internet access; the live feed is what proves localDot answers.
+it("decides and pauses while the browser guesses it is offline, and an offline event cancels nothing", async () => {
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  const late = Promise.withResolvers<Response>(),
+    fetchImpl = vi.fn<typeof fetch>(async () => late.promise),
+    f = fixture(fetchImpl);
+  expect(f.result.current.canApprove).toBe(true);
+  let work: Promise<boolean> | undefined;
+  act(() => {
+    work = f.result.current.answerApproval({
+      approvalId: ID,
+      generation: 1,
+      revision: 1,
+      decision: "approve",
+    });
+  });
+  const signal = fetchImpl.mock.calls[0]?.[1]?.signal;
+  act(() => window.dispatchEvent(new Event("offline")));
+  expect(signal?.aborted).toBe(false);
+  await act(async () => {
+    late.resolve(new Response(null, { status: 204 }));
+    expect(await work).toBe(true);
+  });
+  expect(f.result.current.pending).toBe("approval");
+  expect(f.result.current.error).toBeNull();
+  const free = fixture(
+    vi.fn<typeof fetch>(async (_url, init) => {
+      const { requestId } = JSON.parse(String(init?.body));
+      return Response.json(
+        {
+          requestId,
+          revision: 1,
+          phase: "pausing",
+          reason: "user",
+          atStepBoundary: false,
+          resumeAvailable: false,
+        },
+        { status: 202 },
+      );
+    }),
+    null,
+  );
+  expect(free.result.current.canPause).toBe(true);
+  await act(async () => {
+    expect(await free.result.current.requestPause()).toBe(true);
+  });
+});
+it("with the offline guess, a lost decision reply stays unconfirmed and a lost feed still blocks", async () => {
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  const fetchImpl = vi.fn<typeof fetch>(async () => {
+      throw new TypeError("Failed to fetch");
+    }),
+    f = fixture(fetchImpl);
+  await act(async () => {
+    expect(
+      await f.result.current.answerApproval({
+        approvalId: ID,
+        generation: 1,
+        revision: 1,
+        decision: "approve",
+      }),
+    ).toBe(false);
+  });
+  expect(f.result.current.error).toMatch(/unconfirmed/);
+  expect(f.result.current.canApprove).toBe(false);
+  const g = fixture(fetchImpl);
+  act(() => g.invalidate({ connection: "lost" }));
+  g.update({ agent: { ...g.props.agent } });
+  expect(g.result.current.canApprove).toBe(false);
+});
+it("replaces a computer while the browser guesses it is offline; a lost reply keeps the same request", async () => {
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  const requests: string[] = [];
+  const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+    if (String(url).endsWith("/fence")) return Response.json({ revision: 4 });
+    if (init?.method === "POST") {
+      requests.push(JSON.parse(String(init.body)).requestId);
+      throw new TypeError("Failed to fetch");
+    }
+    throw new TypeError("Failed to fetch");
+  });
+  const f = fixture(fetchImpl, null);
+  f.update({ cell: { ...f.props.cell!, fenced: { revision: 4 } } });
+  expect(f.result.current.canReplace).toBe(true);
+  await act(async () => {
+    expect(await f.result.current.replace()).toBe(false);
+  });
+  expect(requests).toHaveLength(1);
+  expect(f.result.current.error).toMatch(/unconfirmed|retry the same request/);
+  expect(f.result.current.canReplace).toBe(true);
+  await act(async () => {
+    await f.result.current.replace();
+  });
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toBe(requests[0]);
+});

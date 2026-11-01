@@ -471,8 +471,10 @@ describe("owned explicit ChatGPT setup", () => {
     expect(v.current().canStart).toBe(false);
     expect(v.current().summary?.available).toBe(false);
   });
-  it("polls only a visible ongoing sign-in and clears material on offline/hide", async () => {
+  it("polls only a visible ongoing sign-in and clears material when the page hides", async () => {
     vi.useFakeTimers();
+    let hidden = false;
+    vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
     vi.setSystemTime(new Date("2026-10-04T02:00:00Z"));
     const f = fixture(),
       v = view(f);
@@ -487,7 +489,8 @@ describe("owned explicit ChatGPT setup", () => {
     expect(f.state.calls.length).toBe(before + 1);
     const code = screen.getByLabelText<HTMLInputElement>("Sign-in code");
     act(() => {
-      window.dispatchEvent(new Event("offline"));
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
     });
     expect(code.value).toBe("");
     expect(v.current().canStart).toBe(false);
@@ -502,6 +505,50 @@ describe("owned explicit ChatGPT setup", () => {
     });
     expect(f.state.calls).toHaveLength(stopped);
     expect(posts(f, "/login/cancel")).toHaveLength(0);
+  });
+  // The browser's online flag guesses at internet access; the daemon, not the browser, signs in.
+  it("signs in and keeps polling while the browser guesses it is offline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-04T02:00:00Z"));
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const f = fixture(),
+      v = view(f);
+    await act(async () => {});
+    expect(v.current().blocked).toBe(false);
+    expect(v.current().verified).toBe(true);
+    await act(async () => {
+      await v.current().login();
+    });
+    const code = screen.getByLabelText<HTMLInputElement>("Sign-in code");
+    expect(code.value).toBe("TEST-CODE-A");
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+    expect(code.value).toBe("TEST-CODE-A");
+    expect(v.current().blocked).toBe(false);
+    expect(document.body.textContent).not.toMatch(/offline/i);
+    const before = f.state.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(f.state.calls.length).toBe(before + 1);
+  });
+  it("with the offline guess, a failed account read is unverified with an honest error", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const f = fixture(signedIn());
+    f.state.read = async () => {
+      throw new TypeError("Failed to fetch");
+    };
+    const v = view(f);
+    await waitFor(() => expect(v.current().error).not.toBeNull());
+    expect(v.current().verified).toBe(false);
+    expect(v.current().canStart).toBe(false);
+    f.state.read = undefined;
+    await act(async () => {
+      await v.current().check();
+    });
+    expect(v.current().verified).toBe(true);
+    expect(v.current().canStart).toBe(true);
   });
   it("ends the transient login panel at ten minutes without assuming daemon cancellation", async () => {
     vi.useFakeTimers();

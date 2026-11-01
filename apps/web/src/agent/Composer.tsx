@@ -162,8 +162,9 @@ function computerReason(props: ComposerProps): string | undefined {
   return undefined;
 }
 // Why nothing can be sent now, as Send says it.
-function blockedReason(props: ComposerProps, online: boolean, mode: MessageMode) {
-  if (!online) return "You're offline.";
+// The browser's own online flag isn't asked: it guesses about the internet, while localDot is often
+// on this computer or the tailnet, and a send that can't reach it keeps the message anyway.
+function blockedReason(props: ComposerProps, mode: MessageMode) {
   return (
     computerReason(props) ??
     (mode !== "new" && !props.agent.fresh ? "Reconnecting to the task…" : undefined)
@@ -315,7 +316,6 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   revisingNow.current = revising;
   const shownRevising = useRef(revising);
   if (revising) shownRevising.current = revising;
-  const [online, setOnline] = useState(() => navigator.onLine);
   const [text, setText] = useState<TextShape>({ blank: true, length: 0 });
   const shown = useRef(text);
   const problemShown = useRef(problem);
@@ -408,13 +408,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   useEffect(() => () => window.clearTimeout(suggestion.current), []);
   useEffect(() => {
     mounted.current = true;
-    const changed = () => setOnline(navigator.onLine);
-    window.addEventListener("online", changed);
-    window.addEventListener("offline", changed);
     return () => {
       mounted.current = false;
-      window.removeEventListener("online", changed);
-      window.removeEventListener("offline", changed);
     };
   }, []);
   // "/" anywhere outside a field starts a message, as long as the composer is in view.
@@ -440,8 +435,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   }, []);
 
   const mode = modeFor(props, "followup");
-  const permitted =
-    readyCell(props) && online && !props.keysOpen && (mode === "new" || props.agent.fresh);
+  const permitted = readyCell(props) && !props.keysOpen && (mode === "new" || props.agent.fresh);
   const uncertain = delivery?.phase === "uncertain";
   const sending = delivery?.phase === "sending";
   const takeover = !!props.agent.model.pendingTakeover;
@@ -857,13 +851,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       now.onSettings?.(input);
       return;
     }
-    if (
-      !readyCell(now) ||
-      !navigator.onLine ||
-      now.keysOpen ||
-      (chosen !== "new" && !now.agent.fresh)
-    ) {
-      const why = blockedReason(now, navigator.onLine, chosen);
+    if (!readyCell(now) || now.keysOpen || (chosen !== "new" && !now.agent.fresh)) {
+      const why = blockedReason(now, chosen);
       setProblem(
         why
           ? `${why} Your message stays here.`
@@ -983,7 +972,6 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       pending.current?.phase !== "uncertain" ||
       pending.current.id !== previous.id ||
       !readyCell(now) ||
-      !navigator.onLine ||
       now.keysOpen ||
       now.cell?.id !== previous.request.cellId ||
       now.agent.sessionId !== previous.request.sessionId ||
@@ -1118,7 +1106,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   const connect = mode === "new" && props.configured === false;
   const near = text.length > NEAR && text.length <= LIMIT;
   const unavailable = props.keysOpen || props.controlBlocked;
-  const reason = blockedReason(props, online, mode);
+  const reason = blockedReason(props, mode);
   const sendReason = voiceSubmitting
     ? "Sending after transcription…"
     : sending

@@ -121,7 +121,6 @@ export function useTaskControls(props: Props) {
     !fence.current &&
     !now.suspended &&
     !document.hidden &&
-    navigator.onLine &&
     now.cellPending === null &&
     now.cell?.state === "ready" &&
     !now.cell.paused &&
@@ -135,7 +134,6 @@ export function useTaskControls(props: Props) {
       const feed = current.current.feed.read();
       if (
         document.hidden ||
-        !navigator.onLine ||
         current.current.suspended ||
         feed.model.pendingTakeover ||
         feed.model.pendingAsk ||
@@ -149,13 +147,11 @@ export function useTaskControls(props: Props) {
         record.abort.abort();
     };
     const unsubscribe = props.feed.subscribe(check);
-    window.addEventListener("offline", check);
     document.addEventListener("visibilitychange", check);
     return () => {
       mounted.current = false;
       operation.current?.abort.abort();
       unsubscribe();
-      window.removeEventListener("offline", check);
       document.removeEventListener("visibilitychange", check);
     };
   }, [props.feed]);
@@ -321,7 +317,6 @@ export function useTaskControls(props: Props) {
     !operation.current &&
     !now.suspended &&
     !document.hidden &&
-    navigator.onLine &&
     now.cellPending === null &&
     now.cell?.state === "ready" &&
     !now.cell.paused &&
