@@ -32,6 +32,9 @@ vi.mock("../desktopd/tools-client.ts", () => ({
     async close() {
       this.closed = true;
     }
+    async retire() {
+      this.closed = true;
+    }
     async prepareBrowser(taskId: string, signal?: AbortSignal) {
       signal?.throwIfAborted();
       await mocks.prepare(taskId, signal);

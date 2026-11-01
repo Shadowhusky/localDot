@@ -106,7 +106,11 @@ describe("web search", () => {
       "ts3.mm.bing.net": { body: png, contentType: "image/png" },
       "ts4.mm.bing.net": new TypeError("fetch failed"),
     });
-    const out = await webSearch(web, { query: "Zelda", kind: "images", count: 10 }, signal);
+    const out = await webSearch(
+      web,
+      { query: "Zelda Breath of the Wild", kind: "images", count: 10 },
+      signal,
+    );
     expect(out.hits).toHaveLength(10);
     expect(out.pictures.length).toBeGreaterThan(0);
     expect(out.pictures.length).toBeLessThanOrEqual(4);
@@ -121,6 +125,47 @@ describe("web search", () => {
     expect(hosts.length).toBeLessThanOrEqual(6);
   });
 
+  it("passes over a page of pictures unrelated to the query, saying so, and shows none", async () => {
+    const query = "antique English brass chest lock escutcheon ornate engraved";
+    const { web, asked } = fakeWeb({
+      "www.bing.com": page("bing-images-unrelated.html"),
+      "commons.wikimedia.org": page("commons-images.json", "application/json"),
+      "ts1.mm.bing.net": { body: png, contentType: "image/png" },
+    });
+    const out = await webSearch(web, { query, kind: "images" }, signal);
+    expect(out).toEqual({
+      hits: [],
+      pictures: [],
+      problems: [
+        "www.bing.com found only unrelated results",
+        "commons.wikimedia.org found only unrelated results",
+      ],
+    });
+    expect(asked.map((a) => new URL(a.url).hostname)).toEqual([
+      "www.bing.com",
+      "commons.wikimedia.org",
+    ]);
+  });
+
+  it("shows the results Bing found for the query, and only those", async () => {
+    const query = "antique English brass chest lock escutcheon ornate engraved";
+    const { web, asked } = fakeWeb({
+      "www.bing.com": page("bing-images-escutcheon.html"),
+      "ts1.mm.bing.net": { body: png, contentType: "image/png" },
+      "ts2.mm.bing.net": { body: png, contentType: "image/png" },
+      "ts3.mm.bing.net": { body: png, contentType: "image/png" },
+      "ts4.mm.bing.net": { body: png, contentType: "image/png" },
+    });
+    const out = await webSearch(web, { query, kind: "images", count: 8 }, signal);
+    expect(asked[0]?.url).toBe(
+      "https://www.bing.com/images/search?q=antique+English+brass+chest+lock+escutcheon+ornate+engraved&form=HDRSC2",
+    );
+    expect(out.hits).toHaveLength(8);
+    for (const hit of out.hits) expect(hit.title).toMatch(/escutcheon|lock|brass|chest/i);
+    expect(out.pictures).toHaveLength(4);
+    expect(out.problems).toEqual([]);
+  });
+
   it("asks only for WebP, PNG and JPEG thumbnails, and shows no SVG, TIFF or HEIF served as one", async () => {
     const { web, asked } = fakeWeb({
       "www.bing.com": page("bing-images.html"),
@@ -129,7 +174,11 @@ describe("web search", () => {
       "ts3.mm.bing.net": { body: heif, contentType: "image/avif" },
       "ts4.mm.bing.net": { body: png, contentType: "image/png" },
     });
-    const out = await webSearch(web, { query: "Zelda", kind: "images", count: 10 }, signal);
+    const out = await webSearch(
+      web,
+      { query: "Zelda Breath of the Wild", kind: "images", count: 10 },
+      signal,
+    );
     const thumbnails = asked.slice(1);
     expect(thumbnails.length).toBeGreaterThan(0);
     for (const { options } of thumbnails)

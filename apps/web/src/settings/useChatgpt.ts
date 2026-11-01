@@ -26,7 +26,7 @@ type Action =
 type Command = { action: Action; abort: AbortController; epoch: number };
 const LOGIN_MS = 10 * 60 * 1000;
 const INSTALL_MS = 15 * 60 * 1000;
-const away = () => document.hidden || navigator.onLine === false;
+const away = () => document.hidden;
 // Installed, with this Mac's safety check still to finish: the daemon runs it by itself.
 const preparing = (status: Pick<ChatgptSummary, "available" | "install" | "sandbox">) =>
   status.available &&
@@ -278,13 +278,11 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
       if (document.hidden) suspend();
       else restore();
     };
-    window.addEventListener("offline", suspend);
     window.addEventListener("online", restore);
     window.addEventListener("pagehide", suspend);
     window.addEventListener("pageshow", restore);
     document.addEventListener("visibilitychange", visibility);
     return () => {
-      window.removeEventListener("offline", suspend);
       window.removeEventListener("online", restore);
       window.removeEventListener("pagehide", suspend);
       window.removeEventListener("pageshow", restore);

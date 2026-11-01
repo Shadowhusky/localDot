@@ -61,6 +61,31 @@ describe("keyless search result pages", () => {
     expect(hits[0]?.title).toBeTruthy();
   });
 
+  it("asks Bing for images as its own Images tab does, which an uncommon query needs", () => {
+    expect(bingImages.address("antique oak coffer").href).toBe(
+      "https://www.bing.com/images/search?q=antique+oak+coffer&form=HDRSC2",
+    );
+  });
+
+  // Saved in November 2026 for one query, asked without the Images tab's form and with it: the
+  // pages are built alike, and only the second holds results for the query.
+  it("reads the same results grid whether Bing answered the query or not", () => {
+    const unrelated = bingImages.read(fixture("bing-images-unrelated.html"));
+    expect(unrelated).toHaveLength(25);
+    expect(unrelated[0]?.title).toMatch(/Iceland's dinners/);
+    expect(unrelated.some((hit) => /escutcheon|chest|brass/i.test(hit.title))).toBe(false);
+    const answered = bingImages.read(fixture("bing-images-escutcheon.html"));
+    expect(answered).toHaveLength(35);
+    expect(answered[0]).toMatchObject({
+      title: "Ornate Brass Escutcheon by Branford Lock Works circa 1890s — Aurora Mills",
+      site: "auroramills.com",
+    });
+    expect(answered.filter((hit) => /escutcheon/i.test(hit.title)).length).toBeGreaterThan(25);
+    const cjk = bingImages.read(fixture("bing-images-cjk.html"));
+    expect(cjk).toHaveLength(35);
+    expect(cjk.every((hit) => /古董|橡木|箱/.test(hit.title))).toBe(true);
+  });
+
   it("reads open-licence pictures from the Commons API, leaving out what is not a picture", () => {
     const hits = commonsImages.read(fixture("commons-images.json"));
     expect(hits.length).toBeGreaterThan(4);

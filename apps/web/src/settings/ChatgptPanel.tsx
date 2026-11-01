@@ -37,7 +37,7 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
   const signedIn = checked && status.state === "signed_in";
   const refused = account.error === CHATGPT_DEVICE_CODE_OFF;
   const waitReason = account.blocked
-    ? "Paused while this page is offline or hidden"
+    ? "Paused while this page is hidden"
     : !account.verified
       ? "Checking the account first"
       : account.busy
@@ -279,7 +279,7 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
         )}
         {account.blocked && (
           <p role="status" className="settings-note">
-            Account checks wait while this page is offline or hidden.
+            Account checks wait while this page is hidden.
           </p>
         )}
         {account.notice && (

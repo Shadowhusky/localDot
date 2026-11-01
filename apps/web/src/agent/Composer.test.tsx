@@ -460,7 +460,6 @@ describe("composer delivery ownership and draft handling", () => {
     ["pending computer", "Wait for your computer. Your message stays here."],
     ["unknown computer", "Checking your computer… Your message stays here."],
     ["Keys modal", "Reconnect and check the computer before sending."],
-    ["offline", "You're offline. Your message stays here."],
   ] as const)("refuses even a forged submit while %s", async (reason, words) => {
     const f = setup();
     f.input("ordinary text");
@@ -468,13 +467,21 @@ describe("composer delivery ownership and draft handling", () => {
     else if (reason === "paused computer") f.update({ cell: { ...cell, paused: true } });
     else if (reason === "pending computer") f.update({ pending: true });
     else if (reason === "unknown computer") f.update({ known: false });
-    else if (reason === "Keys modal") f.update({ keysOpen: true });
-    else vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    else f.update({ keysOpen: true });
     f.submit();
     await act(async () => {});
     expect(f.requests).toEqual([]);
     expect(f.field.value).toBe("ordinary text");
     expect(screen.getByRole("alert").textContent).toBe(words);
+  });
+  it("sends even when the browser guesses it is offline, since localDot may still answer", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const f = setup();
+    f.input("ordinary text");
+    f.submit();
+    await act(async () => {});
+    expect(f.requests).toHaveLength(1);
+    expect(screen.queryByText(/offline/i)).toBeNull();
   });
   it("checks pasted and synthetic-submit keys before delivery state, requests or a key preview", () => {
     const f = setup();

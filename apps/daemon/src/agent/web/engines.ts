@@ -174,9 +174,12 @@ const text = (value: unknown) => (typeof value === "string" ? value : undefined)
 
 export const bingImages: Engine = {
   host: "www.bing.com",
+  // Without the form its own Images tab sends, Bing answers an uncommon query with pictures it
+  // shows anyone: popular pins, wallpapers and quotes, or nothing at all for a CJK one.
   address: (query) => {
     const url = new URL("https://www.bing.com/images/search");
     url.searchParams.set("q", query);
+    url.searchParams.set("form", "HDRSC2");
     return url;
   },
   read(body) {

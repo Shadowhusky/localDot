@@ -38,6 +38,8 @@ const JSON_BYTES = 32 * 1024 * 1024;
 const CONFIRM_MS = 30_000;
 const ATTEMPT_MS = 5000;
 const RETRY_MS = 250;
+// How often a command whose reply broke off is asked about while it still runs by itself.
+const RUNNING_POLL_MS = 1000;
 const transient = (status: number) => status >= 500 || status === 408 || status === 429;
 type ShellChecks = Omit<ShellDiagnosis, "failed" | "lookup" | "ms">;
 function parseJson(text: string): unknown {
@@ -103,7 +105,7 @@ const FAILED: Record<ShellDiagnosis["failed"], string> = {
   stop_refused: "the stop request was refused",
   reply: "the command's reply was malformed",
   output: "its output could not be taken in",
-  closed: "the connection to the computer closed",
+  closed: "localDot closed its connection to the computer",
 };
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 const answer = (r: ShellReply | undefined) =>
@@ -176,7 +178,11 @@ async function textBody(res: Response, signal: AbortSignal, limit: number): Prom
 export class DesktopdTools {
   readonly #dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
   readonly #lifetime = new AbortController();
+  // Outlives #lifetime while a retired client looks up the receipts of the commands it cut.
+  readonly #transport = new AbortController();
   readonly #uploads = new Set<Promise<unknown>>();
+  readonly #shells = new Set<Promise<unknown>>();
+  #closed: Promise<void> | undefined;
   readonly #fetch: typeof fetch;
 
   constructor(
@@ -202,12 +208,25 @@ export class DesktopdTools {
         ) as unknown as Promise<Response>);
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.#lifetime.abort(new Error("desktop tools closed"));
-    await Promise.all([this.#dispatcher.destroy(), Promise.allSettled([...this.#uploads])]);
+    this.#transport.abort(new Error("desktop tools closed"));
+    this.#closed ??= Promise.all([
+      this.#dispatcher.destroy(),
+      Promise.allSettled([...this.#uploads]),
+    ]).then(() => {});
+    return this.#closed;
   }
 
-  #scope(timeoutMs: number, signal?: AbortSignal): Scope {
+  // For a computer that changed under its commands: ends them like close(), but first lets each
+  // one look up its receipt, so a command that provably ended does not hold the computer.
+  async retire(): Promise<void> {
+    this.#lifetime.abort(new Error("desktop tools retired"));
+    await Promise.allSettled([...this.#shells]);
+    await this.close();
+  }
+
+  #scope(timeoutMs: number, signal?: AbortSignal, life = this.#lifetime.signal): Scope {
     const local = new AbortController();
     const timer = setTimeout(
       () => local.abort(new Error("desktop tool deadline exceeded")),
@@ -215,7 +234,7 @@ export class DesktopdTools {
     );
     timer.unref();
     return {
-      signal: AbortSignal.any([local.signal, this.#lifetime.signal, ...(signal ? [signal] : [])]),
+      signal: AbortSignal.any([local.signal, life, ...(signal ? [signal] : [])]),
       finish: () => clearTimeout(timer),
       abort: () => {
         clearTimeout(timer);
@@ -294,7 +313,19 @@ export class DesktopdTools {
     return this.#json("/capabilities", undefined, DesktopCapabilities.parse, signal, 5000);
   }
 
-  async shell(
+  shell(
+    req: ShellRequest,
+    onChunk: (c: ShellChunk) => void | Promise<void>,
+    signal?: AbortSignal,
+  ): Promise<ShellDone> {
+    const work = this.#shell(req, onChunk, signal);
+    this.#shells.add(work);
+    const forget = () => void this.#shells.delete(work);
+    work.then(forget, forget);
+    return work;
+  }
+
+  async #shell(
     req: ShellRequest,
     onChunk: (c: ShellChunk) => void | Promise<void>,
     signal?: AbortSignal,
@@ -320,8 +351,9 @@ export class DesktopdTools {
       clearTimeout(confirmation);
       confirmation = setTimeout(() => giveUp("stop"), ms);
     };
+    let recovering = false;
     const stop = () => {
-      if (!answered || stopping) return;
+      if (!answered || stopping || recovering) return;
       stopping = true;
       // 404 may race with an already-ended command. Only the original stream's valid terminal
       // result below is proof; this acknowledgement never is. A command the computer no longer
@@ -349,6 +381,7 @@ export class DesktopdTools {
     let resultLookup = false;
     let consumerFailed = false;
     let receiving = false;
+    let cut = false;
     try {
       const res = await this.#send("/shell", scope, JSON.stringify(input), "application/json");
       resultLookup = res.headers.get("x-localdot-shell-result") === "1";
@@ -418,6 +451,8 @@ export class DesktopdTools {
         }
         if (chunk.done) break;
       }
+      // A reply that ends before its terminal line broke off like one that errors.
+      cut = !result;
       if (pending.trim() || !result) throw new ShellExecutionUncertainError();
       return result;
     } catch (error) {
@@ -432,21 +467,29 @@ export class DesktopdTools {
             ? "deadline"
             : !answered
               ? "request"
-              : receiving
+              : receiving || cut
                 ? "stream"
                 : "reply";
-      // Close the failed transport (which cancels a still-running command), then ask only
+      // Close the failed transport (desktopd ends a command whose reply is gone), then ask only
       // for this request's terminal receipt. Never replay a side-effecting command.
       scope.abort();
       // A reply that never came cannot say whether the computer keeps receipts; asking is safe.
       const lookup: ShellDiagnosis["lookup"] =
         answered && !resultLookup
           ? "unsupported"
-          : consumerFailed || this.#lifetime.signal.aborted
+          : consumerFailed || this.#transport.signal.aborted
             ? "skipped"
             : "tried";
       if (lookup === "tried") {
-        const recovered = await this.#shellResult(id, checks);
+        recovering = true;
+        // A reply that broke off on its own leaves its command to end by itself, within its own
+        // timeout; a command this client gave up on, or the user stopped, is stopped first.
+        const left = failed === "stream" && checks.stoppedAtMs === undefined;
+        const recovered = await this.#shellResult(id, checks, {
+          stop: !left,
+          ms: left ? Math.max(CONFIRM_MS, input.timeoutMs - since() + CONFIRM_MS) : CONFIRM_MS,
+          ...(signal ? { signal } : {}),
+        });
         if (recovered) return { ...recovered, outputIncomplete: true };
       }
       throw new ShellExecutionUncertainError({ failed, lookup, ms: since(), ...checks });
@@ -463,14 +506,27 @@ export class DesktopdTools {
 
   // Retries what got no answer while the wait lasts. A command the computer does not know, a reply
   // that makes no sense, or one still running when the wait ends has no receipt: still uncertain.
-  async #shellResult(id: string, checks: ShellChecks): Promise<ShellDone | undefined> {
-    const scope = this.#scope(CONFIRM_MS);
+  // A Stop or a retirement during the wait still reaches the command, and leaves it CONFIRM_MS to
+  // end.
+  async #shellResult(
+    id: string,
+    checks: ShellChecks,
+    wait: { stop: boolean; ms: number; signal?: AbortSignal },
+  ): Promise<ShellDone | undefined> {
+    const scope = this.#scope(wait.ms, undefined, this.#transport.signal);
+    let until = scope;
+    let stopping = wait.stop;
     try {
       // Explicit cancellation also covers a response transport that ignored abort.
-      if (!(await this.#stop(id, scope.signal, checks))) return undefined;
+      if (stopping && !(await this.#stop(id, until.signal, checks))) return undefined;
       for (;;) {
+        if (!stopping && (wait.signal?.aborted || this.#lifetime.signal.aborted)) {
+          stopping = true;
+          until = this.#scope(CONFIRM_MS, scope.signal, this.#transport.signal);
+          if (!(await this.#stop(id, until.signal, checks))) return undefined;
+        }
         checks.lookups++;
-        const reply = await this.#ask("/shell/result", id, scope.signal, 16384);
+        const reply = await this.#ask("/shell/result", id, until.signal, 16384);
         checks.lookupReply = typeof reply === "string" ? reply : reply.status;
         if (typeof reply !== "string") {
           // A receipt whose body broke off is kept by the computer; ask again.
@@ -483,11 +539,18 @@ export class DesktopdTools {
           }
           if (![200, 202].includes(reply.status) && !transient(reply.status)) return undefined;
         }
-        await untilAborted(new Promise((resolve) => setTimeout(resolve, RETRY_MS)), scope.signal);
+        const running = typeof reply !== "string" && reply.status === 202;
+        await untilAborted(
+          new Promise((resolve) =>
+            setTimeout(resolve, running && !stopping ? RUNNING_POLL_MS : RETRY_MS),
+          ),
+          until.signal,
+        );
       }
     } catch {
       return undefined;
     } finally {
+      until.abort();
       scope.abort();
     }
   }
@@ -516,7 +579,7 @@ export class DesktopdTools {
     until: AbortSignal,
     limit: number,
   ): Promise<{ status: number; body?: string } | "timeout" | "unreachable"> {
-    const attempt = this.#scope(ATTEMPT_MS, until);
+    const attempt = this.#scope(ATTEMPT_MS, until, this.#transport.signal);
     let status: number | undefined;
     try {
       const reply = await this.#send(path, attempt, JSON.stringify({ id }), "application/json");
@@ -524,7 +587,7 @@ export class DesktopdTools {
       return { status, body: await textBody(reply, attempt.signal, limit) };
     } catch {
       until.throwIfAborted();
-      this.#lifetime.signal.throwIfAborted();
+      this.#transport.signal.throwIfAborted();
       if (status !== undefined) return { status };
       return attempt.signal.aborted ? "timeout" : "unreachable";
     } finally {

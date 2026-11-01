@@ -115,13 +115,11 @@ export function useResultDownloads(
       if (document.visibilityState === "hidden") retire();
     };
     window.addEventListener("pagehide", retire);
-    window.addEventListener("offline", retire);
     document.addEventListener("visibilitychange", hidden);
     return () => {
       mounted.current = false;
       retire();
       window.removeEventListener("pagehide", retire);
-      window.removeEventListener("offline", retire);
       document.removeEventListener("visibilitychange", hidden);
     };
   }, [retire]);
@@ -133,7 +131,6 @@ export function useResultDownloads(
         active.current ||
         !owner.api ||
         !owner.sessionId ||
-        !navigator.onLine ||
         document.visibilityState === "hidden" ||
         !valid(file)
       )

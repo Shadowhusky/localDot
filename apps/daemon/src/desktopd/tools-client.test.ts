@@ -663,6 +663,155 @@ describe("verified recovery after shell connection loss", () => {
       );
     },
   );
+  // The reply's headers and first output arrive, then its connection goes before the terminal line.
+  const cut = (
+    response: Response,
+    ending: "errors" | "ends",
+    drain?: (reader: ReadableStreamDefaultReader<Uint8Array>) => Promise<void>,
+  ) => {
+    const reader = required(response.body ?? undefined).getReader();
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        async start(c) {
+          const first = await reader.read();
+          if (first.value) c.enqueue(first.value);
+          await drain?.(reader);
+          if (ending === "errors") c.error(new TypeError("terminated: other side closed"));
+          else c.close();
+        },
+      }),
+      { headers: response.headers },
+    );
+  };
+  it.each([
+    ["errors", "has already ended"],
+    ["ends", "has already ended"],
+    ["errors", "is still running"],
+    ["ends", "is still running"],
+  ] as const)(
+    "takes the receipt of a command whose reply %s after headers when the command %s",
+    async (ending, state) => {
+      const { app } = setup();
+      const requests: string[] = [];
+      const results: number[] = [];
+      let executions = 0;
+      const tools = client(async (url, init) => {
+        const route = new URL(String(url)).pathname;
+        requests.push(route);
+        if (route !== "/shell") {
+          const response = await app.request(String(url), init);
+          if (route === "/shell/result") results.push(response.status);
+          return response;
+        }
+        executions++;
+        // The computer does not see this connection go: its command goes on by itself.
+        const { signal: _signal, ...detached } = init ?? {};
+        const response = await app.request(String(url), detached);
+        return cut(
+          response,
+          ending,
+          state === "has already ended"
+            ? async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+                while (!(await reader.read()).done);
+              }
+            : undefined,
+        );
+      });
+      const output: string[] = [];
+      const result = await tools.shell(
+        { command: "printf started; sleep 1; printf once >> proof.txt; printf finished" },
+        (c) => void output.push(c.chunk),
+      );
+      expect(result).toMatchObject({ exitCode: 0, outputIncomplete: true });
+      expect(output).toEqual(["started"]);
+      expect(executions).toBe(1);
+      expect(requests).not.toContain("/shell/stop");
+      if (state === "is still running") expect(results).toContain(202);
+      expect(results.at(-1)).toBe(200);
+      expect((await tools.readFile("proof.txt")).content).toBe("once");
+    },
+  );
+  it("takes the receipt of a command its retired client cut, instead of holding the computer", async () => {
+    const { app } = setup();
+    const requests: string[] = [];
+    const tools = client(async (url, init) => {
+      requests.push(new URL(String(url)).pathname);
+      return app.request(String(url), init);
+    });
+    let retired: Promise<void> | undefined;
+    const result = await tools.shell(
+      { command: "printf started; sleep 30; printf never > proof.txt" },
+      () => {
+        // The computer changes while the command runs.
+        setTimeout(() => {
+          retired ??= tools.retire();
+        }, 50);
+      },
+    );
+    expect(result).toMatchObject({ exitCode: null, signal: "SIGKILL", outputIncomplete: true });
+    expect(requests.filter((p) => p === "/shell")).toHaveLength(1);
+    expect(requests).toContain("/shell/result");
+    await expect(required(retired)).resolves.toBeUndefined();
+    await expect(tools.readFile("proof.txt")).rejects.toThrow();
+  });
+  it("names a retired client's lookup when the computer no longer knows the command", async () => {
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    const tools = client((async (url) => {
+      const route = new URL(String(url)).pathname;
+      if (route === "/shell/stop") return new Response("unknown", { status: 404 });
+      if (route === "/shell/result") return new Response("unknown", { status: 404 });
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            body = c;
+          },
+        }),
+        { headers: { "x-localdot-shell-result": "1" } },
+      );
+    }) as typeof fetch);
+    const work = tools.shell({ command: "sleep 600" }, () => {});
+    const caught = work.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.waitFor(() => expect(body).toBeDefined());
+    await tools.retire();
+    const error = await caught;
+    expect(error).toBeInstanceOf(ShellExecutionUncertainError);
+    const diagnosis = required((error as ShellExecutionUncertainError).diagnosis);
+    expect(diagnosis).toMatchObject({ failed: "closed", lookup: "tried", lookupReply: 404 });
+    expect(describeShellDiagnosis(diagnosis)).toMatch(
+      /^localDot closed its connection to the computer; 1 stop requests, last unknown command; 1 receipt checks, last unknown command; gave up \d+\.\d s in$/,
+    );
+  });
+  it("skips the lookup when the client closes for shutdown", async () => {
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    const asked = vi.fn();
+    const tools = client((async (url) => {
+      if (new URL(String(url)).pathname !== "/shell") asked();
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            body = c;
+          },
+        }),
+        { headers: { "x-localdot-shell-result": "1" } },
+      );
+    }) as typeof fetch);
+    const caught = tools
+      .shell({ command: "sleep 600" }, () => {})
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await vi.waitFor(() => expect(body).toBeDefined());
+    await tools.close();
+    expect(((await caught) as ShellExecutionUncertainError).diagnosis).toMatchObject({
+      failed: "closed",
+      lookup: "skipped",
+    });
+    expect(asked).not.toHaveBeenCalled();
+  });
   it("reports resource refusal as not started, not an uncertain execution", async () => {
     const tools = client(answer(new Response("desktop_memory_pressure", { status: 503 })));
     await expect(tools.shell({ command: "true" }, () => {})).rejects.toThrow(
@@ -724,10 +873,6 @@ describe("confirming a command's end on a slow computer", () => {
   });
   it("looks up a lost reply's receipt through requests that fail or time out", async () => {
     vi.useFakeTimers();
-    const stops = [
-      () => Promise.reject(new TypeError("fetch failed")),
-      () => new Response(null, { status: 204 }),
-    ];
     const results = [
       () => new Response("busy", { status: 503 }),
       () => new Promise<Response>(() => {}),
@@ -736,14 +881,93 @@ describe("confirming a command's end on a slow computer", () => {
     ];
     const tools = client((async (url, init) => {
       if (path(url) === "/shell") return lost();
-      const next = (path(url) === "/shell/stop" ? stops : results).shift();
+      const next = path(url) === "/shell/result" ? results.shift() : undefined;
       if (!next) throw new Error("unexpected request");
       return next(commandId(init));
     }) as typeof fetch);
     const work = tools.shell({ command: "true" }, () => {});
     await vi.advanceTimersByTimeAsync(10_000);
     await expect(work).resolves.toMatchObject({ exitCode: 0, outputIncomplete: true });
-    expect([stops.length, results.length]).toEqual([0, 0]);
+    expect(results).toHaveLength(0);
+  });
+  it("waits out a command still running after its reply broke off, and stops it on Stop", async () => {
+    vi.useFakeTimers();
+    const requests: string[] = [];
+    let stopped = false;
+    const tools = client((async (url, init) => {
+      requests.push(path(url));
+      if (path(url) === "/shell") return lost();
+      if (path(url) === "/shell/stop") {
+        stopped = true;
+        return new Response(null, { status: 204 });
+      }
+      return stopped
+        ? Response.json({
+            id: commandId(init),
+            result: { ...done, exitCode: null, signal: "SIGTERM" },
+          })
+        : new Response("running", { status: 202 });
+    }) as typeof fetch);
+    const stop = new AbortController();
+    const work = tools.shell({ command: "sleep 600", timeoutMs: 600_000 }, () => {}, stop.signal);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(requests).not.toContain("/shell/stop");
+    expect(requests.filter((p) => p === "/shell/result").length).toBeGreaterThan(100);
+    stop.abort();
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(work).resolves.toMatchObject({
+      exitCode: null,
+      signal: "SIGTERM",
+      outputIncomplete: true,
+    });
+  });
+  it("stops a command whose reply broke off when its client is retired during the wait", async () => {
+    vi.useFakeTimers();
+    let stopped = false;
+    const tools = client((async (url, init) => {
+      if (path(url) === "/shell") return lost();
+      if (path(url) === "/shell/stop") {
+        stopped = true;
+        return new Response(null, { status: 204 });
+      }
+      return stopped
+        ? Response.json({
+            id: commandId(init),
+            result: { ...done, exitCode: null, signal: "SIGKILL" },
+          })
+        : new Response("running", { status: 202 });
+    }) as typeof fetch);
+    const work = tools.shell({ command: "sleep 600", timeoutMs: 600_000 }, () => {});
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(stopped).toBe(false);
+    const retired = tools.retire();
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(work).resolves.toMatchObject({ signal: "SIGKILL", outputIncomplete: true });
+    await expect(retired).resolves.toBeUndefined();
+  });
+  it("stays uncertain when a command whose reply broke off outlasts its own timeout", async () => {
+    vi.useFakeTimers();
+    const tools = client((async (url) =>
+      path(url) === "/shell" ? lost() : new Response("running", { status: 202 })) as typeof fetch);
+    let settled = false;
+    const caught = uncertainty(
+      tools.shell({ command: "sleep 600", timeoutMs: 20_000 }, () => {}),
+    ).finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const error = await caught;
+    expect(error.diagnosis).toMatchObject({
+      failed: "stream",
+      lookup: "tried",
+      stops: 0,
+      lookupReply: 202,
+    });
+    expect(describeShellDiagnosis(required(error.diagnosis))).toMatch(
+      /^the command's reply broke off; \d+ receipt checks, last still running; gave up 5\d\.\d s in$/,
+    );
   });
   it("stays uncertain, saying why, while the command still runs after the wait", async () => {
     vi.useFakeTimers();
@@ -786,7 +1010,7 @@ describe("confirming a command's end on a slow computer", () => {
     expect((await caught).diagnosis).toMatchObject({
       failed: "stream",
       lookup: "tried",
-      stops: 1,
+      stops: 0,
       lookups: 1,
       lookupReply: 404,
     });
@@ -805,7 +1029,7 @@ describe("confirming a command's end on a slow computer", () => {
     });
     const older = client(answer(() => new Response("")));
     const noReceipts = await uncertainty(older.shell({ command: "true" }, () => {}));
-    expect(noReceipts.diagnosis).toMatchObject({ failed: "reply", lookup: "unsupported" });
+    expect(noReceipts.diagnosis).toMatchObject({ failed: "stream", lookup: "unsupported" });
     expect(describeShellDiagnosis(required(noReceipts.diagnosis))).toContain(
       "the computer keeps no receipts",
     );

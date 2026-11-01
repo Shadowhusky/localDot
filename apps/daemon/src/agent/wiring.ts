@@ -200,13 +200,13 @@ export function createAgent(d: AgentWiringDeps) {
     outputs = new OutputStore(d.home),
     transfers = d.transfers ?? new Transfers();
   const clients = new Map<string, DesktopdTools>();
-  const retiring = new Set<Promise<void>>();
+  const retiring = new Map<DesktopdTools, Promise<void>>();
   let ready = false,
     closing = false;
   const retire = (tools: DesktopdTools) => {
-    const pending = tools.close();
-    retiring.add(pending);
-    void pending.catch(() => {}).finally(() => retiring.delete(pending));
+    const pending = tools.retire();
+    retiring.set(tools, pending);
+    void pending.catch(() => {}).finally(() => retiring.delete(tools));
   };
   const desktop = (cellId: string): DesktopdTools | undefined => {
     if (closing) return undefined;
@@ -1286,7 +1286,8 @@ export function createAgent(d: AgentWiringDeps) {
           serviceKeys.close(),
           connectors.close(),
           ...activeClients.map((tools) => tools.close()),
-          ...retiring,
+          // Shutdown does not wait out the receipt lookups of a retired computer's commands.
+          ...[...retiring].map(([tools, pending]) => tools.close().then(() => pending)),
         ]);
         if (outcomes.some((outcome) => outcome.status === "rejected"))
           throw new Error("agent shutdown cleanup could not be confirmed");

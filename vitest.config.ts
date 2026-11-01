@@ -6,6 +6,10 @@ export default defineConfig({
   // apps/web resolves its @/ alias from its tsconfig.
   resolve: { tsconfigPaths: true },
   test: {
+    // GitHub's macOS runners are several times slower than a development Mac, so a whole-app test
+    // that takes 2 s here can pass 5 s there; CI gets room, local runs keep the tight limits.
+    testTimeout: process.env.CI ? 20_000 : 5_000,
+    hookTimeout: process.env.CI ? 30_000 : 10_000,
     css: { include: [/theme\.css/, /tokens\.css/] },
     include: [
       "packages/*/src/**/*.test.ts",

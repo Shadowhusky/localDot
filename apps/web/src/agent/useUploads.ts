@@ -91,7 +91,6 @@ export function useUploads(props: Owner) {
     const visible = () => {
       if (document.visibilityState === "visible") resume();
     };
-    window.addEventListener("offline", pause);
     window.addEventListener("online", resume);
     window.addEventListener("pagehide", pause);
     window.addEventListener("pageshow", resume);
@@ -102,7 +101,6 @@ export function useUploads(props: Owner) {
       active.current = null;
       for (const row of list.current) if (row.preview) URL.revokeObjectURL(row.preview);
       sources.current.clear();
-      window.removeEventListener("offline", pause);
       window.removeEventListener("online", resume);
       window.removeEventListener("pagehide", pause);
       window.removeEventListener("pageshow", resume);
@@ -111,8 +109,7 @@ export function useUploads(props: Owner) {
   }, [pause, resume]);
   const pump = async () => {
     const owner = current.current;
-    if (active.current || !mounted.current || !owner.ready || !owner.cellId || !navigator.onLine)
-      return;
+    if (active.current || !mounted.current || !owner.ready || !owner.cellId) return;
     const row = list.current.find((item) => item.phase === "pending");
     const source = row && sources.current.get(row.id);
     if (!row || !source) return;
@@ -154,7 +151,7 @@ export function useUploads(props: Owner) {
   };
   const select = (files: FileList | readonly File[]) => {
     const owner = current.current;
-    if (!owner.ready || !owner.enabled || !owner.cellId || !navigator.onLine) {
+    if (!owner.ready || !owner.enabled || !owner.cellId) {
       setProblem("Reconnect and check the computer before adding files.");
       return;
     }

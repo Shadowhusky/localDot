@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../lib/api.ts";
 import { createApi } from "../lib/api.ts";
@@ -161,6 +169,44 @@ describe("user-activated inert result downloads", () => {
     await waitFor(() => expect(cancelled).toBe(true));
     expect(created).not.toHaveBeenCalled();
     expect(clicked).not.toHaveBeenCalled();
+  });
+  it("downloads while the browser guesses it is offline, and an offline event cancels nothing", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const late = Promise.withResolvers<Response>(),
+      fetchImpl = vi.fn<typeof fetch>(async () => late.promise),
+      announce = vi.fn(),
+      file = results[0]?.files[0] as AgentResult["files"][number],
+      api = apiFor(fetchImpl);
+    const { result } = renderHook(() => useResultDownloads(api, SESSION, results, announce));
+    let work: Promise<boolean> | undefined;
+    act(() => {
+      work = result.current.request("result-id", file);
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    act(() => window.dispatchEvent(new Event("offline")));
+    expect(fetchImpl.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
+    await act(async () => {
+      late.resolve(response());
+      expect(await work).toBe(true);
+    });
+    expect(clicked).toHaveBeenCalledOnce();
+    expect(announce).toHaveBeenCalledWith("report.html downloaded.");
+  });
+  it("with the offline guess, a download whose request fails says so and can be tried again", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+      announce = vi.fn(),
+      file = results[0]?.files[0] as AgentResult["files"][number],
+      api = apiFor(fetchImpl);
+    const { result } = renderHook(() => useResultDownloads(api, SESSION, results, announce));
+    await act(async () => {
+      expect(await result.current.request("result-id", file)).toBe(false);
+    });
+    expect(result.current.state("result-id", file)).toBe("failed");
+    expect(announce).toHaveBeenCalledWith("report.html couldn't be downloaded. Try again.");
+    expect(result.current.busy).toBe(false);
   });
 });
 

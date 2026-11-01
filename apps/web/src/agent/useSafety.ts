@@ -146,8 +146,7 @@ export function useSafety(props: SafetyProps) {
       !p.cell?.replacementPending &&
       !p.blocked &&
       p.visible &&
-      !document.hidden &&
-      navigator.onLine
+      !document.hidden
     );
   };
   useEffect(() => {
@@ -162,8 +161,7 @@ export function useSafety(props: SafetyProps) {
         f.sessionId !== op.session ||
         !current.current.visible ||
         !focused.current ||
-        document.hidden ||
-        !navigator.onLine
+        document.hidden
       )
         op.abort.abort();
     };
@@ -200,7 +198,6 @@ export function useSafety(props: SafetyProps) {
     window.addEventListener("focus", parentFocus);
     document.addEventListener("pointerdown", parentFocus, true);
     document.addEventListener("focusin", parentFocus);
-    window.addEventListener("offline", invalidate);
     document.addEventListener("visibilitychange", invalidate);
     return () => {
       mounted.current = false;
@@ -212,7 +209,6 @@ export function useSafety(props: SafetyProps) {
       window.removeEventListener("focus", parentFocus);
       document.removeEventListener("pointerdown", parentFocus, true);
       document.removeEventListener("focusin", parentFocus);
-      window.removeEventListener("offline", invalidate);
       document.removeEventListener("visibilitychange", invalidate);
     };
   }, [props.feed]);
@@ -523,7 +519,6 @@ export function useSafety(props: SafetyProps) {
       replacingRef.current ||
       (replacementRequest.current && !replacementRetry) ||
       document.hidden ||
-      !navigator.onLine ||
       !p.visible ||
       (p.replaceBlocked ?? p.blocked)
     )
@@ -547,7 +542,6 @@ export function useSafety(props: SafetyProps) {
         !focused.current ||
         !document.hasFocus() ||
         document.hidden ||
-        !navigator.onLine ||
         !current.current.visible ||
         (current.current.replaceBlocked ?? current.current.blocked) ||
         current.current.api !== p.api ||
@@ -581,7 +575,6 @@ export function useSafety(props: SafetyProps) {
         !focused.current ||
         !document.hasFocus() ||
         document.hidden ||
-        !navigator.onLine ||
         !current.current.visible ||
         (current.current.replaceBlocked ?? current.current.blocked)
       )
@@ -693,7 +686,6 @@ export function useSafety(props: SafetyProps) {
       focused.current &&
       document.hasFocus() &&
       !document.hidden &&
-      navigator.onLine &&
       !replacingRef.current &&
       (!replacementRequest.current || replacementRetry),
   };

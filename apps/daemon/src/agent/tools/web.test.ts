@@ -118,6 +118,28 @@ describe("web_search", () => {
     });
   });
 
+  it("says no relevant images were found rather than show unrelated pictures", async () => {
+    const h = harness({
+      "www.bing.com": { body: fixture("bing-images-unrelated.html") },
+      "ts1.mm.bing.net": { body: png, contentType: "image/png" },
+    });
+    const res = await h.call("web_search", {
+      query: "antique English brass chest lock escutcheon ornate engraved",
+      kind: "images",
+    });
+    expect(res.body.ok).toBe(false);
+    expect(textOf(res)).toContain(
+      "No relevant images found. www.bing.com found only unrelated results; commons.wikimedia.org could not be reached. Try other words",
+    );
+    expect(res.body.content.some((c) => c.type === "web_image")).toBe(false);
+    expect(h.events().some((e) => e.type === "tool.output")).toBe(false);
+    expect(h.events().find((e) => e.type === "step.end")?.data).toEqual({
+      status: "failed",
+      note: "No relevant images found.",
+    });
+    expect(h.asked.some((url) => url.includes("mm.bing.net"))).toBe(false);
+  });
+
   it("is classified as opening the engine's results page for the query", () => {
     expect(toolRisk("web_search", { query: "Zelda Link" })).toEqual({
       operation: "navigate",
@@ -125,7 +147,7 @@ describe("web_search", () => {
     });
     expect(toolRisk("web_search", { query: "Zelda", kind: "images" })).toEqual({
       operation: "navigate",
-      destination: "https://www.bing.com/images/search?q=Zelda",
+      destination: "https://www.bing.com/images/search?q=Zelda&form=HDRSC2",
     });
     expect(toolRisk("web_fetch", { url: "https://a.example/x?y=1" })).toEqual({
       operation: "navigate",

@@ -63,14 +63,7 @@ export function useKnowledge(api: ApiClient, sessionId: string | null, visible: 
   }, [api, sessionId, visible, retire]);
   const read = useCallback(async (kind: "skills" | "memory") => {
     const owner = current.current;
-    if (
-      !mounted.current ||
-      !owner.visible ||
-      document.hidden ||
-      !navigator.onLine ||
-      pending.current.has(kind)
-    )
-      return;
+    if (!mounted.current || !owner.visible || document.hidden || pending.current.has(kind)) return;
     const controller = new AbortController();
     pending.current.set(kind, controller);
     setState((old) => ({ ...old, [`${kind}Phase`]: "loading" }));
@@ -112,13 +105,11 @@ export function useKnowledge(api: ApiClient, sessionId: string | null, visible: 
       if (document.hidden) retire();
     };
     window.addEventListener("pagehide", retire);
-    window.addEventListener("offline", retire);
     document.addEventListener("visibilitychange", hide);
     return () => {
       mounted.current = false;
       retire();
       window.removeEventListener("pagehide", retire);
-      window.removeEventListener("offline", retire);
       document.removeEventListener("visibilitychange", hide);
     };
   }, [retire]);
