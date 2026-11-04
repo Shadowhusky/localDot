@@ -48,7 +48,7 @@ pnpm --filter @localdot/admin test
 pnpm --filter @localdot/admin typecheck
 pnpm --filter @localdot/admin exec wrangler d1 migrations apply localdot-stats --remote
 pnpm --filter @localdot/admin exec wrangler deploy --dry-run
-pnpm --filter @localdot/admin deploy
+pnpm --filter @localdot/admin run deploy
 ```
 
 The admin Worker is separate from the local daemon, remote relay and reports service. Its D1 is
