@@ -1,0 +1,5 @@
+{
+  "name": "localdot-stats-test-fixture",
+  "main": "fixture.ts",
+  "compatibility_date": "2026-11-04"
+}

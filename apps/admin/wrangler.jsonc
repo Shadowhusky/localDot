@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "localdot-admin",
+  "account_id": "31c17ebe287229213316608e4ef93f80",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-04",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "admin.localdot.dev", "custom_domain": true }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "localdot-stats",
+      "database_id": "49d4b0d0-f4b7-4c7c-9737-f8561bd90a0b",
+      "migrations_dir": "migrations"
+    },
+    {
+      "binding": "REPORTS",
+      "database_name": "localdot-reports",
+      "database_id": "3c4a21b5-9775-4ef5-89e5-39316b1a07cb"
+    }
+  ],
+  "triggers": { "crons": ["23 */6 * * *"] },
+  "observability": {
+    "enabled": true,
+    "logs": { "invocation_logs": false },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  }
+}

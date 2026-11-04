@@ -1,0 +1,23 @@
+name: Import download statistics
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: stats-import
+  cancel-in-progress: false
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+      - run: node scripts/stats-import.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          LOCALDOT_STATS_INGEST_TOKEN: ${{ secrets.LOCALDOT_STATS_INGEST_TOKEN }}

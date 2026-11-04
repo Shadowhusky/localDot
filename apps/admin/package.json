@@ -1,0 +1,19 @@
+{
+  "name": "@localdot/admin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "deploy": "wrangler deploy",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "test": "pnpm build && wrangler deploy --config test/wrangler.jsonc --dry-run --outdir \"$PWD/dist-fixture\" && node --experimental-transform-types --test test/*.test.ts",
+    "test:browser": "pnpm build && node test/browser-check.mjs"
+  },
+  "devDependencies": {
+    "miniflare": "5.20261103.0-beta",
+    "wrangler": "4.157.0",
+    "@playwright/test": "1.63.0"
+  }
+}

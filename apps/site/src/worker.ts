@@ -1,3 +1,5 @@
+import { countInBackground } from "../../../packages/analytics/src/edge.ts";
+
 export const OWNED_VIDEO =
   /^\/(demos\/[a-z0-9-]+\/(theatre(-sm)?|card-[a-z]+)|film\/localdot-film(-zh)?(-720)?)\.mp4$/;
 // The most read into memory for a range when no length is known.
@@ -145,7 +147,7 @@ function recordedLengths(env: Env, url: URL): Promise<Record<string, number>> {
 }
 
 export const worker = {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (
       url.hostname === "www.localdot.dev" ||
@@ -157,6 +159,7 @@ export const worker = {
       return Response.redirect(url.href, 308);
     }
     const response = await env.ASSETS.fetch(request);
+    if (url.pathname === "/") countInBackground(ctx, env.STATS, request, response, "page");
     if (!OWNED_VIDEO.test(url.pathname)) return response;
     const recorded =
       request.headers.has("range") && !response.headers.has("content-length")
