@@ -17,6 +17,7 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
+          package-manager-cache: false
       - run: node scripts/stats-import.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
