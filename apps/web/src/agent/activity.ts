@@ -316,6 +316,7 @@ export interface StepDetail {
 export function stepDetail(
   entry: ActivityEntry,
   changes: readonly AgentChange[],
+  plain = false,
 ): StepDetail | null {
   const { row } = entry;
   if (row.kind === "key") return null;
@@ -325,7 +326,8 @@ export function stepDetail(
   // The row's words while the task runs; once it ends, only an unfinished step's meta line differs.
   const words = rowWords(row, own, false);
   const done = screen ? words.what : agent?.tool?.title;
-  const said = done && [words.title, words.named].some((text) => text && same(text, done));
+  const onRow = plain ? [words.title] : [words.title, words.named];
+  const said = done && onRow.some((text) => text && same(text, done));
   const code = !screen && (words.kind === "shell" || words.kind === "file");
   return {
     ...(done && !said ? { action: { text: done, code } } : {}),
@@ -341,8 +343,12 @@ export function stepDetail(
   };
 }
 
-export function hasDetails(entry: ActivityEntry, changes: readonly AgentChange[]): boolean {
-  const detail = stepDetail(entry, changes);
+export function hasDetails(
+  entry: ActivityEntry,
+  changes: readonly AgentChange[],
+  plain = false,
+): boolean {
+  const detail = stepDetail(entry, changes, plain);
   return (
     !!detail &&
     (!!detail.action ||
@@ -400,8 +406,39 @@ export function activityReadGroup(entry: ActivityEntry): string | undefined {
     tool?.ok !== false &&
     (tool?.name === "files" || row.computer?.stepKind === "file") &&
     /^(read|list) /i.test(tool?.title ?? row.computer?.label ?? "")
-    ? (row.agent?.planItem ?? "")
+    ? // A run of reads stays on one model, so the list can say where the model changes.
+      `${row.agent?.planItem ?? ""}${row.agent?.model ? `\0${row.agent.model.route}\0${row.agent.model.model}` : ""}`
     : undefined;
+}
+
+export interface StepModel {
+  readonly route: string;
+  readonly model: string;
+}
+export const stepModel = (entry: ActivityEntry): StepModel | undefined =>
+  entry.row.kind === "step" ? entry.row.agent?.model : undefined;
+const sameModel = (a: StepModel | undefined, b: StepModel | undefined) =>
+  a?.route === b?.route && a?.model === b?.model;
+// Where a list of steps moves to another model, by the key of the step that starts each run. Steps
+// recorded before they named their model go with the run they fall in. `opening`: the list's first
+// model is named too, once there is more than one to tell apart.
+export function modelMarks<T extends { key: string }>(
+  steps: readonly T[],
+  modelOf: (step: T) => StepModel | undefined,
+  opening = false,
+): Map<string, StepModel> {
+  const marks = new Map<string, StepModel>();
+  let last: StepModel | undefined;
+  let first: { key: string; model: StepModel } | undefined;
+  for (const step of steps) {
+    const model = modelOf(step);
+    if (!model) continue;
+    first ??= { key: step.key, model };
+    if (last && !sameModel(last, model)) marks.set(step.key, model);
+    last = model;
+  }
+  if (opening && marks.size && first) marks.set(first.key, first.model);
+  return marks;
 }
 
 // Shared by Activity and Chat. Keep every audit identity and cap groups so opening one

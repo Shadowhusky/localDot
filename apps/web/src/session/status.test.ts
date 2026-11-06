@@ -7,12 +7,14 @@ import { type HudState, hudFor } from "../cells/hud-state.ts";
 import type { CellSummary } from "../cells/types.ts";
 import type { DotState } from "../dot/engine/states.ts";
 import {
+  awaitingWord,
   footWork,
   liveState,
   past,
   progressive,
   type Status,
   type StatusRow,
+  sentToRest,
   statusFor,
   type TaskFacts,
   taskFacts,
@@ -1315,16 +1317,44 @@ it("says dot is starting until its first action, even in a Replay that holds the
 
 describe("a message just sent", () => {
   const ready = statusFor({ computer: live, task: null });
-  it("shows dot thinking at once while the computer is otherwise ready", () => {
-    const shown = withSending(ready, true);
-    expect(shown.label).toBe("Thinking…");
-    expect(shown.dotPose).toBe("thinking");
-    expect(shown.row).toBe("thinking");
+  const thinking = {
+    row: "thinking",
+    label: "Thinking…",
+    dotPose: "thinking",
+    attention: "working",
+    caption: { speaker: "dot", text: "" },
+  };
+  it("shows dot thinking at once, with nothing said about it yet", () => {
+    expect(withSending(ready, true)).toMatchObject(thinking);
+    for (const name of ["done", "stopped", "interrupted", "failed", "ready for more", "working"])
+      expect(withSending(STATES[name] as Status, true), name).toMatchObject(thinking);
   });
   it("leaves every other state alone", () => {
     expect(withSending(ready, false)).toBe(ready);
-    const asking = { ...ready, row: "question" as const, label: "Needs your answer" };
-    expect(withSending(asking, true)).toBe(asking);
+    for (const name of ["question", "approval", "task stopping", "off", "acting"]) {
+      const status = STATES[name] as Status;
+      expect(withSending(status, true), name).toBe(status);
+    }
+  });
+  it("is sent to dot at rest, or before there is a task", () => {
+    const failed = view(ended("error"), 9500).task;
+    expect(sentToRest("01SESSION", failed)).toEqual({ session: "01SESSION", row: "failed" });
+    expect(sentToRest(null, null)).toEqual({ session: null, row: null });
+    expect(sentToRest("01SESSION", view(start(), 2000).task)).toBeNull();
+  });
+  it("waits for the task's own word: the one sent to rests as it did, or the next has just begun", () => {
+    const sent = { session: "01OLD", row: "failed" as const };
+    const failed = view(ended("error"), 9500).task;
+    expect(awaitingWord(sent, "01OLD", failed)).toBe(true);
+    const begun = taskHud(foldEvents(emptyModel(), typed()), 5);
+    expect(awaitingWord(sent, "01NEW", begun)).toBe(true);
+    expect(awaitingWord(sent, "01NEW", null)).toBe(true);
+    const thought = view([...typed(), ev("agent.state", 1, { state: "thinking" })], 5).task;
+    expect(awaitingWord(sent, "01NEW", thought)).toBe(false);
+    expect(awaitingWord(sent, "01NEW", failed)).toBe(false);
+    const resting = { session: "01OLD", row: "done" as const };
+    expect(awaitingWord(resting, "01OLD", view(ended("done"), 9500).task)).toBe(true);
+    expect(awaitingWord(resting, "01OLD", thought)).toBe(false);
   });
 });
 

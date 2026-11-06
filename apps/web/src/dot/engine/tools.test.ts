@@ -2,7 +2,16 @@ import { mulberry32 } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import { DotEngine, type DotPose } from "./engine.ts";
 import type { DotState } from "./states.ts";
-import { type DotTool, HAPPY_MS, TOOL_GAP_MS, TOOL_HOLD_MS, TOOLS } from "./tools.ts";
+import {
+  crewSeats,
+  type DotTool,
+  HAPPY_MS,
+  LEAVE_MS,
+  SAD_MS,
+  TOOL_GAP_MS,
+  TOOL_HOLD_MS,
+  TOOLS,
+} from "./tools.ts";
 
 const engine = (state: DotState = "acting", reducedMotion = false) =>
   new DotEngine({ seed: 5, t: 0, state, lod: "glance", reducedMotion, control: true });
@@ -203,25 +212,165 @@ describe("dot's tools", () => {
     const e = engine("thinking");
     e.setTool("delegating", 0);
     e.setHelpers([{ id: "a" }, { id: "b" }], 0);
-    let helpers = e.pose(800).helpers;
-    expect(helpers.map((h) => h.slot)).toEqual([0, 1]);
+    let helpers = e.pose(1000).helpers;
+    expect(helpers.map((h) => h.index)).toEqual([0, 1]);
     expect(helpers.every((h) => h.amount > 0.9 && h.end === null)).toBe(true);
-    // A helper whose work went well smiles before it goes back; one that failed goes at once.
+    // A helper whose work went well smiles before it goes back; one that failed droops first.
     e.setHelpers(
       [
         { id: "a", ok: true },
         { id: "b", ok: false },
       ],
-      1000,
+      1200,
     );
-    helpers = e.pose(1000 + HAPPY_MS - 20).helpers;
-    expect(helpers.find((h) => h.slot === 0)).toMatchObject({ end: { ok: true } });
-    expect(helpers.find((h) => h.slot === 0)?.amount).toBeGreaterThan(0.99);
-    expect(helpers.find((h) => h.slot === 1)?.amount ?? 0).toBeLessThan(0.9);
-    expect(e.pose(1000 + HAPPY_MS + 1500).helpers).toEqual([]);
-    // A new one takes the first place free.
+    helpers = e.pose(1200 + HAPPY_MS - 20).helpers;
+    expect(helpers[0]).toMatchObject({ end: { ok: true } });
+    expect(helpers[0]?.amount).toBeGreaterThan(0.99);
+    expect(helpers[1]).toMatchObject({ end: { ok: false } });
+    expect(helpers[1]?.amount).toBeGreaterThan(0.99);
+    expect(e.pose(1200 + SAD_MS + 1500).helpers).toEqual([]);
+    // Seats are free again, so one coming later has the first.
     e.setHelpers([{ id: "c" }], 4000);
-    expect(e.pose(4500).helpers.map((h) => h.slot)).toEqual([0]);
+    const [seat] = crewSeats(1, "glance").seats;
+    const [c] = e.pose(4900).helpers;
+    expect(c?.x).toBeCloseTo(seat?.x ?? 0, 3);
+    expect(c?.y).toBeCloseTo(seat?.y ?? 0, 3);
+  });
+
+  it("keeps a helper's seat until it has gone, then closes up on the spring", () => {
+    const e = engine("thinking");
+    e.setTool("delegating", 0);
+    const crew = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    e.setHelpers(crew, 0);
+    const three = crewSeats(3, "glance").seats;
+    const near = (helpers: { y: number }[], seats: { y: number }[]) => {
+      expect(helpers).toHaveLength(seats.length);
+      for (const [at, h] of helpers.entries()) expect(h.y).toBeCloseTo(seats[at]?.y ?? 0, 3);
+    };
+    near(e.pose(1500).helpers, three);
+    e.setHelpers([{ id: "a", ok: true }, ...crew.slice(1)], 1500);
+    near(e.pose(1500 + HAPPY_MS + 100).helpers, three);
+    const gone = 1500 + HAPPY_MS + LEAVE_MS;
+    const closing = e.pose(gone + 60).helpers;
+    expect(closing).toHaveLength(2);
+    const two = crewSeats(2, "glance").seats;
+    // On its way from the old seat to the new, with no jump.
+    expect(Math.abs((closing[0]?.y ?? 0) - (three[1]?.y ?? 0))).toBeLessThan(4);
+    expect(Math.abs((closing[0]?.y ?? 0) - (two[0]?.y ?? 0))).toBeGreaterThan(1);
+    near(e.pose(gone + 2000).helpers, two);
+  });
+
+  it("brings helpers out one after another, not all at once", () => {
+    const e = engine("thinking");
+    e.setTool("delegating", 0);
+    e.setHelpers([{ id: "a" }, { id: "b" }, { id: "c" }], 0);
+    const early = e.pose(120).helpers;
+    expect(early[0]?.amount).toBeGreaterThan(early[1]?.amount ?? 0);
+  });
+
+  it("shows how many more there are than seats, and brings them out as seats free up", () => {
+    const e = engine("thinking");
+    e.setTool("delegating", 0);
+    const crew = Array.from({ length: 6 }, (_, at) => ({ id: `h${at}` }));
+    e.setHelpers(crew, 0);
+    let pose = e.pose(1500);
+    expect(pose.helpers).toHaveLength(3);
+    expect(pose.crewMore).toMatchObject({ count: 3 });
+    e.setHelpers(crew.slice(1), 1500);
+    pose = e.pose(1500 + 2000);
+    expect(pose.helpers).toHaveLength(3);
+    expect(pose.crewMore).toMatchObject({ count: 2 });
+    e.setHelpers(crew.slice(2), 3500);
+    pose = e.pose(3500 + 2000);
+    expect(pose.helpers).toHaveLength(4);
+    expect(pose.crewMore).toBeNull();
+  });
+
+  it("puts the crew away for another prop, with their seats kept", () => {
+    const e = engine("thinking");
+    e.setTool("delegating", 0);
+    e.setHelpers([{ id: "a" }], 0);
+    expect(e.pose(1000).helpers).toHaveLength(1);
+    e.setTool("terminal", 1000);
+    expect(e.pose(3000).helpers).toEqual([]);
+    e.setTool("delegating", 3000);
+    expect(e.pose(9000).helpers).toHaveLength(1);
+  });
+
+  it("holds helpers still under reduced motion, and only fades them", () => {
+    const e = engine("thinking");
+    e.setReducedMotion(true, 0);
+    e.setTool("delegating", 0);
+    e.setHelpers([{ id: "a" }, { id: "b" }], 0);
+    const [a] = e.pose(2000).helpers;
+    expect(a).toMatchObject({ still: true, age: 0 });
+    expect(a?.y).toBeCloseTo(crewSeats(2, "glance").seats[0]?.y ?? 0, 3);
+  });
+
+  it("shows plain pips at the badge size, where no prop shows, and never moves them on a loop", () => {
+    const e = new DotEngine({ seed: 3, t: 0, state: "thinking", lod: "badge" });
+    e.setHelpers([{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }], 0);
+    const pose = e.pose(2000);
+    expect(pose.props).toEqual([]);
+    expect(pose.helpers).toHaveLength(3);
+    expect(pose.crewMore).toBeNull();
+    expect(e.looping(2000)).toBe(false);
+  });
+
+  it("has no loop to draw at the presence size while only its crew is out", () => {
+    const e = new DotEngine({ seed: 3, t: 0, state: "thinking", lod: "presence" });
+    e.setTool("delegating", 0);
+    e.setHelpers([{ id: "a" }], 0);
+    expect(e.looping(2000)).toBe(false);
+    const hero = new DotEngine({ seed: 3, t: 0, state: "thinking", lod: "hero" });
+    hero.setTool("delegating", 0);
+    hero.setHelpers([{ id: "a" }], 0);
+    expect(hero.looping(2000)).toBe(true);
+  });
+
+  describe("the crew's seats", () => {
+    // The ball at rest in the delegating look, its size, and how far the widest thing dot wears
+    // reaches past it, as the plates measure (tools/dot-plates): frame units from its centre.
+    const BALL = { x: 22, y: 36.8, r: 19.2 };
+    const WEAR_REACH = 32.5;
+    const scale = BALL.r / 24;
+    const LODS = ["presence", "glance", "hero"] as const;
+
+    it("are in the frame, clear of each other, of the ball and of what dot wears", () => {
+      for (const lod of LODS)
+        for (let count = 1; count <= 12; count++) {
+          const { seats, more } = crewSeats(count, lod);
+          const all = more ? [...seats, more] : seats;
+          for (const [at, seat] of all.entries()) {
+            expect(seat.x - seat.r, `${lod} ${count}`).toBeGreaterThan(0);
+            expect(seat.x + seat.r, `${lod} ${count}`).toBeLessThan(64);
+            expect(seat.y - seat.r, `${lod} ${count}`).toBeGreaterThan(0);
+            expect(seat.y + seat.r, `${lod} ${count}`).toBeLessThan(64);
+            const out = Math.hypot(seat.x - BALL.x, seat.y - BALL.y) - seat.r;
+            expect(out, `${lod} ${count}`).toBeGreaterThan(WEAR_REACH * scale);
+            for (const other of all.slice(at + 1)) {
+              const gap = Math.hypot(seat.x - other.x, seat.y - other.y) - seat.r - other.r;
+              expect(gap, `${lod} ${count}`).toBeGreaterThan(3);
+            }
+          }
+        }
+    });
+
+    it("are as many as the size has room for, the rest being counted", () => {
+      expect(crewSeats(4, "hero")).toMatchObject({ more: null });
+      expect(crewSeats(5, "hero").seats).toHaveLength(3);
+      expect(crewSeats(5, "hero").more).not.toBeNull();
+      expect(crewSeats(3, "presence")).toMatchObject({ more: null });
+      expect(crewSeats(4, "presence").seats).toHaveLength(2);
+      expect(crewSeats(9, "badge").seats).toHaveLength(3);
+    });
+
+    it("are in the frame's corner at the badge size, clear of the ball", () => {
+      for (const seat of crewSeats(3, "badge").seats) {
+        expect(Math.hypot(seat.x - 32, seat.y - 32) - seat.r).toBeGreaterThan(24);
+        expect(Math.max(seat.x, seat.y) + seat.r).toBeLessThan(64);
+      }
+    });
   });
 
   it("never brings out a helper for work that finished before dot saw it start", () => {

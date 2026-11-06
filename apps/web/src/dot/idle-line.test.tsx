@@ -15,6 +15,7 @@ import {
   seenTips,
   TIP_MS,
   TIPS_KEY,
+  tipText,
   useIdleLine,
   usePageHidden,
 } from "./idle-line.ts";
@@ -216,6 +217,22 @@ describe("tips", () => {
     expect(ids({})).not.toContain("update");
     expect(ids({ update: true })[0]).toBe("update");
     expect(ids({ openAtLogin: "unavailable" })).not.toContain("open-at-login");
+  });
+
+  it("suggests the other view style until this person has been in it", () => {
+    const line = (signals: Partial<TipSignals>) =>
+      rankTips(TIPS, { ...SIGNALS, ...signals }).find((tip) => tip.id === "view-style");
+    const studio = line({ view: "studio", viewsTried: false });
+    const chat = line({ view: "chat", viewsTried: false });
+    expect(studio && tipText(studio, { ...SIGNALS, view: "studio" })).toBe(
+      "Prefer texting me? Try Chat view.",
+    );
+    expect(chat && tipText(chat, { ...SIGNALS, view: "chat" })).toBe(
+      "Want to see everything at once? Try Studio view.",
+    );
+    expect(studio?.action).toEqual({ label: "Try it", opens: "view" });
+    expect(line({ view: "studio", viewsTried: true })).toBeUndefined();
+    expect(line({})).toBeUndefined();
   });
 
   it("waits while the page is hidden or the pointer is over the band, then gives the tip its full turn", () => {

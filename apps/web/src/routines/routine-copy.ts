@@ -172,13 +172,11 @@ export function waitText(minutes: number): string {
   return Number.isInteger(hours) ? `${hours} hour${hours === 1 ? "" : "s"}` : `${minutes} min`;
 }
 
-// What a thread a routine started says above its first message.
-export function originLine(origin: SessionOrigin, tz?: string): string {
-  const at = timeIn(
-    Date.parse(origin.dueAt),
-    tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-  );
+// What opens each run in a routine's conversation, and any thread a follow-up started.
+export function originLine(origin: SessionOrigin, tz?: string, now = Date.now()): string {
+  const zone = tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const due = Date.parse(origin.dueAt);
   return origin.kind === "routine"
-    ? `${origin.name} · started by a routine at ${at}`
-    : `A follow-up dot scheduled · ${at}`;
+    ? `Routine run · ${origin.name} · ${whenText(due, zone, now)}`
+    : `A follow-up dot scheduled · ${timeIn(due, zone)}`;
 }

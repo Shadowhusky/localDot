@@ -16,7 +16,7 @@ export function RunHistory({
   tz: string;
   onOpen?(sessionId: string): void;
   // A run waiting for the user: its task is live, so the answer is given there.
-  onAnswer?(): void;
+  onAnswer?(sessionId: string): void;
 }) {
   if (runs === undefined) return <Skeleton loading shape="block" width="100%" height="132px" />;
   if (runs.length === 0) return <p className="routine-history-empty">It hasn't run yet.</p>;
@@ -34,8 +34,8 @@ export function RunHistory({
                 {whenText(Date.parse(run.startedAt ?? run.dueAt), tz, now)}
               </time>
             </span>
-            {run.outcome === "needs_you" && run.endedAt === null && onAnswer ? (
-              <Button size="sm" onClick={onAnswer}>
+            {run.outcome === "needs_you" && run.endedAt === null && onAnswer && recorded ? (
+              <Button size="sm" onClick={() => onAnswer(recorded)}>
                 Answer
               </Button>
             ) : (

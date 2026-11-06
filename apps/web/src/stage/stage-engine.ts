@@ -1,5 +1,6 @@
-import type { LocalDotEvent, Point } from "@localdot/protocol";
+import { type LocalDotEvent, MODEL_SCREEN, type Point, type ScreenName } from "@localdot/protocol";
 import { APPEARANCE_EVENT } from "../onboarding/appearance.ts";
+import { type StagePoint, type StageScreen, stagePoint } from "./composite.ts";
 import { type FrameSource, framePath } from "./frame-source.ts";
 import { KEEP_MS } from "./live-stream.ts";
 import { manualPoint } from "./manual-point.ts";
@@ -36,6 +37,10 @@ export interface StageCanvasHandle {
   replay: ReplayHandle;
   attach(source: FrameSource): void;
   detach(): void;
+  // The desktop's picture under the browser's window.
+  attachUnder(source: FrameSource): void;
+  detachUnder(): void;
+  onUnderStats(listener: (stats: PumpStats) => void): () => void;
   probe(rect: ProbeRect | null, threshold?: number): void;
   pushEvents(events: LocalDotEvent[]): void;
   resetSession(): void;
@@ -43,6 +48,12 @@ export interface StageCanvasHandle {
   setView(view: StageViewPatch): void;
   setTheme(theme: StageTheme): void;
   manualPoint(point: Point, screen: { w: number; h: number }, follow?: boolean): Point | null;
+  stagePoint(
+    point: Point,
+    desktop: StageScreen,
+    front: ScreenName,
+    within?: StagePoint | null,
+  ): StagePoint | null;
   oracle(command: OracleRequest): Promise<unknown>;
 }
 
@@ -54,9 +65,21 @@ interface Pending {
 
 const reducedMotionQuery = () => window.matchMedia("(prefers-reduced-motion: reduce)");
 
-// The canvas keeps at most this many pixels for each CSS pixel: beyond it a stage-sized picture
-// shows little more, and every frame costs the GPU for each pixel.
-export const MAX_BACKING_SCALE = 1.5;
+// The canvas takes the screen's own pixels, so nothing scales the picture a second time on its way
+// there, up to the point where the picture is drawn one to one: past it a canvas shows nothing more,
+// and every frame costs the GPU for each pixel. The picture may be either 2x or 1x, and the larger
+// one sets the limit.
+export function backingScale(
+  box: { width: number; height: number },
+  devicePixelRatio = window.devicePixelRatio || 1,
+): number {
+  const fits = Math.max(
+    1,
+    (2 * MODEL_SCREEN.width) / box.width,
+    (2 * MODEL_SCREEN.height) / box.height,
+  );
+  return Math.min(devicePixelRatio, fits);
+}
 
 // A stage whose box keeps changing, as when a rail slides open beside it, keeps its canvas's size,
 // its picture scaled to the box, until the box has been still this long: each new size costs the
@@ -83,6 +106,9 @@ export class StageEngine implements StageCanvasHandle {
   #sourceId = 0;
   // The source whose frames the worker was last told how to take.
   #fed = 0;
+  #underSource: FrameSource | null = null;
+  #underId = 0;
+  #underFed = 0;
   // Whether the worker reads a track handed to it; null until it says.
   #workerTracks: boolean | null = null;
   #viewport = { w: 1, h: 1 };
@@ -92,6 +118,7 @@ export class StageEngine implements StageCanvasHandle {
   #replaySeq = 0;
   #replayListeners = new Set<(message: ReplayMessage) => void>();
   #statsListeners = new Set<(stats: PumpStats) => void>();
+  #underStatsListeners = new Set<(stats: PumpStats) => void>();
   #flipListeners = new Set<(flip: Flip) => void>();
   #viewListeners = new Set<(view: StageView) => void>();
   #view: StageView = { onScreen: true, share: 0 };
@@ -106,6 +133,9 @@ export class StageEngine implements StageCanvasHandle {
         this.#sourceId++;
         this.#source?.stop();
         this.#source = null;
+        this.#underId++;
+        this.#underSource?.stop();
+        this.#underSource = null;
         this.#post({ type: "replay-open", source });
       },
       transport: (transport) => this.#post({ type: "replay-transport", transport }),
@@ -134,6 +164,11 @@ export class StageEngine implements StageCanvasHandle {
   onStats(listener: (stats: PumpStats) => void): () => void {
     this.#statsListeners.add(listener);
     return () => this.#statsListeners.delete(listener);
+  }
+
+  onUnderStats(listener: (stats: PumpStats) => void): () => void {
+    this.#underStatsListeners.add(listener);
+    return () => this.#underStatsListeners.delete(listener);
   }
 
   onFlip(listener: (flip: Flip) => void): () => void {
@@ -180,7 +215,7 @@ export class StageEngine implements StageCanvasHandle {
   #start(): void {
     const canvas = this.canvas;
     const rect = canvas.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_BACKING_SCALE);
+    const dpr = backingScale(rect);
     const motion = reducedMotionQuery();
     const worker = new Worker(new URL("./render-worker.ts", import.meta.url), { type: "module" });
     const offscreen = canvas.transferControlToOffscreen();
@@ -214,11 +249,12 @@ export class StageEngine implements StageCanvasHandle {
     // Explicit DPR also respects Chromium's emulated HiDPI: its devicePixelContentBoxSize
     // describes native display pixels and can disagree with the page's devicePixelRatio.
     const resize = () => {
-      const w = Math.round(box.w * dpr);
-      const h = Math.round(box.h * dpr);
+      const scale = backingScale({ width: box.w, height: box.h });
+      const w = Math.round(box.w * scale);
+      const h = Math.round(box.h * scale);
       if (w <= 0 || h <= 0 || (w === this.#viewport.w && h === this.#viewport.h)) return;
       this.#viewport = { w, h };
-      this.#post({ type: "resize", width: w, height: h });
+      this.#post({ type: "resize", width: w, height: h, dpr: scale });
     };
     // A still box's first change is taken at once; one that keeps changing waits to settle.
     let settling: ReturnType<typeof setTimeout> | undefined;
@@ -264,6 +300,8 @@ export class StageEngine implements StageCanvasHandle {
       sight?.disconnect();
       this.#source?.stop();
       this.#source = null;
+      this.#underSource?.stop();
+      this.#underSource = null;
       for (const pending of [...this.#pendingOracle.values(), ...this.#pendingReplay.values()]) {
         clearTimeout(pending.timer);
         pending.reject(new Error("stage closed"));
@@ -272,6 +310,7 @@ export class StageEngine implements StageCanvasHandle {
       this.#pendingReplay.clear();
       this.#replayListeners.clear();
       this.#statsListeners.clear();
+      this.#underStatsListeners.clear();
       this.#flipListeners.clear();
       this.#viewListeners.clear();
       worker.postMessage({ type: "replay-close" } satisfies WorkerIn);
@@ -284,6 +323,11 @@ export class StageEngine implements StageCanvasHandle {
     if (m.type === "caps") {
       this.#workerTracks = m.tracks;
       if (this.#source && this.#fed !== this.#sourceId) this.#feed(this.#sourceId, this.#source);
+      if (this.#underSource && this.#underFed !== this.#underId)
+        this.#feed(this.#underId, this.#underSource, true);
+    } else if (m.type === "stats" && m.under) {
+      if (!this.#underSource || m.sourceId !== this.#underId) return;
+      for (const listener of this.#underStatsListeners) listener(m.stats);
     } else if (m.type === "stats") {
       if (!this.#source || m.sourceId !== this.#sourceId) return;
       this.#mark(m.stats);
@@ -352,12 +396,38 @@ export class StageEngine implements StageCanvasHandle {
     this.#feed(id, source);
   }
 
-  #feed(id: number, source: FrameSource): void {
+  attachUnder(source: FrameSource): void {
+    const id = ++this.#underId;
+    this.#underSource?.stop();
+    this.#underSource = source;
+    if (!this.#worker) {
+      source.stop();
+      this.#underSource = null;
+      return;
+    }
+    if (!source.readable && source.track && this.#workerTracks === null) return;
+    this.#feed(id, source, true);
+  }
+
+  detachUnder(): void {
+    this.#underId += 1;
+    this.#underSource?.stop();
+    this.#underSource = null;
+    this.#post({ type: "stop", under: true });
+  }
+
+  #feed(id: number, source: FrameSource, under = false): void {
     const worker = this.#worker;
     if (!worker) return;
-    this.#fed = id;
+    const lost = () => {
+      if (under) this.#underSource = null;
+      else this.#source = null;
+    };
+    const tag = under ? { under } : {};
+    if (under) this.#underFed = id;
+    else this.#fed = id;
     const path = framePath(source, this.#workerTracks);
-    if (path) this.canvas.dataset.path = path;
+    if (path && !under) this.canvas.dataset.path = path;
     // S8's seed frame travels with the readable; both are transferred.
     if (path === "stream" && source.readable) {
       const transfer: Transferable[] = source.first
@@ -365,12 +435,12 @@ export class StageEngine implements StageCanvasHandle {
         : [source.readable];
       try {
         worker.postMessage(
-          { type: "frames", sourceId: id, readable: source.readable, first: source.first },
+          { type: "frames", sourceId: id, readable: source.readable, first: source.first, ...tag },
           transfer,
         );
       } catch (err) {
         source.stop();
-        this.#source = null;
+        lost();
         void source.readable.cancel().catch(() => {});
         console.warn("could not attach desktop frames", err);
       }
@@ -379,33 +449,43 @@ export class StageEngine implements StageCanvasHandle {
     if (path === "track" && source.track) {
       const track = source.track;
       try {
-        worker.postMessage({ type: "frames", sourceId: id, track } satisfies WorkerIn, [track]);
+        worker.postMessage({ type: "frames", sourceId: id, track, ...tag } satisfies WorkerIn, [
+          track,
+        ]);
         source.track = undefined;
         return;
       } catch {
         // This browser cannot hand a track over: its frames are copied on the page instead.
         this.#workerTracks = false;
-        this.canvas.dataset.path = "presented";
+        if (!under) this.canvas.dataset.path = "presented";
       }
     }
     source.track?.stop();
     source.track = undefined;
     if (!source.frames) {
       source.stop();
-      this.#source = null;
+      lost();
       return;
     }
     worker.postMessage(
-      { type: "frames", sourceId: id, pushed: true, first: source.first } satisfies WorkerIn,
+      {
+        type: "frames",
+        sourceId: id,
+        pushed: true,
+        first: source.first,
+        ...tag,
+      } satisfies WorkerIn,
       source.first ? [source.first] : [],
     );
     source.frames((frame) => {
-      if (this.#sourceId !== id) {
+      if ((under ? this.#underId : this.#sourceId) !== id) {
         frame.close();
         return;
       }
       try {
-        worker.postMessage({ type: "frame", sourceId: id, frame } satisfies WorkerIn, [frame]);
+        worker.postMessage({ type: "frame", sourceId: id, frame, ...tag } satisfies WorkerIn, [
+          frame,
+        ]);
       } catch {
         frame.close();
       }
@@ -452,6 +532,23 @@ export class StageEngine implements StageCanvasHandle {
   manualPoint(point: Point, screen: { w: number; h: number }, follow = false): Point | null {
     if (!this.canvas.isConnected) return null;
     return manualPoint(this.canvas.getBoundingClientRect(), screen, point, this.#viewport, follow);
+  }
+
+  stagePoint(
+    point: Point,
+    desktop: StageScreen,
+    front: ScreenName,
+    within?: StagePoint | null,
+  ): StagePoint | null {
+    if (!this.canvas.isConnected) return null;
+    return stagePoint(
+      this.canvas.getBoundingClientRect(),
+      desktop,
+      point,
+      this.#viewport,
+      front,
+      within,
+    );
   }
 
   oracle(command: OracleRequest): Promise<unknown> {

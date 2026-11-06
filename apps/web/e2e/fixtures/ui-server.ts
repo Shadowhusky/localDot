@@ -25,14 +25,18 @@ import {
   type KeydRecord,
   microsToMs,
   msToMicros,
+  nextDue,
   PersonaId,
   type Point,
   RECORDING_DIR,
   RECORDING_VIDEO,
   type ResearchBudget,
+  type ResultPreview,
   type ReviseLink,
+  type RoutineDraft,
   SEAL_INFO,
   type Sealed,
+  SealedLogin,
   type SessionOrigin,
   type TaskModelSelection,
   type ToolName,
@@ -48,6 +52,7 @@ import {
   type CodexInstaller,
   type InstalledCodex,
 } from "../../../../harness/codex/src/index.ts";
+import type { BrowserEngineStatus } from "../../../../packages/protocol/src/browser-engine.ts";
 import { resolveRole, taskSelection } from "../../../daemon/src/agent/bindings.ts";
 import {
   AccountError,
@@ -83,6 +88,7 @@ import { plainForm } from "../../../daemon/src/agent/tools/ask.ts";
 import { createApp } from "../../../daemon/src/app.ts";
 import { AppEvents, appEventsRoute } from "../../../daemon/src/app-events.ts";
 import type { AccountsDeps } from "../../../daemon/src/browser/accounts.ts";
+import type { BrowserEngineDeps } from "../../../daemon/src/browser/engine-routes.ts";
 import { BrowserStreams } from "../../../daemon/src/browser/streams.ts";
 import { browserViewerApi } from "../../../daemon/src/browser/viewer.ts";
 import type { ReadyBrowser } from "../../../daemon/src/cells/browser-orchestrator.ts";
@@ -123,7 +129,6 @@ import { createNotify } from "../../../daemon/src/notify/wiring.ts";
 import { writeManifest } from "../../../daemon/src/recorder/manifest.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
-import { nextDue } from "../../../daemon/src/routines/schedule.ts";
 import { stopAll } from "../../../daemon/src/routines/stop-all.ts";
 import { RoutineStore, scheduleOf, toRoutine } from "../../../daemon/src/routines/store.ts";
 import { SearchFeed } from "../../../daemon/src/search/search-feed.ts";
@@ -291,7 +296,9 @@ const SETTINGS: Record<string, AgentSettings> = {
 // A screen's client repaints one still frame, so the picture is steady while the stream stays
 // live. It asks the fixture whether its screen's picture is dropped (POST /__qa/picture/drop): then
 // its video goes, as Selkies' does while it reconnects, and comes back with a new track on resume.
+// It takes focus for its input as it starts, as Selkies' attach does.
 const clientJs = (paint: string) => `
+const keys=document.createElement('input');document.body.append(keys);keys.focus({preventScroll:true});
 let seen={};
 const canvas=document.createElement('canvas');canvas.width=2560;canvas.height=1600;
 const ctx=canvas.getContext('2d');${paint}
@@ -330,6 +337,7 @@ const base = monotonicClock();
 const clock = { nowMicros: () => (heldAt ?? base.nowMicros()) + skew };
 const log = new EventLog(HOME, clock);
 const conversations = new Conversations(HOME, log);
+let lastTurnModel: string | undefined;
 const cells = new FakeOrchestrator();
 const tickets = new TicketRegistry();
 // The web browser of the computer: the daemon's own BrowserStreams over a browser that is either
@@ -411,6 +419,10 @@ if (initial) cells.emit(initial);
 const START_MS = Number(env.QA_START_MS ?? 1500);
 // How long dot takes to answer a new task; `POST /__qa/reply?ms=` changes it.
 let replyMs = 800;
+// How long dot's brain takes to say anything about a new task or a follow-up, as the real one
+// starts up; its reply comes `replyMs` after that. Unset, a new task thinks at once and a follow-up
+// is left unanswered. `POST /__qa/reply?wake=` sets it.
+let wakeMs: number | null = null;
 function operation(
   kind: "first-start" | "start",
   step: ComputerOperationStep,
@@ -744,10 +756,16 @@ function seedResearchTask(s: AgentSession) {
 }
 
 // An ended task: what the user asked, dot's reply and result. It continues `continues`.
-function endedTask(title: string, reply: string, summary: string, continues?: string): string {
+function endedTask(
+  title: string,
+  reply: string,
+  summary: string,
+  continues?: string,
+  turns = 0,
+): string {
   const id = log.createSession(title);
-  const append = (type: string, data: Record<string, unknown>) =>
-    log.append(id, { agent: "main", type, data } as never);
+  const append: Append = (type, data, step) =>
+    log.append(id, { agent: "main", type, data, ...(step ? { step } : {}) } as never);
   append("session.start", {
     screen: { w: 2560, h: 1600, scale: 2 },
     os: "linux",
@@ -755,6 +773,7 @@ function endedTask(title: string, reply: string, summary: string, continues?: st
     ...(continues ? { continues } : {}),
   });
   append("message.user", { messageId: ulid(), kind: "task", text: title });
+  for (let turn = 1; turn <= turns; turn++) talkTurn(id, append, turn);
   append("message.assistant", { messageId: ulid(), text: reply });
   append("task.result", { summary, files: [] });
   append("session.end", { reason: "done" });
@@ -762,6 +781,55 @@ function endedTask(title: string, reply: string, summary: string, continues?: st
 }
 
 type Append = (type: string, data: Record<string, unknown>, step?: string) => void;
+
+const PARAGRAPH =
+  "The totals in this part of the sheet match the receipts, so I moved on to the next column and checked each row against the bank's export before writing anything down.";
+
+// A turn of a long conversation, the same on every run: messages long and short, a run of steps,
+// screenshots and saved pictures. `short` keeps every row to about a line.
+function talkTurn(id: string, append: Append, turn: number, short = false) {
+  const say: Append = (type, data, step) => {
+    skew += type === "step.end" ? 1_100_000 : 320_000;
+    append(type, data, step);
+  };
+  const tag = `${id.slice(-4)}.${turn}`;
+  say("message.user", {
+    messageId: ulid(),
+    kind: "followup",
+    text: short
+      ? `Next ${tag}`
+      : `Please check part ${tag} of the sheet and tell me what you find.`,
+  });
+  const paragraphs = short ? 0 : (turn * 7) % 5;
+  say("message.assistant", {
+    messageId: ulid(),
+    text: [`Part ${tag}.`, ...Array.from({ length: paragraphs }, () => PARAGRAPH)].join("\n\n"),
+  });
+  for (let index = 0, steps = short ? 1 : 1 + (turn % 4); index < steps; index++) {
+    const step = ulid();
+    say("step.start", { kind: "shell" }, step);
+    say("tool.start", { tool: "shell", title: `Check row ${tag}/${index}` }, step);
+    say("tool.output", { stream: "stdout", chunk: `row ${index} ok\n` }, step);
+    if (!short && turn % 3 === 0 && index === 0) {
+      const frameId = ulid();
+      const file = join(ASSETS, `frame-${(turn % 4) + 1}.webp`);
+      if (existsSync(file)) {
+        frames.save(id, frameId, readFileSync(file));
+        say("observe", { frameId, width: 2560, height: 1600 }, step);
+      }
+    }
+    if (!short && turn % 5 === 0 && index === 0 && stepImageJpeg) {
+      const image = { name: `step-image-${ulid()}.jpg`, alt: `Saved part ${tag}` };
+      const out = join(HOME, "sessions", id, "out");
+      mkdirSync(out, { recursive: true, mode: 0o700 });
+      writeFileSync(join(out, image.name), stepImageJpeg, { mode: 0o600 });
+      say("tool.output", { stream: "stdout", chunk: "Read image", image }, step);
+    }
+    say("tool.end", { ok: true, exitCode: 0 }, step);
+    say("step.end", { status: "ok" }, step);
+  }
+  say("message.assistant", { messageId: ulid(), text: `Done with part ${tag}.` });
+}
 
 const planItems = (finished: boolean) => [
   { id: "open", text: "Open the sample spreadsheet", status: "done" },
@@ -775,7 +843,13 @@ const planItems = (finished: boolean) => [
 const MARKDOWN_SUMMARY =
   "## Couldn't print the report\n\nI made **summary.md**, but this computer has no printer, so nothing was printed.\n\n### What I checked\n\n- **Printers:** none are set up on this computer\n- **Drivers:** the `cups` service isn't installed\n- **Your files:** `summary.md` and `totals.csv` are ready to print elsewhere";
 
-function finishTask(s: AgentSession, a: Append, done = false, markdown = false) {
+function finishTask(
+  s: AgentSession,
+  a: Append,
+  done = false,
+  markdown = false,
+  previews?: ResultPreview[],
+) {
   a("message.assistant", {
     messageId: ulid(),
     text: "## Report ready\n\nThe **monthly total** is 12,480. I saved `summary.md` and updated `totals.csv`.",
@@ -799,6 +873,7 @@ function finishTask(s: AgentSession, a: Append, done = false, markdown = false) 
       { name: "summary.md", path: "summary.md", bytes: 48 },
       { name: "totals.csv", path: "totals.csv", bytes: 32 },
     ],
+    ...(previews ? { previews } : {}),
   });
   s.setStatus("idle");
   a("agent.state", { state: done ? "done" : "idle" });
@@ -1016,6 +1091,156 @@ function seedTask(s: AgentSession, finished: boolean) {
       liveStep,
     );
   }
+}
+
+// QA_ACTIVITY=readme: the README's everyday conversation. A while ago dot, as the dot Auto chose,
+// found the report; now it checks the figures, and every step so far went well.
+const README_TITLE = "Last year's sales report";
+function seedReadmeFind(): string {
+  return backdated(20 * 60_000, () => {
+    const id = log.createSession(README_TITLE);
+    const a: Append = (type, data, step) => {
+      skew += type === "step.end" ? 9_000_000 : 1_500_000;
+      log.append(id, { agent: "main", type, data, ...(step ? { step } : {}) } as never);
+    };
+    a("session.start", {
+      screen: { w: 2560, h: 1600, scale: 2 },
+      os: "linux",
+      title: README_TITLE,
+    });
+    a("message.user", {
+      messageId: ulid(),
+      kind: "task",
+      text: "Can you find last year's sales report? I think it's somewhere in Documents.",
+    });
+    a("persona.choice", {
+      persona: "finance",
+      by: "auto",
+      reason: "Sales figures in a spreadsheet",
+    });
+    a("message.assistant", {
+      messageId: ulid(),
+      text: "Sure, I'll look through Documents for it.",
+    });
+    const search = ulid();
+    a("step.start", { kind: "shell", intent: "Looking for spreadsheets in Documents" }, search);
+    a("tool.start", { tool: "shell", title: "Find spreadsheets in Documents" }, search);
+    a(
+      "tool.output",
+      {
+        stream: "stdout",
+        chunk: "Documents/Reports/monthly-report.ods\nDocuments/Home/budget.ods\n",
+      },
+      search,
+    );
+    a("tool.end", { ok: true, exitCode: 0 }, search);
+    a("step.end", { status: "ok" }, search);
+    const open = ulid();
+    a("step.start", { kind: "gui", intent: "Opening the report to check it" }, open);
+    a(
+      "action.intent",
+      { verb: "click", label: "Open monthly-report.ods", risk: "none", point: { x: 1280, y: 420 } },
+      open,
+    );
+    a("action.result", { ok: true }, open);
+    const frameId = ulid();
+    frames.save(id, frameId, readFileSync(join(ASSETS, "frame-1.webp")));
+    a("observe", { frameId, width: 2560, height: 1600 }, open);
+    a("step.end", { status: "ok" }, open);
+    a("task.result", {
+      summary:
+        "Found it: **monthly-report.ods** in Documents/Reports, with orders, revenue and returns for every month of last year.",
+      files: [],
+    });
+    a("session.end", { reason: "done" });
+    return id;
+  });
+}
+
+function seedReadmeCheck(s: AgentSession) {
+  const a: Append = (type, data, step) => {
+    skew += type === "step.end" ? 1_100_000 : 320_000;
+    s.append(type, data, step);
+  };
+  a("message.user", {
+    messageId: ulid(),
+    kind: "task",
+    text: "Thanks! Can you check the net figures add up, then save me a short summary?",
+  });
+  a("agent.state", { state: "thinking" });
+  a("message.assistant", {
+    messageId: ulid(),
+    text: "Sure. I'll add up the net column, check each month against revenue minus returns, then write the summary.",
+  });
+  a("plan.set", {
+    items: [
+      { id: "total", text: "Add up the net column", status: "done" },
+      { id: "months", text: "Check each month's net figure", status: "doing" },
+      { id: "summary", text: "Write the summary", status: "todo" },
+    ],
+  });
+  const sum = ulid();
+  a("step.start", { kind: "gui", planItem: "total", intent: "Adding up the net column" }, sum);
+  a(
+    "action.intent",
+    { verb: "type", label: "Type =SUM(F2:F13)", risk: "low", point: { x: 1900, y: 1300 } },
+    sum,
+  );
+  a(
+    "action.dispatch",
+    {
+      input: { kind: "type", chars: 12, masked: false },
+      pressT: 3_000_000,
+      ringAt: 3_006_000,
+      injector: "xtest",
+    },
+    sum,
+  );
+  a("text.progress", { chunk: "=SUM(F2:F13)", count: 12, masked: false }, sum);
+  a("action.result", { ok: true }, sum);
+  a("step.end", { status: "ok" }, sum);
+  const check = ulid();
+  a(
+    "step.start",
+    { kind: "shell", planItem: "total", intent: "Checking the total against the raw data" },
+    check,
+  );
+  a("tool.start", { tool: "shell", title: "Check totals with csvstat" }, check);
+  a(
+    "tool.output",
+    { stream: "stdout", chunk: "$ csvstat --sum monthly.csv\nNet: matches\n" },
+    check,
+  );
+  a("tool.end", { ok: true, exitCode: 0 }, check);
+  a("step.end", { status: "ok" }, check);
+  a("message.assistant", {
+    messageId: ulid(),
+    text: "The total matches the raw data. Now I'm going through the months one by one.",
+  });
+  s.setStatus("running");
+  a("agent.state", { state: "acting" });
+  liveStep = ulid();
+  a(
+    "step.start",
+    {
+      kind: "gui",
+      planItem: "months",
+      intent: "Checking January's net figure against revenue minus returns",
+    },
+    liveStep,
+  );
+  a(
+    "action.intent",
+    {
+      verb: "click",
+      label: "Select January's net figure",
+      risk: "none",
+      point: { x: 2060, y: 455 },
+    },
+    liveStep,
+  );
+  // Its look would come from the random task id; the README's dot dresses the same on every run.
+  conversations.organize(s.id, { look: ["cap", "suit"] });
 }
 
 // QA_ACTIVITY=long: a long hand-drawing task, so the Activity rail is checked with many steps,
@@ -1332,16 +1557,21 @@ for (let n = 0; n < Number(env.QA_EARLIER ?? 0); n++)
       : "The figures add up.",
     n === 0 ? "Found sales.xlsx in Documents." : "Checked the figures.",
     earlier,
+    Number(env.QA_EARLIER_TURNS ?? 0),
   );
 if (withSession && initial) {
   heldAt = base.nowMicros();
   const researching = env.QA_ACTIVITY === "research";
+  const readme = env.QA_ACTIVITY === "readme";
+  if (readme) earlier = seedReadmeFind();
   session = newSession(
-    env.QA_ACTIVITY === "long"
-      ? "Sample · dog drawing"
-      : researching
-        ? "Sample · heat pump research"
-        : "Sample · monthly report",
+    readme
+      ? README_TITLE
+      : env.QA_ACTIVITY === "long"
+        ? "Sample · dog drawing"
+        : researching
+          ? "Sample · heat pump research"
+          : "Sample · monthly report",
     "Sample task",
     earlier,
     undefined,
@@ -1351,6 +1581,7 @@ if (withSession && initial) {
   attachLive(session);
   if (env.QA_ACTIVITY === "long") seedLongTask(session);
   else if (researching) seedResearchTask(session);
+  else if (readme) seedReadmeCheck(session);
   else seedTask(session, phase === "finished");
   skew -= base.nowMicros() - heldAt;
   heldAt = undefined;
@@ -1665,7 +1896,7 @@ function seedPlanUsage(state: (typeof PLAN_USAGE)[number]) {
 const planUsageState = env.QA_PLAN_USAGE as (typeof PLAN_USAGE)[number] | undefined;
 if (planUsageState) seedPlanUsage(planUsageState);
 // What the user's direct control delivered to the fake computer, in order, with when it arrived.
-const manualInputs: { at: number; input: unknown }[] = [];
+const manualInputs: { at: number; input: unknown; screen?: string }[] = [];
 const agent: AgentRoutesDeps = {
   home: HOME,
   settings: settingsStore,
@@ -1703,6 +1934,7 @@ const agent: AgentRoutesDeps = {
     },
   ],
   conversations,
+  keyModels: { list: async () => [{ id: "gpt-6.1-sol" }, { id: "gpt-6.1-terra" }] },
   canChangeMemory: () => !session?.controlHeld && !killSwitch.isBusy(cellId),
   taskMutationReady: (owner) =>
     owner === session &&
@@ -1725,6 +1957,22 @@ const agent: AgentRoutesDeps = {
           : "Nothing has happened in this task yet.",
         provider: "openai",
         model: "gpt-6-luna",
+      };
+    },
+    // A task's own model, kept as the real runner keeps it.
+    taskModel: (id) => conversations.model(conversations.latest(id)),
+    chooseTaskModel: (id, ref) => {
+      conversations.chooseModel(conversations.latest(id), ref);
+      return ref;
+    },
+    messageTurn: async (id, ref) => {
+      lastTurnModel = ref.model;
+      conversations.chooseModel(conversations.latest(id), ref);
+      return {
+        model: { provider: ref.provider, model: ref.model },
+        ref,
+        moves: () => false,
+        reached: () => {},
       };
     },
     get: (key) => (session && key === session.id ? session : undefined),
@@ -1752,8 +2000,13 @@ const agent: AgentRoutesDeps = {
       session.askTask();
       if (!continues) lookFirst(session);
       session.setStatus("running");
-      session.append("agent.state", { state: "thinking" });
       const s = session;
+      const wake = () => {
+        if (!s.stopped) s.append("agent.state", { state: "thinking" });
+      };
+      if (wakeMs === null) wake();
+      else setTimeout(wake, wakeMs);
+      const replyAt = (wakeMs ?? 0) + replyMs;
       setTimeout(() => {
         if (s.stopped) return;
         s.append("message.assistant", {
@@ -1771,7 +2024,7 @@ const agent: AgentRoutesDeps = {
           s.append("agent.state", { state: "acting" });
           readSources(s, 3);
         }
-      }, replyMs);
+      }, replyAt);
       return s;
     },
     release: async () => {
@@ -1814,6 +2067,12 @@ const agent: AgentRoutesDeps = {
     switchPersona: (key, persona) => {
       if (!session || key !== session.id) throw new AgentError(409, "This task has ended.");
       session.append("persona.choice", { persona, by: "user" });
+    },
+    // As the runner does: the dot the live task works as now.
+    dotOf: (key) => {
+      if (!session || key !== session.id || session.stopped) return undefined;
+      const chosen = log.read(key).findLast((event) => event.type === "persona.choice");
+      return chosen?.type === "persona.choice" ? chosen.data.persona : undefined;
     },
     selectionOf: () =>
       chatgptState === "signed_in" && settingsMode === "chatgpt"
@@ -1859,17 +2118,25 @@ const agent: AgentRoutesDeps = {
     },
   } as AgentRoutesDeps["runner"],
   desktop: () => undefined,
-  manual: (owner) =>
+  manual: (owner, _scope, screen) =>
     owner === session
       ? {
           screen: { w: 2560, h: 1600 },
           client: {
             input: (request, signal, onPress) => {
-              manualInputs.push({ at: Date.now(), input: request.input });
+              manualInputs.push({
+                at: Date.now(),
+                input: request.input,
+                ...(screen ? { screen } : {}),
+              });
               return client.input(request, signal, onPress);
             },
             type: (request, onProgress, signal) => {
-              manualInputs.push({ at: Date.now(), input: { kind: "text", text: request.text } });
+              manualInputs.push({
+                at: Date.now(),
+                input: { kind: "text", text: request.text },
+                ...(screen ? { screen } : {}),
+              });
               return client.type(request, onProgress, signal);
             },
           },
@@ -2050,6 +2317,43 @@ let cookieDomains = [
   { domain: ".github.com", count: 5 },
   { domain: "www.bbc.co.uk", count: 4 },
 ];
+let browserEngineState: BrowserEngineStatus = {
+  engine: "chromium",
+  version: "154.0.8037.57",
+  choice: null,
+  offered: true,
+  builtIn: false,
+  installing: false,
+  restartNeeded: false,
+};
+const browserEngine: BrowserEngineDeps = {
+  engineStatus: async () => browserEngineState,
+  chooseEngine: async (request) => {
+    browserEngineState =
+      request.choice === "chrome"
+        ? {
+            ...browserEngineState,
+            engine: "chrome",
+            version: "157.0.8103.38",
+            choice: "chrome",
+            backup: { at: "2026-11-01T10:00:00.000Z", version: "154.0.8037.57" },
+          }
+        : { ...browserEngineState, choice: "chromium" };
+  },
+  restoreEngineBackup: async () => {
+    const { backup: _, ...rest } = browserEngineState;
+    browserEngineState = {
+      ...rest,
+      engine: "chromium",
+      version: "154.0.8037.57",
+      choice: "chromium",
+    };
+  },
+  dropEngineBackup: async () => {
+    const { backup: _, ...rest } = browserEngineState;
+    browserEngineState = rest;
+  },
+};
 const accounts: AccountsDeps = {
   cells,
   browser: {
@@ -2074,6 +2378,14 @@ const accounts: AccountsDeps = {
 // Connected apps: each answers in memory with its own tools. POST /__qa/connectors adds GitHub
 // (ready, its key saved), Linear (waiting for a sign-in) and Brave Search (needing its key).
 const CONNECTOR_TOOLS: Record<string, FakeTool[]> = {
+  linear: [
+    {
+      name: "list_issues",
+      description: "List your issues.",
+      annotations: { readOnlyHint: true },
+    },
+    { name: "create_issue", description: "Create an issue." },
+  ],
   github: [
     {
       name: "list_issues",
@@ -2108,13 +2420,70 @@ const connectorHub = new ConnectorHub({
   links: connectorLinks,
   keys: async () => keys,
 });
+// An app's sign-in service, in memory: it answers discovery and registration as a real one does. The
+// page it hands the browser is recorded rather than opened, and GET /__qa/connect says where it
+// would send the user back, so a test approves by visiting that. The fixture stands in for keyd too,
+// recording the code and listing the sign-in it would keep.
+const FAKE_AUTH = "https://auth.fake-app.example";
+const connectPages: string[] = [];
+const connectGrants: { id: string; code: string; clientId: string; tokenEndpoint: string }[] = [];
+const connectState = { remote: false, opens: true };
+const fakeSignInFetch = async (input: string | URL, init?: RequestInit): Promise<Response> => {
+  const url = new URL(String(input));
+  const json = (value: unknown, status = 200) =>
+    new Response(JSON.stringify(value), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  if (init?.method === "POST" && url.origin !== FAKE_AUTH) return new Response("", { status: 401 });
+  if (url.pathname.startsWith("/.well-known/oauth-protected-resource"))
+    return json({ resource: url.origin, authorization_servers: [FAKE_AUTH] });
+  if (url.origin === FAKE_AUTH && url.pathname === "/.well-known/oauth-authorization-server")
+    return json({
+      issuer: FAKE_AUTH,
+      authorization_endpoint: `${FAKE_AUTH}/authorize`,
+      token_endpoint: `${FAKE_AUTH}/token`,
+      response_types_supported: ["code"],
+      code_challenge_methods_supported: ["S256"],
+      client_id_metadata_document_supported: true,
+    });
+  return new Response("not found", { status: 404 });
+};
 const connectorSignIn = new ConnectorSignIn({
   hub: connectorHub,
-  keyd: { status: async () => ({ sealKey }) as never, putSecret: async () => ({}) as never },
-  fetchFor: async () => ({
-    fetch: async () => new Response("", { status: 404 }),
-    close: async () => {},
-  }),
+  keyd: {
+    status: async () => ({ oauth: true }) as never,
+    connectOAuth: (async (
+      binding: { id: string; hosts: string[]; header: string; format: string },
+      grant: { code: string; clientId: string; tokenEndpoint: string },
+    ) => {
+      connectGrants.push({
+        id: binding.id,
+        code: grant.code,
+        clientId: grant.clientId,
+        tokenEndpoint: grant.tokenEndpoint,
+      });
+      const at = new Date().toISOString();
+      const record: KeydRecord = {
+        id: binding.id,
+        kind: "http",
+        hosts: binding.hosts,
+        header: binding.header,
+        format: binding.format,
+        createdAt: at,
+        updatedAt: at,
+        oauth: { refreshes: true, account: "ada@example.com" },
+      };
+      keys = [...keys.filter((k) => k.id !== binding.id), record];
+      return record;
+    }) as never,
+  },
+  fetchFor: async () => ({ fetch: fakeSignInFetch as never, close: async () => {} }),
+  open: async (url) => {
+    if (!connectState.opens) return false;
+    connectPages.push(url);
+    return true;
+  },
 });
 const routes = createApp({
   token: TOKEN,
@@ -2131,6 +2500,7 @@ const routes = createApp({
       },
     },
     signIn: connectorSignIn,
+    remote: () => connectState.remote,
   },
   cells: {
     cells,
@@ -2141,6 +2511,7 @@ const routes = createApp({
   },
   desktop: realDesktop,
   accounts,
+  browserEngine,
   gateway: {
     registry,
     clock,
@@ -2233,6 +2604,7 @@ routes.get("/api/keyd", (c) =>
         bootId: "qa",
         sealKey,
         generalSecrets: true,
+        savedLogins: true,
         audit: keydMode === "audit" ? { ok: false, error: "audit log unwritable" } : { ok: true },
         hairpin:
           keydMode === "guard"
@@ -2249,7 +2621,10 @@ function fixtureVault() {
     : { backend: "file", state: keydMode === "locked" ? "locked" : "ready", key: "passphrase" };
 }
 // As keyd: opens the passphrase the page sealed to this boot's key, under the vault's own AAD.
-async function openPassphrase(sealed: Sealed): Promise<string | undefined> {
+async function openPassphrase(
+  sealed: Sealed,
+  aad = "vault-passphrase",
+): Promise<string | undefined> {
   const { subtle } = webcrypto;
   const ephemeral = fromBase64url(sealed.epk);
   try {
@@ -2283,7 +2658,7 @@ async function openPassphrase(sealed: Sealed): Promise<string | undefined> {
       {
         name: "AES-GCM",
         iv: fromBase64url(sealed.nonce),
-        additionalData: new TextEncoder().encode(`${SEAL_INFO}:vault-passphrase`),
+        additionalData: new TextEncoder().encode(`${SEAL_INFO}:${aad}`),
       },
       key,
       fromBase64url(sealed.ct),
@@ -2293,6 +2668,87 @@ async function openPassphrase(sealed: Sealed): Promise<string | undefined> {
     return undefined;
   }
 }
+// Saved logins, as keyd takes them: sealed in the page, listed without their passwords, and an
+// export read only here. Its rows are told apart just far enough to show the summary.
+let savedLogins: { origin: string; username: string; confirm: boolean }[] = [];
+routes.post("/__qa/logins", (c) => {
+  savedLogins = [
+    { origin: "https://github.com", username: "henry@example.com", confirm: true },
+    { origin: "https://www.notion.so", username: "henry@example.com", confirm: true },
+  ];
+  return c.json({ ok: true });
+});
+const loginsUnavailable = (c: {
+  text(body: string, status: 503): Response;
+  json(body: unknown, status: 423): Response;
+}) =>
+  keydMode === "offline"
+    ? c.text("owned key layer offline", 503)
+    : keydMode === "locked" || keydMode === "setup"
+      ? c.json(
+          {
+            error: "vault-locked",
+            message: "Saved keys are locked. Unlock them in Keys, then try again.",
+          },
+          423,
+        )
+      : undefined;
+routes.get("/api/logins", (c) => loginsUnavailable(c) ?? c.json({ logins: savedLogins }));
+routes.post("/api/logins", async (c) => {
+  const refused = loginsUnavailable(c);
+  if (refused) return refused;
+  const input = SealedLogin.safeParse(await c.req.json().catch(() => null));
+  const plain = input.success && (await openPassphrase(input.data.sealed, "saved-login"));
+  if (!plain) return c.json({ error: "bad-seal", message: "seal the login again" }, 409);
+  const given = JSON.parse(plain) as { origin: string; username: string; password?: string };
+  const login = { origin: given.origin, username: given.username, confirm: true };
+  savedLogins = [...savedLogins.filter((one) => one.origin !== login.origin), login];
+  effects.push(given.password ? "login:saved" : "login:account");
+  return c.json({ login });
+});
+routes.post("/api/logins/import", async (c) => {
+  const refused = loginsUnavailable(c);
+  if (refused) return refused;
+  const input = SealedLogin.safeParse(await c.req.json().catch(() => null));
+  const plain = input.success && (await openPassphrase(input.data.sealed, "login-import"));
+  if (plain === false || plain === undefined)
+    return c.json({ error: "bad-seal", message: "seal the file again" }, 409);
+  const [head = "", ...rows] = plain.split(/\r?\n/u).filter((row) => row.trim());
+  const columns = head.toLowerCase().split(",");
+  const [url, username, password] = ["url", "username", "password"].map((name) =>
+    columns.indexOf(name),
+  ) as [number, number, number];
+  if (url < 0 || password < 0)
+    return c.json({ error: "not-an-export", message: "not a password export" }, 400);
+  const noPassword: number[] = [];
+  let imported = 0;
+  let alreadySaved = 0;
+  rows.forEach((row, at) => {
+    const cells = row.split(",");
+    if (!cells[password]) noPassword.push(at + 2);
+    else {
+      const origin = new URL(cells[url] ?? "").origin;
+      if (savedLogins.some((one) => one.origin === origin)) alreadySaved++;
+      else {
+        imported++;
+        savedLogins = [...savedLogins, { origin, username: cells[username] ?? "", confirm: true }];
+      }
+    }
+  });
+  effects.push(`login:import:${imported}`);
+  return c.json({
+    rows: rows.length,
+    imported,
+    alreadySaved,
+    skipped: noPassword.length
+      ? [{ reason: "no-password", count: noPassword.length, lines: noPassword }]
+      : [],
+  });
+});
+routes.delete("/api/logins/:origin", (c) => {
+  savedLogins = savedLogins.filter((one) => one.origin !== c.req.param("origin"));
+  return c.body(null, 204);
+});
 routes.post("/api/keyd/unlock", async (c) => {
   const input = VaultUnlock.safeParse(await c.req.json().catch(() => null));
   if (!input.success) return c.json({ error: "bad-request", message: "send { sealed }" }, 400);
@@ -2892,6 +3348,19 @@ function ask(): string | undefined {
 // Questions with typed fields (design-v2/HITL.md §3), answered through the real answer route.
 // The secret fields' targets are in the screen's pixels (2560x1600).
 const ASK_FORMS: Record<string, AskForm> = {
+  connect: {
+    question: "Connect Linear?",
+    fields: [
+      {
+        id: "app",
+        kind: "connect_app",
+        label: "Linear",
+        connect: { connector: "linear", name: "Linear", host: "mcp.linear.app" },
+      },
+    ],
+    submit: "Continue",
+    decline: "Not now",
+  },
   servicekey: {
     question: "Add Cloudflare API token (Pages deploy)?",
     fields: [
@@ -3025,6 +3494,13 @@ const ASK_FORMS: Record<string, AskForm> = {
       },
     ],
     submit: "Draft reply",
+  },
+  "saved-login": {
+    question:
+      "Sign in to github.com with your saved login? localDot enters it there, and dot never sees it.",
+    fields: [{ id: "sign_in", kind: "confirm", label: "Sign in" }],
+    submit: "Sign in",
+    decline: "Not now",
   },
   confirm: {
     question: "Delete the 12 old drafts in your mail?",
@@ -3219,13 +3695,13 @@ function endLiveStep() {
   session.append("step.end", { status: "ok" }, liveStep);
   liveStep = undefined;
 }
-function finish(done = false, markdown = false): string | undefined {
+function finish(done = false, markdown = false, previews?: ResultPreview[]): string | undefined {
   const owned = session;
   if (!owned) return "no session";
   const append: Append = (type, data, step) => owned.append(type, data, step);
   endLiveStep();
   append("plan.set", { items: planItems(true) });
-  finishTask(owned, append, done, markdown);
+  finishTask(owned, append, done, markdown, previews);
 }
 function setCell(kind: CellKind): undefined {
   const next = cellFor(kind, cellId);
@@ -3348,6 +3824,30 @@ routes.post("/__qa/connectors", async (c) => {
   });
   return c.json({ connectors: await connectorHub.views() });
 });
+routes.get("/__qa/connect", (c) => {
+  const page = connectPages.at(-1);
+  const url = page ? new URL(page) : undefined;
+  return c.json({
+    pages: connectPages.length,
+    page,
+    state: url?.searchParams.get("state"),
+    redirect: url?.searchParams.get("redirect_uri"),
+    clientId: url?.searchParams.get("client_id"),
+    grants: connectGrants,
+  });
+});
+// How the next sign-in goes: ?remote=1 as if from another device, ?opens=0 with no browser to open.
+routes.post("/__qa/connect", (c) => {
+  connectState.remote = c.req.query("remote") === "1";
+  connectState.opens = c.req.query("opens") !== "0";
+  return c.json(connectState);
+});
+// The app ended this sign-in, as keyd lists it when a refresh is refused (?id=).
+routes.post("/__qa/connect/ended", (c) => {
+  const id = c.req.query("id");
+  keys = keys.map((k) => (k.id === id ? { ...k, oauth: { ...k.oauth, reconnect: true } } : k));
+  return c.json({ ok: true });
+});
 routes.post("/__qa/pointer", () => reply(pointerSteps()));
 routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
 routes.post("/__qa/actions", () => reply(liveActions()));
@@ -3408,6 +3908,11 @@ routes.post("/__qa/screen", async (c) => {
   if (retired) await endLive("done");
   return c.json({ ok: true });
 });
+// The web browser is running, as it is once the computer has warmed it, with dot on the desktop.
+routes.post("/__qa/browser/start", (c) => {
+  runBrowser(true);
+  return c.json({ ok: true });
+});
 // The web browser starts again in place: its screen goes, and the next instance is up after ?ms=.
 routes.post("/__qa/browser/restart", (c) => {
   if (!browserInstance) return c.text("no web browser", 409);
@@ -3429,6 +3934,18 @@ routes.post("/__qa/desktop/:shows", (c) => {
   const shows = c.req.param("shows");
   if (shows !== "home" && shows !== "window") return c.text("home or window", 400);
   desktopHome = shows === "home";
+  return c.json({ ok: true });
+});
+// dot sets aside a wait (state=woke) or a command (state=left_running) to read the newest message.
+routes.post("/__qa/message-heard", (c) => {
+  if (!session) return c.text("no session", 409);
+  const newest = log.read(session.id).findLast((event) => event.type === "message.user");
+  if (newest?.type !== "message.user") return c.text("no message", 409);
+  session.steerQueued(newest.data.messageId);
+  session.append("message.delivery", {
+    messageId: newest.data.messageId,
+    state: c.req.query("state") === "left_running" ? "left_running" : "woke",
+  });
   return c.json({ ok: true });
 });
 routes.post("/__qa/step-end", (c) => {
@@ -3472,7 +3989,7 @@ routes.post("/__qa/research", (c) => {
 });
 // Real protocol events for the work display; no background processes or model calls.
 let workStep: string | undefined;
-routes.post("/__qa/work", (c) => {
+routes.post("/__qa/work", async (c) => {
   if (!session) return c.text("no session", 409);
   const kind = c.req.query("kind") ?? "shell";
   if (kind === "image" && !stepImageJpeg) return c.text("image fixture required", 400);
@@ -3482,6 +3999,13 @@ routes.post("/__qa/work", (c) => {
       { stream: "stdout", chunk: c.req.query("text") ?? "More output\n" },
       workStep,
     );
+  } else if (kind === "late-image" && workStep && stepImageJpeg) {
+    // A picture for the step already drawn, as when a screenshot comes in after dot's next words.
+    const image = { name: `step-image-${ulid()}.jpg`, alt: "Saved late" };
+    const out = join(HOME, "sessions", session.id, "out");
+    mkdirSync(out, { recursive: true, mode: 0o700 });
+    writeFileSync(join(out, image.name), stepImageJpeg, { mode: 0o600 });
+    session.append("tool.output", { stream: "stdout", chunk: "Read image", image }, workStep);
   } else {
     workStep = ulid();
     session.append(
@@ -3498,10 +4022,25 @@ routes.post("/__qa/work", (c) => {
       workStep,
     );
     if (kind === "image" && stepImageJpeg) {
-      const image = { name: `step-image-${ulid()}.jpg`, alt: "Saved work preview" };
+      // ?alt= and ?colour= tell one picture of a run from the next.
+      const image = {
+        name: `step-image-${ulid()}.jpg`,
+        alt: c.req.query("alt") ?? "Saved work preview",
+      };
+      const colour = c.req.query("colour");
       const out = join(HOME, "sessions", session.id, "out");
       mkdirSync(out, { recursive: true, mode: 0o700 });
-      writeFileSync(join(out, image.name), stepImageJpeg, { mode: 0o600 });
+      writeFileSync(
+        join(out, image.name),
+        colour
+          ? await sharp({
+              create: { width: 640, height: 400, channels: 3, background: `#${colour}` },
+            })
+              .jpeg()
+              .toBuffer()
+          : stepImageJpeg,
+        { mode: 0o600 },
+      );
       session.append("tool.output", { stream: "stdout", chunk: "Read image", image }, workStep);
     } else if (kind === "files")
       session.append(
@@ -3576,6 +4115,12 @@ routes.post("/__qa/agents/resume", (c) => {
   });
   return c.json({ ok: true });
 });
+// Sets the task's plan to the items in the body, as dot does.
+routes.post("/__qa/plan", async (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("plan.set", await c.req.json());
+  return c.json({ ok: true });
+});
 routes.post("/__qa/steps", (c) => {
   if (!session) return c.text("no session", 409);
   for (let n = Number(c.req.query("n") ?? 1); n > 0; n--)
@@ -3613,6 +4158,40 @@ routes.post("/__qa/stream", (c) => {
 });
 // dot's turns as the brain reports them: thinking on each model call, acting on each tool call,
 // n of each, `ms` apart. Answers once the last has been sent.
+// A key saved for the user's own endpoint, whose model list the fixture answers.
+routes.post("/__qa/own-endpoint", (c) => {
+  keys = [
+    ...keys,
+    {
+      id: "relay",
+      kind: "llm",
+      provider: "openai-compatible",
+      baseURL: "https://relay.example/v1",
+      createdAt: "2026-10-04T09:00:00Z",
+      updatedAt: "2026-10-04T09:00:00Z",
+    } as KeydRecord,
+  ];
+  return c.json({ ok: true });
+});
+// Steps on one model, then on another, as a task whose model a message changed.
+routes.post("/__qa/model-change", (c) => {
+  if (!session) return c.text("no session", 409);
+  const owned = session;
+  const steps = (route: string, model: string, titles: string[]) => {
+    owned.runningModel = { route, model };
+    for (const title of titles) {
+      const step = ulid();
+      owned.append("step.start", { kind: "shell" }, step);
+      owned.append("tool.start", { tool: "shell", title }, step);
+      owned.append("tool.end", { ok: true }, step);
+      owned.append("step.end", { status: "ok" }, step);
+    }
+  };
+  steps("anthropic", "claude-sonnet-5-5", ["Read the build log", "Find the failing test"]);
+  steps("openai", "gpt-6-luna", ["Run the failing test", "Fix the import"]);
+  return c.json({ ok: true });
+});
+routes.get("/__qa/last-turn-model", (c) => c.json({ model: lastTurnModel ?? null }));
 routes.post("/__qa/turns", async (c) => {
   if (!session) return c.text("no session", 409);
   const owned = session;
@@ -3790,13 +4369,42 @@ routes.post("/__qa/say", (c) => {
     owned.append("message.assistant", { messageId: ulid(), text: n > 1 ? `${text} (${k})` : text });
   return c.json({ ok: true });
 });
+// `turns` more turns of a long conversation, as fast as they go; `short=1` keeps each row to about a
+// line. The page's requests get their turn between them.
+routes.post("/__qa/talk", async (c) => {
+  if (!session) return c.text("no session", 409);
+  const owned = session;
+  const append: Append = (type, data, step) => owned.append(type, data, step);
+  const turns = Number(c.req.query("turns") ?? 20);
+  for (let turn = 1; turn <= turns && session === owned; turn++) {
+    talkTurn(owned.id, append, turn, c.req.query("short") === "1");
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  return c.json({ ok: true });
+});
 routes.post("/__qa/heartbeat", (c) => {
   if (!session) return c.text("no session", 409);
   session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
 routes.post("/__qa/finish", (c) =>
-  reply(finish(c.req.query("done") === "1", c.req.query("markdown") === "1")),
+  reply(
+    finish(
+      c.req.query("done") === "1",
+      c.req.query("markdown") === "1",
+      c.req.query("preview")
+        ? [
+            {
+              port: 5173,
+              url: c.req.query("preview") ?? "",
+              title: "Aegis X-47 viewer",
+              project: "aegis",
+              name: "node",
+            },
+          ]
+        : undefined,
+    ),
+  ),
 );
 // The daemon goes away under the live task (no end is recorded) and comes back without it.
 routes.post("/__qa/crash", async (c) => {
@@ -3849,19 +4457,19 @@ routes.post("/__qa/knows", (c) => {
 routes.get("/__qa/boot-memory", (c) => c.json(memory.bootMemory()));
 
 // Routines: dot proposes one in the live thread; a routine's own run; a run history to browse.
-const MORNING_BILLS = {
+const MORNING_BILLS: RoutineDraft = {
   name: "Morning bills",
   instruction:
     "Check my utility and bank sites for new statements, save the PDFs to Bills and tell me what's due.",
-  when: { kind: "weekdays", time: "08:30" },
-} as const;
+  schedules: [{ every: 1, unit: "week", weekdays: [1, 2, 3, 4, 5], times: ["08:30"] }],
+};
 routes.post("/__qa/routine/propose", (c) => {
   if (!session) return c.text("no session", 409);
   const routine = routineStore.create(MORNING_BILLS, {
     state: "proposed",
     createdFromSession: session.id,
   });
-  const view = toRoutine(routine, undefined);
+  const view = toRoutine(routine, undefined, Date.now());
   session.append("routine.proposed", {
     routineId: routine.id,
     revision: routine.revision,
@@ -3893,8 +4501,7 @@ routes.post("/__qa/routine/session", async (c) => {
 });
 routes.post("/__qa/routine/history", (c) => {
   const at = (iso: string) => Date.parse(iso);
-  const add = (draft: typeof MORNING_BILLS | Parameters<typeof routineStore.create>[0]) =>
-    routineStore.create(draft, { state: "active" });
+  const add = (draft: RoutineDraft) => routineStore.create(draft, { state: "active" });
   const bills = add(MORNING_BILLS);
   const runs = [
     ["2026-10-06T07:30:00Z", "done", "3 new statements saved to Bills", seeded[0] ?? null],
@@ -3921,7 +4528,7 @@ routes.post("/__qa/routine/history", (c) => {
   const inbox = add({
     name: "Inbox sweep",
     instruction: "Check my inbox, archive newsletters and tell me what needs a reply.",
-    when: { kind: "daily", time: "07:45" },
+    schedules: [{ every: 1, unit: "day", times: ["07:45"] }],
     profile: "act_within_rules",
   });
   routineStore.recordRun({
@@ -3936,7 +4543,7 @@ routes.post("/__qa/routine/history", (c) => {
   const prices = add({
     name: "Flight prices",
     instruction: "Check fares from London to Lisbon for 14 November and tell me if any drop.",
-    when: { kind: "hours", every: 4, from: "08:00" },
+    schedules: [{ every: 4, unit: "hour", from: "08:00" }],
     profile: "read_only",
     missedPolicy: "skip",
   });
@@ -3944,12 +4551,55 @@ routes.post("/__qa/routine/history", (c) => {
   add({
     name: "Weekly report",
     instruction: "Collect this week's numbers into report.xlsx in Documents.",
-    when: { kind: "weekly", days: [5], time: "16:00" },
+    schedules: [{ every: 1, unit: "week", weekdays: [5], times: ["16:00"] }],
     notify: "always",
   });
   planRoutines();
   for (const routine of routineStore.list()) routineChanged(routine.id);
   return c.json({ routineId: bills.id });
+});
+// Three runs of one routine, in its one conversation, none of them the conversation on show.
+routes.post("/__qa/routine/runs", (c) => {
+  const routine = routineStore.create(MORNING_BILLS, { state: "active" });
+  const FOUND = [
+    "3 new statements saved to Bills",
+    "Nothing new",
+    "1 new statement saved to Bills",
+  ];
+  let continues: string | undefined;
+  const runs = FOUND.map((found, n) => {
+    const dueAt = Date.parse(`2026-10-0${6 + n}T07:30:00Z`);
+    const runId = ulid();
+    const owned = newSession(MORNING_BILLS.name, MORNING_BILLS.instruction, continues, {
+      kind: "routine",
+      routineId: routine.id,
+      runId,
+      name: MORNING_BILLS.name,
+      dueAt: new Date(dueAt).toISOString(),
+    });
+    owned.append("message.user", {
+      messageId: ulid(),
+      kind: "task",
+      text: MORNING_BILLS.instruction,
+    });
+    owned.append("message.assistant", { messageId: ulid(), text: found });
+    owned.append("session.end", { reason: "done" });
+    routineStore.recordRun({
+      id: runId,
+      routineId: routine.id,
+      dueAt,
+      startedAt: dueAt + 2000,
+      endedAt: dueAt + 240_000,
+      sessionId: owned.id,
+      outcome: "done",
+      note: found,
+    });
+    continues = owned.id;
+    return owned.id;
+  });
+  planRoutines();
+  routineChanged(routine.id);
+  return c.json({ routineId: routine.id, runs });
 });
 routes.post("/__qa/routine/keep", (c) => {
   const routine = routineStore.list()[0];
@@ -3998,10 +4648,35 @@ routes.post("/__qa/first-look", async (c) => {
   return c.json({ ok: true });
 });
 routes.post("/__qa/reply", (c) => {
-  const ms = Number(c.req.query("ms"));
-  if (!Number.isSafeInteger(ms) || ms < 0) return c.text("ms is a whole number", 400);
+  const ms = Number(c.req.query("ms") ?? replyMs);
+  const wake = c.req.query("wake") === undefined ? wakeMs : Number(c.req.query("wake"));
+  if (![ms, wake ?? 0].every((n) => Number.isSafeInteger(n) && n >= 0))
+    return c.text("ms and wake are whole numbers", 400);
   replyMs = ms;
+  wakeMs = wake;
   return c.json({ ok: true });
+});
+// With a wake set, dot takes up a follow-up to the task at rest as the real brain does: its first
+// state after the wake, then its reply, and it rests again.
+log.subscribe((id, event) => {
+  const owned = session;
+  if (wakeMs === null || owned?.id !== id || owned.stopped || event.type !== "message.user") return;
+  const data = event.data as { kind?: string; queued?: boolean };
+  if (data.kind !== "followup" || data.queued) return;
+  setTimeout(() => {
+    if (owned.stopped) return;
+    owned.setStatus("running");
+    owned.append("agent.state", { state: "thinking" });
+    setTimeout(() => {
+      if (owned.stopped) return;
+      owned.append("message.assistant", {
+        messageId: ulid(),
+        text: "Sample reply: I checked again.",
+      });
+      owned.setStatus("idle");
+      owned.append("agent.state", { state: "idle" });
+    }, replyMs);
+  }, wakeMs);
 });
 routes.post("/__qa/plan-usage/:state", (c) => {
   const state = c.req.param("state") as (typeof PLAN_USAGE)[number];

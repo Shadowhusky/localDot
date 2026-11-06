@@ -1,7 +1,8 @@
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { chromium, expect } from "@playwright/test";
+import { chromium, expect, type Page } from "@playwright/test";
 import sharp from "sharp";
+import { VIEW_STYLE_KEY, type ViewStyle } from "../../src/shell/view-style.ts";
 import { assertFreshBuild, startUiFixture, TOKEN } from "../fixtures/start-ui-fixture.ts";
 import { skipSetup } from "../skip-setup.ts";
 
@@ -10,24 +11,48 @@ import { skipSetup } from "../skip-setup.ts";
 assertFreshBuild("app");
 const out = fileURLToPath(new URL("../../../../docs/readme/", import.meta.url));
 await mkdir(out, { recursive: true });
-const fixture = await startUiFixture({ QA_SCENARIO: "running", QA_NOW: "2026-10-08T09:00:00Z" });
+const fixture = await startUiFixture({
+  QA_SCENARIO: "running",
+  QA_NOW: "2026-10-08T09:00:00Z",
+  QA_ACTIVITY: "readme",
+  QA_PAST: "1",
+});
 const browser = await chromium.launch();
-try {
-  const page = await browser.newPage({
-    viewport: { width: 1440, height: 900 },
-    deviceScaleFactor: 2,
-    reducedMotion: "reduce",
-    locale: "en-GB",
-    timezoneId: "UTC",
-    colorScheme: "dark",
-  });
+const look = {
+  reducedMotion: "reduce",
+  locale: "en-GB",
+  timezoneId: "UTC",
+  colorScheme: "dark",
+} as const;
+const open = async (page: Page, view: ViewStyle, address = "") => {
   await page.addInitScript("globalThis.__name = (fn) => fn;");
   await skipSetup(page);
+  await page.addInitScript(
+    ([key, value]) => localStorage.setItem(key as string, value as string),
+    [VIEW_STYLE_KEY, view],
+  );
   await page.clock.setFixedTime(new Date("2026-10-08T09:01:00Z"));
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
+  if (address) {
+    await page.waitForFunction(() => !window.location.hash.includes("token="));
+    await page.evaluate((hash) => {
+      window.location.hash = hash;
+    }, address);
+  }
+};
+try {
+  const page = await browser.newPage({
+    ...look,
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 2,
+  });
+  await open(page, "studio");
   const form = page.getByRole("form", { name: "Message dot" });
   await expect(form.getByRole("button", { name: "Stop task", exact: true })).toBeVisible();
   await expect(page.locator(".stage").first()).toBeVisible();
+  // The live task's controls show once its screen is connected; the connecting card is busy enough
+  // to pass the picture check below.
+  await expect(page.getByRole("button", { name: "Take control" })).toBeVisible({ timeout: 30000 });
   await page.evaluate(() => document.fonts.ready);
   await expect
     .poll(
@@ -38,14 +63,28 @@ try {
       { timeout: 15000 },
     )
     .toBeGreaterThan(20);
-  await page.screenshot({ path: `${out}/watch.png` });
-  // Capture the phone layout instead of shrinking the desktop screenshot on mobile.
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(form.getByRole("button", { name: "Stop task", exact: true })).toBeVisible();
+  // The rail's dots come in their own time, and a dot's plates show together.
+  await expect(page.locator(".sessions-item")).not.toHaveCount(0);
+  await expect(page.locator(".dot-avatar[data-loading], .dot[data-skin='loading']")).toHaveCount(0);
   await page.waitForTimeout(300);
-  await page.screenshot({ path: `${out}/watch-mobile.png` });
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(page.locator(".rail-chat")).toBeVisible();
+  await page.screenshot({ path: `${out}/studio.png` });
+  const phone = await browser.newPage({
+    ...look,
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 2,
+    isMobile: true,
+    hasTouch: true,
+  });
+  await open(phone, "chat", "#/c/current");
+  await expect(phone.locator(".phone-stack")).toHaveAttribute("data-level", "1");
+  await expect(phone.getByRole("button", { name: "Open the computer" })).toBeVisible();
+  await expect(phone.locator(".dot-avatar[data-loading], .dot[data-skin='loading']")).toHaveCount(
+    0,
+  );
+  await phone.waitForTimeout(1500);
+  await phone.screenshot({ path: `${out}/chat.png` });
+  await phone.close();
+  await form.getByRole("textbox").first().focus();
   await form.getByRole("button", { name: /^Permission mode:/ }).click();
   await expect(page.getByRole("menuitemradio", { name: /^Full access/ })).toBeVisible();
   await page.waitForTimeout(200);
@@ -60,7 +99,8 @@ try {
   await form
     .getByRole("textbox", { name: "Message" })
     .fill("When you're finished, add a chart of the monthly totals.");
-  await form.getByRole("button", { name: "Queue message" }).click();
+  await form.getByRole("button", { name: "Message options" }).click();
+  await page.getByRole("menuitem", { name: "Send after this task" }).click();
   const queued = page
     .getByRole("article", { name: "You", exact: true })
     .filter({ hasText: "When you're finished" });

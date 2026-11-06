@@ -24,7 +24,7 @@ test("returning to the app refreshes silent feeds without losing the draft or re
   const input = (await composer(page)).getByRole("textbox", { name: "Message" });
   await input.fill("Keep this unsent draft");
   await expect(
-    (await composer(page)).getByRole("button", { name: "Queue message" }),
+    (await composer(page)).getByRole("button", { name: "Send now" }),
   ).not.toHaveAttribute("aria-disabled", "true");
   const url = page.url();
   const requests: string[] = [];

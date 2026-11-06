@@ -1,15 +1,15 @@
-import { type RefObject, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useRef } from "react";
 import { type ConversationRow, STATUS_LABEL, whenLabel } from "../agent/conversation-list.ts";
 import { TAG_NAMES, TagMark } from "../ui/ConversationTag.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { LayerPortal } from "../ui/LayerStack.tsx";
-import { matches, REDUCED_MOTION } from "../ui/media.ts";
-import { tokenMs } from "../ui/motion.ts";
-import { SessionGlyph } from "../ui/SessionGlyph.tsx";
+import { ConversationAvatar } from "./ConversationAvatar.tsx";
+import { copyInto, mix, ramp, sizeOf, useLift } from "./phone-lift.ts";
+import { clamp, lerp } from "./phone-spring.ts";
 import "../ui/conversation-switcher.css";
 
 // About as tall as a conversation's menu on a touch screen, kept free under the card.
-const MENU_ROOM = 312;
+const MENU_ROOM = 356;
 const GAP = 12;
 const MARGIN = 16;
 
@@ -22,7 +22,7 @@ export interface Peek {
 export interface ConversationPeekProps {
   peek: Peek | null;
   now: Date;
-  // The card, for the conversation's menu to hang from.
+  // Where the card rests, for the conversation's menu to hang from.
   cardRef: RefObject<HTMLDivElement | null>;
   // The card has its place, so the menu can open under it.
   onPlaced(): void;
@@ -31,135 +31,112 @@ export interface ConversationPeekProps {
 const startedAt = (value: string) =>
   new Date(value).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
 
+const radiusOf = (element: Element) =>
+  Number.parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0;
+
 // A held conversation magnified: its row or card grows in place into a card that says all of it,
 // its whole name, what dot is doing, what was first asked and when, while the list behind dims, and
-// the menu opens under it, as iOS's preview does. Letting go of the menu shrinks it back into its row.
+// the menu opens under it, as iOS's preview does. Letting go of the menu shrinks it back: the copy of
+// the row comes back through the card as it goes, and lands on the row's own pixels.
 // The card is for the eye; the row's own name and the menu carry everything to assistive technology.
 export function ConversationPeek({ peek, now, cardRef, onPlaced }: ConversationPeekProps) {
-  const [shown, setShown] = useState<Peek | null>(peek);
-  const [leaving, setLeaving] = useState(false);
-  if (peek && peek !== shown) {
-    setShown(peek);
-    setLeaving(false);
-  } else if (!peek && shown && !leaving) setLeaving(true);
-  const motion = useRef<Animation | null>(null);
-  const layer = useRef<HTMLDivElement>(null);
+  const backLayer = useRef<HTMLDivElement>(null);
+  const flight = useRef<HTMLDivElement>(null);
+  const scrim = useRef<HTMLDivElement>(null);
+  const plate = useRef<HTMLDivElement>(null);
+  const card = useRef<HTMLDivElement>(null);
+  const copy = useRef<HTMLDivElement>(null);
   const placed = useRef(onPlaced);
   placed.current = onPlaced;
 
-  useLayoutEffect(() => {
-    const card = cardRef.current;
-    if (!shown || !card) return;
-    const animates = typeof card.animate === "function";
-    const was = motion.current;
-    if (leaving) {
-      const done = () => setShown(null);
-      if (!animates) {
-        done();
-        return;
-      }
-      if (was && was.playState === "running") {
-        was.onfinish = done;
-        was.reverse();
-        return;
-      }
-      const style = getComputedStyle(card);
-      const back =
-        shown.from.isConnected && !matches(REDUCED_MOTION) ? grownFrom(card, shown.from) : null;
-      const exit = card.animate(back ? [{}, back] : [{}, { opacity: 0 }], {
-        duration: tokenMs(style, "--dur-exit", 180),
-        easing: style.getPropertyValue("--ease-exit").trim() || "ease-in",
-        fill: "forwards",
-      });
-      exit.onfinish = done;
-      motion.current = exit;
-      return;
-    }
-    // Held again while the last one was still going back: this one starts afresh.
-    if (was) {
-      was.onfinish = null;
-      was.cancel();
-      motion.current = null;
-    }
-    const height = card.offsetHeight;
-    const source = shown.from.getBoundingClientRect();
+  const { shown, leaving } = useLift(peek, flight, ({ from }) => {
+    const details = card.current;
+    const anchor = cardRef.current;
+    const back = plate.current;
+    const row = copy.current;
+    if (!details || !anchor || !back || !row) return null;
+    const height = details.offsetHeight;
+    const source = from.getBoundingClientRect();
     const top = Math.max(
       MARGIN * 3,
       Math.min(source.top, window.innerHeight - height - GAP - MENU_ROOM - MARGIN),
     );
-    card.style.top = `${top}px`;
-    card.dataset.placed = "";
-    if (animates) {
-      const style = getComputedStyle(card);
-      const still = matches(REDUCED_MOTION);
-      motion.current = card.animate(
-        still ? [{ opacity: 0 }, { opacity: 1 }] : [grownFrom(card, shown.from), {}],
-        {
-          duration: tokenMs(style, still ? "--dur-fade" : "--dur-default", still ? 150 : 470),
-          easing: style.getPropertyValue("--ease-spring").trim() || "ease-out",
-        },
-      );
-    }
+    details.style.top = `${top}px`;
+    const place = { x: details.offsetLeft, y: top, w: details.offsetWidth, h: height };
+    Object.assign(anchor.style, {
+      top: `${top}px`,
+      left: `${place.x}px`,
+      width: `${place.w}px`,
+      height: `${height}px`,
+    });
+    const fromRadius = radiusOf(from);
+    const toRadius = radiusOf(back);
+    copyInto(row, from);
+    const width = sizeOf(from).w || 1;
     placed.current();
-  }, [shown, leaving, cardRef]);
+    return {
+      place,
+      dim: scrim.current,
+      refresh: () => copyInto(row, from),
+      draw: (t, at) => {
+        const box = mix(at, place, t);
+        const scale = box.w / place.w;
+        const radius = lerp(fromRadius, toRadius, clamp(t));
+        back.style.transform = `translate3d(${box.x}px,${box.y}px,0)`;
+        back.style.width = `${box.w}px`;
+        back.style.height = `${box.h}px`;
+        back.style.borderRadius = `${radius}px`;
+        back.style.opacity = String(ramp(t, 0, 0.3));
+        details.style.transform = `translate3d(${box.x - place.x}px,${box.y - place.y}px,0) scale(${scale})`;
+        details.style.clipPath = `inset(0 0 ${Math.max(0, place.h - box.h / scale)}px 0 round ${radius / scale}px)`;
+        details.style.opacity = String(ramp(t, 0.3, 0.8));
+        row.style.transform = `translate3d(${box.x}px,${box.y}px,0) scale(${box.w / width})`;
+        row.style.opacity = String(1 - ramp(t, 0.15, 0.55));
+      },
+    };
+  });
 
   if (!shown) return null;
   const { row } = shown;
   const said = row.entry.said?.trim();
   const tasks = row.entry.sessions.length;
   return (
-    <LayerPortal kind="popover" closing={leaving} rootRef={layer}>
-      <div className="peek-scrim" aria-hidden="true" />
-      <div
-        ref={cardRef}
-        className="peek-card"
-        data-status={row.status}
-        data-leaving={leaving || undefined}
-        aria-hidden="true"
-      >
-        <TagMark tag={row.entry.tag} />
-        <div className="peek-state">
-          <SessionGlyph status={row.status} />
-          <span className="peek-word">{STATUS_LABEL[row.status]}</span>
-          <span className="num">· {whenLabel(row.since, now)}</span>
-          {row.entry.live?.onScreen && (
-            <span className="peek-screen">
-              <Icon name="monitor" size={12} />
-              On screen
-            </span>
-          )}
+    <>
+      <LayerPortal kind="popover" closing={leaving} rootRef={backLayer}>
+        <div ref={scrim} className="peek-scrim" aria-hidden="true" />
+        <div ref={cardRef} className="peek-anchor" aria-hidden="true" />
+      </LayerPortal>
+      <LayerPortal kind="popover" closing={leaving} rootRef={flight} className="lift-layer">
+        <div ref={plate} className="peek-plate" aria-hidden="true" />
+        <div ref={card} className="peek-card" data-status={row.status} aria-hidden="true">
+          <TagMark tag={row.entry.tag} />
+          <div className="peek-state">
+            <ConversationAvatar row={row} size={28} tagged={false} />
+            <span className="peek-word">{STATUS_LABEL[row.status]}</span>
+            <span className="num">· {whenLabel(row.since, now)}</span>
+            {row.entry.live?.onScreen && (
+              <span className="peek-screen">
+                <Icon name="monitor" size={12} />
+                On screen
+              </span>
+            )}
+          </div>
+          <div className="peek-title">{row.title}</div>
+          {row.activity && <div className="peek-activity">{row.activity}</div>}
+          {said && said !== row.title && <div className="peek-said">“{said}”</div>}
+          <div className="peek-facts num">
+            {[
+              tasks === 1 ? "1 task" : `${tasks} tasks`,
+              `Started ${startedAt(row.entry.startedAt)}`,
+              row.entry.tag && `${TAG_NAMES[row.entry.tag]} tag`,
+              row.entry.pinned && "Pinned",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
         </div>
-        <div className="peek-title">{row.title}</div>
-        {row.activity && <div className="peek-activity">{row.activity}</div>}
-        {said && said !== row.title && <div className="peek-said">“{said}”</div>}
-        <div className="peek-facts num">
-          {[
-            tasks === 1 ? "1 task" : `${tasks} tasks`,
-            `Started ${startedAt(row.entry.startedAt)}`,
-            row.entry.tag && `${TAG_NAMES[row.entry.tag]} tag`,
-            row.entry.pinned && "Pinned",
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </div>
-      </div>
-    </LayerPortal>
+        <div ref={copy} className="lift-copy peek-row" aria-hidden="true" inert />
+      </LayerPortal>
+    </>
   );
-}
-
-// The card laid over `from`: moved and scaled onto it, and cut to its height, so growing out of it
-// reads as the row itself opening up.
-function grownFrom(card: HTMLElement, from: HTMLElement): Keyframe {
-  const box = card.getBoundingClientRect();
-  const source = from.getBoundingClientRect();
-  const scale = source.width / (box.width || 1);
-  const cut = Math.max(0, box.height - source.height / (scale || 1));
-  // Its corners as round as the row's once scaled down onto it.
-  const corner =
-    (Number.parseFloat(getComputedStyle(from).borderTopLeftRadius) || 0) / (scale || 1);
-  return {
-    transform: `translate(${source.left - box.left}px, ${source.top - box.top}px) scale(${scale})`,
-    clipPath: `inset(0 0 ${cut}px 0 round ${corner}px)`,
-    opacity: 0.4,
-  };
 }

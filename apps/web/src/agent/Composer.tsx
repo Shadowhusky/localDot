@@ -1,4 +1,11 @@
-import { type GivenBack, keyLikePresent, STALL, ULID_PATTERN } from "@localdot/protocol";
+import {
+  type GivenBack,
+  KEY_SCAN_CHARS,
+  keyLikePresent,
+  STALL,
+  type TaskModelRef,
+  ULID_PATTERN,
+} from "@localdot/protocol";
 import {
   memo,
   type ReactNode,
@@ -48,12 +55,20 @@ import { editQueuedMessage } from "./control-api.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import { Outbox } from "./outbox.ts";
-import { pastedFiles, pastedText } from "./paste.ts";
-import { onGiveBack, onQueuedEdit } from "./queued-draft.ts";
+import {
+  LONG_TEXT,
+  type LongText,
+  longTextFile,
+  pastedFiles,
+  TEXT_BOUND,
+  withoutKeyLike,
+} from "./paste.ts";
+import { onGiveBack, onQueuedEdit, onSendAfter } from "./queued-draft.ts";
 import { ResearchLine, ResearchToggle } from "./ResearchToggle.tsx";
 import { RevisingChip } from "./RevisingChip.tsx";
 import { looksLikeResearch, onResearchRequest, researchWait } from "./research.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
+import { useComposerFold } from "./useComposerFold.ts";
 import { type KeyGuard, useKeyGuard } from "./useKeyGuard.ts";
 import { useUploads } from "./useUploads.ts";
 import { DeliveryFailure, deliverText, type MessageMode, type TextDelivery } from "./write-api.ts";
@@ -69,8 +84,6 @@ const LIMIT = 8000;
 const NO_ACTIONS: readonly Action[] = [];
 // A phone: Return starts a new line there, and Send sends.
 const TOUCH = "(hover: none) and (pointer: coarse)";
-// What is left shows from here on.
-const NEAR = 7000;
 // An accepted message holds its place in the thread this long at most while its own row arrives.
 const LANDING_MS = 10_000;
 // dot weighs whether a message needs research once typing pauses, never on each keystroke.
@@ -95,14 +108,21 @@ export interface ComposerProps {
   reply?(text: string, attached: boolean): Promise<ReplyOutcome>;
   // A card in the rail, or one rounded field in a phone's toolbar with its controls inside it.
   layout?: "card" | "pill";
+  // What the field says while empty, when it isn't the usual words.
+  placeholder?: string;
   // The model chip, in a card's row.
   model?: ReactNode;
   taskAction?: { kind: "stop" | "continue"; run(): void; disabledReason?: string };
   // The task this device is stopping: what its Stop gives back comes into the draft.
   stopping?: string | null;
   permissions?: ReactNode;
-  // The main model saved since this task started: a message at rest starts a task on it.
+  // The model chosen runs elsewhere than this task's agent: a message at rest starts a task on it.
   modelChanged?: boolean;
+  // The model chosen for this task, which each message carries.
+  sendModel?: TaskModelRef;
+  // Named when the task at work is on another model: moving it there would end what it is running,
+  // so a message for that model waits for the task to finish.
+  modelAfter?: string;
   // What "/" lists: the actions with a command name.
   actions?: readonly Action[];
 }
@@ -208,16 +228,13 @@ function keepDraft(text: string): void {
     /* A blocked store keeps the draft for this page only. */
   }
 }
-// What the composer shows of its text: whether there is any, and its length once that shows.
-interface TextShape {
-  readonly blank: boolean;
-  readonly length: number;
+// What was typed in the last moments, kept at once when another composer is about to take over, as
+// when the view style changes, since it reads the draft as it comes.
+let unkeptDraft: (() => void) | null = null;
+export function keepDraftNow(): void {
+  unkeptDraft?.();
+  unkeptDraft = null;
 }
-const shapeOf = (input: HTMLTextAreaElement): TextShape => ({
-  blank: !input.value.trim(),
-  length: input.value.length > NEAR ? input.value.length : 0,
-});
-
 type FieldEvents = Pick<
   TextAreaProps,
   "onInput" | "onPaste" | "onKeyDown" | "onCompositionStart" | "onCompositionEnd"
@@ -252,7 +269,6 @@ const ComposerField = memo(function ComposerField({
       aria-label={label}
       placeholder={placeholder}
       maxRows={8}
-      maxLength={LIMIT}
       autoComplete="off"
       readOnly={unavailable || listening}
       aria-disabled={unavailable || undefined}
@@ -316,8 +332,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   revisingNow.current = revising;
   const shownRevising = useRef(revising);
   if (revising) shownRevising.current = revising;
-  const [text, setText] = useState<TextShape>({ blank: true, length: 0 });
-  const shown = useRef(text);
+  const [blank, setBlank] = useState(true);
+  const blankNow = useRef(blank);
   const problemShown = useRef(problem);
   const [menu, setMenu] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -434,7 +450,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     return () => document.removeEventListener("keydown", key);
   }, []);
 
-  const mode = modeFor(props, "followup");
+  const mode = modeFor(props, "steer");
   const permitted = readyCell(props) && !props.keysOpen && (mode === "new" || props.agent.fresh);
   const uncertain = delivery?.phase === "uncertain";
   const sending = delivery?.phase === "sending";
@@ -449,6 +465,23 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   const pasteNames = useRef(new Set<string>());
   const attach = useRef<(files: readonly File[]) => boolean>(() => false);
   const draft = useRef(0);
+  // A long text moved out of the field as its message was sent goes once it has uploaded.
+  const sendOnceUploaded = useRef<boolean | null>(null);
+  const addLongText = (text: string, kind: LongText) => {
+    const { clean, removed } = withoutKeyLike(text);
+    if (removed)
+      setProblem(
+        kind === "pasted"
+          ? "Keys were taken out of the pasted text. Paste keys straight into Keys."
+          : "Keys were taken out of your text. Paste keys straight into Keys.",
+      );
+    if (!clean.trim()) return;
+    const { file, label } = longTextFile(clean, kind, pasteNames.current);
+    uploads.addText(file, label, clean);
+    announce("composer", "The long text is attached as a file.");
+  };
+  const addLongNow = useRef(addLongText);
+  addLongNow.current = addLongText;
   // Files dropped anywhere on the window join the draft, while the composer is on screen.
   useEffect(() => {
     const shown = () => !!form.current && !form.current.closest("[hidden], [inert]");
@@ -486,10 +519,10 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   }, []);
 
   // The message's own row is in the thread: one of yours, in its words, that the thread did not
-  // have when it was sent.
+  // have when it was sent. The task's feed can bring it before the send's own reply does.
   const messages = props.agent.model.messages;
   const arrived = useMemo(() => {
-    if (delivery?.phase !== "accepted" && delivery?.phase !== "uncertain") return false;
+    if (!delivery || delivery.phase === "refused") return false;
     for (const message of messages.values())
       if (
         message.role === "user" &&
@@ -505,11 +538,30 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     // Native input already schedules sizing. Imperative paste, voice and clearing need it here.
     if (!nativeInput) resizeTextArea(input);
     menuChanged.current(input.value);
-    const next = shapeOf(input);
-    if (next.blank === shown.current.blank && next.length === shown.current.length) return;
-    shown.current = next;
-    setText(next);
+    const next = !input.value.trim();
+    if (next === blankNow.current) return;
+    blankNow.current = next;
+    setBlank(next);
   }, []);
+  // The field's words go with the message as a file, and the field is free for more. Keys come out
+  // by the guard's own notice when it can read that much.
+  const moveToFile = (input: HTMLTextAreaElement) => {
+    if (input.value.length <= KEY_SCAN_CHARS) guardOwner.current.check(input);
+    addLongText(input.value, "typed");
+    input.value = "";
+    revision.current += 1;
+    keepDraft("");
+    measure(input);
+  };
+  // Text past what the guard can read never reaches it.
+  const checked = (input: HTMLTextAreaElement) => {
+    if (input.value.length > TEXT_BOUND) moveToFile(input);
+    return guardOwner.current.check(input);
+  };
+  const checkedNow = useRef(checked);
+  checkedNow.current = checked;
+  const moveNow = useRef(moveToFile);
+  moveNow.current = moveToFile;
   const weigh = useCallback((input: HTMLTextAreaElement) => {
     window.clearTimeout(suggestion.current);
     suggestion.current = window.setTimeout(
@@ -522,7 +574,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   const runAction = async (action: Action, given: Omit<ActionInput, "trigger">) => {
     const input = field();
     if (!input || actionRunning.current) return;
-    if (!guardOwner.current.check(input)) {
+    if (!checked(input)) {
       measure(input);
       return;
     }
@@ -572,10 +624,11 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   useEffect(() => {
     const input = form.current?.querySelector("textarea");
     const saved = readDraft();
-    if (!input || input.value || input.readOnly || !saved) return;
+    // Read-only is no bar: Settings can change the view, and with it this composer, while it is open.
+    if (!input || input.value || !saved) return;
     input.value = saved;
     revision.current += 1;
-    guardOwner.current.check(input);
+    checkedNow.current(input);
     measure(input);
   }, [measure]);
   // Revise on a file fills the message with the file's name, keeps what was typed and focuses it.
@@ -617,7 +670,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         .join("\n\n");
       restoreFiles.current(parts.flatMap((part) => part.files));
       revision.current += 1;
-      keepDraft(guardOwner.current.check(box) ? box.value : "");
+      keepDraft(checkedNow.current(box) ? box.value : "");
       measure(box);
       setProblem(null);
       box.focus();
@@ -692,7 +745,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     changed: (input, caret) => {
       revision.current += 1;
       if (caret !== undefined) {
-        guardOwner.current.check(input);
+        checked(input);
         keepDraft(input.value);
         if (!touch) {
           input.focus();
@@ -787,7 +840,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     setDelivery(record);
     setProblem(null);
     outbox?.show();
-    current.current.onSending?.(true);
+    // One held for after the task wakes nothing until then.
+    if (!(request.mode === "followup" && shown.tag)) current.current.onSending?.(true);
     const owns = (acceptedSession?: string) =>
       mounted.current &&
       pending.current === record &&
@@ -799,6 +853,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       const acceptedSession = await deliverText(capturedApi, request);
       if (!owns(acceptedSession)) {
         if (mounted.current && pending.current === record) {
+          current.current.onSending?.(false);
           setDelivery(null);
           setProblem(
             "The task changed while sending. Check the current task before sending again.",
@@ -831,11 +886,16 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       if (pending.current === record) pending.current = null;
     }
   };
-  const submit = (later = true, voiceFinished = false) => {
+  const submit = (later = false, voiceFinished = false) => {
     const input = field();
     if (!input || composing.current || (talking && !voiceFinished)) return;
     if (commands.submit(input.value) === "handled") return;
     if (pending.current || replying.current) return;
+    if (input.value.length > TEXT_BOUND) {
+      moveToFile(input);
+      sendOnceUploaded.current = later;
+      return;
+    }
     // Check the DOM before copying even ordinary text into delivery state or requests.
     if (!guardOwner.current.check(input)) {
       measure(input);
@@ -844,7 +904,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     const now = current.current;
     // Research starts a task of its own; at rest, a conversation's next task continues it.
     const resting = now.agent.snapshot?.status === "idle";
-    const asked = modeFor(now, later ? "followup" : "steer");
+    const asked = modeFor(now, later || now.modelAfter ? "followup" : "steer");
     const chosen =
       (researchNow.current || now.modelChanged) && asked === "followup" && resting ? "new" : asked;
     if (chosen === "new" && now.configured === false) {
@@ -860,9 +920,20 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       );
       return;
     }
+    // A revision needs its words, which name the file it revises, in the message.
+    if (input.value.length > LONG_TEXT && !linkFor(input.value, revisingNow.current)) {
+      moveToFile(input);
+      sendOnceUploaded.current = later;
+      return;
+    }
     const text = input.value;
-    if (!text.trim() || text.length > LIMIT || !text.isWellFormed() || text.includes("\0")) {
-      setProblem("Write a message of 1–8,000 characters.");
+    if (
+      (!text.trim() && !uploads.rows.length) ||
+      text.length > LIMIT ||
+      !text.isWellFormed() ||
+      text.includes("\0")
+    ) {
+      setProblem("Write a message or attach a file.");
       return;
     }
     // A revision goes to the revise route when the task has ended, or when it revises an older
@@ -909,6 +980,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     const owner = identity.current;
     try {
       if (await voice.finish()) {
+        // A spoken message waits for this task to finish; only a typed one steers.
         if (mounted.current && identity.current === owner) submit(true, true);
       }
     } finally {
@@ -929,11 +1001,18 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       return;
     }
     const sent = withAttachments(
-      text,
+      text.trim() ? text : "",
       attached.map((row) => row.path),
     );
+    const input = field();
+    // Many long file names take the room the words had.
+    if (sent.length > LIMIT && !revise && input?.value === text && text.trim()) {
+      moveToFile(input);
+      sendOnceUploaded.current = later;
+      return;
+    }
     if (sent.length > LIMIT || keyLikePresent(sent)) {
-      setProblem("Shorten the message or attachment names before sending.");
+      setProblem("Shorten the attachment names before sending.");
       return;
     }
     if (revise && sent.length > 7500) {
@@ -948,6 +1027,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         text: sent,
         ...(revise ? { revise } : {}),
         ...(chosen === "new" && !revise && researchNow.current ? { research: true as const } : {}),
+        ...(now.sendModel && !revise ? { model: now.sendModel } : {}),
       },
       revision.current,
       {
@@ -958,7 +1038,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         tag:
           chosen === "steer"
             ? "Sent while working"
-            : chosen === "followup" && later && now.agent.snapshot?.status !== "idle"
+            : chosen === "followup" && now.agent.snapshot?.status !== "idle"
               ? "After this task"
               : undefined,
       },
@@ -980,7 +1060,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       return;
     if (previous.request.mode === "new" && now.configured === false) return;
     const input = field();
-    if (!input || !guardOwner.current.check(input)) return;
+    if (!input || !checked(input)) return;
     pending.current = null;
     // Reuse the confirmed attachment IDs, while preserving any newer ordinary draft.
     void perform(previous.request, -1, {
@@ -999,9 +1079,9 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   };
   // From the menu, focus goes back to the message once it is on its way; on a phone that would
   // bring up the keyboard, so focus stays on the menu's button.
-  const send = (later: boolean) => {
+  const sendAfter = () => {
     if (!touch) field()?.focus();
-    submit(later);
+    submit(true);
   };
   const edit = () => {
     if (delivery?.phase === "refused") setDelivery(null);
@@ -1009,14 +1089,30 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   };
 
   const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
-  // A phone's field has room for its text and Send only; there a message is read after the step.
+  // A phone's field has room for its text and Send only; its More menu has the choice instead.
   const pill = props.layout === "pill";
-  if ((pill || !choosing) && menu) setMenu(false);
-  const typing = useRef({ submit, touch, choosing, write, menuKey: commands.key });
+  const offersMenu = !pill && choosing && !props.modelAfter;
+  if (!offersMenu && menu) setMenu(false);
+  const rows = uploads.rows;
+  const typing = useRef({ submit, touch, choosing, write, menuKey: commands.key, files: false });
   useLayoutEffect(() => {
-    typing.current = { submit, touch, choosing, write, menuKey: commands.key };
+    typing.current = {
+      submit,
+      touch,
+      choosing,
+      write,
+      menuKey: commands.key,
+      files: rows.length > 0,
+    };
   });
+  useEffect(() => {
+    const later = sendOnceUploaded.current;
+    if (later === null || uploads.blocked) return;
+    sendOnceUploaded.current = null;
+    if (rows.length) typing.current.submit(later);
+  }, [uploads.blocked, rows.length]);
   useEffect(() => onComposerFill((text) => typing.current.write(text)), []);
+  useEffect(() => onSendAfter(() => typing.current.submit(true)), []);
   // From a phone's More menu: research the message, with the field ready for it. Given the question,
   // it goes at once.
   useEffect(
@@ -1043,16 +1139,17 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       },
       onInput: (event) => {
         revision.current += 1;
+        sendOnceUploaded.current = null;
+        if (event.currentTarget.value.length > TEXT_BOUND && !composing.current)
+          moveNow.current(event.currentTarget);
         guardOwner.current.input(event.currentTarget, event.nativeEvent);
         measure(event.currentTarget, true);
         weigh(event.currentTarget);
         if (problemShown.current !== null) setProblem(null);
         const input = event.currentTarget;
         window.clearTimeout(draft.current);
-        draft.current = window.setTimeout(
-          () => keepDraft(guardOwner.current.notice ? "" : input.value),
-          400,
-        );
+        unkeptDraft = () => keepDraft(guardOwner.current.notice ? "" : input.value);
+        draft.current = window.setTimeout(keepDraftNow, 400);
       },
       onPaste: (event) => {
         const input = event.currentTarget;
@@ -1061,16 +1158,17 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         const files = [...(event.clipboardData.files ?? [])];
         if (files.length && attach.current(pastedFiles(files, pasteNames.current))) return;
         const pasted = event.clipboardData.getData("text/plain");
-        const document = pastedText(pasted, pasteNames.current);
-        if (document && attach.current([document])) return;
         if (
           pasted.length + input.value.length - (input.selectionEnd - input.selectionStart) >
-          LIMIT
-        )
-          input.value = " ".repeat(LIMIT + 1); // Bounded overflow sentinel, never a truncated key.
-        else input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
+          LONG_TEXT
+        ) {
+          if (problemShown.current !== null) setProblem(null);
+          addLongNow.current(pasted, "pasted");
+          return;
+        }
+        input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
         revision.current += 1;
-        guardOwner.current.check(input);
+        keepDraft(guardOwner.current.check(input) ? input.value : "");
         measure(input);
         weigh(input);
         if (problemShown.current !== null) setProblem(null);
@@ -1086,26 +1184,23 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           composing.current
         )
           return;
-        // Command or Control and Enter sends now, into the step dot is on.
-        if (event.ctrlKey || event.metaKey) {
-          if (!choosing) return;
-          event.preventDefault();
-          if (event.currentTarget.value.trim()) submit(false);
-          return;
-        }
+        // Command or Control and Enter is Enter, while dot works.
+        if ((event.ctrlKey || event.metaKey) && !choosing) return;
         event.preventDefault();
         // Option-Return sends after this task, where that is a choice; elsewhere it does nothing.
         if (event.altKey && !choosing) return;
-        if (event.currentTarget.value.trim()) submit();
+        if (event.currentTarget.value.trim() || typing.current.files) submit(event.altKey);
       },
     }),
     [measure, weigh],
   );
-  const taskAction = text.blank && !talking ? props.taskAction : undefined;
+  const empty = blank && !rows.length;
+  const taskAction = empty && !talking ? props.taskAction : undefined;
   const command = talking ? undefined : commands.command;
   const connect = mode === "new" && props.configured === false;
-  const near = text.length > NEAR && text.length <= LIMIT;
-  const unavailable = props.keysOpen || props.controlBlocked;
+  // While nothing can be sent the field still takes the user's words, so what they were typing as a
+  // card, an approval or a change of state arrived carries on.
+  const unavailable = props.keysOpen;
   const reason = blockedReason(props, mode);
   const sendReason = voiceSubmitting
     ? "Sending after transcription…"
@@ -1120,7 +1215,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
             : (reason ??
               (uploads.blocked
                 ? "Wait for your files to finish uploading."
-                : text.blank && !talking
+                : empty && !talking
                   ? "Write a message first."
                   : undefined));
   const attachReason = guard.notice
@@ -1151,10 +1246,10 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       : mode === "new" || switching
         ? "Send"
         : mode === "followup"
-          ? choosing
-            ? "Queue message"
-            : "Send follow-up"
-          : "Send now";
+          ? "Send follow-up"
+          : props.modelAfter
+            ? "Send after this task"
+            : "Send now";
   const note =
     mode === "new" || takeover
       ? undefined
@@ -1167,13 +1262,20 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     problem && { text: problem, alert: true },
     uploads.problem && { text: uploads.problem, alert: true },
     uploads.notice && { text: uploads.notice, alert: false },
+    choosing &&
+      props.modelAfter &&
+      !empty && { text: `Runs on ${props.modelAfter} after this task`, alert: false },
   ].filter((notice) => !!notice);
   // The notices fold away holding their last words.
   const shownNotices = useRef(notices);
   if (notices.length) shownNotices.current = notices;
-  const rows = uploads.rows;
   const shownRows = useRef(rows);
   if (rows.length) shownRows.current = rows;
+
+  const fold = useComposerFold(
+    form,
+    !blank || rows.length > 0 || !!revising || research || talking || !!voice.notice,
+  );
 
   const waiting = delivery && !arrived && (
     <PendingMessage
@@ -1200,10 +1302,15 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         className="composer-card"
         data-layout={pill ? "pill" : undefined}
         data-voice={talking || voice.notice ? "" : undefined}
+        data-compact={fold.compact ? "" : undefined}
         aria-label="Message dot"
         data-dragging={dragging || undefined}
+        onFocus={fold.onFocus}
+        onBlur={fold.onBlur}
         onSubmit={(event) => {
           event.preventDefault();
+          // Send pressed: the next words go in the field, not to the button.
+          if (!touch) field()?.focus();
           submit();
         }}
       >
@@ -1249,9 +1356,6 @@ export const Composer = memo(function Composer(props: ComposerProps) {
             />
           </Collapse>
         )}
-        {near && (
-          <p className="composer-count num">{`${(LIMIT - text.length).toLocaleString()} left`}</p>
-        )}
         <ComposerField
           label={newConversation ? "New task" : "Message"}
           placeholder={
@@ -1261,7 +1365,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
                 ? "Ask dot to do something"
                 : props.reply
                   ? "Answer dot"
-                  : "Message dot"
+                  : (props.placeholder ?? "Message dot")
           }
           unavailable={!!unavailable}
           listening={talking}
@@ -1294,7 +1398,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
               {note && <span className="composer-note">{note}</span>}
             </VoiceStrip>
           </div>
-          {!pill && choosing && (
+          {offersMenu && (
             <IconButton
               ref={more}
               className="composer-more"
@@ -1313,24 +1417,13 @@ export const Composer = memo(function Composer(props: ComposerProps) {
             align="end"
             label="Message options"
           >
-            {choosing && (
-              <MenuItem
-                disabledReason={sendReason}
-                kbd={touch ? undefined : ["Mod", "Enter"]}
-                onSelect={() => send(false)}
-              >
-                Send now
-              </MenuItem>
-            )}
-            {choosing && (
-              <MenuItem
-                disabledReason={sendReason}
-                kbd={touch ? undefined : ["Alt", "Enter"]}
-                onSelect={() => send(true)}
-              >
-                Send after this task
-              </MenuItem>
-            )}
+            <MenuItem
+              disabledReason={sendReason}
+              kbd={touch ? undefined : ["Alt", "Enter"]}
+              onSelect={sendAfter}
+            >
+              Send after this task
+            </MenuItem>
           </Menu>
           {props.permissions}
           <VoiceButton voice={voice} />

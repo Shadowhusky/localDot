@@ -1,4 +1,11 @@
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { afterMotion } from "../ui/finished.ts";
 import { type GlyphState, StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -35,46 +42,39 @@ function stateOf(status: string, phase: PlanPhase): [GlyphState, string] {
   return STATES[status] ?? ["todo", "Next"];
 }
 
-// The item dot is on, or else the first it has yet to start, and the one it starts after that.
-export function planFocus(plan: readonly PlanItem[]): { current?: PlanItem; next?: PlanItem } {
-  const doing = plan.findIndex((item) => item.status === "doing");
-  const at = doing >= 0 ? doing : plan.findIndex((item) => item.status === "todo");
-  if (at < 0) return {};
-  return { current: plan[at], next: plan.slice(at + 1).find((item) => item.status === "todo") };
+// What the open list keeps clear of under it, and the least of it that shows on the shortest screen.
+const ROOM_BELOW = 8;
+const MIN_ROOM = 96;
+
+// How far dot is, and the item it is on, or else the first it has yet to start.
+export function planProgress(plan: readonly PlanItem[]): {
+  done: number;
+  total: number;
+  current?: PlanItem;
+} {
+  const current =
+    plan.find((item) => item.status === "doing") ?? plan.find((item) => item.status === "todo");
+  return {
+    done: plan.filter((item) => item.status === "done").length,
+    total: plan.length,
+    ...(current ? { current } : {}),
+  };
 }
 
-function FocusLine({
-  item,
-  phase,
-  next = false,
-}: {
-  item: PlanItem;
-  phase: PlanPhase;
-  next?: boolean;
-}) {
-  const [state, word] = stateOf(item.status, phase);
-  const text = markdownToPlain(item.text);
-  return (
-    <span className="plan-strip-line" data-next={next || undefined}>
-      <StatusGlyph state={state} label={next ? "Then" : word} />
-      <span className="plan-strip-text" title={text}>
-        {text}
-      </span>
-    </span>
-  );
-}
-
-// The plan as one compact card over the steps: how far dot is, the item it is on and the next.
-// Open, the whole list takes the place of those two lines on the same card, and the card keeps
-// its closed height in the rail so the steps under it never move.
+// The plan over the steps, as one line: the item dot is on and how far it has got. Open, the whole
+// list hangs under that line on the same card, over the steps, which never move. It lives with the
+// steps alone: other tabs say how far dot is on the Steps tab itself.
 export function PlanStrip({
   plan,
   label = "Task plan",
   phase = "working",
+  over,
 }: {
   plan: readonly PlanItem[];
   label?: string;
   phase?: PlanPhase;
+  // The scrolling list the open card lies over.
+  over?: RefObject<HTMLElement | null>;
 }) {
   const [open, setOpen] = useState(false);
   // Until the list has folded away again, the card stays lifted over the steps at its closed
@@ -83,8 +83,10 @@ export function PlanStrip({
   if (open && !lifted) setLifted(true);
   const [closedHeight, setClosedHeight] = useState(0);
   const card = useRef<HTMLDivElement>(null);
-  const done = plan.filter((item) => item.status === "done").length;
-  const { current, next } = planFocus(plan);
+  const { done, total, current } = planProgress(plan);
+  const shown = current && stateOf(current.status, phase);
+  const words = PHASE_LABEL[phase];
+  const line = current && markdownToPlain(current.text);
   useEffect(() => {
     if (!open) return;
     const away = (event: PointerEvent) => {
@@ -104,6 +106,42 @@ export function PlanStrip({
     if (open || !lifted) return;
     return afterMotion([card.current], () => setLifted(false));
   }, [open, lifted]);
+  // iOS Safari can draw a scrolling list in a layer of its own, over a card stacked above it, so its
+  // rows show through however solid the card is. The part under the card is cut out of the list
+  // instead, in the same frame as the card grows. The card's own list stops where the steps' does,
+  // so a long plan scrolls rather than running out of the panel.
+  useLayoutEffect(() => {
+    const list = over?.current;
+    const held = card.current;
+    const strip = held?.firstElementChild;
+    if (!lifted || !list || !held || !strip || typeof ResizeObserver === "undefined") return;
+    const cut = () => {
+      const under = strip.getBoundingClientRect().bottom - list.getBoundingClientRect().top;
+      list.style.clipPath = under > 0 ? `inset(${under}px 0 0)` : "";
+    };
+    const fit = () => {
+      const top = strip.querySelector(".ui-collapse")?.getBoundingClientRect().top ?? 0;
+      const room = list.getBoundingClientRect().bottom - top - ROOM_BELOW;
+      held.style.setProperty("--_room", `${Math.max(MIN_ROOM, room)}px`);
+    };
+    cut();
+    fit();
+    // The height the list is given changes what is observed, so not within the observer's delivery.
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cut();
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fit);
+    });
+    observer.observe(strip);
+    observer.observe(list);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      list.style.clipPath = "";
+      held.style.removeProperty("--_room");
+    };
+  }, [lifted, over]);
   return (
     <div
       ref={card}
@@ -121,21 +159,26 @@ export function PlanStrip({
         }}
         summary={
           <span className="plan-strip-summary">
-            <span className="plan-strip-head">
-              <span className="plan-strip-title">
-                Plan{PHASE_LABEL[phase] && ` · ${PHASE_LABEL[phase]}`}
-              </span>
-              <span
-                className="plan-strip-bar"
-                aria-hidden="true"
-                style={{ "--_done": plan.length ? done / plan.length : 0 } as CSSProperties}
-              />
-              <span className="plan-strip-count num">
-                {done} of {plan.length}
-              </span>
+            <span className="ui-visually-hidden">Plan: </span>
+            {open || !line || !shown ? (
+              <span className="plan-strip-title">Plan{words && ` · ${words}`}</span>
+            ) : (
+              <>
+                <StatusGlyph state={shown[0]} label={shown[1]} />
+                <span className="plan-strip-text" title={line}>
+                  {words && `${words} · `}
+                  {line}
+                </span>
+              </>
+            )}
+            <span className="plan-strip-count num">
+              {done} of {total}
             </span>
-            {!open && current && <FocusLine item={current} phase={phase} />}
-            {!open && next && phase === "working" && <FocusLine item={next} phase={phase} next />}
+            <span
+              className="plan-strip-bar"
+              aria-hidden="true"
+              style={{ "--_done": total ? done / total : 0 } as CSSProperties}
+            />
           </span>
         }
       >

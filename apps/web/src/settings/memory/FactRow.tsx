@@ -4,6 +4,7 @@ import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../../ui/Menu.tsx";
 import { triggerProps } from "../../ui/Popover.tsx";
+import { useRevealInvalid } from "../../ui/reveal-field.ts";
 import { TextArea } from "../../ui/TextArea.tsx";
 import { MemoryRequestError } from "./memory-api.ts";
 import { sourceLine } from "./memory-copy.ts";
@@ -72,6 +73,7 @@ export function FactRow({
   const [draft, setDraft] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
   const source = sourceLine(entry);
   const begin = () => {
     setDraft(entry.text);
@@ -86,6 +88,7 @@ export function FactRow({
     const problem = factProblem(draft);
     if (problem) {
       setNote(problem);
+      reveal();
       return;
     }
     if (draft === entry.text) {
@@ -113,6 +116,7 @@ export function FactRow({
       <li className="ui-group-row memory-row" data-editing="">
         {heading}
         <form
+          ref={scope}
           className="memory-edit"
           onSubmit={(event) => {
             event.preventDefault();
@@ -121,6 +125,7 @@ export function FactRow({
         >
           <TextArea
             aria-label={noun}
+            aria-invalid={note ? true : undefined}
             value={draft}
             maxRows={8}
             autoFocus

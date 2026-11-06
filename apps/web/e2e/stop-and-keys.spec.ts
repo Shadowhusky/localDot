@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { PANEL_NAME } from "../src/shell/panel-name.ts";
 import { desktopContainer, docker, type RunningDaemon, startDaemon } from "./daemon.ts";
 
 const DOCKER = process.env.LOCALDOT_DOCKER_TESTS === "1";
@@ -70,7 +71,7 @@ test("a key's use shows in the steps; Stop freezes the computer and Resume thaws
   });
   expect(started.status).toBe(202);
   // An allowed use folds into the step it came with; unfolding the step lists it.
-  const rail = page.getByRole("complementary", { name: "Plan and steps" });
+  const rail = page.getByRole("complementary", { name: PANEL_NAME });
   await expect(async () => {
     const head = rail.getByTestId("step-row").last().locator(".activity-row-head");
     if ((await head.getAttribute("aria-expanded")) === "false") await head.click();

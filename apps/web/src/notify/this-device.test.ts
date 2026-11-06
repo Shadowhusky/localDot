@@ -102,6 +102,10 @@ describe("this device", () => {
     expect(await deviceState([], env({ standalone: false }))).toEqual({
       kind: "needs-home-screen",
     });
+    expect(await deviceState([], env({ standalone: false, hostname: "100.91.187.75" }))).toEqual({
+      kind: "needs-home-screen",
+      bareAddress: true,
+    });
     expect(await deviceState([], env({ pushSupported: false }))).toEqual({ kind: "unsupported" });
     expect(await deviceState([], env({}, "denied"))).toEqual({ kind: "blocked" });
     expect(await deviceState([], env())).toEqual({ kind: "off" });

@@ -1,6 +1,7 @@
 import { computerFileName } from "@localdot/protocol";
 import { type RefObject, useEffect, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
+import { useLoadAgain } from "../lib/useLoadAgain.ts";
 import { loadThumbnail } from "./api.ts";
 import { slot } from "./usePreview.ts";
 import type { ComputerEntry } from "./viewer/scope.tsx";
@@ -19,7 +20,8 @@ function keep(key: string, url: string) {
 }
 
 // A picture on the computer as a small, metadata-free PNG, loaded once its element is near the
-// viewport, two at a time across the page. Null while loading or when it can't be read.
+// viewport, two at a time across the page. Null while loading or when it can't be read, in which
+// case it is read again.
 export function useThumbnail(
   api: ApiClient | null,
   entry: ComputerEntry | undefined,
@@ -27,7 +29,8 @@ export function useThumbnail(
 ): string | null {
   const key = entry ? `${entry.sessionId}/${entry.path}` : "";
   const [url, setUrl] = useState<{ key: string; url: string } | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the key names the file.
+  const { attempt, failed } = useLoadAgain(key);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key names the file; another attempt loads it again.
   useEffect(() => {
     if (!api || !entry) return;
     const known = kept.get(key);
@@ -52,7 +55,9 @@ export function useThumbnail(
     };
     const start = () =>
       load()
-        .catch(() => {})
+        .catch(() => {
+          if (!controller.signal.aborted) failed();
+        })
         .finally(() => release?.());
     const observer =
       typeof IntersectionObserver === "undefined"
@@ -72,6 +77,6 @@ export function useThumbnail(
       controller.abort();
       release?.();
     };
-  }, [api, key, target]);
+  }, [api, key, target, attempt, failed]);
   return url?.key === key ? url.url : null;
 }

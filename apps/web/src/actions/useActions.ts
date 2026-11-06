@@ -23,6 +23,8 @@ import { APPEARANCE_CHOICES, type AppearanceChoice } from "../onboarding/appeara
 import { addEntry, MemoryRequestError } from "../settings/memory/memory-api.ts";
 import type { ModelGroup, ModelOption } from "../settings/model-options.ts";
 import { SECTIONS, type SettingsSection } from "../settings/sections.ts";
+import { PANEL_NAME } from "../shell/panel-name.ts";
+import { VIEW_NAMES } from "../shell/view-style.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { TAG_NAMES } from "../ui/ConversationTag.tsx";
 import { showToast } from "../ui/Toast.tsx";
@@ -81,6 +83,8 @@ export interface ActionsInput {
     readonly value: AppearanceChoice;
     change(value: AppearanceChoice): void;
   };
+  // Over to the other view style.
+  readonly viewStyle: { readonly label: string; run(): void };
   readonly otherDots: readonly { readonly id: string; readonly name: string; open(): void }[];
   readonly stopAll: Doable;
   newRoutine(trigger: HTMLElement | null): void;
@@ -115,6 +119,7 @@ export function useActions(input: ActionsInput): {
     chatPanel,
     persona,
     appearance,
+    viewStyle,
     conversations,
   } = input;
   const stopReason = input.stop.reason;
@@ -551,17 +556,17 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "view-activity",
-        title: "Show Activity",
-        description: "Steps, files and sources of this task",
+        title: `Show ${PANEL_NAME}`,
+        description: "Steps, files and previews of this work",
         group: "Go to",
         icon: "list",
-        keywords: "steps timeline tab",
+        keywords: "activity steps timeline tab",
         run: () => now().view("activity"),
       },
       {
         id: "files",
         title: "Show files",
-        description: "Files dot made or changed in this task",
+        description: "Files dot made or changed in this conversation",
         group: "Go to",
         icon: "file",
         keywords: "downloads results outputs activity",
@@ -654,6 +659,16 @@ export function useActions(input: ActionsInput): {
         },
       },
       {
+        id: "view-style",
+        title: viewStyle.label,
+        description: `${VIEW_NAMES.chat} or ${VIEW_NAMES.studio}, on this device`,
+        group: "Settings",
+        icon: "layout-grid",
+        keywords: `view style layout messenger switch ${VIEW_NAMES.chat} ${VIEW_NAMES.studio}`,
+        searchable: true,
+        run: () => now().viewStyle.run(),
+      },
+      {
         id: "other-dots",
         title: "Open another localDot",
         description: "Your other localDots on this Mac or elsewhere",
@@ -702,6 +717,7 @@ export function useActions(input: ActionsInput): {
     modelReason,
     persona.value,
     appearance.value,
+    viewStyle.label,
     stopReason,
     continueReason,
     takeReason,

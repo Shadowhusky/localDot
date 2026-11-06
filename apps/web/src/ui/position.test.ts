@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { place } from "./position.ts";
+import { levelWith, place } from "./position.ts";
 
 const viewport = { width: 1440, height: 900 };
 const size = { width: 200, height: 160 };
@@ -72,5 +72,28 @@ describe("place", () => {
       align: "start",
     });
     expect(found).toMatchObject({ side: "left", left: 1300 - 8 - 200, top: 400, originX: 200 });
+  });
+
+  it("goes under an anchor that leaves room on neither hand, or over it near the bottom", () => {
+    const phone = { width: 390, height: 844 };
+    const row = { top: 300, left: 0, width: 390, height: 72 };
+    const under = place({ anchor: row, size, viewport: phone, side: "right", align: "start" });
+    expect(under).toMatchObject({ side: "bottom", top: 380, left: 8 });
+    const low = { ...row, top: 700 };
+    const over = place({ anchor: low, size, viewport: phone, side: "right", align: "start" });
+    expect(over).toMatchObject({ side: "top", top: 700 - 8 - 160, left: 8 });
+  });
+});
+
+describe("levelWith", () => {
+  it("is level with the row and as wide as its list", () => {
+    const box = (left: number, top: number, width: number, height: number) =>
+      ({ getBoundingClientRect: () => ({ left, top, width, height }) }) as Element;
+    expect(levelWith(box(16, 420, 330, 72), box(0, 0, 368, 900))).toEqual({
+      top: 420,
+      height: 72,
+      left: 0,
+      width: 368,
+    });
   });
 });

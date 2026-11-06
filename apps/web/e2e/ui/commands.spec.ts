@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { composer, expect, isPhone, runAt, test } from "./harness.ts";
 
 // The composer's slash commands, a side question only the user sees, and the action palette, at
@@ -112,6 +113,38 @@ for (const appearance of ["graphite", "midnight"] as const)
     await expect(page.locator("html")).toHaveAttribute("data-appearance", "midnight");
   });
 
+test("the palette's search keeps its whole focus ring", async ({ page, ui }) => {
+  await ui.open("running");
+  await composer(page);
+  const palette = await openPalette(page);
+  const search = palette.getByRole("combobox");
+  await search.focus();
+  const edges = () =>
+    search.locator("xpath=ancestor::*[contains(@class,'ui-field-box')][1]").evaluate((box) => {
+      const style = getComputedStyle(box);
+      const line = box.parentElement && getComputedStyle(box.parentElement);
+      const shell = box.getBoundingClientRect();
+      const room = box.closest(".command-palette")?.getBoundingClientRect();
+      return {
+        sameColour: style.borderBottomColor === style.borderTopColor,
+        sameWidth: style.borderBottomWidth === style.borderTopWidth,
+        ring: style.boxShadow.includes("3px"),
+        inside: !!room && shell.left - room.left >= 3 && room.right - shell.right >= 3,
+        lineUnder: line?.borderBottomStyle,
+        roomUnder: Number.parseFloat(line?.paddingBottom ?? "0"),
+      };
+    });
+  await expect.poll(edges).toEqual({
+    sameColour: true,
+    sameWidth: true,
+    ring: true,
+    inside: true,
+    lineUnder: "solid",
+    roomUnder: 6,
+  });
+  await shot(page, "palette-focus");
+});
+
 test("the palette runs actions from the keyboard and gives focus back", async ({ page, ui }) => {
   test.skip(isPhone(page), "A keyboard flow");
   await ui.open("running");
@@ -123,7 +156,7 @@ test("the palette runs actions from the keyboard and gives focus back", async ({
   await page.keyboard.type("activity");
   await page.keyboard.press("Enter");
   await expect(palette).toBeHidden();
-  await expect(page.getByRole("radio", { name: "Activity" })).toHaveAttribute(
+  await expect(page.getByRole("radio", { name: PANEL_NAME })).toHaveAttribute(
     "aria-checked",
     "true",
   );

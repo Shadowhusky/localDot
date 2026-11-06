@@ -7,6 +7,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { copyHomeScreenLink, LinkNotCopied } from "../notify/home-screen-link.ts";
+import { isBareAddress } from "../notify/this-device.ts";
 import { localDotHost } from "../shell/local-dots.ts";
 import { Button } from "../ui/Button.tsx";
 import { Group, GroupHead, GroupNote, GroupRow } from "../ui/Group.tsx";
@@ -59,6 +60,19 @@ const standing = (tailscale: TailscaleAccess) =>
       : STANDING[tailscale.state];
 const named = (label: string) => (label === "Tailscale" ? label : label.toLowerCase());
 const openPage = (url: string) => window.open(url, "_blank", "noopener,noreferrer");
+
+const bareHttps = (origin: string) =>
+  URL.canParse(origin) &&
+  new URL(origin).protocol === "https:" &&
+  isBareAddress(new URL(origin).hostname);
+
+// Only said where a phone could be given the wrong address.
+function homeScreenNote({ links, tailscale }: AccessLinksStatus): string | undefined {
+  if (!links.some(({ origin }) => bareHttps(origin))) return undefined;
+  return tailscale.state === "served"
+    ? "For an iPhone's Home Screen, use the Tailscale link: its certificate is trusted, so the app gets its icon and opens with no warning."
+    : "An iPhone doesn't trust the certificate of a bare address, so the app would lose its icon and warn each time it opens. Turn on Tailscale for an address it trusts.";
+}
 
 export function AccessLinksSettings({ api }: { api: ApiClient }) {
   const [status, setStatus] = useState<AccessLinksStatus | null>(null);
@@ -219,6 +233,7 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
       </Button>
     );
   };
+  const note = status && homeScreenNote(status);
   const addressRow = (address: AccessAddress) => (
     <GroupRow
       key={address.origin}
@@ -252,6 +267,7 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
             {status.links.slice(1).map(addressRow)}
           </Group>
           <GroupNote role="status">{tailscale.message}</GroupNote>
+          {note && <GroupNote>{note}</GroupNote>}
           {tailscale.operatorHint && (
             <pre className="settings-well settings-command">{tailscale.operatorHint}</pre>
           )}

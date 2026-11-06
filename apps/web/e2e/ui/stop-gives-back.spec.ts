@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { TOKEN } from "../fixtures/start-ui-fixture.ts";
 import { attachFiles } from "./attach.ts";
-import { composer, expect, runAt, test } from "./harness.ts";
+import { composer, expect, runAt, sendAfterThisTask, test } from "./harness.ts";
 
 // Stop gives back what dot had not acted on yet: it leaves the thread for the composer of the device
 // that stopped, ahead of anything written there since, with its files. What dot acted on stays.
@@ -53,18 +53,47 @@ test("a new task's message dot has not answered comes back, and no empty convers
   ).not.toContain(task);
 });
 
-test("a message dot acted on stays; only what came after it comes back", async ({ page, ui }) => {
-  await ui.open("running");
+for (const how of ["sent as it works", "queued"] as const)
+  test(`a message dot acted on stays; only what came after it comes back: ${how}`, async ({
+    page,
+    ui,
+  }) => {
+    await ui.open("running");
+    const card = await composer(page);
+    const field = card.getByRole("textbox", { name: "Message", exact: true });
+    await field.fill("Then tidy up the sheet");
+    if (how === "queued") await sendAfterThisTask(page);
+    else await card.getByRole("button", { name: "Send now" }).click();
+    await expect(
+      yours(page, "Then tidy up the sheet").getByText(
+        how === "queued" ? "After this task" : "Sent while working",
+      ),
+    ).toBeVisible();
+    await expect(field).toHaveValue("");
+    await card.getByRole("button", { name: "Stop task" }).click();
+
+    await expect(field).toHaveValue("Then tidy up the sheet");
+    await expect(yours(page, "Then tidy up the sheet")).toHaveCount(0);
+    await expect(yours(page, "Summarise the sample sales table")).toBeVisible();
+    await expect(page.getByText("Not sent")).toHaveCount(0);
+  });
+
+test("a message dot went on to answer stays when Stop comes after", async ({ page, ui }) => {
+  const fixture = await ui.open("running");
   const card = await composer(page);
   const field = card.getByRole("textbox", { name: "Message", exact: true });
-  await field.fill("Then tidy up the sheet");
-  await card.getByRole("button", { name: "Queue message" }).click();
-  await expect(yours(page, "Then tidy up the sheet").getByText("After this task")).toBeVisible();
-  await expect(field).toHaveValue("");
+  await field.fill("Use the blue palette");
+  await card.getByRole("button", { name: "Send now" }).click();
+  const sent = yours(page, "Use the blue palette");
+  await expect(sent.getByText("Sent while working")).toBeVisible();
+  const said = await page.request.post(`${fixture.origin}/__qa/say?text=Switching%20to%20blue.`);
+  expect(said.ok()).toBe(true);
+  await expect(page.locator(".thread .safe-markdown").filter({ hasText: "Switching" })).toHaveCount(
+    1,
+  );
   await card.getByRole("button", { name: "Stop task" }).click();
 
-  await expect(field).toHaveValue("Then tidy up the sheet");
-  await expect(yours(page, "Then tidy up the sheet")).toHaveCount(0);
-  await expect(yours(page, "Summarise the sample sales table")).toBeVisible();
-  await expect(page.getByText("Not sent")).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Stop task" })).toHaveCount(0);
+  await expect(field).toHaveValue("");
+  await expect(sent).toHaveCount(1);
 });

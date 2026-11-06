@@ -1,10 +1,8 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
-// Attaches files the computer takes at once, as finished uploads. Each event that changes the task
-// makes the composer check it again, and until it has, it holds off Attach for a moment: a choice it
-// turned down is made again.
-export async function attachFiles(page: Page, card: Locator, names: string[]) {
-  await page.route("**/api/cells/*/uploads", (route) => {
+// The computer takes each upload at once.
+export const finishUploads = (page: Page) =>
+  page.route("**/api/cells/*/uploads", (route) => {
     const { id, name, bytes } = route.request().postDataJSON();
     return route.fulfill({
       status: 201,
@@ -19,6 +17,12 @@ export async function attachFiles(page: Page, card: Locator, names: string[]) {
       },
     });
   });
+
+// Attaches files the computer takes at once, as finished uploads. Each event that changes the task
+// makes the composer check it again, and until it has, it holds off Attach for a moment: a choice it
+// turned down is made again.
+export async function attachFiles(page: Page, card: Locator, names: string[]) {
+  await finishUploads(page);
   const uploaded = card.getByText("Uploaded to Downloads");
   await expect(async () => {
     if (!(await uploaded.count())) {

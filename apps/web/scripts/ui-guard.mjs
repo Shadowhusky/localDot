@@ -9,6 +9,8 @@ export const BASELINE = fileURLToPath(new URL("./ui-guard-baseline.json", import
 
 export const RULES = {
   "raw-colour": "raw colour; use a colour role from src/ui/tokens.css",
+  "track-surface":
+    "track painted in a surface role, which vanishes on that surface; use a track role",
   "undeclared-token": "var() of a custom property nothing declares",
   "token-fallback": "var() with a fallback, which hides a missing token",
   "type-literal": "font size, line height or weight off the type scale; use a --text-* token",
@@ -44,6 +46,9 @@ const COLOUR_FUNCTION = /(?<![\w-])(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)
 const NAMED_COLOUR =
   /(?<![\w-])(?:white|black|red|green|blue|gr[ae]y|silver|yellow|orange|purple|pink|navy|teal|maroon|olive|lime|aqua|cyan|magenta|fuchsia)(?![\w-])/i;
 const COLOUR_PROPERTY = /^--|color|background|border|outline|fill|stroke|shadow/;
+const TRACK_SELECTOR = /track(?![\w-])/;
+const SURFACE_ROLE =
+  /var\(\s*--color-(?:void|console|raised(?:-2)?|overlay|popover|well|surface(?:-2)?)\s*\)/;
 const LENGTH = /(?<![\w.-])-?(\d*\.?\d+)(px|rem|em)\b/g;
 const TIME = /(?<![\w.-])(\d*\.?\d+)m?s\b/g;
 const EASING = /(?<![\w-])(?:ease(?:-in|-out|-in-out)?|cubic-bezier\(|steps\(|linear\()/;
@@ -148,8 +153,8 @@ function lineOf(text, offset) {
 }
 
 // Calls onRule(prelude, offset, source) for each block and onDeclaration(property, value, offset,
-// source) for each declaration in it. Comments and string contents are blanked first, so a ";" or
-// "{" in either cannot split a rule; source is the text as written.
+// source, prelude) for each declaration in it. Comments and string contents are blanked first, so a
+// ";" or "{" in either cannot split a rule; source is the text as written.
 function walkCss(css, onRule, onDeclaration) {
   const text = blankCommentsAndStrings(css);
   const preludes = [];
@@ -173,7 +178,13 @@ function walkCss(css, onRule, onDeclaration) {
       const colon = body.indexOf(":");
       if (preludes.length && colon !== -1 && !body.startsWith("@")) {
         const source = css.slice(start, start + body.length);
-        onDeclaration(body.slice(0, colon).trim(), body.slice(colon + 1).trim(), start, source);
+        onDeclaration(
+          body.slice(0, colon).trim(),
+          body.slice(colon + 1).trim(),
+          start,
+          source,
+          preludes.at(-1),
+        );
       }
       if (ch === "}") preludes.pop();
       segment = i + 1;
@@ -338,9 +349,11 @@ function scanCss(path, css, declared, report) {
         report("control-selector", offset, source.replace(/\s+/g, " "));
       }
     },
-    (property, raw, offset, source) => {
+    (property, raw, offset, source, prelude) => {
       const flag = (rule) => report(rule, offset, source.replace(/\s+/g, " "));
       const value = raw.replace(URL_FUNCTION, "url()");
+      if (/^background/.test(property) && TRACK_SELECTOR.test(prelude) && SURFACE_ROLE.test(value))
+        flag("track-surface");
       tokenFindings(value, local, (rule, name) => report(rule, offset, name));
       if (
         HEX.test(value) ||

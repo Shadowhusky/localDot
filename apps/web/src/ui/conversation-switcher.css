@@ -6,6 +6,10 @@
   /* It fills the sheet without lending the sheet its own height, so a longer list never squeezes
      the sheet's header. */
   .conversations[data-layout="sheet"] {
+    --_gutter: calc(var(--spacing) * 5);
+    /* A row's ball is on the gutter: past the list's padding, its button's border and the room the
+       frame leaves round the ball. */
+    --_row-start: calc(var(--_gutter) - var(--spacing) * 3 - 1px);
     flex: 1 1 auto;
     gap: calc(var(--spacing) * 2);
     height: 0;
@@ -14,7 +18,7 @@
   }
 
   .conversations[data-layout="sheet"] > :is(.conversations-search, .conversations-note) {
-    margin-inline: calc(var(--spacing) * 5);
+    margin-inline: var(--_gutter);
   }
 
   .conversations[data-layout="sheet"] > .conversations-body {
@@ -28,7 +32,7 @@
     scrollbar-width: none;
   }
 
-  .conversations[data-layout="sheet"] .conversations-day {
+  .conversations[data-layout="sheet"] :is(.conversations-day, .ui-empty[data-layout="start"]) {
     padding-inline: calc(var(--spacing) * 3);
   }
 
@@ -37,12 +41,13 @@
     border-top: 0;
   }
 
-  /* The tags in use, each a filter: a tap shows only that colour, another shows them all. */
+  /* The tags in use, each a filter: a tap shows only that colour, another shows them all. They
+     scroll edge to edge and rest at the list's gutter. */
   .conversations-tags {
     display: flex;
     flex: none;
     gap: calc(var(--spacing) * 2);
-    padding: 0 calc(var(--spacing) * 5);
+    padding-inline: var(--_gutter);
     overflow-x: auto;
     scrollbar-width: none;
   }
@@ -89,7 +94,7 @@
   .conversations[data-layout="sheet"] .conversations-row:not(:has(> .ui-swipe)) {
     display: grid;
     min-height: calc(var(--spacing) * 13);
-    padding-inline: calc(var(--spacing) * 3) var(--spacing);
+    padding-inline: var(--_row-start) var(--spacing);
   }
 
   .conversations-swipe {
@@ -101,7 +106,7 @@
     grid-template-columns: minmax(0, 1fr) 32px;
     align-items: center;
     min-height: calc(var(--spacing) * 13);
-    padding-inline: calc(var(--spacing) * 3) var(--spacing);
+    padding-inline: var(--_row-start) var(--spacing);
     border-radius: inherit;
     transition:
       background-color var(--dur-hover) var(--ease-standard),
@@ -116,6 +121,7 @@
   .conversations[data-layout="sheet"] .conversations-pick.ui-button {
     --_bg-hover: transparent;
     --_bg-pressed: transparent;
+    padding-inline-start: 0;
   }
 
   @media (hover: hover) {
@@ -154,11 +160,11 @@
     grid-auto-flow: column;
     gap: var(--_gap);
     margin: 0 calc(var(--spacing) * -2);
-    padding: var(--spacing) calc(var(--spacing) * 4) calc(var(--spacing) * 2);
+    padding: var(--spacing) var(--_gutter) calc(var(--spacing) * 2);
     overflow-x: auto;
     overscroll-behavior-x: contain;
     list-style: none;
-    scroll-padding-inline: calc(var(--spacing) * 4);
+    scroll-padding-inline: var(--_gutter);
     scroll-snap-type: x mandatory;
     scrollbar-width: none;
   }
@@ -347,6 +353,25 @@
     transition-duration: var(--dur-exit);
   }
 
+  /* Where the card rests, whatever it is doing on its way there. */
+  .peek-anchor {
+    position: absolute;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  /* What a held conversation lifts as: all three are drawn each frame (ConversationPeek). */
+  .peek-plate {
+    position: absolute;
+    top: 0;
+    left: 0;
+    border-radius: var(--radius-xl);
+    background-color: var(--color-popover);
+    box-shadow: var(--shadow-overlay);
+    pointer-events: none;
+    will-change: transform;
+  }
+
   .peek-card {
     position: absolute;
     top: 0;
@@ -358,17 +383,9 @@
     margin-inline: auto;
     padding: calc(var(--spacing) * 4) calc(var(--spacing) * 4) calc(var(--spacing) * 4)
       calc(var(--spacing) * 5);
-    border-radius: var(--radius-xl);
-    background-color: var(--color-popover);
-    box-shadow: var(--shadow-overlay);
     color: var(--color-fg-1);
     pointer-events: none;
     transform-origin: 0 0;
-    visibility: hidden;
-  }
-
-  .peek-card[data-placed] {
-    visibility: visible;
   }
 
   .peek-card > .ui-tag-mark {
@@ -469,13 +486,13 @@
   }
 
   /* A row's tag sits 2 px in from its swiping surface's edge. */
-  .conversations[data-layout="sheet"] .conversations-glyph > .ui-tag-mark {
-    left: calc(var(--spacing) * -2.5);
+  .conversations[data-layout="sheet"] .conversation-avatar > .ui-tag-mark {
+    left: calc(var(--spacing) * -1.5);
   }
 
   @media (forced-colors: active) {
     .live-card-body,
-    .peek-card {
+    .peek-plate {
       border: 1px solid CanvasText;
     }
 

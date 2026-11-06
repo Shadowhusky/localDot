@@ -12,10 +12,13 @@ import {
 } from "react";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { KeysController } from "../keys/useKeys.ts";
+import type { ApiClient } from "../lib/api.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
+import { Chip } from "../ui/Chip.tsx";
 import { CodeField } from "../ui/CodeField.tsx";
+import { enterCode } from "../ui/code.ts";
 import { Field } from "../ui/Field.tsx";
 import { ChooseFileButton } from "../ui/FileButton.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -26,6 +29,7 @@ import { QrCode } from "../ui/QrCode.tsx";
 import { RadioCards } from "../ui/RadioCards.tsx";
 import { TextArea } from "../ui/TextArea.tsx";
 import { TextField, type TextFieldProps } from "../ui/TextField.tsx";
+import { AppConnectRequest } from "./AppConnectRequest.tsx";
 import { RevealedText } from "./ApprovalValue.tsx";
 import { type AskDraft, type AskState, useAskState } from "./ask-draft.ts";
 import {
@@ -72,6 +76,10 @@ export interface AskFormProps {
   // Takes a key pasted into a field into Keys.
   receiveKey?: KeyIntake["receive"];
   saveKey?: KeysController["save"];
+  // Where to ask for an app to be connected.
+  connectApi?: ApiClient;
+  // One choice of a few is answered by one tap on a chip, as a chat's quick replies are.
+  quick?: boolean;
 }
 
 const TYPED = new Set<AskField["kind"]>([
@@ -98,9 +106,19 @@ const TEXT_INPUT: Partial<Record<AskField["kind"], Partial<TextFieldProps>>> = {
 export function AskForm(props: AskFormProps) {
   if (props.draft.fields.length === 1 && props.draft.fields[0]?.kind === "api_key")
     return <PrivateKeyRequest key={props.draft.question.askId} {...props} />;
+  if (props.draft.fields.length === 1 && props.draft.fields[0]?.kind === "connect_app")
+    return <AppConnectRequest key={props.draft.question.askId} {...props} />;
   return <StandardAskForm {...props} />;
 }
-function StandardAskForm({ draft, layout, answer, reason, upload, receiveKey }: AskFormProps) {
+function StandardAskForm({
+  draft,
+  layout,
+  answer,
+  reason,
+  upload,
+  receiveKey,
+  quick = false,
+}: AskFormProps) {
   const state = useAskState(draft);
   const titleId = `ask-${draft.question.askId}`;
   const composing = useRef(false);
@@ -166,6 +184,59 @@ function StandardAskForm({ draft, layout, answer, reason, upload, receiveKey }: 
     if (!reason) draft.set(choice.id, String(index));
   };
 
+  // On a phone, a code of known length that makes up the whole question goes as soon as it is whole,
+  // so a code offered from a text message, or one pasted, takes one tap. Once for each value: a
+  // rejected code stays until it is changed.
+  const onlyCode =
+    fields.length === 1 && fields[0]?.kind === "code" && fields[0].length ? fields[0] : undefined;
+  const typedCode = onlyCode ? state.draft.values[onlyCode.id] : undefined;
+  const wholeCode =
+    typeof typedCode === "string" && [...typedCode].length === onlyCode?.length ? typedCode : "";
+  const sentCode = useRef(wholeCode);
+  const send = useRef(submit);
+  send.current = submit;
+  useEffect(() => {
+    if (wholeCode === sentCode.current) return;
+    sentCode.current = wholeCode;
+    if (wholeCode && touch) send.current();
+  }, [wholeCode, touch]);
+
+  if (quick && choice)
+    return (
+      // biome-ignore lint/a11y/useSemanticElements: a row of buttons, not a form's fieldset.
+      <div className="ask-quick" role="group" aria-label="Answer dot">
+        {choice.options.map((option, index) => (
+          <Chip
+            key={option}
+            aria-busy={state.sending === "answer" || undefined}
+            disabledReason={reason ?? waiting}
+            onClick={() => {
+              if (reason || state.sending) return;
+              draft.set(choice.id, String(index));
+              void draft.submit(answer);
+            }}
+          >
+            {markdownToPlain(option)}
+          </Chip>
+        ))}
+        {question.declinable !== false && (
+          <Chip
+            variant="outline"
+            disabledReason={reason ?? waiting}
+            onClick={() => {
+              if (!reason && !state.sending) void draft.decline(answer);
+            }}
+          >
+            {question.decline ?? "Not now"}
+          </Chip>
+        )}
+        {state.failed && (
+          <p className="ask-problem" role="status">
+            {state.failed}
+          </p>
+        )}
+      </div>
+    );
   const body = (
     <div className="ask-fields">
       {fields.map((field) => (
@@ -348,13 +419,36 @@ function AskFieldControl({
               aria-label={label}
               value={text}
               maxLength={32}
-              autoComplete="off"
+              autoComplete="one-time-code"
               autoCapitalize="none"
               spellCheck={false}
+              enterKeyHint="send"
               readOnly={!!reason}
               onChange={(event) => draft.set(field.id, event.currentTarget.value)}
               onBlur={leave}
             />
+          )}
+          {touch && !reason && canReadClipboard() && (
+            <Button
+              className="ask-paste-code"
+              variant="quiet"
+              size="sm"
+              icon="clipboard-paste"
+              onClick={() => {
+                void navigator.clipboard.readText().then(
+                  (copied) =>
+                    draft.set(
+                      field.id,
+                      field.length
+                        ? enterCode("", 0, copied, field.length).code
+                        : copied.trim().slice(0, 32),
+                    ),
+                  () => {},
+                );
+              }}
+            >
+              Paste code
+            </Button>
           )}
         </Field>
       );
@@ -458,6 +552,8 @@ function AskFieldControl({
       );
   }
 }
+
+const canReadClipboard = () => typeof navigator.clipboard?.readText === "function";
 
 // Under a field: a warning when its name hides characters, the site a secret is typed into, and
 // dot's hint, drawn as an approval card draws a value so nothing in it can disguise the rest.

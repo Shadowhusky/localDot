@@ -72,6 +72,7 @@ const PLANNED: IconName[] = [
   "bell",
   "trash",
   "chevrons-up-down",
+  "grip-vertical",
   "info",
   // Settings: Spending and the audit log (design-v2 §11 I, J).
   "chart",

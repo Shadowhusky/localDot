@@ -18,25 +18,12 @@
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  transition:
-    transform var(--dur-default) var(--ease-spring),
-    opacity var(--dur-fade) var(--ease-enter);
 }
 
-.viewer-pane[data-dragging] {
-  transition: none;
-}
-
-@starting-style {
-  .viewer-pane[data-from="right"] {
-    opacity: 0;
-    transform: translateX(calc(var(--spacing) * 12));
-  }
-
-  .viewer-pane[data-from="left"] {
-    opacity: 0;
-    transform: translateX(calc(var(--spacing) * -12));
-  }
+/* The files beside the one on show lie over it until FileViewer moves them a sheet's width away. */
+.viewer-pane[data-aside] {
+  position: absolute;
+  inset: 0;
 }
 
 /* The bar: what this kind of file can do on the left, a quiet fact about it on the right. */
@@ -138,16 +125,27 @@
     var(--font-ui);
 }
 
-.viewer-message {
-  display: grid;
-  justify-items: center;
-  gap: calc(var(--spacing) * 2);
-  max-width: 320px;
-  text-align: center;
+.viewer-center:has(> .ui-file-card) {
+  grid-template-columns: minmax(0, 480px);
 }
 
-.viewer-message > .ui-button {
-  margin-top: calc(var(--spacing) * 2);
+.viewer-center > .ui-file-card {
+  width: 100%;
+}
+
+/* A file's own player under its row, kept to the card and short enough to see its controls. */
+.file-preview-media video {
+  display: block;
+  width: 100%;
+  max-height: min(360px, 50dvh);
+  aspect-ratio: auto 16 / 9;
+  border-radius: var(--radius-md);
+  background-color: var(--color-void);
+}
+
+.file-preview-media audio {
+  display: block;
+  width: 100%;
 }
 
 .viewer-tile {
@@ -170,21 +168,6 @@
   width: 88px;
   height: 88px;
   border-radius: var(--radius-xl);
-}
-
-.viewer-message-title {
-  color: var(--color-fg-1);
-  font:
-    var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
-    var(--font-ui);
-  letter-spacing: var(--text-title-3--letter-spacing);
-}
-
-.viewer-message-detail {
-  color: var(--color-fg-2);
-  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
-  letter-spacing: var(--text-body--letter-spacing);
-  text-wrap: pretty;
 }
 
 /* A picture: drawn at its scale from its top-left corner, a checkerboard showing through what it
@@ -1053,7 +1036,6 @@ div.viewer-json-row {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .viewer-pane,
   .viewer-canvas[data-settling],
   .viewer-pages-run {
     transition: opacity var(--dur-fade) var(--ease-enter);

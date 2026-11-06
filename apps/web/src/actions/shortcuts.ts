@@ -20,9 +20,8 @@ export const SHORTCUTS: readonly { readonly title: string; readonly rows: readon
     {
       title: "Message",
       rows: [
-        { keys: [["Enter"]], label: "Send" },
+        { keys: [["Enter"]], label: "Send; dot reads it at its next step" },
         { keys: [["Shift", "Enter"]], label: "New line" },
-        { keys: [["Mod", "Enter"]], label: "Send now, while dot works" },
         { keys: [["Alt", "Enter"]], label: "Send after this task" },
         { keys: [["/"]], label: "Commands, at the start of a message" },
         { keys: [["Tab"]], label: "Complete a command" },

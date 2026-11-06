@@ -1,3 +1,4 @@
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "w39");
@@ -7,9 +8,12 @@ test("saved image reads display inside Steps after reopening the conversation", 
 }) => {
   await ui.open("image-output");
   for (const reopened of [false, true]) {
-    if (reopened) await page.reload();
-    if (isPhone(page)) await page.getByRole("button", { name: "Activity", exact: true }).click();
-    else await page.getByRole("radio", { name: "Activity", exact: true }).click();
+    if (reopened) {
+      ui.leaving();
+      await page.reload();
+    }
+    if (isPhone(page)) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+    else await page.getByRole("radio", { name: PANEL_NAME, exact: true }).click();
     const row = page
       .getByTestId("tool-row")
       .filter({ hasText: "read flower-poster/assets/hero1.jpg" });

@@ -6,7 +6,7 @@ import {
   personaOf,
   type StartAtLoginState,
 } from "@localdot/protocol";
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
 import type { ComputerUpdate } from "../cells/useComputerUpdate.ts";
 import type { FreshStart } from "../cells/useFreshStart.ts";
@@ -21,9 +21,12 @@ import {
   AppearancePicker,
 } from "../onboarding/AppearancePicker.tsx";
 import { PersonaPicker } from "../onboarding/PersonaPicker.tsx";
+import { ViewStylePicker } from "../onboarding/ViewStylePicker.tsx";
 import { FreshStartButton } from "../shell/FreshStartButton.tsx";
 import type { OtherLocalDot } from "../shell/localdot-handoff.ts";
+import { PANEL_NAME } from "../shell/panel-name.ts";
 import type { LocalDots } from "../shell/useLocalDots.ts";
+import type { ViewStyleControl } from "../shell/view-style.ts";
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { STREAM_PREFERENCES } from "../stage/stream-quality.ts";
 import { Button } from "../ui/Button.tsx";
@@ -32,6 +35,7 @@ import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { matches, PHONE, REDUCED_MOTION, TOUCH, useMediaQuery } from "../ui/media.ts";
+import { revealInvalid } from "../ui/reveal-field.ts";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet, SheetNavItem, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
@@ -61,6 +65,7 @@ import { CHATGPT, CLAUDE_CODE, subscription } from "./chooser.ts";
 import { DotsOnThisComputer } from "./DotsOnThisComputer.tsx";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
 import { CheckIns, ResearchLimits, SpendingLimits } from "./Limits.tsx";
+import { ModelLibrary, type ModelLibraryProps } from "./ModelLibrary.tsx";
 import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
 import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 import { NotificationsSection } from "./NotificationsSection.tsx";
@@ -80,9 +85,17 @@ import {
   sectionTitle,
   spendingValue,
 } from "./sections.ts";
-import type { CheckInKey, CheckInsDraft, ResearchDraft, SpendingDraft } from "./settings-form.ts";
+import {
+  type CheckInKey,
+  type CheckInsDraft,
+  issueOf,
+  type ResearchDraft,
+  type SettingsIssue,
+  type SpendingDraft,
+} from "./settings-form.ts";
 import type { AccountsView } from "./useAccounts.ts";
 import type { AppUpdateControl } from "./useAppUpdate.ts";
+import type { BrowserEngineView } from "./useBrowserEngine.ts";
 import type { BrowserStatusView } from "./useBrowserStatus.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
 import type { ClaudeCodeControls } from "./useClaudeCode.ts";
@@ -111,6 +124,7 @@ export interface SettingsSheetProps {
   tip?: string;
   appearance?: AppearanceControl;
   showDot?: ShowDotControl;
+  view?: Pick<ViewStyleControl, "value" | "recommended" | "saved" | "change">;
   // Which dot works the next task, and whether Auto picks it for each new conversation.
   persona?: {
     value: PersonaId;
@@ -137,6 +151,8 @@ export interface SettingsSheetProps {
   providers: readonly ProviderModels[];
   keys: readonly PickerKey[];
   keyLayer: "online" | "offline" | "unknown";
+  // Why the fast model failed dot's last quick request, until it answers one again.
+  fastFailure?: { provider: string; model: string; reason: string };
   subscriptionModels?: readonly SubscriptionModel[];
   chatgpt?: ChatgptControls;
   claudeCode?: ClaudeCodeControls;
@@ -151,6 +167,8 @@ export interface SettingsSheetProps {
   onClose(): void;
   onChange(role: ModelRole, value: RoleChoice | undefined): void;
   onKeys(role: ModelRole, provider: string, trigger: HTMLButtonElement): void;
+  // The user's models beyond those in a role.
+  library?: ModelLibraryProps;
   onRefresh?(): void;
   onReload?(): void;
   // Run on its own after an edit; settles once the save has.
@@ -178,6 +196,7 @@ export interface SettingsSheetProps {
   notifications?: NotificationsView;
   accounts?: AccountsView;
   browser?: BrowserStatusView;
+  engine?: BrowserEngineView;
   // Sign in to a site: the web browser opens it with the user in control.
   signIn?: SignInView;
   // The user's connected apps and their tools.
@@ -236,6 +255,8 @@ function catalogLine(state: CatalogState, at: string | undefined): string {
     }
   }
 }
+
+const NO_ISSUES: readonly SettingsIssue[] = [];
 
 // Scrolls only the sheet's body: scrollIntoView would also scroll the clipped panel around it and
 // lift the sheet's header out of place.
@@ -377,31 +398,26 @@ export function SettingsSheet(props: SettingsSheetProps) {
     if (!matches(TOUCH))
       target.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true });
   });
+  const issues = useMemo(() => props.validation?.map(issueOf) ?? NO_ISSUES, [props.validation]);
   const [revealIssue, setRevealIssue] = useState(0);
+  const revealed = useRef(0);
   useLayoutEffect(() => {
-    if (!revealIssue || !body) return;
-    const section = body.querySelector<HTMLElement>(`#settings-${selected}`);
-    const target =
-      section?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
-      section?.querySelector<HTMLElement>(
-        '.keys-secret input, input.keys-secret, textarea.keys-secret, input[type="password"]',
-      ) ??
-      section?.querySelector<HTMLElement>('input, [role="combobox"], [role="alert"]');
-    if (target) {
-      bringToTop(target);
-      target.focus({ preventScroll: true });
-    }
-  }, [revealIssue, selected, body]);
+    if (!revealIssue || revealed.current === revealIssue || !body) return;
+    revealed.current = revealIssue;
+    const section = body.querySelector(`#settings-${selected}`);
+    const role = section?.querySelector(`[data-role="${issues[0]?.field}"]`);
+    revealInvalid(
+      role ?? section,
+      '.keys-secret input, input.keys-secret, textarea.keys-secret, input[type="password"]',
+      '.settings-key-row button, input, [role="combobox"], [role="alert"]',
+    );
+  }, [revealIssue, selected, body, issues]);
+  // Fields say what is wrong with them once saving has been tried, not while they are being filled.
+  const [issuesShown, setIssuesShown] = useState(false);
+  if (issuesShown && !props.open) setIssuesShown(false);
   const revealUnfinished = () => {
-    const text = props.validation?.join(" ").toLowerCase() ?? "";
-    const target: SettingsSection = holding
-      ? "keys"
-      : /budget|spend|price/.test(text)
-        ? "spending"
-        : /check.in|research/.test(text)
-          ? "autonomy"
-          : "models";
-    setStack([target]);
+    setStack([holding ? "keys" : (issues[0]?.section ?? "models")]);
+    setIssuesShown(!holding);
     setRevealIssue((n) => n + 1);
     setDoneBlocked(true);
   };
@@ -516,7 +532,12 @@ export function SettingsSheet(props: SettingsSheetProps) {
     />
   );
   const content = (id: SettingsSection) => (
-    <SectionContent id={id} props={props} keysPanel={keysPanel} />
+    <SectionContent
+      id={id}
+      props={props}
+      issues={issuesShown ? issues : NO_ISSUES}
+      keysPanel={keysPanel}
+    />
   );
 
   if (phone)
@@ -888,7 +909,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
           {stream && (
             <GroupNote>
               {stream.saved
-                ? "Auto picks for you. When things slow down, Sharp keeps text crisp and Smooth keeps motion fluid."
+                ? "Auto picks for you. Sharp keeps text crisp while the screen moves, using more data. Smooth keeps motion fluid when things slow down."
                 : "Applied for this visit. This browser couldn't save it."}
             </GroupNote>
           )}
@@ -1021,15 +1042,30 @@ function ThisLocalDot({
   );
 }
 
+// The fast model's failure, while it is the model chosen; the daemon may have asked it by the
+// library's spelling of the same name.
+function fastFailureOf({ fastFailure, choices }: SettingsSheetProps): string | undefined {
+  const fast = choices.fast;
+  return fastFailure &&
+    fast?.provider === fastFailure.provider &&
+    fast.model.toLowerCase() === fastFailure.model.toLowerCase()
+    ? fastFailure.reason
+    : undefined;
+}
+
 function SectionContent({
   id,
   props,
+  issues,
   keysPanel,
 }: {
   id: SettingsSection;
   props: SettingsSheetProps;
+  issues: readonly SettingsIssue[];
   keysPanel: ReactNode;
 }) {
+  const issue = (field: NonNullable<SettingsIssue["field"]>) =>
+    issues.find((one) => one.field === field)?.text;
   const wait = (height: number) => (
     <Skeleton loading shape="block" width="100%" height={`${height}px`} />
   );
@@ -1069,11 +1105,14 @@ function SectionContent({
               main={main}
               inactive={inactive(role)}
               manualPrice={props.manualPrices?.[role]}
+              problem={issue(role)}
+              failure={role === "fast" ? fastFailureOf(props) : undefined}
               onChange={(value) => props.onChange(role, value)}
               onKeys={props.onKeys}
               onPrice={(value) => props.onPrice?.(role, value)}
             />
           ))}
+          {props.library && <ModelLibrary {...props.library} />}
           <div className="settings-inline settings-note-line">
             <p className="settings-lede" role="status">
               {catalogLine(props.catalog, props.catalogAt)}
@@ -1117,10 +1156,22 @@ function SectionContent({
           />
           {props.purposeCheck && <PurposeCheck control={props.purposeCheck} />}
           {props.checkIns && (
-            <CheckIns value={props.checkIns.value} onChange={props.checkIns.change} />
+            <CheckIns
+              value={props.checkIns.value}
+              errors={{
+                steps: issue("steps"),
+                failures: issue("failures"),
+                actions: issue("actions"),
+              }}
+              onChange={props.checkIns.change}
+            />
           )}
           {props.research && (
-            <ResearchLimits value={props.research.value} onChange={props.research.change} />
+            <ResearchLimits
+              value={props.research.value}
+              error={issue("research")}
+              onChange={props.research.change}
+            />
           )}
         </>
       );
@@ -1139,7 +1190,11 @@ function SectionContent({
               />
             </Group>
           ) : (
-            <SpendingLimits value={props.spending.value} onChange={props.spending.change} />
+            <SpendingLimits
+              value={props.spending.value}
+              errors={{ task: issue("task"), day: issue("day") }}
+              onChange={props.spending.change}
+            />
           )}
           {props.spent && (
             <div>
@@ -1158,8 +1213,8 @@ function SectionContent({
                 />
               </Group>
               <GroupNote>
-                Spend also shows in Activity and in each conversation's summary. It never interrupts
-                you.
+                Spend also shows in {PANEL_NAME} and in each conversation's summary. It never
+                interrupts you.
               </GroupNote>
             </div>
           )}
@@ -1187,7 +1242,7 @@ function SectionContent({
       );
     case "appearance":
       return props.appearance ? (
-        <Appearance appearance={props.appearance} showDot={props.showDot} />
+        <Appearance appearance={props.appearance} showDot={props.showDot} view={props.view} />
       ) : null;
     case "voice":
       return props.voice ? <VoiceSection voice={props.voice} /> : null;
@@ -1208,6 +1263,7 @@ function SectionContent({
           accounts={props.accounts}
           signIn={props.signIn}
           browser={props.browser}
+          engine={props.engine}
           report={props.report}
         />
       ) : null;
@@ -1238,13 +1294,32 @@ function Revert({ disabledReason, onRevert }: { disabledReason?: string; onRever
 function Appearance({
   appearance,
   showDot,
+  view,
 }: {
   appearance: AppearanceControl;
   showDot?: ShowDotControl;
+  view?: Pick<ViewStyleControl, "value" | "recommended" | "saved" | "change">;
 }) {
   return (
     <>
+      {view && (
+        <div>
+          <GroupHead title="View" />
+          <ViewStylePicker
+            aria-label="View"
+            value={view.value}
+            recommended={view.recommended}
+            onChange={view.change}
+          />
+          <GroupNote>
+            {view.saved
+              ? "Just for this device."
+              : "Applied for this visit. This browser couldn't save it."}
+          </GroupNote>
+        </div>
+      )}
       <div>
+        {view && <GroupHead title="Theme" />}
         <AppearancePicker appearance={appearance} aria-label="Theme" />
         {appearance.value === "system" && (
           <GroupNote>

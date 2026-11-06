@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { nestedKeys } from "../settings-ui.ts";
-import { expect, type Harness, runAt, test } from "./harness.ts";
+import { expect, type Harness, isPhone, runAt, test } from "./harness.ts";
 
 // Keys, a section of Settings: in the inspector at 1440, and a page of its sheet on a phone.
 runAt("c14", "w39");
@@ -45,10 +45,36 @@ test("keys, list", async ({ page, ui }) => {
   const sheet = await keys(page, ui);
   await expect(sheet.getByText("openai-fast", { exact: true })).toBeVisible();
   for (const box of await rows(sheet)) expect(box[3]).toBeLessThanOrEqual(100);
+  // One line when wide. On a phone what won't fit takes a second line, whatever its length.
   const summaries = sheet.locator(".keys-row-facts");
-  expect(
-    await summaries.evaluateAll((els) => els.every((e) => e.getBoundingClientRect().height <= 24)),
-  ).toBe(true);
+  const most = isPhone(page) ? 2 : 1;
+  const lines = () =>
+    summaries.evaluateAll((els) =>
+      els.map((e) =>
+        Math.round(
+          e.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(e).lineHeight),
+        ),
+      ),
+    );
+  for (const count of await lines()) expect(count).toBeLessThanOrEqual(most);
+  // A second line never starts with the separator.
+  const dotEndsLine = await summaries.last().evaluate((element) => {
+    const text = element.firstChild as Text;
+    const dot = text.data.indexOf("·");
+    const top = (at: number) => {
+      const range = document.createRange();
+      range.setStart(text, at);
+      range.setEnd(text, at + 1);
+      return range.getBoundingClientRect().top;
+    };
+    return top(dot) === top(dot - 2);
+  });
+  expect(dotEndsLine).toBe(true);
+  await summaries.last().evaluate((element) => {
+    element.textContent = `a-very-long-account-name-${"x".repeat(120)}@example.com`;
+  });
+  for (const count of await lines()) expect(count).toBeLessThanOrEqual(most);
+  for (const box of await rows(sheet)) expect(box[3]).toBeLessThanOrEqual(100);
 });
 
 test("keys, held while the audit log fails", async ({ page, ui }) => {

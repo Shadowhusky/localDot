@@ -1,8 +1,9 @@
-import { type ConversationEntry, ulid } from "@localdot/protocol";
+import { type ConversationEntry, taskOutfit, ulid } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import { createApi } from "../lib/api.ts";
 import {
   arrangeConversations,
+  conversationLook,
   conversationRows,
   conversationStatus,
   conversationTitle,
@@ -218,6 +219,32 @@ describe("renaming", () => {
       [`/api/conversations/${id}/title`, { title: "Lisbon trip" }],
       [`/api/conversations/${id}/title`, { title: null }],
     ]);
+  });
+});
+
+describe("a conversation's look", () => {
+  it("is its first task's, as the dot it works as now: live first, else what the daemon read", () => {
+    const first = ulid();
+    const latest = ulid();
+    const listed = entry({
+      sessionId: latest,
+      sessions: [latest, first],
+      firstTask: first,
+      persona: "coder",
+    });
+    expect(conversationLook(listed)).toEqual(taskOutfit(first, "coder"));
+    const live = { state: "working", since: at(0), onScreen: true } as const;
+    expect(conversationLook({ ...listed, live: { ...live, persona: "everyday" } })).toEqual(
+      taskOutfit(first, "everyday"),
+    );
+    expect(conversationLook({ ...listed, live })).toEqual(taskOutfit(first, "coder"));
+    expect(conversationLook(listed, "design")).toEqual(taskOutfit(first, "design"));
+  });
+
+  it("is what the user dressed it in, whatever dot works it", () => {
+    const listed = entry({ persona: "coder", look: ["crown", "monocle"] });
+    expect(conversationLook(listed)).toEqual(["crown", "monocle"]);
+    expect(conversationLook(listed, "design")).toEqual(["crown", "monocle"]);
   });
 });
 

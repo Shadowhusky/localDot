@@ -78,6 +78,15 @@ it("cancels with Cancel or Escape, and Escape goes no further than the edit", ()
   expect(changes).toEqual([]);
 });
 
+it("takes Add with no address to the field that needs it, and says so", () => {
+  const changes = fixture();
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  expect(changes).toEqual([]);
+  expect(document.activeElement).toBe(field("Address"));
+  expect(field("Address").getAttribute("aria-invalid")).toBe("true");
+  expect(screen.getByText(/^Enter its address/)).toBeTruthy();
+});
+
 it("refuses a name the settings can't keep", () => {
   const changes = fixture();
   fireEvent.click(screen.getByRole("button", { name: "Edit Office PC" }));

@@ -111,7 +111,7 @@ export function UserBubble({
       {lead}
       <div className="thread-bubble">
         {files.length > 0 && <SentFiles paths={files} sessionId={sessionId} />}
-        <p className="thread-bubble-text">{text}</p>
+        {text.trim() && <p className="thread-bubble-text">{text}</p>}
       </div>
     </div>
   );

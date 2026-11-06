@@ -340,10 +340,44 @@
   }
 }
 
-/* A phone's New conversation, level with the island in the strip over the picture. The island
-   centres in the room left of it, so its controls never run under it. */
-.island-anchor:has(~ .island-new) {
-  left: calc(50% - (var(--island-h) + var(--spacing) * 2) / 2);
+/* On a phone the island keeps to the strip between the buttons in its corners, a clear gap from each
+   and from the ring around one of them, whether or not New conversation is there to balance it.
+   Its label gives way first and shortens rather than let it run under them; the narrowest phones
+   leave out the time, which the chat has too. Only the island and its notes take a touch. */
+@media (--phone) {
+  .island-anchor {
+    --_beside: calc(var(--island-h) + var(--spacing) * 3);
+    left: var(--_beside);
+    right: var(--_beside);
+    width: auto;
+    pointer-events: none;
+  }
+
+  .island-anchor > * {
+    pointer-events: auto;
+  }
+
+  .island {
+    right: 0;
+    width: max-content;
+    max-width: 100%;
+    margin-inline: auto;
+    translate: none;
+  }
+
+  .island-notices {
+    left: 50%;
+  }
+
+  .island-row {
+    max-width: 100%;
+  }
+}
+
+@media (width < 340px) {
+  .island-elapsed {
+    display: none;
+  }
 }
 
 .island-new {

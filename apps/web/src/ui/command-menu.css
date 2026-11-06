@@ -76,6 +76,10 @@
     color: var(--color-fg-3);
   }
 
+  .action-row[data-active] :is(.action-row-hint, .action-row-note) {
+    color: var(--color-fg-2);
+  }
+
   .action-row[aria-disabled="true"] .action-row-label {
     color: var(--color-fg-3);
   }
@@ -88,7 +92,6 @@
     z-index: 4;
     display: flex;
     flex-direction: column;
-    max-height: min(calc(var(--spacing) * 84), 46dvh);
   }
 
   .command-menu-empty {
@@ -128,6 +131,8 @@
     translate: -50% 0;
   }
 
+  /* The line under the search is its own: on the field it would take the place of the focus ring's
+     lower edge. */
   .command-palette-search {
     flex: none;
     margin-bottom: calc(var(--spacing) * 1.5);

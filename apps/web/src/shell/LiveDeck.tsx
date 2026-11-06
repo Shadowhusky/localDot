@@ -6,7 +6,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { attachLongPress } from "../ui/long-press.ts";
 import { triggerProps } from "../ui/Popover.tsx";
-import { SessionGlyph } from "../ui/SessionGlyph.tsx";
+import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { conversationLabel } from "./SessionRail.tsx";
 import "../ui/conversation-switcher.css";
 
@@ -146,7 +146,7 @@ function LiveCard({
             onClick={onPick}
           >
             <span className="live-card-state">
-              <SessionGlyph status={row.status} />
+              <ConversationAvatar row={row} size={28} tagged={false} />
               <span className="live-card-word">
                 {CARD_WORD[row.status] ?? STATUS_LABEL[row.status]}
               </span>

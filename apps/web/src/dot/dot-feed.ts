@@ -1,7 +1,9 @@
+import type { PersonaId, Wearable } from "@localdot/protocol";
 import {
   type ActionState,
   type PlanItemState,
   type PlanSnapshot,
+  personaAt,
   planAt,
   type SessionModel,
   type StepState,
@@ -44,6 +46,10 @@ export interface DotFeed {
   helpers?: readonly { id: string; ok?: boolean }[];
   // The action that just failed, for a wince.
   failed?: string | null;
+  // The dot the task works as, which it wears; without one, the user's own dot.
+  persona?: PersonaId | undefined;
+  // What it wears here, over what the persona wears: a phone's conversation dressed as its row is.
+  look?: readonly Wearable[] | undefined;
 }
 
 const ATTENTION = new Set<StatusRow>(["approval", "question", "waiting", "recovery", "limit"]);
@@ -104,6 +110,7 @@ export function dotFeed(
       action?.ok === false && action.resultT !== undefined && nowMs - action.resultT < FAILED_MS
         ? action.id
         : null,
+    ...(model ? { persona: personaAt(model, nowMs) } : {}),
   };
 }
 

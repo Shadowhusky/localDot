@@ -79,6 +79,10 @@ const apiFor = (fetchImpl: typeof fetch) =>
 // A card also reads each file's versions, previews and the task's proof; only these fetch a file.
 const downloadPath = (url: string) =>
   /\/files\/[^/]+(?:\/versions\/\d+)?$/.test(new URL(url).pathname);
+const download = (name: string) => {
+  fireEvent.click(screen.getByRole("button", { name: `More for ${name}` }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Download" }));
+};
 const downloadsOf = (fetchImpl: { mock: { calls: unknown[][] } }) =>
   fetchImpl.mock.calls.map((call) => String(call[0])).filter(downloadPath);
 describe("user-activated inert result downloads", () => {
@@ -103,7 +107,7 @@ describe("user-activated inert result downloads", () => {
     );
     // The first three show and the rest are one press away.
     fireEvent.click(screen.getByText("Show 29 more"));
-    expect(screen.getAllByRole("button", { name: /^Download report-/ })).toHaveLength(32);
+    expect(screen.getAllByRole("button", { name: /^More for report-/ })).toHaveLength(32);
     expect(downloadsOf(fetchImpl)).toEqual([]);
     expect(created).not.toHaveBeenCalled();
   });
@@ -113,7 +117,7 @@ describe("user-activated inert result downloads", () => {
     const view = render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
     expect(downloadsOf(fetchImpl)).toEqual([]);
     expect(created).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Download report.html" }));
+    download("report.html");
     await waitFor(() => expect(clicked).toHaveBeenCalledOnce());
     expect(downloadsOf(fetchImpl)[0]).toBe(
       `http://127.0.0.1:4747/api/agent/sessions/${SESSION}/files/report.html`,
@@ -129,10 +133,11 @@ describe("user-activated inert result downloads", () => {
       fetchImpl = vi.fn<typeof fetch>(async () => late.promise),
       api = apiFor(fetchImpl);
     const view = render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
+    fireEvent.click(screen.getByRole("button", { name: "More for report.html" }));
     act(() => {
-      const button = screen.getByRole("button", { name: "Download report.html" });
-      button.click();
-      button.click();
+      const item = screen.getByRole("menuitem", { name: "Download" });
+      item.click();
+      item.click();
     });
     expect(downloadsOf(fetchImpl)).toHaveLength(1);
     view.rerender(<ResultFiles api={api} sessionId={OTHER} results={results} />);
@@ -163,7 +168,7 @@ describe("user-activated inert result downloads", () => {
         : new Response("not found", { status: 404 }),
     );
     render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
-    fireEvent.click(screen.getByRole("button", { name: "Download report.html" }));
+    download("report.html");
     await act(async () => Promise.resolve());
     fireEvent.click(screen.getByRole("button", { name: "Cancel download" }));
     await waitFor(() => expect(cancelled).toBe(true));
@@ -229,7 +234,7 @@ describe("the result card", () => {
       files: [{ name: "totals.csv", path: "Documents/totals.csv", bytes: 2, version: 1 }],
     };
     render(<ResultFiles api={apiFor(fetchImpl)} sessionId={SESSION} results={[earlier]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Download totals.csv" }));
+    download("totals.csv");
     await waitFor(() => expect(clicked).toHaveBeenCalledOnce());
     expect(downloadsOf(fetchImpl)).toEqual([
       `http://127.0.0.1:4747/api/agent/sessions/${SESSION}/files/totals.csv/versions/1`,
@@ -305,7 +310,7 @@ describe("the result card", () => {
     const rows = () => list.querySelectorAll(":scope > li");
     expect(rows()).toHaveLength(3);
     expect(
-      [...list.querySelectorAll("[aria-expanded]")].map((row) => [
+      [...list.querySelectorAll(".ui-file-main[aria-expanded]")].map((row) => [
         row.getAttribute("aria-label"),
         row.getAttribute("aria-expanded"),
       ]),

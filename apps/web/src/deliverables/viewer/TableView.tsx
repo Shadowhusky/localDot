@@ -9,9 +9,10 @@ import { ViewerBar, ViewerLoading, ViewerMessage } from "./states.tsx";
 
 type Table = Extract<TableFileReply, { kind: "table" }>;
 const NUMERIC = /^[\s$€£¥+−-]*[\d.,]+\s*%?$/;
-const REASONS: Partial<Record<string, string>> = {
-  too_large: "Too large to preview",
-  binary: "This file isn't a table",
+const PROBLEMS: Partial<Record<string, string>> = {
+  computer_off: "Turn on your computer to see this file",
+  busy: "Your computer is busy",
+  failed: "Couldn't load this table",
   missing: "This version is no longer available",
 };
 
@@ -43,7 +44,8 @@ export function TableView({
     null,
   );
   const [sheets, setSheets] = useState<string[]>([]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the key names the file.
+  const [attempt, setAttempt] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key names the file; attempt asks again.
   useEffect(() => {
     const controller = new AbortController();
     loadTable(api, file, sheet, controller.signal).then(
@@ -55,7 +57,7 @@ export function TableView({
       () => !controller.signal.aborted && setLoaded({ sheet, reply: "failed" }),
     );
     return () => controller.abort();
-  }, [api, key, sheet]);
+  }, [api, key, sheet, attempt]);
   const reply = loaded?.sheet === sheet ? loaded.reply : null;
   const table = reply && reply !== "failed" && reply.kind === "table" ? reply : null;
   const bar =
@@ -86,15 +88,16 @@ export function TableView({
         <ViewerLoading label="Loading the table" />
       </>
     );
+  const problem = reply === "failed" || reply.kind !== "none" ? "failed" : reply.reason;
   if (!table)
     return (
       <>
         {bar}
         <ViewerMessage
           name={name}
-          title={
-            (reply !== "failed" && reply.kind === "none" && REASONS[reply.reason]) ||
-            "Can't show this table"
+          title={PROBLEMS[problem]}
+          retry={
+            problem === "failed" || problem === "busy" ? () => setAttempt((n) => n + 1) : undefined
           }
         />
       </>

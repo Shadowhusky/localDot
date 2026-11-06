@@ -25,8 +25,10 @@ import { KeyList } from "./KeyList.tsx";
 import { KeyMetadataEditor } from "./KeyMetadataEditor.tsx";
 import { type KeydHealth, type KeyRecord, keyHome, vaultLocked } from "./keys-api.ts";
 import { Protection } from "./Protection.tsx";
+import { SavedLogins } from "./SavedLogins.tsx";
 import { UNLOCK_PRIVACY, UnlockKeys } from "./UnlockKeys.tsx";
 import type { KeysController } from "./useKeys.ts";
+import type { SavedLoginsView } from "./useSavedLogins.ts";
 import "./keys.css";
 
 export const keysDescription = (health: KeydHealth | null) =>
@@ -44,6 +46,7 @@ export const SETUP_TEXT =
 export interface KeysPanelProps {
   active: boolean;
   keys: KeysController;
+  logins?: SavedLoginsView;
   intakeRef?: Ref<KeyIntake>;
   preset?: KeyFormPreset;
   // Asked from elsewhere (a task that stopped on it) to enter a saved key's value again.
@@ -61,6 +64,7 @@ export interface KeysPanelProps {
 export function KeysPanel({
   active,
   keys,
+  logins,
   intakeRef,
   preset,
   reenter,
@@ -354,6 +358,9 @@ export function KeysPanel({
         </section>
       ) : (
         phone && add(true)
+      )}
+      {logins && !offline && (
+        <SavedLogins view={logins} unavailable={unavailable} reveal={reveal} />
       )}
     </div>
   );

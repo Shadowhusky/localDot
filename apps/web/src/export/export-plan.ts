@@ -151,6 +151,7 @@ function precedingIndex<T>(
 
 const GAP_PRIORITY: readonly RecordingGapReason[] = [
   "user-control",
+  "other-task",
   "stream-lost",
   "disk-full",
   "size-cap",

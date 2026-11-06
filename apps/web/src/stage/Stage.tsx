@@ -13,6 +13,8 @@ import {
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { onForeground } from "../lib/foreground.ts";
+import { BrowserEntry, sayApart } from "./BrowserEntry.tsx";
+import type { StagePoint } from "./composite.ts";
 import type { ScreenName, StageConnection } from "./connection.ts";
 import type { ProbeApi } from "./debug-hooks.ts";
 import { frameTapSupport } from "./frame-source.ts";
@@ -30,7 +32,15 @@ import { StageCanvas } from "./StageCanvas.tsx";
 import { StageNotice } from "./StageNotice.tsx";
 import type { ReplayHandle, StageCanvasHandle, StageView } from "./stage-engine.ts";
 import { stageFramerate } from "./stream-quality.ts";
-import type { FieldMark, OracleRequest, StageClock, StageViewPatch } from "./worker-protocol.ts";
+import type { StageFront } from "./useStageFront.ts";
+import { useUnderDesktop } from "./useUnderDesktop.ts";
+import type {
+  FieldMark,
+  OracleRequest,
+  StageClock,
+  StageComposite,
+  StageViewPatch,
+} from "./worker-protocol.ts";
 
 export interface StageHandle {
   replay: ReplayHandle;
@@ -45,8 +55,13 @@ export interface StageHandle {
 
 export interface StageProps {
   mode?: "live" | "replay";
+  // The computer whose screen is in front.
   cell: CellSummary | null;
   parentId?: string;
+  // The desktop, which the web browser is a window on: both make the one screen.
+  parent?: CellSummary | null;
+  // Which of them is in front, from useStageFront; else the one dot is on (`selection`).
+  front?: StageFront;
   selection?: ScreenSelectionSnapshot;
   api: ApiClient;
   reconnects: number;
@@ -85,6 +100,8 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     manual,
     mode = "live",
     parentId,
+    parent,
+    front,
     selection,
     dim = false,
     fields = NO_FIELDS,
@@ -108,15 +125,25 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   // The live stage's engine outlives a remount, so moving the stage keeps its picture.
   const [keep] = useState(() => (mode === "live" ? api : undefined));
   const cellId = cell?.id ?? null;
-  const surface = selection?.screen ?? "desktop";
+  const surface = front?.screen ?? selection?.screen ?? "desktop";
   const ready =
     mode === "live" &&
     cell?.state === "ready" &&
     !cell.paused &&
     !cell.fenced &&
     !cell.replacementPending &&
-    (!selection || selection.cellId === cellId) &&
+    (!selection || selection.screen !== surface || selection.cellId === cellId) &&
     (surface !== "browser" || (!!parentId && parentId !== cellId));
+  const parentScale = parent?.scale;
+  const composite = useMemo<StageComposite | null>(
+    () =>
+      mode === "live" && parentScale
+        ? { front: surface, desktop: { w: 1280 * parentScale, h: 800 * parentScale } }
+        : null,
+    [mode, parentScale, surface],
+  );
+  const desktopUp =
+    parent?.state === "ready" && !parent.paused && !parent.fenced && !parent.replacementPending;
   // What the stage shows. A new revision of the same screen, a status socket that reopens or a
   // refreshed ticket is not a new owner: each used to reload the client and blank the picture.
   const owner = useMemo(
@@ -143,12 +170,40 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     if (leavingReplay) canvas.current?.replay.close();
     canvas.current?.detach();
   }, [owner]);
+  // Before any frame of the screen coming forward: the pictures change places first.
+  useLayoutEffect(() => {
+    canvas.current?.setView({ composite });
+  }, [composite]);
   const flips = useRef<Flip[]>([]);
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const listedRef = useRef(listed);
   useEffect(() => {
     listedRef.current = listed;
   }, [listed]);
+  // A press that went past the edge of its screen: it stopped there, and nothing crossed.
+  const pastEdge = useRef(false);
+  // The user's input, sent to the screen under their pointer. A press on the one behind brings it
+  // forward once it lets go, so the press itself never goes astray while the screens change places;
+  // one on the desktop beside the window only brings it forward.
+  const route = useCallback(
+    (input: ManualStreamInput) => {
+      const at = "at" in input ? (input.at as Partial<StagePoint>) : null;
+      const screen = at?.screen;
+      if (!at || !screen) {
+        manual?.send(input);
+        return;
+      }
+      const { screen: _, behind, ...point } = at;
+      if (!behind) manual?.send({ ...input, at: point, screen } as ManualStreamInput);
+      if (input.kind === "up" && pastEdge.current) {
+        pastEdge.current = false;
+        sayApart();
+      }
+      if (screen !== surface && (input.kind === "up" || input.kind === "click"))
+        front?.pick(screen);
+    },
+    [manual, surface, front],
+  );
 
   useEffect(() => {
     if (!cellId || !ready || !support.ok) return;
@@ -264,6 +319,14 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   useEffect(() => {
     stream?.show(inSight);
   }, [stream, inSight]);
+  useUnderDesktop({
+    api,
+    canvas,
+    listed: listedRef,
+    cellId: composite?.front === "browser" && desktopUp && support.ok ? (parent?.id ?? null) : null,
+    inSight,
+    live: control,
+  });
 
   useEffect(() => {
     if (params.get("probe") !== "1") return;
@@ -338,13 +401,31 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
           ref={keyboard}
           live={manual.enabled && ready && !reconnecting && !!stream && displayOwner === owner}
           mode={manual.pointer}
-          locate={(point, follow) =>
-            canvas.current?.manualPoint(point, manual.screen, follow) ?? null
+          locate={(point, within) => {
+            const stage = canvas.current;
+            if (!composite) return stage?.manualPoint(point, manual.screen, !!within) ?? null;
+            const pressed = within as StagePoint | null | undefined;
+            if (
+              pressed &&
+              !pressed.behind &&
+              surface === "browser" &&
+              stage?.stagePoint(point, composite.desktop, surface)?.screen !== pressed.screen
+            )
+              pastEdge.current = true;
+            return stage?.stagePoint(point, composite.desktop, surface, pressed) ?? null;
+          }}
+          send={route}
+          keysTo={
+            composite
+              ? `Keys go to ${surface === "browser" ? "the web browser's window" : "the desktop"}.`
+              : undefined
           }
-          send={manual.send}
           onTyping={manual.onTyping}
           onRefused={manual.onRefused}
         />
+      )}
+      {mode === "live" && front && composite && desktopUp && (
+        <BrowserEntry front={front} holding={control} />
       )}
       {mode === "live" && connection && (
         <StageNotice connection={connection} onRetry={stream ? () => stream.retry() : undefined} />

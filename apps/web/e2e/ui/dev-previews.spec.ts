@@ -1,5 +1,6 @@
 import type { PreviewOpened, PreviewRefusal, PreviewsStatus } from "@localdot/protocol";
 import type { Page, Route } from "@playwright/test";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { settingsSheet } from "../settings-ui.ts";
 import { expect, isPhone, runAt, test } from "./harness.ts";
 
@@ -89,9 +90,9 @@ async function recordTabs(page: Page) {
 const html = (page: Page) => page.locator("html");
 
 async function showActivity(page: Page) {
-  if (isPhone(page)) await page.getByRole("button", { name: "Activity", exact: true }).click();
+  if (isPhone(page)) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
   else
-    await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
+    await page.locator(".rail-chat").getByRole("radio", { name: PANEL_NAME, exact: true }).click();
 }
 
 async function previewsTab(page: Page) {
@@ -213,7 +214,10 @@ test("the Previews list shows the web apps answering in dot's computer, and open
   await expect(list.getByText("Aegis X-47 viewer")).toBeVisible();
   await expect(list).toContainText("localhost:5173 · Running");
   await expect(list).toContainText("python3 · Running");
-  await expect(list).toContainText("localhost:8888 · Not answering for 5 min");
+  // One that stopped answering is folded away, and says so when opened.
+  await expect(list).not.toContainText("localhost:8888");
+  await panel.getByRole("button", { name: /Replaced or not answering/ }).click();
+  await expect(panel).toContainText("localhost:8888 · Not answering for 5 min");
   await shoot(page, ui, "previews-list");
 
   await list.getByRole("button", { name: "Open preview of localhost:5173" }).click();
@@ -296,4 +300,36 @@ test("without Tailscale a chip says how to turn it on, opens no tab, and leads t
     settingsSheet(page).getByRole("region", { name: "Your computer", exact: true }),
   ).toBeVisible();
   await expect(settingsSheet(page).getByRole("heading", { name: "App links" })).toBeInViewport();
+});
+
+test("a reply comes with a preview of the app its turn left running, until it stops", async ({
+  page,
+  ui,
+}) => {
+  const server = {
+    port: 5173,
+    url: VITE,
+    name: "node",
+    title: "Aegis X-47 viewer",
+    state: "answering" as const,
+    seenAt: NOW,
+  };
+  const daemon = await previewsDaemon(page, { ...READY, servers: [server] });
+  const fixture = await ui.open("running");
+  await recordTabs(page);
+  const finished = await page.request.post(
+    `${fixture.origin}/__qa/finish?preview=${encodeURIComponent(VITE)}`,
+  );
+  expect(finished.ok(), await finished.text()).toBe(true);
+  const card = page.locator(".preview-card");
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText("Aegis X-47 viewer");
+  await expect(card).toContainText("localhost:5173 · Running");
+  await shoot(page, ui, "preview-card");
+  await card.getByRole("button", { name: "Open preview of localhost:5173" }).click();
+  await expect.poll(() => daemon.requests).toEqual([{ url: VITE }]);
+  daemon.status = { ...READY };
+  await expect(card).toContainText("Stopped. Ask dot to start it again.", { timeout: 10_000 });
+  await expect(card.getByRole("button", { name: /Open preview/ })).toHaveCount(0);
+  await shoot(page, ui, "preview-card-stopped");
 });

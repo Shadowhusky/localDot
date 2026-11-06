@@ -41,17 +41,19 @@ function aligned(start: number, length: number, size: number, align: Align): num
   return start + length / 2 - size / 2;
 }
 
+// The box a row's menu is placed against: level with the row and as wide as its list, so the menu
+// stands against the list's edge rather than over the rows around it.
+export function levelWith(row: Element, list: Element): Rect {
+  const at = row.getBoundingClientRect();
+  const across = list.getBoundingClientRect();
+  return { top: at.top, height: at.height, left: across.left, width: across.width };
+}
+
 // Puts a popup beside its anchor on the requested side, or on the opposite side when that has more
-// room and the requested one is too small, then slides it along the anchor to stay on screen.
-export function place({
-  anchor,
-  size,
-  viewport,
-  side,
-  align,
-  gap = 8,
-  edge = 8,
-}: PlaceOptions): Placement {
+// room and the requested one is too small, then slides it along the anchor to stay on screen. Beside
+// an anchor that leaves room on neither hand, as a phone's list does, it goes under or over it.
+export function place(options: PlaceOptions): Placement {
+  const { anchor, size, viewport, side, align, gap = 8, edge = 8 } = options;
   const room: Record<Side, number> = {
     top: anchor.top - gap - edge,
     bottom: viewport.height - (anchor.top + anchor.height) - gap - edge,
@@ -59,6 +61,8 @@ export function place({
     right: viewport.width - (anchor.left + anchor.width) - gap - edge,
   };
   const vertical = side === "top" || side === "bottom";
+  if (!vertical && size.width > room[side] && size.width > room[OPPOSITE[side]])
+    return place({ ...options, side: "bottom" });
   const needed = vertical ? size.height : size.width;
   const chosen = needed > room[side] && room[OPPOSITE[side]] > room[side] ? OPPOSITE[side] : side;
   const centreX = anchor.left + anchor.width / 2;

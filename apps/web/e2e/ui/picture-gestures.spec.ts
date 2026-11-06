@@ -1,4 +1,4 @@
-import { expect, runAt, test } from "./harness.ts";
+import { expect, openFile, runAt, test } from "./harness.ts";
 
 runAt("c39", "w39");
 test("pinch from Fit zooms the image, not the page or another file", async ({
@@ -10,7 +10,7 @@ test("pinch from Fit zooms the image, not the page or another file", async ({
   const fixture = await ui.open("running");
   await page.request.post(`${fixture.origin}/__qa/previews`);
   const card = page.getByRole("region", { name: "Task result" }).last();
-  await card.getByRole("button", { name: "Open chart.png", exact: true }).click();
+  await openFile(page, "chart.png", card);
   const sheet = page.getByRole("dialog", { name: "chart.png" });
   const picture = sheet.locator(".viewer-picture");
   const canvas = sheet.locator(".viewer-canvas");

@@ -169,7 +169,10 @@ test("a right click along an expanded row or a search's opens its menu, and neve
   expect(clicks.filter((click) => click.expected).length).toBeGreaterThan(60);
   expect(missed(clicks)).toEqual([]);
 
+  // What the tasks said comes once typing pauses, and can reorder the rows the sweep is under.
+  const said = page.waitForResponse((reply) => new URL(reply.url()).pathname === "/api/search");
   await rail(page).getByRole("textbox", { name: "Search conversations" }).fill("the");
+  await said;
   const results = rail(page).getByRole("list", { name: "Results" }).locator(".sessions-item");
   await expect(results.nth(2)).toBeVisible();
   const found = await results.nth(1).boundingBox();

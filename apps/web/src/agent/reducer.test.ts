@@ -184,6 +184,35 @@ describe("bounded agent projection", () => {
       true,
     );
   });
+  it("says what dot set aside to read a message, without moving it", () => {
+    const woke = id(20001),
+      left = id(20002);
+    const events = [
+      ev(0, "message.user", { messageId: woke, text: "Stop waiting", kind: "steer" }),
+      ev(1, "message.user", { messageId: left, text: "Also the docs", kind: "steer" }),
+      ev(2, "message.delivery", { messageId: woke, state: "woke" }),
+      ev(3, "message.delivery", { messageId: left, state: "left_running" }),
+    ];
+    const model = reduce(events);
+    expect(model.messages.get(woke)).toMatchObject({ seq: 0, kind: "steer", interrupted: "wait" });
+    expect(model.messages.get(left)).toMatchObject({
+      seq: 1,
+      kind: "steer",
+      interrupted: "command",
+    });
+    expect(model.messages.get(woke)?.delivery).toBeUndefined();
+  });
+
+  it("holds the order the user moved the waiting messages to", () => {
+    const first = id(10012);
+    const second = id(10013);
+    const model = reduce([
+      ev(0, "message.user", { messageId: first, text: "a", kind: "followup", queued: true }),
+      ev(1, "message.user", { messageId: second, text: "b", kind: "followup", queued: true }),
+      ev(2, "message.queue", { order: [second, first] }),
+    ]);
+    expect(model.queueOrder).toEqual([second, first]);
+  });
   it("moves a queued message to where dot received it, whether sent or steered, and on replay", () => {
     const later = id(10002),
       steered = id(10003),

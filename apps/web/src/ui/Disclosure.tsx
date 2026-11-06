@@ -6,6 +6,8 @@ import {
   type TransitionEvent,
   useEffect,
   useId,
+  useLayoutEffect,
+  useRef,
   useState,
 } from "react";
 import { Icon } from "./Icon.tsx";
@@ -16,17 +18,23 @@ export interface CollapseProps {
   open: boolean;
   id?: string;
   className?: string;
+  // Content that arrives or changes size while it is open eases to its new height, as the opening
+  // itself does, rather than arriving all at once.
+  fit?: boolean;
   children?: ReactNode;
 }
 
 // Longer than the fold (--dur-default), so the content stays while it folds away.
 const FOLDED = 520;
 
-// Height comes from the grid track, so nothing is measured. The content mounts when it opens and
-// leaves once it has folded away, so closed panels hold no heavy content (long output, frames).
-export function Collapse({ open, id, className, children }: CollapseProps) {
+// Height comes from the grid track, so nothing is measured, unless it is to `fit` its content. The
+// content mounts when it opens and leaves once it has folded away, so closed panels hold no heavy
+// content (long output, frames).
+export function Collapse({ open, id, className, fit = false, children }: CollapseProps) {
   const [mounted, setMounted] = useState(open);
   const [settled, setSettled] = useState(open);
+  const panel = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
   if (open && !mounted) setMounted(true);
   if (!open && settled) setSettled(false);
   useEffect(() => {
@@ -34,10 +42,32 @@ export function Collapse({ open, id, className, children }: CollapseProps) {
     const done = window.setTimeout(() => setMounted(false), FOLDED);
     return () => window.clearTimeout(done);
   }, [open, mounted]);
+  useLayoutEffect(() => {
+    const outer = panel.current;
+    const content = inner.current;
+    if (!fit || !outer || !content || typeof ResizeObserver === "undefined") return;
+    const size = () => {
+      outer.style.height = open ? `${content.offsetHeight}px` : "0px";
+    };
+    size();
+    // Not within the observer's delivery: the height resizes what other observers watch, above this.
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(size);
+    });
+    observer.observe(content);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [fit, open]);
   return (
     <div
+      ref={panel}
       id={id}
       className={clsx("ui-collapse", className)}
+      data-fit={fit || undefined}
       data-open={open || undefined}
       data-settled={(open && settled) || undefined}
       inert={!open}
@@ -45,7 +75,9 @@ export function Collapse({ open, id, className, children }: CollapseProps) {
         if (event.target === event.currentTarget && open) setSettled(true);
       }}
     >
-      <div className="ui-collapse-inner">{mounted && children}</div>
+      <div ref={inner} className="ui-collapse-inner">
+        {mounted && children}
+      </div>
     </div>
   );
 }

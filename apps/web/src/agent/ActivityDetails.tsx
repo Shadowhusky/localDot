@@ -1,16 +1,18 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
+import { useLoadAgain } from "../lib/useLoadAgain.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
 import type { KeyUseRowView } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { cachedThumbnail, releaseThumbnail, thumbnailUrl } from "../session/thumbnails.ts";
 import { Icon } from "../ui/Icon.tsx";
+import { PlainSteps } from "./ActivityRow.tsx";
 import { type ActivityEntry, stepDetail } from "./activity.ts";
 import { DiffViewer } from "./DiffViewer.tsx";
 import type { AgentChange } from "./model.ts";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { StepImage } from "./StepImage.tsx";
-import { StepPreviewButton } from "./StepPreview.tsx";
+import { StepPreviewButton, StepPreviewCover, type StepResource } from "./StepPreview.tsx";
 import { TerminalViewer } from "./TerminalViewer.tsx";
 
 // The observe frame is 1280×800 CSS px; target rects are device px, so they are divided by the scale.
@@ -49,6 +51,12 @@ export function frameCrop(target: StepRowView["target"], scale: number): FrameCr
   };
 }
 
+const screenshot = (sessionId: string, frameId: string): StepResource => ({
+  kind: "file",
+  entries: [{ sessionId, frameId, name: "Step screenshot" }],
+  index: 0,
+});
+
 const NoScreenshot = () => <p className="activity-detail-note">No screenshot for this step.</p>;
 
 function LiveFrame({
@@ -67,6 +75,8 @@ function LiveFrame({
     const url = frameId ? cachedThumbnail(api, sessionId, frameId) : undefined;
     return url && frameId ? { frameId, url } : null;
   });
+  const { attempt, failed } = useLoadAgain(`${sessionId}/${frameId}`);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: another attempt loads it again.
   useEffect(() => {
     if (!frameId) return;
     let cancelled = false;
@@ -74,22 +84,21 @@ function LiveFrame({
       (url) => {
         if (!cancelled) setImage({ frameId, url });
       },
-      () => {},
+      () => {
+        if (!cancelled) failed();
+      },
     );
     return () => {
       cancelled = true;
       releaseThumbnail(api, sessionId, frameId);
     };
-  }, [api, sessionId, frameId]);
+  }, [api, sessionId, frameId, attempt, failed]);
   if (!frameId) return <NoScreenshot />;
   const crop = frameCrop(row.target, scale);
   const url = image?.frameId === frameId ? image.url : undefined;
   return (
     <div className="activity-frame step-preview-resource" data-loaded={url ? "" : undefined}>
-      <StepPreviewButton
-        label="Preview screenshot"
-        resource={{ kind: "frame", name: "Step screenshot", sessionId, frameId }}
-      />
+      <StepPreviewCover label="Preview screenshot" resource={screenshot(sessionId, frameId)} />
       {url && (
         <img
           className="activity-frame-crop"
@@ -137,7 +146,8 @@ export function ActivityDetail({
   replay: boolean;
 }) {
   const { row } = entry;
-  const detail = stepDetail(entry, changes);
+  const plain = useContext(PlainSteps);
+  const detail = stepDetail(entry, changes, plain);
   if (row.kind === "key" || !detail) return null;
   const { computer, agent } = row;
   const { action, note, changes: own } = detail;
@@ -162,14 +172,9 @@ export function ActivityDetail({
         (replay ? (
           computer.frameId ? (
             <div className="activity-frame step-preview-resource" data-loaded="">
-              <StepPreviewButton
+              <StepPreviewCover
                 label="Preview screenshot"
-                resource={{
-                  kind: "frame",
-                  name: "Step screenshot",
-                  sessionId,
-                  frameId: computer.frameId,
-                }}
+                resource={screenshot(sessionId, computer.frameId)}
               />
               <ReplayImage api={api} sessionId={sessionId} frameId={computer.frameId} />
             </div>

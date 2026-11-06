@@ -1,5 +1,6 @@
-import type { Point, Rect } from "@localdot/protocol";
+import type { Point, Rect, ScreenName } from "@localdot/protocol";
 import { cameraFor, toCanvas } from "@localdot/stage";
+import { browserCamera, browserWindow } from "./composite.ts";
 
 // The macOS arrow of the design-v2 board, tip at the origin, as drawn in its 22 px box.
 const ARROW = [0, 0, 0, 15.6, 4.2, 11.5, 7.1, 18.1, 9.8, 16.9, 7, 10.4, 12.9, 10.4];
@@ -40,17 +41,19 @@ const RING_POINT_REACH_PX = 17;
 
 // The part of a stage `stage` CSS px in size that a field's target ring covers, in the same px.
 export function targetRingBox(
-  mark: { point: Point; bbox?: Rect },
+  mark: { screen?: ScreenName; point: Point; bbox?: Rect },
   screen: { w: number; h: number },
   stage: { w: number; h: number },
 ): Rect {
-  const camera = cameraFor({
+  const desktop = cameraFor({
     stageW: stage.w,
     stageH: stage.h,
     desktopW: screen.w,
     desktopH: screen.h,
     zoom: 1,
   });
+  const camera =
+    mark.screen === "browser" ? browserCamera(desktop, browserWindow(screen)) : desktop;
   const reach = mark.bbox ? RING_BOX_REACH_PX : RING_POINT_REACH_PX;
   const at = toCanvas(camera, mark.bbox ?? mark.point);
   const w = (mark.bbox?.w ?? 0) * camera.scale;

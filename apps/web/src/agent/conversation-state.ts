@@ -1,7 +1,5 @@
-// Every task goes on when the user moves to another conversation; only a Stop on its way or a
-// choice still being made holds the move up.
-export function conversationBlockReason(stopping: boolean, busy: boolean): string | undefined {
-  if (stopping) return "Stopping the current task…";
-  if (busy) return "Just a moment…";
-  return undefined;
+// Every task goes on when the user moves to another conversation, and a choice made while another
+// is on its way waits for it; only a Stop on its way holds the move up.
+export function conversationBlockReason(stopping: boolean): string | undefined {
+  return stopping ? "Stopping the current task…" : undefined;
 }

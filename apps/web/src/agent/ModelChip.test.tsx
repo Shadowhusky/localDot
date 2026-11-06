@@ -118,7 +118,7 @@ describe("the composer's model configuration", () => {
   it("opens model management and explains that an active task keeps its settings", () => {
     const { chip, onManage } = setup({ working: true, next: true });
     fireEvent.click(chip);
-    expect(screen.getByRole("dialog").textContent).toContain("Applies from the next task");
+    expect(screen.getByRole("dialog").textContent).toContain("Applies from your next message");
     fireEvent.click(screen.getByRole("button", { name: "Manage models…" }));
     expect(onManage).toHaveBeenCalledOnce();
     cleanup();

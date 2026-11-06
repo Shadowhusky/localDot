@@ -340,6 +340,10 @@ describe("what a step shows unfolded", () => {
     ).toBe("npm test --workspace web");
     // A meta line that names the command keeps it, until what went wrong takes its place.
     expect(stepDetail(build({ status: "ok" }), [])?.action).toBeUndefined();
+    // Chat's rows have no such line, so it goes in the unfold.
+    expect(stepDetail(build({ status: "ok" }), [], true)?.action?.text).toBe(
+      "npm test --workspace web",
+    );
     expect(
       stepDetail(build({ status: "failed", note: "The command returned exit code 1." }), [])?.action
         ?.text,

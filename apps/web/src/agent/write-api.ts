@@ -1,4 +1,4 @@
-import { keyLikePresent, ReviseLink, ULID_PATTERN } from "@localdot/protocol";
+import { keyLikePresent, ReviseLink, type TaskModelRef, ULID_PATTERN } from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
 
 export type MessageMode = "new" | "steer" | "followup";
@@ -12,6 +12,8 @@ export interface TextDelivery {
   readonly revise?: ReviseLink;
   // A new task in research mode: dot reads many sources and writes a cited report.
   readonly research?: true;
+  // The model chosen as this was sent, which its turn runs on.
+  readonly model?: TaskModelRef;
 }
 export class DeliveryFailure extends Error {
   constructor(
@@ -66,8 +68,13 @@ export async function deliverText(api: ApiClient, request: TextDelivery): Promis
                 task: request.text,
                 continues: request.sessionId,
                 ...(request.research ? { mode: "research" } : {}),
+                ...(request.model ? { model: request.model } : {}),
               }
-            : { kind: request.mode, text: request.text },
+            : {
+                kind: request.mode,
+                text: request.text,
+                ...(request.model ? { model: request.model } : {}),
+              },
       ),
       signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),
     });

@@ -62,3 +62,59 @@ test("Replay opens its picture when Watch is minimized and keeps the live prefer
   await ui.picture(page.locator(".replay-main .stage"));
   await expect(page.locator(".replay-main .stage")).toBeVisible();
 });
+
+test("the island never runs under the buttons in its corners, at any phone width or length of status", async ({
+  page,
+  ui,
+}) => {
+  await ui.open("running");
+  const status = page.getByTestId("hud-status");
+  await expect(status).toHaveText("Select the Net total cell");
+  const long = "Checking February's net total against revenue minus returns, row by row";
+  const overlap = (a: DOMRect, b: DOMRect) =>
+    a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  for (const width of [320, 344, 360, 375, 390, 414, 430]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const words of ["Thinking", long]) {
+      await status.evaluate((element, text) => {
+        const shown = element.querySelector(".island-text-current");
+        if (shown) shown.textContent = text;
+      }, words);
+      // The glass follows the row a moment after it changes.
+      await expect(async () => {
+        const fits = await page.evaluate(() => {
+          const rect = (selector: string) =>
+            document.querySelector(selector)?.getBoundingClientRect().toJSON();
+          return {
+            plate: rect(".island-plate"),
+            row: rect(".island-row"),
+            left: rect(".island-conversations"),
+            right: rect(".island-new"),
+          };
+        });
+        for (const key of ["plate", "row"] as const) {
+          const box = fits[key] as DOMRect;
+          const left = fits.left as DOMRect;
+          const right = fits.right as DOMRect | undefined;
+          expect(overlap(box, left), `${key} over Conversations at ${width}`).toBe(false);
+          if (right) expect(overlap(box, right), `${key} over New at ${width}`).toBe(false);
+          expect(box.left - left.right, `${key}'s gap at ${width}`).toBeGreaterThanOrEqual(8);
+          if (right)
+            expect(right.left - box.right, `${key}'s gap at ${width}`).toBeGreaterThanOrEqual(8);
+        }
+        // The controls stay whole, on the island; the label shortens.
+        const take = await page.getByRole("button", { name: "Take control" }).boundingBox();
+        expect((take?.x ?? 0) + (take?.width ?? 0)).toBeLessThanOrEqual(
+          (fits.plate as DOMRect).right,
+        );
+        await expect(page.getByTestId("hud-stop-session")).toBeVisible();
+        const label = await status.boundingBox();
+        expect(label?.width ?? 0).toBeGreaterThanOrEqual(50);
+      }).toPass({ timeout: 5_000 });
+    }
+    await page.screenshot({
+      path: test.info().outputPath(`island-${width}.png`),
+      clip: { x: 0, y: 0, width, height: 120 },
+    });
+  }
+});

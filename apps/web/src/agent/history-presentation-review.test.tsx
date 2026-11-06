@@ -7,6 +7,7 @@ import type { StepRowView } from "../session/session-view.ts";
 import type { Status } from "../session/status.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { HudIsland } from "../shell/HudIsland.tsx";
+import { PANEL_NAME } from "../shell/panel-name.ts";
 import { ANNOUNCE_GAP, Announcer } from "../ui/Announcer.tsx";
 import { Conversation } from "./Conversation.tsx";
 import type { AgentMessage } from "./model.ts";
@@ -52,7 +53,7 @@ afterEach(() => {
 it("preserves selected Activity text while a reader scrolls within the current history and one live step arrives", () => {
   const v = render(rail(180));
   const pane = screen
-    .getByRole("complementary", { name: "Plan and steps" })
+    .getByRole("complementary", { name: PANEL_NAME })
     .querySelector(".activity-scroll") as HTMLElement;
   Object.defineProperties(pane, {
     scrollHeight: { configurable: true, value: 10_000 },

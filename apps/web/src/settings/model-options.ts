@@ -22,19 +22,29 @@ export interface PlanAccount {
   readonly models: readonly SubscriptionModel[];
 }
 
-const optionId = (choice: RoleChoice) =>
+export const optionId = (choice: RoleChoice) =>
   [choice.provider, choice.model, choice.key ?? ""].join("\0");
+// A custom endpoint is named by its address, a provider by its name.
+export function modelGroupLabel(choice: RoleChoice, index: ProviderIndex | null): string {
+  if (!isCustomFormat(choice.provider)) return providerName(choice.provider);
+  const url = index?.keys.find((key) => key.id === choice.key)?.baseURL;
+  try {
+    return url ? new URL(url).host : "Custom endpoint";
+  } catch {
+    return "Custom endpoint";
+  }
+}
 
-// The models the main model can switch to without a trip to Settings: the ones chosen there for any
-// role, and those of each plan the user is signed in to. Each is one Settings would save as main
-// now, its key present; the current one is always listed. Plans come last, in a fixed order.
+// The models a task can run on: the ones in Settings that are on, for any role, and those of each
+// plan the user is signed in to. Each is one Settings would save as main now, its key present; the
+// current one is always listed. Plans come last, in a fixed order.
 export function modelGroups(
   saved: AgentSettingsDocument | null,
   index: ProviderIndex | null,
   accounts: { chatgpt: PlanAccount; claudeCode: PlanAccount },
   names: ModelNames,
+  current: RoleChoice | undefined = saved?.main,
 ): ModelGroup[] {
-  const current = saved?.main;
   if (!saved || !current) return [];
   const plans = { [CLAUDE_CODE]: accounts.claudeCode, [CHATGPT]: accounts.chatgpt };
   const usable = (choice: RoleChoice) =>
@@ -51,33 +61,27 @@ export function modelGroups(
     Number(a.provider === "openai-responses-compatible");
   const chosen = [
     current,
-    ...[saved.fast, saved.local, ...(saved.models ?? [])]
-      .filter((choice): choice is RoleChoice => !!choice)
+    ...[saved.main, saved.fast, saved.local, ...(saved.models ?? [])]
+      .filter((choice): choice is RoleChoice => !!choice && !choice.off)
       .sort(responsesFirst),
   ].filter((choice): choice is RoleChoice => !!choice && !(choice.provider in plans));
   const offered = Object.entries(plans).flatMap(([provider, account]) => {
     const models = account.ready
-      ? account.models.map((model) =>
-          current.provider === provider && current.model === model.id
-            ? current
-            : (saved.models?.find(
-                (choice) => choice.provider === provider && choice.model === model.id,
-              ) ?? { provider, model: model.id }),
-        )
+      ? account.models
+          .map((model) =>
+            current.provider === provider && current.model === model.id
+              ? current
+              : (saved.models?.find(
+                  (choice) => choice.provider === provider && choice.model === model.id,
+                ) ?? { provider, model: model.id }),
+          )
+          .filter((choice) => !choice.off)
       : [];
     return provider === current.provider && !models.some((row) => row.model === current.model)
       ? [current, ...models]
       : models;
   });
   // A custom endpoint's models go under its address, each once in whatever format it was chosen.
-  const endpoint = (choice: RoleChoice) => {
-    const url = index?.keys.find((key) => key.id === choice.key)?.baseURL;
-    try {
-      return url ? new URL(url).host : "Custom endpoint";
-    } catch {
-      return "Custom endpoint";
-    }
-  };
   const now = optionId(current);
   const groups = new Map<string, ModelOption[]>();
   const seen = new Set<string>();
@@ -87,7 +91,7 @@ export function modelGroups(
     const same = custom ? ["custom", choice.model, choice.key ?? ""].join("\0") : id;
     if (seen.has(same) || (id !== now && !usable(choice))) continue;
     seen.add(same);
-    const label = custom ? endpoint(choice) : providerName(choice.provider);
+    const label = modelGroupLabel(choice, index);
     groups.set(label, [
       ...(groups.get(label) ?? []),
       {
@@ -105,6 +109,3 @@ export function modelGroups(
   }
   return [...groups].map(([label, options]) => ({ label, options }));
 }
-
-export const currentOption = (saved: AgentSettingsDocument | null) =>
-  saved?.main ? optionId(saved.main) : undefined;

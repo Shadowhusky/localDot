@@ -16,6 +16,37 @@
   pointer-events: none;
 }
 
+/* A still dot for a list (DotAvatar); a flat ball shows until its plates have come in, if they are
+   slow to, so one whose plates are to hand arrives whole. */
+.dot-avatar {
+  position: relative;
+  display: block;
+  flex: none;
+  width: var(--dot-size);
+  height: var(--dot-size);
+  user-select: none;
+  pointer-events: none;
+}
+
+.dot-avatar[data-loading],
+.dot[data-skin="loading"] {
+  animation: dot-wait var(--dur-fade) var(--ease-standard) 200ms backwards;
+}
+
+@keyframes dot-wait {
+  from {
+    opacity: 0;
+  }
+}
+
+.dot-avatar::before {
+  content: "";
+  position: absolute;
+  inset: 12.5%;
+  border-radius: var(--radius-full);
+  background-color: var(--dot-body);
+}
+
 .dot-shadow,
 .dot-body,
 .dot-plate,
@@ -37,6 +68,7 @@
   inset: 0;
   width: 100%;
   height: 100%;
+  filter: var(--dot-props-contour);
 }
 
 /* The shadow's plate is cut square, which shows on a light floor, so its edges fade. */
@@ -62,6 +94,43 @@
 
 .dot-face {
   overflow: visible;
+}
+
+/* A change of outfit: what goes on settles from just above its place, what comes off lifts away. */
+.dot-wear[data-arriving] {
+  animation: dot-wear-on var(--dur-default) var(--ease-spring) backwards;
+}
+
+.dot-wear[data-leaving] {
+  animation: dot-wear-off var(--dur-exit) var(--ease-exit) forwards;
+}
+
+@keyframes dot-wear-on {
+  from {
+    opacity: 0;
+    scale: 0.86;
+    translate: 0 -7%;
+  }
+}
+
+@keyframes dot-wear-off {
+  to {
+    opacity: 0;
+    scale: 0.94;
+    translate: 0 -5%;
+  }
+}
+
+@keyframes dot-wear-fade-on {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes dot-wear-fade-off {
+  to {
+    opacity: 0;
+  }
 }
 
 .dot-flat {
@@ -94,10 +163,14 @@
   stop-color: var(--color-xenon);
 }
 
-/* Until the neutral plate decodes, the SVG body stands in for it; if a plate fails, for good. */
+/* Until its plates decode, the SVG body stands in, wearing nothing; if a plate fails, for good. */
 .dot[data-skin="svg"] .dot-plate,
 .dot[data-skin="plate"] .dot-svgbody {
   display: none;
+}
+
+.dot[data-skin="loading"] :is(.dot-shadow, .dot-plate, .dot-wear) {
+  visibility: hidden;
 }
 
 .dot[data-lod="badge"] .dot-pearl,
@@ -227,5 +300,13 @@
 @media (prefers-reduced-motion: reduce) {
   .presence-mark {
     scale: 1;
+  }
+
+  .dot-wear[data-arriving] {
+    animation-name: dot-wear-fade-on;
+  }
+
+  .dot-wear[data-leaving] {
+    animation-name: dot-wear-fade-off;
   }
 }

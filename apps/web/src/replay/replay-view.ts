@@ -141,6 +141,11 @@ export function gapCard(kind: RecordingGapReason | "none" | "expired" | "failed"
         title: "You had control here",
         body: "Nothing was recorded while you were in control.",
       };
+    case "other-task":
+      return {
+        title: "Another task was on screen here",
+        body: "This task kept going; its own window comes back when it next acts.",
+      };
     case "stream-lost":
       return {
         title: "The picture dropped here",

@@ -21,6 +21,7 @@ import { Field } from "../ui/Field.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
+import { useRevealInvalid } from "../ui/reveal-field.ts";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select } from "../ui/Select.tsx";
 import { TextArea } from "../ui/TextArea.tsx";
@@ -139,6 +140,7 @@ export function KeyForm({
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
+  const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
   const [saved, setSaved] = useState<string | null>(null);
   const valueRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   // Ref detachment precedes passive effect cleanup. Clear the old DOM owner at detachment,
@@ -374,6 +376,7 @@ export function KeyForm({
     // Refused for itself first: fixing another field would not make a plan token usable.
     if (!general && claudePlanToken(value)) {
       setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
+      reveal();
       return;
     }
     if (!check.ok) {
@@ -383,11 +386,13 @@ export function KeyForm({
           ? `${check.message} Paste the key again after correcting it.`
           : check.message,
       });
+      reveal();
       return;
     }
     const bad = valueProblem(value, check.binding.kind);
     if (bad) {
       setProblem({ field: "value", message: bad });
+      reveal();
       return;
     }
     savingRef.current = true;
@@ -432,6 +437,7 @@ export function KeyForm({
   const typed = draft.id.trim();
   return (
     <form
+      ref={scope}
       className="keys-form"
       onSubmit={submit}
       noValidate

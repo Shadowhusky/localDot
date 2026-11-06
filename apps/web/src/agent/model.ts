@@ -47,8 +47,12 @@ export interface AgentMessage {
   readonly kind?: EventOf<"message.user">["data"]["kind"];
   // A follow-up sent while dot was still working, so it waits for the task to finish.
   readonly queued?: boolean;
+  // Why it can't simply be sent now: its model isn't the one dot is on.
+  readonly waitsFor?: EventOf<"message.user">["data"]["waitsFor"];
   readonly sessionId?: string;
   readonly delivery?: "sent" | "steering" | "cancelled" | "withdrawn";
+  // What dot set aside to read it: a wait it ended, or a command it left running.
+  readonly interrupted?: "wait" | "command";
   // Its task's Stop left it unanswered: cancelled, it waits unsent for the user to edit it;
   // withdrawn, Stop gave it back to whoever stopped the task.
   readonly stopped?: boolean;
@@ -62,6 +66,8 @@ export interface AgentStep {
   readonly planItem?: string;
   // dot's line for the user about the call this step starts.
   readonly intent?: string;
+  // The model that was running when the step started.
+  readonly model?: { readonly route: string; readonly model: string };
   readonly startedAt?: number;
   readonly endedAt?: number;
   readonly status?: EventOf<"step.end">["data"]["status"];
@@ -113,7 +119,12 @@ export interface AgentResult {
   readonly seq?: number;
   readonly at?: number;
   readonly summary: string;
-  readonly files: readonly EventOf<"task.result">["data"]["files"][number][];
+  // A file whose bytes are gone, as the daemon found when asked for the conversation's files.
+  readonly files: readonly (EventOf<"task.result">["data"]["files"][number] & {
+    readonly gone?: true;
+  })[];
+  // Web apps its turn started or changed, running as it ended.
+  readonly previews?: EventOf<"task.result">["data"]["previews"];
 }
 // The dot the task works as while Auto is on: Auto's pick, the default it fell back to, or the
 // user's switch.
@@ -214,6 +225,8 @@ export interface AgentModel {
     readonly receivedAt?: number;
   } | null;
   readonly messages: ReadonlyMap<string, AgentMessage>;
+  // The waiting messages' order, once the user has moved one.
+  readonly queueOrder?: readonly string[];
   readonly steps: ReadonlyMap<string, AgentStep>;
   readonly subagents: ReadonlyMap<string, AgentChild>;
   readonly plan: readonly EventOf<"plan.set">["data"]["items"][number][];

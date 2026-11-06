@@ -15,6 +15,12 @@ import type { AgentQuestion } from "./model.ts";
 // the island and the sheet share controls.
 export interface AskField {
   readonly credential?: CredentialRequest;
+  readonly connect?: {
+    readonly connector: string;
+    readonly name: string;
+    readonly host: string;
+    readonly reconnect?: boolean | undefined;
+  };
   readonly id: string;
   readonly kind: AskFieldKind;
   readonly label: string;
@@ -61,6 +67,7 @@ export function askFields(question: AgentQuestion): readonly AskField[] {
     return question.fields.map((field) => ({
       id: field.id,
       ...(field.credential ? { credential: field.credential } : {}),
+      ...(field.connect ? { connect: field.connect } : {}),
       kind: field.kind,
       label: field.label,
       ...(field.hint ? { hint: field.hint } : {}),
@@ -121,6 +128,7 @@ export function fieldValue(
   const words = draft.other[field.id]?.trim();
   switch (field.kind) {
     case "api_key":
+    case "connect_app":
       return value === true ? true : undefined;
     case "qr":
       return true;
@@ -202,7 +210,11 @@ export function composerReply(
 ): ComposerReply {
   if (
     question.fields?.some(
-      (field) => field.kind === "secret" || field.kind === "code" || field.kind === "api_key",
+      (field) =>
+        field.kind === "secret" ||
+        field.kind === "code" ||
+        field.kind === "api_key" ||
+        field.kind === "connect_app",
     )
   )
     return {

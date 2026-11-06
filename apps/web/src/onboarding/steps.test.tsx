@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { KeyStep, ModelStep } from "./steps.tsx";
+import { ViewStylePicker } from "./ViewStylePicker.tsx";
 
 afterEach(cleanup);
 
@@ -18,6 +19,20 @@ const step = (unavailable?: string) => (
     onTyped={vi.fn()}
   />
 );
+
+it("offers both view styles, each described, with the device's recommendation marked", () => {
+  const onChange = vi.fn();
+  render(<ViewStylePicker aria-label="View" value="chat" recommended="chat" onChange={onChange} />);
+  const group = screen.getByRole("radiogroup", { name: "View" });
+  const chat = within(group).getByRole("radio", { name: /^Chat/ });
+  const studio = within(group).getByRole("radio", { name: /^Studio/ });
+  expect((chat as HTMLInputElement).checked).toBe(true);
+  expect(chat.closest("label")?.textContent).toContain("Recommended");
+  expect(studio.closest("label")?.textContent).not.toContain("Recommended");
+  expect(studio.closest("label")?.textContent).toContain("on one screen");
+  fireEvent.click(studio);
+  expect(onChange).toHaveBeenCalledWith("studio");
+});
 
 it("shows the command that turns key protection back on while it is off", () => {
   const view = render(step("Key protection is off. To turn it back on, run this in Terminal:"));

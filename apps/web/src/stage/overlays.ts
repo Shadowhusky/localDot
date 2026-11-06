@@ -124,6 +124,10 @@ class GlassChip extends Container {
     this.#drawGlyph();
   }
 
+  setDensity(dpr: number): void {
+    this.#text.resolution = dpr;
+  }
+
   // dot's porcelain sphere, lit from the upper left, with its two eyes.
   #drawGlyph(): void {
     const t = this.#theme;
@@ -173,7 +177,7 @@ export class Overlays {
   readonly world = new Container();
   readonly screen = new Container();
   #theme: StageTheme;
-  readonly #dpr: number;
+  #dpr: number;
   #unit = 1;
   #cam: Camera = { scale: 1, tx: 0, ty: 0 };
   #viewport = { w: 1, h: 1 };
@@ -192,6 +196,7 @@ export class Overlays {
   #typingWidth = 0;
   readonly #cursor = new Container();
   readonly #cursorShadow = new Graphics();
+  readonly #cursorBlur: BlurFilter;
   readonly #cursorG = new Graphics();
   #cursorKey = "";
   readonly #nameChip: GlassChip;
@@ -209,7 +214,8 @@ export class Overlays {
     this.#typingText = label(theme, dpr, 13, "500");
     this.#typing.addChild(this.#typingBody, this.#typingText, this.#caret);
     this.#scroll.addChild(this.#scrollBody, this.#chevron);
-    this.#cursorShadow.filters = [new BlurFilter({ strength: 2 * dpr, quality: 3 })];
+    this.#cursorBlur = new BlurFilter({ strength: 2 * dpr, quality: 3 });
+    this.#cursorShadow.filters = [this.#cursorBlur];
     this.#cursor.addChild(this.#cursorShadow, this.#cursorG);
     this.world.addChild(
       this.#targetG,
@@ -241,8 +247,17 @@ export class Overlays {
     this.#unit = this.#dpr / cam.scale;
   }
 
-  setViewport(w: number, h: number): void {
+  setViewport(w: number, h: number, dpr = this.#dpr): void {
     this.#viewport = { w, h };
+    if (dpr === this.#dpr) return;
+    this.#dpr = dpr;
+    this.#unit = dpr / this.#cam.scale;
+    for (const chip of [this.#nameChip, this.#cancelChip]) chip.setDensity(dpr);
+    this.#typingText.resolution = dpr;
+    this.#cursorBlur.strength = 2 * dpr;
+    this.#typingKey = "";
+    this.#cursorKey = "";
+    this.#keycapsLabel = "";
   }
 
   // While dot waits on an answer, its target ring stays on each field the answer goes into.

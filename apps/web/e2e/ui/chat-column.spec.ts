@@ -1,7 +1,18 @@
 import type { Locator, Page } from "@playwright/test";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { TOKEN } from "../fixtures/start-ui-fixture.ts";
 import { choose } from "../settings-ui.ts";
-import { chatRail, composer, expect, type Harness, isPhone, runAt, test } from "./harness.ts";
+import {
+  chatRail,
+  composer,
+  expect,
+  type Harness,
+  isPhone,
+  openComposer,
+  openFile,
+  runAt,
+  test,
+} from "./harness.ts";
 
 // The chat column's details: the phone toolbar's buttons keep clear of the field, the dot that
 // works a conversation wears this localDot's accessory, the model menu shows only the plan the
@@ -62,7 +73,7 @@ test("the phone toolbar's buttons keep their hover and press faces clear of the 
   for (const width of touch ? [390, 320] : [600, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await ui.settle();
-    for (const name of ["Activity", "More"]) {
+    for (const name of [PANEL_NAME, "More"]) {
       const button = toolbar.getByRole("button", { name, exact: true });
       await expect
         .poll(() => clearance(button), { message: `${name} at ${width}px` })
@@ -70,7 +81,7 @@ test("the phone toolbar's buttons keep their hover and press faces clear of the 
     }
     for (const value of APPEARANCES) {
       await appearance(page, value);
-      for (const name of ["Activity", "More"]) {
+      for (const name of [PANEL_NAME, "More"]) {
         const button = toolbar.getByRole("button", { name, exact: true });
         if (touch) await button.dispatchEvent("pointerdown", { button: 0, pointerType: "touch" });
         else await button.hover();
@@ -150,14 +161,14 @@ test("on a wide screen the narrowest chat column keeps every button's face clear
   }
 });
 
-test("the dot in the chat and in the chooser wears this localDot's accessory", async ({
+test("the dot's line wears the task's own look, and the chooser this localDot's accessory", async ({
   page,
   ui,
 }) => {
   const fixture = await ui.open("ready");
   await settings(page, fixture.origin, { persona: "coder", accessory: "cap", autoPersona: true });
   await reload(page, ui);
-  // Auto has no answer in time, so the user's default dot, Coder, works the task.
+  // Auto has no answer in time, so the user's usual dot, Coder, works the task.
   await page.request.post(`${fixture.origin}/__qa/first-look`, {
     data: { title: "Login page fix" },
   });
@@ -166,9 +177,26 @@ test("the dot in the chat and in the chooser wears this localDot's accessory", a
   await form.getByRole("button", { name: /^(Start task|Send)$/ }).click();
   const rail = await chatRail(page);
   const line = rail.locator(".thread-dot");
-  await expect(line).toContainText("Working as Coder, your default: Auto had no quick answer");
-  await expect(line.locator('[data-wear="cap"]')).toHaveCount(1);
+  await expect(line).toContainText("Working as Coder, your usual dot");
+  await expect(line.getByRole("button", { name: "Change" })).toBeVisible();
+  const wornIn = (where: Locator) =>
+    where
+      .locator("[data-wear]")
+      .evaluateAll((items) => items.map((item) => (item as HTMLElement).dataset.wear).sort());
   await expect(line.locator('[data-wear="hoodie"]')).toHaveCount(1);
+  // The task continues the fixture's conversation: it wears that conversation's look from the
+  // first, before the list has heard of it, and keeps it once the list is read again.
+  const first = await wornIn(line);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForLoadState("networkidle");
+  expect(await wornIn(line)).toEqual(first);
+  // The dot on screen wears what its line does.
+  await expect
+    .poll(async () => {
+      const [dot, said] = [await wornIn(page.locator(".presence-frame")), await wornIn(line)];
+      return dot.join(" ") === said.join(" ") ? "one look" : `dot: ${dot}; line: ${said}`;
+    })
+    .toBe("one look");
   await expect(
     rail.getByRole("article", { name: "dot" }).filter({ hasText: "Sample reply" }),
   ).toBeVisible();
@@ -198,7 +226,7 @@ test("the dot in the chat and in the chooser wears this localDot's accessory", a
 test("the model menu shows only the plan the chosen model spends", async ({ page, ui }) => {
   const fixture = await ui.open("plan-usage");
   const touch = isPhone(page);
-  const chip = (await composer(page)).getByRole("button", { name: /^Model:/ });
+  const chip = (await openComposer(page)).getByRole("button", { name: /^Model:/ });
   const panel = page.getByRole("dialog", { name: "Model and thinking" });
   const claude = panel.getByRole("region", { name: /^Claude plan/ });
   const chatgpt = panel.getByRole("region", { name: /^ChatGPT plan/ });
@@ -232,6 +260,7 @@ test("the model menu shows only the plan the chosen model spends", async ({ page
     main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic-main" },
   });
   await reload(page, ui);
+  await openComposer(page);
   await expect(chip).toHaveAccessibleName("Model: Claude Sonnet 5.5");
   for (const value of ["graphite", "daylight"] as const) {
     await appearance(page, value);
@@ -307,7 +336,7 @@ test("a preview beside the chat closes on a click outside it, and on Escape", as
   await page.screenshot({ path: test.info().outputPath("preview-closed.png") });
 
   // A file's full preview is modal, and its dimmed page closes it the same way.
-  await rail.getByRole("button", { name: "Open summary.md" }).click();
+  await openFile(page, "summary.md", rail);
   const viewer = page.getByRole("dialog", { name: "summary.md" });
   await expect(viewer).toHaveAttribute("aria-modal", "true");
   await page.mouse.click(40, 450);

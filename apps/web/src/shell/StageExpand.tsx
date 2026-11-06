@@ -1,19 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { IconButton } from "../ui/IconButton.tsx";
 import { STILL_MS } from "./focus.ts";
 
-// Keep watching unobstructed. Activity on the picture reveals its control without taking over
+// Keep watching unobstructed. Activity on the picture reveals a control on it without taking over
 // the computer; activity elsewhere in the conversation does not keep it on screen.
-export function StageExpand({
-  phone,
-  onEnter,
-  onMinimize,
-}: {
-  phone: boolean;
-  onEnter(): void;
-  onMinimize?(): void;
-}) {
-  const ref = useRef<HTMLSpanElement>(null);
+export function useStillPicture(ref: RefObject<HTMLElement | null>): boolean {
   const [still, setStill] = useState(false);
   useEffect(() => {
     const picture = ref.current?.closest(".stage");
@@ -30,7 +21,21 @@ export function StageExpand({
       clearTimeout(timer);
       for (const event of events) picture.removeEventListener(event, wake, true);
     };
-  }, []);
+  }, [ref]);
+  return still;
+}
+
+export function StageExpand({
+  phone,
+  onEnter,
+  onMinimize,
+}: {
+  phone: boolean;
+  onEnter(): void;
+  onMinimize?(): void;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const still = useStillPicture(ref);
   return (
     <span ref={ref} className="stage-expand" data-still={still || undefined}>
       {onMinimize && (

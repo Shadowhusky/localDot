@@ -26,7 +26,6 @@ import {
   liveConversations,
   type Organize,
   organizeConversation,
-  STATUS_LABEL,
   tagsInUse,
   useRecentConversations,
   whenLabel,
@@ -38,17 +37,17 @@ import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
-import { TAG_NAMES, TagDot, TagMark } from "../ui/ConversationTag.tsx";
+import { TAG_NAMES, TagDot } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { MenuItem } from "../ui/Menu.tsx";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
-import { SessionGlyph } from "../ui/SessionGlyph.tsx";
 import { type SwipeAction, SwipeActions } from "../ui/SwipeActions.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
+import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { ConversationMenu } from "./ConversationMenu.tsx";
 import { ConversationPeek, type Peek } from "./ConversationPeek.tsx";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
@@ -90,6 +89,9 @@ export function ConversationList({
   const sheet = layout === "sheet";
   const listId = useId();
   const actionAnchor = useRef<HTMLElement | null>(null);
+  // A row's menu stands against the popover's edge, or the sheet's, level with the row.
+  const actionRow = useRef<HTMLElement | null>(null);
+  const surface = useRef<HTMLElement | null>(null);
   const [action, setAction] = useState<ConversationRow | null>(null);
   const [deleting, setDeleting] = useState<ConversationRow | null>(null);
   // The row whose name is being typed in place, and what is typed. An empty name gives the
@@ -222,6 +224,13 @@ export function ConversationList({
   const closeMenu = () => {
     setAction(null);
     setPeek(null);
+  };
+  const openMenu = (row: ConversationRow, trigger: HTMLElement, from: HTMLElement | null) => {
+    actionAnchor.current = trigger;
+    actionRow.current = from;
+    surface.current = from?.closest(".ui-popup") ?? from?.closest(".conversations") ?? null;
+    setPeek(null);
+    setAction(row);
   };
   // The cards, day headings, rows and the foot all glide to their new places together.
   useFlip(
@@ -397,14 +406,7 @@ export function ConversationList({
                     disabledReason={!isCurrent ? reason : undefined}
                     onClick={() => pick(row)}
                   >
-                    <span className="conversations-glyph">
-                      <SessionGlyph
-                        status={row.status}
-                        label={STATUS_LABEL[row.status]}
-                        className="conversations-status"
-                      />
-                      <TagMark tag={row.entry.tag} />
-                    </span>
+                    <ConversationAvatar row={row} labelled />
                     <span className="conversations-title">
                       {match ? <Highlight text={match.title} /> : row.title}
                     </span>
@@ -427,13 +429,12 @@ export function ConversationList({
                 <IconButton
                   icon="more-horizontal"
                   size={28}
+                  className="conversations-more"
                   label={`Actions for ${row.title}`}
                   {...triggerProps("menu", action?.entry.sessionId === id)}
-                  onClick={(event) => {
-                    actionAnchor.current = event.currentTarget;
-                    setPeek(null);
-                    setAction(row);
-                  }}
+                  onClick={(event) =>
+                    openMenu(row, event.currentTarget, event.currentTarget.closest("[role=row]"))
+                  }
                 />
               </div>
             </>
@@ -457,6 +458,13 @@ export function ConversationList({
               onPointerMove={(event) => {
                 // A finger moving over the rows is scrolling them, not choosing one.
                 if (id !== activeKey && event.pointerType === "mouse") setActive(id);
+              }}
+              // The sheet's rows take a right click as a hold; the popover's open their menu.
+              onContextMenu={(event) => {
+                const more = event.currentTarget.querySelector<HTMLElement>(".conversations-more");
+                if (sheet || !more || renaming?.id === id) return;
+                event.preventDefault();
+                openMenu(row, more, event.currentTarget);
               }}
             >
               {sheet && renaming?.id !== id ? (
@@ -563,11 +571,7 @@ export function ConversationList({
             renaming={renaming?.id}
             renameField={renameField}
             onPick={pick}
-            onMenu={(row, trigger) => {
-              actionAnchor.current = trigger;
-              setPeek(null);
-              setAction(row);
-            }}
+            onMenu={(row, trigger) => openMenu(row, trigger, null)}
             onPeek={openPeek}
           />
         )}
@@ -587,8 +591,12 @@ export function ConversationList({
       <ConversationMenu
         entry={action?.entry ?? null}
         anchor={actionAnchor}
+        row={peek ? undefined : actionRow}
+        list={peek ? undefined : surface}
         onClose={closeMenu}
-        align={peek ? "start" : "end"}
+        side={peek ? "bottom" : "right"}
+        // A phone's sheet leaves no room beside it, so the menu hangs under the row, by its More.
+        align={sheet && !peek ? "end" : "start"}
         running={!!action && running(action)}
         onRename={() => {
           if (action)
@@ -596,6 +604,11 @@ export function ConversationList({
         }}
         onOrganize={(change) => {
           if (action) void organize(action, change);
+        }}
+        onLook={(entry, look) => {
+          organizeConversation(api, entry.sessionId, { look }).catch(() =>
+            announce("conversation", "That change couldn't be saved. Try again.", "assertive"),
+          );
         }}
         onDelete={() => setDeleting(action)}
       >

@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useContext, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
+import { HOLD_MS } from "../ui/long-press.ts";
 import { Conversation } from "./Conversation.tsx";
 import { OPENING_ROWS } from "./earlier.ts";
 import type { AgentMessage, AgentQuestion } from "./model.ts";
@@ -326,6 +327,25 @@ describe("the conversation thread", () => {
   });
 });
 
+it("keeps a decision in the foot above the composer, out of the thread that scrolls", () => {
+  render(
+    <Conversation
+      items={items([message("one")])}
+      truncated={false}
+      composer={<textarea aria-label="Composer" />}
+      decisions={<button type="button">Save routine</button>}
+      pinned
+    />,
+  );
+  const decision = screen.getByRole("button", { name: "Save routine" });
+  expect(decision.closest(".thread-foot")).not.toBeNull();
+  expect(decision.closest(".thread-scroll")).toBeNull();
+  const composer = screen.getByRole("textbox", { name: "Composer" });
+  expect(
+    decision.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
 it("mounts a bounded window of 10,000 messages and keeps the reader's rows through a live addition", () => {
   const data = Array.from({ length: 10_000 }, (_, n) => message(`message-${n}`, `Content ${n}`));
   const v = render(<Conversation items={items(data)} truncated={false} ownerKey="large-task" />);
@@ -349,6 +369,22 @@ it("mounts a bounded window of 10,000 messages and keeps the reader's rows throu
   fireEvent.click(screen.getByRole("button", { name: "Newer messages" }));
   expect(screen.getByText("Newest content")).toBeTruthy();
   expect(history().querySelectorAll("article.thread-message")).toHaveLength(OPENING_ROWS);
+});
+
+it("draws a row the same wherever the page starts: only the thread's own start says the time", () => {
+  const at = Date.UTC(2026, 9, 8, 9);
+  const data = Array.from({ length: 100 }, (_, n) => ({
+    kind: "message" as const,
+    key: `message-${n}`,
+    speaker: "user" as const,
+    time: at + n * 60_000,
+    message: message(`${n}`, `Content ${n}`),
+  }));
+  render(<Conversation items={data} truncated={false} ownerKey="task" />);
+  expect(screen.getByText("Content 60")).toBeTruthy();
+  expect(history().querySelector(".thread-time")).toBeNull();
+  const first = screen.getByText("Content 60").closest(".thread-row");
+  expect(first?.hasAttribute("data-group-start")).toBe(false);
 });
 
 it("announces completed replies without reading each streaming delta", () => {
@@ -491,6 +527,78 @@ it("holds a phone's toolbar at the foot however short the column is, its control
   ).toEqual(["Activity", "Message", "More"]);
 });
 
+describe("a chat", () => {
+  const reply = (id: string, text: string) => ({
+    kind: "message" as const,
+    key: `message-${id}`,
+    speaker: "dot" as const,
+    time: 1_000,
+    message: { id, seq: 2, role: "assistant" as const, text, final: true },
+  });
+  const hold = (element: Element) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    element.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        pointerId: 3,
+        pointerType: "touch",
+        isPrimary: true,
+        button: 0,
+        bubbles: true,
+      }),
+    );
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    vi.useRealTimers();
+    // The finger lifts over the menu that came up under it, which chooses nothing.
+    fireEvent.pointerUp(window, { pointerId: 3 });
+    fireEvent.click(document.body);
+  };
+
+  it("offers a held reply's Copy, Select text and Share", async () => {
+    const { container } = render(
+      <Conversation chat items={[reply("one", "Three plans undercut ours.")]} truncated={false} />,
+    );
+    hold(container.querySelector('.thread-message[data-role="dot"]') as Element);
+    const menu = screen.getByRole("menu", { name: "Message actions" });
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Copy", "Select text", "Share"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Select text" }));
+    const sheet = await screen.findByRole("dialog", { name: "Select text" });
+    expect(sheet.textContent).toContain("Three plans undercut ours.");
+  });
+
+  it("offers your own message's Copy and Edit and send again", async () => {
+    const { container } = render(
+      <Conversation
+        chat
+        items={items([message("asked", "Find the cheapest fare")])}
+        truncated={false}
+        composer={<textarea aria-label="Message" />}
+      />,
+    );
+    hold(container.querySelector('.thread-message[data-role="user"]') as Element);
+    const menu = screen.getByRole("menu", { name: "Message actions" });
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Copy", "Edit and send again"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Edit and send again" }));
+    const field = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    expect(field.value).toBe("Find the cheapest fare");
+  });
+
+  it("offers nothing on a hold outside a chat", async () => {
+    const { container } = render(
+      <Conversation items={[reply("one", "Three plans.")]} truncated={false} />,
+    );
+    hold(container.querySelector('.thread-message[data-role="dot"]') as Element);
+    expect(screen.queryByRole("menu", { name: "Message actions" })).toBeNull();
+  });
+});
+
 it("steers the existing queued message by ID without posting its text again", async () => {
   const sessionId = "01J00000000000000000000001",
     messageId = "01J00000000000000000000002";
@@ -521,6 +629,51 @@ it("steers the existing queued message by ID without posting its text again", as
   );
   expect(screen.queryByRole("button", { name: "Steer now" })).toBeNull();
   expect(screen.getAllByText("Use the latest numbers")).toHaveLength(1);
+});
+
+it("asks a second press before switching model, which ends what dot is running", async () => {
+  const sessionId = "01J00000000000000000000001",
+    messageId = "01J00000000000000000000002";
+  const fetch = vi.fn(
+    async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 204 }),
+  );
+  const api = createApi("fixture", { origin: "http://127.0.0.1:4790", fetchImpl: fetch });
+  const queued = {
+    ...message(messageId, "Use the latest numbers"),
+    queued: true,
+    sessionId,
+    kind: "followup" as const,
+    waitsFor: "switch" as const,
+  };
+  render(
+    <Conversation items={items([queued])} truncated={false} api={api} sessionId={sessionId} />,
+  );
+  expect(screen.getByText("After this task, on another model")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Steer now" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Switch now" }));
+  expect(fetch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "End what's running and switch" }));
+  await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+  expect(String(fetch.mock.calls[0]?.[0])).toContain(`/messages/${messageId}/steer`);
+});
+
+it("offers no way to send early a message another task must take over", () => {
+  const sessionId = "01J00000000000000000000001",
+    messageId = "01J00000000000000000000002";
+  const api = createApi("fixture", { origin: "http://127.0.0.1:4790", fetchImpl: vi.fn() });
+  const queued = {
+    ...message(messageId, "Use the latest numbers"),
+    queued: true,
+    sessionId,
+    kind: "followup" as const,
+    waitsFor: "handover" as const,
+  };
+  render(
+    <Conversation items={items([queued])} truncated={false} api={api} sessionId={sessionId} />,
+  );
+  expect(screen.queryByRole("button", { name: "Steer now" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Switch now" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
 });
 
 it("keeps a queued message at the end, under what dot says meanwhile, until dot receives it", () => {

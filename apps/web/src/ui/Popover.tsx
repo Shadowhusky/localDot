@@ -10,13 +10,15 @@ import {
 } from "react";
 import { tabbables } from "./focus.ts";
 import { LayerPortal, useExit, useLayer, useLeaving } from "./LayerStack.tsx";
-import { type Align, place, type Side } from "./position.ts";
+import { type Align, place, type Rect, type Side } from "./position.ts";
 
 export interface AnchoredProps {
   kind: "popover" | "menu";
   open: boolean;
   onClose(): void;
   anchor: RefObject<HTMLElement | null>;
+  // What the popup is placed beside when not the anchor's own box, read each time it is placed.
+  against?: () => Rect | undefined;
   side?: Side;
   align?: Align;
   // Keeps Tab inside the popup; a menu closes on Tab instead.
@@ -45,13 +47,13 @@ export function finishPlacing(element: HTMLElement) {
 }
 
 // Puts a popup beside its anchor, through the CSSOM so the page's CSP holds.
-function put(element: HTMLElement, target: HTMLElement, side: Side, align: Align) {
+function put(element: HTMLElement, target: Rect, side: Side, align: Align) {
   // Measure the full content without temporarily expanding the scrollport. Clearing
   // maxHeight clamps scrollTop to zero, so every scroll event used to jump tall menus
   // back to their first item (and a following tap could hit a different choice).
   const naturalHeight = element.scrollHeight + element.offsetHeight - element.clientHeight;
   const found = place({
-    anchor: target.getBoundingClientRect(),
+    anchor: target,
     size: { width: element.offsetWidth, height: naturalHeight },
     viewport: { width: document.documentElement.clientWidth, height: window.innerHeight },
     side,
@@ -77,6 +79,7 @@ function AnchoredLayer({
   kind,
   onClose,
   anchor,
+  against,
   side = "bottom",
   align = "start",
   trap,
@@ -90,8 +93,11 @@ function AnchoredLayer({
 }: AnchoredProps & { root: RefObject<HTMLDivElement | null>; closing: boolean }) {
   const own = useRef<HTMLDivElement>(null);
   const panel = panelRef ?? own;
-  const placement = useRef({ side, align, closing });
-  placement.current = { side, align, closing };
+  const placement = useRef({ side, align, closing, against });
+  placement.current = { side, align, closing, against };
+  const box = useRef(
+    () => placement.current.against?.() ?? anchor.current?.getBoundingClientRect(),
+  ).current;
 
   useLayer({
     active: !closing,
@@ -106,7 +112,7 @@ function AnchoredLayer({
 
   const update = useRef(() => {
     const element = panel.current;
-    const target = anchor.current;
+    const target = box();
     if (!element || placement.current.closing) return;
     if (target) put(element, target, placement.current.side, placement.current.align);
     finishPlacing(element);
@@ -131,8 +137,8 @@ function AnchoredLayer({
     let watch = 0;
     let at = "";
     const follow = () => {
-      const box = anchor.current?.getBoundingClientRect();
-      const now = box ? `${box.left} ${box.top}` : "";
+      const target = box();
+      const now = target ? `${target.left} ${target.top} ${target.width}` : "";
       if (at && now !== at) update();
       at = now;
       watch = requestAnimationFrame(follow);
@@ -145,7 +151,7 @@ function AnchoredLayer({
       window.removeEventListener("scroll", soon, { capture: true });
       window.removeEventListener("resize", soon);
     };
-  }, [anchor, panel, update]);
+  }, [anchor, panel, update, box]);
 
   return (
     <LayerPortal kind={kind} closing={closing} rootRef={root}>

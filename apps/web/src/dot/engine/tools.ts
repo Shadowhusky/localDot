@@ -1,6 +1,7 @@
 import { clamp, smoothstep } from "./math.ts";
 import { hash01 } from "./rng.ts";
 import { GAZE_MAX } from "./sphere.ts";
+import type { Lod } from "./states.ts";
 
 // What dot is doing with its hands, as it were: each tool brings a small prop and a way of
 // holding the body and eyes. Times are in milliseconds, places in the 64-unit frame.
@@ -100,14 +101,31 @@ export interface PropPose {
   still: boolean;
 }
 
-// A sub-agent at work, drawn as a small dot beside dot: its place, how far out it is, how long it
-// has been out, how its work ended once it has, and a draw of its own.
+// A sub-agent at work, drawn as a small dot beside dot: its seat and its place along the arc, how far
+// out it is, how long it has been out, how its work ended once it has, and a draw of its own.
 export interface HelperPose {
-  slot: number;
+  x: number;
+  y: number;
+  r: number;
+  index: number;
   amount: number;
   age: number;
   end: { ok: boolean; age: number } | null;
   seed: number;
+  // The prop's fine detail: a bob and blinks. Without it a helper holds still between its moves.
+  fine: boolean;
+  still: boolean;
+}
+
+// The rest of the crew beyond the seats, on a seat of their own.
+export interface CrewMore {
+  x: number;
+  y: number;
+  r: number;
+  count: number;
+  amount: number;
+  fine: boolean;
+  still: boolean;
 }
 
 // How each tool holds the body (an offset in frame units and a scale about its base), how much of
@@ -142,7 +160,7 @@ export const TOOL_LOOK: Record<DotTool, ToolLook> = {
   filing: { x: -9, y: 0, s: 0.84, gaze: 0.8, up: 0.08 },
   recalling: BOOK_LOOK,
   remembering: BOOK_LOOK,
-  delegating: { x: -9, y: 0, s: 0.84, gaze: 0.6, up: 0 },
+  delegating: { x: -10, y: 0, s: 0.8, gaze: 0.6, up: 0 },
 };
 
 export const DEFAULT_ANGLE = 0.7;
@@ -304,15 +322,65 @@ export function handAt(p: PropPose): { angle: number; mark: number; set: number;
   return { angle: from + forward * set, mark, set, k };
 }
 
-// Where the helpers float, in an arc round dot's shoulder, the first nearest; a helper is the body
-// drawn small.
-export const HELPER_SLOTS = [
-  { x: 53.4, y: 28.4, r: 4.6 },
-  { x: 58.4, y: 40.2, r: 4 },
-  { x: 50.6, y: 16.6, r: 3.6 },
+export interface Seat {
+  x: number;
+  y: number;
+  r: number;
+}
+
+// The crew sits evenly along one arc about the ball as it rests in the delegating look, far enough
+// out to clear the widest hat and inside the frame at either end. The arc's middle is a little above
+// the ball's, so one helper sits at dot's shoulder and four reach from its crown to its side.
+const BALL_AT_REST = { x: 22, y: 36.8 } as const;
+const ARC_REACH = 33;
+const ARC_MIDDLE = -14;
+const SPREADS = [
+  { step: 0, r: 6.6 },
+  { step: 36, r: 6.2 },
+  { step: 32, r: 5.8 },
+  { step: 28, r: 5.2 },
 ] as const;
-// A helper that finished well smiles this long before it pops back into dot.
+// At the badge size the body stays where it is and the crew are plain pips in the frame's corner.
+const PIPS = { x: 32, y: 32, reach: 31, middle: 45, step: 20, r: 3.4, seats: 3 } as const;
+
+function arc(centre: { x: number; y: number }, reach: number, middle: number, step: number) {
+  return (at: number, count: number) => {
+    const angle = ((middle + step * (at - (count - 1) / 2)) * Math.PI) / 180;
+    return { x: centre.x + reach * Math.cos(angle), y: centre.y + reach * Math.sin(angle) };
+  };
+}
+
+// Who gets a seat: all of the crew while they fit; beyond that the first of them and, on the last
+// seat, the number of the rest. A dot at the presence size has fewer seats, and at the badge size
+// the pips only say that there is a crew.
+export function crewSeats(count: number, lod: Lod): { seats: Seat[]; more: Seat | null } {
+  if (count <= 0) return { seats: [], more: null };
+  if (lod === "glyph" || lod === "badge") {
+    const place = arc(PIPS, PIPS.reach, PIPS.middle, PIPS.step);
+    const n = Math.min(count, PIPS.seats);
+    return {
+      seats: Array.from({ length: n }, (_, at) => ({ ...place(at, n), r: PIPS.r })),
+      more: null,
+    };
+  }
+  const most = lod === "presence" ? 3 : 4;
+  const n = Math.min(count, most);
+  const spread = SPREADS[n - 1] ?? SPREADS[3];
+  const place = arc(BALL_AT_REST, ARC_REACH, ARC_MIDDLE, spread.step);
+  const seats = Array.from({ length: n }, (_, at) => ({ ...place(at, n), r: spread.r }));
+  return count > most
+    ? { seats: seats.slice(0, -1), more: seats.at(-1) ?? null }
+    : { seats, more: null };
+}
+
+// A helper that finished well smiles this long before it hops back into dot; one that failed droops
+// this long before it fades where it is.
 export const HAPPY_MS = 420;
+export const SAD_MS = 620;
+// A helper gone, its seat goes too and the rest close up, this long after it started to leave.
+export const LEAVE_MS = 420;
+// Helpers that come out together do so one after another.
+export const CREW_STAGGER_MS = 80;
 
 // The book: a page turns as each lookup starts, and each note is written onto the right-hand page.
 export const BOOK = { cx: 49.5, cy: 48.5 } as const;
@@ -465,8 +533,8 @@ export function toolMotion(p: PropPose, fine: boolean): ToolMotion {
       };
     }
     case "delegating":
-      // Eyes on the helpers, from one to the next.
-      return { x: 0, y: 0, roll: 0, gx: 4.4 + 0.8 * wave(c, 4200), gy: -1.4 + 1.8 * wave(c, 2100) };
+      // Eyes on the helpers, slowly along the arc they sit on.
+      return { x: 0, y: 0, roll: 0, gx: 5 + 0.5 * wave(c, 5200), gy: -1.6 + 1.6 * wave(c, 2600) };
   }
 }
 

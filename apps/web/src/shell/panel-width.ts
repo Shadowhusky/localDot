@@ -6,6 +6,8 @@ export interface PanelWidth {
   max: number;
   // What the rest of the page keeps beside the panel, so the stage never gets squeezed out.
   reserve: number;
+  // What the other panel that can be resized holds now, on top of that.
+  beside?(): number;
 }
 
 export const CHAT_WIDTH: PanelWidth = {
@@ -13,7 +15,18 @@ export const CHAT_WIDTH: PanelWidth = {
   initial: 368,
   min: 320,
   max: 640,
-  reserve: 600,
+  reserve: 344,
+  beside: () => readWidth(SESSIONS_WIDTH),
+};
+
+// The conversations rail, expanded.
+export const SESSIONS_WIDTH: PanelWidth = {
+  key: "localdot.width.sessions",
+  initial: 256,
+  min: 208,
+  max: 420,
+  reserve: 472,
+  beside: () => readWidth(CHAT_WIDTH),
 };
 
 export const ACTIVITY_WIDTH: PanelWidth = {
@@ -27,7 +40,10 @@ export const ACTIVITY_WIDTH: PanelWidth = {
 export function widthLimits(panel: PanelWidth, viewport: number): { min: number; max: number } {
   return {
     min: panel.min,
-    max: Math.max(panel.min, Math.min(panel.max, viewport - panel.reserve)),
+    max: Math.max(
+      panel.min,
+      Math.min(panel.max, viewport - panel.reserve - (panel.beside?.() ?? 0)),
+    ),
   };
 }
 
@@ -56,7 +72,7 @@ export function rubberBand(overshoot: number, reach = 60, constant = 0.55): numb
   return (Math.sign(overshoot) * (magnitude * reach * constant)) / (reach + constant * magnitude);
 }
 
-// Where the edge sits for a pointer `travel` px left of where the drag began.
+// Where the edge sits for a pointer `travel` px outward of where the drag began.
 export function dragWidth(start: number, travel: number, limits: { min: number; max: number }) {
   const raw = start + travel;
   if (raw > limits.max) return limits.max + rubberBand(raw - limits.max);

@@ -5,14 +5,17 @@ import type { FileState, ResultDownloads } from "../agent/ResultFiles.tsx";
 import { bytes } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
-import { FileRow } from "../ui/Card.tsx";
+import { FileCard, FileRow } from "../ui/Card.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { Menu, MenuGroup, MenuItem } from "../ui/Menu.tsx";
+import { triggerProps } from "../ui/Popover.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
 import { showToast } from "../ui/Toast.tsx";
 import { CompareSheet } from "./CompareSheet.tsx";
-import { FilePreview } from "./FilePreview.tsx";
+import { FilePreview, MediaPreview } from "./FilePreview.tsx";
+import { kindLabel } from "./kind-label.ts";
 import { openHere } from "./open-here.ts";
 import { requestRevise } from "./revise-draft.ts";
 import { usePreview } from "./usePreview.ts";
@@ -46,10 +49,13 @@ export interface DeliverableFileProps {
   revisable?: boolean;
   // One line, as in the chat, where an image shows its own picture on the row's tile.
   compact?: boolean;
+  // When it was handed over, where a list holds more than one task's files.
+  when?: string;
 }
 
-// A file dot handed over: a row to open its preview, download it or open it on the Mac, and under
-// it, what it looks like, its versions, and Revise and Compare.
+// A file dot handed over: a row to open its preview, with Open and a menu that also holds Download
+// (and, where a row is too narrow for Open, is all there is), and under it, what it looks like, its
+// versions, and Revise and Compare.
 export function DeliverableFile({
   measure,
   index,
@@ -63,6 +69,7 @@ export function DeliverableFile({
   onMac,
   revisable = true,
   compact = false,
+  when,
 }: DeliverableFileProps) {
   const panel = useId();
   const row = useRef<HTMLLIElement | null>(null);
@@ -78,6 +85,8 @@ export function DeliverableFile({
   const [shown, setShown] = useState<ShownVersion>({ sessionId, version: file.version ?? null });
   const [attempt, setAttempt] = useState(0);
   const [opening, setOpening] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const more = useRef<HTMLButtonElement>(null);
   const [comparing, setComparing] = useState<{
     pair: [FileVersion, FileVersion];
     open: boolean;
@@ -92,6 +101,7 @@ export function DeliverableFile({
       : undefined);
   const newest = !current || current === versions.at(-1);
   const kind = fileKind(file.name);
+  const shows = viewerKind(file.name);
   // The tile's picture is the preview itself, so it loads while the row is closed.
   const picture = compact && kind === "image";
   const preview = usePreview(
@@ -100,12 +110,13 @@ export function DeliverableFile({
     shown.sessionId,
     file.name,
     shown.version,
-    (open || picture) && (kind !== "attachment" || viewerKind(file.name) === "details"),
+    (open || picture) && (kind !== "attachment" || shows === "details"),
     attempt,
   );
   const pair = comparePair(file.name, versions, current);
   const state: FileState | undefined = downloads.state(resultId, file);
-  const gone = current?.available === false;
+  // A version asked for by the user speaks for itself; the file's own may be known to be gone.
+  const gone = current ? current.available === false : !!file.gone;
   const own = shown.sessionId === sessionId && shown.version === (file.version ?? null);
 
   const meta =
@@ -113,12 +124,15 @@ export function DeliverableFile({
       ? "Downloading…"
       : state === "failed"
         ? "Couldn't download. Try again."
-        : [
-            bytes(current?.bytes ?? file.bytes),
-            versions.length > 1 && current ? `v${current.label}` : null,
-          ]
-            .filter(Boolean)
-            .join(" · ");
+        : gone
+          ? "No longer available"
+          : [
+              bytes(current?.bytes ?? file.bytes),
+              versions.length > 1 && current ? `v${current.label}` : null,
+              when,
+            ]
+              .filter(Boolean)
+              .join(" · ");
   const openOnMac = async () => {
     setOpening(true);
     await openHere(api, shown.sessionId, file.name, shown.version);
@@ -141,6 +155,50 @@ export function DeliverableFile({
       : downloads.busy && state !== "busy"
         ? "Another download is still running."
         : undefined;
+  const openReason = gone ? "This version is no longer available." : undefined;
+  const download = () => void downloads.request(resultId, file, own ? undefined : shown);
+  const openViewer =
+    viewer &&
+    (() =>
+      viewer(entryKey({ resultId, file }), {
+        sessionId: shown.sessionId,
+        version: shown.version,
+        bytes: current?.bytes ?? file.bytes,
+        ...(versions.length > 1 && current ? { label: current.label } : {}),
+      }));
+  const opener = openViewer ?? (onMac && canOpenOnMac(file.name) ? openOnMac : undefined);
+  const openLabel = viewer ? `Open ${file.name}` : `Open ${file.name} on your Mac`;
+  // Under the row, Open does something the card doesn't: the Mac's own app, or a viewer that can
+  // show more than this card again.
+  const opensMore =
+    onMac && canOpenOnMac(file.name) ? openOnMac : shows !== "details" ? openViewer : undefined;
+  const card = {
+    name: file.name,
+    meta: [kindLabel(file.name), bytes(current?.bytes ?? file.bytes)].join(" · "),
+    actions: (
+      <>
+        {opensMore && (
+          <Button
+            size="sm"
+            busy={opening}
+            disabledReason={openReason}
+            onClick={() => void opensMore()}
+          >
+            Open
+          </Button>
+        )}
+        <Button
+          size="sm"
+          icon={state === "done" ? "check" : "download"}
+          busy={state === "busy"}
+          disabledReason={downloadReason}
+          onClick={download}
+        >
+          Download
+        </Button>
+      </>
+    ),
+  };
 
   return (
     <li ref={attach} data-index={index} className="deliverable" aria-label={file.name}>
@@ -157,60 +215,84 @@ export function DeliverableFile({
         onToggle={() => setOpen((was) => !was)}
         actions={
           <>
-            {viewer ? (
+            {opener && (
               <Button
                 size="sm"
-                aria-label={`Open ${file.name}`}
-                disabledReason={gone ? "This version is no longer available." : undefined}
-                onClick={() =>
-                  viewer(entryKey({ resultId, file }), {
-                    sessionId: shown.sessionId,
-                    version: shown.version,
-                    bytes: current?.bytes ?? file.bytes,
-                    ...(versions.length > 1 && current ? { label: current.label } : {}),
-                  })
-                }
+                className="ui-file-open"
+                busy={opening}
+                aria-label={openLabel}
+                disabledReason={openReason}
+                onClick={() => void opener()}
               >
                 Open
               </Button>
-            ) : (
-              onMac &&
-              canOpenOnMac(file.name) && (
-                <Button
-                  size="sm"
-                  busy={opening}
-                  aria-label={`Open ${file.name} on your Mac`}
-                  disabledReason={gone ? "This version is no longer available." : undefined}
-                  onClick={() => void openOnMac()}
-                >
-                  Open
-                </Button>
-              )
             )}
             <span className="result-file-action" data-state={state}>
               {state === "busy" && <Spinner className="result-file-ring" />}
-              <IconButton
-                icon={state === "busy" ? "x" : state === "done" ? "check" : "download"}
-                label={state === "busy" ? "Cancel download" : `Download ${file.name}`}
-                disabledReason={state === "busy" ? undefined : downloadReason}
-                onClick={() => {
-                  if (state === "busy") downloads.cancel();
-                  else void downloads.request(resultId, file, own ? undefined : shown);
-                }}
-              />
+              {opener && !state ? (
+                <IconButton
+                  ref={more}
+                  icon="more-horizontal"
+                  label={`More for ${file.name}`}
+                  {...triggerProps("menu", menu)}
+                  onClick={() => setMenu(true)}
+                />
+              ) : (
+                <IconButton
+                  icon={state === "busy" ? "x" : state === "done" ? "check" : "download"}
+                  label={state === "busy" ? "Cancel download" : `Download ${file.name}`}
+                  disabledReason={state === "busy" ? undefined : downloadReason}
+                  onClick={() => (state === "busy" ? downloads.cancel() : download())}
+                />
+              )}
             </span>
+            {opener && (
+              <Menu
+                open={menu}
+                onClose={() => setMenu(false)}
+                anchor={more}
+                align="end"
+                label={`Actions for ${file.name}`}
+              >
+                {/* The whole name, for a finger that can't hover over a shortened one. */}
+                <MenuGroup label={file.name}>
+                  <MenuItem
+                    icon="expand"
+                    disabledReason={openReason}
+                    onSelect={() => void opener()}
+                  >
+                    {viewer ? "Open" : "Open on your Mac"}
+                  </MenuItem>
+                  <MenuItem icon="download" disabledReason={downloadReason} onSelect={download}>
+                    Download
+                  </MenuItem>
+                </MenuGroup>
+              </Menu>
+            )}
           </>
         }
       />
-      <Collapse id={panel} open={open} className="deliverable-panel">
+      <Collapse id={panel} open={open} className="deliverable-panel" fit>
         <div className="deliverable-body">
-          <FilePreview
-            state={preview}
-            kind={kind}
-            name={file.name}
-            onRetry={() => setAttempt((n) => n + 1)}
-            opens={viewer !== null}
-          />
+          {shows === "video" || shows === "audio" ? (
+            gone ? (
+              <FileCard {...card} problem="This version is no longer available." />
+            ) : (
+              <MediaPreview
+                api={api}
+                file={{ sessionId: shown.sessionId, name: file.name, version: shown.version }}
+                kind={shows}
+                card={card}
+              />
+            )
+          ) : (
+            <FilePreview
+              state={preview}
+              kind={kind}
+              {...card}
+              onRetry={() => setAttempt((n) => n + 1)}
+            />
+          )}
           {(revisable || pair || versions.length > 1) && (
             <div className="deliverable-tools">
               {revisable && (

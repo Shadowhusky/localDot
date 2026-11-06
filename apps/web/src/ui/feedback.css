@@ -77,13 +77,14 @@
     transition: opacity var(--dur-exit) var(--ease-exit);
   }
 
-  /* Everything lines up on the title's line, so a second line or opened details grow the toast
-     downwards and nothing beside the title moves. One line of text makes it 40 tall. */
+  /* The glyph, the action and the close button sit level with the words as a whole, however many
+     lines those take, so the toast reads balanced; opened details grow it downwards on a line of
+     their own and nothing above them moves. One line of text makes it 40 tall. */
   .ui-toast-body {
     --_line: var(--text-body--line-height);
     --_pad-y: calc((var(--spacing) * 10 - var(--_line)) / 2);
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: calc(var(--spacing) * 2.5);
     min-height: calc(var(--spacing) * 10);
     padding: var(--_pad-y) calc(var(--spacing) * 1.5) var(--_pad-y) calc(var(--spacing) * 3.5);
@@ -124,11 +125,11 @@
     text-wrap: pretty;
   }
 
-  /* Beside an action it often takes two short lines, best kept even. */
+  /* It fills the room it has beside an action rather than leave a gap in front of it. */
   .ui-toast-description {
     color: var(--color-fg-2);
     font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-    text-wrap: balance;
+    text-wrap: pretty;
   }
 
   /* Details take a line of their own under the title, the toast's whole width from the title's
@@ -337,14 +338,14 @@
     height: var(--spacing);
     overflow: hidden;
     border-radius: var(--radius-full);
-    background-color: var(--color-control);
+    background-color: var(--color-meter-track);
   }
 
   :is(.ui-progress-fill, .ui-meter-fill) {
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background-color: var(--color-fg-2);
+    background-color: var(--color-bar-fill);
     translate: calc((var(--_value) - 1) * 100%) 0;
     transition:
       translate var(--dur-default) var(--ease-standard),
@@ -361,7 +362,7 @@
     position: absolute;
     inset: 1px 0;
     border-radius: inherit;
-    background-color: var(--color-control);
+    background-color: var(--color-meter-track);
   }
 
   .ui-progress[data-indeterminate] > .ui-progress-fill {
@@ -384,7 +385,7 @@
   .ui-progress[data-variant="ring"] {
     display: inline-flex;
     flex-shrink: 0;
-    color: var(--color-fg-2);
+    color: var(--_ring-colour, var(--color-fg-2));
     transition: color var(--dur-fade) var(--ease-standard);
   }
 

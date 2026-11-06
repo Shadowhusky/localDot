@@ -32,6 +32,8 @@ describe("a tool's behaviour", () => {
   it("is summed up under the app's name", () => {
     const view = {
       status: "ready",
+      enabled: true,
+      server: { kind: "remote", auth: { kind: "oauth", secret: "connector-x" } },
       tools: [
         { name: "a", access: "read", enabled: true },
         { name: "b", access: "write", enabled: true },
@@ -39,7 +41,22 @@ describe("a tool's behaviour", () => {
       ],
     } as unknown as ConnectorView;
     expect(statusLine(view)).toBe("2 tools · 1 ask first");
-    expect(statusLine({ ...view, status: "needs_sign_in" })).toBe("Not signed in yet");
+    expect(statusLine({ ...view, status: "needs_sign_in" })).toBe("Needs reconnecting");
+    expect(
+      statusLine({
+        ...view,
+        status: "needs_sign_in",
+        server: {
+          kind: "remote",
+          url: "https://a.example/mcp",
+          transport: "http",
+          auth: { kind: "oauth" },
+        },
+      }),
+    ).toBe("Not connected");
+    expect(statusLine({ ...view, signIn: { expiresAt: 1, remote: false } })).toBe(
+      "Waiting for your approval",
+    );
     expect(statusLine({ ...view, tools: [] })).toBe("No tools");
   });
 });

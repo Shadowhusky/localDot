@@ -434,6 +434,14 @@ export const ICONS = {
     ["path", { d: "M10 11v6" }],
     ["path", { d: "M14 11v6" }],
   ],
+  "grip-vertical": [
+    ["circle", { cx: "9", cy: "12", r: "1" }],
+    ["circle", { cx: "9", cy: "5", r: "1" }],
+    ["circle", { cx: "9", cy: "19", r: "1" }],
+    ["circle", { cx: "15", cy: "12", r: "1" }],
+    ["circle", { cx: "15", cy: "5", r: "1" }],
+    ["circle", { cx: "15", cy: "19", r: "1" }],
+  ],
   "chevrons-up-down": [
     ["path", { d: "m7 15 5 5 5-5" }],
     ["path", { d: "m7 9 5-5 5 5" }],

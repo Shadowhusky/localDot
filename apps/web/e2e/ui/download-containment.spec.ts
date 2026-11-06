@@ -1,3 +1,4 @@
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
@@ -32,7 +33,7 @@ for (const width of [320, 390, 1440]) {
     });
     await ui.open("ready");
     await page
-      .getByRole(width < 700 ? "button" : "radio", { name: "Activity", exact: true })
+      .getByRole(width < 700 ? "button" : "radio", { name: PANEL_NAME, exact: true })
       .click();
     await page.getByRole("tab", { name: /^Files/ }).click();
     await page.getByRole("button", { name: "Review", exact: true }).click();

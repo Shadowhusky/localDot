@@ -37,10 +37,10 @@
   margin-top: 0;
 }
 
-/* The plan over the steps: "Plan" and how far dot is, a hairline of progress, then the item dot is
-   on and the one after it. Open, the strip lifts into one card whose list takes those lines' place;
-   the card keeps its closed height in the rail until the list has folded away again, so the steps
-   under it stay put. */
+/* The plan over the steps, in one line: the item dot is on, how far it has got, and a hairline of
+   progress along its foot. Open, the strip lifts into one card whose list hangs under that line; the
+   card keeps its closed height in the rail until the list has folded away again, so the steps under
+   it stay put. */
 .plan-card {
   position: relative;
   flex: none;
@@ -58,6 +58,7 @@
 
 /* The trigger's 1 px border is taken from its padding, so its glyphs sit on the steps' column. */
 .plan-strip > .ui-disclosure-trigger {
+  position: relative;
   padding-inline: calc(var(--spacing) * 2 - 1px);
 }
 
@@ -66,78 +67,62 @@
 }
 
 .plan-strip-summary {
-  display: grid;
-  gap: calc(var(--spacing) * 1.5);
-  min-width: 0;
-}
-
-.plan-strip-head {
   display: flex;
   align-items: center;
-  gap: calc(var(--spacing) * 3);
+  gap: calc(var(--spacing) * 2.5);
+  min-width: 0;
+  color: var(--color-fg-1);
+  font: var(--font-weight-normal) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+
+.plan-strip-summary > .ui-status-glyph {
+  flex: none;
 }
 
 .plan-strip-title {
-  color: var(--color-fg-1);
-  font:
-    var(--font-weight-semibold) var(--text-callout) / var(--text-callout--line-height)
-    var(--font-ui);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-strip-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .plan-strip-count {
+  flex: none;
   color: var(--color-fg-3);
   font:
-    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
 }
 
 .plan-strip-bar {
-  position: relative;
-  flex: 1;
-  height: 3px;
+  position: absolute;
+  inset-inline: calc(var(--spacing) * 2);
+  bottom: 0;
+  height: 2px;
   overflow: hidden;
   border-radius: var(--radius-full);
-  background-color: var(--color-track);
+  background-color: var(--color-bar-track);
 }
 
 .plan-strip-bar::after {
   content: "";
   position: absolute;
   inset: 0;
-  background-color: var(--color-fg-3);
+  background-color: var(--color-bar-fill-quiet);
   transform: scaleX(var(--_done));
   transform-origin: left;
   transition: transform var(--dur-default) var(--ease-standard);
-}
-
-.plan-strip-line {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  column-gap: calc(var(--spacing) * 2.5);
-  align-items: start;
-  color: var(--color-fg-1);
-  font: var(--font-weight-normal) var(--text-body) / var(--text-body--line-height) var(--font-ui);
-  letter-spacing: var(--text-body--letter-spacing);
-}
-
-.plan-strip-line > .ui-status-glyph {
-  margin-top: 1px;
-}
-
-.plan-strip-text {
-  display: -webkit-box;
-  min-width: 0;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.plan-strip-line[data-next] {
-  color: var(--color-fg-3);
-}
-
-.plan-strip-line[data-next] > .plan-strip-text {
-  -webkit-line-clamp: 1;
 }
 
 .plan-list {
@@ -229,14 +214,14 @@
   margin-bottom: calc(var(--spacing) * 1.5);
   overflow: hidden;
   border-radius: var(--radius-full);
-  background-color: var(--color-track);
+  background-color: var(--color-bar-track);
 }
 
 .research-track::after {
   content: "";
   position: absolute;
   inset: 0;
-  background-color: var(--color-fg-2);
+  background-color: var(--color-bar-fill);
   transform: scaleX(var(--_used, 0));
   transform-origin: left;
   transition: transform var(--dur-default) var(--ease-spring);
@@ -462,6 +447,17 @@ button.activity-row-head[data-pressed] {
 }
 
 .activity-row[data-failed] .activity-row-meta {
+  color: var(--color-fg-2);
+}
+
+/* A lit row's quiet words read fg-2; fg-3 holds only on the surfaces themselves. */
+@media (hover: hover) {
+  .activity-row-head:not(div):hover :is(.activity-row-meta, .activity-row-time) {
+    color: var(--color-fg-2);
+  }
+}
+
+.activity-row-head[data-pressed] :is(.activity-row-meta, .activity-row-time) {
   color: var(--color-fg-2);
 }
 
@@ -925,8 +921,11 @@ button.activity-usage-trigger:active {
   min-height: 0;
   margin-top: calc(var(--spacing) * 2);
 }
+.activity-plan + .activity-filter {
+  margin-top: calc(var(--spacing) * 1);
+}
 .activity-plan .plan-list {
-  max-height: min(320px, 45dvh);
+  max-height: min(320px, 45dvh, var(--_room, 45dvh));
 }
 
 /* Windowed history uses real measured row heights. Rows reentering the viewport should
@@ -1050,7 +1049,7 @@ button.activity-usage-trigger:active {
   left: calc(var(--spacing) * 2);
   width: 1px;
   translate: -50% 0;
-  background-color: var(--color-separator);
+  background-color: var(--color-step-line);
 }
 :is(.activity-window-row, .thread-work-window-row)::before {
   top: 0;

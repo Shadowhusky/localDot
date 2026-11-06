@@ -32,6 +32,9 @@ export function TerminalViewer({ step, children }: { step: AgentStep; children?:
   ].filter(Boolean);
   const streams = (["stdout", "stderr"] as const).filter((stream) => display[stream].text);
   const failed = step.tool?.ok === false || (exit !== undefined && exit !== 0);
+  // A step that brought back pictures only captions them here: it opens as the pictures, not as
+  // the words under them.
+  const captions = (step.images?.length ?? 0) > 0;
   const named = (stream: "stdout" | "stderr") =>
     stream === "stderr" && !failed ? NOTES : STREAMS[stream];
   return (
@@ -45,10 +48,12 @@ export function TerminalViewer({ step, children }: { step: AgentStep; children?:
             data-failed={failed || undefined}
             aria-label={named(stream).name}
           >
-            <StepPreviewButton
-              label={`Preview ${named(stream).name.toLowerCase()}`}
-              resource={{ kind: "text", name: named(stream).name, text: display[stream].text }}
-            />
+            {!captions && (
+              <StepPreviewButton
+                label={`Preview ${named(stream).name.toLowerCase()}`}
+                resource={{ kind: "text", name: named(stream).name, text: display[stream].text }}
+              />
+            )}
             <h4 className="terminal-stream-name">{named(stream).name}</h4>
             <section className="terminal-text" aria-label={named(stream).region}>
               <pre>{display[stream].text}</pre>

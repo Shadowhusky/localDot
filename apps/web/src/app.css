@@ -228,6 +228,7 @@
     height: var(--_composer-rest-height, 0px);
   }
 
+  /* It lies over the thread here, and a press in its padding is meant for what shows beside it. */
   .app[data-composer-keyboard] .thread-toolbar {
     position: fixed;
     z-index: 20;
@@ -237,6 +238,11 @@
     bottom: auto;
     translate: 0 -100%;
     padding-bottom: calc(var(--spacing) * 2);
+    pointer-events: none;
+  }
+
+  .app[data-composer-keyboard] .thread-toolbar > * {
+    pointer-events: auto;
   }
 
   .app[data-keyboard]:not([data-composer-keyboard]) .stage-band {
@@ -529,9 +535,10 @@
 
 /* Short phones give the band's room to the thread while dot works, so the run it is at and the
    composer both fit; the island still says what dot is doing. Full screen hides the thread, so
-   dot keeps its place there. */
+   dot keeps its place there, and a curtain needs the band to hold its words and action. */
 @media (width < 700px) and (height < 650px) {
-  .app:not([data-focus]):has(.thread-work[data-live]) .stage-band {
+  .app:not([data-focus]):has(.thread-work[data-live]):not(:has(.stage-curtain .curtain))
+    .stage-band {
     display: none;
   }
 }

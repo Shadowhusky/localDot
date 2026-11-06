@@ -1,7 +1,6 @@
-import { PERSONAS, type PersonaId } from "@localdot/protocol";
+import { PERSONAS, type PersonaId, type Wearable } from "@localdot/protocol";
 import { useRef, useState } from "react";
 import { Dot } from "../dot/Dot.tsx";
-import { useOutfit } from "../dot/wearing.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
@@ -11,7 +10,7 @@ import type { AgentDotChoice } from "./model.ts";
 export function dotChoiceLine(choice: AgentDotChoice): string {
   const name = PERSONAS[choice.persona].name;
   if (choice.by === "user") return `You chose ${name} for this conversation`;
-  if (choice.by === "default") return `Working as ${name}, your default: Auto had no quick answer`;
+  if (choice.by === "default") return `Working as ${name}, your usual dot`;
   return `Auto chose ${name}`;
 }
 
@@ -19,13 +18,15 @@ export function dotChoiceLine(choice: AgentDotChoice): string {
 // task at work: the agent carries on as the new dot.
 export function DotChoice({
   choice,
+  wearables,
   task,
 }: {
   choice: AgentDotChoice;
+  // The conversation's look as this dot, as its row and the dot on screen wear it.
+  wearables: readonly Wearable[];
   // The task at work, when this line is the conversation's latest choice.
   task?: { api: ApiClient; sessionId: string };
 }) {
-  const wearables = useOutfit(choice.persona);
   const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);

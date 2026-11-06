@@ -11,8 +11,8 @@ import {
 
 // A gesture toward the end that comes to rest this close to it follows the end again...
 const END_SLACK = 24;
-// ...or further by as much as arrived meanwhile, up to this: rows that arrive during the gesture
-// move the end, not the reader.
+// ...or further by as much as arrived since it last moved, up to this: rows that arrive under the
+// gesture move the end, not the reader.
 const ARRIVING_SLACK = 136;
 // A gesture's scrolling can go on this long after its last event or scroll: a wheel's or a key's
 // smooth scroll, a flick's momentum.
@@ -21,8 +21,10 @@ const TAIL_MS = 300;
 const SWIPE = 10;
 // A jump to the end takes this long, eased like --ease-enter, toward the end as each frame finds it.
 const JUMP_MS = 360;
-// An element unfolding into view is followed at most this long, however long it keeps growing.
+// An element unfolding into view is followed at most this long, however long it keeps growing...
 const SHOW_MS = 1500;
+// ...and for this many frames after it seems to have stopped, as what it holds may still be coming.
+const SHOW_STILL_FRAMES = 20;
 const eased = (progress: number) => 1 - (1 - progress) ** 4;
 
 // The keys that scroll a list holding the focus, and which way.
@@ -38,7 +40,7 @@ const SCROLL_KEYS: Readonly<Record<string, "up" | "down">> = {
 interface Gesture {
   // Its scrolling may still arrive until then; a press holds it open.
   until: number;
-  // How tall the content was as it began.
+  // How tall the content was as it last moved.
   height: number;
   // Whether it last moved toward the end.
   down: boolean;
@@ -52,10 +54,15 @@ interface Tracking {
   anchor: HTMLElement | null;
   // Where the anchor sits in the content: scrolling never moves it, only what changes above it.
   anchorAt: number;
+  // How tall the anchor is, while its top lies above the view: a row that folds there takes its
+  // height from above what the reader sees, not from under it.
+  anchorHeight: number | null;
   frame: number;
   // Where the view was when the hook last put it there or saw it scrolled: a scroll that finds it
   // anywhere else was not the hook's own.
   top: number;
+  // How tall the content was then: shorter now, the browser clamped the view, which is no reader's.
+  height: number;
   jump: { frame: number; from: number; start: number } | null;
   gesture: Gesture | null;
   // A finger or a button is down on the list, or a flick it let go of still coasts: the end is not
@@ -65,6 +72,8 @@ interface Tracking {
   touchY: number;
   unlisten: (() => void) | null;
 }
+
+const always = () => true;
 
 export const reducedMotion = () =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -114,7 +123,8 @@ function scrolls(event: KeyboardEvent): boolean {
 // scroll anchoring is off (WebKit has none), so both engines behave alike. Only the reader leaves
 // the end, by scrolling back, and only the reader comes back to it: by a gesture toward the end that
 // comes to rest there, or by a jump. The list's own scrolls, and anyone else's, never bring it back.
-export function useFollowScroll(owner: string, follow: boolean) {
+// `whole` says whether the list holds its true end: the end of a page of rows is nothing to follow.
+export function useFollowScroll(owner: string, follow: boolean, whole: () => boolean = always) {
   const [pinned, setPinned] = useState(follow);
   const tracking = useRef<Tracking>({
     element: null,
@@ -123,8 +133,10 @@ export function useFollowScroll(owner: string, follow: boolean) {
     pinned: follow,
     anchor: null,
     anchorAt: 0,
+    anchorHeight: null,
     frame: 0,
     top: 0,
+    height: 0,
     jump: null,
     gesture: null,
     pressed: false,
@@ -134,6 +146,8 @@ export function useFollowScroll(owner: string, follow: boolean) {
   });
   const follows = useRef(follow);
   follows.current = follow;
+  const reachesEnd = useRef(whole);
+  reachesEnd.current = whole;
 
   const setPin = useCallback((next: boolean) => {
     tracking.current.pinned = next;
@@ -146,10 +160,13 @@ export function useFollowScroll(owner: string, follow: boolean) {
     if (!element) return;
     const top = element.getBoundingClientRect().top;
     t.anchor = null;
+    t.anchorHeight = null;
     for (const row of element.querySelectorAll<HTMLElement>("[data-anchor]")) {
-      if (row.getBoundingClientRect().bottom > top) {
+      const box = row.getBoundingClientRect();
+      if (box.bottom > top) {
         t.anchor = row;
         t.anchorAt = offsetIn(row, element);
+        if (box.top < top - 0.5) t.anchorHeight = row.offsetHeight;
         break;
       }
     }
@@ -179,32 +196,52 @@ export function useFollowScroll(owner: string, follow: boolean) {
     pickAnchor();
   }, [stopJump, setPin, pickAnchor]);
 
-  const hold = useCallback(() => {
-    const t = tracking.current,
-      element = t.element;
-    if (!element) return;
-    // Moved up before its scroll event (a control brought into view as it takes the focus): not the
-    // hook, so the end is no longer held, or the move would be undone under the reader's press. A
-    // view only clamped by shorter content is still at the end.
-    if (t.pinned && element.scrollTop < t.top - 1) {
-      if (below(element) > 1) leave();
-      else t.top = element.scrollTop;
-    }
-    if (t.jump) return;
-    if (t.pinned && !t.pressed) {
-      const end = element.scrollHeight - element.clientHeight;
-      if (end - element.scrollTop > 0.5) put(end);
-      return;
-    }
-    if (!t.anchor?.isConnected) return;
-    const at = offsetIn(t.anchor, element);
-    if (Math.abs(at - t.anchorAt) >= 0.5) put(element.scrollTop + at - t.anchorAt);
-    t.anchorAt = at;
-  }, [leave, put]);
+  const hold = useCallback(
+    (rowsLeft = false) => {
+      const t = tracking.current,
+        element = t.element;
+      // Out of the page (the panel or the whole view is hidden) nothing has a place to read or keep.
+      if (!element?.clientHeight) return;
+      const had = t.top;
+      // Moved up before its scroll event (a control brought into view as it takes the focus): not the
+      // hook, so the end is no longer held, or the move would be undone under the reader's press. A
+      // view only clamped by shorter content is still at the end, however the content has grown back
+      // since: rows leaving and rows arriving can be drawn a commit apart.
+      if (t.pinned && element.scrollTop < t.top - 1) {
+        if (!rowsLeft && below(element) > 1 && element.scrollHeight >= t.height) leave();
+        else t.top = element.scrollTop;
+      }
+      t.height = element.scrollHeight;
+      if (t.jump) return;
+      if (t.pinned && !t.pressed) {
+        const end = element.scrollHeight - element.clientHeight;
+        if (end - element.scrollTop > 0.5) put(end);
+        return;
+      }
+      if (!t.anchor?.isConnected) {
+        pickAnchor();
+        return;
+      }
+      const at = offsetIn(t.anchor, element);
+      const folded =
+        t.anchorHeight === null ? 0 : Math.max(0, t.anchorHeight - t.anchor.offsetHeight);
+      const moved = at - t.anchorAt - folded;
+      if (Math.abs(moved) >= 0.5) {
+        // Rows leaving from above shorten the content before the view is moved for them: a view left
+        // past the new end was clamped to it, and goes from where the reader had it.
+        const from = below(element) <= 1 ? Math.max(element.scrollTop, had) : element.scrollTop;
+        put(from + moved);
+      }
+      t.anchorAt = at;
+      if (folded >= 0.5) pickAnchor();
+      else if (t.anchorHeight !== null) t.anchorHeight = t.anchor.offsetHeight;
+    },
+    [leave, put, pickAnchor],
+  );
 
   // A gesture toward the end came to rest at it.
   const stick = useCallback(() => {
-    if (!follows.current) return;
+    if (!follows.current || !reachesEnd.current()) return;
     setPin(true);
     hold();
   }, [setPin, hold]);
@@ -279,13 +316,15 @@ export function useFollowScroll(owner: string, follow: boolean) {
       }
       t.element = element;
       if (!element || typeof ResizeObserver === "undefined") return;
-      t.observer = new ResizeObserver(hold);
+      t.observer = new ResizeObserver(() => hold());
       t.observer.observe(element);
       if (element.firstElementChild) t.observer.observe(element.firstElementChild);
       // Rows and words are held in the task that adds them, before the frame that draws them; a
       // resize is only observed after that frame has been laid out, a frame late.
       if (typeof MutationObserver === "undefined") return;
-      t.mutations = new MutationObserver(hold);
+      t.mutations = new MutationObserver((changes) =>
+        hold(changes.some((change) => change.removedNodes.length > 0)),
+      );
       t.mutations.observe(element, { childList: true, subtree: true, characterData: true });
     },
     [hold, stopJump],
@@ -317,10 +356,17 @@ export function useFollowScroll(owner: string, follow: boolean) {
     }
     if (t.coast) coast();
     // Back up, and neither the hook's own scroll nor a view clamped by shorter content: reading.
-    if (moved < -1 && below(element) > 1) leave();
+    const clamped = element.scrollHeight < t.height;
+    t.height = element.scrollHeight;
+    if (moved < -1 && below(element) > 1 && !clamped) leave();
     else if (gesture?.down && !t.pinned && near(element, gesture)) stick();
-    cancelAnimationFrame(t.frame);
-    t.frame = requestAnimationFrame(pickAnchor);
+    if (gesture && Math.abs(moved) > 0.5) gesture.height = element.scrollHeight;
+    // The hook's own scroll shows the same rows, and whatever has moved since is still to be held:
+    // picked again now, the anchor would take that in where it lies.
+    if (Math.abs(moved) > 0.5) {
+      cancelAnimationFrame(t.frame);
+      t.frame = requestAnimationFrame(pickAnchor);
+    }
     return t.pinned;
   }, [coast, leave, stick, pickAnchor]);
 
@@ -362,6 +408,11 @@ export function useFollowScroll(owner: string, follow: boolean) {
           coast();
         },
         onTouchCancel: coast,
+        // A tap has landed: nothing moves under a finger now, so what it unfolds is followed from
+        // its first frame, not all at once when the wait for a flick is over.
+        onClick() {
+          if (tracking.current.coast) rest();
+        },
         // A finger is followed by its touch events.
         onPointerDown(event: PointerEvent) {
           if (event.pointerType === "touch" || event.button !== 0) return;
@@ -395,6 +446,7 @@ export function useFollowScroll(owner: string, follow: boolean) {
       setPin(false);
       t.anchor = element;
       t.anchorAt = offsetIn(element, view);
+      t.anchorHeight = null;
     },
     // Goes to the end and follows it: Jump to latest, or a message just sent.
     jump() {
@@ -436,6 +488,7 @@ export function useFollowScroll(owner: string, follow: boolean) {
       setPin(false);
       t.anchor = element;
       t.anchorAt = offsetIn(element, view);
+      t.anchorHeight = null;
       return true;
     },
     // An element the reader has just unfolded is followed down into view as it unfolds, until its
@@ -465,13 +518,14 @@ export function useFollowScroll(owner: string, follow: boolean) {
         // Done once it has stopped unfolding.
         still = Math.abs(box.height - height) < 0.5 ? still + 1 : 0;
         height = box.height;
-        if ((progress < 1 || still < 2) && elapsed < SHOW_MS) {
+        if ((progress < 1 || still < SHOW_STILL_FRAMES) && elapsed < SHOW_MS) {
           glide.frame = requestAnimationFrame(step);
           return;
         }
         t.jump = null;
         t.anchor = element;
         t.anchorAt = offsetIn(element, view);
+        t.anchorHeight = null;
       };
       t.jump = glide;
       glide.frame = requestAnimationFrame(step);

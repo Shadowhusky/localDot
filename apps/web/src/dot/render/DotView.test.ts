@@ -71,6 +71,22 @@ const between = (values: number[], lo: number, hi: number) =>
   new Set(values.filter((v) => v > lo && v < hi)).size;
 
 describe("DotView", () => {
+  it("changes only what changes in an outfit, with a small hop", () => {
+    const { root, view } = mount({ size: 96, wearables: ["beret", "scarf"] });
+    const scarf = root.querySelector('[data-wear="scarf"]');
+    const before = translate(root);
+    view.setWearables(["hoodie", "beret"]);
+    expect(worn(root)).toEqual(["hoodie", "beret"]);
+    expect(root.querySelector('[data-wear="scarf"]')).toBeNull();
+    expect(root.querySelector<HTMLElement>('[data-wear="hoodie"]')?.dataset.arriving).toBe("");
+    expect(
+      root.querySelector<HTMLElement>('[data-wear="beret"]')?.dataset.arriving,
+    ).toBeUndefined();
+    expect(scarf?.isConnected).toBe(false);
+    drive(view, clock, clock + 160);
+    expect(translate(root)[1]).not.toBe(before[1]);
+  });
+
   it("wears its own outfit over the face, or the user's dot's, and changes with it", () => {
     setWearing(["headphones", "mustache"]);
     const { root, view } = mount({ wearables: ["round-glasses", "mortarboard"] });
@@ -86,6 +102,83 @@ describe("DotView", () => {
     expect(worn(root)).toEqual(["hoodie"]);
     view.setSize(96);
     expect(root.querySelector<HTMLImageElement>(".dot-wear")?.sizes).toBe("96px");
+  });
+
+  describe("when plates take time", () => {
+    const waiting: (() => void)[] = [];
+    const decode = async () => {
+      for (const resolve of waiting.splice(0)) resolve();
+      await new Promise((resolve) => setTimeout(resolve));
+    };
+    beforeEach(() => {
+      Object.defineProperty(HTMLImageElement.prototype, "decode", {
+        configurable: true,
+        value: () => new Promise<void>((resolve) => waiting.push(resolve)),
+      });
+    });
+    afterEach(() => {
+      waiting.length = 0;
+      Reflect.deleteProperty(HTMLImageElement.prototype, "decode");
+    });
+
+    it("stands in plain, then shows all it wears at once with no hop", async () => {
+      const hop = vi.spyOn(DotEngine.prototype, "hop");
+      const { root, view, plate } = mount({ size: 51, wearables: ["cap", "lei"] });
+      const dressed = vi.fn();
+      view.whenDressed(dressed);
+      expect(worn(root)).toEqual([]);
+      expect(root.dataset.skin).toBe("loading");
+      plate("neutral").dispatchEvent(new Event("load"));
+      expect(root.dataset.skin).toBe("loading");
+      await decode();
+      expect(worn(root)).toEqual(["cap", "lei"]);
+      expect(root.dataset.skin).toBe("plate");
+      expect(dressed).toHaveBeenCalledOnce();
+      expect(root.querySelector("[data-arriving]")).toBeNull();
+      expect(hop).not.toHaveBeenCalled();
+    });
+
+    it("changes outfit in one frame once the new plates are in, with its hop then", async () => {
+      const { root, view } = mount({ size: 52, wearables: ["cap"] });
+      await decode();
+      const hop = vi.spyOn(DotEngine.prototype, "hop");
+      view.setWearables(["crown", "lei"]);
+      expect(worn(root)).toEqual(["cap"]);
+      expect(hop).not.toHaveBeenCalled();
+      await decode();
+      expect(worn(root).filter((name) => name !== "cap")).toEqual(["crown", "lei"]);
+      expect(root.querySelector('[data-wear="crown"]')?.hasAttribute("data-arriving")).toBe(true);
+      expect(hop).toHaveBeenCalledOnce();
+    });
+
+    it("takes the latest outfit when a change overtakes one still waiting", async () => {
+      const { root, view } = mount({ size: 53, wearables: ["cap"] });
+      await decode();
+      view.setWearables(["crown"]);
+      view.setWearables(["lei"]);
+      await decode();
+      expect(worn(root).filter((name) => name !== "cap")).toEqual(["lei"]);
+    });
+
+    it("changes without a word when told to be quiet", async () => {
+      const { root, view } = mount({ size: 54, wearables: ["cap"] });
+      await decode();
+      const hop = vi.spyOn(DotEngine.prototype, "hop");
+      view.setWearables(["crown"], true);
+      await decode();
+      expect(worn(root)).toEqual(["crown"]);
+      expect(root.querySelector("[data-arriving]")).toBeNull();
+      expect(hop).not.toHaveBeenCalled();
+    });
+
+    it("waits for its plates at the size it ends up drawn", async () => {
+      const { view } = mount({ size: 55, wearables: ["cap"] });
+      const dressed = vi.fn();
+      view.whenDressed(dressed);
+      view.setSize(56);
+      await decode();
+      expect(dressed).toHaveBeenCalledOnce();
+    });
   });
 
   it("keeps what is on the face on the eyes as they look around, and the rest on the body", () => {

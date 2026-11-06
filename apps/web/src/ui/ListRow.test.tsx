@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Button } from "./Button.tsx";
 import { FileRow, PlayRow } from "./Card.tsx";
 import { ListRow } from "./ListRow.tsx";
+import { fileNameTail } from "./MiddleTruncate.tsx";
 
 afterEach(cleanup);
 
@@ -38,6 +39,19 @@ describe("ListRow", () => {
     expect(row?.hasAttribute("data-thumbnail")).toBe(false);
     expect(row?.querySelector(".ui-list-row-actions")).not.toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+});
+
+describe("fileNameTail", () => {
+  it("keeps the extension and a few characters before it, and leaves a start beside them", () => {
+    const tail = (name: string) => name.slice(name.length - fileNameTail(name));
+    expect(tail("quarterly-report-final.pdf")).toBe("nal.pdf");
+    expect(tail("季度财务报告最终版本第二稿.xlsx")).toBe("第二稿.xlsx");
+    expect(tail("archive.tar.gz")).toBe("tar.gz");
+    expect(tail("report.pdf")).toBe("rt.pdf");
+    expect(tail("README-for-the-whole-project")).toBe("ect");
+    expect(tail("a.csv")).toBe("");
+    expect(tail(".env")).toBe("");
   });
 });
 

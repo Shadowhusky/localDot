@@ -3,7 +3,13 @@ import { parseCssColor } from "../../stage/theme.ts";
 import { DotEngine, type DotPose, type EyePose, type Point } from "../engine/engine.ts";
 import type { DotState, Lod, Reaction } from "../engine/states.ts";
 import type { DotTool } from "../engine/tools.ts";
-import { BODY_PLATES, type BodyPlate, SHADOW_PLATE } from "../plates.ts";
+import {
+  BODY_PLATES,
+  type BodyPlate,
+  platesDecoded,
+  SHADOW_PLATE,
+  whenImagesIn,
+} from "../plates.ts";
 import { onWearing, wearing } from "../wearing.ts";
 import { canvasColour, GLOSS_STOPS, PEARL_STOPS, PROP, SHEEN_STOPS, VOID } from "./dot-colours.ts";
 import { type Arc, eyeGeometry } from "./eye-geometry.ts";
@@ -62,7 +68,9 @@ export interface DotViewOptions {
 
 // Renders a DotEngine into a host element: Blender body plates under a procedural SVG face, and
 // what dot wears over both. The neutral plate loads at once, the xenon and dim plates the first time
-// they show, and if any plate fails the body falls back to SVG. Attributes and styles are written only when they change.
+// they show, and if any plate fails the body falls back to SVG. All it first shows comes in together:
+// until then the SVG body stands in, wearing nothing. Attributes and styles are written only when
+// they change.
 export class DotView implements Frameable {
   readonly root: HTMLElement;
   visible = true;
@@ -88,6 +96,10 @@ export class DotView implements Frameable {
   private xenonColour: string | null = null;
   private readonly wardrobe: Wardrobe;
   private own: readonly Wearable[] | undefined;
+  // The neutral plate can be drawn.
+  private bodyIn = false;
+  private dressed = false;
+  private readonly onDressed: (() => void)[] = [];
 
   constructor(root: HTMLElement, o: DotViewOptions) {
     this.root = root;
@@ -129,7 +141,8 @@ export class DotView implements Frameable {
     this.plates.neutral.addEventListener(
       "load",
       () => {
-        if (root.dataset.skin === "loading") root.dataset.skin = "plate";
+        this.bodyIn = true;
+        this.uncover();
       },
       { signal },
     );
@@ -200,16 +213,24 @@ export class DotView implements Frameable {
     this.eyes = [eye("L"), eye("R")];
     this.wardrobe = new Wardrobe(this.body);
     this.own = o.wearables;
-    this.wardrobe.wear(this.own ?? wearing(), this.size);
-    const follow = onWearing(() => {
-      if (!this.own) this.dress(wearing());
+    const follow = onWearing((arrival) => {
+      if (!this.own) this.dress(wearing(), arrival);
     });
     signal.addEventListener("abort", follow, { once: true });
 
+    this.bodyIn = platesDecoded([BODY_PLATES.neutral], this.size);
     this.load(this.plates.neutral, BODY_PLATES.neutral);
     this.applyLod();
     this.render(t);
+    this.dress(this.own ?? wearing(), true);
     addView(this);
+    this.dressUp();
+  }
+
+  // Runs once all it first shows can be drawn, at once if that is so already.
+  whenDressed(then: () => void): void {
+    if (this.dressed) then();
+    else this.onDressed.push(then);
   }
 
   setState(state: DotState): void {
@@ -264,10 +285,11 @@ export class DotView implements Frameable {
     kick();
   }
 
-  // An outfit of its own, or undefined to follow the user's dot.
-  setWearables(list: readonly Wearable[] | undefined): void {
+  // An outfit of its own, or undefined to follow the user's dot. Quiet, for what it wears as it
+  // arrives, which is no change to see.
+  setWearables(list: readonly Wearable[] | undefined, quiet = false): void {
     this.own = list;
-    this.dress(list ?? wearing());
+    this.dress(list ?? wearing(), quiet);
   }
 
   setTool(tool: DotTool | null): void {
@@ -300,6 +322,7 @@ export class DotView implements Frameable {
       this.applyLod();
     }
     this.render(now());
+    if (!this.dressed) this.dressUp();
   }
 
   destroy(): void {
@@ -324,17 +347,39 @@ export class DotView implements Frameable {
     return Math.max(0, Math.min(this.lastRender + gap, this.engine.nextEventAt()) - t);
   }
 
-  // A new outfit takes its place in the current pose at once.
-  private dress(list: readonly Wearable[]): void {
-    this.wardrobe.wear(list, this.size);
-    this.render(now());
+  // A new outfit takes its place in the current pose: dot gives a small hop as it changes.
+  private dress(list: readonly Wearable[], quiet = false): void {
+    this.wardrobe.wear(list, this.size, !quiet, () => {
+      if (this.listeners.signal.aborted) return;
+      if (!quiet) {
+        this.engine.hop(now());
+        kick();
+      }
+      this.render(now());
+    });
+  }
+
+  private dressUp(): void {
+    const size = this.size;
+    const body = [this.shadow, ...Object.values(this.plates)].filter((img) => img.srcset);
+    whenImagesIn([...body, ...this.wardrobe.images], size, () => {
+      if (this.dressed || size !== this.size || this.listeners.signal.aborted) return;
+      this.dressed = true;
+      this.uncover();
+      for (const then of this.onDressed.splice(0)) then();
+    });
+  }
+
+  private uncover(): void {
+    if (this.bodyIn && this.dressed && this.root.dataset.skin === "loading")
+      this.root.dataset.skin = "plate";
   }
 
   private image(className: string, parent: Element): HTMLImageElement {
     const img = document.createElement("img");
     img.className = className;
     img.alt = "";
-    img.decoding = "async";
+    img.decoding = "sync";
     img.draggable = false;
     parent.appendChild(img);
     return img;
@@ -403,7 +448,7 @@ export class DotView implements Frameable {
   // The props paint on two canvases, behind and in front of the body, with the exporter's painter.
   // A canvas is resized only when dot is, so a frame never touches layout.
   private renderProps(p: DotPose, dpr: number): void {
-    const out = p.props.length > 0;
+    const out = p.props.length > 0 || p.helpers.length > 0 || p.crewMore !== null;
     if (!out && !this.propsOut) return;
     this.propsOut = out;
     const layers = this.props ?? this.makeProps();

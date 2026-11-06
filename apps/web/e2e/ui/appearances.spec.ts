@@ -1,7 +1,8 @@
 import type { Page } from "@playwright/test";
 import { SECTIONS } from "../../src/settings/sections.ts";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { closeSettings, openSettings } from "../settings-ui.ts";
-import { expect, isPhone, runAt, test } from "./harness.ts";
+import { expect, isPhone, openFile, runAt, test } from "./harness.ts";
 
 // Every main view in each appearance, and System under both schemes of the device. The shots are
 // for looking at (no baselines); the spec checks that the page is in the right appearance from its
@@ -130,9 +131,9 @@ for (const appearance of CASES)
         await page.keyboard.press("Escape");
       }
 
-      if (isPhone(page)) await page.getByRole("button", { name: "Activity", exact: true }).click();
-      else await page.locator(".rail-chat").getByRole("radio", { name: "Activity" }).click();
-      const tabs = page.getByRole("tablist", { name: "Activity" });
+      if (isPhone(page)) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+      else await page.locator(".rail-chat").getByRole("radio", { name: PANEL_NAME }).click();
+      const tabs = page.getByRole("tablist", { name: PANEL_NAME });
       for (const tab of await tabs.getByRole("tab").all()) {
         const name = ((await tab.textContent()) ?? "").trim().split(/\s/)[0]?.toLowerCase();
         await tab.click();
@@ -149,7 +150,7 @@ for (const appearance of CASES)
 
     test("file viewer", async ({ page, ui }) => {
       await ui.open("image-output");
-      await page.getByRole("button", { name: "Open summary.md", exact: true }).click();
+      await openFile(page, "summary.md");
       const viewer = page.getByRole("dialog", { name: "summary.md", exact: true });
       await expect(viewer.getByRole("heading", { name: "Monthly report (sample)" })).toBeVisible();
       await shot(page, "viewer-rendered");

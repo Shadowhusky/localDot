@@ -12,6 +12,7 @@ import { Collapse } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile, Monogram } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { useRevealInvalid } from "../ui/reveal-field.ts";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
@@ -24,6 +25,7 @@ import {
   customDraft,
   EMPTY_CUSTOM,
   initialOf,
+  signInOf,
   statusLine,
   TOOL_MODES,
   type ToolMode,
@@ -202,20 +204,94 @@ function ToolList({ view, connectors }: { view: ConnectorView; connectors: Conne
   );
 }
 
+// Whether this page is on another device than the daemon, which opens the sign-in page on its own.
+function onAnotherDevice(): boolean {
+  return !["127.0.0.1", "localhost"].includes(window.location.hostname);
+}
+
+// A sign-in open in the browser on the daemon's computer, until it finishes or runs out of time. A
+// phone has no way to finish it: the app sends the user back to that computer's loopback address.
+function WaitingForApproval({
+  view,
+  connectors,
+}: {
+  view: ConnectorView;
+  connectors: ConnectorsView;
+}) {
+  const page = connectors.page?.id === view.id ? connectors.page.url : undefined;
+  return (
+    <GroupRow
+      label={view.signIn?.remote ? "Finish on your Mac" : "Approve in your browser"}
+      detail={
+        view.signIn?.remote ? (
+          "The sign-in opened in the browser on your Mac, where your accounts are. It can't be finished from this device."
+        ) : page ? (
+          <a className="connectors-page" href={page} target="_blank" rel="noopener noreferrer">
+            Open the sign-in page
+          </a>
+        ) : (
+          "The sign-in page is open in your browser. This updates by itself when you're done."
+        )
+      }
+      trailing={
+        <Button
+          variant="quiet"
+          size="sm"
+          busy={connectors.pending === view.id}
+          onClick={() => connectors.cancelSignIn(view.id)}
+        >
+          Cancel
+        </Button>
+      }
+    />
+  );
+}
+
+// An app connected by signing in: who as, if it says, and the way to sign in again or end it.
+function Connection({ view, connectors }: { view: ConnectorView; connectors: ConnectorsView }) {
+  const busy = connectors.pending === view.id;
+  return (
+    <GroupRow
+      label={view.account ? `Connected as ${view.account}` : "Connected"}
+      detail="It stays connected. dot never sees this sign-in."
+    >
+      <div className="connectors-connection">
+        <Button variant="quiet" size="sm" busy={busy} onClick={() => connectors.signIn(view.id)}>
+          Reconnect
+        </Button>
+        <Button
+          variant="quiet"
+          size="sm"
+          disabledReason={busy ? "Working on it" : undefined}
+          onClick={() => connectors.disconnect(view.id)}
+        >
+          Disconnect
+        </Button>
+      </div>
+    </GroupRow>
+  );
+}
+
 // What the app needs before dot can use it: a sign-in, a key, or another try.
 function NextStep({ view, connectors }: { view: ConnectorView; connectors: ConnectorsView }) {
   const [key, setKey] = useState("");
   const entry = catalogEntry(view.catalog);
   const busy = connectors.pending === view.id;
+  const signsIn = signInOf(view);
   if (!view.enabled) return null;
-  if (view.status === "needs_sign_in")
+  if (view.signIn) return <WaitingForApproval view={view} connectors={connectors} />;
+  if (view.status === "needs_sign_in") {
+    const verb = signsIn?.signedIn ? "Reconnect" : "Connect";
+    const where = view.server.kind === "remote" ? connectorHost(view.server.url) : view.name;
     return (
       <GroupRow
-        label={`Sign in to ${view.name}`}
+        label={`${verb} ${view.name}`}
         detail={
-          view.server.kind === "remote"
-            ? `Opens ${connectorHost(view.server.url)} in a new tab.`
-            : undefined
+          view.problem
+            ? view.problem
+            : onAnotherDevice()
+              ? `Opens ${where} in the browser on your Mac. You'll need to be there to approve it.`
+              : `Opens ${where} in your browser to approve it.`
         }
         trailing={
           <Button
@@ -224,11 +300,12 @@ function NextStep({ view, connectors }: { view: ConnectorView; connectors: Conne
             busy={busy}
             onClick={() => connectors.signIn(view.id)}
           >
-            Sign in
+            {verb}
           </Button>
         }
       />
     );
+  }
   const where =
     entry?.key ??
     (view.server.kind === "remote"
@@ -328,6 +405,10 @@ function AppCard({ view, connectors }: { view: ConnectorView; connectors: Connec
         }}
       />
       <NextStep view={view} connectors={connectors} />
+      {view.enabled &&
+        !view.signIn &&
+        view.status !== "needs_sign_in" &&
+        signInOf(view)?.signedIn && <Connection view={view} connectors={connectors} />}
       <GroupRow
         label="Tools"
         trailing={view.tools.length ? `${on} of ${view.tools.length} on` : "None listed yet"}
@@ -349,9 +430,9 @@ function AppCard({ view, connectors }: { view: ConnectorView; connectors: Connec
 }
 
 const ADDRESS_SIGN_INS = [
-  { value: "none", label: "Nothing" },
-  { value: "key", label: "A key" },
   { value: "oauth", label: "Its own sign-in page" },
+  { value: "key", label: "A key" },
+  { value: "none", label: "Nothing" },
 ] as const;
 
 // An app that isn't listed: its address, or the command that runs it on the computer.
@@ -366,6 +447,7 @@ function CustomApp({
 }) {
   const [form, setForm] = useState<CustomForm>(EMPTY_CUSTOM);
   const [problems, setProblems] = useState<CustomProblems>({});
+  const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
   const set = <K extends keyof CustomForm>(key: K, value: CustomForm[K]) => {
     setForm((now) => ({ ...now, [key]: value }));
     if (problems[key]) setProblems((now) => ({ ...now, [key]: undefined }));
@@ -377,24 +459,20 @@ function CustomApp({
     const built = customDraft(form, taken);
     if ("problems" in built) {
       setProblems(built.problems);
+      reveal();
       return;
     }
-    const tab =
-      built.draft.server.kind === "remote" && built.draft.server.auth.kind === "oauth"
-        ? window.open("", "_blank")
-        : undefined;
+    const signsIn =
+      built.draft.server.kind === "remote" && built.draft.server.auth.kind === "oauth";
     void connectors.add(built.draft, built.key).then((view) => {
-      if (!view) {
-        tab?.close();
-        return;
-      }
-      if (tab !== undefined) connectors.signIn(view.id, tab);
+      if (!view) return;
+      if (signsIn) connectors.signIn(view.id);
       onDone();
     });
   };
   const command = form.kind === "command";
   return (
-    <form className="connectors-form connectors-inline" onSubmit={submit} noValidate>
+    <form ref={scope} className="connectors-form connectors-inline" onSubmit={submit} noValidate>
       <SegmentedControl
         size={32}
         aria-label="How the app is reached"
@@ -512,7 +590,7 @@ function CustomApp({
   );
 }
 
-// A listed app: Add, then whatever it needs (a key, or a sign-in in a new tab).
+// A listed app: Connect, for one that signs in, in the browser; or Add, then the key it needs.
 function CatalogRow({
   entry,
   taken,
@@ -528,19 +606,16 @@ function CatalogRow({
 }) {
   const [key, setKey] = useState("");
   const [problem, setProblem] = useState<string | undefined>();
+  const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
   const busy = connectors.pending === "new";
   const auth = entry.server.kind === "remote" ? entry.server.auth : "key";
   const needsKey = auth === "key";
+  const signsIn = auth === "oauth" || auth === "oauth-or-key";
   const add = (withKey?: string) => {
-    const signsIn = auth === "oauth" || (auth === "oauth-or-key" && !withKey);
-    const tab = signsIn ? window.open("", "_blank") : undefined;
     const { draft, key: saved } = catalogDraft(entry, taken, withKey);
     void connectors.add(draft, saved).then((view) => {
-      if (!view) {
-        tab?.close();
-        return;
-      }
-      if (tab !== undefined) connectors.signIn(view.id, tab);
+      if (!view) return;
+      if (signsIn && !withKey) connectors.signIn(view.id);
       onOpen(false);
       setKey("");
     });
@@ -550,6 +625,7 @@ function CatalogRow({
     if (busy) return;
     if (!key.trim()) {
       setProblem("Paste the key first.");
+      reveal();
       return;
     }
     add(key.trim());
@@ -561,29 +637,35 @@ function CatalogRow({
         label={entry.name}
         detail={entry.description}
         trailing={
-          <Button
-            size="sm"
-            busy={busy && !open && connectors.pending === "new"}
-            aria-expanded={needsKey || auth === "oauth-or-key" ? open : undefined}
-            onClick={() => {
-              if (needsKey || auth === "oauth-or-key") onOpen(!open);
-              else add();
-            }}
-          >
-            {open ? "Cancel" : "Add"}
-          </Button>
+          <>
+            {auth === "oauth-or-key" && (
+              <Button variant="quiet" size="sm" aria-expanded={open} onClick={() => onOpen(!open)}>
+                {open ? "Cancel" : "Use a key"}
+              </Button>
+            )}
+            {(!open || needsKey) && (
+              <Button
+                size="sm"
+                busy={busy && !open && connectors.pending === "new"}
+                aria-expanded={needsKey ? open : undefined}
+                onClick={() => {
+                  if (needsKey) onOpen(!open);
+                  else add();
+                }}
+              >
+                {open ? "Cancel" : signsIn ? "Connect" : "Add"}
+              </Button>
+            )}
+          </>
         }
       >
         <Collapse open={open}>
-          <form className="connectors-form connectors-inline" onSubmit={submit} noValidate>
-            {auth === "oauth-or-key" && (
-              <div className="connectors-choice">
-                <Button variant="primary" busy={busy} onClick={() => add()}>
-                  Sign in with {entry.name}
-                </Button>
-                <span className="connectors-or">or use a key</span>
-              </div>
-            )}
+          <form
+            ref={scope}
+            className="connectors-form connectors-inline"
+            onSubmit={submit}
+            noValidate
+          >
             <SecretField
               label={entry.key?.label ?? "Key"}
               description={<HelpLink entry={entry} />}
@@ -597,13 +679,8 @@ function CatalogRow({
               }}
             />
             <div className="connectors-form-actions">
-              <Button
-                type="submit"
-                variant={needsKey ? "primary" : "secondary"}
-                size="sm"
-                busy={busy}
-              >
-                Connect
+              <Button type="submit" variant="primary" size="sm" busy={busy}>
+                Save key
               </Button>
             </div>
           </form>
@@ -627,8 +704,9 @@ export function ConnectorsSection({ connectors }: { connectors: ConnectorsView }
   return (
     <div className="settings-connectors">
       <p className="settings-lede">
-        dot works in these apps directly. Their keys stay with localDot and dot never sees them.
-        Changes it makes in an app need your approval.
+        dot works in these apps directly. Connect one and approve it in your browser: it stays
+        connected, and dot never sees its sign-in or keys. Changes dot makes in an app need your
+        approval.
       </p>
       {phase === "error" ? (
         <Group>

@@ -782,7 +782,7 @@
   width: 14px;
   height: 14px;
   border-radius: var(--radius-full);
-  background: var(--porcelain-knob);
+  background: var(--porcelain-line-knob);
   box-shadow: var(--shadow-knob);
   translate: -50% -50%;
   transition: scale var(--dur-snappy) var(--ease-spring);
@@ -1115,7 +1115,7 @@
     display: grid;
     flex: none;
     padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3)
-      calc(var(--spacing) * 3 + env(safe-area-inset-bottom));
+      max(calc(var(--spacing) * 3), var(--home-foot));
     background-color: var(--_toolbar);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
     backdrop-filter: blur(20px) saturate(160%);

@@ -27,11 +27,20 @@ export interface ResizeHandleProps {
   // The custom property that sizes the panel, set on the page's root over its token.
   property: string;
   label: string;
+  // Which of the panel's edges this is: dragging it outward widens the panel, the stage giving up
+  // the room.
+  side?: "left" | "right";
   className?: string;
 }
 
-// The edge at a panel's left: dragging it left widens the panel, the stage giving up the room.
-export function ResizeHandle({ panel, property, label, className }: ResizeHandleProps) {
+export function ResizeHandle({
+  panel,
+  property,
+  label,
+  side = "left",
+  className,
+}: ResizeHandleProps) {
+  const outward = side === "left" ? -1 : 1;
   const [width, setWidth] = useState(() =>
     clampWidth(readWidth(panel), widthLimits(panel, window.innerWidth)),
   );
@@ -117,14 +126,21 @@ export function ResizeHandle({ panel, property, label, className }: ResizeHandle
       onPointerMove={(event) => {
         const held = drag.current;
         if (held?.pointer !== event.pointerId) return;
-        apply(dragWidth(held.start, held.x - event.clientX, widthLimits(panel, window.innerWidth)));
+        apply(
+          dragWidth(
+            held.start,
+            (event.clientX - held.x) * outward,
+            widthLimits(panel, window.innerWidth),
+          ),
+        );
       }}
       onPointerUp={end}
       onPointerCancel={end}
       onLostPointerCapture={end}
       onDoubleClick={() => commit(panel.initial)}
       onKeyDown={(event: KeyboardEvent<HTMLHRElement>) => {
-        const sign = event.key === "ArrowLeft" ? 1 : event.key === "ArrowRight" ? -1 : 0;
+        const sign =
+          event.key === "ArrowLeft" ? -outward : event.key === "ArrowRight" ? outward : 0;
         if (!sign) return;
         event.preventDefault();
         cancelAnimationFrame(settling.current);

@@ -9,7 +9,6 @@ import {
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { type ReactNode, useEffect, useState } from "react";
 import type { ApiClient } from "../../lib/api.ts";
-import { Button } from "../../ui/Button.tsx";
 import { type KeptFile, type LoadedPages, loadPages, loadPreviewBytes } from "../api.ts";
 import { PagesView } from "./PagesView.tsx";
 import type { PageSize } from "./PdfPage.tsx";
@@ -22,29 +21,36 @@ GlobalWorkerOptions.workerSrc = workerUrl;
 // Page sizes are read this many at a time after the first page shows, between frames.
 const SIZES_AT_ONCE = 32;
 const RETRY = new Set<PreviewReason>(["busy", "failed", "computer_off"]);
-const PAGES_REASONS: Record<PreviewReason, string> = {
-  attachment: "This kind of file has no pages to show.",
-  binary: "This kind of file has no pages to show.",
-  too_large: "It's too large to show here. Download it to open it.",
-  computer_off: "Turn on your computer to see its pages.",
-  busy: "Your computer is busy. Try again in a moment.",
-  failed: "Your computer couldn't open it. Download it to open it in another app.",
-  missing: "This version is no longer available.",
+const PAGES_PROBLEMS: Partial<Record<PreviewReason, string>> = {
+  computer_off: "Turn on your computer to see its pages",
+  busy: "Your computer is busy",
+  failed: "Your computer couldn't open it",
+  missing: "This version is no longer available",
 };
 
 // A PDF the browser loads by its preview link.
 export function PdfFile({ api, url, name }: { api: ApiClient; url: string; name: string }) {
   const [data, setData] = useState<ArrayBuffer | "failed" | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt asks again.
   useEffect(() => {
+    setData(null);
     const controller = new AbortController();
     loadPreviewBytes(api, url, VIEWER_LIMITS.pdfBytes, controller.signal).then(
       (bytes) => !controller.signal.aborted && setData(bytes),
       () => !controller.signal.aborted && setData("failed"),
     );
     return () => controller.abort();
-  }, [api, url]);
+  }, [api, url, attempt]);
   if (data === null) return <ViewerLoading label="Loading the PDF" />;
-  if (data === "failed") return <ViewerMessage name={name} title="Couldn't load the preview" />;
+  if (data === "failed")
+    return (
+      <ViewerMessage
+        name={name}
+        title="Couldn't load the preview"
+        retry={() => setAttempt((n) => n + 1)}
+      />
+    );
   return <PdfView data={data} name={name} />;
 }
 
@@ -87,17 +93,9 @@ function OfficeAttempt({
       ) : (
         <ViewerMessage
           name={name}
-          title="Can't show the pages"
-          action={
-            RETRY.has(reason) ? (
-              <Button size="md" variant="secondary" onClick={retry}>
-                Try again
-              </Button>
-            ) : undefined
-          }
-        >
-          {PAGES_REASONS[reason]}
-        </ViewerMessage>
+          title={PAGES_PROBLEMS[reason]}
+          retry={RETRY.has(reason) ? retry : undefined}
+        />
       )}
     </>
   );
@@ -148,13 +146,13 @@ export function PdfView({
   if (opened === "locked")
     return (
       <ViewerMessage name={name} title="This PDF is locked">
-        It needs a password. Download it to open it.
+        It needs a password.
       </ViewerMessage>
     );
   if (opened === "failed")
     return (
       <ViewerMessage name={name} title="Can't show this PDF">
-        It may be damaged. Download it to open it in another app.
+        It may be damaged.
       </ViewerMessage>
     );
   return <Paged opened={opened} name={name} lead={lead} />;

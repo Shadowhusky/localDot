@@ -1,6 +1,6 @@
 import { mulberry32, type SpringParams } from "@localdot/stage";
 import { Channel } from "./channel.ts";
-import { clamp } from "./math.ts";
+import { clamp, smoothstep } from "./math.ts";
 import { hash01, lognormal } from "./rng.ts";
 import { EYE_ANCHORS, type EyeFrame, eyeFrame, GAZE_MAX, R } from "./sphere.ts";
 import {
@@ -21,13 +21,17 @@ import {
   spring,
 } from "./states.ts";
 import {
+  CREW_STAGGER_MS,
+  type CrewMore,
+  crewSeats,
   DEFAULT_ANGLE,
   type DotTool,
   HAPPY_MS,
-  HELPER_SLOTS,
   type HelperPose,
+  LEAVE_MS,
   PAUSES,
   type PropPose,
+  SAD_MS,
   TOOL_GAP_MS,
   TOOL_HOLD_MS,
   TOOL_LOOK,
@@ -55,8 +59,13 @@ interface Track {
   touched: number;
 }
 interface Helper {
-  slot: number;
+  // Its place in the crew's order, kept along the arc.
+  index: number;
+  seated: boolean;
   amount: Channel;
+  x: Channel;
+  y: Channel;
+  r: Channel;
   since: number;
   end: { t: number; ok: boolean } | null;
   seed: number;
@@ -149,8 +158,11 @@ export interface DotPose {
   plate: { dim: number; rim: number };
   // The props out with dot, in the order they came out; empty where the body does not animate.
   props: PropPose[];
-  // The sub-agents at work beside dot, for the delegating prop; empty where props are.
+  // The sub-agents at work beside dot, as far out as the delegating prop lets them be; at the badge
+  // size, where no prop shows, plain pips.
   helpers: HelperPose[];
+  // How many more there are than seats, on a seat of their own.
+  crewMore: CrewMore | null;
   // Fine props: full keyboards and page detail, where dot is big enough to show them.
   fine: boolean;
   eyes: [EyePose, EyePose];
@@ -201,6 +213,14 @@ export class DotEngine {
   private wanted: DotTool | null = null;
   private wantedAt = Number.NEGATIVE_INFINITY;
   private readonly helpers = new Map<string, Helper>();
+  private helperCount = 0;
+  private readonly more = {
+    count: 0,
+    amount: new Channel(0, SPRINGS.propIn),
+    x: new Channel(0, SPRINGS.helperSeat),
+    y: new Channel(0, SPRINGS.helperSeat),
+    r: new Channel(0, SPRINGS.helperSeat),
+  };
   private toolSince = Number.NEGATIVE_INFINITY;
   private toolToken = 0;
   private draws = 0;
@@ -367,28 +387,29 @@ export class DotEngine {
   // dot for each, and goes back when its work is done, with a smile when it went well.
   setHelpers(list: readonly { id: string; ok?: boolean }[], t: number): void {
     this.advance(t);
-    for (const [id, h] of this.helpers) {
-      if (h.end && h.amount.value(t) < 0.001 && t > h.end.t + HAPPY_MS) this.helpers.delete(id);
-    }
     for (const { id, ok } of list) {
       let h = this.helpers.get(id);
       if (!h) {
-        const slot = this.freeSlot(t);
-        if (ok !== undefined || slot < 0) continue;
+        if (ok !== undefined) continue;
         h = {
-          slot,
-          amount: new Channel(0, SPRINGS.propIn),
+          index: this.helperCount++,
+          seated: false,
+          amount: new Channel(0, SPRINGS.helperIn),
+          x: new Channel(0, SPRINGS.helperSeat),
+          y: new Channel(0, SPRINGS.helperSeat),
+          r: new Channel(0, SPRINGS.helperSeat),
           since: t,
           end: null,
           seed: this.draw(),
         };
-        h.amount.set(1, t, this.sp(SPRINGS.propIn));
         this.helpers.set(id, h);
       }
       if (ok !== undefined) this.release(h, ok, t);
     }
+    // One no longer listed has nothing to say about how it went, and goes without a word.
     for (const [id, h] of this.helpers)
-      if (!list.some((c) => c.id === id)) this.release(h, false, t);
+      if (!list.some((c) => c.id === id)) this.release(h, true, t, 0);
+    this.seatCrew(t);
   }
 
   setControl(on: boolean, t: number): void {
@@ -402,6 +423,7 @@ export class DotEngine {
     if (lod === this.lod) return;
     const rich = this.rich;
     this.lod = lod;
+    this.seatCrew(t);
     // Only a change in what the body may do restarts the state; a resize alone, as dot lands from a
     // flight, carries on with whatever it was doing.
     if (this.rich !== rich) this.enter(this.current, t, null);
@@ -431,7 +453,14 @@ export class DotEngine {
       track.amount.jump(tool === this.tool ? 1 : 0, t);
       track.scroll.jump(track.lines, t);
     }
-    for (const h of this.helpers.values()) h.amount.jump(h.end ? 0 : 1, t);
+    for (const [id, h] of this.helpers)
+      if (h.end) this.helpers.delete(id);
+      else {
+        h.amount.jump(h.seated ? 1 : 0, t);
+        for (const c of [h.x, h.y, h.r]) c.jump(c.to, t);
+      }
+    this.seatCrew(t);
+    for (const c of [this.more.amount, this.more.x, this.more.y, this.more.r]) c.jump(c.to, t);
     this.aim.x.jump(this.aim.x.to, t);
     this.aim.y.jump(this.aim.y.to, t);
     this.enter(next, t, null, true);
@@ -444,7 +473,7 @@ export class DotEngine {
     const fine = this.lod === "glance" || this.lod === "hero";
     const props = this.props(t);
     const tool = blend(props, fine);
-    const helpers = this.rich ? this.helperPoses(t) : [];
+    const crew = this.crewGate(props);
     const body = this.rich ? 1 : 0;
     const b = rich ? v("breath") * this.breathValue(t) : 0;
     // Like breath, the talk-bob shows only where the body animates.
@@ -490,7 +519,8 @@ export class DotEngine {
       },
       plate: { dim: clamp(v("dim"), 0, 1), rim: clamp(v("rim"), 0, 1) },
       props: this.rich ? props : [],
-      helpers,
+      helpers: this.helperPoses(t, crew, fine),
+      crewMore: this.crewMoreAt(t, crew, fine),
       fine,
       eyes: [eye(0), eye(1)],
       blink,
@@ -515,14 +545,21 @@ export class DotEngine {
       if (rich || !RICH_ONLY.has(k)) m = Math.max(m, this.ch[k].speed(t) * SPEED_UNITS[k]);
     }
     for (const track of this.tracks.values()) m = Math.max(m, track.amount.speed(t) * FADE);
-    for (const h of this.helpers.values()) m = Math.max(m, h.amount.speed(t) * FADE);
+    for (const h of this.helpers.values())
+      m = Math.max(m, h.amount.speed(t) * FADE, h.x.speed(t), h.y.speed(t), h.r.speed(t));
+    m = Math.max(m, this.more.amount.speed(t) * FADE, this.more.x.speed(t), this.more.y.speed(t));
     return m + this.blinkAmount(t) * 50;
   }
 
-  // A prop is out and its loops (a caret, a sweep, an orbit) keep it moving.
+  // A prop is out and its loops (a caret, a sweep, an orbit) keep it moving. A crew's bob and blinks
+  // show only where its detail does.
   looping(t: number): boolean {
     if (!this.rich || this.reduced) return false;
-    for (const track of this.tracks.values()) if (track.amount.value(t) > 0.001) return true;
+    const fine = this.lod === "glance" || this.lod === "hero";
+    for (const [tool, track] of this.tracks) {
+      if (tool === "delegating" && !fine) continue;
+      if (track.amount.value(t) > 0.001) return true;
+    }
     return false;
   }
 
@@ -572,36 +609,130 @@ export class DotEngine {
     track.key = null;
   }
 
-  private freeSlot(t: number): number {
-    const taken = new Set<number>();
-    for (const h of this.helpers.values()) {
-      if (!h.end || h.amount.value(t) > 0.02) taken.add(h.slot);
-    }
-    for (let slot = 0; slot < HELPER_SLOTS.length; slot++) if (!taken.has(slot)) return slot;
-    return -1;
+  // Everyone still there keeps a seat, in the order they came, until they have gone; then the rest
+  // close up on the spring. A helper's first seat is where it comes out to, so it does not slide.
+  private seatCrew(t: number): void {
+    const crew = [...this.helpers.values()].sort((a, b) => a.index - b.index);
+    const { seats, more } = crewSeats(crew.length, this.lod);
+    let fresh = 0;
+    crew.forEach((h, at) => {
+      const seat = seats[at];
+      if (!seat) {
+        if (h.seated) h.amount.set(0, t, this.sp(SPRINGS.propOut));
+        h.seated = false;
+        return;
+      }
+      if (!this.reduced && (h.seated || h.amount.value(t) > 0.02)) {
+        h.x.set(seat.x, t, SPRINGS.helperSeat);
+        h.y.set(seat.y, t, SPRINGS.helperSeat);
+        h.r.set(seat.r, t, SPRINGS.helperSeat);
+      } else {
+        h.x.jump(seat.x, t);
+        h.y.jump(seat.y, t);
+        h.r.jump(seat.r, t);
+      }
+      if (!h.seated && !h.end) {
+        h.seated = true;
+        const at = this.reduced ? t : t + CREW_STAGGER_MS * fresh++;
+        this.at(
+          at,
+          (tt) => {
+            if (h.seated && !h.end) h.amount.set(1, tt, this.sp(SPRINGS.helperIn));
+          },
+          true,
+        );
+      }
+    });
+    this.more.count = more ? crew.length - seats.length : this.more.count;
+    if (more) {
+      const out = this.more.amount.to > 0.5;
+      for (const [channel, value] of [
+        [this.more.x, more.x],
+        [this.more.y, more.y],
+        [this.more.r, more.r],
+      ] as const) {
+        if (out && !this.reduced) channel.set(value, t, SPRINGS.helperSeat);
+        else channel.jump(value, t);
+      }
+      if (!out) this.more.amount.set(1, t, this.sp(SPRINGS.helperIn));
+    } else if (this.more.amount.to > 0.5) this.more.amount.set(0, t, this.sp(SPRINGS.propOut));
   }
 
-  private release(h: Helper, ok: boolean, t: number): void {
+  // A helper done goes back, after a smile when its work went well or a droop when it failed. dot
+  // takes one back with a small squeeze. Its seat stays until it has gone.
+  private release(h: Helper, ok: boolean, t: number, hold = ok ? HAPPY_MS : SAD_MS): void {
     if (h.end) return;
     h.end = { t, ok };
-    const at = ok ? t + HAPPY_MS : t;
-    this.at(at, (tt) => h.amount.set(0, tt, this.sp(SPRINGS.propOut)), true);
+    const at = t + hold;
+    if (!h.seated) {
+      this.dropCrew(h, t);
+      return;
+    }
+    this.at(
+      at,
+      (tt) => {
+        h.amount.set(0, tt, this.sp(SPRINGS.propOut));
+        if (ok && hold > 0 && this.rich && !this.reduced)
+          this.at(tt + 200, (ts) => this.ch.squash.kick(-0.025, ts, spring(0.7, 0.32)), true);
+        this.at(tt + LEAVE_MS, (tg) => this.dropCrew(h, tg), true);
+      },
+      true,
+    );
   }
 
-  private helperPoses(t: number): HelperPose[] {
+  private dropCrew(h: Helper, t: number): void {
+    for (const [id, each] of this.helpers) if (each === h) this.helpers.delete(id);
+    this.seatCrew(t);
+  }
+
+  // How far the crew may be out: as far as its prop, and not while another prop has the same room.
+  // At the badge size no prop shows, so nothing is in the way.
+  private crewGate(props: readonly PropPose[]): number {
+    if (!this.rich) return 1;
+    let own = 0;
+    let other = 0;
+    for (const p of props) {
+      if (p.tool === "delegating") own = p.amount;
+      else other = Math.max(other, p.amount);
+    }
+    return own * (1 - smoothstep(0, 0.5, other));
+  }
+
+  private helperPoses(t: number, gate: number, fine: boolean): HelperPose[] {
     const out: HelperPose[] = [];
-    for (const h of this.helpers.values()) {
-      const amount = clamp(h.amount.value(t), 0, 1);
-      if (amount < 0.001) continue;
+    if (gate < 0.001) return out;
+    const crew = [...this.helpers.values()].sort((a, b) => a.index - b.index);
+    crew.forEach((h, index) => {
+      const amount = h.amount.value(t);
+      if (amount < 0.001) return;
       out.push({
-        slot: h.slot,
-        amount,
+        x: h.x.value(t),
+        y: h.y.value(t),
+        r: h.r.value(t),
+        index,
+        amount: clamp(amount, 0, 1.1) * gate,
         age: this.reduced ? 0 : t - h.since,
         end: h.end ? { ok: h.end.ok, age: t - h.end.t } : null,
         seed: h.seed,
+        fine,
+        still: this.reduced,
       });
-    }
+    });
     return out;
+  }
+
+  private crewMoreAt(t: number, gate: number, fine: boolean): CrewMore | null {
+    const amount = this.more.amount.value(t);
+    if (gate < 0.001 || amount < 0.001) return null;
+    return {
+      x: this.more.x.value(t),
+      y: this.more.y.value(t),
+      r: this.more.r.value(t),
+      count: this.more.count,
+      amount: clamp(amount, 0, 1.1) * gate,
+      fine,
+      still: this.reduced,
+    };
   }
 
   private pushBeat(track: Track, t: number): void {

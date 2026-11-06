@@ -140,7 +140,7 @@ test("New conversation starts afresh and stays new after a refresh", async ({
   let rail = await chat(page);
   // In the rail's header; on a phone, first in More.
   if ((page.viewportSize()?.width ?? 0) < 700) {
-    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("button", { name: "More", exact: true }).click();
     await page.getByRole("menuitem", { name: "New conversation" }).click();
   } else await rail.getByRole("button", { name: "New conversation" }).click();
   await expect(rail.getByRole("heading", { name: "What should we do?" })).toBeVisible();
@@ -156,21 +156,28 @@ test("New conversation starts afresh and stays new after a refresh", async ({
   await expect(rail.getByText(LATEST)).toHaveCount(0);
 });
 
-test("New conversation waits while dot works", async ({ page, ui }) => {
-  await ui.open("running");
+test("New conversation doesn't wait for dot, which goes on with its task", async ({
+  page,
+  ui,
+  request,
+}) => {
+  const fixture = await ui.open("running");
   const rail = await chat(page);
+  const running = await shownTask(request, fixture.origin);
   // In the rail's header; on a phone, first in More.
-  if ((page.viewportSize()?.width ?? 0) < 700) {
-    await page.getByRole("button", { name: "More" }).click();
-    await expect(page.getByRole("menuitem", { name: "New conversation" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-  } else
-    await expect(rail.getByRole("button", { name: "New conversation" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
+  const start =
+    (page.viewportSize()?.width ?? 0) < 700
+      ? page.getByRole("menuitem", { name: "New conversation" })
+      : rail.getByRole("button", { name: "New conversation" });
+  if ((page.viewportSize()?.width ?? 0) < 700)
+    await page.getByRole("button", { name: "More", exact: true }).click();
+  await expect(start).not.toHaveAttribute("aria-disabled", "true");
+  await start.click();
+  await expect(rail.getByRole("heading", { name: "What should we do?" })).toBeVisible();
+  const reply = await request.get(`${fixture.origin}/api/agent/sessions/${running}`, {
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+  expect(((await reply.json()) as { status: string }).status).not.toBe("ended");
 });
 
 test("Continue on an older task in Replay makes its conversation current", async ({
@@ -189,6 +196,7 @@ test("Continue on an older task in Replay makes its conversation current", async
   const known = page.waitForResponse(
     (reply) => new URL(reply.url()).pathname === "/api/conversation" && reply.ok(),
   );
+  ui.leaving();
   await page.goto(`${fixture.origin}/?replay=${older}#token=${TOKEN}`);
   await known;
   const proceed = page.getByRole("button", { name: "Continue working" });

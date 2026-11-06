@@ -11,10 +11,10 @@
     --graphite-popover: #25262a;
     --graphite-well: #070809;
     --graphite-fg-1: #eeeff1;
-    --graphite-fg-2: #a8abb0;
-    --graphite-fg-3: #83868b;
-    --graphite-field-line: #6b6e75;
-    --graphite-glass: rgba(20, 21, 24, 0.72);
+    --graphite-fg-2: #acafb4;
+    --graphite-fg-3: #8a8d92;
+    --graphite-field-line: #6e7178;
+    --graphite-glass: rgba(20, 21, 24, 0.82);
     --graphite-glass-solid: rgba(20, 21, 24, 0.94);
     --graphite-stage-dim: rgba(10, 11, 13, 0.42);
 
@@ -26,10 +26,10 @@
     --midnight-popover: #1c2738;
     --midnight-well: #040810;
     --midnight-fg-1: #edf0f5;
-    --midnight-fg-2: #a7afbc;
-    --midnight-fg-3: #818a99;
+    --midnight-fg-2: #a8b0bd;
+    --midnight-fg-3: #858e9d;
     --midnight-field-line: #6e7686;
-    --midnight-glass: rgba(10, 16, 26, 0.72);
+    --midnight-glass: rgba(10, 16, 26, 0.82);
     --midnight-glass-solid: rgba(10, 16, 26, 0.94);
     --midnight-stage-dim: rgba(6, 11, 20, 0.42);
 
@@ -43,9 +43,11 @@
     --daylight-popover: #ffffff;
     --daylight-well: #eceef1;
     --daylight-fg-1: #16171a;
-    --daylight-fg-2: #474a52;
-    --daylight-fg-3: #676a72;
-    --daylight-field-line: #858890;
+    --daylight-fg-2: #3d4047;
+    --daylight-fg-3: #595c64;
+    --daylight-field-line: #82858d;
+    /* What a value runs along holds 3:1 on every ground; a thin line of it joins a list of steps. */
+    --daylight-rail: rgba(22, 23, 26, 0.5);
     --daylight-glass: rgba(250, 250, 251, 0.8);
     --daylight-glass-solid: rgba(250, 250, 251, 0.96);
   }
@@ -77,12 +79,12 @@
   --color-popover: var(--graphite-popover);
   --color-well: var(--graphite-well);
 
-  /* fg-3 holds 4.5:1 on void, console, well and raised only: never on raised-2, overlay or
-     popover. fg-4 is never text. */
+  /* fg-3 holds 4.5:1 on every surface, but not on a row lit over a popover, where quiet words read
+     fg-2. fg-4 is never text. */
   --color-fg-1: var(--graphite-fg-1);
   --color-fg-2: var(--graphite-fg-2);
   --color-fg-3: var(--graphite-fg-3);
-  --color-fg-4: rgba(255, 255, 255, 0.28);
+  --color-fg-4: var(--color-rail);
 
   /* Hairline is decorative only; separators divide lists; every field and outlined control uses
      field-line (3:1). */
@@ -92,10 +94,24 @@
   --color-field-line-hover: #83868b;
   --color-field: rgba(255, 255, 255, 0.04);
   --color-field-ring: rgba(255, 255, 255, 0.08);
+  /* The edge of a field that wears a card's look: the composer at rest, a little over the rail as a
+     sheet's shadow may fall on it, and in use, and a filled search. */
+  --color-card-field-line: rgba(255, 255, 255, 0.41);
+  --color-card-field-focus: var(--color-fg-2);
+  --color-filled-field-line: var(--color-rail);
   --color-track: rgba(255, 255, 255, 0.06);
-  /* A switch's off track and an in-progress glyph's ring. */
-  --color-track-strong: rgba(255, 255, 255, 0.14);
-  --color-grabber: rgba(255, 255, 255, 0.24);
+  /* The quietest line that holds 3:1 on every surface, in the dark and in daylight. It draws the
+     empty part of what a value runs along, a switch's off track, an in-progress glyph's ring, the
+     thread that joins a list of steps and a sheet's grabber. A fill stands 3:1 clear of it. */
+  --color-rail: rgba(255, 255, 255, 0.38);
+  --color-track-strong: var(--color-rail);
+  --color-slider-rail: var(--color-rail);
+  --color-bar-track: var(--color-rail);
+  --color-meter-track: var(--color-rail);
+  --color-bar-fill: var(--color-fg-1);
+  --color-bar-fill-quiet: var(--color-progress-fill);
+  --color-step-line: var(--color-rail);
+  --color-grabber: var(--color-rail);
   --color-row-hover: rgba(255, 255, 255, 0.035);
   --color-scrollbar: rgba(255, 255, 255, 0.16);
   /* Behind a phone's menu: lighter than a sheet's scrim, since the menu is small. */
@@ -105,7 +121,7 @@
   --color-code-text: #d9dbde;
   --color-inline-code: rgba(255, 255, 255, 0.07);
   --color-quote-bar: rgba(255, 255, 255, 0.2);
-  --color-link-line: rgba(255, 255, 255, 0.35);
+  --color-link-line: var(--color-rail);
   --color-table-head: rgba(255, 255, 255, 0.03);
   /* Code's tints in a file's preview (design-v2 §10.22); comments are fg-3. */
   --color-code-keyword: #c6b8f4;
@@ -117,8 +133,8 @@
   --color-paper: #ffffff;
   --color-paper-selection: rgba(0, 99, 225, 0.24);
   /* Replay's scrubber: its track, and a tick at each step. */
-  --color-scrubber-track: rgba(255, 255, 255, 0.16);
-  --color-step-tick: rgba(255, 255, 255, 0.5);
+  --color-scrubber-track: var(--color-rail);
+  --color-step-tick: rgba(255, 255, 255, 0.72);
 
   /* Light tells who has the computer. Xenon means "dot has control" and nothing else; you are
      porcelain; attention is a 7–10 px point next to words, never a fill or a rim. */
@@ -130,6 +146,11 @@
   --color-you: #f2f3f5;
   --color-you-glow: rgba(242, 243, 245, 0.16);
   --color-attention: #e9b44c;
+  /* A phone's chat: your bubble is the house grey in the dark, near black in daylight. */
+  --color-bubble-you: var(--color-raised-2);
+  --color-bubble-you-ink: var(--color-fg-1);
+  --color-bubble-you-file: var(--color-inset);
+  --color-bubble-you-file-line: var(--color-hairline);
 
   --color-diff-add-fg: #8fd6a6;
   --color-diff-add-bg: rgba(70, 190, 120, 0.12);
@@ -165,6 +186,15 @@
   --color-stage-key-bevel: var(--color-key-bevel);
   --color-stage-spill: var(--color-spill);
   --color-stage-spill-xenon: var(--color-spill-xenon);
+  /* The computer's own menu bar (cells/desktop's xfce4-panel), light in every appearance as the
+     computer keeps its own theme: the web browser's entry the stage draws on it. */
+  --color-desktop-bar-fg: #1d1d1f;
+  --color-desktop-bar-hover: rgba(0, 0, 0, 0.06);
+  --color-desktop-bar-active: rgba(0, 0, 0, 0.11);
+  --color-desktop-bar-glass: rgba(246, 246, 248, 0.96);
+  --shadow-desktop-bar-entry: 0 0 0 0.5px rgba(0, 0, 0, 0.16), 0 1px 3px rgba(0, 0, 0, 0.22);
+  /* Its type, Inter Medium 10 pt, in the picture's own measure: the desktop's 1280 px are 100cqw. */
+  --text-desktop-bar: 1.015625cqw;
 
   --color-state-hover: rgba(255, 255, 255, 0.06);
   /* The band of light that sweeps a skeleton's bones. */
@@ -174,6 +204,8 @@
   --color-selected: rgba(255, 255, 255, 0.1);
   --color-selection: rgba(238, 239, 241, 0.22);
   --opacity-disabled: 0.45;
+  /* A control a touch screen always shows, resting quiet beside what it acts on. */
+  --opacity-touch-rest: 0.55;
 
   /* Filled controls (secondary buttons, filled icon buttons, chips): rest, hover and pressed. */
   --color-control: rgba(255, 255, 255, 0.08);
@@ -215,6 +247,8 @@
   );
   /* A switch's knob: porcelain lit a little brighter, as it sits on a dark track. */
   --porcelain-knob: linear-gradient(180deg, #ffffff, #e4e6e9);
+  /* A knob on a thin line, with the page rather than a track around it. */
+  --porcelain-line-knob: var(--porcelain-knob);
   --porcelain-dark: linear-gradient(
     180deg,
     var(--color-porcelain-dark-top),
@@ -274,8 +308,8 @@
     rgba(255, 255, 255, 0.06),
     transparent 70%
   );
-  --color-progress-track: rgba(255, 255, 255, 0.1);
-  --color-progress-fill: rgba(238, 239, 241, 0.75);
+  --color-progress-track: var(--color-rail);
+  --color-progress-fill: var(--color-fg-1);
 
   --shadow-edge: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --shadow-stage:
@@ -319,6 +353,11 @@
 
   /* Size, leading, weight and tracking as one set; tracking tightens as the size grows. In rem, so
      a larger user font scales the layout with it. */
+  /* A phone's root title, larger than anything else the house sets. */
+  --text-large-title: 1.875rem;
+  --text-large-title--line-height: 2.25rem;
+  --text-large-title--font-weight: 600;
+  --text-large-title--letter-spacing: -0.026em;
   --text-title-1: 1.375rem;
   --text-title-1--line-height: 1.75rem;
   --text-title-1--font-weight: 600;
@@ -472,12 +511,19 @@
   /* The stage is placed first and everything else around it. Over it, under the top bar, a strip
      is kept for the island whether it shows or not: 4, the island, then the gap over the picture. */
   --bar-h: 52px;
+  /* What a row at the screen's foot leaves under it: clear of the home indicator, about where the
+     system's own bars stop, rather than a whole inset above it. 22 of the 34 upright, 13 of the 20
+     sideways. */
+  --home-foot: calc(env(safe-area-inset-bottom) * 0.65);
   --rail-w: 368px;
+  --sessions-w: 256px;
   --activity-w: 320px;
   --rail-inset: 8px;
   --gutter: 20px;
   --stage-top: 104px;
   --band-min: 112px;
+  /* Around dot's props, which are porcelain: nothing on a dark floor, a contour on a light one. */
+  --dot-props-contour: none;
   /* How far what dot wears on its head rises above the ball, in frame units; the app sets it. */
   --dot-crown: 0;
   --island-h: 40px;
@@ -528,7 +574,7 @@
     --color-fg-1: var(--daylight-fg-1);
     --color-fg-2: var(--daylight-fg-2);
     --color-fg-3: var(--daylight-fg-3);
-    --color-fg-4: rgba(22, 23, 26, 0.28);
+    --color-rail: var(--daylight-rail);
     --color-field-line: var(--daylight-field-line);
     --color-glass: var(--daylight-glass);
     --color-glass-solid: var(--daylight-glass-solid);
@@ -538,24 +584,22 @@
     --color-field-line-hover: #6a6d75;
     --color-field: #ffffff;
     --color-field-ring: rgba(22, 23, 26, 0.1);
+    --color-card-field-line: var(--daylight-field-line);
+    --color-filled-field-line: var(--daylight-field-line);
     --color-track: rgba(22, 23, 26, 0.06);
-    --color-track-strong: rgba(22, 23, 26, 0.16);
-    --color-grabber: rgba(22, 23, 26, 0.22);
     --color-row-hover: rgba(22, 23, 26, 0.035);
-    --color-scrollbar: rgba(22, 23, 26, 0.24);
+    --color-scrollbar: var(--color-rail);
     --color-menu-dim: rgba(22, 23, 26, 0.12);
     --color-code-text: #24262b;
     --color-inline-code: rgba(22, 23, 26, 0.06);
     --color-quote-bar: rgba(22, 23, 26, 0.18);
-    --color-link-line: rgba(22, 23, 26, 0.35);
     --color-table-head: rgba(22, 23, 26, 0.03);
     --color-code-keyword: #7b3fbf;
-    --color-code-string: #2b7a37;
+    --color-code-string: #226b2e;
     --color-code-number: #0e64a3;
     --color-checker-light: #ffffff;
     --color-checker-dark: #e6e8eb;
-    --color-scrubber-track: rgba(22, 23, 26, 0.14);
-    --color-step-tick: rgba(22, 23, 26, 0.45);
+    --color-step-tick: rgba(22, 23, 26, 0.8);
 
     --color-xenon: #0b7fae;
     --color-xenon-glow: rgba(11, 127, 174, 0.24);
@@ -564,6 +608,10 @@
     --color-xenon-a40: rgba(11, 127, 174, 0.4);
     --color-you: var(--daylight-fg-1);
     --color-you-glow: rgba(22, 23, 26, 0.12);
+    --color-bubble-you: var(--color-porcelain-bottom);
+    --color-bubble-you-ink: var(--color-porcelain-ink);
+    --color-bubble-you-file: rgba(255, 255, 255, 0.1);
+    --color-bubble-you-file-line: rgba(255, 255, 255, 0.14);
     --color-attention: #a8650c;
 
     --color-diff-add-fg: #176c37;
@@ -579,6 +627,7 @@
     --color-tag-blue: #2a6fd8;
     --color-tag-purple: #8a4fd6;
 
+    --opacity-touch-rest: 0.8;
     --color-state-hover: rgba(22, 23, 26, 0.05);
     --color-shimmer: rgba(255, 255, 255, 0.7);
     --color-state-pressed: rgba(22, 23, 26, 0.09);
@@ -644,8 +693,7 @@
       rgba(255, 255, 255, 0.9),
       transparent 70%
     );
-    --color-progress-track: rgba(22, 23, 26, 0.1);
-    --color-progress-fill: rgba(22, 23, 26, 0.72);
+    --porcelain-line-knob: var(--porcelain);
 
     --shadow-edge: inset 0 1px 0 rgba(255, 255, 255, 0.7);
     --shadow-stage:
@@ -671,6 +719,7 @@
     --shadow-knob-on: 0 1px 2px rgba(22, 23, 26, 0.3);
     --shadow-thumbnail: 0 0 0 0.5px rgba(22, 23, 26, 0.14);
     --focus-halo: 0 0 0 5px rgba(255, 255, 255, 0.75);
+    --dot-props-contour: drop-shadow(0 0 1px rgba(22, 23, 26, 0.7));
 
     --color-stage-fg-1: var(--graphite-fg-1);
     --color-stage-fg-2: var(--graphite-fg-2);

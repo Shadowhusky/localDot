@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { type Browser, type BrowserType, chromium, type Page, webkit } from "@playwright/test";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { setupServer } from "../fixtures/setup-server.ts";
 
 // The "before" capture: today's sign-in, installer, first run, Settings, Keys and computer states
@@ -117,7 +118,7 @@ async function run(engine: BrowserType, engineName: string) {
       await shot(page, `${tag}-03-first-run`);
       await probeControls(page, `${tag} first-run`);
       if (size.mobile) {
-        for (const pane of ["Conversation", "Activity"]) {
+        for (const pane of ["Conversation", PANEL_NAME]) {
           await page.getByRole("tab", { name: new RegExp(`^${pane}`) }).click();
           await shot(page, `${tag}-03-first-run-${pane.toLowerCase()}`);
           await probeControls(page, `${tag} first-run ${pane}`);

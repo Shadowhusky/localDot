@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { LocalDotEvent, outfit } from "@localdot/protocol";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { LocalDotEvent, outfit, type PersonaId, taskOutfit } from "@localdot/protocol";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { setWearing } from "../dot/wearing.ts";
 import { createApi } from "../lib/api.ts";
+import { Conversation } from "./Conversation.tsx";
 import { DotChoice, dotChoiceLine } from "./DotChoice.tsx";
 import { type AgentDotChoice, emptyAgentModel } from "./model.ts";
 import { projectAgentEvent } from "./reducer.ts";
@@ -46,10 +47,10 @@ it("keeps each choice of dot in the task's model and places it where it was made
   expect(items.map((item) => item.kind)).toEqual(["message", "dot", "message", "dot"]);
 });
 
-it("says which dot Auto chose and why, the default it fell back to, or the user's switch", () => {
+it("says which dot Auto chose and why, the user's usual one it fell back to, or their switch", () => {
   expect(dotChoiceLine(coder)).toBe("Auto chose Coder");
   expect(dotChoiceLine({ ...coder, persona: "finance", by: "default" })).toBe(
-    "Working as Finance, your default: Auto had no quick answer",
+    "Working as Finance, your usual dot",
   );
   expect(dotChoiceLine({ ...coder, persona: "design", by: "user" })).toBe(
     "You chose Designer for this conversation",
@@ -65,7 +66,7 @@ it("changes the task's dot from the line while it works, and only then", async (
       return new Response(null, { status: 204 });
     }) as typeof fetch,
   });
-  render(<DotChoice choice={coder} task={{ api, sessionId: ID }} />);
+  render(<DotChoice choice={coder} wearables={[]} task={{ api, sessionId: ID }} />);
   expect(screen.getByText("Auto chose Coder").parentElement?.textContent).toBe(
     "Auto chose Coder · Code work",
   );
@@ -80,20 +81,47 @@ it("changes the task's dot from the line while it works, and only then", async (
     ]),
   );
   cleanup();
-  render(<DotChoice choice={coder} />);
+  render(<DotChoice choice={coder} wearables={[]} />);
   expect(screen.queryByRole("button", { name: "Change" })).toBeNull();
 });
 
-it("draws the chosen dot in its own outfit with this localDot's accessory", () => {
+it("wears the conversation's look as the chosen dot, whatever this localDot's accessory", () => {
   setWearing(outfit("coder", "cap"), "cap");
-  render(<DotChoice choice={{ ...coder, persona: "research", by: "default" }} />);
+  const look = (persona: PersonaId) => taskOutfit(ID, persona);
+  render(
+    <DotChoice
+      choice={{ ...coder, persona: "research", by: "default" }}
+      wearables={look("research")}
+    />,
+  );
   const worn = () =>
     [...document.querySelectorAll<HTMLElement>(".thread-dot [data-wear]")]
       .map((img) => img.dataset.wear)
       .sort();
-  expect(worn()).toEqual(["cap", "round-glasses"]);
-  act(() => setWearing(outfit("coder", "bow"), "bow"));
-  expect(worn()).toEqual(["bow", "mortarboard", "round-glasses"]);
-  act(() => setWearing(outfit("coder")));
-  expect(worn()).toEqual(["mortarboard", "round-glasses"]);
+  expect(worn()).toEqual([...look("research")].sort());
+  expect(worn()).not.toContain("cap");
+});
+
+it("draws each line of a thread in the look the conversation wore as that dot", () => {
+  const look = (persona: PersonaId) => taskOutfit(ID, persona);
+  const model = [
+    ev(1, "message.user", {
+      messageId: "01M4ECBR5X0R92SYA389FM3QAA",
+      text: "Fix it",
+      kind: "task",
+    }),
+    ev(2, "persona.choice", { persona: "coder", by: "default" }),
+    ev(3, "persona.choice", { persona: "design", by: "user" }),
+  ].reduce(projectAgentEvent, emptyAgentModel());
+  render(
+    <Conversation
+      items={threadItems(model.messages.values(), [], [], [], [], undefined, model.dots)}
+      truncated={false}
+      dotLook={look}
+    />,
+  );
+  const lines = [...document.querySelectorAll<HTMLElement>(".thread-dot")].map((line) =>
+    [...line.querySelectorAll<HTMLElement>("[data-wear]")].map((img) => img.dataset.wear).sort(),
+  );
+  expect(lines).toEqual([[...look("coder")].sort(), [...look("design")].sort()]);
 });

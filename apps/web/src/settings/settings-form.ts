@@ -155,6 +155,37 @@ const CHECK_IN_PROBLEMS: Record<CheckInKey, string> = {
   failures: "Check in after 2 to 100 failed actions in a row.",
   actions: "Stop after 10 to 100,000 actions, in whole actions.",
 };
+export interface SettingsIssue {
+  section: "models" | "autonomy" | "spending" | "dot";
+  // A role's card, a check-in, or the limit that says what is wrong; none when no one field does.
+  field?: ModelRole | CheckInKey | "research" | "task" | "day" | "name";
+  text: string;
+}
+// Where a problem validateForm reports is put right.
+export function issueOf(problem: string): SettingsIssue {
+  if (problem === "Choose a main provider and model.")
+    return { section: "models", field: "main", text: problem };
+  for (const role of roles) {
+    const lead = `${ROLE_NAMES[role]}: `;
+    if (problem.startsWith(lead))
+      return { section: "models", field: role, text: problem.slice(lead.length) };
+  }
+  for (const key of CHECK_INS)
+    if (problem === CHECK_IN_PROBLEMS[key])
+      return { section: "autonomy", field: key, text: problem };
+  if (problem.startsWith("Research reads"))
+    return { section: "autonomy", field: "research", text: problem };
+  if (problem.startsWith("Enter a limit"))
+    return {
+      section: "spending",
+      field: problem.startsWith("Enter a limit per day") ? "day" : "task",
+      text: problem,
+    };
+  if (problem.startsWith("Check the settings")) return { section: "spending", text: problem };
+  if (problem.startsWith("Name this localDot"))
+    return { section: "dot", field: "name", text: problem };
+  return { section: "models", text: problem };
+}
 // Reports the first problem in each role, and any limit or check-in problem, together.
 export function validateForm(
   draft: SettingsDraft,
@@ -167,7 +198,8 @@ export function validateForm(
   const problems: string[] = [];
   if (!draft.choices.main) problems.push("Choose a main provider and model.");
   const document: AgentSettingsDocument = { ...saved };
-  if (draft.models?.length) document.models = draft.models;
+  // An empty list says the user removed every model in it.
+  if (draft.models) document.models = draft.models;
   if (draft.persona === DEFAULT_PERSONA) delete document.persona;
   else document.persona = draft.persona;
   if (draft.autoPersona) document.autoPersona = true;

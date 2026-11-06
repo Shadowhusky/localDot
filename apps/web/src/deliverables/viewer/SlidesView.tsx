@@ -1,4 +1,3 @@
-import { type SpringParams, springValue } from "@localdot/stage";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
   type ReactNode,
@@ -10,7 +9,6 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { springVelocity } from "../../dot/engine/spring.ts";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { useLayer } from "../../ui/LayerStack.tsx";
@@ -20,13 +18,10 @@ import { type PageSize, PdfPage } from "./PdfPage.tsx";
 import { clampPage, contain, keyTurn, turned } from "./paging.ts";
 import { ViewerBar } from "./states.tsx";
 import { Thumbs } from "./Thumbs.tsx";
+import { FLICK, MOMENTUM, SETTLE, useGlide } from "./useGlide.ts";
 import { pressesControl, viewerHears } from "./viewer-keys.ts";
-import { rubberband, swipeTurn } from "./zoom.ts";
+import { draggedPlace, swipeTurn } from "./zoom.ts";
 
-// Critically damped for a press or a key; a little give only after a flick (design-v2 §7).
-const SETTLE: SpringParams = { dampingRatio: 1, response: 0.35 };
-const MOMENTUM: SpringParams = { dampingRatio: 0.8, response: 0.35 };
-const FLICK = 300;
 // The present controls fade after this long without the pointer moving.
 const CONTROLS_MS = 2500;
 // Room between neighbouring slides beyond the stage's width, so no shadow reaches the one on show.
@@ -141,10 +136,6 @@ function SlideTrack({
   const stage = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const reduced = useMediaQuery(REDUCED_MOTION);
-  const place = useRef(slide - 1);
-  const speed = useRef(0);
-  const goal = useRef(slide - 1);
-  const frame = useRef(0);
   const [near, setNear] = useState<[number, number]>([slide - 2, slide]);
 
   useLayoutEffect(() => {
@@ -170,55 +161,29 @@ function SlideTrack({
     };
   }, []);
 
-  const paint = useCallback(() => {
-    const element = stage.current;
-    if (!element) return;
-    const pitch = element.clientWidth + APART;
-    for (const child of element.querySelectorAll<HTMLElement>("[data-index]")) {
-      const x = (Number(child.dataset.index) - place.current) * pitch;
-      child.style.transform = `translate3d(${x}px, 0, 0)`;
-    }
-    const at = place.current;
-    const next: [number, number] = reduced
-      ? [Math.round(at), Math.round(at)]
-      : [Math.max(0, Math.floor(at) - 1), Math.min(count - 1, Math.ceil(at) + 1)];
-    setNear((was) => (was[0] === next[0] && was[1] === next[1] ? was : next));
-  }, [count, reduced]);
-  useLayoutEffect(() => paint());
-
-  const glide = useCallback(
-    (to: number, velocity: number, spring: SpringParams) => {
-      cancelAnimationFrame(frame.current);
-      goal.current = to;
-      if (reduced) {
-        place.current = to;
-        speed.current = 0;
-        paint();
-        return;
+  const paint = useCallback(
+    (at: number) => {
+      const element = stage.current;
+      if (!element) return;
+      const pitch = element.clientWidth + APART;
+      for (const child of element.querySelectorAll<HTMLElement>("[data-index]")) {
+        const x = (Number(child.dataset.index) - at) * pitch;
+        child.style.transform = `translate3d(${x}px, 0, 0)`;
       }
-      const from = place.current;
-      const start = performance.now();
-      const step = (now: number) => {
-        const t = (now - start) / 1000;
-        place.current = springValue(from, to, velocity, t, spring);
-        speed.current = springVelocity(from, to, velocity, t, spring);
-        if (t > spring.response * 2 && Math.abs(place.current - to) < 0.001) {
-          place.current = to;
-          speed.current = 0;
-          frame.current = 0;
-        } else frame.current = requestAnimationFrame(step);
-        paint();
-      };
-      frame.current = requestAnimationFrame(step);
+      const next: [number, number] = reduced
+        ? [Math.round(at), Math.round(at)]
+        : [Math.max(0, Math.floor(at) - 1), Math.min(count - 1, Math.ceil(at) + 1)];
+      setNear((was) => (was[0] === next[0] && was[1] === next[1] ? was : next));
     },
-    [paint, reduced],
+    [count, reduced],
   );
-  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  const { place, speed, goal, glide, halt } = useGlide(slide - 1, reduced, paint);
+  useLayoutEffect(() => paint(place.current));
 
   // A slide chosen anywhere else is glided to from wherever the track is, keeping its speed.
   useEffect(() => {
     if (slide - 1 !== goal.current) glide(slide - 1, speed.current, SETTLE);
-  }, [slide, glide]);
+  }, [slide, glide, goal, speed]);
 
   const press = useRef<{
     id: number;
@@ -231,8 +196,7 @@ function SlideTrack({
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (press.current || (event.pointerType === "mouse" && event.button !== 0)) return;
     event.stopPropagation();
-    cancelAnimationFrame(frame.current);
-    frame.current = 0;
+    halt();
     press.current = {
       id: event.pointerId,
       x: event.clientX,
@@ -259,10 +223,8 @@ function SlideTrack({
     if (!p.decided) return;
     p.moves = [...p.moves.slice(-5), { t: event.timeStamp, x: event.clientX }];
     const pitch = element.clientWidth + APART;
-    const wanted = p.from - dx / pitch;
-    const over = wanted < 0 ? wanted : wanted > count - 1 ? wanted - (count - 1) : 0;
-    place.current = wanted - over + rubberband(over * pitch, pitch) / pitch;
-    paint();
+    place.current = draggedPlace(p.from - dx / pitch, count, pitch);
+    paint(place.current);
   };
   const onPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
     const p = press.current;

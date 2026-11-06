@@ -16,3 +16,8 @@ it("keeps a toast's details from widening it, so opening them only grows it down
   const details = blocks.find(({ selector }) => selector === ".ui-toast-details");
   expect(details?.body).toMatch(/contain:\s*inline-size;/);
 });
+
+it("sets a toast's action and close button level with its words as a whole", () => {
+  const body = blocks.find(({ selector }) => selector === ".ui-toast-body");
+  expect(body?.body).toMatch(/align-items:\s*center;/);
+});

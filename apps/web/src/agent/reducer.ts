@@ -363,6 +363,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
             kind: e.data.kind,
             ...(e.data.sessionId ? { sessionId: e.data.sessionId } : {}),
             ...(queued ? { queued } : {}),
+            ...(e.data.waitsFor ? { waitsFor: e.data.waitsFor } : {}),
             ...(e.data.files ? { files: [...e.data.files] } : {}),
           },
           L.messages,
@@ -375,6 +376,19 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     }
     case "message.delivery": {
       const message = model.messages.get(e.data.messageId);
+      if (e.data.state === "woke" || e.data.state === "left_running") {
+        if (message)
+          next = {
+            ...next,
+            messages: put(
+              model.messages,
+              message.id,
+              { ...message, interrupted: e.data.state === "woke" ? "wait" : "command" },
+              L.messages,
+            ),
+          };
+        break;
+      }
       const reached = e.data.state === "sent" || e.data.state === "steering";
       // Stop left it unanswered: unsent (cancelled), or given back to its writer (withdrawn).
       const stopped = e.data.reason === "stopped";
@@ -399,6 +413,9 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         };
       break;
     }
+    case "message.queue":
+      next = { ...next, queueOrder: e.data.order };
+      break;
     case "message.delta": {
       const old = model.messages.get(e.data.messageId);
       if (old?.final || old?.role === "user") break;
@@ -474,6 +491,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           kind: e.data.kind,
           planItem: e.data.planItem,
           ...(e.data.intent ? { intent: e.data.intent } : {}),
+          ...(e.data.model ? { model: e.data.model } : {}),
           startedAt: e.t,
         };
       else if (e.type === "step.end")
@@ -675,6 +693,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
             summary: e.data.summary,
             ...(e.data.outcome ? { outcome: e.data.outcome } : {}),
             files: e.data.files.map((file) => ({ ...file })),
+            ...(e.data.previews?.length ? { previews: e.data.previews } : {}),
           },
         ].slice(-L.results),
         historyTruncated: next.historyTruncated || model.results.length >= L.results,

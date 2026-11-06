@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
+import { useLoadAgain } from "../lib/useLoadAgain.ts";
 import { replayOrigin } from "./useReplay.ts";
 
 // Recently shown pictures stay as blobs, so a scrubber moving back over them paints at once. A full
@@ -54,21 +55,25 @@ export function ReplayImage({
   frameId,
   full = false,
   alt = "",
+  near: told = false,
 }: {
   api: ApiClient;
   sessionId: string;
   frameId: string | null;
   full?: boolean;
   alt?: string;
+  // Whoever draws it already knows it is close to the view.
+  near?: boolean;
 }) {
   const picture = useRef<HTMLSpanElement>(null);
-  const [near, setNear] = useState(full || typeof IntersectionObserver === "undefined");
+  const [seen, setSeen] = useState(full || typeof IntersectionObserver === "undefined");
+  const near = told || seen;
   useEffect(() => {
     if (full || near || !picture.current) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
-          setNear(true);
+          setSeen(true);
           observer.disconnect();
         }
       },
@@ -81,20 +86,25 @@ export function ReplayImage({
   const shown = useRef<string | null>(null);
   const kind = full ? "frames" : "thumbs";
   const key = `${sessionId}/${kind}/${frameId}`;
+  const { attempt, failed } = useLoadAgain(key);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: another attempt loads it again.
   useEffect(() => {
     if (!frameId || !near) return;
     const controller = new AbortController();
     void load(api, kind, key, controller.signal)
       .then((blob) => {
         if (controller.signal.aborted) return;
+        if (!blob) failed();
         const url = blob && URL.createObjectURL(blob);
         if (shown.current) URL.revokeObjectURL(shown.current);
         shown.current = url;
         setImage(url ? { sessionId, url } : null);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted) failed();
+      });
     return () => controller.abort();
-  }, [api, kind, key, sessionId, frameId, near]);
+  }, [api, kind, key, sessionId, frameId, near, attempt, failed]);
   useEffect(
     () => () => {
       if (shown.current) URL.revokeObjectURL(shown.current);

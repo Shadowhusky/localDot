@@ -54,7 +54,11 @@ export function GroupRow({
       </span>
       {(trailing || onSelect) && (
         <span className="ui-group-row-trailing">
-          {trailing}
+          {typeof trailing === "string" ? (
+            <span className="ui-group-row-value">{trailing}</span>
+          ) : (
+            trailing
+          )}
           {onSelect && (
             <Icon
               name={expanded === undefined ? "chevron-right" : "chevron-down"}

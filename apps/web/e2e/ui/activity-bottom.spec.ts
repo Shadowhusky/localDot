@@ -1,3 +1,4 @@
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, runAt, test } from "./harness.ts";
 
 runAt("c39", "w39");
@@ -6,8 +7,8 @@ for (const height of [568, 680, 844]) {
   test(`the last step and usage footer remain reachable at ${height}px`, async ({ page, ui }) => {
     await page.setViewportSize({ width: 390, height });
     await ui.open("done");
-    await page.getByRole("button", { name: "Activity", exact: true }).click();
-    const sheet = page.getByRole("dialog", { name: "Activity" });
+    await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: PANEL_NAME });
     const pane = sheet.locator('[role="tabpanel"]:not([aria-hidden]) .activity-scroll');
     const last = pane.locator(".activity-row").last();
     const usage = sheet.locator(".activity-usage");
@@ -35,15 +36,19 @@ for (const height of [568, 680, 844]) {
       const row = await last.boundingBox();
       const footer = await usage.boundingBox();
       await expect
-        .poll(() =>
-          last.evaluate((node) => {
+        .poll(async () => {
+          // What comes in late can push the last row back down from the end.
+          await pane.evaluate((node) => {
+            node.scrollTop = node.scrollHeight;
+          });
+          return last.evaluate((node) => {
             const head = node.querySelector(".activity-row-head") ?? node;
             const rect = head.getBoundingClientRect();
             return node.contains(
               document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
             );
-          }),
-        )
+          });
+        })
         .toBe(true);
       expect(row).not.toBeNull();
       expect(footer).not.toBeNull();

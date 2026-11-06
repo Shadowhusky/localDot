@@ -1,6 +1,12 @@
 import { cameraFor, toCanvas } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
-import { cursorPolygon, cursorSizePx, targetRadius, videoPlacement } from "./geometry.ts";
+import {
+  cursorPolygon,
+  cursorSizePx,
+  targetRadius,
+  targetRingBox,
+  videoPlacement,
+} from "./geometry.ts";
 
 describe("stage geometry", () => {
   it("builds the macOS arrow with its tip at the origin, 18.1 px tall in its 22 px box", () => {
@@ -64,5 +70,17 @@ describe("stage geometry", () => {
         y: 400,
       }),
     ).toEqual({ x: 300, y: 400 });
+  });
+
+  it("rings a field where its screen draws it: a browser's inside its window on the desktop", () => {
+    const screen = { w: 2560, h: 1600 };
+    const stage = { w: 1280, h: 800 };
+    const mark = { point: { x: 1280, y: 800 } };
+    const onDesktop = targetRingBox({ ...mark, screen: "desktop" }, screen, stage);
+    expect(onDesktop.x + onDesktop.w / 2).toBeCloseTo(640);
+    expect(onDesktop.y + onDesktop.h / 2).toBeCloseTo(400);
+    const onBrowser = targetRingBox({ ...mark, screen: "browser" }, screen, stage);
+    expect(onBrowser.x + onBrowser.w / 2).toBeCloseTo(640);
+    expect(onBrowser.y + onBrowser.h / 2).toBeCloseTo(24 + 776 / 2);
   });
 });

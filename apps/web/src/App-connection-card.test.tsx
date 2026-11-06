@@ -8,6 +8,7 @@ import type { CellSummary } from "./cells/types.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
 import { STILL_MS } from "./shell/focus.ts";
+import { VIEW_STYLE_KEY } from "./shell/view-style.ts";
 import { closeStreams } from "./stage/live-stream.ts";
 import { fakeChromium, presentFrame } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
@@ -186,6 +187,7 @@ it("keeps the card in sight in full screen while the user holds the computer", a
 }, 10_000);
 
 it("shows the card in the phone's sheet while the user holds the computer", async () => {
+  localStorage.setItem(VIEW_STYLE_KEY, "studio");
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: /width < (700|1100)px/.test(query),
     media: query,

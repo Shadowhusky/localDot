@@ -145,9 +145,12 @@ describe("files on dot's computer in the viewer", () => {
         : Response.json({ kind: "none", reason: "binary" }),
     );
     viewer(api, [entry(`${UPLOADS}/firmware.bin`)]);
-    expect(await screen.findByText("This file isn't text")).toBeTruthy();
-    expect(screen.getByText(/BIN file · 3(\.\d)? MB/)).toBeTruthy();
-    fireEvent.click(screen.getAllByRole("button", { name: "Download" })[0] as HTMLElement);
+    const card = await waitFor(() => {
+      const found = document.querySelector(".ui-file-card");
+      expect(found?.textContent).toMatch(/BIN file · 3(\.\d)? MB/);
+      return found as HTMLElement;
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "Download" }));
     expect(downloads.request).toHaveBeenCalledWith(entry(`${UPLOADS}/firmware.bin`), undefined);
   });
 });

@@ -33,7 +33,7 @@ export function awayWords(cause: AwayCause, screen: ScreenName) {
 // desktop by itself (a task ended, a new conversation began) and dot has not moved.
 export function screenMoveNote(to: ScreenName, dotChose: boolean): string | null {
   if (!dotChose) return null;
-  return to === "browser" ? "dot moved to the web browser" : "dot is back on the desktop";
+  return to === "browser" ? "dot is working in the web browser" : "dot is back on the desktop";
 }
 
 // Over the last picture while it is away: nothing for a blip (only a dip while dot changes

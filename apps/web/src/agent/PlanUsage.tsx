@@ -1,5 +1,5 @@
 import type { PlanProvider, PlanUsageReply } from "@localdot/protocol";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Badge } from "../ui/Badge.tsx";
 import { Meter } from "../ui/Meter.tsx";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
@@ -90,6 +90,11 @@ function PlanBlock({
 }) {
   const id = useId();
   const plan = view?.plan && `${view.plan.charAt(0).toUpperCase()}${view.plan.slice(1)}`;
+  // A read that came back with nothing leaves its words; the reads that follow on a timer don't
+  // keep flipping them to "Checking" and back.
+  const checked = useRef({ checking: false, done: false });
+  if (checking) checked.current.checking = true;
+  else if (checked.current.checking) checked.current.done = true;
   return (
     <section className="plan-usage" aria-labelledby={id}>
       <div className="plan-usage-head">
@@ -122,7 +127,9 @@ function PlanBlock({
       ))}
       {!view?.windows.length && !view?.limit && (
         <p className="plan-usage-line">
-          {checking ? "Checking usage…" : "Usage appears after the first reply."}
+          {checking && !checked.current.done
+            ? "Checking usage…"
+            : "Usage appears after the first reply."}
         </p>
       )}
     </section>

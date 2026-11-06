@@ -19,6 +19,7 @@ export interface KeydHealth {
   bootId?: string;
   sealKey?: string;
   generalSecrets?: boolean;
+  savedLogins?: boolean;
   audit?: { ok: boolean; error?: string };
   hairpin?: HairpinGuard;
   // How many keys need entering again.

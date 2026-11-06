@@ -6,6 +6,10 @@ import {
   ConversationLiveEvent,
   ConversationOrganizedEvent,
   type ConversationTag,
+  type LookWearables,
+  type PersonaId,
+  taskOutfit,
+  type Wearable,
 } from "@localdot/protocol";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { ApiClient } from "../lib/api.ts";
@@ -119,6 +123,14 @@ export function liveConversations(rows: readonly ConversationRow[]): Conversatio
     .map(({ row }) => row);
 }
 
+// All of them, most urgent first, each kind newest first as the daemon lists them.
+export function mostUrgent(rows: readonly ConversationRow[]): ConversationRow[] {
+  return rows
+    .map((row, at) => ({ row, at }))
+    .sort((a, b) => URGENCY[a.row.status] - URGENCY[b.row.status] || a.at - b.at)
+    .map(({ row }) => row);
+}
+
 // The colour tags given to any of `rows`, in the order the swatches show them.
 export function tagsInUse(rows: readonly ConversationRow[]): ConversationTag[] {
   const used = new Set(rows.map((row) => row.entry.tag));
@@ -188,6 +200,18 @@ export function conversationRows(
   });
 }
 
+// How a conversation looks wherever it is drawn: what the user dressed it in, else its first task's
+// draw for the dot it works as now, or as `persona` for a line that names another.
+export function conversationLook(
+  entry: ConversationEntry,
+  persona: PersonaId | undefined = entry.live?.persona ?? entry.persona,
+): readonly Wearable[] {
+  return entry.look ?? taskOutfit(lookSeed(entry), persona);
+}
+
+export const lookSeed = (entry: ConversationEntry) =>
+  entry.firstTask ?? entry.sessions.at(-1) ?? entry.sessionId;
+
 // An empty title gives the conversation back its own.
 export function renameConversation(
   api: ApiClient,
@@ -201,17 +225,24 @@ export function renameConversation(
 export type Organize =
   | { tag: ConversationTag | null }
   | { pinned: boolean }
-  | { archived: boolean };
+  | { archived: boolean }
+  | { look: LookWearables | null };
 
-type Filing = Partial<{ tag: ConversationTag | null; pinned: boolean; archived: boolean }>;
+type Filing = Partial<{
+  tag: ConversationTag | null;
+  pinned: boolean;
+  archived: boolean;
+  look: LookWearables | null;
+}>;
 
 const organized = (entry: ConversationEntry, change: Filing): ConversationEntry => {
-  const { tag, pinned, archived, ...rest } = { ...entry, ...change };
+  const { tag, pinned, archived, look, ...rest } = { ...entry, ...change };
   return {
     ...rest,
     ...(tag ? { tag } : {}),
     ...(pinned ? { pinned } : {}),
     ...(archived ? { archived } : {}),
+    ...(look ? { look } : {}),
   };
 };
 
@@ -229,7 +260,8 @@ export async function organizeConversation(
 ): Promise<void> {
   const lists = [...(stores.get(api)?.values() ?? [])];
   for (const list of lists) list.patch(sessionId, change);
-  const route = "tag" in change ? "tag" : "pinned" in change ? "pin" : "archive";
+  const route =
+    "tag" in change ? "tag" : "pinned" in change ? "pin" : "look" in change ? "look" : "archive";
   try {
     await api.post(`/api/conversations/${sessionId}/${route}`, change);
   } finally {
@@ -358,10 +390,11 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
     if (store.state.entries && entry)
       set({ ...store.state, entries: store.state.entries.with(at, organized(entry, change)) });
   };
-  const reorganized = ({ sessionId, tag, pinned, archived }: ConversationOrganizedEvent) => {
+  const reorganized = ({ sessionId, tag, pinned, archived, look }: ConversationOrganizedEvent) => {
     const { entry } = held(sessionId);
     // One that comes into the view or leaves it, and the count of those archived, need a read.
-    if (entry && !!entry.archived === archived) patch(sessionId, { tag, pinned });
+    if (entry && !!entry.archived === archived)
+      patch(sessionId, { tag, pinned, ...(look === undefined ? {} : { look }) });
     else refresh();
   };
   const start = () => {

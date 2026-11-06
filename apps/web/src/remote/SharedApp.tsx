@@ -177,6 +177,7 @@ export function SharedApp({ api }: { api: ApiClient }) {
               api={api}
               cell={shown}
               parentId={watchingBrowser ? computer.cell?.id : undefined}
+              parent={computer.cell}
               selection={watchingBrowser ? selection : undefined}
               reconnects={watchingBrowser ? browser.reconnects : computer.reconnects}
               listed={computer.listed}

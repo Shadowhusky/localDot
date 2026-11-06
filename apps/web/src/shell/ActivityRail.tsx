@@ -1,8 +1,17 @@
 import type { TaskModelSelection } from "@localdot/protocol";
 import type { KeyUseState, PlanItemState } from "@localdot/stage";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ActivityDetail } from "../agent/ActivityDetails.tsx";
-import { ActivityRow, reveal, revealOpened } from "../agent/ActivityRow.tsx";
+import { ActivityRow, PlainSteps, reveal, revealOpened } from "../agent/ActivityRow.tsx";
 import {
   type ActivityEntry,
   type ActivityFilter,
@@ -13,10 +22,13 @@ import {
   groupActivity,
   hasDetails,
   matchesFilter,
+  modelMarks,
+  stepModel,
 } from "../agent/activity.ts";
 import { ChangeRow, type UndoStatus } from "../agent/ChangeRow.tsx";
+import { markdownToPlain } from "../agent/markdown.ts";
 import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/model.ts";
-import { PlanStrip } from "../agent/PlanStrip.tsx";
+import { PlanStrip, planProgress } from "../agent/PlanStrip.tsx";
 import { planPhase } from "../agent/plan-state.ts";
 import { ResearchSources } from "../agent/ResearchSources.tsx";
 import { StepPreviewScope } from "../agent/StepPreview.tsx";
@@ -24,9 +36,11 @@ import { SubagentList } from "../agent/SubagentList.tsx";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
 import { useFollowScroll } from "../agent/useFollowScroll.ts";
 import { useStepHistory } from "../agent/useStepHistory.ts";
+import { RunPicturesScope } from "../agent/WorkPictures.tsx";
 import { BrowserDownloads } from "../browser/BrowserDownloads.tsx";
 import { isLoopbackPage } from "../deliverables/api.ts";
 import { HandedOverFiles, latestFiles } from "../deliverables/HandedOverFiles.tsx";
+import { useConversationFiles } from "../deliverables/useConversationFiles.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { type Previews, PreviewsScope } from "../previews/PreviewsContext.tsx";
 import { PreviewsPanel } from "../previews/PreviewsPanel.tsx";
@@ -48,6 +62,7 @@ import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { VirtualList } from "../ui/VirtualList.tsx";
 import { activityTabs as chosenTabs, onActivityTab } from "./activity-tabs.ts";
 import { HANDHELD } from "./layout.ts";
+import { PANEL_NAME } from "./panel-name.ts";
 import "../agent/activity.css";
 
 export interface ActivityRailProps {
@@ -127,6 +142,7 @@ export function ActivityRail({
   planSnapshot,
   previews = null,
 }: ActivityRailProps) {
+  const plainSteps = useContext(PlainSteps);
   const phone = useMediaQuery(HANDHELD);
   const replay = asOfMs !== undefined;
   const model = agent ?? EMPTY;
@@ -142,6 +158,10 @@ export function ActivityRail({
   const selected = useMemo(
     () => entries.filter((entry) => matchesFilter(entry.row, filter)),
     [entries, filter],
+  );
+  const withPictures = useMemo(
+    () => entries.map((entry) => ({ key: entry.key, entry, title: "" })),
+    [entries],
   );
 
   const history = useStepHistory(selected, entryKey, `${owner}:${filter}`);
@@ -164,7 +184,13 @@ export function ActivityRail({
     };
   }, [model.changes, ended]);
   const plan = planSnapshot ?? model.plan;
-  const handed = useMemo(() => latestFiles(model.results).length, [model.results]);
+  const progress = planProgress(plan);
+  // Replay shows what its recording had handed over by then; live, the whole conversation's.
+  const conversationFiles = useConversationFiles(api, replay ? null : sessionId, model.results);
+  const handedFiles = conversationFiles.results;
+  const handed = useMemo(() => latestFiles(handedFiles).length, [handedFiles]);
+  // What this task hands over from now on is new; what earlier ones did never is.
+  const handedHere = useMemo(() => latestFiles(model.results).length, [model.results]);
   const started = !!sessionId || !!plan.length;
   const [downloads, setDownloads] = useState(0);
   const fileChanges = model.changes.filter((change) => change.type !== "memory");
@@ -198,11 +224,26 @@ export function ActivityRail({
   chooseNow.current = choose;
   useEffect(() => onActivityTab((next) => chooseNow.current(next)), []);
   useEffect(() => {
-    if (historyLoaded && (tab === "files" || !seenFiles.has(owner))) seenFiles.set(owner, handed);
-  }, [historyLoaded, owner, tab, handed]);
-  const fresh = tab !== "files" && handed > (seenFiles.get(owner) ?? handed);
+    if (historyLoaded && (tab === "files" || !seenFiles.has(owner)))
+      seenFiles.set(owner, handedHere);
+  }, [historyLoaded, owner, tab, handedHere]);
+  const fresh = tab !== "files" && handedHere > (seenFiles.get(owner) ?? handedHere);
+  const phase = planPhase(model);
+  const onPlan =
+    progress.done < progress.total &&
+    (phase === "working" || phase === "waiting" || phase === "paused");
   const tabs: SegmentItem[] = [
-    { value: "steps", label: "Steps", icon: TAB_ICONS.steps, count: entries.length || undefined },
+    {
+      value: "steps",
+      label: "Steps",
+      icon: TAB_ICONS.steps,
+      count: onPlan ? `${progress.done}/${progress.total}` : entries.length || undefined,
+      ...(onPlan && progress.current
+        ? {
+            hint: `${progress.done} of ${progress.total} done. Now: ${markdownToPlain(progress.current.text)}`,
+          }
+        : {}),
+    },
     ...(tab === "files" || files > 0
       ? [
           {
@@ -237,6 +278,15 @@ export function ActivityRail({
   const onSteps = tab === "steps";
   const follow = useFollowScroll(`${owner}:${filter}`, !replay && started);
   const timeline = useRef<HTMLElement>(null);
+  const stepsList = useRef<HTMLDivElement>(null);
+  const followList = follow.ref;
+  const attachSteps = useCallback(
+    (element: HTMLDivElement | null) => {
+      stepsList.current = element;
+      followList(element);
+    },
+    [followList],
+  );
 
   const steps = entries.filter((entry) => entry.row.kind === "step");
   const currentKey =
@@ -252,6 +302,8 @@ export function ActivityRail({
     keys: new Set(),
   });
   const groups = useMemo(() => groupActivity(history.rows), [history.rows]);
+  // Only a list with more than one model says which: nothing else here names the first.
+  const marks = useMemo(() => modelMarks(history.rows, stepModel, true), [history.rows]);
   const display = useMemo(
     () =>
       groups.flatMap<{
@@ -259,15 +311,22 @@ export function ActivityRail({
         entry?: ActivityEntry;
         child?: boolean;
         group?: (typeof groups)[number];
+        model?: { route: string; model: string };
       }>((group) => {
+        const mark = marks.get(group.entries[0]?.key ?? "");
+        const lead = mark ? [{ key: `model-${group.key}`, model: mark }] : [];
         if (group.entries.length === 1 || replay)
-          return group.entries.map((entry) => ({ key: entry.key, entry }));
+          return [...lead, ...group.entries.map((entry) => ({ key: entry.key, entry }))];
         const header = { key: `group-${group.key}`, group };
         return expanded.owner === owner && expanded.keys.has(group.key)
-          ? [header, ...group.entries.map((entry) => ({ key: entry.key, entry, child: true }))]
-          : [header];
+          ? [
+              ...lead,
+              header,
+              ...group.entries.map((entry) => ({ key: entry.key, entry, child: true })),
+            ]
+          : [...lead, header];
       }),
-    [groups, expanded, owner, replay],
+    [groups, marks, expanded, owner, replay],
   );
   const virtualKeys = useMemo(() => display.map((item) => item.key), [display]);
   const virtual = useVirtualRows(timeline, virtualKeys, estimateStep, { anchored: true });
@@ -329,7 +388,7 @@ export function ActivityRail({
   const renderEntry = (entry: ActivityEntry) => {
     const view = viewOf(entry);
     const running = entry.key === currentKey && !view.time && !replay;
-    const expandable = !!sessionId && hasDetails(entry, model.changes);
+    const expandable = !!sessionId && hasDetails(entry, model.changes, plainSteps);
     return (
       <ActivityRow
         key={entry.key}
@@ -369,10 +428,10 @@ export function ActivityRail({
   );
 
   const content = (
-    <aside className="rail r activity-rail" aria-label="Plan and steps">
+    <aside className="rail r activity-rail" aria-label={PANEL_NAME}>
       {/* A tab or the column names it on screen; Replay's transport says how far its record runs. */}
       <div className="ui-visually-hidden">
-        <h2>Activity</h2>
+        <h2>{PANEL_NAME}</h2>
         {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
       </div>
       <div className="activity-controls">
@@ -380,7 +439,7 @@ export function ActivityRail({
           <div className="activity-tabs-row">
             <Tabs
               id={`${domId}-tabs`}
-              aria-label="Activity"
+              aria-label={PANEL_NAME}
               size={32}
               variant="line"
               className="activity-tabs"
@@ -391,18 +450,19 @@ export function ActivityRail({
           </div>
         )}
       </div>
-      {plan.length > 0 && (
-        <div className="activity-plan">
-          <PlanStrip
-            plan={plan}
-            phase={planPhase(model)}
-            label={replay ? "Plan at replay time" : "Task plan"}
-          />
-        </div>
-      )}
       <div className="activity-body">
         <SwipePanels enabled={phone} value={tab} values={tabValues} onValueChange={choose}>
           <TabPanel tabsId={`${domId}-tabs`} value="steps" selected={tab} swipe={phone}>
+            {plan.length > 0 && (
+              <div className="activity-plan">
+                <PlanStrip
+                  plan={plan}
+                  phase={phase}
+                  label={replay ? "Plan at replay time" : "Task plan"}
+                  over={stepsList}
+                />
+              </div>
+            )}
             {started && entries.length > 0 && (
               <div className="activity-filter">
                 <SegmentedControl
@@ -416,7 +476,7 @@ export function ActivityRail({
               </div>
             )}
             <ScrollArea
-              ref={follow.ref}
+              ref={attachSteps}
               className="activity-scroll"
               onScroll={(event) => {
                 if (!follow.onScroll()) {
@@ -454,29 +514,36 @@ export function ActivityRail({
                             className="activity-window-row"
                             data-group-child={item.child || undefined}
                           >
-                            {item.entry
-                              ? renderEntry(item.entry)
-                              : group && (
-                                  <GroupHeading
-                                    className="activity-read-group"
-                                    leading={<StatusGlyph state="done" />}
-                                    title={group.label}
-                                    meta={`${group.entries.length} read-only steps · ${isOpen ? "Hide" : "Show"} details`}
-                                    count={group.entries.length}
-                                    open={isOpen}
-                                    onToggle={(trigger) => {
-                                      follow.anchorTo(trigger);
-                                      setExpanded((previous) => {
-                                        const keys = new Set(
-                                          previous.owner === owner ? previous.keys : [],
-                                        );
-                                        if (keys.has(group.key)) keys.delete(group.key);
-                                        else keys.add(group.key);
-                                        return { owner, keys };
-                                      });
-                                    }}
-                                  />
-                                )}
+                            {item.model ? (
+                              <p className="work-model-change">
+                                {modelName?.(item.model.route, item.model.model) ??
+                                  item.model.model}
+                              </p>
+                            ) : item.entry ? (
+                              renderEntry(item.entry)
+                            ) : (
+                              group && (
+                                <GroupHeading
+                                  className="activity-read-group"
+                                  leading={<StatusGlyph state="done" />}
+                                  title={group.label}
+                                  meta={`${group.entries.length} read-only steps · ${isOpen ? "Hide" : "Show"} details`}
+                                  count={group.entries.length}
+                                  open={isOpen}
+                                  onToggle={(trigger) => {
+                                    follow.anchorTo(trigger);
+                                    setExpanded((previous) => {
+                                      const keys = new Set(
+                                        previous.owner === owner ? previous.keys : [],
+                                      );
+                                      if (keys.has(group.key)) keys.delete(group.key);
+                                      else keys.add(group.key);
+                                      return { owner, keys };
+                                    });
+                                  }}
+                                />
+                              )
+                            )}
                           </div>
                         );
                       })}
@@ -519,9 +586,14 @@ export function ActivityRail({
                       <HandedOverFiles
                         api={api}
                         sessionId={sessionId}
-                        results={model.results}
+                        results={handedFiles}
                         onMac={isLoopbackPage()}
                       />
+                      {conversationFiles.more && (
+                        <p className="activity-note">
+                          Files from the oldest part of this conversation aren't listed.
+                        </p>
+                      )}
                     </section>
                   )}
                   {cellId && !replay && (
@@ -616,7 +688,7 @@ export function ActivityRail({
   );
   const scoped = (
     <StepPreviewScope api={api} sessionId={owner} results={model.results} scale={scale}>
-      {content}
+      <RunPicturesScope steps={withPictures}>{content}</RunPicturesScope>
     </StepPreviewScope>
   );
   return <PreviewsScope value={replay ? null : previews}>{scoped}</PreviewsScope>;

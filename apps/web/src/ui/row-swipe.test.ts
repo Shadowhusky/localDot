@@ -127,6 +127,26 @@ describe("swiping a row", () => {
     expect(offsetOf(element)).toBe(0);
   });
 
+  it("closes at a press anywhere else, but not at a press on its own faces", () => {
+    const { element, host, drag } = row();
+    const box = document.createElement("div");
+    const face = document.createElement("button");
+    box.append(face, element);
+    document.body.append(box);
+    drag(300, 180);
+    expect(offsetOf(element)).toBe(-152);
+    const press = (target: Element) =>
+      target.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }),
+      );
+    press(face);
+    expect(offsetOf(element)).toBe(-152);
+    press(document.body);
+    expect(host.rest).toHaveBeenLastCalledWith(null);
+    expect(offsetOf(element)).toBe(0);
+    box.remove();
+  });
+
   it("lights the commit line as it is crossed, and archives by sliding the row away first", () => {
     const { element, host, drag } = row();
     drag(340, 100);

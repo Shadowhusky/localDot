@@ -28,20 +28,21 @@ import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
-import { TAG_NAMES, TagMark } from "../ui/ConversationTag.tsx";
+import { TAG_NAMES } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { isApple } from "../ui/Kbd.tsx";
+import { isMenuKey } from "../ui/Menu.tsx";
 import { matches, REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
 import { tokenMs } from "../ui/motion.ts";
 import { triggerProps } from "../ui/Popover.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
-import { SessionGlyph } from "../ui/SessionGlyph.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { useTooltip } from "../ui/Tooltip.tsx";
 import { useHandler } from "../ui/useHandler.ts";
+import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { ConversationMenu } from "./ConversationMenu.tsx";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import type { Layout } from "./layout.ts";
@@ -266,7 +267,7 @@ export const SessionRail = memo(function SessionRail({
     } else if (event.key === "F2" && expanded) {
       event.preventDefault();
       setEditing(row.entry.sessionId);
-    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+    } else if (isMenuKey(event)) {
       event.preventDefault();
       openMenu(row, event.currentTarget);
     }
@@ -284,10 +285,13 @@ export const SessionRail = memo(function SessionRail({
     );
   };
 
+  const rail = useRef<HTMLElement>(null);
   const actionAnchor = useRef<HTMLButtonElement | null>(null);
+  const actionRow = useRef<HTMLElement | null>(null);
   const [action, setAction] = useState<ConversationRow | null>(null);
   const openMenu = (row: ConversationRow, trigger: HTMLButtonElement) => {
     actionAnchor.current = trigger;
+    actionRow.current = trigger.closest("li");
     setAction(row);
   };
   // A right click anywhere along a row opens its menu: on any part of it, in the gaps between rows
@@ -378,7 +382,12 @@ export const SessionRail = memo(function SessionRail({
     body = <EmptyState layout="start" title="No conversations yet" />;
 
   return (
-    <nav className="sessions" aria-label="Conversations" data-expanded={expanded || undefined}>
+    <nav
+      ref={rail}
+      className="sessions"
+      aria-label="Conversations"
+      data-expanded={expanded || undefined}
+    >
       <div className="sessions-head">
         <IconButton
           icon="panel-left"
@@ -465,8 +474,10 @@ export const SessionRail = memo(function SessionRail({
       <ConversationMenu
         entry={action?.entry ?? null}
         anchor={actionAnchor}
+        row={actionRow}
+        list={rail}
         onClose={() => setAction(null)}
-        side={expanded ? "bottom" : "right"}
+        side="right"
         running={!!action && running(action)}
         renameKeys={["F2"]}
         onRename={() => {
@@ -476,6 +487,11 @@ export const SessionRail = memo(function SessionRail({
         }}
         onOrganize={(change) => {
           if (action) void organize(action, change);
+        }}
+        onLook={(entry, look) => {
+          organizeConversation(api, entry.sessionId, { look }).catch(() =>
+            announce("conversation", "That change couldn't be saved. Try again.", "assertive"),
+          );
         }}
         onDelete={() => setDeleting(action)}
       />
@@ -648,10 +664,7 @@ function RailRow({
             onKeyDown={onKeyDown}
             onClick={onPick}
           >
-            <span className="sessions-glyph">
-              <SessionGlyph status={row.status} />
-              <TagMark tag={row.entry.tag} />
-            </span>
+            <ConversationAvatar row={row} />
             <span className="sessions-title">
               {match ? <Highlight text={match.title} /> : row.title}
             </span>

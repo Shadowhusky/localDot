@@ -1,4 +1,13 @@
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type RefObject,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Kbd } from "../ui/Kbd.tsx";
 import { ActionList, rowId, type ShownRow } from "./ActionList.tsx";
 import {
@@ -55,6 +64,57 @@ export function shownSlashRow(row: ActionRow): ShownRow {
   };
 }
 
+const MENU_MOST = 336;
+const MENU_LEAST = 88;
+const MENU_MARGIN = 8;
+
+// The list opens upward from the field. It takes the room the screen has left above the field, on a
+// short phone with its keyboard up too, and stays clear of the island, which holds Stop.
+function useRoomAbove(menu: RefObject<HTMLElement | null>, open: boolean) {
+  useLayoutEffect(() => {
+    if (!open) return;
+    const fit = () => {
+      const element = menu.current;
+      const card = element?.parentElement;
+      if (!element || !card) return;
+      const below = card.getBoundingClientRect().top - MENU_MARGIN;
+      const box = element.getBoundingClientRect();
+      const island = document.querySelector(".island")?.getBoundingClientRect();
+      const top = Math.max(
+        window.visualViewport?.offsetTop ?? 0,
+        island?.height &&
+          island.left < box.right &&
+          island.right > box.left &&
+          island.bottom < below
+          ? island.bottom
+          : 0,
+      );
+      const room = Math.round(below - top - MENU_MARGIN);
+      element.style.maxHeight = `${Math.max(MENU_LEAST, Math.min(MENU_MOST, room))}px`;
+    };
+    let frame = 0;
+    const later = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fit);
+    };
+    fit();
+    const view = window.visualViewport;
+    view?.addEventListener("resize", later);
+    view?.addEventListener("scroll", later);
+    window.addEventListener("resize", later);
+    const card = menu.current?.parentElement;
+    const grows = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(later);
+    if (card) grows?.observe(card);
+    return () => {
+      cancelAnimationFrame(frame);
+      view?.removeEventListener("resize", later);
+      view?.removeEventListener("scroll", later);
+      window.removeEventListener("resize", later);
+      grows?.disconnect();
+    };
+  }, [menu, open]);
+}
+
 // The composer's slash commands: "/" at the start of the field lists them, the field keeps focus and
 // its keys drive the list. Nothing that reads as a command reaches dot unless the user says so twice.
 export function useCommandMenu(options: CommandMenuOptions) {
@@ -92,6 +152,8 @@ export function useCommandMenu(options: CommandMenuOptions) {
     [actions, typed, choices, waiting],
   );
   const open = !!typed && !dismissed;
+  const box = useRef<HTMLDivElement>(null);
+  useRoomAbove(box, open);
   const at = rows.length ? Math.min(active, rows.length - 1) : -1;
 
   // Each change of the field's text; a message's draws nothing.
@@ -177,7 +239,7 @@ export function useCommandMenu(options: CommandMenuOptions) {
           : "Loading…"
         : "Nothing matches.";
   const view = open && (
-    <div className="ui-picker-popover command-menu" data-command-menu="">
+    <div ref={box} className="ui-picker-popover command-menu" data-command-menu="">
       {rows.length > 0 ? (
         <ActionList
           id={listId}

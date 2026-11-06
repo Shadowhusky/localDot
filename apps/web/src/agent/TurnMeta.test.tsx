@@ -71,6 +71,11 @@ describe("a turn's meta line", () => {
     expect(details.querySelectorAll(".ui-speed-mark")).toHaveLength(1);
   });
 
+  it("names both models of a turn a message moved, in the order they ran", () => {
+    const line = metaLine(item({ models: [sonnet, { ...luna, role: "main" }] }), names);
+    expect(line.startsWith("Claude Sonnet 5.5 → GPT-6 Luna")).toBe(true);
+  });
+
   it("names a plan's app, where the plan paid rather than a key", () => {
     const plan = { ...sonnet, route: "claude-code", model: "sonnet", reasoningTokens: undefined };
     expect(metaLine(item({ models: [plan], usd: undefined }), names)).toBe(

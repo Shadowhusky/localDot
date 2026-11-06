@@ -10,13 +10,16 @@ import {
   type UsageCall,
 } from "./model.ts";
 import {
+  chatItems,
   controlLine,
   type ThreadItem,
   threadItems,
   threadRows,
   timeLabel,
+  unanswered,
   type WorkStep,
   type WorkStepCache,
+  withModelChanges,
   withWork,
   workSteps,
 } from "./thread.ts";
@@ -183,7 +186,7 @@ describe("the steps of each turn", () => {
     expect(thread.map((item) => item.key)).toEqual([
       "message-task",
       "message-plan",
-      "work-message-plan",
+      "work-message-task",
       "message-checked",
       "work-message-checked",
       "result-result",
@@ -230,7 +233,7 @@ describe("the steps of each turn", () => {
     expect(live.map((item) => item.key)).toEqual([
       "message-task",
       "message-first",
-      "work-message-first",
+      "work-message-task",
       "message-streaming",
       "work-message-streaming",
     ]);
@@ -262,6 +265,34 @@ describe("the steps of each turn", () => {
     expect(runs(thread)).toEqual([["a"], ["b"], ["c"]]);
     expect(thread.flatMap((item) => (item.kind === "work" ? [item.startMs] : []))).toEqual([
       1000, 5000, 10_000,
+    ]);
+  });
+
+  it("keeps a message sent while dot works below the run it is at, until its next step", () => {
+    const keys = (rows: readonly { key: string }[]) => rows.map((row) => row.key);
+    const items = threadItems([
+      message("task", 1),
+      message("steer", 5, "user", { kind: "steer" }),
+      message("steer-2", 6, "user", { kind: "steer" }),
+    ]);
+    const below = ["message-task", "work-message-task", "message-steer", "message-steer-2"];
+    expect(keys(withWork(items, [step("a", 2000)], true))).toEqual(below);
+    expect(keys(withWork(items, [], true))).toEqual(below);
+    const next = withWork(items, [step("a", 2000), step("b", 7000)], true);
+    expect(keys(next)).toEqual([...below, "work-message-steer"]);
+    expect(runs(next)).toEqual([["a"], ["b"]]);
+    // After dot's words, as after a step, the run it is at is the one they ended with.
+    const words = threadItems([
+      message("task", 1),
+      message("said", 3, "assistant"),
+      message("steer", 5, "user", { kind: "steer" }),
+    ]);
+    expect(keys(withWork(words, [step("a", 2000)], true))).toEqual([
+      "message-task",
+      "work-message-task",
+      "message-said",
+      "work-message-said",
+      "message-steer",
     ]);
   });
 
@@ -407,11 +438,26 @@ describe("the steps of each turn", () => {
       "work-message-Download it",
       `took-${taken}`,
       `back-${taken}`,
-      `work-back-${taken}`,
+      `work-took-${taken}`,
     ]);
     // While the user holds the computer, the live run waits after the change of hands.
     const held = withWork(items.slice(0, 2), [step("Open", 1_500)], true);
     expect(held.map((item) => item.kind)).toEqual(["message", "work", "control", "work"]);
+  });
+
+  it("keeps the run dot is at the same row as it says more before its next step", () => {
+    const said = [message("task", 1), message("first", 2, "assistant")];
+    const key = (more: ReturnType<typeof message>[], steps: ReturnType<typeof step>[]) =>
+      withWork(threadItems([...said, ...more]), steps, true).findLast(
+        (item) => item.kind === "work",
+      )?.key;
+    const quiet = key([], []);
+    expect(key([message("more", 3, "assistant")], [])).toBe(quiet);
+    expect(key([message("more", 3, "assistant")], [step("a", 4000)])).toBe(quiet);
+    // Its steps done and more said, the next run is a row of its own.
+    expect(
+      key([message("more", 3, "assistant"), message("then", 5, "assistant")], [step("a", 4000)]),
+    ).not.toBe(quiet);
   });
 
   it("holds a live line on the latest turn before any step, and none on a turn that only talked", () => {
@@ -659,4 +705,106 @@ it("builds a work step again only when its row, its key uses or its file changes
   expect(twice).not.toBe(once);
   expect(twice?.entry.keys.map((key) => key.count)).toEqual([2]);
   expect(workSteps(timelineRows([a], [used(1.5), used(1.6)]), model, cache)[0]).toBe(twice);
+});
+
+describe("a thread's model changes", () => {
+  const work = (key: string, ...models: (string | undefined)[]) =>
+    ({
+      kind: "work",
+      key,
+      speaker: "dot",
+      turn: key,
+      startMs: null,
+      steps: models.map((model, at) => ({
+        key: `${key}-${at}`,
+        ...(model ? { model: { route: "r", model } } : {}),
+      })),
+    }) as unknown as ThreadItem;
+  it("names a run's model only where it changes from the run before", () => {
+    const items = withModelChanges([
+      work("a", "sol"),
+      work("b", undefined, "sol"),
+      work("c", "terra", "terra"),
+      work("d", "terra", "sol"),
+      work("e", "sol"),
+    ]);
+    expect(items.map((item) => (item.kind === "work" ? item.changedTo?.model : undefined))).toEqual(
+      [undefined, undefined, "terra", undefined, undefined],
+    );
+  });
+  it("leaves a record that never named its models alone", () => {
+    const items = [work("a", undefined), work("b", undefined)];
+    expect(withModelChanges(items)).toEqual(items);
+  });
+});
+
+describe("a chat's thread", () => {
+  const said = [
+    message("ask", 1),
+    message("first", 2, "assistant"),
+    message("answer", 6, "assistant"),
+    message("again", 12),
+    message("second", 13, "assistant"),
+  ];
+  const steps = [step("a", 2500), step("b", 4000), step("c", 14_000)];
+  const shape = (items: ThreadItem[]) =>
+    items.map((item) => (item.kind === "work" ? `steps:${item.steps.length}` : item.key));
+
+  it("gathers a turn's steps behind one caption under what dot said last in it", () => {
+    const thread = chatItems(withWork(threadItems(said), steps, false), false);
+    expect(shape(thread)).toEqual([
+      "message-ask",
+      "message-first",
+      "message-answer",
+      "steps:2",
+      "message-again",
+      "message-second",
+      "steps:1",
+    ]);
+  });
+
+  it("keeps the caption under the files a reply handed over", () => {
+    const result: AgentResult = { id: "r", seq: 7, at: 7_000_000, files: [], summary: "Done" };
+    const items = threadItems(said.slice(0, 3), [], [result]);
+    const thread = chatItems(withWork(items, steps.slice(0, 2), false), false);
+    expect(shape(thread)).toEqual([
+      "message-ask",
+      "message-first",
+      "message-answer",
+      "result-r",
+      "steps:2",
+    ]);
+  });
+
+  it("has no caption while dot works on a turn it has said nothing in", () => {
+    const items = threadItems(said.slice(0, 1));
+    expect(shape(chatItems(withWork(items, steps.slice(0, 1), true), true))).toEqual([
+      "message-ask",
+    ]);
+    // Finished without a word, the steps are all it has to show.
+    expect(shape(chatItems(withWork(items, steps.slice(0, 1), false), false))).toEqual([
+      "message-ask",
+      "steps:1",
+    ]);
+  });
+
+  it("names the steps by their turn, so a caption stays the same row as they arrive", () => {
+    const key = (count: number) =>
+      chatItems(withWork(threadItems(said.slice(0, 2)), steps.slice(0, count), true), true).find(
+        (item) => item.kind === "work",
+      )?.key;
+    expect(key(1)).toBe(key(2));
+  });
+});
+
+describe("a message dot hasn't answered", () => {
+  it("is the thread's latest word until dot says anything after it", () => {
+    const asked = [message("ask", 1), message("reply", 2, "assistant")];
+    expect(unanswered(threadItems(asked))).toBe(false);
+    expect(unanswered(threadItems([...asked, message("again", 3)]))).toBe(true);
+    expect(
+      unanswered(threadItems([...asked, message("again", 3), message("on it", 4, "assistant")])),
+    ).toBe(false);
+    expect(unanswered([])).toBe(false);
+  });
 });

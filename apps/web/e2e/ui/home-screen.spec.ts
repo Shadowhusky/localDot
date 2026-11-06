@@ -36,7 +36,7 @@ test("the home-screen app follows the visible viewport after launch and resume",
   // Zooming should magnify the page, without resizing its layout underneath the user.
   await page.evaluate(() => {
     const view = window.visualViewport;
-    Object.defineProperty(view, "scale", { configurable: true, get: () => 2 });
+    Object.defineProperty(view, "width", { configurable: true, get: () => 195 });
     Object.defineProperty(view, "height", { configurable: true, get: () => 422 });
     view?.dispatchEvent(new Event("resize"));
   });

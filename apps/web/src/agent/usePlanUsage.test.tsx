@@ -3,7 +3,9 @@ import type { PlanUsageReply } from "@localdot/protocol";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../lib/api.ts";
-import { usePlanUsage } from "./usePlanUsage.ts";
+import { usePlanUsage, WATCH_FRESH_MS } from "./usePlanUsage.ts";
+
+const POLL_MINUTES = 5;
 
 afterEach(() => vi.useRealTimers());
 
@@ -57,6 +59,79 @@ describe("plan usage feed", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(get.mock.calls.length).toBe(calls);
+  });
+
+  it("asks for fresh figures once a minute while watched, not on every look and not when hidden", async () => {
+    vi.useFakeTimers();
+    const { api, get } = client(() => Promise.resolve(reply(10)));
+    const { result } = renderHook(() => usePlanUsage(api, true));
+    await act(async () => {});
+    let stop!: () => void;
+    act(() => {
+      stop = result.current.watch();
+    });
+    const fresh = () =>
+      get.mock.calls.filter(([path]) => path === "/api/agent/plan-usage?fresh=1").length;
+    expect(fresh()).toBe(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WATCH_FRESH_MS - 5_000);
+    });
+    expect(fresh()).toBe(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fresh()).toBe(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WATCH_FRESH_MS);
+    });
+    expect(fresh()).toBe(3);
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WATCH_FRESH_MS * 2);
+    });
+    expect(fresh()).toBe(3);
+    hidden.mockRestore();
+    act(() => stop());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MINUTES * 60_000);
+    });
+    expect(fresh()).toBe(3);
+  });
+
+  it("asks for fresh figures when a turn ends, and only while a plan is in use", async () => {
+    const { api, get } = client(() => Promise.resolve(reply(10)));
+    const fresh = () =>
+      get.mock.calls.filter(([path]) => path === "/api/agent/plan-usage?fresh=1").length;
+    const { rerender } = renderHook(({ on, working }) => usePlanUsage(api, on, working), {
+      initialProps: { on: false, working: true },
+    });
+    rerender({ on: false, working: false });
+    await act(async () => {});
+    expect(fresh()).toBe(0);
+    rerender({ on: true, working: true });
+    await act(async () => {});
+    expect(fresh()).toBe(0);
+    rerender({ on: true, working: false });
+    await act(async () => {});
+    expect(fresh()).toBe(1);
+    rerender({ on: true, working: false });
+    await act(async () => {});
+    expect(fresh()).toBe(1);
+  });
+
+  it("keeps the same figures object when a look changes nothing, so nothing draws again", async () => {
+    vi.useFakeTimers();
+    const { api } = client(() => Promise.resolve(reply(10)));
+    const { result } = renderHook(() => usePlanUsage(api, true));
+    await act(async () => {});
+    const shown = result.current.reply;
+    act(() => {
+      result.current.watch();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WATCH_FRESH_MS);
+    });
+    expect(result.current.reply).toBe(shown);
   });
 
   it("drops an answer overtaken by a later one, and a reply that isn't plan usage", async () => {

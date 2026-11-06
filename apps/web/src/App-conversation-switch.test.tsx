@@ -7,6 +7,7 @@ import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
+import { VIEW_STYLE_KEY } from "./shell/view-style.ts";
 import { closeStreams } from "./stage/live-stream.ts";
 import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
@@ -168,6 +169,7 @@ it("clears the thread the moment New conversation is pressed, and never draws th
 });
 
 it("offers New conversation in a phone's top corner, and drops it once the conversation is new", async () => {
+  localStorage.setItem(VIEW_STYLE_KEY, "studio");
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: /width < (700|1100)px/.test(query),
     media: query,

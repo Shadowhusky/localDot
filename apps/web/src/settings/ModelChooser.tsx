@@ -30,6 +30,8 @@ export interface ModelChooserProps {
   main?: string;
   // The role's notes under its rows, which say what the choice means.
   describedBy?: string;
+  // What stops the choice being saved, once saving has been tried.
+  problem?: string;
   onChange(value: RoleChoice): void;
 }
 
@@ -74,6 +76,7 @@ export function ModelChooser({
   subscriptionModels,
   main,
   describedBy,
+  problem,
   onChange,
 }: ModelChooserProps) {
   const provider = providerById(value.provider);
@@ -87,10 +90,16 @@ export function ModelChooser({
       : value.provider === CLAUDE_CODE
         ? "Set up Claude Code to load its models."
         : "No models in the list yet. Refresh the model list.";
-  const idProblem = value.model ? modelIdProblem(value.model) : null;
+  const idProblem = (value.model ? modelIdProblem(value.model) : null) ?? problem;
+  const chooseModel = plan || (provider && !provider.notOffered);
   return (
     <>
-      <Field label="Provider" inline className="ui-group-row">
+      <Field
+        label="Provider"
+        inline
+        className="ui-group-row"
+        {...(problem && !chooseModel ? { error: problem } : {})}
+      >
         <Combobox
           appearance="inline"
           value={value.provider}
@@ -111,7 +120,7 @@ export function ModelChooser({
           />
         </Field>
       )}
-      {(plan || (provider && !provider.notOffered)) &&
+      {chooseModel &&
         (typed && !models.length ? (
           <Field label="Model ID" inline className="ui-group-row" error={idProblem ?? undefined}>
             <TextField
@@ -132,7 +141,7 @@ export function ModelChooser({
             label="Model"
             inline
             className="ui-group-row"
-            {...(typed ? { error: idProblem ?? undefined } : {})}
+            {...(typed || idProblem ? { error: idProblem ?? undefined } : {})}
             disabledReason={items.length || typed ? undefined : empty}
           >
             <Combobox

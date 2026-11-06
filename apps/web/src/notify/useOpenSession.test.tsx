@@ -25,10 +25,12 @@ function heading(id: string) {
 
 function setup(initial: Partial<OpenSessionProps> = {}) {
   const select = vi.fn();
+  const take = vi.fn(async (_id: string) => true);
   let props: OpenSessionProps = {
     known: false,
     sessionId: null,
     decision: null,
+    take,
     select,
     ...initial,
   };
@@ -37,6 +39,7 @@ function setup(initial: Partial<OpenSessionProps> = {}) {
   });
   return {
     select,
+    take,
     open: (id: string) => act(() => hook.result.current(id)),
     set: (next: Partial<OpenSessionProps>) => {
       props = { ...props, ...next };
@@ -57,9 +60,33 @@ it("holds a link that arrives while the page opens, then lands on the live task'
   expect(document.activeElement).toBe(card);
 });
 
-it("opens any task but the one Watch shows in Replay", () => {
-  const f = setup({ known: true, sessionId: LIVE });
+it("takes up another task's conversation and lands on its decision, not the one left behind", async () => {
+  const left = heading("approval-left");
+  const f = setup({ known: true, sessionId: LIVE, decision: left.id });
   f.open(OTHER);
+  await act(async () => {});
+  expect(f.take).toHaveBeenCalledWith(OTHER);
+  expect(f.select).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersToNextFrame());
+  expect(document.activeElement).not.toBe(left);
+  const card = heading("approval-other");
+  f.set({ sessionId: OTHER, decision: card.id });
+  act(() => vi.advanceTimersToNextFrame());
+  expect(document.activeElement).toBe(card);
+});
+
+it("waits for the page to settle before taking another task up", () => {
+  const f = setup({ known: false, sessionId: LIVE });
+  f.open(OTHER);
+  expect(f.take).not.toHaveBeenCalled();
+  f.set({ known: true });
+  expect(f.take).toHaveBeenCalledWith(OTHER);
+});
+
+it("opens in Replay a task no conversation can take up", async () => {
+  const f = setup({ known: true, sessionId: LIVE, take: vi.fn(async () => false) });
+  f.open(OTHER);
+  await act(async () => {});
   expect(f.select).toHaveBeenCalledWith(OTHER);
 });
 

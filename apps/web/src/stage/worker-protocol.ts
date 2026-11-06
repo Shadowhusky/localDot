@@ -16,8 +16,16 @@ export interface StageClock {
   originMicros: number;
 }
 
+// Which screen is in front of the one the stage shows, and the desktop's size they share. Null where
+// the stage draws one recording, as in Replay.
+export interface StageComposite {
+  front: ScreenName;
+  desktop: { w: number; h: number };
+}
+
 export interface StageViewPatch {
   selection?: ScreenSelectionSnapshot | null;
+  composite?: StageComposite | null;
   zoom?: number;
   freeze?: boolean;
   reducedMotion?: boolean;
@@ -85,7 +93,7 @@ export type WorkerIn =
       theme: StageTheme;
       reducedMotion: boolean;
     }
-  | { type: "resize"; width: number; height: number }
+  | { type: "resize"; width: number; height: number; dpr: number }
   // S8's seed travels with the readable (Part 2's Task 14): the <video>'s frame at tap time.
   | {
       type: "frames";
@@ -96,9 +104,11 @@ export type WorkerIn =
       // The frames follow as "frame" messages for this source.
       pushed?: boolean;
       first?: VideoFrame;
+      // For the desktop's picture under the browser's window.
+      under?: boolean;
     }
-  | { type: "frame"; sourceId?: number; frame: VideoFrame }
-  | { type: "stop" }
+  | { type: "frame"; sourceId?: number; frame: VideoFrame; under?: boolean }
+  | { type: "stop"; under?: boolean }
   | { type: "probe"; rect: ProbeRect | null; threshold: number }
   | { type: "events"; events: LocalDotEvent[] }
   | { type: "session-reset" }
@@ -115,7 +125,7 @@ export type WorkerIn =
 export type WorkerOut =
   // Sent once as the worker starts: whether it can read a track handed to it.
   | { type: "caps"; tracks: boolean }
-  | { type: "stats"; sourceId?: number; stats: PumpStats }
+  | { type: "stats"; sourceId?: number; stats: PumpStats; under?: boolean }
   | { type: "error"; message: string }
   | { type: "warn"; message: string }
   | { type: "flip"; flip: Flip }

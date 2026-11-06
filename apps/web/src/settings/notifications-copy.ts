@@ -34,7 +34,7 @@ export function deviceCopy(
       };
     case "needs-home-screen":
       return {
-        line: "Add localDot to your Home Screen first: tap Share, then Add to Home Screen. Open it from there, paste this link to sign in, then turn notifications on.",
+        line: `${state.bareAddress ? "If you can, open localDot from its Tailscale link first: an iPhone doesn't trust this address's certificate, so the app would lose its icon. " : ""}Add localDot to your Home Screen first: tap Share, then Add to Home Screen. Open it from there, paste this link to sign in, then turn notifications on.`,
         action: "copy-link",
       };
     case "unsupported":

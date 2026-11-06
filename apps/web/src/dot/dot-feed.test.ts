@@ -329,6 +329,14 @@ describe("the tool dot works with", () => {
     });
   });
 
+  it("says which dot the task works as at that moment", () => {
+    const m = emptyModel();
+    m.dots.push({ t: 0, persona: "everyday" }, { t: 500, persona: "design" });
+    expect(dotFeed(status("thinking"), m, 100).persona).toBe("everyday");
+    expect(dotFeed(status("thinking"), m, 600).persona).toBe("design");
+    expect(dotFeed(status("thinking"), null, 600).persona).toBeUndefined();
+  });
+
   it("brings out a helper for each sub-agent at work, and lets one go with how it went", () => {
     const m = emptyModel();
     m.subagents.push(

@@ -58,6 +58,25 @@ it("holds the end as rows arrive while following it", async () => {
   expect(element.scrollTop).toBe(840);
 });
 
+it("stays at the end when shorter content and a taller foot arrive in one frame", async () => {
+  render(<List />);
+  const { element, add, end } = view();
+  element.scrollTop = 800;
+  await add();
+  await add();
+  expect(element.scrollTop).toBe(end());
+  // A row leaves as the foot under the list grows: the browser clamps the view to the shorter
+  // content, and the list then finds itself further from an end the foot has moved.
+  Object.defineProperty(element, "clientHeight", { configurable: true, value: 100 });
+  await act(async () => {
+    element.querySelector("li")?.remove();
+    element.scrollTop -= 40;
+  });
+  expect(element.scrollTop).toBe(end());
+  await add();
+  expect(element.scrollTop).toBe(end());
+});
+
 it("leaves the view where a control taking the focus brought it, before its scroll event", async () => {
   render(<List />);
   const { element, add } = view();
@@ -233,6 +252,18 @@ it("keeps following through a tap at the end, holding the rows under the finger 
   expect(following()).toBe(true);
   expect(element.scrollTop).toBe(end());
   expect(taken).toHaveBeenCalledOnce();
+});
+
+it("follows what a tap unfolds from its first frame, not once the wait for a flick is over", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  render(<Reader />);
+  const { element, add, end, scroll } = view();
+  scroll(end());
+  fireEvent.touchStart(element, { touches: [{ clientY: 300 }] });
+  fireEvent.touchEnd(element, { touches: [], changedTouches: [{ clientY: 300 }] });
+  fireEvent.click(element);
+  await add();
+  expect(element.scrollTop).toBe(end());
 });
 
 it("keeps following through a wheel down at the end and a click that scrolls nothing", async () => {
@@ -432,4 +463,204 @@ it("stops bringing a run into view once the reader scrolls back", async () => {
   const left = element.scrollTop;
   await frames(1500);
   expect(element.scrollTop).toBe(left);
+});
+
+// A reader above the end, over rows whose place and height the test sets: [top in the content, height].
+function Rows({ count, whole }: { count: number; whole?: () => boolean }) {
+  const follow = useFollowScroll("task", true, whole);
+  return (
+    <div ref={follow.ref} data-testid="view" onScroll={follow.onScroll} {...follow.gestures()}>
+      <ul>
+        {Array.from({ length: count }, (_, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: fixed rows, placed by the test.
+          <li key={index} data-anchor="" />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function placed(rows: [number, number][]) {
+  const { element, scroll, end } = view();
+  const items = [...element.querySelectorAll("li")];
+  element.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+  const place = () => {
+    items.forEach((item, index) => {
+      const [top, height] = rows[index] ?? [0, 0];
+      Object.defineProperties(item, {
+        offsetTop: { configurable: true, value: top },
+        offsetHeight: { configurable: true, value: height },
+      });
+      item.getBoundingClientRect = () =>
+        ({ top: top - element.scrollTop, bottom: top + height - element.scrollTop }) as DOMRect;
+    });
+  };
+  place();
+  // What an animation does before the frame's callbacks; the hook hears of it after them.
+  const drift = (next: [number, number][]) => {
+    rows.splice(0, rows.length, ...next);
+    place();
+  };
+  const change = async (next: [number, number][]) => {
+    drift(next);
+    await act(async () => {
+      element.querySelector("ul")?.append(document.createTextNode(""));
+    });
+  };
+  return { element, scroll, end, drift, change };
+}
+
+const frame = () =>
+  act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  });
+
+it("keeps what the reader sees when the row their view starts inside folds away above it", async () => {
+  render(<Rows count={2} />);
+  const { element, scroll, change } = placed([
+    [0, 600],
+    [600, 100],
+  ]);
+  fireEvent.wheel(element, { deltaY: -120 });
+  scroll(500);
+  await frame();
+  // The first row, its top above the view, folds from 600 to 60; the next row comes up with it.
+  await change([
+    [0, 60],
+    [60, 100],
+  ]);
+  expect(element.scrollTop).toBe(-40);
+});
+
+it("leaves the view alone when the row it starts inside grows", async () => {
+  render(<Rows count={2} />);
+  const { element, scroll, change } = placed([
+    [0, 600],
+    [600, 100],
+  ]);
+  fireEvent.wheel(element, { deltaY: -120 });
+  scroll(500);
+  await frame();
+  await change([
+    [0, 700],
+    [700, 100],
+  ]);
+  expect(element.scrollTop).toBe(500);
+});
+
+it("goes from where the reader was when rows leaving above leave the view past the new end", async () => {
+  render(<Rows count={2} />);
+  const { element, scroll, change } = placed([
+    [1000, 100],
+    [1100, 100],
+  ]);
+  fireEvent.wheel(element, { deltaY: -120 });
+  scroll(1050);
+  await frame();
+  // The browser has clamped the view to the shorter content before the hook hears of it.
+  Object.defineProperty(element, "scrollHeight", { configurable: true, value: 600 });
+  element.scrollTop = 400;
+  await change([
+    [300, 100],
+    [400, 100],
+  ]);
+  // The anchor came up 700: the reader's 1050 goes to 350, not the clamped 400 to -300.
+  expect(element.scrollTop).toBe(350);
+});
+
+it("goes from where the reader was when rows leave above a finger at the end", async () => {
+  render(<Rows count={2} />);
+  const { element, scroll, change } = placed([
+    [1000, 100],
+    [1100, 100],
+  ]);
+  Object.defineProperty(element, "scrollHeight", { configurable: true, value: 1250 });
+  scroll(1050);
+  fireEvent.touchStart(element, { touches: [{ clientY: 300 }] });
+  // Still following as the finger comes down; the browser clamps the view to the shorter content.
+  Object.defineProperty(element, "scrollHeight", { configurable: true, value: 600 });
+  element.scrollTop = 400;
+  await change([
+    [300, 100],
+    [400, 100],
+  ]);
+  expect(element.scrollTop).toBe(350);
+});
+
+it("holds what the reader sees through every frame of a fold above it", async () => {
+  render(<Rows count={2} />);
+  const { element, scroll, drift, change } = placed([
+    [0, 700],
+    [700, 100],
+  ]);
+  fireEvent.wheel(element, { deltaY: -120 });
+  scroll(750);
+  await frame();
+  await change([
+    [0, 690],
+    [690, 100],
+  ]);
+  expect(element.scrollTop).toBe(740);
+  // The scroll event of that move, then the fold's next step by the time of the frame's callbacks.
+  fireEvent.scroll(element);
+  drift([
+    [0, 680],
+    [680, 100],
+  ]);
+  await frame();
+  await change([
+    [0, 680],
+    [680, 100],
+  ]);
+  expect(element.scrollTop).toBe(730);
+});
+
+it("follows no end that is only the end of a page of rows", async () => {
+  let whole = false;
+  render(<Rows count={1} whole={() => whole} />);
+  const { element, end, scroll } = placed([[0, 100]]);
+  fireEvent.wheel(element, { deltaY: -120 });
+  scroll(100);
+  fireEvent.wheel(element, { deltaY: 120 });
+  scroll(end());
+  expect(element.scrollTop).toBe(end());
+  // Nothing brought the reader back: a row arriving does not pull the view along.
+  Object.defineProperty(element, "scrollHeight", { configurable: true, value: 2000 });
+  await act(async () => {
+    element.querySelector("ul")?.append(document.createTextNode(""));
+  });
+  expect(element.scrollTop).toBeLessThan(end());
+  whole = true;
+  fireEvent.wheel(element, { deltaY: 120 });
+  scroll(end());
+  expect(element.scrollTop).toBe(end());
+});
+
+it("reads nothing and moves nothing while the list is out of the page", async () => {
+  render(<Rows count={1} />);
+  const { element, scroll, change } = placed([[500, 100]]);
+  fireEvent.wheel(element, { deltaY: -120 });
+  scroll(450);
+  await frame();
+  Object.defineProperty(element, "clientHeight", { configurable: true, value: 0 });
+  await change([[0, 0]]);
+  Object.defineProperty(element, "clientHeight", { configurable: true, value: 200 });
+  await change([[500, 100]]);
+  expect(element.scrollTop).toBe(450);
+});
+
+it("still follows when content that shortened under the end has grown back by the time it hears", async () => {
+  render(<List />);
+  const { element, add, end } = view();
+  element.scrollTop = end();
+  await add();
+  expect(element.scrollTop).toBe(end());
+  // Rows left above and the browser clamped the view, then more rows came, all within one task.
+  element.scrollTop = end() - 300;
+  await act(async () => {
+    const list = element.querySelector("ul") as HTMLElement;
+    list.firstElementChild?.remove();
+    list.append(document.createElement("li"), document.createElement("li"));
+  });
+  expect(element.scrollTop).toBe(end());
 });

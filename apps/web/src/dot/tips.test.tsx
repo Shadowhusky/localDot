@@ -85,7 +85,7 @@ describe("dot's idle lines", () => {
     const steps = TIPS.flatMap((tip) => (tip.action ? [{ id: tip.id, action: tip.action }] : []));
     expect(steps.length).toBeGreaterThan(0);
     for (const { id, action } of steps) {
-      expect(["settings", "replay", "routine"], id).toContain(action.opens);
+      expect(["settings", "replay", "routine", "view"], id).toContain(action.opens);
       expect(["Open", "Try it"], id).toContain(action.label);
       if (action.opens !== "settings") continue;
       expect(ids.has(action.section), id).toBe(true);

@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dragWidth, type PanelWidth, readWidth, rubberBand, saveWidth } from "./panel-width.ts";
+import {
+  dragWidth,
+  type PanelWidth,
+  readWidth,
+  rubberBand,
+  saveWidth,
+  widthLimits,
+} from "./panel-width.ts";
 import { ResizeHandle } from "./ResizeHandle.tsx";
 
 const PANEL: PanelWidth = { key: "test.width", initial: 300, min: 200, max: 500, reserve: 0 };
@@ -47,6 +54,28 @@ describe("ResizeHandle", () => {
     expect(edge.getAttribute("aria-valuenow")).toBe("200");
     expect(shown()).toBe("200px");
     expect(readWidth(PANEL)).toBe(200);
+  });
+
+  it("widens to the right on a panel's right edge, by pointer and by arrow", () => {
+    render(<ResizeHandle panel={PANEL} property="--panel-w" label="Panel width" side="right" />);
+    const edge = handle();
+    fireEvent.keyDown(edge, { key: "ArrowRight" });
+    expect(edge.getAttribute("aria-valuenow")).toBe("316");
+    fireEvent.keyDown(edge, { key: "ArrowLeft" });
+    expect(edge.getAttribute("aria-valuenow")).toBe("300");
+    fireEvent.pointerDown(edge, { button: 0, pointerId: 1, clientX: 300 });
+    fireEvent.pointerMove(edge, { pointerId: 1, clientX: 360 });
+    expect(edge.getAttribute("aria-valuenow")).toBe("360");
+    fireEvent.pointerUp(edge, { pointerId: 1, clientX: 360 });
+    expect(readWidth(PANEL)).toBe(360);
+  });
+
+  it("leaves the stage its room beside the other panel", () => {
+    const other: PanelWidth = { key: "test.other", initial: 400, min: 100, max: 900, reserve: 0 };
+    const panel = { ...PANEL, max: 800, reserve: 300, beside: () => readWidth(other) };
+    expect(widthLimits(panel, 1200).max).toBe(500);
+    saveWidth(other, 700);
+    expect(widthLimits(panel, 1200).max).toBe(200);
   });
 
   it("follows the pointer from where it was grabbed, gives softly past a limit and settles inside it", () => {

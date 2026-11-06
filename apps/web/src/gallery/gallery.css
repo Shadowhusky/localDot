@@ -278,3 +278,21 @@
     gap: var(--spacing);
   }
 }
+
+.gallery-helpers {
+  display: grid;
+  gap: var(--spacing-gutter);
+}
+
+.gallery-helpers-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-gutter);
+  color: var(--color-text-3);
+}
+
+.gallery-looks-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-rail-gap);
+}

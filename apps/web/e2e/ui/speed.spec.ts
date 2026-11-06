@@ -1,5 +1,5 @@
 import { choose, closeSettings, openSettings, roleCard } from "../settings-ui.ts";
-import { composer, expect, isPhone, runAt, test } from "./harness.ts";
+import { expect, isPhone, openComposer, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
 
@@ -8,7 +8,7 @@ test("each speed a model offers comes with its price, and the model button marks
   ui,
 }, testInfo) => {
   await ui.open("ready");
-  const trigger = (await composer(page)).getByRole("button", { name: /^Model:/ });
+  const trigger = (await openComposer(page)).getByRole("button", { name: /^Model:/ });
   await trigger.click();
   const panel = page.getByRole("dialog", { name: "Model and thinking" });
   await choose(page, panel.getByRole("combobox", { name: "Model", exact: true }), "GPT-6 Luna", {
@@ -84,7 +84,7 @@ test("a fast model on the main model's provider starts from its key and a cheape
 
   // Each edit saved itself, Speed included, so Settings closes with nothing to discard.
   await closeSettings(page);
-  const trigger = (await composer(page)).getByRole("button", { name: /^Model:/ });
+  const trigger = (await openComposer(page)).getByRole("button", { name: /^Model:/ });
   await expect(trigger).toHaveAttribute("aria-label", /^Model: GPT-6\.1 Sol, Ultrafast$/);
   await expect(trigger.locator(".ui-speed-mark")).toHaveAttribute("data-speed", "ultrafast");
   await expect(trigger.locator(".ui-speed-mark svg")).toHaveCount(2);

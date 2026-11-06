@@ -40,3 +40,16 @@ export function onGiveBack(listener: GivenListener): () => void {
     given.delete(listener);
   };
 }
+
+// A phone's More menu has no draft of its own: it asks the composer to send its message after this
+// task.
+const after = new Set<() => void>();
+export function sendAfter(): void {
+  for (const listener of after) listener();
+}
+export function onSendAfter(listener: () => void): () => void {
+  after.add(listener);
+  return () => {
+    after.delete(listener);
+  };
+}

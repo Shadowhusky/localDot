@@ -5,6 +5,7 @@ import { type AgentStep, emptyAgentModel } from "../agent/model.ts";
 import { workSteps } from "../agent/thread.ts";
 import { createApi } from "../lib/api.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
+import { PANEL_NAME } from "../shell/panel-name.ts";
 import { Button } from "../ui/Button.tsx";
 
 const api = createApi("fixture", { origin: "http://localhost" });
@@ -63,7 +64,7 @@ export function ActivityPage() {
         </Button>
         <Button onClick={() => setCount(count + 100)}>Append 100 steps</Button>
         <Button onClick={() => setChat(!chat)}>
-          {chat ? "Show Activity panel" : "Show Chat steps"}
+          {chat ? `Show ${PANEL_NAME} panel` : "Show Chat steps"}
         </Button>
         <output ref={metrics} aria-label="Render duration" />
       </div>

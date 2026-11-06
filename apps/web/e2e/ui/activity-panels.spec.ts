@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, type Harness, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
@@ -7,10 +8,10 @@ runAt("c14", "c39", "w39");
 const GAP = 8;
 
 async function activity(page: Page) {
-  if (isPhone(page)) await page.getByRole("button", { name: "Activity", exact: true }).click();
+  if (isPhone(page)) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
   else
-    await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
-  return page.getByRole("tablist", { name: "Activity" });
+    await page.locator(".rail-chat").getByRole("radio", { name: PANEL_NAME, exact: true }).click();
+  return page.getByRole("tablist", { name: PANEL_NAME });
 }
 
 // A research task part-way through, so Sources joins the tabs.
@@ -102,7 +103,22 @@ async function expectWholeTabs(tabs: Locator) {
   return report.iconic;
 }
 
-test("Activity's tabs are never cut, however many there are", async ({ page, ui }) => {
+test("the plan stays with the steps, and its tab says how far it has got", async ({ page, ui }) => {
+  await ui.open("running");
+  const tabs = await activity(page);
+  await expect(tabs.getByRole("tab", { name: "Steps 1/4" })).toBeVisible();
+  const strip = page.locator(".plan-strip");
+  await expect(strip).toBeVisible();
+  const box = await strip.boundingBox();
+  // One line: the item dot is on and how far it has got.
+  expect(box?.height ?? 99).toBeLessThanOrEqual(isPhone(page) ? 44 : 36);
+  await tabs.getByRole("tab", { name: /^Agents/ }).click();
+  // A phone keeps its panels side by side to swipe between; another tab's are out of view.
+  await expect(strip).not.toBeInViewport();
+  await expect(tabs.getByRole("tab", { name: "Steps 1/4" })).toBeVisible();
+});
+
+test("the panel's tabs are never cut, however many there are", async ({ page, ui }) => {
   const fixture = await research(ui);
   const tabs = await activity(page);
   for (const extra of ["/__qa/agents", "/__qa/work?kind=files", "/__qa/research?n=3"]) {

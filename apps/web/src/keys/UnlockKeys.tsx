@@ -2,6 +2,7 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import { passphraseProblem } from "../settings/dot-copy.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
+import { useRevealInvalid } from "../ui/reveal-field.ts";
 import { TextField } from "../ui/TextField.tsx";
 import { unlockProblem } from "./keys-api.ts";
 import "./keys.css";
@@ -29,6 +30,7 @@ export function UnlockKeys({
   const again = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
+  const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -54,6 +56,7 @@ export function UnlockKeys({
     if (again.current) again.current.value = "";
     if (wrong) {
       setProblem(wrong);
+      reveal();
       return;
     }
     if (first.current) first.current.value = "";
@@ -72,7 +75,13 @@ export function UnlockKeys({
     }
   };
   return (
-    <form className="keys-unlock-form" aria-label={label} autoComplete="on" onSubmit={submit}>
+    <form
+      ref={scope}
+      className="keys-unlock-form"
+      aria-label={label}
+      autoComplete="on"
+      onSubmit={submit}
+    >
       <Field label={setup ? "New passphrase" : "Passphrase"} {...(setup ? {} : { error: problem })}>
         <TextField
           ref={(node) => {

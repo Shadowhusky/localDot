@@ -1,18 +1,24 @@
-import { KEY_SCAN_CHARS, keyLikePresent } from "@localdot/protocol";
+import { keyLikeMatches } from "@localdot/protocol";
 
-// Text past this length is a document rather than a message: it goes with the message as a file,
-// leaving the field for what to do with it.
-export const LONG_PASTE = 4000;
+// The daemon takes 8,000 characters for a message, the names of its files included, and 16 files
+// take up to about 2,000 of them. Text past what is left goes with the message as a file, leaving
+// the field for what to do with it.
+export const LONG_TEXT = 6000;
+// The key guard can't read more than 8,000 characters at once: typing stops at this, a little
+// short of it, and carries on with the text so far as a file.
+export const TEXT_BOUND = 7900;
 
-// The key scanner reads at most KEY_SCAN_CHARS at once, so a longer text is read in windows that
-// overlap by more than any key's length. Past PASTE_SCAN_CHARS it counts as holding one.
-const PASTE_SCAN_CHARS = 1024 * 1024;
-const OVERLAP = 512;
-function holdsKey(text: string): boolean {
-  if (text.length > PASTE_SCAN_CHARS) return true;
-  for (let at = 0; at < text.length; at += KEY_SCAN_CHARS - OVERLAP)
-    if (keyLikePresent(text.slice(at, at + KEY_SCAN_CHARS))) return true;
-  return false;
+// A long text's keys come out before it becomes a file. `keyLikeMatches` reads text of any length.
+export function withoutKeyLike(text: string): { clean: string; removed: number } {
+  let clean = "";
+  let from = 0;
+  let removed = 0;
+  for (const match of keyLikeMatches(text)) {
+    clean += text.slice(from, match.start);
+    from = match.end;
+    removed += 1;
+  }
+  return { clean: removed ? clean + text.slice(from) : text, removed };
 }
 
 // Clipboard pictures come named "image.png" every time.
@@ -25,13 +31,8 @@ function stamp(at: Date): string {
 
 // A name of its own for each pasted picture and text. Downloads never replaces a file, so the time
 // keeps names apart across reloads, and a number apart within one second.
-export function pastedName(
-  kind: "image" | "text",
-  ext: string,
-  taken: ReadonlySet<string>,
-  at = new Date(),
-): string {
-  const base = `Pasted ${kind} ${stamp(at)}`;
+function fileNamed(what: string, ext: string, taken: ReadonlySet<string>, at: Date): string {
+  const base = `${what} ${stamp(at)}`;
   for (let n = 1; ; n++) {
     const name = n === 1 ? `${base}.${ext}` : `${base} ${n}.${ext}`;
     if (!taken.has(name)) return name;
@@ -45,16 +46,34 @@ export function pastedFiles(files: readonly File[], taken: Set<string>, at = new
       .slice("image/".length)
       .replace("jpeg", "jpg")
       .match(/^[a-z0-9]+/) ?? ["png"])[0];
-    const name = pastedName("image", ext, taken, at);
+    const name = fileNamed("Pasted image", ext, taken, at);
     taken.add(name);
     return new File([file], name, { type: file.type, lastModified: file.lastModified });
   });
 }
 
-// A long text the key guard has nothing to say about becomes a text file.
-export function pastedText(text: string, taken: Set<string>, at = new Date()): File | null {
-  if (text.length <= LONG_PASTE || holdsKey(text)) return null;
-  const name = pastedName("text", "txt", taken, at);
+export type LongText = "pasted" | "typed";
+const LONG_NAMES = { pasted: "Pasted text", typed: "Long message" } as const;
+
+const lines = (text: string) => {
+  let count = 1;
+  for (let at = text.indexOf("\n"); at >= 0; at = text.indexOf("\n", at + 1)) count += 1;
+  return count;
+};
+
+// A text too long for a message, as a file of its own and the name its chip goes by. Its file has
+// that name too, which tells dot what it is.
+export function longTextFile(
+  text: string,
+  kind: LongText,
+  taken: Set<string>,
+  at = new Date(),
+): { file: File; label: string } {
+  const name = fileNamed(LONG_NAMES[kind], "txt", taken, at);
   taken.add(name);
-  return new File([text], name, { type: "text/plain" });
+  const count = lines(text);
+  return {
+    file: new File([text], name, { type: "text/plain" }),
+    label: `${LONG_NAMES[kind]} · ${count.toLocaleString("en-US")} ${count === 1 ? "line" : "lines"}`,
+  };
 }

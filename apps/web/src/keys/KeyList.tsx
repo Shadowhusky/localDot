@@ -12,6 +12,8 @@ import { type KeyRecord, problemText } from "./keys-api.ts";
 
 // How long a first press of Remove stays armed.
 export const ARMED_MS = 4000;
+// Where a row's facts wrap, the separator ends the line rather than starting the next.
+const FACT_BREAK = "\u00a0· ";
 
 export interface KeyListProps {
   active: boolean;
@@ -205,7 +207,7 @@ export function KeyList({
                         </span>
                       )}
                       <span className="keys-row-facts" title={facts.join(" · ")}>
-                        {facts.join(" · ")}
+                        {facts.join(FACT_BREAK)}
                       </span>
                     </span>
                   }

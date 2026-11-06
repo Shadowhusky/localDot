@@ -11,6 +11,7 @@ import {
   type SubscriptionModel,
 } from "./choices.ts";
 import { beside, fastBeside } from "./chooser.ts";
+import { promoted } from "./model-library.ts";
 import {
   loadProviderIndex,
   loadSettings,
@@ -367,6 +368,14 @@ export function useSettings(
     if (old?.provider === value?.provider && old?.model !== value?.model) delete prices[role];
     edit({ ...d, choices, prices, ...(models ? { models } : {}) });
   };
+  const changeModels = (models: RoleChoice[]) => {
+    const d = current.current.draft;
+    if (d) edit({ ...d, models });
+  };
+  const takeRole = (role: ModelRole, choice: RoleChoice) => {
+    const d = current.current.draft;
+    if (d) edit({ ...d, ...promoted(d, role, choice) });
+  };
   const changePrice = (role: ModelRole, price: PriceDraft) => {
     const d = current.current.draft;
     if (d) edit({ ...d, prices: { ...d.prices, [role]: price } });
@@ -521,62 +530,6 @@ export function useSettings(
   };
   // Saves another main model outside Settings, checked as Settings checks it. False when it wasn't
   // saved; an unconfirmed save reads the saved settings back.
-  const chooseMain = async (choice: RoleChoice): Promise<boolean> => {
-    const owner = current.current,
-      previous = owner.saved;
-    if (
-      owner.open ||
-      !previous ||
-      mutating.current ||
-      unresolved.current ||
-      document.hidden ||
-      blocked.current ||
-      owner.api !== api ||
-      loadedFor.current !== api
-    )
-      return false;
-    const abort = new AbortController();
-    mutating.current = abort;
-    setBusy(true);
-    let sent = false;
-    try {
-      const fresh = await loadProviderIndex(api, abort.signal);
-      if (!mounted.current || current.current.api !== api) return false;
-      owner.index = fresh;
-      setIndex(fresh);
-      const accountModels =
-        choice.provider === "chatgpt"
-          ? chatgpt.models
-          : choice.provider === "claude-code"
-            ? claudeCode.models
-            : [];
-      const checked = validateForm(
-        formOf({ ...previous, main: choice }),
-        previous,
-        fresh,
-        accountModels,
-      );
-      if (!checked.ok) return false;
-      sent = true;
-      writing.current = true;
-      const next = await saveSettings(api, checked.document, abort.signal);
-      if (!mounted.current || current.current.api !== api) return false;
-      owner.saved = next;
-      setSaved(next);
-      return true;
-    } catch (failure) {
-      if (sent && (!(failure instanceof SettingsFailure) || failure.uncertain) && mounted.current)
-        queueMicrotask(() => void read(false, true));
-      return false;
-    } finally {
-      if (mutating.current === abort) {
-        mutating.current = null;
-        writing.current = false;
-        if (mounted.current) setBusy(false);
-      }
-      abort.abort();
-    }
-  };
   const reload = () => {
     if (!mutating.current && !document.hidden && !blocked.current) {
       current.current.revision++;
@@ -683,6 +636,8 @@ export function useSettings(
     claudeCode,
     subscriptionModels,
     change,
+    changeModels,
+    takeRole,
     changePrice,
     changeAutonomy: (value: unknown) => {
       const parsed = AutonomyPolicy.safeParse(value),
@@ -713,7 +668,6 @@ export function useSettings(
     refresh: () => refreshCatalogIndex(),
     refreshModels: () => refreshCatalogIndex(true),
     reload,
-    chooseMain,
     choosePermissions: (permissionMode: "custom" | "auto" | "full") => choose({ permissionMode }),
     choosePersona: (persona: PersonaId) => choose({ persona }),
     chooseAutoPersona: (on: boolean) => choose({ autoPersona: on ? true : undefined }),

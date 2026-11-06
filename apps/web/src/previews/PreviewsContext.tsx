@@ -18,7 +18,13 @@ import type { ComputerUpdate } from "../cells/useComputerUpdate.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { copyIssuedLink, LinkNotCopied } from "../notify/home-screen-link.ts";
 import { showToast } from "../ui/Toast.tsx";
-import { readPreviews, refusalOf, requestPreview, stopPreview } from "./previews-api.ts";
+import {
+  readPreviews,
+  refusalOf,
+  requestPreview,
+  stopPreview,
+  stopServer,
+} from "./previews-api.ts";
 
 // What a tap that could not open a preview shows beside the control that was tapped.
 export interface PreviewNoticeState {
@@ -46,7 +52,9 @@ export interface Previews {
   copy(request: PreviewRequest, trigger: HTMLElement): void;
   // Ends every preview link, so each device has to open it from localDot again.
   signOut(trigger: HTMLElement): void;
-  // Requests being opened or copied ("copy " before its key), and "sign-out".
+  // Ends the server on a port, in the computer.
+  stop(port: number, trigger: HTMLElement): void;
+  // Requests being opened or copied ("copy " before its key), "stop " and a port, and "sign-out".
   pending: ReadonlySet<string>;
   notice: PreviewNoticeState | null;
   closeNotice(): void;
@@ -273,6 +281,20 @@ export function usePreviewsState(
     [api, sessionId, run, refuse],
   );
 
+  const stop = useCallback(
+    (port: number, trigger: HTMLElement) => {
+      const key = `stop ${port}`;
+      if (!sessionId || busy.current.has(key)) return;
+      setNotice(null);
+      run(key, () =>
+        stopServer(api, sessionId, port).catch((error: unknown) => {
+          refuse(trigger, refusalOf(error));
+        }),
+      );
+    },
+    [api, sessionId, run, refuse],
+  );
+
   const closeNotice = useCallback(() => setNotice(null), []);
   // The app hands over new functions with every render; the context changes only with what shows.
   const given = useRef(actions);
@@ -310,6 +332,7 @@ export function usePreviewsState(
             open,
             copy,
             signOut,
+            stop,
             pending,
             notice,
             closeNotice,
@@ -325,6 +348,7 @@ export function usePreviewsState(
       open,
       copy,
       signOut,
+      stop,
       pending,
       notice,
       closeNotice,

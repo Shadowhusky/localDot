@@ -39,6 +39,25 @@ describe("task text delivery response boundary", () => {
       expect(f.fetchImpl).toHaveBeenCalledOnce();
     },
   );
+  it("carries the model chosen when it was sent, to a task at work and to a new one", async () => {
+    const model = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
+    const f = setup(() => new Response(null, { status: 202 }));
+    await deliverText(f.api, { ...request, model });
+    expect(f.fetchImpl).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: JSON.stringify({ kind: "steer", text: request.text, model }),
+      }),
+    );
+    const next = setup(() => Response.json({ sessionId }, { status: 202 }));
+    await deliverText(next.api, { ...request, mode: "new", model });
+    expect(next.fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining("/agent"),
+      expect.objectContaining({
+        body: JSON.stringify({ task: request.text, continues: sessionId, model }),
+      }),
+    );
+  });
   it("treats lost or malformed accepted replies as uncertain", async () => {
     for (const response of [
       () => {

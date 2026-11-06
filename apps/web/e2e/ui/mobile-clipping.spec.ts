@@ -126,6 +126,16 @@ for (const scenario of ["running", "approval", "ask", "takeover", "budget", "don
     for (const width of [320, 390, 430]) {
       await page.setViewportSize({ width, height: 664 });
       await ui.settle();
+      // The page fits a new viewport within a frame or two of hearing of it.
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (document.querySelector(".thread-toolbar")?.getBoundingClientRect().bottom ?? 0) <=
+              innerHeight + 1,
+          ),
+        )
+        .toBe(true);
       const problems = await page
         .locator(".thread-toolbar button:visible, .island button:visible")
         .evaluateAll((buttons) => {
@@ -182,6 +192,9 @@ test("larger text does not turn an empty narrow composer into a tall column", as
   await field.fill("");
   await ui.settle();
   expect((await field.boundingBox())?.height).toBeLessThan(64);
+  // A short phone gives dot's band to the thread while dot works; a taller one holds its line.
+  await page.setViewportSize({ width: 320, height: 700 });
+  await ui.settle();
   const band = await page.locator(".stage-band").boundingBox();
   const narration = await page.locator(".narration-line").boundingBox();
   expect(narration && band && narration.y + narration.height <= band.y + band.height).toBe(true);

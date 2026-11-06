@@ -38,6 +38,37 @@ function fixture(first: AccessLinksStatus = served) {
 const tailscaleRow = () =>
   screen.getByText("Tailscale", { selector: ".ui-group-row-label" }).closest(".ui-group-row");
 
+const bare = { origin: "https://100.91.187.75:4744", label: "Remote address" };
+const withBare = (tailscale: TailscaleAccess): AccessLinksStatus => ({
+  links: [...status(tailscale).links, bare],
+  tailscale,
+});
+
+it("points an iPhone's Home Screen at the address it trusts, only where there is a choice", async () => {
+  fixture(withBare(served.tailscale));
+  expect(
+    await screen.findByText(/For an iPhone's Home Screen, use the Tailscale link/),
+  ).toBeTruthy();
+  cleanup();
+  fixture({
+    ...served,
+    links: [...served.links, { origin: "http://192.168.1.20:4750", label: "Local network" }],
+  });
+  await screen.findByRole("button", { name: "Copy Tailscale link" });
+  expect(screen.queryByText(/Home Screen/)).toBeNull();
+});
+
+it("says why a bare address makes a poor Home Screen app while Tailscale is off", async () => {
+  fixture(
+    withBare({
+      state: "ready-to-enable",
+      origin,
+      message: "Turn on to open localDot from your devices signed in to Tailscale.",
+    }),
+  );
+  expect(await screen.findByText(/An iPhone doesn't trust/)).toBeTruthy();
+});
+
 it("lists the addresses without creating links, and copies the chosen address on request", async () => {
   const writeText = vi.fn(async () => {});
   vi.stubGlobal("navigator", { clipboard: { writeText } });

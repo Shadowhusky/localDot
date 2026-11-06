@@ -60,14 +60,19 @@ test("a long run of steps opened near the bottom of the chat comes into view to 
   const { run, toggle } = await foldedRun(page, fixture.origin);
   await ui.settle();
   // Its head 40 px above the bottom of the view, so the list it opens would unfold out of sight.
-  await toggle.evaluate((node) => {
-    const view = node.closest(".thread-scroll") as HTMLElement;
-    view.scrollTop -=
-      view.getBoundingClientRect().bottom - node.getBoundingClientRect().bottom - 40;
-  });
-  await ui.settle();
+  // Asked again until it holds: the task's last words may still be arriving under the run.
+  await expect
+    .poll(async () => {
+      await toggle.evaluate((node) => {
+        const view = node.closest(".thread-scroll") as HTMLElement;
+        view.scrollTop -=
+          view.getBoundingClientRect().bottom - node.getBoundingClientRect().bottom - 40;
+      });
+      await ui.settle();
+      return Math.round((await placed(run)).bottom);
+    })
+    .toBe(40);
   const before = await placed(run);
-  expect(Math.round(before.bottom)).toBe(40);
 
   await press(page, toggle);
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -94,7 +99,7 @@ test("a long run of steps opened near the bottom of the chat comes into view to 
 
   // It stays there: nothing pulls the view back, or on to the end.
   await page.waitForTimeout(600);
-  expect(Math.round((await placed(run)).scrollTop)).toBe(Math.round(after.scrollTop));
+  expect(Math.round((await placed(run)).top)).toBe(Math.round(after.top));
 
   // Folding it again leaves its head where it is.
   await press(page, toggle);
@@ -128,6 +133,6 @@ test("a run of steps opened high in the chat moves it only as far as the run nee
   } else {
     // All of it is in view already: the chat stays where it is.
     expect(after.bottom).toBeGreaterThan(before.jumpReach + 8);
-    expect(Math.round(after.scrollTop)).toBe(Math.round(before.scrollTop));
+    expect(Math.round(after.top)).toBe(Math.round(before.top));
   }
 });

@@ -1,3 +1,4 @@
+import type { ResultPreview } from "@localdot/protocol";
 import {
   type ReactNode,
   useCallback,
@@ -15,9 +16,11 @@ import { ProofStrip, ReplayRow } from "../deliverables/ProofStrip.tsx";
 import { useProof } from "../deliverables/useProof.ts";
 import { FileViewerScope, type ViewerEntry } from "../deliverables/viewer/scope.tsx";
 import type { ApiClient } from "../lib/api.ts";
+import { PreviewCard } from "../previews/PreviewCard.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card, FileRow } from "../ui/Card.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { MiddleName } from "../ui/MiddleTruncate.tsx";
 import { downloadResult, FILE_LIMITS, safeTransferName } from "./file-transfer.ts";
 import type { AgentResult } from "./model.ts";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
@@ -245,15 +248,9 @@ export function useResultDownloads(
 }
 export type ResultDownloads = ReturnType<typeof useResultDownloads>;
 
-// Keeps the end of a long name (its extension) in view; the middle gives way.
+// Keeps both ends of a long name in view, its extension among them; the middle gives way.
 export function FileName({ name }: { name: string }) {
-  const tail = Math.min(8, Math.max(0, name.length - 4));
-  return (
-    <span className="file-name" title={name}>
-      <span className="file-name-head">{name.slice(0, name.length - tail)}</span>
-      <span className="file-name-tail">{name.slice(name.length - tail)}</span>
-    </span>
-  );
+  return <MiddleName className="file-name" name={name} />;
 }
 
 // A list's files open the full preview once the list knows its task.
@@ -288,6 +285,8 @@ export interface ResultCardProps {
   onMac?: boolean;
   // A composer is in reach to take a revision.
   revisable?: boolean;
+  // Web apps to open with it: the turn's, unless a later reply offers them again.
+  previews?: readonly ResultPreview[];
 }
 
 // A result: what dot says it did, the files it handed over, and the proof of the work. In the chat
@@ -299,6 +298,7 @@ export function ResultCard({
   refresh = 0,
   onMac = isLoopbackPage(),
   revisable = true,
+  previews,
 }: ResultCardProps) {
   const files = result.files;
   const api = downloads.api;
@@ -344,6 +344,9 @@ export function ResultCard({
           <SafeMarkdown text={result.summary} />
         </div>
       )}
+      {previews?.map((offer) => (
+        <PreviewCard key={offer.url} offer={offer} />
+      ))}
       {files.length > 0 && (
         <Card variant="file" className="result-files">
           {downloadAll && (

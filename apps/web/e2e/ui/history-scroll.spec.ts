@@ -1,3 +1,4 @@
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
@@ -30,9 +31,9 @@ test("earlier Activity and work steps remain reachable without paging or moving 
   expect(await history.evaluate((node) => node.clientHeight)).toBeLessThanOrEqual(280);
   await work.locator(".thread-work-steps > .ui-disclosure-trigger").click();
   const phone = (page.viewportSize()?.width ?? 0) < 700;
-  if (phone) await page.getByRole("button", { name: "Activity", exact: true }).click();
+  if (phone) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
   else
-    await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
+    await page.locator(".rail-chat").getByRole("radio", { name: PANEL_NAME, exact: true }).click();
   const rail = page.locator(".activity-rail");
   // Virtualized rows stay bounded; the last logical row records the loaded window.
   await expect(rail.locator(".activity-window-row[data-last]")).toBeVisible();

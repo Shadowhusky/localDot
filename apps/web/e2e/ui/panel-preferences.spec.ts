@@ -1,3 +1,4 @@
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, runAt, test } from "./harness.ts";
 
 runAt("c14", "w14");
@@ -10,7 +11,7 @@ test("Activity stays in the conversation panel across desktop sizes and reloads"
   await ui.open("done");
   const chat = page.locator(".rail-chat");
   await expect(page.locator(".rail-activity")).toHaveCount(0);
-  await chat.getByRole("radio", { name: "Activity", exact: true }).click();
+  await chat.getByRole("radio", { name: PANEL_NAME, exact: true }).click();
   await chat.getByRole("tab", { name: /^Files/ }).click();
   await page.reload();
   await expect(chat.getByRole("tab", { name: /^Files/ })).toHaveAttribute("aria-selected", "true");
@@ -21,7 +22,7 @@ test("Activity stays in the conversation panel across desktop sizes and reloads"
   await page.reload();
   await expect(chat).toBeHidden();
   await page.getByRole("button", { name: "Show chat", exact: true }).click();
-  await expect(chat.getByRole("radio", { name: "Activity", exact: true })).toBeVisible();
+  await expect(chat.getByRole("radio", { name: PANEL_NAME, exact: true })).toBeVisible();
   await ui.picture();
   await page.screenshot({ path: test.info().outputPath("shared-activity.png") });
 });

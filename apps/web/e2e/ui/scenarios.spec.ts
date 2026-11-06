@@ -21,6 +21,7 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   "chatgpt-plan": hud("Ready"),
   "plan-usage": hud("Ready"),
   running: hud("Select the Net total cell"),
+  "long-thread": hud("Select the Net total cell"),
   library: hud("Select the Net total cell"),
   approval: shows((page) => page.getByRole("dialog", { name: "Send this email?" })),
   ask: hud("Needs your answer"),

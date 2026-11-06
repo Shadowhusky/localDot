@@ -57,7 +57,7 @@
     "control-selector": 2,
     "half-pixel": 2,
     "motion-literal": 7,
-    "raw-colour": 15,
+    "raw-colour": 8,
     "stray-stylesheet": 1,
     "type-literal": 2
   }

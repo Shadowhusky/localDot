@@ -279,9 +279,11 @@ export function PictureView({
         </div>
       </ViewerBar>
       {failed ? (
-        <ViewerMessage name={name} title="Can't show this picture">
-          It may be damaged or in a format this browser can't draw.
-        </ViewerMessage>
+        <ViewerMessage
+          name={name}
+          title="Couldn't show this picture"
+          retry={() => setFailed(false)}
+        />
       ) : (
         // biome-ignore lint/a11y/noStaticElementInteractions: The stage takes pinches and drags; the bar's buttons zoom by keyboard.
         <div

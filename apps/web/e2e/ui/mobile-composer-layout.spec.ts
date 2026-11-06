@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { composer, expect, runAt, test } from "./harness.ts";
 
 runAt("c39", "w39");
@@ -320,4 +321,77 @@ test("keyboard recovery tolerates a stale pan and reopening without another focu
   });
   await expect(app).not.toHaveAttribute("data-composer-keyboard");
   await expect(field).toBeVisible();
+});
+
+// The foot of the toolbar, against the foot of the screen.
+const gapUnderToolbar = async (page: Page) => {
+  const rect = await page.locator(".thread-toolbar").boundingBox();
+  return Math.round(844 - (rect?.y ?? 0) - (rect?.height ?? 0));
+};
+const covering = (page: Page, covered: number) =>
+  page.evaluate((by) => {
+    const view = window.visualViewport;
+    if (!view) throw new Error("Visual viewport required");
+    Object.defineProperty(view, "height", { configurable: true, value: innerHeight - by });
+    view.dispatchEvent(new Event("resize"));
+  }, covered);
+
+test("a viewport left short after the keyboard has gone opens no gap under the toolbar", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("running");
+  await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
+  const app = page.locator(".app");
+  const field = (await composer(page)).getByRole("textbox", { name: "Message", exact: true });
+  await page.request.post(`${fixture.origin}/__qa/stream?ms=4000`);
+  await field.focus();
+  await covering(page, 300);
+  await expect(app).toHaveAttribute("data-composer-keyboard", "");
+  await expect.poll(() => gapUnderToolbar(page)).toBe(300);
+  // The keyboard goes with the field's focus, and WebKit never says the viewport has grown back.
+  await field.blur();
+  await expect(app).not.toHaveAttribute("data-composer-keyboard");
+  await expect.poll(() => gapUnderToolbar(page)).toBe(0);
+  await expect.poll(async () => (await app.boundingBox())?.height).toBe(844);
+  // Typing again takes the toolbar back up to the keyboard.
+  await field.focus();
+  await covering(page, 300);
+  await expect.poll(() => gapUnderToolbar(page)).toBe(300);
+});
+
+test("a press in the open composer's padding reaches the thread control it lies over", async ({
+  page,
+  ui,
+}) => {
+  // Opening in motion, the card rises over the thread instead of pushing it.
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const { origin } = await ui.open("running");
+  await page.request.post(`${origin}/__qa/say?n=20&text=History%20message`);
+  await page.request.post(`${origin}/__qa/steps?n=10`);
+  await page.request.post(`${origin}/__qa/finish?done=1`);
+  await expect(page.locator(".thread-work[data-live]")).toHaveCount(0);
+  const app = page.locator(".app");
+  await expect(app).not.toHaveAttribute("data-entering");
+  const card = await composer(page);
+  await card.getByRole("textbox", { name: "Message", exact: true }).tap();
+  await expect(app).toHaveAttribute("data-composer-keyboard", "");
+  await expect(card).not.toHaveAttribute("data-compact");
+  await expect.poll(() => card.evaluate((node) => node.getAnimations().length)).toBe(0);
+  const toggle = page.locator(".thread-work-steps > .ui-disclosure-trigger").last();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  const point = await toggle.evaluate((node) => {
+    const toolbar = document.querySelector(".thread-toolbar")?.getBoundingClientRect();
+    const view = node.closest(".thread-scroll");
+    if (!toolbar || !view) throw new Error("Nothing to place");
+    const y = toolbar.top + 3;
+    view.scrollTop -= y - node.getBoundingClientRect().top - 3;
+    const box = node.getBoundingClientRect();
+    // At its start: the jump button floats over the middle of a thread read back.
+    return { x: box.left + 30, y, top: box.top, bottom: box.bottom };
+  });
+  expect(point.top).toBeLessThan(point.y);
+  expect(point.bottom).toBeGreaterThan(point.y);
+  await page.touchscreen.tap(point.x, point.y);
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
 });

@@ -1,3 +1,4 @@
+import type { Wearable } from "@localdot/protocol";
 import type { Point } from "./engine/engine.ts";
 import type { DotState } from "./engine/states.ts";
 import { type Box, Flight } from "./flight.ts";
@@ -40,6 +41,9 @@ export interface PresenceOptions {
   state: DotState;
   control: boolean;
   reducedMotion: boolean;
+  wearables?: readonly Wearable[] | undefined;
+  // Where it starts, so its plates are fetched once, at the size that place draws them.
+  place?: PresencePlace | null;
 }
 
 // The one live dot, moved between the places that keep room for it. At rest it sits inside its place,
@@ -59,6 +63,7 @@ export class Presence {
   private place: PresencePlace | null = null;
   // Put away because its place had no box to draw it over.
   private lost = false;
+  private showing = false;
   private drawn = 0;
   private fade: ReturnType<typeof setTimeout> | undefined;
   private reduced: boolean;
@@ -73,7 +78,12 @@ export class Presence {
     this.host = host;
     this.layer = frame.parentElement ?? document.body;
     this.reduced = o.reducedMotion;
-    this.view = new DotView(host, { size: 96, ...o });
+    const { place, wearables, ...start } = o;
+    this.view = new DotView(host, {
+      ...start,
+      size: boxOf(place ? placeElement(place) : null)?.size ?? 96,
+      ...(wearables ? { wearables } : {}),
+    });
   }
 
   setReducedMotion(on: boolean): void {
@@ -190,14 +200,18 @@ export class Presence {
   }
 
   private show(on: boolean): void {
+    this.showing = on;
     if (!on) {
       delete this.frame.dataset.shown;
       return;
     }
-    if (this.frame.dataset.shown !== undefined) return;
-    // A frame that has just moved into its place has no style yet for the fade to start from.
-    void this.frame.offsetWidth;
-    this.frame.dataset.shown = "";
+    // dot comes on to the page whole, with all it wears.
+    this.view.whenDressed(() => {
+      if (!this.showing || this.frame.dataset.shown !== undefined) return;
+      // A frame that has just moved into its place has no style yet for the fade to start from.
+      void this.frame.offsetWidth;
+      this.frame.dataset.shown = "";
+    });
   }
 
   private draw(size: number): void {

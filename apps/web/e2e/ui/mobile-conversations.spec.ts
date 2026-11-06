@@ -301,7 +301,7 @@ test("the desktop rail keeps its marks, rows and menu", async ({ page, ui }) => 
       return { height: Math.round(row.getBoundingClientRect().height), glyph: glyph?.width };
     }),
   );
-  for (const each of rows) expect(each.glyph).toBe(16);
+  for (const each of rows) expect(each.glyph).toBe(12);
   expect(rows.filter((each) => each.height === 36).length).toBeGreaterThan(3);
   await shot(page, ui, "rail-expanded");
 

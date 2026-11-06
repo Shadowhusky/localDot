@@ -1,4 +1,5 @@
 import type { Locator } from "@playwright/test";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, runAt, test } from "./harness.ts";
 
 runAt("c39", "w39");
@@ -14,8 +15,8 @@ test("a mouse on Activity content never drags the sheet; its handle dismisses it
 }) => {
   await page.setViewportSize({ width: 390, height: 680 });
   await ui.open("done");
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Activity" });
+  await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: PANEL_NAME });
   const pane = sheet.locator('[role="tabpanel"]:not([aria-hidden]) .activity-scroll');
   await pane.evaluate((node) => {
     node.scrollTop = 0;
@@ -50,8 +51,8 @@ test("Activity pages follow horizontal scroll and keep each tab's vertical posit
 }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await ui.open("done");
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Activity" });
+  await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: PANEL_NAME });
   const pager = sheet.locator(".ui-swipe-panels");
   const steps = sheet.locator('[role="tabpanel"]').first().locator(".activity-scroll");
   await ui.settle();
@@ -70,8 +71,8 @@ test("Activity pages follow horizontal scroll and keep each tab's vertical posit
 
 test("the plan stays visible below tabs while steps scroll", async ({ page, ui }) => {
   await ui.open("done");
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Activity" });
+  await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: PANEL_NAME });
   const plan = sheet.locator(".activity-plan");
   await expect(plan).toBeVisible();
   const before = await bounds(plan);
@@ -92,8 +93,8 @@ test("a finger swipe switches Activity tabs without moving the sheet", async ({
   test.skip(browserName !== "chromium", "CDP touch injection needs Chromium");
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await ui.open("done");
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Activity" });
+  await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: PANEL_NAME });
   await ui.settle();
   const pane = sheet.locator('[role="tabpanel"]').first().locator(".activity-scroll");
   await page.evaluate(() =>
@@ -130,8 +131,8 @@ test("opening the pinned plan preserves the steps viewport and scroll position",
 }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await ui.open("done");
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Activity" });
+  await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: PANEL_NAME });
   await expect(sheet).toBeVisible();
   await page.evaluate(() =>
     Promise.all(
@@ -176,8 +177,8 @@ test("the filter travels with Steps and selection updates at the halfway thresho
   ui,
 }) => {
   await ui.open("done");
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Activity" });
+  await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: PANEL_NAME });
   const pager = sheet.locator(".ui-swipe-panels");
   const filter = sheet.locator(".activity-filter");
   await expect(filter).toBeVisible();
