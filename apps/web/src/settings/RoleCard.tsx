@@ -54,10 +54,24 @@ export interface RoleCardProps {
   // Why the role is off: the main model runs on a plan's own app, which brings its own models.
   inactive?: string;
   manualPrice?: { input: string; output: string };
+  // What stops this role being saved, once saving has been tried.
+  problem?: string;
+  // Why the model failed dot's last quick request, until it answers one again.
+  failure?: string;
   onChange(value: RoleChoice | undefined): void;
   onKeys(role: ModelRole, provider: string, trigger: HTMLButtonElement): void;
   onPrice?(value: { input: string; output: string }): void;
 }
+
+// The field that says what is wrong with a role; the model's unless it is about another.
+function problemField(problem: string | undefined): "model" | "key" | "price" | "context" | null {
+  if (!problem) return null;
+  if (problem.startsWith("enter both")) return "price";
+  if (problem.startsWith("enter a context")) return "context";
+  return /^(choose a stored key|reconnect the key|this key)/.test(problem) ? "key" : "model";
+}
+
+const capital = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
 // Notes from the catalog may come without a full stop; joined into one line, each needs one.
 const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
@@ -81,6 +95,8 @@ export function RoleCard({
   main,
   inactive,
   manualPrice,
+  problem,
+  failure,
   onChange,
   onKeys,
   onPrice,
@@ -105,6 +121,7 @@ export function RoleCard({
   const notes =
     on && !inactive && value
       ? [
+          failure && `dot's last quick request to it failed: ${failure}`,
           role === "main" && "Needs a model that can use a computer.",
           providerNote(value.provider),
           typed && "Type the model ID as the server names it.",
@@ -126,6 +143,7 @@ export function RoleCard({
         subscriptionModels={subscriptionModels}
         main={main}
         describedBy={notes.length ? notesId : undefined}
+        problem={problemField(problem) === "model" ? problem && capital(problem) : undefined}
         onChange={onChange}
       />
       {value?.model && (
@@ -151,6 +169,7 @@ export function RoleCard({
           keys={keys}
           keyLayer={keyLayer}
           manualPrice={manualPrice}
+          problem={problem}
           onChange={onChange}
           onKeys={onKeys}
           onPrice={onPrice}
@@ -200,13 +219,16 @@ function RoleDetails({
   keys,
   keyLayer,
   manualPrice,
+  problem,
   onChange,
   onKeys,
   onPrice,
 }: Pick<
   RoleCardProps,
-  "modelRole" | "keys" | "keyLayer" | "manualPrice" | "onChange" | "onKeys" | "onPrice"
+  "modelRole" | "keys" | "keyLayer" | "manualPrice" | "problem" | "onChange" | "onKeys" | "onPrice"
 > & { value: RoleChoice }) {
+  const said = (field: ReturnType<typeof problemField>) =>
+    problem && problemField(problem) === field ? { error: capital(problem) } : {};
   const row = useRef<HTMLDivElement>(null);
   const provider = providerById(value.provider);
   if (!provider) return null;
@@ -225,7 +247,13 @@ function RoleDetails({
       {keyed && (
         <div ref={row} className="settings-key-row">
           {available.length || missing ? (
-            <Field label="Key" inline className="ui-group-row" disabledReason={keyReason}>
+            <Field
+              label="Key"
+              inline
+              className="ui-group-row"
+              disabledReason={keyReason}
+              {...said("key")}
+            >
               <Select
                 appearance="inline"
                 value={value.key ?? ""}
@@ -275,9 +303,11 @@ function RoleDetails({
           )}
         </div>
       )}
-      {provider.custom && <CustomEndpoint value={value} onChange={onChange} />}
+      {provider.custom && (
+        <CustomEndpoint value={value} problem={said("context").error} onChange={onChange} />
+      )}
       {manualPrice && !subscription(value.provider) && (
-        <ManualPrice value={manualPrice} onPrice={onPrice} />
+        <ManualPrice value={manualPrice} problem={said("price").error} onPrice={onPrice} />
       )}
     </>
   );
@@ -285,9 +315,11 @@ function RoleDetails({
 
 function CustomEndpoint({
   value,
+  problem,
   onChange,
 }: {
   value: RoleChoice;
+  problem?: string;
   onChange(value: RoleChoice): void;
 }) {
   // OpenAI's service tiers ride only on its own formats.
@@ -301,7 +333,12 @@ function CustomEndpoint({
         checked={value.vision !== false}
         onCheckedChange={(checked) => onChange({ ...value, vision: checked ? undefined : false })}
       />
-      <Field label="Context window" inline className="ui-group-row">
+      <Field
+        label="Context window"
+        inline
+        className="ui-group-row"
+        {...(problem ? { error: problem } : {})}
+      >
         <TextField
           size="sm"
           inputMode="numeric"
@@ -349,13 +386,22 @@ function CustomEndpoint({
 
 function ManualPrice({
   value,
+  problem,
   onPrice,
 }: {
   value: { input: string; output: string };
+  problem?: string;
   onPrice?(value: { input: string; output: string }): void;
 }) {
+  // The side left empty says so; with both filled in, the first.
+  const wrong = !value.input.trim() || value.output.trim() ? "input" : "output";
   const field = (side: "input" | "output", label: string) => (
-    <Field label={label} inline className="ui-group-row">
+    <Field
+      label={label}
+      inline
+      className="ui-group-row"
+      {...(problem && side === wrong ? { error: problem } : {})}
+    >
       <TextField
         size="sm"
         inputMode="decimal"

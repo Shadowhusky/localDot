@@ -176,7 +176,10 @@ func (s *Server) copyTo(socket string, logins bool) (copyResult, error) {
 				result.Skipped++
 				continue
 			}
-			body := map[string]string{"origin": origin, "username": login.Username, "password": login.Password}
+			body := map[string]any{"origin": origin, "username": login.Username, "password": login.Password}
+			if login.Confirm {
+				body["confirm"] = true
+			}
 			if err := peer.do("PUT", "/v1/logins", body, nil); err != nil {
 				return result, err
 			}

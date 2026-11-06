@@ -1,22 +1,24 @@
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
 
 test("Activity tabs and filters remain below the header while scrolling", async ({ page, ui }) => {
   const phone = (page.viewportSize()?.width ?? 0) < 700;
-  if (!phone) await page.setViewportSize({ width: 2000, height: 400 });
+  // Short enough for the fixture's steps to scroll: on a tall phone the sheet shows them all.
+  await page.setViewportSize(phone ? { width: 390, height: 600 } : { width: 2000, height: 400 });
   await ui.open("done");
   await ui.picture();
-  if (phone) await page.getByRole("button", { name: "Activity", exact: true }).click();
+  if (phone) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
   else
-    await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
+    await page.locator(".rail-chat").getByRole("radio", { name: PANEL_NAME, exact: true }).click();
   const rail = phone ? page.locator(".activity-sheet") : page.locator(".rail-chat");
   const controls = rail.locator(".activity-controls");
   await expect(controls).toBeVisible();
   const scroller = rail.locator('[role="tabpanel"]:not([aria-hidden]) .activity-scroll');
   if (phone) {
     const header = await page
-      .getByRole("dialog", { name: "Activity" })
+      .getByRole("dialog", { name: PANEL_NAME })
       .locator(".ui-sheet-header")
       .boundingBox();
     const tabs = await controls.boundingBox();
@@ -37,7 +39,7 @@ test("Activity tabs and filters remain below the header while scrolling", async 
   expect(bounds.y).toBeGreaterThanOrEqual(0);
   if (phone) {
     const header = await page
-      .getByRole("dialog", { name: "Activity" })
+      .getByRole("dialog", { name: PANEL_NAME })
       .locator(".ui-sheet-header")
       .boundingBox();
     if (!header) throw new Error("Missing header");

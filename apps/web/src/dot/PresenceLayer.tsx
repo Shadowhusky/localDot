@@ -7,6 +7,7 @@ import { onPlaces } from "./places.ts";
 import { Presence } from "./presence.ts";
 import type { PresencePlace } from "./presence-rules.ts";
 import { useReplayPresence } from "./replay-presence.ts";
+import { useOutfit } from "./wearing.ts";
 import "./dot.css";
 
 const RESTING_MS = 60_000;
@@ -20,12 +21,14 @@ export interface PresenceLayerProps {
   feed: DotFeed;
   // dot's line beside the stage; each new one gets a talk-bob.
   line: string;
+  // What decides its look has answered. Until then a change of look is no change to see.
+  arrived?: boolean;
 }
 
 // The one live dot (design-v2 §10.17), mounted once at the app's root and resting in the place that
 // keeps room for it: the hero on the curtain, the dock beside the stage or the island's badge. While
 // Replay is open it plays the recording's dot instead of the live one.
-export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
+export function PresenceLayer({ place, arrived = true, ...now }: PresenceLayerProps) {
   const replayed = useReplayPresence();
   const { feed, line } = replayed ?? now;
   const reduced = useMediaQuery(REDUCED_MOTION);
@@ -35,7 +38,15 @@ export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
   const live = place === "dock" || place === "badge";
   const idle = useIdle(live && feed.state === "idle", presence);
   const state: DotState = feed.state === "idle" ? idle : feed.state;
-  const first = useRef({ state, control: feed.control, reducedMotion: reduced });
+  const dressed = useOutfit(feed.persona);
+  const worn = feed.look ?? dressed;
+  const first = useRef({
+    state,
+    control: feed.control,
+    reducedMotion: reduced,
+    wearables: worn,
+    place,
+  });
 
   useEffect(() => {
     if (!frame.current || !host.current) return;
@@ -88,6 +99,13 @@ export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
     if (beatKey !== undefined && beatN !== undefined)
       presence.current?.view.beat(beatKey, beatN, beatOk);
   }, [beatKey, beatN, beatOk]);
+  const outfit = worn?.join(" ");
+  const quiet = useRef(!arrived);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the outfit's words say when it changed.
+  useEffect(() => {
+    presence.current?.view.setWearables(worn, quiet.current);
+    quiet.current = !arrived;
+  }, [outfit, arrived]);
   const helpers = feed.helpers ?? NO_HELPERS;
   const crew = helpers.map((helper) => `${helper.id}:${helper.ok ?? ""}`).join(" ");
   // biome-ignore lint/correctness/useExhaustiveDependencies: the crew's words say when it changed.
@@ -132,6 +150,7 @@ export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
         ref={frame}
         className="presence-frame"
         data-place={place ?? undefined}
+        data-state={state}
         data-attention={(feed.attention && place !== "badge") || undefined}
       >
         <span ref={host} className="dot" />

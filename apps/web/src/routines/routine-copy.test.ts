@@ -15,8 +15,9 @@ const base = {
   kind: "routine",
   name: "Morning bills",
   instruction: "x",
-  when: { kind: "weekdays", time: "08:30" },
+  schedules: [{ every: 1, unit: "week" as const, weekdays: [1, 2, 3, 4, 5], times: ["08:30"] }],
   tz: "Europe/London",
+  start: "2026-10-01",
   until: null,
   profile: "ask_first",
   notify: "changes",
@@ -27,7 +28,7 @@ const base = {
   pausedReason: null,
   revision: 1,
   nextDueAt: "2026-10-13T07:30:00.000Z",
-  summary: "Weekdays at 08:30 · London time",
+  summary: "Weekdays at 8:30 · London time",
   createdFromSession: null,
   createdAt: "2026-10-01T00:00:00.000Z",
   updatedAt: "2026-10-01T00:00:00.000Z",
@@ -116,19 +117,20 @@ describe("routine copy", () => {
       "Spending limit reached",
     );
   });
-  it("names who started a thread", () => {
-    expect(
-      originLine(
-        {
-          kind: "routine",
-          routineId: base.id,
-          runId: base.id,
-          name: "Morning bills",
-          dueAt: "2026-10-12T07:30:00.000Z",
-        },
-        "Europe/London",
-      ),
-    ).toBe("Morning bills · started by a routine at 08:30");
+  it("opens each run in a routine's conversation with its name and day", () => {
+    const origin = {
+      kind: "routine",
+      routineId: base.id,
+      runId: base.id,
+      name: "Morning bills",
+      dueAt: "2026-10-12T07:30:00.000Z",
+    } as const;
+    expect(originLine(origin, "Europe/London", Date.parse("2026-10-12T12:00:00Z"))).toBe(
+      "Routine run · Morning bills · Today 08:30",
+    );
+    expect(originLine(origin, "Europe/London", Date.parse("2026-10-20T12:00:00Z"))).toBe(
+      "Routine run · Morning bills · Mon 12 Oct 08:30",
+    );
   });
 });
 

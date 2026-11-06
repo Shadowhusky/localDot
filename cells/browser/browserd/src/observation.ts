@@ -204,7 +204,7 @@ export class BrowserObservation {
       if (typeof tabId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/u.test(tabId))
         throw new BrowserObservationError("request");
       const permit = permitData(rawPermit);
-      lease = this.#options.control.admit(permit);
+      lease = this.#options.control.admit(permit, tabId);
       const expiry = new AbortController();
       deadline = setTimeout(() => expiry.abort(), BROWSER_OBSERVATION_TIMEOUT_MS);
       const combined = AbortSignal.any([

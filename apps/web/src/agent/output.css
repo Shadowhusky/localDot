@@ -183,6 +183,10 @@
   min-width: 0;
   overflow: hidden;
 }
+/* Holds about a picture's room while it loads, so what is under it moves as little as can be. */
+.step-output-image:has(> p) {
+  min-height: calc(var(--spacing) * 40);
+}
 .step-output-image img {
   display: block;
   width: 100%;

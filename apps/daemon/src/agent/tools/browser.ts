@@ -6,6 +6,8 @@ import {
   type ToolResult,
   webUrl,
 } from "@localdot/protocol";
+import { signInNeedsOwnBrowser } from "../../../../../packages/protocol/src/accounts.ts";
+import { OWN_BROWSER_SIGN_IN_NOTE } from "../../../../../packages/protocol/src/guidance.ts";
 import { BrowserClientError } from "../../browser/client.ts";
 import { DesktopdError } from "../../desktopd/client.ts";
 import { hostOf } from "../safety/purpose.ts";
@@ -39,7 +41,7 @@ function pageStatusNote(url: string): string {
     case "error":
       return "Browser status: reachable; Chromium is displaying an error page. The target app has not been verified. Inspect the error and the requested address before retrying; do not treat this as a completed interactive test.\n\n";
     case "page":
-      return "";
+      return signInNeedsOwnBrowser(url) ? `${OWN_BROWSER_SIGN_IN_NOTE}\n\n` : "";
   }
 }
 
@@ -165,7 +167,10 @@ export async function browserNavigateTool(
   let download = false;
   let verificationNote = "";
   if (browser) {
-    const navigation = await browser.client.navigate(browser.permit, browser.tabId, url.href, ctx);
+    session.browserHost = url.hostname;
+    // A page that takes its time holds up nobody: the turn comes back to read what loaded.
+    const load = () => browser.client.navigate(browser.permit, browser.tabId, url.href, ctx);
+    const navigation = await (ctx.turn ? ctx.turn.yielding(load) : load());
     download = navigation.download === true;
     ctx.check();
     if (download) {
@@ -227,6 +232,8 @@ export async function browserNavigateTool(
     verificationNote =
       pageStatusNote(result.url) ||
       "Navigation has not finished loading. Inspect the current page before deciding whether the app is ready; do not repeat navigation just to check.";
+  if (!download && result.loaded && signInNeedsOwnBrowser(result.url))
+    verificationNote = OWN_BROWSER_SIGN_IN_NOTE;
   let image: Awaited<ReturnType<typeof frame>> | undefined;
   try {
     const o = await deps.gateway.observe(screenContext(ctx));

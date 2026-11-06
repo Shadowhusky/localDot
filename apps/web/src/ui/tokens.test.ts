@@ -81,6 +81,7 @@ const WHITE: Rgba = [255, 255, 255, 1];
 const BLACK: Rgba = [0, 0, 0, 1];
 const MORE_CONTRAST = "prefers-contrast: more";
 const APPEARANCES = ["graphite", "midnight", "daylight"] as const;
+const SURFACES = ["void", "console", "well", "raised", "raised-2", "overlay", "popover"];
 const CONTEXTS: TokenContext[] = APPEARANCES.flatMap((appearance) => [
   { appearance },
   { appearance, media: [MORE_CONTRAST] },
@@ -92,36 +93,25 @@ describe("colour tokens", () => {
     const color = palette(context);
 
     it(`keeps text at 4.5:1 on every surface it may sit on (${label})`, () => {
-      for (const ground of [
-        "void",
-        "console",
-        "well",
-        "raised",
-        "raised-2",
-        "overlay",
-        "popover",
-      ]) {
+      for (const ground of SURFACES) {
         for (const text of ["fg-1", "fg-2", "fg-3"]) {
-          if (text === "fg-3" && ["raised-2", "overlay", "popover"].includes(ground)) continue;
           const ratio = contrast(color(text), color(ground));
           expect(ratio, `${text} on ${ground}`).toBeGreaterThanOrEqual(4.5);
         }
       }
     });
 
-    // Glass is .72 so the picture reads through it; over a white page the elapsed time (fg-2) holds
-    // 3:1, and more contrast makes the glass solid.
+    // Glass is .82, the lowest that keeps the elapsed time (fg-2) at 4.5:1 over a white page.
     it(`keeps the island's words legible over a white or a black frame (${label})`, () => {
       for (const frame of [WHITE, BLACK]) {
         const glass = over(color("glass"), frame);
         expect(contrast(color("fg-1"), glass), "fg-1 on glass").toBeGreaterThanOrEqual(4.5);
-        const least = frame === BLACK || context.media ? 4.5 : 3;
-        expect(contrast(color("fg-2"), glass), "fg-2 on glass").toBeGreaterThanOrEqual(least);
+        expect(contrast(color("fg-2"), glass), "fg-2 on glass").toBeGreaterThanOrEqual(4.5);
       }
     });
 
-    it(`gives field edges 3:1 on the void and on raised surfaces (${label})`, () => {
-      for (const ground of ["void", "raised"]) {
+    it(`gives field edges 3:1 on every surface a field sits on (${label})`, () => {
+      for (const ground of ["void", "console", "well", "raised", "overlay", "popover"]) {
         const ratio = contrast(color("field-line"), color(ground));
         expect(ratio, `field-line on ${ground}`).toBeGreaterThanOrEqual(3);
       }
@@ -146,6 +136,55 @@ describe("colour tokens", () => {
       }
     });
   }
+
+  it("gives Daylight its own value for all the dark page lights with white, bar the stage's marks", () => {
+    const dark = readTokens([tokensCss]);
+    const daylight = readTokens([tokensCss], { appearance: "daylight" });
+    const kept = [...dark].filter(
+      ([name, value]) =>
+        value.includes("rgba(255, 255, 255") &&
+        daylight.get(name) === value &&
+        !name.startsWith("--color-stage-"),
+    );
+    expect(kept).toEqual([]);
+  });
+
+  it.each(APPEARANCES)(
+    "keeps what a value runs along, the thread of steps and quiet icons at 3:1 in %s",
+    (appearance) => {
+      const color = palette({ appearance });
+      for (const ground of SURFACES) {
+        for (const line of [
+          "fg-4",
+          "track-strong",
+          "slider-rail",
+          "bar-track",
+          "meter-track",
+          "scrubber-track",
+          "progress-track",
+          "step-line",
+          "grabber",
+          "link-line",
+          "card-field-line",
+          "filled-field-line",
+        ]) {
+          const ratio = contrast(over(color(line), color(ground)), color(ground));
+          expect(ratio, `${line} on ${ground}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    },
+  );
+
+  it.each(APPEARANCES)("keeps a value's fill apart from what it runs along in %s", (appearance) => {
+    const color = palette({ appearance });
+    for (const ground of SURFACES) {
+      const rail = over(color("bar-track"), color(ground));
+      for (const fill of ["bar-fill", "bar-fill-quiet", "progress-fill", "step-tick"]) {
+        const ratio = contrast(over(color(fill), rail), rail);
+        expect(ratio, `${fill} on ${ground}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
 
   it("keeps secondary and tertiary text apart in every appearance", () => {
     for (const appearance of APPEARANCES) {

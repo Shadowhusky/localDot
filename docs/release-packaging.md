@@ -65,6 +65,24 @@ and publication provenance, the matching signed helper package, notarization, pu
 and installed acceptance remain separate release gates. A local receipt does not authorize the
 installer to trust this archive.
 
+## No Chrome in a release
+
+Google's terms don't let us distribute Chrome, so it is installed on each user's machine (see
+[browser-environment.md](browser-environment.md#google-chrome)) and must not be in anything we publish.
+`scripts/release/no-chrome.mjs` reads the file list of every layer of an image, so a file a later layer
+deleted still counts, and refuses a layer it can't read:
+
+```sh
+node scripts/release/no-chrome.mjs --out no-chrome.json /absolute/path/to/publish-input.json
+```
+
+Given `publish-input.json` it pulls each pinned image by digest and scans those exact bytes.
+`publish-input.json` needs `"noChrome": "/absolute/path/to/no-chrome.json"`: `scripts/distribution/assemble.ts`
+refuses to sign a catalog with an image that has no clean scan. The `release-image-candidate` workflow
+scans before it records a candidate and `publish-images.mjs` refuses one without that evidence.
+`scripts/distribution/verify.ts` checks the npm archive's inventory the same way. Never set
+`INSTALL_CHROME` when building an image to publish.
+
 ## Release notes
 
 Each release needs `docs/releases/<version>.md` in the shape `docs/releases/README.md` describes.

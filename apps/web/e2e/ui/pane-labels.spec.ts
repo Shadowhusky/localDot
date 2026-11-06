@@ -1,4 +1,5 @@
 import type { Locator } from "@playwright/test";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, isPhone, test } from "./harness.ts";
 
 // The rail is named once on screen, by its segmented header, or on a phone by the title of the
@@ -37,19 +38,19 @@ test("the rail's header names its view, and the view never names itself again", 
   const rail = page.getByRole("complementary", { name: "Conversation" });
   if (isPhone(page)) {
     await expect(rail.getByRole("radiogroup", { name: "Show" })).toHaveCount(0);
-    await page.getByRole("button", { name: "Activity", exact: true }).click();
-    const sheet = page.getByRole("dialog", { name: "Activity" });
-    await expect(sheet.getByRole("complementary", { name: "Plan and steps" })).toBeVisible();
-    expect(await drawn(sheet, "Activity"), "Activity drawn once, as the sheet's title").toBe(1);
+    await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: PANEL_NAME });
+    await expect(sheet.getByRole("complementary", { name: PANEL_NAME })).toBeVisible();
+    expect(await drawn(sheet, PANEL_NAME), "Drawn once, as the sheet's title").toBe(1);
     return;
   }
-  for (const name of ["Activity", "Chat"]) {
+  for (const name of [PANEL_NAME, "Chat"]) {
     const view = rail.getByRole("radio", { name, exact: true });
     await view.click();
     await expect(view).toHaveAttribute("aria-checked", "true");
     expect(await drawn(rail, name), `${name} drawn once, in the header`).toBe(1);
   }
-  await expect(page.getByRole("heading", { name: "Activity", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: PANEL_NAME, exact: true })).toHaveCount(1);
 });
 
 test("New conversation sits in the rail's header, or in More on a phone, and opens a fresh one", async ({
@@ -60,11 +61,11 @@ test("New conversation sits in the rail's header, or in More on a phone, and ope
   await expect(page.getByTestId("hud-status")).toHaveText("Done");
   const rail = page.getByRole("complementary", { name: "Conversation" });
   if (isPhone(page)) {
-    await rail.getByRole("button", { name: "More" }).click();
+    await rail.getByRole("button", { name: "More", exact: true }).click();
     await page.getByRole("menuitem", { name: "New conversation" }).click();
   } else {
     // From another view of the rail too, which goes back to the chat.
-    await rail.getByRole("radio", { name: "Activity", exact: true }).click();
+    await rail.getByRole("radio", { name: PANEL_NAME, exact: true }).click();
     const start = rail.getByRole("button", { name: "New conversation" });
     await expect(start).toHaveCount(1);
     await start.click();

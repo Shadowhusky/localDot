@@ -12,6 +12,7 @@ import {
   BrowserSignInRequest,
   type BrowserSignInState,
   type BrowserSupervisorState,
+  BrowserWindowEntry,
 } from "../../../../packages/protocol/src/browser-control.ts";
 import {
   BrowserDownloadAck,
@@ -35,8 +36,10 @@ import { type BrowserInput, BrowserInputError } from "./input.ts";
 import type { BrowserNavigation } from "./navigation-owner.ts";
 import { type BrowserObservation, BrowserObservationError } from "./observation.ts";
 import type { BrowserRuntimeConfig } from "./runtime-config.ts";
+import type { BrowserSignInPage } from "./sign-in-page.ts";
 import type { BrowserTargets } from "./targets.ts";
 import { BROWSER_UPLOAD_TIMEOUT_MS, type BrowserUploadService } from "./upload-service.ts";
+import type { BrowserWindows } from "./windows.ts";
 
 export const BROWSER_HTTP_BODY_BYTES = 65536;
 export const BROWSER_HTTP_BODY_MS = 5000;
@@ -55,6 +58,15 @@ const actionFields = {
 const actionSchema = schema.strictObject(actionFields);
 const inputSchema = schema.strictObject({ ...actionFields, request: schema.unknown() });
 const manualSchema = schema.strictObject({ permit: BrowserManualPermit, request: ManualInput });
+const manualPageSchema = schema.strictObject({
+  permit: BrowserManualPermit,
+  request: schema.unknown(),
+});
+const manualSecretSchema = schema.strictObject({
+  permit: BrowserManualPermit,
+  tabId: schema.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u),
+  request: schema.unknown(),
+});
 const navigationSchema = schema.strictObject({
   ...actionFields,
   url: schema.string().min(1).max(8192),
@@ -70,11 +82,15 @@ const routes = new Set([
   "GET /supervisor",
   "GET /tabs",
   "POST /tabs",
+  "POST /windows/enter",
+  "POST /windows/tabs",
   "PUT /control",
   "POST /input",
   "POST /type",
   "POST /secret",
   "POST /manual",
+  "POST /manual/page",
+  "POST /manual/secret",
   "POST /signin",
   "POST /observe",
   "POST /navigate",
@@ -99,6 +115,7 @@ export interface BrowserHttpOptions {
   readonly instance: string;
   readonly control: Pick<BrowserControl, "holder" | "set">;
   readonly targets: Pick<BrowserTargets, "tabs">;
+  readonly windows?: Pick<BrowserWindows, "enter" | "tabs">;
   readonly input: Pick<BrowserInput, "inject" | "type"> &
     Partial<Pick<BrowserInput, "timing" | "manual" | "secret">>;
   readonly observation: Pick<BrowserObservation, "observe"> &
@@ -107,6 +124,7 @@ export interface BrowserHttpOptions {
   readonly downloads?: Pick<BrowserDownloadService, "arm" | "list" | "read" | "acknowledge">;
   readonly uploads?: Pick<BrowserUploadService, "chooser" | "upload">;
   readonly accounts?: Pick<BrowserAccounts, "domains" | "signOut">;
+  readonly signInPage?: Pick<BrowserSignInPage, "read">;
   readonly signIn?: {
     state(): schema.infer<typeof BrowserSignInState>;
     set(
@@ -585,6 +603,38 @@ export class BrowserHttp {
         send(response, 200, reply);
         return;
       }
+      if (route === "POST /manual/page") {
+        const parsed = manualPageSchema.safeParse(body);
+        if (!parsed.success) throw new HttpRefusal(400, "request");
+        if (!this.#options.signInPage) throw new HttpRefusal(503, "unavailable");
+        this.#available(signal);
+        const page = await this.#options.signInPage.read(
+          parsed.data.permit,
+          parsed.data.request,
+          signal,
+        );
+        this.#available(signal);
+        send(response, 200, { page });
+        return;
+      }
+      if (route === "POST /manual/secret") {
+        const parsed = manualSecretSchema.safeParse(body);
+        if (!parsed.success) throw new HttpRefusal(400, "request");
+        if (this.#active) throw new HttpRefusal(409, "busy");
+        if (!this.#options.input.secret) throw new HttpRefusal(503, "unavailable");
+        this.#active = true;
+        ownsSlot = true;
+        const reply = await this.#options.input.secret(
+          parsed.data.permit,
+          parsed.data.tabId,
+          parsed.data.request,
+          signal,
+          true,
+        );
+        this.#available(signal);
+        send(response, 200, reply);
+        return;
+      }
       if (route === "POST /manual") {
         const parsed = manualSchema.safeParse(body);
         if (!parsed.success) throw new HttpRefusal(400, "request");
@@ -599,6 +649,27 @@ export class BrowserHttp {
         );
         this.#available(signal);
         send(response, 200, BrowserManualReply.parse(reply));
+        return;
+      }
+      if (route === "POST /windows/tabs") {
+        const parsed = openTabSchema.safeParse(body);
+        if (!parsed.success) throw new HttpRefusal(400, "request");
+        if (!this.#options.windows) throw new HttpRefusal(503, "unavailable");
+        const tabs = this.#options.windows.tabs(parsed.data.permit);
+        this.#available(signal);
+        send(response, 200, { tabs });
+        return;
+      }
+      if (route === "POST /windows/enter") {
+        const parsed = BrowserWindowEntry.safeParse(body);
+        if (!parsed.success) throw new HttpRefusal(400, "request");
+        if (!this.#options.windows) throw new HttpRefusal(503, "unavailable");
+        if (this.#active) throw new HttpRefusal(409, "busy");
+        this.#active = true;
+        ownsSlot = true;
+        const reply = await this.#options.windows.enter(parsed.data, signal);
+        this.#available(signal);
+        send(response, 200, reply);
         return;
       }
       if (route === "POST /tabs") {
@@ -621,9 +692,12 @@ export class BrowserHttp {
             : inputSchema
       ).safeParse(body);
       if (!parsed.success) throw new HttpRefusal(400, "request");
-      if (this.#active) throw new HttpRefusal(409, "busy");
-      this.#active = true;
-      ownsSlot = true;
+      // Loading a page uses no display: it runs on no one's turn, beside whatever a task does.
+      if (route !== "POST /navigate") {
+        if (this.#active) throw new HttpRefusal(409, "busy");
+        this.#active = true;
+        ownsSlot = true;
+      }
       const { permit, tabId } = parsed.data;
       let result: unknown;
       if (route === "POST /observe")
@@ -674,7 +748,7 @@ export class BrowserHttp {
           ? error
           : error instanceof BrowserObservationError && error.reason === "secret"
             ? new HttpRefusal(423, "protected-input")
-            : route === "POST /secret" &&
+            : (route === "POST /secret" || route === "POST /manual/secret") &&
                 error instanceof BrowserInputError &&
                 error.reason === "login-form"
               ? new HttpRefusal(422, "login-form")

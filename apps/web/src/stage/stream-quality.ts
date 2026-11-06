@@ -28,8 +28,10 @@ export const HANDHELD_FRAMERATE = 30;
 export const WATCHING_FRAMERATE = 30;
 export const LARGE_STAGE_SHARE = 0.6;
 // x264 CRF: each step up saves about a fifth of the bit rate, and the picture softens. Still
-// screens are sharpened again by Selkies' paint-over whatever the step.
-export const CRFS = [25, 28, 31, 34, 37, 41] as const;
+// screens are sharpened again by Selkies' paint-over whatever the step. The first step is Sharp's
+// alone: it spends more on a moving screen, where the paint-over can't help.
+export const CRFS = [20, 25, 28, 31, 34, 37, 41] as const;
+const TOP_CRF: Record<StreamPreference, number> = { auto: 1, sharp: 0, smooth: 1 };
 
 // Round trip above the empty link's that means a queue, a long one, and one that has drained.
 export const QUEUE_MS = { bad: 150, severe: 600, clear: 60 };
@@ -90,7 +92,7 @@ export class QualityController {
   // The step the frame rate starts from and never rises above.
   #top: number;
   #framerate: number;
-  #crf = 0;
+  #crf: number;
   // The steps down, latest last, each with its cause: a step comes back once its cause has cleared,
   // the latest such first.
   readonly #lowered: { knob: Knob; cause: Cause }[] = [];
@@ -106,6 +108,7 @@ export class QualityController {
     this.#preference = preference;
     this.#top = topStep(maxFramerate);
     this.#framerate = this.#top;
+    this.#crf = TOP_CRF[preference];
   }
 
   // A new ceiling, as the stage grows, shrinks or changes hands. Steps a slow device or link took
@@ -123,7 +126,7 @@ export class QualityController {
     if (preference === this.#preference) return;
     this.#preference = preference;
     this.#framerate = this.#top;
-    this.#crf = 0;
+    this.#crf = TOP_CRF[preference];
     this.#lowered.length = 0;
     this.#bad = 0;
     this.#clear.link = 0;
@@ -199,7 +202,7 @@ export class QualityController {
   #raise(at: number): void {
     const [step] = this.#lowered.splice(at, 1);
     if (step?.knob === "framerate") this.#framerate = Math.max(this.#top, this.#framerate - 1);
-    else if (step?.knob === "crf") this.#crf = Math.max(0, this.#crf - 1);
+    else if (step?.knob === "crf") this.#crf = Math.max(TOP_CRF[this.#preference], this.#crf - 1);
     this.#clear.link = 0;
     this.#clear.device = 0;
     this.#probe = 0;

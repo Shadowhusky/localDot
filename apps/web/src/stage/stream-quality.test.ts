@@ -32,9 +32,10 @@ function run(controller: QualityController, sample: QualitySample, ticks: number
 }
 
 describe("QualityController", () => {
-  it("starts at full quality, whatever the choice", () => {
-    for (const choice of ["auto", "sharp", "smooth"] as const)
+  it("starts at full quality, with more detail for Sharp", () => {
+    for (const choice of ["auto", "smooth"] as const)
       expect(new QualityController(choice).quality).toEqual({ framerate: 60, crf: 25 });
+    expect(new QualityController("sharp").quality).toEqual({ framerate: 60, crf: 20 });
   });
 
   it("keeps full quality on a clear link and a device that keeps up", () => {
@@ -165,12 +166,12 @@ describe("QualityController", () => {
   it("gives frames before detail when the choice is Sharp", () => {
     const controller = new QualityController("sharp");
     run(controller, queued, 2);
-    expect(controller.quality).toEqual({ framerate: 45, crf: 25 });
+    expect(controller.quality).toEqual({ framerate: 45, crf: 20 });
     run(controller, queued, 12);
-    expect(controller.quality).toEqual({ framerate: 12, crf: 25 });
+    expect(controller.quality).toEqual({ framerate: 12, crf: 20 });
     run(controller, queued, 3);
-    expect(controller.quality).toEqual({ framerate: 12, crf: 28 });
-    expect(new QualityController("sharp").tick(flooded)).toEqual({ framerate: 12, crf: 25 });
+    expect(controller.quality).toEqual({ framerate: 12, crf: 25 });
+    expect(new QualityController("sharp").tick(flooded)).toEqual({ framerate: 12, crf: 20 });
   });
 
   it("gives detail before frames when the choice is Smooth, even for a slow device", () => {
@@ -190,9 +191,11 @@ describe("QualityController", () => {
     controller.prefer("auto");
     expect(controller.quality.crf).toBeGreaterThan(25);
     controller.prefer("sharp");
-    expect(controller.quality).toEqual({ framerate: 60, crf: 25 });
+    expect(controller.quality).toEqual({ framerate: 60, crf: 20 });
     run(controller, queued, 2);
-    expect(controller.quality).toEqual({ framerate: 45, crf: 25 });
+    expect(controller.quality).toEqual({ framerate: 45, crf: 20 });
+    controller.prefer("smooth");
+    expect(controller.quality).toEqual({ framerate: 60, crf: 25 });
   });
 
   it("judges nothing by the link before a ping has come back", () => {

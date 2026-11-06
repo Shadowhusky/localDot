@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { TOKEN } from "../fixtures/start-ui-fixture.ts";
 import { skipSetup } from "../skip-setup.ts";
 import { attachFiles } from "./attach.ts";
-import { composer, expect, runAt, test } from "./harness.ts";
+import { chooseView, composer, expect, runAt, sendAfterThisTask, test } from "./harness.ts";
 
 // A message sent while dot works: it waits at the end of the thread, Edit takes it back into the
 // composer with its files, Stop gives it back there too, and the files a message carried sit atop
@@ -28,8 +28,7 @@ async function queue(page: Page, card: Locator, text: string) {
   await card.getByRole("textbox", { name: "Message", exact: true }).fill(text);
   const sent = page.locator(".thread-pending, .thread-message").filter({ hasText: text });
   await expect(async () => {
-    if (!(await sent.count()))
-      await card.getByRole("button", { name: "Queue message" }).click({ timeout: 2000 });
+    if (!(await sent.count())) await sendAfterThisTask(page, 2000);
     await expect(sent).not.toHaveCount(0, { timeout: 2000 });
   }).toPass({ timeout: 60_000 });
 }
@@ -226,6 +225,7 @@ test("a message Stop gave back stays out of the thread, read again and on anothe
   try {
     const device = await other.newPage();
     await skipSetup(device);
+    await chooseView(device, "studio");
     await device.goto(`${fixture.origin}/#token=${TOKEN}`);
     await expect(yours(device, "Summarise the sample sales table")).toBeVisible();
     await expect(yours(device, "Then tidy up the sheet")).toHaveCount(0);
@@ -300,4 +300,117 @@ test("the files a message carried sit atop its bubble on one line that scrolls",
   await page.keyboard.press("ArrowRight");
   await expect.poll(() => files.evaluate((list) => list.scrollLeft)).toBeGreaterThan(0);
   await shot(page, "18-files-scrolled");
+});
+
+// By mouse where there is one, by a real touch on Chromium's phone.
+async function drag(page: Page, from: Locator, toY: number) {
+  const box = await from.boundingBox();
+  if (!box) throw new Error("Missing handle");
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  const steps = Array.from({ length: 8 }, (_, n) => y + ((toY - y) * (n + 1)) / 8);
+  if (test.info().project.name === "c39") {
+    const touch = await page.context().newCDPSession(page);
+    const send = (
+      type: "touchStart" | "touchMove" | "touchEnd",
+      points: { x: number; y: number }[],
+    ) => touch.send("Input.dispatchTouchEvent", { type, touchPoints: points });
+    await send("touchStart", [{ x, y }]);
+    for (const at of steps) await send("touchMove", [{ x, y: at }]);
+    await page.screenshot({ path: test.info().outputPath("13-dragging.png") });
+    await send("touchEnd", []);
+    return;
+  }
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  for (const at of steps) await page.mouse.move(x, at);
+  await page.screenshot({ path: test.info().outputPath("13-dragging.png") });
+  await page.mouse.up();
+}
+
+test("queued messages move by drag and by keys, and dot receives them in that order", async ({
+  page,
+  ui,
+  browserName,
+}) => {
+  const fixture = await ui.open("running");
+  const card = await composer(page);
+  const words = ["First thing", "Second thing", "Third thing"];
+  await queue(page, card, words[0] as string);
+  // One message has nowhere to go.
+  await expect(yours(page, "First thing").getByRole("button", { name: "Steer now" })).toBeEnabled();
+  await expect(page.locator("[data-queue-handle]")).toHaveCount(0);
+  await queue(page, card, words[1] as string);
+  await queue(page, card, words[2] as string);
+  for (const text of words)
+    await expect(yours(page, text).getByRole("button", { name: "Steer now" })).toBeEnabled();
+  const handles = page.locator("[data-queue-handle]");
+  await expect(handles).toHaveCount(3);
+  const waiting = async () => {
+    const rows = await order(page);
+    return rows.filter((row) => row && words.includes(row));
+  };
+  await ui.settle();
+  await page.screenshot({ path: test.info().outputPath("13-queue.png") });
+
+  // The third to the top.
+  const firstRow = await yours(page, "First thing").boundingBox();
+  await drag(page, handles.nth(2), (firstRow?.y ?? 0) - 4);
+  await expect.poll(waiting).toEqual(["Third thing", "First thing", "Second thing"]);
+
+  // First, now second, down one by the keys, keeping focus for the next.
+  const first = yours(page, "First thing").getByRole("button", {
+    name: "Move this message, place 2 of 3",
+  });
+  await first.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(waiting).toEqual(["Third thing", "Second thing", "First thing"]);
+  const moved = yours(page, "First thing").getByRole("button", {
+    name: "Move this message, place 3 of 3",
+  });
+  await expect(moved).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(waiting).toEqual(["Third thing", "Second thing", "First thing"]);
+
+  // A later message joins the end.
+  await queue(page, card, "Fourth thing");
+  words.push("Fourth thing");
+  await expect
+    .poll(waiting)
+    .toEqual(["Third thing", "Second thing", "First thing", "Fourth thing"]);
+
+  // The order is the task's: it comes back with the page. WebKit reports the status check a reload
+  // cuts short as a page error.
+  if (browserName !== "webkit") {
+    await page.waitForLoadState("networkidle");
+    await page.reload();
+    await expect
+      .poll(waiting)
+      .toEqual(["Third thing", "Second thing", "First thing", "Fourth thing"]);
+  }
+
+  // And dot receives them that way.
+  expect((await page.request.post(`${fixture.origin}/__qa/finish`)).ok()).toBe(true);
+  await expect(yours(page, "Third thing").getByText("After this task")).toHaveCount(0);
+  await expect(page.locator("[data-queue-handle]")).toHaveCount(0);
+  await expect
+    .poll(waiting)
+    .toEqual(["Third thing", "Second thing", "First thing", "Fourth thing"]);
+});
+
+test("a move the task turns down shows the task's order again", async ({ page, ui }) => {
+  await ui.open("running");
+  const card = await composer(page);
+  await queue(page, card, "One");
+  await queue(page, card, "Two");
+  await expect(yours(page, "Two").getByRole("button", { name: "Steer now" })).toBeEnabled();
+  await page.route("**/messages/*/move", (route) =>
+    route.fulfill({ status: 409, json: { error: "message is no longer queued" } }),
+  );
+  const handle = yours(page, "Two").getByRole("button", { name: /^Move this message/ });
+  await handle.focus();
+  await page.keyboard.press("ArrowUp");
+  await expect(page.getByText("Couldn't move that message.")).toBeVisible();
+  const rows = (await order(page)).filter((row) => row === "One" || row === "Two");
+  expect(rows).toEqual(["One", "Two"]);
 });

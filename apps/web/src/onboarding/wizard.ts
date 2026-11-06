@@ -2,14 +2,32 @@ import { PROVIDERS, type ProviderSpec, providerById } from "@localdot/providers"
 import type { DotState } from "../dot/engine/states.ts";
 import type { PickerModel } from "../settings/choices.ts";
 
-export type WizardStep = "welcome" | "thinks" | "key" | "model" | "permissions" | "dot" | "turn-on";
+export type WizardStep =
+  | "welcome"
+  | "thinks"
+  | "key"
+  | "model"
+  | "permissions"
+  | "dot"
+  | "view"
+  | "browser"
+  | "turn-on";
 export type ThinkKind = "api" | "chatgpt" | "claude-code" | "plan" | "local" | "custom";
 // A plan the person signs in to in its own app, which brings its own models.
 export const appKind = (kind: ThinkKind | undefined) =>
   kind === "chatgpt" || kind === "claude-code";
 
 // The steps the progress bars count; the welcome comes before them.
-export const WIZARD_STEPS = ["thinks", "key", "model", "permissions", "dot", "turn-on"] as const;
+export const WIZARD_STEPS = [
+  "thinks",
+  "key",
+  "model",
+  "permissions",
+  "dot",
+  "view",
+  "browser",
+  "turn-on",
+] as const;
 type CountedStep = (typeof WIZARD_STEPS)[number];
 
 export interface WizardProgress {
@@ -35,6 +53,8 @@ const STEP_TITLES: Record<CountedStep, string> = {
   model: "Model",
   permissions: "Permissions",
   dot: "Your dot",
+  view: "View",
+  browser: "Web browser",
   "turn-on": "Turn on",
 };
 
@@ -54,6 +74,8 @@ export const STEP_DOT: Readonly<Record<WizardStep, DotState>> = {
   model: "idle",
   permissions: "idle",
   dot: "listening",
+  view: "idle",
+  browser: "idle",
   "turn-on": "waking",
 };
 
@@ -66,7 +88,14 @@ export function nextStep(progress: WizardProgress): WizardStep {
   const { step } = progress;
   if (step === "welcome") return "thinks";
   // A change from the summary returns to it once nothing after it needs choosing again.
-  if (progress.back && (step === "model" || step === "permissions" || step === "dot"))
+  if (
+    progress.back &&
+    (step === "model" ||
+      step === "permissions" ||
+      step === "dot" ||
+      step === "view" ||
+      step === "browser")
+  )
     return progress.back;
   return WIZARD_STEPS[WIZARD_STEPS.indexOf(step) + 1] ?? "turn-on";
 }

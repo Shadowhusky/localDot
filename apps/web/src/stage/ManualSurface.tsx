@@ -21,12 +21,14 @@ export interface ManualSurfaceProps {
   live: boolean;
   mode: PointerMode;
   // Where a page point falls on the computer's screen, or null off it. A pointer already pressed
-  // on the screen (`follow`) stays on its edge instead.
-  locate(point: Point, follow: boolean): Point | null;
+  // (`within`, where it was pressed) stays on that screen's edge instead.
+  locate(point: Point, within?: Point | null): Point | null;
   send(input: ManualStreamInput): void;
   onTyping?(typing: boolean): void;
   // Why a paste was not typed, or null once one is.
   onRefused?(message: string | null): void;
+  // Where keys go, when the screen has more than the desktop on it.
+  keysTo?: string;
 }
 interface Press {
   id: number;
@@ -57,7 +59,7 @@ const whole = (n: number) => Math.trunc(n + Math.sign(n) * 1e-9);
 // The computer itself while the user holds control: the pointer goes to it as it moves, and
 // every key typed into the hidden keyboard field goes to it in order.
 export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>(
-  function ManualSurface({ live, mode, locate, send, onTyping, onRefused }, ref) {
+  function ManualSurface({ live, mode, locate, send, onTyping, onRefused, keysTo }, ref) {
     const surface = useRef<HTMLDivElement>(null);
     const field = useRef<HTMLTextAreaElement>(null);
     const [typing, setTyping] = useState(false);
@@ -141,7 +143,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
       const wheel = (event: WheelEvent) => {
         if (!props.current.live) return;
         event.preventDefault();
-        const at = props.current.locate({ x: event.clientX, y: event.clientY }, false);
+        const at = props.current.locate({ x: event.clientX, y: event.clientY });
         if (!at) return;
         const travel = state.current.wheel,
           per = NOTCH[event.deltaMode] ?? 50;
@@ -182,7 +184,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
         s = state.current;
       if (!now.live || s.press) return;
       event.preventDefault();
-      const at = now.locate({ x: event.clientX, y: event.clientY }, false);
+      const at = now.locate({ x: event.clientX, y: event.clientY });
       if (!at) return;
       if (event.pointerType !== "touch") field.current?.focus({ preventScroll: true });
       event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -214,7 +216,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
         press.moved = true;
       }
       if (press?.tap) return;
-      const at = now.locate({ x: event.clientX, y: event.clientY }, !!press);
+      const at = now.locate({ x: event.clientX, y: event.clientY }, press?.at);
       if (!at) return;
       if (press) {
         press.last = at;
@@ -244,7 +246,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
       }
       // A finger that wobbled less than the slop lets go where it pressed, so the press stays a click.
       const at = press.moved
-        ? (now.locate({ x: event.clientX, y: event.clientY }, true) ?? press.last)
+        ? (now.locate({ x: event.clientX, y: event.clientY }, press.at) ?? press.last)
         : press.at;
       emit({ kind: "up", at, button: press.button });
     };
@@ -303,6 +305,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
           ref={field}
           className="manual-keyboard"
           aria-label="Type on the computer"
+          aria-description={keysTo}
           rows={1}
           readOnly={!live}
           tabIndex={live ? undefined : -1}

@@ -88,10 +88,29 @@ describe.skipIf(!DOCKER_TESTS)("a blank tab for a new conversation in a real bro
   let blank = "";
 
   // Control as the daemon hands it over: to a task's agent, or to the user.
+  let task: { sessionId: string; generation: number } | undefined;
   const grant = async (holder: "agent" | "user") => {
+    // The task before it is over, as it is before the next conversation's task starts alone.
+    if (task) {
+      await client.control(
+        {
+          ...identity,
+          revision: ++revision,
+          requestId: ulid(),
+          holder: "release",
+          owner: task,
+        },
+        owner,
+      );
+      task = undefined;
+    }
     const request = { ...identity, revision: ++revision, requestId: ulid() };
     const agent = { ...request, owner: { sessionId: ulid(), generation: 1 } };
     await client.control(holder === "agent" ? { ...agent, holder } : { ...request, holder }, owner);
+    if (holder === "agent") {
+      task = agent.owner;
+      await client.enterWindow(agent, { fresh: true }, owner);
+    }
     return { permit: agent, manual: request };
   };
   // A read of a tab that waits for it to come to the front and settle.

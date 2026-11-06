@@ -671,6 +671,7 @@
 }
 
 .export-row:is([data-phase="queued"], [data-phase="making"]) .export-row-badge {
+  --_ring-colour: var(--color-stage-fg-2);
   background-color: var(--color-edge);
 }
 
@@ -686,7 +687,7 @@
   background-color: var(--color-edge);
   -webkit-backdrop-filter: blur(var(--blur-glass));
   backdrop-filter: blur(var(--blur-glass));
-  color: var(--color-fg-1);
+  color: var(--color-stage-fg-1);
   font: var(--text-tag--font-weight) var(--text-tag) / var(--text-tag--line-height) var(--font-ui);
   letter-spacing: var(--text-tag--letter-spacing);
   text-transform: uppercase;
@@ -767,13 +768,46 @@
   white-space: nowrap;
 }
 
+/* Its own rail and knob, as the browser's rail fades into the page. */
 .export-preview-seek {
   flex: 1;
   min-width: 0;
   height: 36px;
   margin: 0;
-  accent-color: var(--color-fg-1);
+  appearance: none;
+  background: transparent;
   cursor: pointer;
+}
+
+.export-preview-seek::-webkit-slider-runnable-track {
+  height: var(--spacing);
+  border-radius: var(--radius-full);
+  background: var(--color-slider-rail);
+}
+
+.export-preview-seek::-moz-range-track {
+  height: var(--spacing);
+  border-radius: var(--radius-full);
+  background: var(--color-slider-rail);
+}
+
+.export-preview-seek::-webkit-slider-thumb {
+  appearance: none;
+  width: calc(var(--spacing) * 3.5);
+  height: calc(var(--spacing) * 3.5);
+  margin-top: calc(var(--spacing) * -1.25);
+  border-radius: var(--radius-full);
+  background: var(--porcelain-line-knob);
+  box-shadow: var(--shadow-knob);
+}
+
+.export-preview-seek::-moz-range-thumb {
+  width: calc(var(--spacing) * 3.5);
+  height: calc(var(--spacing) * 3.5);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--porcelain-line-knob);
+  box-shadow: var(--shadow-knob);
 }
 
 .export-preview-note {

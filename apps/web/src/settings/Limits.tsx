@@ -1,3 +1,4 @@
+import { ResearchBudget } from "@localdot/protocol";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote, GroupRow } from "../ui/Group.tsx";
@@ -36,11 +37,16 @@ const CHECK_INS: readonly {
   },
 ];
 
+// Only a field with something to say keeps a line for it.
+const saying = (error: string | undefined) => (error ? { error } : {});
+
 export function CheckIns({
   value,
+  errors,
   onChange,
 }: {
   value: CheckInsDraft;
+  errors?: Partial<Record<CheckInKey, string>>;
   onChange(key: CheckInKey, next: CheckInsDraft[CheckInKey]): void;
 }) {
   return (
@@ -59,7 +65,12 @@ export function CheckIns({
                 onCheckedChange={(on) => onChange(row.key, { ...current, on })}
               />
               <Collapse open={current.on}>
-                <Field label={row.field} inline className="ui-group-row">
+                <Field
+                  label={row.field}
+                  inline
+                  className="ui-group-row"
+                  {...saying(errors?.[row.key])}
+                >
                   <TextField
                     size="sm"
                     inputMode="numeric"
@@ -90,17 +101,25 @@ export function CheckIns({
 // How far a research task reads before it writes: a soft stop, with what it has.
 export function ResearchLimits({
   value,
+  error,
   onChange,
 }: {
   value: ResearchDraft;
+  error?: string;
   onChange(next: ResearchDraft): void;
 }) {
   const digits = (raw: string) => raw.replace(/\D/g, "");
+  const sourcesFit = ResearchBudget.shape.sources.safeParse(Number(value.sources || "x")).success;
   return (
     <div>
       <GroupHead title="Research" />
       <Group>
-        <Field label="Read up to" inline className="ui-group-row">
+        <Field
+          label="Read up to"
+          inline
+          className="ui-group-row"
+          {...saying(sourcesFit ? undefined : error)}
+        >
           <TextField
             size="sm"
             inputMode="numeric"
@@ -111,7 +130,12 @@ export function ResearchLimits({
             onChange={(event) => onChange({ ...value, sources: digits(event.target.value) })}
           />
         </Field>
-        <Field label="Take up to" inline className="ui-group-row">
+        <Field
+          label="Take up to"
+          inline
+          className="ui-group-row"
+          {...saying(sourcesFit ? error : undefined)}
+        >
           <TextField
             size="sm"
             inputMode="numeric"
@@ -133,9 +157,11 @@ export function ResearchLimits({
 
 export function SpendingLimits({
   value,
+  errors,
   onChange,
 }: {
   value: SpendingDraft;
+  errors?: { task?: string; day?: string };
   onChange(next: SpendingDraft): void;
 }) {
   return (
@@ -149,7 +175,7 @@ export function SpendingLimits({
           onCheckedChange={(on) => onChange({ ...value, on })}
         />
         <Collapse open={value.on}>
-          <Field label="Per task" inline className="ui-group-row">
+          <Field label="Per task" inline className="ui-group-row" {...saying(errors?.task)}>
             <MoneyField
               size="sm"
               value={value.task}
@@ -158,7 +184,7 @@ export function SpendingLimits({
               onValueChange={(task) => onChange({ ...value, task })}
             />
           </Field>
-          <Field label="Per day" inline className="ui-group-row">
+          <Field label="Per day" inline className="ui-group-row" {...saying(errors?.day)}>
             <MoneyField
               size="sm"
               value={value.day}

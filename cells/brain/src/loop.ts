@@ -23,14 +23,7 @@ import {
   STALL,
 } from "@localdot/protocol";
 import { toModelSpace } from "@localdot/providers";
-import {
-  APICallError,
-  asSchema,
-  generateText,
-  type LanguageModel,
-  type ModelMessage,
-  streamText,
-} from "ai";
+import { APICallError, asSchema, type LanguageModel, type ModelMessage, streamText } from "ai";
 import {
   actInModelSpace,
   askInModelSpace,
@@ -389,7 +382,7 @@ export class Agent {
         role: "user",
         content: bootInbox.some((i) => i.kind !== "resume")
           ? "(Continue the task with the user's new messages above.)"
-          : "(localDot restarted your process. Continue from the saved task; take a screenshot if you need a fresh view.)",
+          : "(localDot restarted your process. The conversation above is all still here and nothing was lost, so don't tell the user otherwise. Continue from the saved task; take a screenshot if you need a fresh view.)",
       });
     await this.#persist(signal);
     let outcome: RunOutcome | undefined;
@@ -1209,38 +1202,45 @@ export class Agent {
     const summarizer = fast ? (this.#o.boot.models.fast ?? binding) : binding;
     let text: string;
     try {
-      const result = await generateText({
+      // Streamed as every other call is: Codex-backed endpoints refuse a reply that isn't.
+      const result = streamText({
         model: fast ?? this.#model(),
         system: COMPACTION_PROMPT,
         messages: pruneScreenshots(sent.slice(0, cut), 0, 0),
         maxOutputTokens: 4000,
         maxRetries: 0,
         abortSignal: signal,
-        // An OpenAI-style chat completion says which tier served it only in its body.
-        include: { responseBody: true },
+        // An OpenAI-style chat completion says which tier served it only in its chunks.
+        includeRawChunks: true,
       });
+      let chatTier: unknown, speed: PremiumSpeed | undefined;
+      text = "";
+      for await (const part of result.fullStream) {
+        signal.throwIfAborted();
+        if (part.type === "raw") chatTier = rawTier(part.rawValue) ?? chatTier;
+        else if (part.type === "text-delta") text += part.text;
+        else if (part.type === "error") throw part.error;
+        else if (part.type === "finish-step")
+          speed = servedTier(part.providerMetadata, part.response.headers, chatTier);
+        else if (part.type === "finish") {
+          const usage = part.totalUsage;
+          this.#o.sink.push({
+            type: "model.usage",
+            data: {
+              role: fast ? "fast" : this.#role,
+              route: summarizer.route,
+              model: summarizer.model,
+              inputTokens: usage.inputTokens ?? 0,
+              outputTokens: usage.outputTokens ?? 0,
+              ...(usage.outputTokenDetails?.reasoningTokens
+                ? { reasoningTokens: usage.outputTokenDetails.reasoningTokens }
+                : {}),
+              ...(speed ? { speed } : {}),
+            },
+          });
+        }
+      }
       signal.throwIfAborted();
-      text = result.text;
-      const usage = result.totalUsage;
-      const speed = servedTier(
-        result.providerMetadata,
-        result.response.headers,
-        rawTier(result.response.body),
-      );
-      this.#o.sink.push({
-        type: "model.usage",
-        data: {
-          role: fast ? "fast" : this.#role,
-          route: summarizer.route,
-          model: summarizer.model,
-          inputTokens: usage.inputTokens ?? 0,
-          outputTokens: usage.outputTokens ?? 0,
-          ...(usage.outputTokenDetails?.reasoningTokens
-            ? { reasoningTokens: usage.outputTokenDetails.reasoningTokens }
-            : {}),
-          ...(speed ? { speed } : {}),
-        },
-      });
     } catch {
       signal.throwIfAborted();
       this.#compactFailedAt = estimate;

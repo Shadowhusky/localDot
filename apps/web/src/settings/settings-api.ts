@@ -1,6 +1,7 @@
 import {
   AgentSettingsDocument,
   ClaudeCodeStatus,
+  KeyModelsReply,
   ModelControls,
   SECRET_ID_PATTERN,
 } from "@localdot/protocol";
@@ -36,6 +37,14 @@ export const ProviderIndex = z
       })
       .nullable(),
     keyLayer: z.enum(["online", "offline"]),
+    // Why the fast model failed dot's last quick request, until it answers one again.
+    fastFailure: z
+      .strictObject({
+        provider: identifier,
+        model: z.string().max(256),
+        reason: z.string().max(512),
+      })
+      .optional(),
     subscriptions: z
       .array(
         z.discriminatedUnion("id", [
@@ -246,6 +255,16 @@ export async function loadClaudeCode(
   if (!parsed.success) throw new SettingsFailure(false);
   return parsed.data;
 }
+// The models a saved key reaches, as its provider or endpoint lists them.
+export async function loadKeyModels(
+  api: ApiClient,
+  keyId: string,
+  signal?: AbortSignal,
+): Promise<KeyModelsReply["models"]> {
+  const reply = await api.get(`/api/agent/keys/${encodeURIComponent(keyId)}/models`, { signal });
+  return KeyModelsReply.parse(reply).models;
+}
+
 export async function refreshCatalog(api: ApiClient, signal?: AbortSignal): Promise<void> {
   const parsed = z
     .strictObject({

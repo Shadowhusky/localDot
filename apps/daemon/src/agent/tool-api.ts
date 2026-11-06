@@ -5,6 +5,7 @@ import {
   BriefPost,
   MAX_BRAIN_EVENTS,
   TOOL_API_PORT,
+  TOOL_REQUEST_HEADER,
   ToolCallRequest,
   TranscriptAppend,
   ULID_PATTERN,
@@ -14,6 +15,7 @@ import { z } from "zod";
 import type { FramePng, Region } from "./frame-png.ts";
 import type { Redactor } from "./redact.ts";
 import { type AgentSession, abortable, type BrainGeneration } from "./session.ts";
+import { Replies, type Reply } from "./tool-replies.ts";
 import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
 import { MAX_TRANSCRIPT_MESSAGE, type TranscriptStore } from "./transcript.ts";
 
@@ -23,8 +25,22 @@ export interface ToolApiDeps extends DispatchDeps {
   png: Pick<FramePng, "png">;
   redactorFor(session: AgentSession): Redactor;
 }
-type Variables = { session: AgentSession; generation: BrainGeneration };
+// `began`: the request got past the point where it does something, so it is never run again.
+type Variables = { session: AgentSession; generation: BrainGeneration; began?: boolean };
 const MAX_BODY = 2 * 1024 * 1024;
+// Longer than the brain keeps an idle connection (cells/brain/src/tool-client.ts), so the brain
+// never sends a request on a connection this end is closing. A busy Mac can hold the daemon up for
+// seconds, and Node closes an idle connection on time even when a request is already waiting in it.
+const KEEP_ALIVE_MS = 65_000;
+const INTERRUPTED =
+  "The connection dropped while this ran, so it may have been done in part. Check before you repeat it.";
+async function replyOf(res: Response): Promise<Reply> {
+  return {
+    status: res.status,
+    headers: [...res.headers],
+    body: await res.clone().arrayBuffer(),
+  };
+}
 const digest = (s: string) => createHash("sha256").update(s).digest();
 class BodyError extends Error {
   constructor(
@@ -156,6 +172,32 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
     c.set("generation", match.generation);
     await next();
   });
+  const replies = new WeakMap<BrainGeneration, Replies>();
+  app.use("*", async (c, next) => {
+    const id = c.req.header(TOOL_REQUEST_HEADER);
+    if (c.req.method !== "POST" || id === undefined) return next();
+    if (!ULID_PATTERN.test(id)) return c.text("invalid request id", 400);
+    const taken = replies.get(c.var.generation) ?? new Replies();
+    replies.set(c.var.generation, taken);
+    for (let earlier = taken.get(id); earlier; earlier = taken.get(id)) {
+      const reply = await abortable(earlier, c.req.raw.signal);
+      if (reply)
+        return new Response(reply.body.byteLength ? reply.body.slice(0) : null, {
+          status: reply.status,
+          headers: reply.headers,
+        });
+    }
+    const settle = taken.take(id);
+    try {
+      await next();
+    } finally {
+      if (!c.var.began) settle(undefined);
+    }
+    if (c.var.began)
+      settle(
+        await replyOf(c.res).catch(() => ({ status: 500, headers: [], body: new ArrayBuffer(0) })),
+      );
+  });
   app.get("/v1/control", async (c) => {
     const { session, generation } = c.var;
     const after = Number(c.req.query("after") ?? "0"),
@@ -210,6 +252,7 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
       )
     )
       return c.text("transcript message too large", 400);
+    c.set("began", true);
     try {
       session.appendTranscript(deps.transcripts, generation, request, signal);
     } catch {
@@ -235,6 +278,7 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
     if (!batch.success) return c.text("invalid brain events", 400);
     const events = batch.data.events.flatMap((event) => brainEvent(event) ?? []);
     if (!events.length) return c.text("invalid brain events", 400);
+    c.set("began", true);
     for (const event of events) {
       session.check(generation, signal);
       session.append(event.type, event.data as Record<string, unknown>);
@@ -254,6 +298,7 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
     if (!parsed.success) return c.text("invalid subagent brief", 400);
     const post = BriefPost.safeParse(redactValue(parsed.data, deps.redactorFor(session)));
     if (!post.success) return c.text("invalid subagent brief", 400);
+    c.set("began", true);
     deps.transcripts.saveBrief(session.id, post.data.brief);
     return c.body(null, 204);
   });
@@ -264,6 +309,7 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
     const parsed = ToolCallRequest.safeParse(await jsonBody(c.req.raw, signal));
     session.check(generation, signal);
     if (!parsed.success) return c.text("invalid tool call", 400);
+    c.set("began", true);
     try {
       const out = await dispatchTool(
         deps,
@@ -293,7 +339,14 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
     } catch {
       return c.json({
         ok: false,
-        content: [{ type: "text", text: "The tool was cancelled or could not complete." }],
+        content: [
+          {
+            type: "text",
+            text: c.req.raw.signal.aborted
+              ? INTERRUPTED
+              : "The tool was cancelled or could not complete.",
+          },
+        ],
       });
     }
   });
@@ -330,5 +383,7 @@ export function serveToolApi(
   app: ReturnType<typeof createToolApi>,
   port = TOOL_API_PORT,
 ): { close(): void } {
-  return serve({ fetch: app.fetch, hostname: "127.0.0.1", port });
+  const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port });
+  if ("keepAliveTimeout" in server) server.keepAliveTimeout = KEEP_ALIVE_MS;
+  return server;
 }

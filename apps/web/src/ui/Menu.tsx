@@ -15,7 +15,7 @@ import type { IconName } from "./icons.ts";
 import { formatKeys } from "./Kbd.tsx";
 import { lastModality } from "./LayerStack.tsx";
 import { Anchored } from "./Popover.tsx";
-import type { Align, Side } from "./position.ts";
+import type { Align, Rect, Side } from "./position.ts";
 import { pressHandlers } from "./press.ts";
 
 // Typed letters within this long of each other search together.
@@ -28,6 +28,10 @@ interface MenuState {
 
 const MenuContext = createContext<MenuState | null>(null);
 
+// The keyboard's way to a thing's context menu: the menu key, or Shift+F10.
+export const isMenuKey = (event: { key: string; shiftKey: boolean }) =>
+  event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");
+
 function items(menu: HTMLElement): HTMLElement[] {
   return [...menu.querySelectorAll<HTMLElement>("[role=menuitem], [role=menuitemradio]")];
 }
@@ -36,6 +40,8 @@ export interface MenuProps {
   open: boolean;
   onClose(): void;
   anchor: RefObject<HTMLElement | null>;
+  // What the menu is placed beside when not the anchor itself.
+  against?: () => Rect | undefined;
   label: string;
   side?: Side;
   align?: Align;
@@ -161,6 +167,8 @@ export function useMenuItem(onSelect: () => void, unavailable = false) {
 export interface MenuItemProps {
   onSelect(): void;
   icon?: IconName;
+  // In the icon's place, such as a small dot.
+  glyph?: ReactNode;
   kbd?: readonly string[];
   // Unavailable while set: the item stays reachable and says why under its label.
   disabledReason?: string;
@@ -174,6 +182,7 @@ export interface MenuItemProps {
 export function MenuItem({
   onSelect,
   icon,
+  glyph: drawn,
   kbd,
   disabledReason,
   textValue,
@@ -192,13 +201,14 @@ export function MenuItem({
         ? { role: "menuitem" }
         : { role: "menuitemradio", "aria-checked": checked })}
       className="ui-menu-item"
+      data-glyph={drawn ? "" : undefined}
       data-label={textValue ?? (typeof children === "string" ? children : undefined)}
       aria-labelledby={labelId}
       aria-disabled={disabledReason ? true : undefined}
       aria-describedby={disabledReason ? reasonId : undefined}
       aria-keyshortcuts={keys?.aria}
     >
-      {glyph && <Icon name={glyph} size={18} className="ui-menu-icon" />}
+      {drawn ?? (glyph && <Icon name={glyph} size={18} className="ui-menu-icon" />)}
       <span className="ui-menu-text">
         <span id={labelId} className="ui-menu-label">
           {children}

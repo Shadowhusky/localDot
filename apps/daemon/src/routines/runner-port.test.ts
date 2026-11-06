@@ -18,11 +18,17 @@ function fixture() {
     { start: vi.fn(), end: vi.fn(() => true), get: (id: string) => sessions.get(id) as never },
     live,
     { listSessions: () => [{ id: "S1", title: "Find flights", startedAt: "", events: 1 }] },
+    () => ({ has: (id) => id === "S1", latest: () => "S2" }),
   );
   return { sessions, live, port };
 }
 
 describe("agent runner port", () => {
+  it("finds a conversation's latest task, and none once it is gone", () => {
+    const { port } = fixture();
+    expect(port.latest("S1")).toBe("S2");
+    expect(port.latest("S0")).toBeUndefined();
+  });
   it("shares the computer with tasks at work, and waits only while the user holds it", async () => {
     const f = fixture();
     expect(f.port.busy("C")).toBe(false);

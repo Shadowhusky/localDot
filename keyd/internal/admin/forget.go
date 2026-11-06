@@ -39,6 +39,9 @@ func (s *Server) forgetVault(w http.ResponseWriter, r *http.Request) {
 	}
 	secrets := 0
 	for _, rec := range s.Vault.Records() {
+		if s.Tokens != nil {
+			s.Tokens.Forget(rec.ID)
+		}
 		_, err := s.Manager.DeleteSecret(rec.ID)
 		if errors.Is(err, vault.ErrLocked) {
 			failLocked(w)
@@ -60,6 +63,9 @@ func (s *Server) forgetVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	secrets += rest
+	if s.Logins != nil {
+		s.Logins.Reset()
+	}
 	s.admin("vault-forget", "", fmt.Sprintf("%d key(s) and %d login(s) forgotten", secrets, logins))
 	reply(w, http.StatusOK, map[string]int{"secrets": secrets, "logins": logins})
 }

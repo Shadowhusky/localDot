@@ -45,6 +45,7 @@ import { StreamTuning } from "./cells/stream-tuning.ts";
 import { SystemMigration } from "./cells/system-migration.ts";
 import { monotonicClock } from "./clock.ts";
 import { timestampLogs } from "./daemon-log.ts";
+import { TaskScanner } from "./deliverables/task-scan.ts";
 import { deliverablesFor } from "./deliverables/wiring.ts";
 import { DesktopdRegistry } from "./desktopd/registry.ts";
 import { runDoctor } from "./doctor.ts";
@@ -84,6 +85,7 @@ import { previewPortRange } from "./previews/config.ts";
 import { previewFronts } from "./previews/fronts.ts";
 import { Previews } from "./previews/previews.ts";
 import { PreviewServe } from "./previews/serve.ts";
+import { turnOffers } from "./previews/turn-offers.ts";
 import { resumeCompactions } from "./recorder/compaction.ts";
 import { compactionFromEnv, DockerTrackEncoder, RecordingCompactor } from "./recorder/compactor.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
@@ -500,9 +502,20 @@ const systemClock = {
     return () => clearInterval(timer);
   },
 };
+const offerScanner = new TaskScanner(eventLog);
 agent = createAgent({
+  previewOffers: (id, reply) =>
+    turnOffers(
+      {
+        scan: (task) => offerScanner.scan(task),
+        offers: (task, turn) => previews.offers(task, turn),
+      },
+      id,
+      reply,
+    ),
   transfers,
   quarantine,
+  recordings: recorder,
   sessionScreens: new SessionScreens({
     cells: orchestrator,
     browser,
@@ -512,7 +525,6 @@ agent = createAgent({
     downloads,
     pendingStop: (sessionId) => killSwitch.pendingStop(sessionId),
     live,
-    makeWay: async (sessionId, signal) => (await agent?.runner.makeWay(sessionId, signal)) ?? false,
     report: (message) => console.error(message),
     now: () => clock.nowMicros(),
   }),
@@ -549,7 +561,7 @@ const running = agent;
 const routineLauncher = new RoutineLauncher({
   store: routineStore,
   cells: orchestrator,
-  runner: agentRunnerPort(running.runner, live, eventLog),
+  runner: agentRunnerPort(running.runner, live, eventLog, () => running.routes.conversations),
   events: eventLog,
   dockerAvailable: async () => {
     if (appInstalling) return false;
@@ -663,6 +675,11 @@ const keydEvents = new KeydEventRouter({
   ask: (cellId, held) => void agent.connections.ask(cellId, held),
   asksMissed: () => void agent.connections.sweep(),
   parentOf: (cellId) => browser.parentOf(cellId),
+  browsingHost: (parent, host) =>
+    live
+      .sessionsOn(parent)
+      .find((id) => agent?.runner.get(id)?.browserHost?.endsWith(host.replace(/^www\./u, ""))),
+  accountOf: (sessionId) => agent.runner.accountOf(sessionId),
 });
 // keyd holds a connection for two minutes; a missed event is picked up well within that.
 const sweepAsks = setInterval(() => void agent.connections.sweep(), 15_000);
@@ -672,6 +689,7 @@ shutdown.push(
   { name: "key events", stop: () => keydEvents.stop() },
   { name: "key monitor", stop: () => keydMonitor.stop() },
   { name: "browser warmer", stop: () => browserWarmer.dispose() },
+  { name: "Chrome updates", stop: browser.watchEngine() },
   { name: "browser recovery", stop: () => browserRecovery.close() },
   { name: "routine scheduler", stop: () => routineScheduler.stop() },
   {
@@ -766,6 +784,8 @@ const previews = new Previews({
   range: previewPorts,
   cells: orchestrator,
   cellOf: taskCell,
+  conversation: (id) => running.routes.conversations?.chain(id).sessions ?? [id],
+  working: (cellId) => running.runner.workingOn(cellId),
   fronts: async () =>
     previewFronts(
       configuredAccessOrigins(),
@@ -825,6 +845,8 @@ const app = createApp({
     start: (cellId, task, signal, opts) => running.runner.start(cellId, task, signal, opts),
     upload: running.routes.desktop,
     redactUserText: running.routes.redactUserText,
+    conversation: (id) =>
+      running.routes.conversations?.chain(id) ?? { sessions: [id], more: false },
   }),
   cells: {
     cells: orchestrator,
@@ -843,6 +865,7 @@ const app = createApp({
   browser: browserViewer,
   accounts: { cells: orchestrator, browser },
   browserStatus: { cells: orchestrator, browser, report: (message) => console.error(message) },
+  browserEngine: browser,
   ui: { dir: webDir("dist") },
   gateway: {
     registry,

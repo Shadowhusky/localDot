@@ -70,7 +70,7 @@ export function SideNote({
       {aside.phase === "asking" && (
         <p className="side-note-wait" role="status">
           <Spinner size={16} />
-          Asking your Fast model…
+          Asking…
         </p>
       )}
       {aside.phase === "answered" && aside.answer && (
@@ -79,7 +79,9 @@ export function SideNote({
             <SafeMarkdown text={aside.answer.answer} compact />
           </div>
           <p className="side-note-by">
-            {`Answered by ${modelName(aside.answer.provider, aside.answer.model)}, your Fast model`}
+            {`Answered by ${modelName(aside.answer.provider, aside.answer.model)}`}
+            {aside.answer.failed &&
+              `, as ${modelName(aside.answer.provider, aside.answer.failed.model)} didn't: ${aside.answer.failed.reason}`}
           </p>
         </>
       )}
@@ -91,7 +93,7 @@ export function SideNote({
           <div className="side-note-actions">
             {aside.setup ? (
               <Button size="sm" onClick={(event) => onModels(event.currentTarget)}>
-                Choose a Fast model
+                Choose a model
               </Button>
             ) : (
               <Button size="sm" onClick={onRetry}>

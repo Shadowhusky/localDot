@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import type { MouseEvent, ReactNode } from "react";
+import { Icon } from "./Icon.tsx";
 import { pressHandlers } from "./press.ts";
 
 export interface ThumbnailButtonProps {
@@ -34,6 +35,30 @@ export function ThumbnailButton({
       onClick={onClick}
     >
       {children}
+    </button>
+  );
+}
+
+// Laid over a picture: pressing it anywhere opens it large. The glyph at its centre shows under a
+// pointer, and always where there is none to hover with.
+export function PictureCover({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick(event: MouseEvent<HTMLButtonElement>): void;
+}) {
+  return (
+    <button
+      {...pressHandlers}
+      type="button"
+      className="ui-picture-cover"
+      aria-label={label}
+      onClick={onClick}
+    >
+      <span className="ui-picture-cover-glyph">
+        <Icon name="expand" size={18} />
+      </span>
     </button>
   );
 }

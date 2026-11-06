@@ -3,7 +3,7 @@ import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "n
 import { join } from "node:path";
 import { z } from "zod";
 import { BrowserLifecycleError } from "./browser-ledger.ts";
-import { type DockerClient, DockerError } from "./docker.ts";
+import { type DockerClient, DockerError, dockerLogLines } from "./docker.ts";
 
 type Docker = Pick<DockerClient, "request">;
 type Raw = Record<string, unknown>;
@@ -11,6 +11,33 @@ type Raw = Record<string, unknown>;
 export const ACCOUNTS_PROFILE_ROLE = "accounts-profile";
 const OWNER_LABEL = "localdot.accounts-owner";
 const COPY_MS = 10 * 60_000;
+const BACKUP_ROLE = "accounts-backup";
+const LAST_VERSION = /^[0-9]+(?:\.[0-9]+){3}$/u;
+// What a browser rebuilds by itself isn't worth a copy, and a stale lock must not come back.
+const NOT_COPIED = [
+  "Cache",
+  "Code Cache",
+  "GPUCache",
+  "DawnGraphiteCache",
+  "DawnWebGPUCache",
+  "GrShaderCache",
+  "ShaderCache",
+  "CacheStorage",
+  "ScriptCache",
+  "Singleton*",
+];
+// A one-way upgrade rests on this copy, so the files sign-ins depend on are compared after it, and
+// there must be room for it before the first byte. Exits 28 for no room and 29 for a bad copy.
+const COPY_PROFILE = `set -euo pipefail
+excluded=(${NOT_COPIED.map((name) => `--exclude='${name}'`).join(" ")})
+need=$(du -sk "\${excluded[@]}" /legacy | cut -f1)
+have=$(df -k --output=avail /profile | tail -1)
+[ "$have" -gt $((need + need / 10 + 65536)) ] || exit 28
+find /profile -mindepth 1 -delete
+tar -C /legacy "\${excluded[@]}" -cf - . | tar -C /profile -xpf -
+for file in "chromium/Local State" chromium/Default/Cookies "chromium/Default/Login Data"; do
+  [ ! -e "/legacy/$file" ] || cmp -s "/legacy/$file" "/profile/$file" || exit 29
+done`;
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,199}$/u;
 const identitySchema = z.strictObject({
   v: z.literal(1),
@@ -87,9 +114,79 @@ export class AccountsProfile {
       });
       if (await this.#inspect()) throw new BrowserLifecycleError();
     }
+    await this.dropBackup();
     const fresh: Identity = { v: 1, owner: identity.owner, migration: "done" };
     this.#write(fresh);
     await this.#volume(fresh);
+  }
+
+  get backupVolume(): string {
+    return `${this.volume}-backup`;
+  }
+
+  // The version of the browser that last opened the profile; undefined for one no browser has.
+  async lastVersion(): Promise<string | undefined> {
+    if (!(await this.#inspect())) return undefined;
+    const identity = await this.#identity();
+    const { code, output } = await this.#helper(
+      `${this.volume}-version`,
+      this.labels(identity.owner),
+      ["/bin/cat", "/legacy/chromium/Last Version"],
+      this.volume,
+      undefined,
+      60_000,
+    );
+    const version = code === 0 ? output[0]?.trim() : undefined;
+    return version && LAST_VERSION.test(version) ? version : undefined;
+  }
+
+  // A copy of the sign-ins in a volume of its own, kept beside the profile and never on the host.
+  async backup(): Promise<void> {
+    const identity = await this.#identity();
+    const volume = this.backupVolume;
+    const expected = { ...this.labels(identity.owner), "localdot.role": BACKUP_ROLE };
+    if (!(await this.#inspect(volume)))
+      await this.deps.docker.request({
+        method: "POST",
+        path: "/volumes/create",
+        body: { Name: volume, Labels: expected },
+      });
+    await this.#copyProfile(identity, this.volume, volume, "backup");
+  }
+
+  async hasBackup(): Promise<boolean> {
+    const found = await this.#inspect(this.backupVolume);
+    return raw(found?.Labels) && found.Labels["localdot.role"] === BACKUP_ROLE;
+  }
+
+  // Puts the backup back in place of the profile. No browser may hold it.
+  async restoreBackup(): Promise<void> {
+    const identity = await this.#identity();
+    if ((await this.holders()).length) throw new BrowserLifecycleError("Saved sign-ins are in use");
+    if (!(await this.hasBackup())) throw new BrowserLifecycleError("There is no backup to restore");
+    await this.#copyProfile(identity, this.backupVolume, this.volume, "restore");
+  }
+
+  async dropBackup(): Promise<void> {
+    if (!(await this.#inspect(this.backupVolume))) return;
+    await this.deps.docker.request({
+      method: "DELETE",
+      path: `/volumes/${encodeURIComponent(this.backupVolume)}`,
+    });
+  }
+
+  async #copyProfile(identity: Identity, from: string, to: string, kind: string): Promise<void> {
+    const { code } = await this.#helper(
+      `${this.volume}-${kind}`,
+      { ...this.labels(identity.owner), "localdot.role": "accounts-copy" },
+      ["/bin/bash", "-c", COPY_PROFILE],
+      from,
+      to,
+      COPY_MS,
+    );
+    if (code === 28)
+      throw new BrowserLifecycleError("Docker doesn't have enough free disk space for a copy");
+    if (code !== 0) throw new BrowserLifecycleError("Saved sign-ins could not be copied");
   }
 
   labels(owner: string): Record<string, string> {
@@ -209,8 +306,27 @@ export class AccountsProfile {
   }
 
   async #copy(identity: Identity, source: string): Promise<void> {
-    const name = `${this.volume}-copy`;
-    const labels = { ...this.labels(identity.owner), "localdot.role": "accounts-copy" };
+    const { code } = await this.#helper(
+      `${this.volume}-copy`,
+      { ...this.labels(identity.owner), "localdot.role": "accounts-copy" },
+      ["/bin/cp", "-a", "--", "/legacy/.", "/profile/"],
+      source,
+      this.volume,
+      COPY_MS,
+    );
+    if (code !== 0) throw new BrowserLifecycleError("Saved sign-ins could not be copied");
+  }
+
+  // A short-lived container with one volume to read at /legacy and maybe one to fill at /profile: no
+  // network, no capabilities, and the user the profile belongs to.
+  async #helper(
+    name: string,
+    labels: Record<string, string>,
+    [entrypoint, ...command]: readonly string[],
+    read: string,
+    write: string | undefined,
+    timeoutMs: number,
+  ): Promise<{ code: number; output: readonly string[] }> {
     const stale = await this.#container(name);
     if (stale) {
       const config = raw(stale.Config) ? stale.Config : undefined;
@@ -226,15 +342,15 @@ export class AccountsProfile {
       body: {
         Image: this.deps.image(),
         User: "1000:1000",
-        Entrypoint: ["/bin/cp"],
-        Cmd: ["-a", "--", "/legacy/.", "/profile/"],
+        Entrypoint: [entrypoint],
+        Cmd: command,
         NetworkDisabled: true,
         Labels: labels,
         HostConfig: {
           NetworkMode: "none",
           Mounts: [
-            { Type: "volume", Source: source, Target: "/legacy", ReadOnly: true },
-            { Type: "volume", Source: this.volume, Target: "/profile" },
+            { Type: "volume", Source: read, Target: "/legacy", ReadOnly: true },
+            ...(write ? [{ Type: "volume", Source: write, Target: "/profile" }] : []),
           ],
           ReadonlyRootfs: true,
           CapDrop: ["ALL"],
@@ -252,10 +368,21 @@ export class AccountsProfile {
       const result = await this.deps.docker.request<unknown>({
         method: "POST",
         path: `/containers/${id}/wait`,
-        timeoutMs: COPY_MS,
+        timeoutMs,
       });
-      if (!raw(result) || result.StatusCode !== 0)
-        throw new BrowserLifecycleError("Saved sign-ins could not be copied");
+      if (!raw(result) || typeof result.StatusCode !== "number") throw new BrowserLifecycleError();
+      const logs = write
+        ? undefined
+        : await this.deps.docker.request<Buffer>({
+            method: "GET",
+            path: `/containers/${id}/logs`,
+            query: { stdout: "true", stderr: "false", tail: "1" },
+            response: "buffer",
+          });
+      return {
+        code: result.StatusCode,
+        output: Buffer.isBuffer(logs) ? dockerLogLines(logs) : [],
+      };
     } finally {
       await this.#remove(id);
     }

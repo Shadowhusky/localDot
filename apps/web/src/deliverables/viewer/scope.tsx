@@ -12,6 +12,8 @@ export interface ViewerEntry {
   resultId: string;
   file: ResultFile;
   sessionId: string;
+  // What the viewer calls it, when that is not the file's name: a step's saved picture has none.
+  title?: string;
 }
 // The version a row is showing, when it is not the file's own.
 export interface ShownVersion {
@@ -34,10 +36,21 @@ export interface FilePatch {
   op?: "create" | "modify" | "delete";
   truncated?: boolean;
 }
-export type AnyEntry = ViewerEntry | ComputerEntry;
+// A screenshot a task recorded, which has no file of its own and nothing to download.
+export interface FrameEntry {
+  sessionId: string;
+  frameId: string;
+  name: string;
+}
+export type AnyEntry = ViewerEntry | ComputerEntry | FrameEntry;
 export const isComputerEntry = (entry: AnyEntry): entry is ComputerEntry => "path" in entry;
+export const isFrameEntry = (entry: AnyEntry): entry is FrameEntry => "frameId" in entry;
 export const anyEntryKey = (entry: AnyEntry) =>
-  isComputerEntry(entry) ? `computer:${entry.sessionId}:${entry.path}` : entryKey(entry);
+  isComputerEntry(entry)
+    ? `computer:${entry.sessionId}:${entry.path}`
+    : isFrameEntry(entry)
+      ? `frame:${entry.sessionId}:${entry.frameId}`
+      : entryKey(entry);
 // How the viewer gets a file: its download's state, why it can't start now, and starting it.
 export interface ViewerDownloads<E extends AnyEntry = AnyEntry> {
   state(entry: E): FileState | undefined;

@@ -3,7 +3,7 @@ import { LocalDotEvent, ulid } from "@localdot/protocol";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { OPENING_ROWS, useEarlierThread } from "./earlier.ts";
+import { OPENING_ROWS, readThread, useEarlierThread } from "./earlier.ts";
 import type { ThreadItem } from "./thread.ts";
 
 afterEach(cleanup);
@@ -133,8 +133,9 @@ it("carries the shown task's thread over as it is when the next task takes its p
   // The next task starts before the conversation is read again.
   view.rerender({ sessions: [FIRST, SECOND], shown: { sessionId: THIRD, items: [] } });
   expect(view.result.current.items.at(-1)?.key).toBe("message-shown");
+  // Then what was on show gives way to the whole of it, as a fresh load has it.
   await settle();
-  expect(f.read.mock.calls.map(([id]) => id)).toEqual([FIRST]);
+  expect(said(view.result.current.items).at(-2)).toBe("dot: Made it blue.");
 });
 
 it("shows nothing earlier while no task is shown", async () => {
@@ -233,4 +234,160 @@ it("reads an earlier task's steps where dot took them, between its words, as tha
     "done",
     "failed",
   ]);
+});
+
+it("shows which run of a routine each earlier task was", async () => {
+  const origin = {
+    kind: "routine",
+    routineId: "01JXYZ0000000000000000RRR1",
+    runId: "01JXYZ0000000000000000RRN1",
+    name: "Morning bills",
+    dueAt: "2026-10-12T07:30:00.000Z",
+  };
+  const first = ndjson([
+    [
+      "session.start",
+      { screen: { w: 1280, h: 800, scale: 1 }, os: "linux", title: "Morning bills", origin },
+    ],
+    ["message.user", { messageId: ulid(), text: "Check", kind: "task" }],
+    ["session.end", { reason: "done" }],
+  ]);
+  const api = createApi("fixture", {
+    origin: "http://127.0.0.1:4747",
+    fetchImpl: async () =>
+      new Response(first, { headers: { "content-type": "application/x-ndjson" } }),
+  });
+  const items = await readThread(api, FIRST, new AbortController().signal);
+  expect(items[0]).toMatchObject({ kind: "origin", origin });
+});
+
+const message = (key: string): ThreadItem => ({
+  kind: "message",
+  key: `message-${key}`,
+  speaker: "user",
+  message: { id: key, role: "user", text: key, final: true },
+});
+
+it("keeps every task that has been on show, however late the list of tasks learns of them", async () => {
+  const f = setup();
+  const view = renderHook(({ sessions, shown }) => useEarlierThread(f.api, sessions, shown), {
+    initialProps: {
+      sessions: [] as string[],
+      shown: { sessionId: FIRST as string | null, items: rows(OPENING_ROWS) },
+    },
+  });
+  await settle();
+  const first = view.result.current.owner;
+  view.rerender({ sessions: [], shown: { sessionId: SECOND, items: [message("second")] } });
+  expect(view.result.current.items).toHaveLength(OPENING_ROWS);
+  view.rerender({ sessions: [], shown: { sessionId: THIRD, items: [message("third")] } });
+  // Both tasks before the one shown stay, oldest first, and the conversation is still the one it was.
+  expect(view.result.current.items.at(0)?.key).toBe("message-0");
+  expect(view.result.current.items.at(-1)?.key).toBe("message-second");
+  expect(view.result.current.owner).toBe(first);
+  expect(view.result.current.opening).toBe(false);
+  // The list comes in: nothing above moves.
+  view.rerender({
+    sessions: [FIRST, SECOND, THIRD],
+    shown: { sessionId: THIRD, items: [message("third")] },
+  });
+  expect(view.result.current.items.at(-1)?.key).toBe("message-second");
+  expect(view.result.current.owner).toBe(first);
+  // Both are read from their history in the end, as a fresh load has them.
+  await settle();
+  expect(said(view.result.current.items)).toEqual([
+    "user: Draw a dog",
+    "dot: Drew it.",
+    `result of ${FIRST}: dog.png`,
+    "user: Make it blue",
+    "dot: Made it blue.",
+    `result of ${SECOND}: `,
+  ]);
+});
+
+it("opens anew on a list that names none of the tasks seen, and on nothing shown", async () => {
+  const f = setup();
+  const view = renderHook(({ sessions, shown }) => useEarlierThread(f.api, sessions, shown), {
+    initialProps: {
+      sessions: [FIRST],
+      shown: { sessionId: FIRST as string | null, items: rows(2) },
+    },
+  });
+  await settle();
+  view.rerender({ sessions: [SECOND, THIRD], shown: { sessionId: THIRD, items: rows(2) } });
+  expect(view.result.current.owner).toBe(SECOND);
+  expect(view.result.current.opening).toBe(true);
+  expect(view.result.current.items.map((item) => item.key)).not.toContain("message-0");
+  view.rerender({ sessions: [], shown: { sessionId: null, items: [] } });
+  expect(view.result.current.owner).toBe("");
+  expect(view.result.current.items).toEqual([]);
+});
+
+it("reads no earlier task until asked once the shown task fills the thread by itself", async () => {
+  const f = setup();
+  const view = renderHook(() =>
+    useEarlierThread(f.api, [FIRST, SECOND, THIRD], {
+      sessionId: THIRD,
+      items: rows(OPENING_ROWS),
+    }),
+  );
+  await settle();
+  expect(view.result.current).toMatchObject({ opening: false, more: true, reading: false });
+  expect(f.read).not.toHaveBeenCalled();
+  act(() => view.result.current.older());
+  await settle();
+  expect(f.read.mock.calls.map(([id]) => id)).toEqual([SECOND]);
+});
+
+it("keeps what was on show if the task's history can't be read after all", async () => {
+  const api = createApi("fixture", {
+    origin: "http://127.0.0.1:4747",
+    fetchImpl: async () => new Response("gone", { status: 404 }),
+  });
+  const view = renderHook(({ sessions, shown }) => useEarlierThread(api, sessions, shown), {
+    initialProps: {
+      sessions: [FIRST],
+      shown: { sessionId: FIRST as string | null, items: [message("shown")] },
+    },
+  });
+  await settle();
+  view.rerender({ sessions: [FIRST], shown: { sessionId: SECOND, items: [] } });
+  await settle();
+  expect(view.result.current.items.map((item) => item.key)).toEqual(["message-shown"]);
+});
+
+it("reads a task that failed to load again, showing nothing of it meanwhile", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const logs = log("Draw a dog", "Drew it.");
+    let fail = true;
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4747",
+      fetchImpl: async () =>
+        fail
+          ? new Response("down", { status: 503 })
+          : new Response(logs, { headers: { "content-type": "application/x-ndjson" } }),
+    });
+    const view = renderHook(() =>
+      useEarlierThread(api, [FIRST, SECOND], { sessionId: SECOND, items: [] }),
+    );
+    const run = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+    await run(5);
+    expect(view.result.current).toMatchObject({ items: [], opening: false, reading: false });
+    fail = false;
+    await run(1100);
+    expect(said(view.result.current.items)[0]).toBe("user: Draw a dog");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("does not read again a task that no longer exists", async () => {
+  const f = setup();
+  const view = renderHook(() =>
+    useEarlierThread(f.api, ["01JXYZ0000000000000000AAA9", THIRD], { sessionId: THIRD, items: [] }),
+  );
+  await settle();
+  expect(view.result.current.items).toEqual([]);
+  expect(f.read).toHaveBeenCalledTimes(1);
 });

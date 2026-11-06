@@ -28,6 +28,8 @@ export interface RoutineRunnerPort {
   post(sessionId: string, text: string): boolean;
   settled(sessionId: string): Promise<void>;
   title(sessionId: string): string | undefined;
+  // The latest task of the conversation this task is part of, if it is still there.
+  latest(sessionId: string): string | undefined;
 }
 export interface LaunchClock {
   now(): number;
@@ -98,9 +100,10 @@ export function pickComputer(
   );
 }
 
-/** Starts one run of a routine as an ordinary task with the routine's options, then watches the
- * session to record how it ended. One run per routine at a time; a frozen computer is never
- * resumed, and a computer the run turned on is turned off again when nobody else uses it.
+/** Starts one run of a routine as an ordinary task with the routine's options, going on in the
+ * routine's one conversation, then watches the session to record how it ended. One run per routine
+ * at a time; a frozen computer is never resumed, and a computer the run turned on is turned off again
+ * when nobody else uses it.
  */
 export class RoutineLauncher {
   readonly #pending = new Map<string, AbortController>();
@@ -261,7 +264,20 @@ export class RoutineLauncher {
     return `Follow up on the earlier task "${title}". ${NOTE_FRAME}\n${untrusted("follow-up note", routine.followUp.note)}`;
   }
 
+  // The conversation's latest task, which may be the user's own message after the last run, found
+  // through the newest run whose task is still there: Stop can leave no record of a run. None the
+  // first time, or once the user has deleted the conversation.
+  #continues(routine: StoredRoutine): string | undefined {
+    if (routine.kind !== "routine") return undefined;
+    for (const session of this.deps.store.recentSessions(routine.id)) {
+      const latest = this.deps.runner.latest(session);
+      if (latest) return latest;
+    }
+    return undefined;
+  }
+
   #options(routine: StoredRoutine, run: StoredRun): TaskStartOptions {
+    const continues = this.#continues(routine);
     const origin: SessionOrigin =
       routine.kind === "follow_up" && routine.followUp
         ? {
@@ -280,6 +296,7 @@ export class RoutineLauncher {
           };
     return {
       origin,
+      ...(continues ? { continues } : {}),
       autonomy: autonomyFor(routine.profile, this.deps.userAutonomy()),
       ...(routine.budgetUSD === null ? {} : { budgetUSD: routine.budgetUSD }),
       approvalWindowMs: routine.approvalWindowMinutes * 60_000,

@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { ulid } from "@localdot/protocol";
 import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import { PANEL_NAME } from "../src/shell/panel-name.ts";
 import { fixture, load, proof } from "./fixtures/recovery-server.ts";
 import { showActivity, showChat } from "./layout.ts";
 import { settingsSheet } from "./settings-ui.ts";
@@ -113,7 +114,7 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     // The thread opens on its newest 40 rows (OPENING_ROWS), Activity on its newest 100 steps.
     expect(initial).toEqual({ messages: 40, steps: 100, outputViewers: 0 });
     const activityPane = page
-      .getByRole("complementary", { name: "Plan and steps" })
+      .getByRole("complementary", { name: PANEL_NAME })
       .locator(".activity-scroll");
     await activityPane.evaluate((pane) => {
       pane.scrollTop = 100;
@@ -271,10 +272,10 @@ for (const width of [390, 640])
       await seed(f, 600);
       const p = await load(page, f);
       // A phone's toolbar: Activity opens its sheet, whose own pages step through older steps.
-      const activity = page.getByRole("button", { name: "Activity", exact: true });
+      const activity = page.getByRole("button", { name: PANEL_NAME, exact: true });
       await activity.focus();
       await page.keyboard.press("Enter");
-      const sheet = page.getByRole("dialog", { name: "Activity" });
+      const sheet = page.getByRole("dialog", { name: PANEL_NAME });
       await sheet.getByRole("button", { name: "Earlier steps", exact: true }).focus();
       await page.keyboard.press("Enter");
       await expect(sheet.getByTestId("tool-row").first()).toContainText("Replay command 101");

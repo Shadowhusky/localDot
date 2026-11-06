@@ -1,9 +1,8 @@
 import { type TextFileReply, type TextFormat, textFormat } from "@localdot/protocol";
-import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { OutputCopy } from "../../agent/OutputCopy.tsx";
 import { count } from "../../copy/format.ts";
 import type { ApiClient } from "../../lib/api.ts";
-import { Button } from "../../ui/Button.tsx";
 import { Switch } from "../../ui/Switch.tsx";
 import { type FileRef, loadText, onComputer } from "../api.ts";
 import { CodeLines } from "./CodeLines.tsx";
@@ -31,11 +30,12 @@ export function useText(api: ApiClient, file: FileRef, from: "start" | "end", at
   return text;
 }
 
-const TEXT_REASONS = {
-  binary: "This file isn't text",
+// A file that simply isn't text gets its card and no words.
+const TEXT_PROBLEMS = {
   missing: "This version is no longer available",
   computer_off: "Turn on your computer to see this file",
-  busy: "Your computer is busy. Try again in a moment",
+  busy: "Your computer is busy",
+  failed: "Couldn't load this file",
 } as const;
 
 // Text as the file means it: Markdown formatted, JSON as a tree that folds, a log from its end, and
@@ -43,12 +43,10 @@ const TEXT_REASONS = {
 export function TextView({
   api,
   file,
-  download,
   choice,
 }: {
   api: ApiClient;
   file: FileRef;
-  download?: ReactNode;
   // Shown as text whatever the viewer's choice, unless it is the file's rendered view.
   choice?: ViewChoice;
 }) {
@@ -68,36 +66,27 @@ export function TextView({
         <ViewerLoading label="Loading the text" />
       </>
     );
-  const reason = text !== "failed" && text.kind === "none" ? text.reason : null;
-  if (text === "failed" || text.kind === "none")
+  if (text === "failed" || text.kind === "none") {
+    const reason = text === "failed" ? "failed" : text.reason;
     return (
       <>
         {bar}
         <ViewerMessage
           name={name}
-          action={
-            text === "failed" || reason === "busy" ? (
-              <Button size="md" variant="secondary" onClick={() => setAttempt((n) => n + 1)}>
-                Try again
-              </Button>
-            ) : (
-              download
-            )
-          }
           title={
             reason === "missing" && onComputer(file)
               ? "This file is no longer on the computer"
-              : reason && reason in TEXT_REASONS
-                ? TEXT_REASONS[reason as keyof typeof TEXT_REASONS]
-                : "Can't show this file"
+              : reason in TEXT_PROBLEMS
+                ? TEXT_PROBLEMS[reason as keyof typeof TEXT_PROBLEMS]
+                : undefined
           }
-        >
-          {reason !== "computer_off" &&
-            reason !== "busy" &&
-            "Download the file to open it in another app."}
-        </ViewerMessage>
+          retry={
+            reason === "failed" || reason === "busy" ? () => setAttempt((n) => n + 1) : undefined
+          }
+        />
       </>
     );
+  }
   return <TextBody name={name} format={format} reply={text} choice={choice} />;
 }
 

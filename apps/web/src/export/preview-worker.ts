@@ -63,7 +63,7 @@ async function start(message: Extract<PreviewIn, { type: "start" }>) {
     }
     const gap = plan.gapAt(index);
     const pick =
-      gap === "user-control"
+      gap === "user-control" || gap === "other-task"
         ? "hold"
         : sourceAt(time, {
             hasVideo: !!video,

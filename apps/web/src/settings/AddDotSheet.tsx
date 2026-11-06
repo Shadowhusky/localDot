@@ -7,6 +7,7 @@ import { Checkbox } from "../ui/Checkbox.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Progress } from "../ui/Progress.tsx";
+import { useRevealInvalid } from "../ui/reveal-field.ts";
 import { Select } from "../ui/Select.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
 import { TextField } from "../ui/TextField.tsx";
@@ -88,6 +89,7 @@ export function AddDotSheet({
 
   const nameProblem = dotNameProblem(name);
   const passProblem = passphraseProblem(passphrase, again);
+  const { scope, reveal } = useRevealInvalid<HTMLDivElement>();
   const copying = source !== EMPTY;
 
   // Each attempt follows its job until the sheet closes or another attempt starts.
@@ -117,7 +119,10 @@ export function AddDotSheet({
 
   const submit = async () => {
     setTried(true);
-    if (nameProblem) return;
+    if (nameProblem) {
+      reveal();
+      return;
+    }
     setProblem(null);
     setPhase("working");
     added.current = name.trim();
@@ -140,7 +145,10 @@ export function AddDotSheet({
 
   const unlock = async () => {
     setPassTried(true);
-    if (passProblem || !job?.sealKey) return;
+    if (passProblem || !job?.sealKey) {
+      reveal();
+      return;
+    }
     setProblem(null);
     setPhase("working");
     const signal = attempt();
@@ -234,7 +242,7 @@ export function AddDotSheet({
         title={problem ?? ""}
         className="settings-dot-banner"
       />
-      <div className="settings-dot-form">
+      <div ref={scope} className="settings-dot-form">
         {phase === "form" && (
           <>
             <Field label="Name" error={tried ? (nameProblem ?? undefined) : undefined}>

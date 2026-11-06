@@ -49,7 +49,11 @@ function fixture() {
   const audit = { append: vi.fn() };
   const publish = vi.fn();
   const routine = store.create(
-    { name: "Morning bills", instruction: "x", when: { kind: "daily", time: "08:30" } },
+    {
+      name: "Morning bills",
+      instruction: "x",
+      schedules: [{ every: 1, unit: "day", times: ["08:30"] }],
+    },
     { state: "active" },
   );
   const deps = {

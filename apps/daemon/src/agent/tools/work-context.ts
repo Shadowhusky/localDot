@@ -128,6 +128,7 @@ export async function workContextTool(
           )
       : "unavailable",
     connectors: apps,
+    connectableApps: deps.connectors?.connectable() ?? [],
     recentResults: ctx.session.workProgress.snapshot(),
     preferredRoutes: chooseRoute(
       input.goal,
@@ -137,7 +138,7 @@ export async function workContextTool(
       apps.length,
     ),
     rules:
-      "Route order is advice, not authorization. Match the operation to the listed tool schema. A connected app cannot authenticate another browser or CLI. Respect refusals on every route; do not copy credentials. After a timeout or lost result, verify completion before retrying a possible write. Unknown access is not a request to log in.",
+      "Route order is advice, not authorization. Match the operation to the listed tool schema. A connected app cannot authenticate another browser or CLI. Respect refusals on every route; do not copy credentials. After a timeout or lost result, verify completion before retrying a possible write. Unknown access is not a request to log in. When the task needs an app in connectableApps, offer it with credentials/connect rather than signing in on a screen.",
   };
   append(ctx, "tool.end", { ok: true });
   append(ctx, "step.end", { status: "ok" });

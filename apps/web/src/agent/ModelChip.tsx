@@ -29,8 +29,10 @@ export interface ModelMenuProps {
   current?: string;
   choice?: AgentRoleChoice;
   outputLimit?(choice: AgentRoleChoice): number;
-  // A task is at work: it keeps its model, and a choice starts with the next task.
+  // A task is at work: it keeps its model until the next message.
   working?: boolean;
+  // What runs the task now, when one does: a model elsewhere is a move, not a switch in place.
+  runtime?: string;
   onChoose(option: ModelOption): void;
   // Given what the menu opened from, which takes the focus back when Settings closes.
   onManage(trigger: HTMLElement): void;
@@ -62,6 +64,7 @@ function ModelMenuBody({
   current,
   choice,
   working,
+  runtime,
   onChoose,
   onManage,
   outputLimit,
@@ -76,6 +79,7 @@ function ModelMenuBody({
   // Only the plan the chosen model spends: another plan the menu offers, or one signed in beside a
   // model billed by the call, says nothing about the model in use.
   const plan = PlanProvider.options.find((provider) => provider === draft?.choice.provider);
+  const moves = !!runtime && !!draft && (plan ?? "api") !== runtime;
   const dirty =
     draft &&
     (draft.id !== current ||
@@ -94,9 +98,11 @@ function ModelMenuBody({
           }}
         />
       </div>
-      {working && (
+      {(working || moves) && (
         <p className="model-options-note">
-          Applies from the next task. This one keeps its settings.
+          {moves
+            ? "This model keeps its own history, so dot brings over a summary of this task, not every step."
+            : "Applies from your next message."}
         </p>
       )}
       <Select
@@ -152,7 +158,7 @@ function ModelMenuBody({
 export interface ModelChipProps extends Omit<ModelMenuProps, "open" | "onClose" | "anchor"> {
   // The main model, or the one being saved.
   name: string;
-  // The task at work keeps its own model: the chosen one starts with the next task.
+  // The task at work is on another model: the chosen one starts with the next message.
   next?: boolean;
   disabledReason?: string;
   // The pointer is on its way, or focus arrived: the plans in the menu can be read in time.
@@ -164,7 +170,7 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const { triggerProps: tip, tooltip } = useTooltip({
-    content: !disabledReason && next ? "Starts with the next task" : undefined,
+    content: !disabledReason && next ? "Starts with your next message" : undefined,
   });
   // The menu and the label give the full name; the chip leaves out a family name the rest says.
   const label = name.replace(/^Claude (?=[A-Za-z])/, "");
@@ -182,7 +188,7 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
         size="sm"
         className="composer-model"
         disabledReason={disabledReason}
-        aria-label={next ? `Model for the next task: ${said}` : `Model: ${said}`}
+        aria-label={next ? `Model for your next message: ${said}` : `Model: ${said}`}
         aria-describedby={tip["aria-describedby"]}
         {...triggerProps("dialog", open)}
         onClick={() => {

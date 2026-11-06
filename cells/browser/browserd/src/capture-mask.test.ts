@@ -125,14 +125,14 @@ describe("private masked browser capture", () => {
     fixture.capture.close();
   });
 
-  it("fences masked capture cancellation and never publishes late pixels", async () => {
+  it("never publishes the late pixels of a masked capture given up on", async () => {
     const fixture = await peer();
     const abort = new AbortController();
     const pending = expect(fixture.capture.masked(mask, abort.signal)).rejects.toThrow("aborted");
     abort.abort();
     fixture.output.emit("data", encodedFrame(1));
     await pending;
-    expect(fixture.onFatal).toHaveBeenCalledTimes(1);
-    expect(fixture.capture.alive).toBe(false);
+    expect(fixture.onFatal).not.toHaveBeenCalled();
+    expect(fixture.capture.alive).toBe(true);
   });
 });

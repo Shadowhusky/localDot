@@ -1,12 +1,12 @@
-import type { ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
+import { FileCard } from "../../ui/Card.tsx";
 import { Progress } from "../../ui/Progress.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
+import { kindLabel } from "../kind-label.ts";
 import type { ViewChoice, ViewName } from "./views.ts";
 
-function extension(name: string): string {
-  const dot = name.lastIndexOf(".");
-  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1, dot + 5).toUpperCase() : "FILE";
-}
+// What the viewer knows of the file on show, for whichever view has to stop and say so.
+export const ViewerFile = createContext<{ meta?: string; actions?: ReactNode }>({});
 
 // While a file loads: the shape of what is coming, no words that flash past. A wait long enough to
 // wonder about says what it is waiting for.
@@ -19,28 +19,30 @@ export function ViewerLoading({ label, note }: { label: string; note?: string })
   );
 }
 
-// A calm stop in the stage: the file's tile, what happened, and what to do instead.
+// A stop in the stage: the file's card, with what went wrong if something did, and the viewer's
+// actions for it.
 export function ViewerMessage({
   name,
   title,
   children,
-  action,
+  retry,
 }: {
   name: string;
-  title: string;
+  title?: string;
   children?: ReactNode;
-  action?: ReactNode;
+  retry?(): void;
 }) {
+  const file = useContext(ViewerFile);
   return (
     <div className="viewer-center">
-      <div className="viewer-message">
-        <span className="viewer-tile" aria-hidden="true">
-          {extension(name)}
-        </span>
-        <p className="viewer-message-title">{title}</p>
-        {children && <div className="viewer-message-detail">{children}</div>}
-        {action}
-      </div>
+      <FileCard
+        name={name}
+        meta={file.meta ?? kindLabel(name)}
+        problem={title}
+        detail={children}
+        onRetry={retry}
+        actions={file.actions}
+      />
     </div>
   );
 }

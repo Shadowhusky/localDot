@@ -21,6 +21,15 @@ describe("index.html", () => {
     expect(page).toContain('<meta name="apple-mobile-web-app-title" content="localDot" />');
   });
 
+  // iOS 26 draws a black-translucent Home Screen app from the top of the screen but gives it a
+  // viewport short by the status bar, so everything anchored to its foot stops that far above the
+  // screen's edge. The default style starts the page under the status bar, on the theme colour.
+  it("keeps the Home Screen app's page under the status bar", () => {
+    expect(page).toContain(
+      '<meta name="apple-mobile-web-app-status-bar-style" content="default" />',
+    );
+  });
+
   it("keeps everything the CSP refuses out: no inline script or style", () => {
     for (const html of [page, exportPage]) {
       expect(html).not.toMatch(/<style/);

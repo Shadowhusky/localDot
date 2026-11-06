@@ -58,9 +58,13 @@ test("New conversation clears the thread at once", async ({ page, ui }) => {
   await ui.settle();
   await frames();
   if (test.info().project.name === "c39") {
-    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("button", { name: "More", exact: true }).click();
     await page.getByRole("menuitem", { name: "New conversation" }).click();
-  } else await page.getByRole("button", { name: "New conversation" }).click();
+  } else
+    await page
+      .getByRole("complementary", { name: "Conversation" })
+      .getByRole("button", { name: "New conversation" })
+      .click();
   await capture(page, "new", 4, 120);
   await expect(page.getByRole("heading", { name: "What should we do?" })).toBeVisible();
   const after = await frames();
@@ -76,12 +80,12 @@ test("the list of conversations, by day, takes one up", async ({ page, ui }) => 
   const thread = page.getByRole("region", { name: "Conversation history" });
   await expect(thread.locator(".thread-message").first()).toBeVisible();
   if (test.info().project.name === "c39") {
-    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("button", { name: "More", exact: true }).click();
     await page.getByRole("menuitem", { name: "Conversations" }).click();
-  } else await page.getByRole("button", { name: "Conversations" }).click();
+  } else await page.getByRole("button", { name: "Conversations", exact: true }).click();
   const list = page.getByRole("grid", { name: "Recent conversations" });
   await expect(list.getByRole("row")).toHaveCount(7);
-  await expect(list.getByRole("rowgroup")).toHaveCount(3);
+  await expect(list.locator(".conversations-day")).toHaveCount(3);
   await ui.settle();
   await ui.still();
   await page.screenshot({ path: test.info().outputPath("list.png") });

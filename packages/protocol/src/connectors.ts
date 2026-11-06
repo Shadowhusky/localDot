@@ -44,6 +44,13 @@ export function connectorSecretId(connectorId: string): string {
   return `${CONNECTOR_SECRET_PREFIX}${connectorId}`;
 }
 
+// Who localDot is to an app's sign-in service: a public document naming the app and the loopback
+// addresses it may send the user back to (apps/site/public/oauth/client-metadata.json), so no app
+// needs localDot registered with it first.
+export const CLIENT_METADATA_URL = "https://localdot.dev/oauth/client-metadata.json";
+// Where every sign-in comes back to: this computer's daemon, whichever device started it.
+export const CONNECTOR_CALLBACK_PATH = "/connectors/callback";
+
 // The name dot calls an app's tool by: its own name in the characters every model accepts, cut to
 // fit, and numbered when two would read the same.
 export function connectorToolName(
@@ -118,7 +125,7 @@ export const ConnectorAuth = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("none") }),
   // A key saved in keyd, bound to the server's host: keyd puts it in at the edge.
   z.strictObject({ kind: z.literal("key"), secret: SecretId }),
-  // Sign-in with the app (OAuth): the access token keyd keeps once the user signed in.
+  // Sign-in with the app (OAuth): the secret keyd keeps the access token under once signed in.
   z.strictObject({ kind: z.literal("oauth"), secret: SecretId.optional() }),
 ]);
 export type ConnectorAuth = z.infer<typeof ConnectorAuth>;
@@ -195,9 +202,15 @@ export const ConnectorConfig = z.strictObject({
   tools: z
     .record(ToolKey, ConnectorToolChoice)
     .refine((tools) => Object.keys(tools).length <= MAX_TOOL_CHOICES),
-  // A signed-in app's registration of localDot (OAuth dynamic registration): public, no secret.
+  // A signed-in app's registration of localDot, for an app that doesn't read CLIENT_METADATA_URL:
+  // public, no secret, good only at the service that issued it. One with no issuer is from before
+  // localDot asked to refresh, so it registers again.
   client: z
-    .strictObject({ clientId: z.string().min(1).max(512), redirectUri: z.string().max(2048) })
+    .strictObject({
+      clientId: z.string().min(1).max(512),
+      redirectUri: z.string().max(2048),
+      issuer: z.string().max(2048).optional(),
+    })
     .optional(),
   createdAt: z.number().int().nonnegative(),
 });
@@ -247,6 +260,11 @@ export const ConnectorToolView = z.object({
 });
 export type ConnectorToolView = z.infer<typeof ConnectorToolView>;
 
+// A sign-in open in the browser on this computer, waiting for the user. remote: it was started from
+// another device, which can't finish it.
+export const ConnectorSignInWait = z.object({ expiresAt: z.number(), remote: z.boolean() });
+export type ConnectorSignInWait = z.infer<typeof ConnectorSignInWait>;
+
 export const ConnectorView = z.object({
   id: z.string(),
   name: z.string(),
@@ -255,6 +273,9 @@ export const ConnectorView = z.object({
   server: ConnectorServer,
   status: ConnectorStatus,
   problem: z.string().max(300).optional(),
+  // Who it is connected as, when the app says.
+  account: z.string().max(200).optional(),
+  signIn: ConnectorSignInWait.optional(),
   tools: z.array(ConnectorToolView),
   createdAt: z.number(),
 });
@@ -562,7 +583,9 @@ export interface CatalogEntry {
 }
 
 // A short list of common apps whose makers publish an MCP server. Anything else can be added by its
-// address or command.
+// address or command. An entry whose auth is "oauth" connects in one click if its sign-in service
+// reads CLIENT_METADATA_URL or lets clients register themselves: scripts/probe-mcp-oauth.mjs says
+// which do. Apps that need a registered client (GitHub, Slack, Google, Microsoft) can't be here.
 export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
   {
     id: "github",
@@ -613,6 +636,57 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     name: "Sentry",
     description: "Errors and performance problems in your projects.",
     server: { kind: "remote", url: "https://mcp.sentry.dev/mcp", transport: "http", auth: "oauth" },
+  },
+  {
+    id: "vercel",
+    name: "Vercel",
+    description: "Your projects, deployments and logs.",
+    server: { kind: "remote", url: "https://mcp.vercel.com", transport: "http", auth: "oauth" },
+  },
+  {
+    id: "canva",
+    name: "Canva",
+    description: "Find, make and edit your designs.",
+    server: { kind: "remote", url: "https://mcp.canva.com/mcp", transport: "http", auth: "oauth" },
+  },
+  {
+    id: "cloudflare",
+    name: "Cloudflare",
+    description: "Your accounts, Workers and zones.",
+    server: {
+      kind: "remote",
+      url: "https://mcp.cloudflare.com/mcp",
+      transport: "http",
+      auth: "oauth",
+    },
+  },
+  {
+    id: "stripe",
+    name: "Stripe",
+    description: "Your customers, payments and products.",
+    server: { kind: "remote", url: "https://mcp.stripe.com", transport: "http", auth: "oauth" },
+  },
+  {
+    id: "zapier",
+    name: "Zapier",
+    description: "Run actions in the apps you've set up in Zapier.",
+    server: {
+      kind: "remote",
+      url: "https://mcp.zapier.com/api/mcp/mcp",
+      transport: "http",
+      auth: "oauth",
+    },
+  },
+  {
+    id: "atlassian",
+    name: "Atlassian",
+    description: "Jira and Confluence. Your organization may have to allow localDot first.",
+    server: {
+      kind: "remote",
+      url: "https://mcp.atlassian.com/v1/mcp",
+      transport: "http",
+      auth: "oauth",
+    },
   },
   {
     id: "brave",

@@ -14,7 +14,7 @@ export type Aside =
       readonly phase: "asking" | "answered" | "failed";
       readonly answer?: SideAnswer;
       readonly problem?: string;
-      // The fix is choosing a Fast model.
+      // The fix is choosing a model.
       readonly setup?: boolean;
     }
   | { readonly kind: "usage"; readonly id: number };
@@ -67,7 +67,7 @@ export function useAside(api: ApiClient, sessionId: string | null): AsideControl
           const failure =
             error instanceof SideQuestionFailure
               ? error
-              : new SideQuestionFailure("Your Fast model didn't answer. Try again.");
+              : new SideQuestionFailure("No model could answer. Try again.");
           setAside({ ...shown, phase: "failed", problem: failure.message, setup: failure.setup });
         },
       );

@@ -12,32 +12,37 @@ import { useComputerDownloads } from "../deliverables/useComputerDownloads.ts";
 import { ChangesView } from "../deliverables/viewer/ChangesView.tsx";
 import { FileViewer } from "../deliverables/viewer/FileViewer.tsx";
 import { MarkdownView } from "../deliverables/viewer/MarkdownView.tsx";
-import { PictureView } from "../deliverables/viewer/PictureView.tsx";
 import {
   type ComputerEntry,
+  type FrameEntry,
+  isFrameEntry,
   resultDownloads,
   type ViewerDownloads,
   type ViewerEntry,
 } from "../deliverables/viewer/scope.tsx";
-import { ViewerLoading, ViewerMessage } from "../deliverables/viewer/states.tsx";
 import { TextBody } from "../deliverables/viewer/TextView.tsx";
 import type { ApiClient } from "../lib/api.ts";
-import { releaseThumbnail, thumbnailUrl } from "../session/thumbnails.ts";
 import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
+import { PictureCover } from "../ui/Thumbnail.tsx";
 import type { AgentResult } from "./model.ts";
 import { OutputCopy } from "./OutputCopy.tsx";
 import { useResultDownloads } from "./ResultFiles.tsx";
 import "../ui/step-preview.css";
 
 export type StepResource =
-  | { kind: "file"; entry: ViewerEntry; label?: string }
+  // Files a task handed over and pictures it recorded, the viewer moving between them.
+  | {
+      kind: "file";
+      entries: readonly (ViewerEntry | FrameEntry)[];
+      index: number;
+      noun?: "file" | "picture";
+    }
   // Files on dot's computer, the viewer moving between them; `view` is the one it opens on.
   | { kind: "files"; entries: readonly ComputerEntry[]; index: number; view?: string }
   // Recorded output, a step's Markdown notes, or a patch with no file to read.
-  | { kind: "text"; name: string; text: string; markdown?: boolean; diff?: boolean }
-  | { kind: "frame"; name: string; sessionId: string; frameId: string };
+  | { kind: "text"; name: string; text: string; markdown?: boolean; diff?: boolean };
 const Context = createContext<{
   api: ApiClient | null;
   sessionId: string | null;
@@ -53,6 +58,7 @@ export function useStepPreviewEnvironment() {
     : null;
 }
 const LARGE = ["large"] as const;
+const NO_ENTRIES: readonly (ViewerEntry | FrameEntry)[] = [];
 
 // Lives outside the virtual rows: scrolling or collapsing the source step cannot close a preview.
 // Nothing is fetched or parsed for the viewer until the user opens it.
@@ -112,22 +118,17 @@ export function StepPreviewScope({
     };
   }, [selection]);
   const resource = selection?.resource;
-  const entry = resource?.kind === "file" ? resource.entry : undefined;
+  const listed = resource?.kind === "file" ? resource.entries : NO_ENTRIES;
   const downloadable = useMemo<AgentResult[]>(
     () =>
-      entry
-        ? [
-            {
-              id: entry.resultId,
-              sessionId: entry.sessionId,
-              summary: "",
-              files: [entry.file],
-            },
-          ]
-        : [],
-    [entry],
+      listed.flatMap((entry) =>
+        isFrameEntry(entry)
+          ? []
+          : [{ id: entry.resultId, sessionId: entry.sessionId, summary: "", files: [entry.file] }],
+      ),
+    [listed],
   );
-  const handed = useResultDownloads(api, entry?.sessionId ?? null, downloadable);
+  const handed = useResultDownloads(api, downloadable[0]?.sessionId ?? null, downloadable);
   const downloads = useMemo(() => resultDownloads(handed), [handed]);
   const computer = useComputerDownloads(api);
   const close = () => setSelection((was) => was && { ...was, open: false });
@@ -150,16 +151,18 @@ export function StepPreviewScope({
       {children}
       {selection && api && (
         <ErrorBoundary floating key={resource?.kind}>
-          {entry ? (
+          {resource?.kind === "file" ? (
             <FileViewer
               api={api}
-              entries={[entry]}
-              displayName={resource?.kind === "file" ? resource.label : undefined}
-              index={0}
+              entries={resource.entries}
+              index={resource.index}
+              noun={resource.noun}
               open={selection.open}
               downloads={downloads}
               onMac={false}
-              onIndex={() => {}}
+              onIndex={(index) =>
+                setSelection((was) => was && { ...was, resource: { ...resource, index } })
+              }
               onClose={close}
               previewWidth={width}
               returnFocus={returnFocus}
@@ -183,20 +186,13 @@ export function StepPreviewScope({
               returnFocus={returnFocus}
             />
           ) : (
-            resource &&
-            resource.kind !== "file" && (
+            resource && (
               <Sheet
                 open={selection.open}
                 onClose={close}
                 returnFocus={returnFocus}
                 title={resource.name}
-                description={
-                  resource.kind === "frame"
-                    ? "Recorded screenshot"
-                    : resource.diff
-                      ? "Recorded change"
-                      : "Recorded step output"
-                }
+                description={resource.diff ? "Recorded change" : "Recorded step output"}
                 className="file-viewer step-preview-sheet"
                 style={width ? { left: 8, right: "auto", width } : undefined}
                 size="wide"
@@ -205,19 +201,15 @@ export function StepPreviewScope({
                 detents={LARGE}
                 flush
                 footer={
-                  resource.kind === "text" ? (
-                    <OutputCopy
-                      text={resource.text}
-                      label={resource.diff ? "Copy changes" : "Copy output"}
-                    />
-                  ) : undefined
+                  <OutputCopy
+                    text={resource.text}
+                    label={resource.diff ? "Copy changes" : "Copy output"}
+                  />
                 }
               >
                 <div className="viewer">
                   <div className="viewer-pane">
-                    {resource.kind === "frame" ? (
-                      <FramePreview api={api} resource={resource} />
-                    ) : resource.diff ? (
+                    {resource.diff ? (
                       <ChangesView
                         api={api}
                         name={resource.name}
@@ -274,6 +266,21 @@ export function StepPreviewButton({ resource, label }: { resource: StepResource;
   );
 }
 
+// A picture in a step, which opens large from a press anywhere on it.
+export function StepPreviewCover({ resource, label }: { resource: StepResource; label: string }) {
+  const viewer = useContext(Context);
+  if (!viewer?.api || !viewer.sessionId) return null;
+  return (
+    <PictureCover
+      label={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        viewer.open(resource, event.currentTarget);
+      }}
+    />
+  );
+}
+
 // Match only files already handed over by this task. Text that happens to look like a path or URL
 // never authorizes a new file read, remote request or conversion. Require whole path/name tokens.
 export function referencedFiles(text: string, files: readonly ViewerEntry[]): ViewerEntry[] {
@@ -315,43 +322,10 @@ export function StepFileResources({ text }: { text: string }) {
           <span>{entry.file.name}</span>
           <StepPreviewButton
             label={`Preview ${entry.file.name}`}
-            resource={{ kind: "file", entry }}
+            resource={{ kind: "file", entries: [entry], index: 0 }}
           />
         </div>
       ))}
     </section>
-  );
-}
-
-function FramePreview({
-  api,
-  resource,
-}: {
-  api: ApiClient;
-  resource: Extract<StepResource, { kind: "frame" }>;
-}) {
-  const { sessionId, frameId, name } = resource;
-  const key = `${sessionId}/${frameId}`;
-  const [state, setState] = useState<{ key: string; url?: string }>();
-  useEffect(() => {
-    let disposed = false;
-    thumbnailUrl(api, sessionId, frameId).then(
-      (url) => {
-        if (!disposed) setState({ key, url });
-      },
-      () => {
-        if (!disposed) setState({ key });
-      },
-    );
-    return () => {
-      disposed = true;
-      releaseThumbnail(api, sessionId, frameId);
-    };
-  }, [api, sessionId, frameId, key]);
-  if (state?.key !== key) return <ViewerLoading label="Loading screenshot" />;
-  return state.url ? (
-    <PictureView key={key} src={state.url} name={name} />
-  ) : (
-    <ViewerMessage name={name} title="Screenshot unavailable" />
   );
 }

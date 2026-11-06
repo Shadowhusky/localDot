@@ -1,5 +1,5 @@
 import { attachFiles } from "./attach.ts";
-import { composer, expect, runAt, test } from "./harness.ts";
+import { composer, expect, isPhone, runAt, test } from "./harness.ts";
 
 // The composer in each of its states.
 runAt("c14", "w39");
@@ -10,7 +10,7 @@ test("composer, at rest", async ({ page, ui }) => {
   await ui.open("running");
   const card = await composer(page);
   await expect(card.getByRole("button", { name: "Stop task" })).toBeVisible();
-  await expect(card.getByRole("button", { name: "Queue message" })).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Send now" })).toHaveCount(0);
   await expect(
     page.locator(".island").getByRole("button", { name: "Stop", exact: true }),
   ).toBeVisible();
@@ -34,7 +34,7 @@ test("composer, a key taken out", async ({ page, ui }) => {
   await card.getByRole("textbox", { name: "Message" }).fill(`token ${KEY} please`);
   const notice = card.getByRole("region", { name: "Key safeguard" });
   await expect(notice.getByRole("button", { name: "Move to Keys" })).toBeVisible();
-  await expect(card.getByRole("button", { name: "Queue message" })).toBeDisabled();
+  await expect(card.getByRole("button", { name: "Send now" })).toBeDisabled();
   await ui.settle();
 });
 
@@ -44,7 +44,7 @@ test("composer, not sure dot got it", async ({ page, ui }) => {
   await page.route("**/messages", (route) => route.abort());
   const box = card.getByRole("textbox", { name: "Message" });
   await box.fill("Also add a chart of the monthly totals");
-  const send = card.getByRole("button", { name: "Queue message" });
+  const send = card.getByRole("button", { name: "Send now" });
   await expect(send).toBeEnabled();
   await send.click();
   const rail = page.getByRole("complementary", { name: "Conversation" });
@@ -70,7 +70,7 @@ test("a lost reply that reached dot settles once the thread shows it", async ({ 
   });
   const box = card.getByRole("textbox", { name: "Message" });
   await box.fill("Also add a chart of the monthly totals");
-  await card.getByRole("button", { name: "Queue message" }).click();
+  await card.getByRole("button", { name: "Send now" }).click();
   const rail = page.getByRole("complementary", { name: "Conversation" });
   await expect(
     rail.getByRole("article", { name: "You" }).filter({ hasText: "Also add a chart" }),
@@ -107,7 +107,7 @@ test("sending from far back brings the message's place at the end into view", as
     route.request().method() === "POST" ? route.abort() : route.fallback(),
   );
   await card.getByRole("textbox", { name: "Message" }).fill("Also add a chart");
-  await card.getByRole("button", { name: "Queue message" }).click();
+  await card.getByRole("button", { name: "Send now" }).click();
   const waiting = rail.getByRole("region", { name: "Message delivery" });
   const again = waiting.getByRole("button", { name: "Send again" });
   await expect(waiting).toContainText("Not sure dot got that.");
@@ -134,10 +134,12 @@ test("a sent message holds its place as its own row takes over", async ({ page, 
       const bubbles = document.querySelectorAll(".thread-message[data-role=user] .thread-bubble");
       const last = bubbles[bubbles.length - 1];
       const box = last?.getBoundingClientRect();
+      // From the foot of the list, which moves with the composer as it folds after the send.
+      const foot = document.querySelector(".thread-scroll")?.getBoundingClientRect().bottom ?? 0;
       if (box && last?.textContent === "Add a chart of the totals")
         frames.push({
-          top: box.top,
-          bottom: box.bottom,
+          top: box.top - foot,
+          bottom: box.bottom - foot,
           pending: !!last.closest(".thread-pending"),
         });
       if (frames.length < 1500) requestAnimationFrame(tick);
@@ -146,9 +148,12 @@ test("a sent message holds its place as its own row takes over", async ({ page, 
   });
   const box = card.getByRole("textbox", { name: "Message" });
   await box.fill("Add a chart of the totals");
-  const send = card.getByRole("button", { name: "Queue message" });
+  const send = card.getByRole("button", { name: "Send now" });
   await expect(send).toBeEnabled();
-  await send.click();
+  // A finger on Send leaves the focus in the field. WebKit's mouse click takes it away, and the
+  // phone's hold on the composer with it, moving the foot of the list just as the message lands.
+  if (isPhone(page)) await send.dispatchEvent("click");
+  else await send.click();
   const rail = page.getByRole("complementary", { name: "Conversation" });
   await expect(rail.locator(".thread-pending")).toHaveCount(0);
   await expect(

@@ -86,7 +86,10 @@ the images every registered dot refers to.
 - `cells/gate/build.sh` builds `localdot/gate:dev`; `cells/desktop/build.sh` bundles `desktopd`
   and builds `localdot/desktop:dev`. The first desktop build takes about 10–25 minutes.
 - `cells/browser/build.sh` bundles `browserd` and builds `localdot/browser:dev` on top of the
-  desktop image.
+  desktop image. `INSTALL_CHROME=1` bakes in Google Chrome from Google (you accept Google's terms);
+  once a profile has been opened by Chrome, building without it makes an image browserd refuses to
+  open that profile with. Never publish such an image; see
+  [browser-environment.md](browser-environment.md#google-chrome).
 - `pnpm --filter @localdot/daemon doctor` checks Docker (Engine 28+), the images and the daemon
   port.
 - Build the UI with `pnpm --filter @localdot/web build`, start the daemon, then open its
@@ -105,6 +108,13 @@ the images every registered dot refers to.
   4:4:4. `LOCALDOT_STREAM_FULLCOLOR=1` streams 4:4:4 for sharper coloured text in desktop Chrome.
   Both modes keep the stream setting locked in the client. Results and screenshots are in
   `apps/web/e2e/out/`.
+- The stream is a 2560×1600 display (1280×800 at 2×, `LOCALDOT_SCALE`). A quarter of a second after
+  the screen stops changing, Selkies' paint-over sends it again at CRF 18, nearly pixel-exact. What
+  a viewer then sees is up to the stage: its canvas takes the device's own pixels, up to the
+  picture's (`backingScale`), so nothing scales the picture twice, and `VideoQuad` weighs every
+  texel a canvas pixel covers. Stream quality **Sharp** also starts a moving screen at CRF 20
+  instead of 25, unless another viewer of that computer can't take it.
+  `e2e/ui/stage-sharpness.spec.ts` shoots the stage showing a real capture.
 - Processes that need to stop the daemon should run `node --import tsx src/main.ts` from
   `apps/daemon`; pnpm's start command does not forward SIGTERM.
 - `apps/web/vendor/selkies` is the pinned MPL-2.0 client served by the daemon. The cell supplies
@@ -237,6 +247,13 @@ history and inbox acknowledgements remain localDot-owned; native child history u
 compaction and retains exact provider replay blocks. Model
 requests continue through the AI SDK and keyd; tools continue through the authenticated
 daemon API at `127.0.0.1:4751`, including JEV approvals and computer ownership checks.
+A request whose connection to that API drops is sent again, with backoff, for up to 30 seconds;
+each POST carries an `x-localdot-request` id, and the daemon answers a copy of a request it already
+took with that request's own answer, so nothing runs twice. A brain that loses the API for longer
+exits with code 4 and is restarted from saved history without counting as a crash; one that then
+cannot boot does count. When a brain ends, its key listener and containers are removed patiently:
+while Docker or keyd does not answer, cleanup asks again for up to five minutes, and only a refusal
+or that long without an answer fences the computer.
 
 Each model call is sent a lighter copy of the root history (`cells/brain/src/context.ts`): the
 newest three to six screenshots, and for DeepSeek, OpenAI and Azure, whose APIs accept it,
@@ -362,13 +379,20 @@ Authorization header and JSON request bodies:
   and immutable price table across brain restarts and follow-ups; editing settings affects new tasks.
 - `POST /api/cells/<id>/agent` with `{"task":"…"}` starts on a ready computer and returns a
   `sessionId`. Follow-ups use `POST /api/agent/sessions/<id>/messages` with
-  `{"kind":"followup","text":"…"}`; use `"steer"` to redirect current work. Do not automatically
-  resend a mutation if its reply is lost: reconcile the session and event log first. A steer that
-  dot's model hasn't taken in yet ends the wait dot is in, on every model path, within a second: a
+  `{"kind":"followup","text":"…"}`; use `"steer"` to redirect current work, which is what the
+  composer sends while dot works. A steer whose `model` isn't the one at work is queued as a
+  follow-up, as moving dot would end what it has running. Do not automatically resend a mutation
+  if its reply is lost: reconcile the session and event log first. A steer that dot's model hasn't taken in yet ends the wait dot is in, on every model path, within a second: a
   `computer` wait (a batch stops after it), `done` waiting for progress, a `shell` command's opening
   `sleep` (only while it is still sleeping, before anything after it has run; the command is stopped
   as Stop stops one), and the wait for its turn on a computer another task is using (the action is
-  then not done). Each message ends one wait; actions already under way finish.
+  then not done). A follow-up queued for after the task also ends a wait of 5 seconds or more, and
+  reaches dot as a steer, unless it is for another model. Each message ends one wait. Any other
+  `shell` command is not stopped: 3 seconds after a steer it goes on in the background and its call
+  answers, so dot can read the message. See [Messages during a command](agent-runtime.md#messages-during-a-command).
+- `POST /api/agent/sessions/<id>/messages/<messageId>/move` with `{"before":"<messageId>"}`, or
+  `null` for the end, moves a queued follow-up (204, or 409 once either has left the queue). The
+  session holds the queue and delivers it in that order; `message.queue` tells every viewer.
 - `POST /api/agent/sessions/<id>/stop` ends a task's run (204). With `?giveBack=1` it answers 200
   `{"messages":[{"messageId","text"}]}`: the stopper's own messages dot had not acted on yet (no
   words of its own and no tool call but a screenshot since), oldest first. The daemon decides
@@ -382,12 +406,17 @@ Authorization header and JSON request bodies:
   messages unsent with Edit.
 - Questions and hand-back require the current `askId` or `requestId` from the session snapshot.
   Completed files are downloaded from `/api/agent/sessions/<id>/files/<name>`, as attachments.
+  `GET /api/agent/sessions/<id>/conversation-files` lists every file the conversation ending with
+  that task handed over, newest first, each with whether its bytes are still kept; shared links
+  can't read it.
 - `POST /api/conversations/<id>/title` with `{"title":"…"}` (1–80 characters once trimmed, one
   line, no control characters) names the conversation that task belongs to, any of its tasks
   finding it; `{"title":null}` gives it back its automatic name. Both answer 204; a bad body is
   400, an unknown task 404. The user's name wins over dot's until cleared. Shared links can't
   rename. `POST /api/agent/sessions/<id>/persona` with `{"persona":"coder"}` switches a running
-  task's dot: its agent carries on from its saved history with that dot's skills and role.
+  task's dot: its agent carries on from its saved history with that dot's skills and role. A task's
+  `session.start` names the dot it starts as, and each `persona.choice` the one it works as from
+  then on, which the dot on screen wears as soon as the event arrives, in Replay too.
 - `POST /api/conversations/<id>/tag` with `{"tag":"blue"}` (`red`, `orange`, `yellow`, `green`,
   `blue`, `purple`, or `null` to take it off), `/pin` with `{"pinned":true}` and `/archive` with
   `{"archived":true}` organize the conversation that task belongs to, as rename does, and answer
@@ -396,7 +425,11 @@ Authorization header and JSON request bodies:
   A conversation with a task under way can't be archived (409). Each change goes to every open
   app as a `conversation.organized` event on `/api/events`. `GET /api/conversations` leaves the
   archived ones out, keeps those pinned before the rest are counted, and says how many are
-  archived (`archivedCount`); `?archived=1` lists them. Shared links can't organize or delete.
+  archived (`archivedCount`); `?archived=1` lists them. Shared links can't organize or delete. Each
+  entry names its `firstTask` and the dot its latest task works as (`persona`: the runner's while it
+  runs, then the one its `session.end` names), from which the app draws its look when the user
+  hasn't chosen one (`look`). A live task's `live` status names its dot too, so a switch reaches
+  every list at once.
 
 A new conversation's first message gets one short call to a quick model beside the task
 (`agent/first-look.ts`): the fast model, else the main model at its least thinking (Claude Code's
@@ -411,7 +444,11 @@ second `persona.choice` (`auto`), and a different dot takes over as a switch doe
 history. A ChatGPT plan has no call to spare: its one
 Codex process is the task's. The agent's own first reply can't do this: Claude Code and Codex shape
 their own output, and the dot's skills and role must be in place before that agent starts. Follow-up
-tasks keep the conversation's names and dot without asking again.
+tasks keep the conversation's names and dot without asking again. The call's answer is read as a
+stream whenever its body is one, whatever type a relay labels it. A custom endpoint's model typed in
+another case than the library holds it for the same key (`gpt-6.1-Terra` for `gpt-6.1-terra`) is
+asked by the library's spelling. Why the fast model last failed such a call shows under it in
+Settings (`fastFailure` on `GET /api/agent/providers`) until it answers one.
 
 Memory lives in `<home>/memory/USER.md` and `MEMORY.md` (normally under `~/.localdot`). Skills
 are `SKILL.md` directories under `<home>/skills/` and this repository's `skills/`; task startup
@@ -560,8 +597,14 @@ Connectors live in `<home>/connectors.json`; their tools, as last listed, in
 
 - **Remote apps** (streamable HTTP or SSE) are reached by the daemon through a keyd listener of
   their own (role `connector`): keyd swaps the key's stand-in for the key at the server's host.
-  Sign-in apps use OAuth with PKCE in the user's browser; the access token goes straight into keyd
-  as `connector-<id>`. There is no refresh: when the app stops taking it, the user signs in again.
+  Sign-in apps connect in one click with no client registered in advance: localDot is its public
+  client metadata document (`apps/site/public/oauth/client-metadata.json`, at
+  `https://localdot.dev/oauth/client-metadata.json`) where the app's sign-in service reads one, and
+  registers itself where it doesn't. The page opens in the Mac's browser, with PKCE, and comes back
+  to the daemon on loopback, so a phone can start a sign-in but only the Mac can finish it, and the
+  phone is told so. keyd redeems the code and keeps both tokens, refreshing behind a stable surrogate;
+  see [keyd's README](../keyd/README.md#signed-in-apps). `node scripts/probe-mcp-oauth.mjs` reads which
+  apps' services allow this, from public metadata, before one is added to `CONNECTOR_CATALOG`.
 - **Programs** (`npx`, `uvx` and the like) run in a connector cell: an internal network, a gate
   that relays only keyd (`LD_ROLE=connector`) and a read-only container with no host mounts, built
   by `cells/connector/build.sh` as `localdot/connector:dev`. MCP runs over the container's stdin
@@ -575,8 +618,8 @@ Connectors live in `<home>/connectors.json`; their tools, as last listed, in
 
 ## README images
 
-The README keeps the illustrated tour in one document. It uses the actual phone layout for Watch,
-focused 2× screenshots, and narrow versions of the original hand-drawn diagrams. Refresh screenshots
+The README stays short and around the film. It shows Studio on a desktop beside Chat on a phone, in
+2× screenshots, and narrow versions of the original hand-drawn diagrams. Refresh screenshots
 with `node --import tsx e2e/ui/readme-capture.ts` from `apps/web` after building the app.
 The capture uses a separate fixture with sample data; it never connects to a user's session.
 
@@ -601,7 +644,8 @@ The numbers in the charts come from the measurements listed in
 [measurements/2026-10-readme-numbers.md](measurements/2026-10-readme-numbers.md). The
 screenshots and the tour come from the fixture daemon (`apps/web/e2e/fixtures/ui-server.ts`)
 with sample data only. `QA_ACTIVITY=research` starts it on a research task part-way through, with
-web searches, page reads and numbered sources.
+web searches, page reads and numbered sources. `QA_ACTIVITY=readme`, which the capture uses, starts
+it on the README's conversation: a found report, Auto's dot and a check under way.
 
 ### Desktop memory and saved sign-ins
 
@@ -694,7 +738,7 @@ until publication is complete.
 The DeepSeek harness emits bounded `subagent.state` events from upstream's paired start/end
 lifecycle. The parent remains alive until every child has finished persisting its result and
 delivering its settlement notification; a child's temporary idle state is not completion. The
-Activity → Agents tab projects these events from the existing session stream, with virtualized
+panel's Agents tab projects these events from the existing session stream, with virtualized
 rows and lazily expanded results. It adds no model requests or polling. Existing recordings
 without lifecycle events cannot reconstruct their child-agent history.
 

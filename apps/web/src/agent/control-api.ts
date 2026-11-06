@@ -312,6 +312,26 @@ export function steerQueuedMessage(
   );
 }
 
+// `before`: the waiting message it goes in front of; null for the end.
+export function moveQueuedMessage(
+  api: ApiClient,
+  sessionId: string,
+  messageId: string,
+  before: string | null,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!ULID_PATTERN.test(sessionId) || !ULID_PATTERN.test(messageId))
+    return Promise.reject(new ControlFailure(false));
+  return controlRequest(
+    api,
+    `/api/agent/sessions/${sessionId}/messages/${messageId}/move`,
+    { before },
+    204,
+    signal,
+    () => {},
+  );
+}
+
 export function cancelQueuedMessage(
   api: ApiClient,
   sessionId: string,

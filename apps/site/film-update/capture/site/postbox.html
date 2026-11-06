@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Postbox</title>
+<style>
+  @font-face { font-family: "Inter"; src: url("../../assets/fonts/inter.woff2") format("woff2"); font-weight: 100 900; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 800px; overflow: hidden; font-family: "Inter", sans-serif; color: #1c2230; -webkit-font-smoothing: antialiased; }
+  #desk { position: absolute; inset: 0; background: linear-gradient(135deg, #cdc6ee, #e8ecf5 52%, #a8d2ee); }
+  .win { position: absolute; width: 1212px; height: 748px; border-radius: 12px; overflow: hidden; background: #fff; box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.28), 0 18px 50px rgb(20 30 60 / 0.32); }
+  .front { left: 34px; top: 26px; z-index: 2; }
+  .back { display: none; }
+  body[data-wallpaper] .win { display: none; }
+  .tabs { height: 40px; background: #e6e8ee; display: flex; align-items: flex-end; padding: 0 12px; gap: 10px; }
+  .lights { display: flex; gap: 7px; align-self: center; margin-right: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; }
+  .lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+  .tab { height: 33px; width: 230px; background: #fff; border-radius: 10px 10px 0 0; display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: 13px; font-weight: 500; }
+  .tool { height: 42px; display: flex; align-items: center; gap: 14px; padding: 0 14px; border-bottom: 1px solid #e3e5ea; color: #5b6470; }
+  .url { flex: 1; height: 29px; border-radius: 15px; background: #f0f2f5; display: flex; align-items: center; padding: 0 14px; font-size: 13.5px; color: #39404d; }
+  .page { position: absolute; top: 82px; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: 188px 1fr; }
+  aside { background: #f6f7fa; padding: 18px 12px; border-right: 1px solid #e8eaef; }
+  .logo { display: flex; align-items: center; gap: 9px; font-size: 21px; font-weight: 680; letter-spacing: -0.02em; margin: 0 6px 18px; }
+  .logo svg { width: 25px; height: 25px; }
+  .compose { height: 40px; border-radius: 12px; background: #2f6bff; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+  .nav { display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 10px; border-radius: 9px; font-size: 15px; color: #3a4250; }
+  .nav.on { background: #e5ecff; color: #1f4fd6; font-weight: 600; }
+  main { position: relative; display: flex; flex-direction: column; min-width: 0; }
+  header { height: 62px; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid #eceef2; }
+  .search { flex: 1; height: 38px; border-radius: 11px; background: #f0f2f5; display: flex; align-items: center; padding: 0 14px; font-size: 16px; color: #1c2230; }
+  .search em { font-style: normal; color: #7b8290; }
+  .me { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .me i { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #ff9d6c, #e8567a); display: grid; place-items: center; color: #fff; font-style: normal; font-weight: 700; font-size: 16px; }
+  .split { flex: 1; display: grid; grid-template-columns: 312px 1fr; min-height: 0; }
+  .list { border-right: 1px solid #eceef2; overflow: hidden; }
+  .row { padding: 12px 18px; border-bottom: 1px solid #f0f1f4; }
+  .row.on { background: #eef3ff; }
+  .row b { display: flex; justify-content: space-between; font-size: 15px; font-weight: 620; margin-bottom: 3px; }
+  .row small { font-size: 12.5px; color: #7b8290; font-weight: 500; }
+  .row span { display: block; font-size: 14px; color: #39404d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row mark { background: #ffe9a8; color: inherit; border-radius: 3px; padding: 0 2px; }
+  .read { padding: 22px 28px; overflow: hidden; min-width: 0; }
+  .read h2 { font-size: 27px; font-weight: 660; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .from { display: flex; align-items: center; gap: 10px; font-size: 15px; color: #4a5260; margin-bottom: 14px; }
+  .from i { width: 30px; height: 30px; border-radius: 50%; background: #3f8f7d; display: grid; place-items: center; color: #fff; font-style: normal; font-weight: 700; font-size: 14px; }
+  .body { font-size: 17px; line-height: 1.5; color: #252b38; }
+  .reply { margin-top: 18px; border: 1.5px solid #2f6bff; border-radius: 14px; padding: 14px 16px; min-height: 186px; }
+  .reply small { display: block; font-size: 13.5px; color: #6c7482; margin-bottom: 8px; }
+  .reply p { font-size: 19px; line-height: 1.45; color: #1c2230; white-space: pre-wrap; }
+  .caret { display: inline-block; width: 2px; height: 1.05em; background: #2f6bff; vertical-align: -0.14em; margin-left: 1px; }
+  .invoice { margin-top: 12px; border: 1px solid #e3e5ea; border-radius: 14px; padding: 18px 20px; }
+  .invoice h3 { font-size: 20px; font-weight: 650; margin-bottom: 12px; }
+  .invoice dl { display: grid; grid-template-columns: 120px 1fr; gap: 7px 12px; font-size: 16px; }
+  .invoice dt { color: #6c7482; }
+  .invoice .sum { font-size: 26px; font-weight: 680; margin-top: 12px; }
+  .saved { margin-top: 14px; display: inline-flex; align-items: center; gap: 8px; height: 36px; border-radius: 10px; padding: 0 14px; background: #e6f6ec; color: #17693a; font-size: 15px; font-weight: 600; }
+  #bar { position: absolute; inset: 0 0 auto; height: 24px; display: flex; align-items: center; gap: 14px; padding: 0 12px; background: #f3f4f8; font-size: 12.5px; color: #2a303c; }
+  #bar b { font-weight: 650; }
+  /* The other sites dot works in. */
+  .site { position: absolute; top: 82px; left: 0; right: 0; bottom: 0; padding: 22px 28px; overflow: hidden; }
+  .site h1 { font-size: 26px; font-weight: 660; letter-spacing: -0.02em; margin-bottom: 4px; }
+  .site .sub { font-size: 15px; color: #8e96a4; margin-bottom: 18px; }
+  .card { display: flex; align-items: center; gap: 18px; padding: 14px 18px; border: 1px solid #2b313b; border-radius: 14px; margin-bottom: 10px; font-size: 16px; background: #1e222b; }
+  .card.on { border-color: #2f6bff; background: #1d2943; }
+  .card b { font-weight: 640; }
+  .card .grow { flex: 1; }
+  .card .price { font-size: 22px; font-weight: 680; }
+  .tag { display: inline-flex; height: 26px; align-items: center; padding: 0 10px; border-radius: 8px; background: #163a26; color: #84e0a8; font-size: 13.5px; font-weight: 600; margin-left: 10px; }
+  .muted { color: #8e96a4; font-size: 14px; }
+  .photos { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  .photo i { display: block; height: 118px; border-radius: 10px; }
+  .photo span { display: block; font-size: 13px; color: #c0c7d2; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .photo span.done { color: #84e0a8; }
+  table.sheet { border-collapse: collapse; width: 100%; font-size: 15px; }
+  .sheet th, .sheet td { border: 1px solid #2b313b; padding: 8px 12px; text-align: left; height: 38px; }
+  .sheet th { background: #252a33; color: #aeb5c2; font-weight: 600; }
+  .sheet td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .sheet tr.now td { background: #1d2943; }
+  .sheet tr.sum td { font-weight: 680; }
+  .slots { display: flex; gap: 10px; margin: 6px 0 18px; }
+  .slots span { padding: 9px 16px; border-radius: 10px; border: 1px solid #2b313b; font-size: 15px; }
+  .slots span.on { background: #2f6bff; border-color: #2f6bff; color: #fff; font-weight: 600; }
+  .stars { color: #febc2e; letter-spacing: 1px; }
+  .bar { height: 10px; border-radius: 5px; background: #252a33; overflow: hidden; margin: 8px 0 18px; }
+  .bar i { display: block; height: 100%; background: #2f6bff; }
+  .file { display: grid; grid-template-columns: 34px 1fr 140px; align-items: center; height: 42px; border-bottom: 1px solid #242932; font-size: 15px; }
+  .file i { width: 22px; height: 26px; border-radius: 4px; background: #3a4150; }
+  .file.moved { opacity: 0.35; }
+  /* dot's computer is in dark mode, as the app around it is. */
+  html, body { color: #e4e8ef; }
+  #desk { background: linear-gradient(135deg, #2c2848, #1c2130 52%, #1d3446); }
+  .win { background: #1a1e26; box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.12), 0 18px 50px rgb(0 0 0 / 0.5); }
+  .tabs { background: #252a33; }
+  .tab { background: #1a1e26; }
+  .tool { border-bottom-color: #2b313b; color: #9aa3b2; }
+  .url { background: #252a33; color: #c4cad5; }
+  aside { background: #1e222b; border-right-color: #2b313b; }
+  .nav { color: #c0c7d2; }
+  .nav.on { background: #1d2f5e; color: #a9c1ff; }
+  header, .list { border-color: #2b313b; }
+  .search { background: #252a33; color: #e4e8ef; }
+  .search em, .row small { color: #8a93a3; }
+  .row { border-bottom-color: #242932; }
+  .row.on { background: #1d2943; }
+  .row span { color: #c0c7d2; }
+  .row mark { background: #6b5717; color: #ffe9a8; }
+  .from { color: #aeb5c2; }
+  .body { color: #d3d8e1; }
+  .reply small, .invoice dt { color: #8e96a4; }
+  .reply p { color: #e4e8ef; }
+  .invoice { border-color: #2f3540; }
+  .saved { background: #163a26; color: #84e0a8; }
+  #bar { background: #1f222a; color: #d3d8e1; }
+  #bar .right { margin-left: auto; }
+  body[data-browser] #bar { display: none; }
+</style>
+</head>
+<body>
+<div id="desk">
+  <div id="bar"><b>Activities</b><span class="right">Thu 5 Nov 09:41</span></div>
+  <div id="a" class="win"></div>
+  <div id="b" class="win"></div>
+</div>
+<script>
+const LOGO = '<svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="5" width="19" height="14" rx="3.2" fill="#2f6bff"/><path d="m4 8 8 5.5L20 8" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const chrome = (title) => `<div class="tabs"><div class="lights"><i></i><i></i><i></i></div><div class="tab">${LOGO.replace('<svg','<svg width="16" height="16"')}${title}</div></div>
+<div class="tool"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b5bac3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5"/></svg><div class="url">postbox.example/inbox</div></div>`;
+const side = (inbox) => `<aside><div class="logo">${LOGO}Postbox</div><div class="compose">Compose</div>
+<div class="nav on"><span>Inbox</span><span>${inbox}</span></div><div class="nav">Sent</div><div class="nav">Drafts</div><div class="nav">Invoices</div><div class="nav">Archive</div></aside>`;
+const me = '<div class="me"><i>S</i>Sam</div>';
+const REPLY = "Hi Tom, thanks for sorting this so quickly. Tuesday morning works well for me, and someone will be in from 9.\n\nBest, Sam";
+const MAILS = [["Tom Hartley","Boiler service next week","Mon"],["Priya N.","Q3 numbers, final","Mon"],["Lisbon Air","Your itinerary","Sun"],["Maya","Mum's 60th!","Sat"],["Brightside Heating","Your invoice is ready","Fri"],["Council Tax","Annual statement","12 Oct"]];
+
+function windowA(chars) {
+  const rows = MAILS.map(([f,s,d],i)=>`<div class="row${i===0?" on":""}"><b>${f}<small>${d}</small></b><span>${s}</span></div>`).join("");
+  return `${chrome("Inbox – Postbox")}<div class="page">${side(12)}<main><header><div class="search"><em>Search your mail</em></div>${me}</header>
+  <div class="split"><div class="list">${rows}</div><div class="read"><h2>Boiler service next week</h2>
+  <div class="from"><i>T</i>Tom Hartley, to you</div>
+  <div class="body">Hi Sam, the engineer can come on Tuesday or Wednesday morning. Which suits you best?</div>
+  <div class="reply"><small>Reply to Tom Hartley</small><p>${REPLY.slice(0,chars)}<span class="caret"></span></p></div></div></div></main></div>`;
+}
+const QUERY = "boiler invoice";
+const FOUND = [["Brightside Heating","Your <mark>boiler invoice</mark>, March","14 Mar"],["Brightside Heating","<mark>Boiler</mark> service reminder","2 Feb"],["Tom Hartley","Old <mark>invoice</mark> for the flue","9 Dec"],["Brightside Heating","<mark>Invoice</mark> paid, thank you","20 Nov"]];
+function windowB(typed, shown, opened, saved) {
+  const rows = FOUND.slice(0,shown).map(([f,s,d],i)=>`<div class="row${opened&&i===0?" on":""}"><b>${f}<small>${d}</small></b><span>${s}</span></div>`).join("");
+  const read = opened ? `<div class="read"><h2>Your boiler invoice, March</h2><div class="from"><i style="background:#c9622f">B</i>Brightside Heating, to you</div>
+  <div class="invoice"><h3>Invoice 2291</h3><dl><dt>Work</dt><dd>Annual boiler service</dd><dt>Date</dt><dd>14 March</dd><dt>Paid</dt><dd>By card</dd></dl><div class="sum">£184.00</div></div>
+  ${saved?'<div class="saved">✓ Saved to Tax folder</div>':""}</div>` : `<div class="read"></div>`;
+  return `${chrome("Search – Postbox")}<div class="page">${side(12)}<main><header><div class="search">${QUERY.slice(0,typed)}<span class="caret"></span></div>${me}</header>
+  <div class="split"><div class="list">${rows}</div>${read}</div></main></div>`;
+}
+
+// The other sites, each a moment of its work at t seconds.
+const site = (title, url, body) =>
+  `${chrome(title).replace("postbox.example/inbox", url)}<div class="site">${body}</div>`;
+const FLIGHTS = [["TAP Air Portugal", "07:05 – 09:50", "Direct · 2h 45m", 142], ["easyJet", "06:15 – 09:05", "Direct · 2h 50m", 96], ["British Airways", "10:40 – 13:30", "Direct · 2h 50m", 168], ["Ryanair", "19:20 – 22:10", "Direct · 2h 50m", 104], ["Vueling", "08:10 – 13:55", "1 stop · 4h 45m", 121]];
+const PHOTO_HUES = [28, 200, 340, 160, 45, 260, 15, 185, 300, 90, 220, 5, 130, 50, 275];
+const COSTS = [["2 Oct", "Train to Leeds", "48.20"], ["3 Oct", "Hotel, 2 nights", "212.00"], ["3 Oct", "Dinner with client", "86.40"], ["4 Oct", "Taxi", "23.10"], ["4 Oct", "Train home", "48.20"], ["5 Oct", "Printing", "12.75"]];
+const PLUMBERS = [["Brightside Heating", "4.9", "212 reviews · 1.2 mi", "Available Tue"], ["Kettle & Sons", "4.7", "98 reviews · 2.0 mi", "Available Thu"], ["FlowFix", "4.6", "341 reviews · 2.4 mi", "Available Wed"], ["Drip Doctors", "4.4", "57 reviews · 3.1 mi", "Next week"]];
+const FILES = ["invoice-march.pdf", "IMG_4471.HEIC", "slides-final-v3.key", "boarding-pass.pdf", "setup-2.4.dmg", "budget.xlsx", "Screenshot 09.41.png", "contract-signed.pdf", "song-demo.m4a"];
+const PAGES = {
+  flights: (t) => {
+    const best = t > 1.2;
+    const rows = FLIGHTS.map(([air, time, how, price], i) => `<div class="card${best && i === 1 ? " on" : ""}"><div class="grow"><b>${air}</b><div class="muted">${time} · ${how}</div></div><div class="price">£${price}</div>${best && i === 1 ? '<span class="tag">Cheapest</span>' : ""}</div>`).join("");
+    return site("Flights – Skyway", "skyway.example/flights", `<h1>London to Lisbon</h1><div class="sub">Fri 14 May · 1 adult · ${Math.min(FLIGHTS.length, Math.floor(t * 6) + 1)} of 5 flights compared</div>${rows}`);
+  },
+  photos: (t) => {
+    const done = Math.min(15, Math.floor(t * 5));
+    const tiles = PHOTO_HUES.map((h, i) => `<div class="photo"><i style="background:linear-gradient(135deg,hsl(${h} 55% 55%),hsl(${(h + 40) % 360} 60% 30%))"></i><span class="${i < done ? "done" : ""}">${i < done ? `2025-08-${String(14 + Math.floor(i / 5)).padStart(2, "0")} Lisbon ${String(i + 1).padStart(2, "0")}.jpg` : `IMG_${4021 + i}.jpg`}</span></div>`).join("");
+    return site("Holiday – Lumen Photos", "lumen.example/albums/holiday", `<h1>Holiday photos</h1><div class="sub">Renaming by date · ${done * 14} of 214</div><div class="photos">${tiles}</div>`);
+  },
+  sheet: (t) => {
+    const filled = Math.min(COSTS.length, Math.floor(t * 2.4));
+    const total = COSTS.slice(0, filled).reduce((sum, [, , n]) => sum + Number(n), 0).toFixed(2);
+    const rows = COSTS.map(([d, item, n], i) => `<tr class="${i === filled ? "now" : ""}"><td>${i < filled ? d : ""}</td><td>${i < filled ? item : ""}</td><td class="n">${i < filled ? `£${n}` : ""}</td></tr>`).join("");
+    return site("Expenses – Sheets", "sheets.example/expenses-october", `<h1>Expenses, October</h1><div class="sub">From the receipts PDF</div><table class="sheet"><tr><th>Date</th><th>Item</th><th>Amount</th></tr>${rows}<tr class="sum"><td></td><td>Total</td><td class="n">£${total}</td></tr></table>`);
+  },
+  dinner: (t) => {
+    const slot = t > 1.6 ? 2 : -1;
+    const slots = ["18:30", "19:00", "19:30", "20:00", "20:30"].map((x, i) => `<span class="${i === slot ? "on" : ""}">${x}</span>`).join("");
+    return site("Book a table – Forkful", "forkful.example/casa-lume", `<h1>Casa Lume</h1><div class="sub">Portuguese · £££ · 0.8 mi</div><div class="muted">Saturday 22 November · Party of 8</div><div class="slots">${slots}</div>${slot >= 0 ? '<div class="card on"><div class="grow"><b>Table for 8 at 19:30</b><div class="muted">Held for 10 minutes</div></div><span class="tag">Held</span></div>' : '<div class="card"><div class="grow"><b>Choose a time</b><div class="muted">5 tables free on Saturday</div></div></div>'}`);
+  },
+  plumber: (t) => {
+    const picked = t > 1.4;
+    const rows = PLUMBERS.map(([name, stars, about, when], i) => `<div class="card${picked && i === 0 ? " on" : ""}"><div class="grow"><b>${name}</b> <span class="stars">★ ${stars}</span><div class="muted">${about}</div></div><div class="muted">${when}</div>${picked && i === 0 ? '<span class="tag">Message sent</span>' : ""}</div>`).join("");
+    return site("Plumbers near you – Fixly", "fixly.example/plumbers/se15", `<h1>Plumbers near you</h1><div class="sub">Boiler service · SE15</div>${rows}`);
+  },
+  downloads: (t) => {
+    const moved = Math.min(FILES.length, Math.floor(t * 3));
+    const rows = FILES.map((f, i) => `<div class="file${i < moved ? " moved" : ""}"><i></i><span>${f}</span><span class="muted">${i < moved ? "→ sorted" : "Downloads"}</span></div>`).join("");
+    return site("Downloads – Files", "files.example/home/downloads", `<h1>Downloads</h1><div class="sub">Sorting into folders · ${Math.min(86, moved * 10)} of 86 moved</div><div class="bar"><i style="width:${Math.min(100, (moved / FILES.length) * 100)}%"></i></div>${rows}`);
+  },
+};
+// t: seconds into the work. Both windows go on whichever is in front, or one of the other sites.
+window.render = ({ front, t, cps = 30, chars, page }) => {
+  const a = document.getElementById("a");
+  const b = document.getElementById("b");
+  if (page) {
+    a.className = "win front";
+    b.className = "win back";
+    a.innerHTML = PAGES[page](t);
+    return;
+  }
+  a.className = `win ${front === "a" ? "front" : "back"}`;
+  b.className = `win ${front === "b" ? "front" : "back"}`;
+  a.innerHTML = windowA(chars ?? Math.min(REPLY.length, Math.floor(Math.max(0, t - 1.4) * cps)));
+  const typed = Math.min(QUERY.length, Math.floor(Math.max(0, t - 0.4) * 24));
+  const shown = Math.min(FOUND.length, Math.floor(Math.max(0, t - 0.5) * 8));
+  b.innerHTML = windowB(typed, shown, t > 1.1, t > 2.3);
+};
+window.REPLY_LENGTH = REPLY.length;
+render({ front: "a", t: 0 });
+</script>
+</body>
+</html>

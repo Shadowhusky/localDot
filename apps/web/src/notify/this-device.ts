@@ -6,7 +6,7 @@ import type { NotifyApi } from "./notify-api.ts";
 export type DeviceState =
   | { kind: "this-mac" }
   | { kind: "needs-https" }
-  | { kind: "needs-home-screen" }
+  | { kind: "needs-home-screen"; bareAddress?: boolean }
   | { kind: "unsupported" }
   | { kind: "blocked" }
   | { kind: "off" }
@@ -59,6 +59,12 @@ export function isStandalone(): boolean {
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+// No certificate a phone trusts names a tailnet's bare address. iOS gets a Home Screen icon with no
+// way past that warning, so it draws the name's first letter instead, and warns at each cold start.
+export const isBareAddress = (hostname: string) =>
+  /^(?:\d{1,3}\.){3}\d{1,3}$|^\[.*\]$/.test(hostname);
+
 const isAppleTouch = (device: Pick<Navigator, "userAgent" | "maxTouchPoints">) =>
   /iPhone|iPad|iPod/.test(device.userAgent) ||
   (device.userAgent.includes("Macintosh") && device.maxTouchPoints > 1);
@@ -100,7 +106,10 @@ function precheck(env: DeviceEnv): DeviceState | null {
   if (LOOPBACK.has(env.hostname) && deviceLabel(env.userAgent, env.maxTouchPoints) === "Mac")
     return { kind: "this-mac" };
   if (!env.isSecureContext) return { kind: "needs-https" };
-  if (isAppleTouch(env) && !env.standalone) return { kind: "needs-home-screen" };
+  if (isAppleTouch(env) && !env.standalone)
+    return isBareAddress(env.hostname)
+      ? { kind: "needs-home-screen", bareAddress: true }
+      : { kind: "needs-home-screen" };
   if (!env.serviceWorker || !env.pushSupported || !env.notification) return { kind: "unsupported" };
   if (env.notification.permission() === "denied") return { kind: "blocked" };
   return null;

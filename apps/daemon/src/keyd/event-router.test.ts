@@ -107,6 +107,39 @@ describe("KeydEventRouter", () => {
       },
     ]);
   });
+  it("reads a task's spending across the accounts its models ran on", () => {
+    const ACCOUNT = "01JXYZ0000000000000000ACCT";
+    router = new KeydEventRouter({
+      keyd: new KeydClient(keyd.socketPath),
+      live,
+      eventLog,
+      accountOf: () => ({ id: ACCOUNT, spentBefore: 2 }),
+    });
+    const spend = (taskId: string): KeydEvent => ({
+      type: "model.spend",
+      cell: CELL,
+      time: "2026-10-01T12:00:00Z",
+      data: {
+        taskId,
+        route: "openrouter",
+        model: "glm-5.3",
+        costUSD: 0.5,
+        billed: true,
+        taskSpentUSD: 0.5,
+        taskLimitUSD: 3,
+        daySpentUSD: 1.5,
+        dayLimitUSD: 0,
+      },
+    });
+    router.route(spend(ACCOUNT));
+    router.route(spend(sessionId));
+    expect(
+      eventLog
+        .read(sessionId)
+        .filter((e) => e.type === "model.spend")
+        .map((e) => e.data),
+    ).toEqual([expect.objectContaining({ taskSpentUSD: 2.5, taskLimitUSD: 5 })]);
+  });
   it("gives the task on a browser's computer the keys its browser was refused, and only those", () => {
     const BROWSER = "01JXYZ0000000000000000BRWS";
     router = new KeydEventRouter({
@@ -121,6 +154,20 @@ describe("KeydEventRouter", () => {
     expect(keyEvents().map((e) => e.data)).toEqual([
       expect.objectContaining({ secretId: "thema", decision: "deny" }),
     ]);
+  });
+  it("names the task whose page is on the refused host, of the tasks in the browser", () => {
+    const BROWSER = "01JXYZ0000000000000000BRWS";
+    const browsingHost = vi.fn(() => undefined as string | undefined);
+    router = new KeydEventRouter({
+      keyd: new KeydClient(keyd.socketPath),
+      live,
+      eventLog,
+      parentOf: (id) => (id === BROWSER ? CELL : undefined),
+      browsingHost,
+    });
+    router.route(use({ decision: "deny", secretId: "thema", host: "linear.app" }, BROWSER));
+    expect(browsingHost).toHaveBeenCalledWith(CELL, "linear.app");
+    expect(keyEvents()).toHaveLength(1);
   });
   it("appends key use to the cell's live session as keyd, cutting what a cell chose", () => {
     router = new KeydEventRouter({ keyd: new KeydClient(keyd.socketPath), live, eventLog });

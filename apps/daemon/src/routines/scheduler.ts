@@ -1,6 +1,5 @@
-import type { RoutineAppEvent } from "@localdot/protocol";
+import { dueTimesBetween, nextDue, type RoutineAppEvent } from "@localdot/protocol";
 import { notifyFor, type RoutineLauncher } from "./launch.ts";
-import { dueTimesBetween, nextDue } from "./schedule.ts";
 import { type RoutineStore, type StoredRoutine, type StoredRun, scheduleOf } from "./store.ts";
 
 export interface SchedulerClock {

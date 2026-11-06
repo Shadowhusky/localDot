@@ -1,6 +1,6 @@
 import { constants } from "node:os";
 import { DockerClient } from "./cells/docker.ts";
-import { imagesFromEnv } from "./cells/images.ts";
+import { browserImagesFromEnv, imagesFromEnv } from "./cells/images.ts";
 import { runDoctor } from "./doctor.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
 import { KeydClient, keydSocketPath } from "./keyd/client.ts";
@@ -24,6 +24,7 @@ const report = await runDoctor({
   docker: new DockerClient(socket.path),
   socket,
   images: imagesFromEnv(),
+  browserImage: browserImagesFromEnv().browser,
   port: parsePort(process.env.LOCALDOT_PORT),
   signal: controller.signal,
   keyd: new KeydClient(keydSocketPath(localdotHome())),

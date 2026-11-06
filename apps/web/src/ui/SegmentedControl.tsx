@@ -20,8 +20,10 @@ export interface SegmentItem {
   label: string;
   icon?: IconName;
   disabledReason?: string;
-  // A quiet number after the label, such as how many files a tab holds.
-  count?: number;
+  // A quiet number after the label, such as how many files a tab holds, or how far a plan has got.
+  count?: number | string;
+  // More than the label says, shown as its tooltip and read with its name.
+  hint?: string;
   // An amber point at the segment's corner, such as Chat while dot asks and Activity shows.
   attention?: boolean;
   // A quiet point after the label for something the user has not seen yet, such as a new file.
@@ -38,6 +40,8 @@ export interface SegmentTrackProps {
   size?: 24 | 28 | 32;
   // Let the segments fit a constrained container instead of reserving their usual minimum width.
   compact?: boolean;
+  // Each segment as wide as its name, sharing what is left, for names of very different lengths.
+  fit?: boolean;
   // Line: tabs over a hairline, each as wide as its name, the chosen one underlined; when the names
   // don't all fit, tabs that all have icons show those instead. Quiet: no track, a soft thumb.
   variant?: "line" | "quiet";
@@ -71,8 +75,8 @@ function Segment({
   onSelect(event: MouseEvent<HTMLButtonElement>): void;
 }) {
   const { triggerProps, tooltip } = useTooltip({
-    content: item.disabledReason ?? (iconic ? item.label : undefined),
-    description: item.disabledReason,
+    content: item.disabledReason ?? item.hint ?? (iconic ? item.label : undefined),
+    description: item.disabledReason ?? item.hint,
     showOnPress: !!item.disabledReason,
   });
   return (
@@ -112,6 +116,7 @@ export function SegmentTrack({
   onReselect,
   size = 28,
   compact,
+  fit,
   variant,
   className,
   "aria-label": label,
@@ -122,7 +127,8 @@ export function SegmentTrack({
   const focusIndex = index >= 0 ? index : 0;
   const [iconic, setIconic] = useState(false);
   const line = variant === "line";
-  const canIconic = items.every((item) => item.icon);
+  const placed = line || !!fit;
+  const canIconic = line && items.every((item) => item.icon);
   const widths = items
     .map((item) => `${item.value}:${item.label}:${item.count ?? ""}:${item.fresh ? 1 : 0}`)
     .join(" ");
@@ -131,7 +137,7 @@ export function SegmentTrack({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `widths` and `iconic` change what sizes a tab.
   useLayoutEffect(() => {
     const node = track.current;
-    if (!line || !node) return;
+    if (!placed || !node) return;
     let frame = 0;
     const measure = () => {
       if (canIconic) {
@@ -157,7 +163,7 @@ export function SegmentTrack({
       cancelAnimationFrame(frame);
       observer?.disconnect();
     };
-  }, [line, canIconic, widths, index, iconic]);
+  }, [placed, canIconic, widths, index, iconic]);
 
   const select = (item: SegmentItem) => {
     if (item.disabledReason) return;
@@ -206,8 +212,9 @@ export function SegmentTrack({
       className={clsx("ui-segmented", className)}
       data-size={size}
       data-compact={compact || undefined}
+      data-fit={fit || undefined}
       data-variant={variant}
-      data-iconic={(line && canIconic && iconic) || undefined}
+      data-iconic={(canIconic && iconic) || undefined}
       style={{ "--_count": items.length, "--_index": Math.max(index, 0) } as CSSProperties}
     >
       <span className="ui-segmented-thumb" data-hidden={index < 0 ? "" : undefined} />

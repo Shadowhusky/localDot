@@ -1,5 +1,6 @@
 import {
   CompareReply,
+  ConversationFilesReply,
   clipPatch,
   type FileVersion,
   FileVersionsReply,
@@ -32,7 +33,7 @@ import type { FrameStore } from "../gateway/frames.ts";
 import { recordingCard } from "../sessions/summary.ts";
 import { type ComputerFiles, computerFileRoutes } from "./computer-files.ts";
 import { fileText, screenLine, textEncoding } from "./excerpt.ts";
-import { fileVersions } from "./lineage.ts";
+import { conversationFiles, fileVersions } from "./lineage.ts";
 import { isLoopbackRequest } from "./loopback.ts";
 import { type MacOpener, OpenRefused, openOnMac } from "./open-on-mac.ts";
 import { PageQuieter } from "./page-quieter.ts";
@@ -56,6 +57,8 @@ export interface DeliverablesDeps {
   revise?: ReviseDeps;
   quieter?: PageQuieter;
   computer?: ComputerFiles;
+  // The tasks of the conversation that ends with this one, oldest first.
+  conversation?(sessionId: string): { sessions: readonly string[]; more: boolean };
 }
 export interface ReviseDeps {
   start(
@@ -70,18 +73,14 @@ export interface ReviseDeps {
 
 export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
   const stored = new StoredFiles(deps.home);
-  const versionsOf = (id: string, name: string) =>
-    fileVersions(
-      {
-        scan: (s) => deps.scanner.scan(s),
-        stored: (s, n, v) => {
-          const rel = outputPath(s, n, v);
-          return !!rel && stored.exists(rel);
-        },
-      },
-      id,
-      name,
-    );
+  const lineage = {
+    scan: (s: string) => deps.scanner.scan(s),
+    stored: (s: string, n: string, v: number | null) => {
+      const rel = outputPath(s, n, v);
+      return !!rel && stored.exists(rel);
+    },
+  };
+  const versionsOf = (id: string, name: string) => fileVersions(lineage, id, name);
   const file = "/api/agent/sessions/:id/files/:name";
   const links = new PreviewLinks();
   const quieter = deps.quieter ?? new PageQuieter();
@@ -98,6 +97,7 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
     `${file}/*`,
     "/api/agent/sessions/:id/proof",
     "/api/agent/sessions/:id/preview-link",
+    "/api/agent/sessions/:id/conversation-files",
   ])
     app.use(path, async (c, next) => {
       const id = c.req.param("id") ?? "";
@@ -110,6 +110,13 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
       await next();
     });
 
+  app.get("/api/agent/sessions/:id/conversation-files", async (c) => {
+    const id = c.req.param("id");
+    const chain = deps.conversation?.(id) ?? { sessions: [id], more: false };
+    const { files, more } = await conversationFiles(lineage, chain.sessions);
+    c.header("cache-control", "no-store");
+    return c.json(ConversationFilesReply.parse({ files, more: more || chain.more }));
+  });
   app.get(`${file}/versions`, async (c) => {
     const { id, name } = c.req.param() as { id: string; name: string };
     return c.json(FileVersionsReply.parse({ name, versions: await versionsOf(id, name) }));

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { VIEWER_LIMITS } from "@localdot/protocol";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../../lib/api.ts";
 import { DeliverableFile } from "../DeliverableFile.tsx";
@@ -127,13 +127,14 @@ describe("the full preview", () => {
       `/api/agent/sessions/${ID}/files/notes.txt/compare?from=${ID}.1&to=${ID}.2`,
     );
   });
-  it("explains binary files and offers a download", async () => {
+  it("shows a binary file's card, with a download and no explanation", async () => {
     const api = createApi("a".repeat(43), {
       fetchImpl: async () => Response.json({ kind: "none", reason: "binary" }),
     });
     viewer(api, [entry("archive.unknown")]);
-    expect(await screen.findByText("This file isn't text")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Download" }).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/^UNKNOWN file/, { selector: ".ui-file-meta" })).toBeTruthy();
+    expect(screen.queryByText(/isn't text/)).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Download" }).length).toBeGreaterThan(1);
   });
   it("lets a failed text request retry without closing the file", async () => {
     let calls = 0;
@@ -213,11 +214,12 @@ describe("the full preview", () => {
     await waitFor(async () => expect(await src()).toContain(ticket));
   });
 
-  it("says a file is too large without loading it", async () => {
+  it("shows a file too large to open as its card, without loading it", async () => {
     const { api, calls } = daemon();
     viewer(api, [entry("photo.png", VIEWER_LIMITS.pictureBytes + 1)]);
-    expect(await screen.findByText("Too large to preview")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Download" }).length).toBeGreaterThan(0);
+    await waitFor(() => expect(document.querySelector(".ui-file-card")).toBeTruthy());
+    expect(screen.queryByText(/too large/i)).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Download" }).length).toBeGreaterThan(1);
     expect(calls).toEqual([]);
   });
 
@@ -236,6 +238,57 @@ describe("the full preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Previous file" }));
     expect(onIndex).toHaveBeenLastCalledWith(1);
     expect(await screen.findByRole("region", { name: "Contents of c.zip" })).toBeTruthy();
+  });
+
+  it("draws the pictures beside the one on show, out of reach, and leaves other files until then", () => {
+    const { api } = daemon();
+    viewer(api, [entry("a.png"), entry("b.png"), entry("c.png"), entry("d.zip")], 1);
+    const panes = () => [...document.querySelectorAll<HTMLElement>(".viewer-pane")];
+    expect(panes().map((pane) => [pane.dataset.index, pane.hasAttribute("inert")])).toEqual([
+      ["0", true],
+      ["1", false],
+      ["2", true],
+    ]);
+    expect(panes()[0]?.getAttribute("aria-hidden")).toBe("true");
+    expect(panes()[1]?.hasAttribute("data-aside")).toBe(false);
+    expect(panes()[1]?.style.transform).toBe("");
+  });
+
+  it("keeps a picture drawn as it comes on show, so it needn't load again", () => {
+    const { api } = daemon();
+    const { rerender } = viewer(api, [entry("a.png"), entry("b.png"), entry("c.png")]);
+    const next = document.querySelector<HTMLElement>('.viewer-pane[data-index="1"]');
+    expect(next?.hasAttribute("inert")).toBe(true);
+    rerender(1);
+    expect(document.querySelector('.viewer-pane[data-index="1"]')).toBe(next);
+    expect(next?.hasAttribute("inert")).toBe(false);
+    expect(next?.hasAttribute("data-aside")).toBe(false);
+  });
+
+  it("names a list's controls by what it holds and shows a recorded screenshot with nothing to download", () => {
+    const { api } = daemon();
+    render(
+      <FileViewer
+        api={api}
+        entries={[
+          { sessionId: ID, frameId: "01J00000000000000000000F01", name: "Step screenshot" },
+          { ...entry("step-image-a.jpg"), title: "~/poster/hero.jpg" },
+        ]}
+        index={0}
+        noun="picture"
+        open
+        downloads={downloads}
+        onMac={false}
+        onIndex={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByRole("dialog", { name: "Step screenshot" }).textContent).toContain(
+      "Recorded screenshot",
+    );
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Next picture" })).toBeTruthy();
+    expect(downloads.request).not.toHaveBeenCalled();
   });
 
   it("opens from a file's row, and the row points there for a file it can't draw inline", async () => {
@@ -264,8 +317,9 @@ describe("the full preview", () => {
         </ul>
       </FileViewerScope>,
     );
-    expect(screen.getByText("Press Open to see this file.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open diagram.svg" }));
+    const card = document.querySelector(".ui-file-card") as HTMLElement;
+    expect(within(card).getByRole("button", { name: "Download" })).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "Open" }));
     expect(await screen.findByRole("img", { name: "diagram.svg" })).toBeTruthy();
     expect(screen.getByRole("dialog")).toBeTruthy();
   });

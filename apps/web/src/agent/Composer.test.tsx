@@ -6,11 +6,11 @@ import type { CellSummary } from "../cells/types.ts";
 import { requestRevise } from "../deliverables/revise-draft.ts";
 import { createApi } from "../lib/api.ts";
 import type { TextAreaProps } from "../ui/TextArea.tsx";
-import { withAttachments } from "./attachments.ts";
+import { splitAttachments, withAttachments } from "./attachments.ts";
 import { Composer, type ComposerProps, type ReplyOutcome } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
 import { Outbox } from "./outbox.ts";
-import { editQueued, giveBack } from "./queued-draft.ts";
+import { editQueued, giveBack, sendAfter } from "./queued-draft.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 
 const spoken = vi.hoisted(() => ({ announce: vi.fn() }));
@@ -156,27 +156,125 @@ function setup(
     },
   };
 }
+describe("a message sent while dot works", () => {
+  it("reaches dot at its next step from Return, Command-Return and Send", async () => {
+    const f = setup();
+    f.input("Use the blue palette");
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "Use the blue palette" });
+    await act(async () => {});
+    f.input("Add a title");
+    fireEvent.keyDown(f.field, { key: "Enter", metaKey: true });
+    expect(f.requests[1]?.body).toEqual({ kind: "steer", text: "Add a title" });
+    await act(async () => {});
+    f.input("Add a legend");
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(f.requests[2]?.body).toEqual({ kind: "steer", text: "Add a legend" });
+    await act(async () => {});
+  });
+  it("offers in its menu only what Send doesn't do", () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Message options" }));
+    expect(screen.getAllByRole("menuitem")).toHaveLength(1);
+    screen.getByRole("menuitem", { name: "Send after this task" });
+  });
+  it("keeps what was asked for while a long text uploads", async () => {
+    transfer.trustNames = true;
+    const long = "Long words ".repeat(600);
+    const sent = async (press: (field: HTMLTextAreaElement) => void) => {
+      const f = setup();
+      f.input(long);
+      press(f.field);
+      await waitFor(() => expect(f.requests.at(-1)?.path).toMatch(/\/messages$/));
+      const body = f.requests.at(-1)?.body as { kind: string };
+      cleanup();
+      return body.kind;
+    };
+    expect(await sent((field) => fireEvent.keyDown(field, { key: "Enter" }))).toBe("steer");
+    expect(await sent((field) => fireEvent.keyDown(field, { key: "Enter", altKey: true }))).toBe(
+      "followup",
+    );
+  });
+  it("sends after this task from a phone's More menu, as its composer has no menu", async () => {
+    const f = setup(undefined, { layout: "pill" });
+    expect(screen.queryByRole("button", { name: "Message options" })).toBeNull();
+    f.input("Then the totals");
+    act(() => sendAfter());
+    expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "Then the totals" });
+    await act(async () => {});
+  });
+});
+describe("dot thinking from Send", () => {
+  it("is asked for as a message goes, and given up when it doesn't arrive", async () => {
+    const onSending = vi.fn();
+    const f = setup(() => new Response(null, { status: 409 }), { onSending });
+    f.input("Check the totals again");
+    f.submit();
+    expect(onSending).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(onSending).toHaveBeenLastCalledWith(false));
+  });
+  it("is not asked for by a message held for after the task", async () => {
+    const onSending = vi.fn();
+    const f = setup(undefined, { onSending });
+    f.input("Then the totals");
+    act(() => sendAfter());
+    expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "Then the totals" });
+    await act(async () => {});
+    expect(onSending).not.toHaveBeenCalled();
+  });
+});
+describe("a message for another model than the one at work", () => {
+  const luna = { modelAfter: "GPT-6 Luna" };
+  const note = "Runs on GPT-6 Luna after this task";
+  it("waits for this task, and says so before it goes and as it goes", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const model = { provider: "openai", model: "gpt-6-luna", key: "openai" };
+    const f = setup(() => pending.promise, { ...luna, sendModel: model });
+    expect(screen.queryByText(note)).toBeNull();
+    f.input("Now use the bigger model");
+    expect(screen.getByRole("status").textContent).toBe(note);
+    // Send already does the one thing there is to do.
+    expect(screen.queryByRole("button", { name: "Message options" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send after this task" }));
+    expect(f.requests[0]?.body).toEqual({
+      kind: "followup",
+      text: "Now use the bigger model",
+      model,
+    });
+    const waiting = screen.getByLabelText("Message delivery");
+    expect(waiting.querySelector(".thread-tag")?.textContent).toBe("After this task");
+    await act(async () => pending.resolve(new Response(null, { status: 202 })));
+  });
+  it("waits from Return too", async () => {
+    const f = setup(undefined, luna);
+    f.input("Next");
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "Next" });
+    await act(async () => {});
+  });
+  it("says nothing of it once the task is at rest, when the message goes at once", () => {
+    const f = setup(undefined, {
+      ...luna,
+      agent: { ...agent, snapshot: { ...snapshot, status: "idle" } },
+    });
+    f.input("Next");
+    expect(screen.queryByText(note)).toBeNull();
+    screen.getByRole("button", { name: "Send follow-up" });
+  });
+});
 describe("composer delivery ownership and draft handling", () => {
-  it("switches the same button from Stop to queue Send while there is a draft", async () => {
+  it("switches the same button from Stop to Send while there is a draft", async () => {
     const stop = vi.fn();
     const f = setup(undefined, { taskAction: { kind: "stop", run: stop } });
     fireEvent.click(screen.getByRole("button", { name: "Stop task" }));
     expect(stop).toHaveBeenCalledOnce();
     f.input("Keep this follow-up");
     expect(screen.queryByRole("button", { name: "Stop task" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Queue message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
     await waitFor(() => expect(f.field.value).toBe(""));
-    expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "Keep this follow-up" });
+    expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "Keep this follow-up" });
     expect(stop).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "Stop task" })).toBeTruthy();
-  });
-  it("can still steer immediately through the explicit Send now menu action", async () => {
-    const f = setup();
-    f.input("Change direction now");
-    fireEvent.click(screen.getByRole("button", { name: "Message options" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Send now" }));
-    await waitFor(() => expect(f.requests).toHaveLength(1));
-    expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "Change direction now" });
   });
 
   it("offers Move to Keys before a computer exists, without delivering a task", () => {
@@ -218,7 +316,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.requests).toEqual([
       {
         path: `/api/agent/sessions/${sessionId}/messages`,
-        body: { kind: "followup", text: "请继续 monthly report" },
+        body: { kind: "steer", text: "请继续 monthly report" },
       },
     ]);
     expect(f.field.value).toBe("请继续 monthly report");
@@ -269,16 +367,17 @@ describe("composer delivery ownership and draft handling", () => {
     f.input("captured ordinary message");
     f.submit();
     await screen.findByText(/Not sure dot got that/);
+    // The task is checked at once, and that sends nothing.
+    await waitFor(() => expect(reconcile).toHaveBeenCalledOnce());
     expect(f.field.value).toBe("captured ordinary message");
     f.input("new unsent draft");
     f.submit();
-    // The task is checked at once, and that sends nothing.
     expect(reconcile).toHaveBeenCalledOnce();
     expect(f.requests).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Send again" }));
     await waitFor(() => expect(said().at(-1)).toBe("Sent to dot."));
     expect(f.requests).toHaveLength(2);
-    expect(f.requests[1]?.body).toEqual({ kind: "followup", text: "captured ordinary message" });
+    expect(f.requests[1]?.body).toEqual({ kind: "steer", text: "captured ordinary message" });
     expect(f.field.value).toBe("new unsent draft");
   });
   it("does not interpret Shift Enter or IME composition as submit", () => {
@@ -292,7 +391,7 @@ describe("composer delivery ownership and draft handling", () => {
     fireEvent.compositionEnd(f.field);
     fireEvent.keyDown(f.field, { key: "Enter" });
     expect(f.requests).toHaveLength(1);
-    expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "多行\ntext" });
+    expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "多行\ntext" });
   });
   it("fences two synchronous duplicate-risk retry clicks", async () => {
     const pending = Promise.withResolvers<Response>();
@@ -502,7 +601,7 @@ describe("composer delivery ownership and draft handling", () => {
     const f = setup();
     const key = `sk-ant-api03-${"x".repeat(40)}`;
     f.input(`token ${key} please`);
-    const send = screen.getByRole("button", { name: "Queue message" }) as HTMLButtonElement;
+    const send = screen.getByRole("button", { name: "Send now" }) as HTMLButtonElement;
     const blocked = () => send.getAttribute("aria-disabled") === "true";
     expect(blocked()).toBe(true);
     const described = (send.getAttribute("aria-describedby") ?? "")
@@ -527,23 +626,29 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.requests).toEqual([
       {
         path: `/api/agent/sessions/${sessionId}/messages`,
-        body: { kind: "followup", text: "token  please continue" },
+        body: { kind: "steer", text: "token  please continue" },
       },
     ]);
     expect(JSON.stringify(f.requests)).not.toContain("sk-ant-api03");
   });
-  it("rejects empty and oversized drafts, with an exact 8000-character positive", async () => {
+  it("sends nothing for an empty draft, and what no message can hold as a file", async () => {
+    transfer.trustNames = true;
     const f = setup();
-    for (const value of ["", "  ", "x".repeat(8001)]) {
+    for (const value of ["", "  "]) {
       f.field.value = value;
       f.submit();
     }
     expect(f.requests).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
-    f.input("x".repeat(8000));
+    f.field.value = "x".repeat(8001);
     f.submit();
-    expect(f.requests).toHaveLength(1);
-    await act(async () => {});
+    expect(f.field.value).toBe("");
+    expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    f.input("x".repeat(6000));
+    await waitFor(() => expect(screen.queryByText("Uploaded to Downloads")).toBeNull());
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(2));
+    expect(f.requests[1]?.body).toEqual({ kind: "steer", text: "x".repeat(6000) });
   });
   it("starts a new task and sends idle follow-up without creating a new session", async () => {
     const f = setup(() => Response.json({ sessionId }, { status: 202 }));
@@ -638,10 +743,10 @@ describe("explicit composer attachments", () => {
     );
     await waitFor(() => expect(screen.getAllByText("Uploaded to Downloads")).toHaveLength(2));
     expect(calls.map((c) => c.body)).toEqual([one, two]);
-    fireEvent.click(screen.getByRole("button", { name: "Queue message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
     await waitFor(() => expect(said().at(-1)).toBe("Sent to dot."));
     expect(JSON.parse(String(calls[2]?.body))).toEqual({
-      kind: "followup",
+      kind: "steer",
       text: "Read both sample files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.txt",
     });
     expect(f.field.value).toBe("");
@@ -682,7 +787,7 @@ describe("explicit composer attachments", () => {
     expect(f.field.value).toBe("Read the file");
     expect(screen.queryByLabelText("Message delivery")).toBeNull();
     expect(screen.getByRole("alert").textContent).toBe(
-      "Shorten the message or attachment names before sending.",
+      "Shorten the attachment names before sending.",
     );
   });
   it("retains the original confirmed attachment references for an explicit uncertain-message retry", async () => {
@@ -724,17 +829,33 @@ describe("the composer's controls", () => {
       .split(" ")
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
-  it("counts what is left only near the limit, where typing stops", () => {
+  it("never stops typing: past what the key guard reads, the words carry on as a file", async () => {
+    transfer.trustNames = true;
     const f = setup();
-    expect(f.field.maxLength).toBe(8000);
+    expect(f.field.maxLength).toBe(-1);
     f.input("x".repeat(7000));
-    expect(screen.queryByText(/ left$/)).toBeNull();
-    f.input("x".repeat(7500));
-    expect(screen.getByText("500 left")).toBeTruthy();
-    f.input("x".repeat(8000));
-    expect(screen.getByText("0 left")).toBeTruthy();
-    f.input("x".repeat(10));
-    expect(screen.queryByText(/ left$/)).toBeNull();
+    expect(f.field.value.length).toBe(7000);
+    expect(screen.queryByRole("list", { name: "Attached files" })).toBeNull();
+    f.input("x".repeat(9000));
+    expect(f.field.value).toBe("");
+    expect(screen.getByRole("list", { name: "Attached files" }).textContent).toContain(
+      "Long message · 1 line",
+    );
+    expect(screen.queryByText("Message cleared")).toBeNull();
+    await screen.findByText("Uploaded to Downloads");
+  });
+  it("keeps taking the user's words while nothing can be sent", () => {
+    const f = setup(undefined, { controlBlocked: true });
+    expect(f.field.readOnly).toBe(false);
+    expect(f.field.getAttribute("aria-disabled")).toBeNull();
+    f.input("Still typing");
+    expect(f.field.value).toBe("Still typing");
+    const send = screen.getByRole("button", { name: "Send now" });
+    expect(send.getAttribute("aria-disabled")).toBe("true");
+    expect(reasonOf(send)).toContain("You can send once the task is ready.");
+    f.submit();
+    expect(f.requests).toEqual([]);
+    expect(f.field.value).toBe("Still typing");
   });
   it("starts a new line on Return on a phone, where Send sends", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({
@@ -746,10 +867,10 @@ describe("the composer's controls", () => {
     f.input("Also add a chart");
     expect(fireEvent.keyDown(f.field, { key: "Enter" })).toBe(true);
     expect(f.requests).toEqual([]);
-    const send = screen.getByRole("button", { name: "Queue message" });
+    const send = screen.getByRole("button", { name: "Send now" });
     expect(send.hasAttribute("aria-keyshortcuts")).toBe(false);
     fireEvent.click(send);
-    expect(f.requests).toHaveLength(1);
+    expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "Also add a chart" });
     await act(async () => {});
     // Sent from the menu, the message goes without bringing up the keyboard.
     f.input("Then the totals");
@@ -763,9 +884,9 @@ describe("the composer's controls", () => {
   });
   it("names Return as Send's shortcut where Return sends", () => {
     setup();
-    expect(
-      screen.getByRole("button", { name: "Queue message" }).getAttribute("aria-keyshortcuts"),
-    ).toBe("Enter");
+    expect(screen.getByRole("button", { name: "Send now" }).getAttribute("aria-keyshortcuts")).toBe(
+      "Enter",
+    );
   });
   it("allows user-owned attachments as well as messages while the user has control", async () => {
     const f = setup(undefined, {
@@ -779,7 +900,7 @@ describe("the composer's controls", () => {
     expect(f.requests).toEqual([
       {
         path: `/api/agent/sessions/${sessionId}/messages`,
-        body: { kind: "followup", text: "Use the second sheet" },
+        body: { kind: "steer", text: "Use the second sheet" },
       },
     ]);
   });
@@ -806,7 +927,7 @@ describe("the composer's controls", () => {
     fireEvent.keyDown(f.field, { key: "Enter" });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(f.requests).toEqual([]);
-    expect(reasonOf(screen.getByRole("button", { name: "Queue message" }))).toContain(
+    expect(reasonOf(screen.getByRole("button", { name: "Send now" }))).toContain(
       "Write a message first.",
     );
   });
@@ -893,16 +1014,71 @@ describe("the composer's controls", () => {
     expect(names).toContain("notes.md");
     expect(f.field.value).toBe("");
   });
-  it("turns a long pasted text into a text file, keeping the field for the message", async () => {
+  it("turns a long pasted text into a chip, keeping the field for the message", async () => {
     transfer.trustNames = true;
     const f = setup();
+    f.input("Summarise this");
     const log = "line of a long build log\n".repeat(400);
     fireEvent.paste(f.field, { clipboardData: { files: [], getData: () => log } });
     await screen.findByText("Uploaded to Downloads");
-    expect(screen.getByRole("list", { name: "Attached files" }).textContent).toMatch(
-      /Pasted text [\d-]+ [\d.]+\.txt/,
-    );
+    const chips = screen.getByRole("list", { name: "Attached files" });
+    expect(chips.textContent).toContain("Pasted text · 401 lines");
+    expect(f.field.value).toBe("Summarise this");
+    fireEvent.click(screen.getByRole("button", { name: "Read Pasted text · 401 lines" }));
+    expect(screen.getByRole("dialog").textContent).toContain("line of a long build log");
+    f.submit();
+    await waitFor(() => expect(f.requests.length).toBeGreaterThan(0));
+    expect(JSON.stringify(f.requests.at(-1)?.body)).toMatch(/Pasted text [\d-]+ [\d.]+\.txt/);
+  });
+  it("takes keys out of a very long paste and attaches the rest, leaving the draft alone", async () => {
+    transfer.trustNames = true;
+    const f = setup();
+    f.input("My own words");
+    const key = `sk-proj-${"z".repeat(80)}`;
+    fireEvent.paste(f.field, {
+      clipboardData: { files: [], getData: () => `${"filler words ".repeat(1000)} ${key}` },
+    });
+    await screen.findByText("Uploaded to Downloads");
+    expect(f.field.value).toBe("My own words");
+    expect(screen.getByRole("alert").textContent).toContain("Keys were taken out");
+    fireEvent.click(screen.getByRole("button", { name: "Read Pasted text · 1 line" }));
+    expect(screen.getByRole("dialog").textContent).not.toContain(key);
+    expect(screen.queryByText("Message cleared")).toBeNull();
+  });
+  it("sends a message over the long-text mark as a file, once it has uploaded", async () => {
+    transfer.trustNames = true;
+    const f = setup();
+    f.input("Long words ".repeat(600));
+    f.submit();
     expect(f.field.value).toBe("");
+    await waitFor(() =>
+      expect(f.requests.some(({ path }) => path.endsWith("/messages"))).toBe(true),
+    );
+    const sent = f.requests.find(({ path }) => path.endsWith("/messages"))?.body as {
+      text: string;
+    };
+    expect(sent.text).toMatch(/^\n\nAttached files on this computer:\n- .*Long message .*\.txt$/);
+  });
+  it("sends files with no words, as one message naming them", async () => {
+    transfer.trustNames = true;
+    const f = setup();
+    const send = () => screen.getByRole("button", { name: "Send now" });
+    f.attach(new File(["x"], "photo.png", { type: "image/png" }));
+    await screen.findByText("Uploaded to Downloads");
+    expect(send().getAttribute("aria-disabled")).toBeNull();
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    await waitFor(() => expect(f.requests.at(-1)?.path).toMatch(/\/messages$/));
+    const sent = f.requests.at(-1)?.body as { text: string };
+    expect(splitAttachments(sent.text)).toEqual({
+      body: "",
+      files: [expect.stringMatching(/photo\.png$/)],
+    });
+  });
+  it("says what to do when there is nothing to send", () => {
+    const f = setup();
+    f.submit();
+    expect(screen.getByRole("alert").textContent).toContain("Write a message or attach a file.");
+    expect(f.requests).toEqual([]);
   });
   it("keeps a long paste with a key in the field, where the key guard catches it", () => {
     const f = setup();
@@ -1000,7 +1176,7 @@ describe("a message on its way", () => {
     const waiting = outbox.querySelector<HTMLElement>(".thread-pending");
     expect(waiting?.dataset.phase).toBe("sending");
     expect(waiting?.querySelector(".thread-bubble")?.textContent).toBe("Add a chart");
-    expect(waiting?.querySelector(".thread-tag")?.textContent).toBe("After this task");
+    expect(waiting?.querySelector(".thread-tag")?.textContent).toBe("Sent while working");
     expect(field.value).toBe("Add a chart");
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
     expect(outbox.querySelector<HTMLElement>(".thread-pending")?.dataset.phase).toBe("accepted");
@@ -1022,6 +1198,46 @@ describe("a message on its way", () => {
     expect(outbox.querySelector(".thread-pending")).not.toBeNull();
     rerender([earlier, user("01JXYZ00000000000000000M02", "Add a chart")]);
     expect(outbox.querySelector(".thread-pending")).toBeNull();
+    outbox.remove();
+  });
+  it("gives way to its own row even when the task's feed brings it before the send's reply", async () => {
+    const outbox = document.createElement("div");
+    document.body.append(outbox);
+    const pending = Promise.withResolvers<Response>();
+    const props: ComposerProps = {
+      api: createApi("fixture", {
+        origin: "http://127.0.0.1:4790",
+        fetchImpl: async () => pending.promise,
+      }),
+      cell,
+      agent,
+      known: true,
+      pending: false,
+      keysOpen: false,
+      receiveKey: vi.fn(() => false),
+    };
+    const end = { slot: outbox, show: vi.fn(), needs: vi.fn(), keep: vi.fn() };
+    const draw = (messages: AgentMessage[]) => (
+      <Outbox.Provider value={end}>
+        <Composer
+          {...props}
+          agent={{
+            ...agent,
+            model: { ...emptyAgentModel(), messages: new Map(messages.map((m) => [m.id, m])) },
+          }}
+        />
+      </Outbox.Provider>
+    );
+    const view = render(draw([]));
+    const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.input(field, { target: { value: "Add a chart" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(outbox.querySelector<HTMLElement>(".thread-pending")?.dataset.phase).toBe("sending");
+    view.rerender(draw([user("01JXYZ00000000000000000M03", "Add a chart")]));
+    expect(outbox.querySelector(".thread-pending")).toBeNull();
+    await act(async () => pending.resolve(new Response(null, { status: 202 })));
+    expect(outbox.querySelector(".thread-pending")).toBeNull();
+    expect(field.value).toBe("");
     outbox.remove();
   });
   it("shows the files it carries and a refusal with the way back to the draft", async () => {
@@ -1068,7 +1284,7 @@ describe("a message on its way", () => {
     f.input("Also add a chart");
     f.submit();
     await screen.findByText(/Not sure dot got that/);
-    expect(f.requests[0]?.body).toEqual({ kind: "followup", text });
+    expect(f.requests[0]?.body).toEqual({ kind: "steer", text });
     f.update({ agent: { ...agent, model: model(earlier) } });
     expect(screen.getByText(/Not sure dot got that/)).toBeTruthy();
     f.update({
@@ -1084,8 +1300,8 @@ describe("a message on its way", () => {
     f.submit();
     await act(async () => {});
     expect(f.requests.map((request) => request.body)).toEqual([
-      { kind: "followup", text },
-      { kind: "followup", text: "Then the totals" },
+      { kind: "steer", text },
+      { kind: "steer", text: "Then the totals" },
     ]);
   });
   it("keeps what you wrote since when a lost reply settles", async () => {
@@ -1200,7 +1416,7 @@ describe("typing", () => {
       </Profiler>,
     );
     const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
-    const send = screen.getByRole("button", { name: "Queue message" });
+    const send = screen.getByRole("button", { name: "Send now" });
     type(field, "A");
     expect(send.getAttribute("aria-disabled")).toBeNull();
     commits.mockClear();
@@ -1260,9 +1476,9 @@ describe("typing", () => {
     await waitFor(() => expect(f.field.value).toBe("token "));
     expect(counts.scans).toBe(1);
     expect(screen.getByRole("region", { name: "Key safeguard" })).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Queue message" }).getAttribute("aria-disabled"),
-    ).toBe("true");
+    expect(screen.getByRole("button", { name: "Send now" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Discard key" }));
 
     type(f.field, key);
@@ -1296,7 +1512,7 @@ describe("answering dot from the composer", () => {
     await waitFor(() => expect(f.requests).toHaveLength(1));
     expect(f.requests[0]).toEqual({
       path: `/api/agent/sessions/${sessionId}/messages`,
-      body: { kind: "followup", text: "use my work account" },
+      body: { kind: "steer", text: "use my work account" },
     });
     reply.mockResolvedValueOnce({ hold: "Type it in dot's question above." });
     f.input("hunter2");
@@ -1333,7 +1549,7 @@ describe("answering dot from the composer", () => {
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(reply).toHaveBeenCalledExactlyOnceWith("Use this plan instead", true);
     expect(JSON.parse(String(calls[1]?.body))).toEqual({
-      kind: "followup",
+      kind: "steer",
       text: "Use this plan instead\n\nAttached files on this computer:\n- ~/Downloads/plan.pdf",
     });
   });
@@ -1499,7 +1715,7 @@ describe("a queued message taken back to edit", () => {
     expect(calls[1]).toEqual({
       method: "POST",
       path: `/api/agent/sessions/${sessionId}/messages`,
-      body: { kind: "followup", text: withAttachments("Original words", [path]) },
+      body: { kind: "steer", text: withAttachments("Original words", [path]) },
     });
   });
 
@@ -1518,7 +1734,7 @@ describe("a queued message taken back to edit", () => {
     f.submit();
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(calls[1]?.body).toEqual({
-      kind: "followup",
+      kind: "steer",
       text: "Original words\n\nMy newer draft",
     });
     expect(calls.some((call) => call.method === "DELETE")).toBe(false);

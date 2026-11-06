@@ -251,6 +251,7 @@ describe.skipIf(!DOCKER_TESTS)("sign-ins persist in the shared browser profile",
       owner: { sessionId: ulid(), generation: 1 },
     };
     await client.control({ ...permit, holder: "agent" }, scope);
+    await client.enterWindow(permit, {}, scope);
     let tab = "";
     for (let i = 0; i < 40 && !tab; i++) {
       tab = (await client.tabs(scope)).tabs.find((entry) => entry.ready)?.id ?? "";

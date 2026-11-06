@@ -73,7 +73,7 @@ test("a turn puts its steps and pictures between dot's words, and ends on the an
   });
   await picture.scrollIntoViewIfNeeded();
   await picture.click();
-  const viewer = page.locator(".file-viewer img");
+  const viewer = page.locator(".file-viewer .viewer-pane:not([data-aside]) img");
   await expect
     .poll(() => viewer.evaluate((node) => (node as HTMLImageElement).naturalWidth))
     .toBe(640);
@@ -136,3 +136,79 @@ test("a long run streams its steps open in the thread, and folds each run once d
   await expect(live.locator(".activity-row").last()).toBeInViewport();
   if (isPhone(page)) await expect(page.locator(".thread-toolbar")).toBeInViewport();
 });
+
+// How far each steps row's head stands below what it follows, as painted: its hover, press and
+// focus fill that head's box, so this is the gap they keep. A focused head is measured with its ring.
+const headGaps = (page: Page) =>
+  page.locator(".thread > .thread-row[data-kind='work']").evaluateAll((all) =>
+    all.flatMap((row) => {
+      const head = row.querySelector<HTMLElement>(".thread-work-steps > .ui-disclosure-trigger");
+      const before = row.previousElementSibling;
+      if (!head || !before?.classList.contains("thread-row")) return [];
+      let above = Number.NEGATIVE_INFINITY;
+      for (const part of [before, ...before.querySelectorAll("*")]) {
+        const box = part.getBoundingClientRect();
+        if (box.width && box.height && getComputedStyle(part).visibility !== "hidden")
+          above = Math.max(above, box.bottom);
+      }
+      const style = getComputedStyle(head);
+      const ring = head.matches(":focus-visible")
+        ? Math.max(
+            0,
+            Number.parseFloat(style.outlineOffset) + Number.parseFloat(style.outlineWidth),
+          )
+        : 0;
+      return [
+        {
+          after: before.getAttribute("data-kind"),
+          gap: Math.round((head.getBoundingClientRect().top - ring - above) * 10) / 10,
+        },
+      ];
+    }),
+  );
+
+const spacing = (page: Page) =>
+  page.evaluate(() =>
+    Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--spacing")),
+  );
+
+for (const style of ["chat", "studio"] as const)
+  test.describe(`in ${style}`, () => {
+    test.use({ viewStyle: style });
+
+    test("a steps row lights up a step clear of the reply or card it follows", async ({
+      page,
+      ui,
+      browserName,
+    }) => {
+      await ui.open("narrated");
+      const unit = await spacing(page);
+      const heads = page.locator(".thread-work-steps > .ui-disclosure-trigger:visible");
+      await expect(heads.first()).toBeVisible();
+      const gaps = await headGaps(page);
+      expect(gaps.length).toBeGreaterThan(0);
+      for (const { gap } of gaps) expect(gap).toBeGreaterThanOrEqual(unit);
+      // Open, and focused from the keyboard (WebKit, as Safari, shows no ring on a button there).
+      const head = heads.last();
+      await head.click();
+      await expect(head).toHaveAttribute("aria-expanded", "true");
+      await page.keyboard.press("Shift");
+      await head.focus();
+      if (browserName === "chromium")
+        expect(await head.evaluate((node) => node.matches(":focus-visible"))).toBe(true);
+      for (const { gap } of await headGaps(page)) expect(gap).toBeGreaterThanOrEqual(unit);
+    });
+
+    test("a steps row lights up a step clear of dot's words", async ({ page, ui }) => {
+      await ui.open("long-thread");
+      const unit = await spacing(page);
+      await expect(
+        page.locator(".thread-work-steps > .ui-disclosure-trigger").first(),
+      ).toBeVisible();
+      const gaps = (await headGaps(page)).filter((gap) => gap.after === "message");
+      expect(gaps.length).toBeGreaterThan(0);
+      for (const { gap } of gaps) expect(gap).toBeGreaterThanOrEqual(unit);
+      // The same gap under every reply.
+      expect(new Set(gaps.map(({ gap }) => gap)).size).toBe(1);
+    });
+  });

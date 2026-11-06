@@ -1,3 +1,6 @@
+@custom-media --phone (width < 700px),
+  (pointer: coarse) and (orientation: landscape) and (height < 500px);
+
 /* Routines (the rail's Routines view, its phone sheet, the routine sheet and the thread's routine
    card): kit parts laid out on the 4 px scale, never restyled; the kit's layer comes after this. */
 .routines-panel {
@@ -74,11 +77,83 @@
   overflow-wrap: anywhere;
 }
 
+/* Chips keep their own width on any screen: as many columns as fit, the rest on the next row. */
 .routine-days {
+  --_day: calc(var(--spacing) * 13);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--_day), 1fr));
+  gap: calc(var(--spacing) * 1.5);
+}
+
+.routine-days[data-month] {
+  --_day: calc(var(--spacing) * 11);
+}
+
+.routine-days > .ui-chip {
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.routine-when {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+}
+
+.routine-when > .ui-group-head {
+  margin-bottom: 0;
+}
+
+.routine-every,
+.routine-times,
+.routine-time {
   display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+.routine-times {
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.routine-every-count {
+  width: calc(var(--spacing) * 14);
+}
+
+.routine-add-schedule {
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* The schedule in words and its next runs, read as the form changes. */
+.routine-preview {
+  display: grid;
   gap: calc(var(--spacing) * 1.5);
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3.5);
+  border-radius: var(--radius-group);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
+}
+
+.routine-preview-summary {
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.routine-preview-note,
+.routine-preview-runs {
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.routine-preview-runs {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .routine-sheet-footer {
@@ -236,6 +311,44 @@
   min-height: calc(var(--spacing) * 8);
   color: var(--color-fg-2);
   font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+/* A routine waiting for an answer, above the composer whatever dot says after it. */
+.routine-pending {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  margin-bottom: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
+}
+
+.routine-pending-text {
+  display: grid;
+  flex: 1 1 calc(var(--spacing) * 48);
+  gap: 2px;
+  min-width: 0;
+}
+
+.routine-pending-name {
+  color: var(--color-fg-1);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.routine-pending > .routine-card-actions {
+  flex: none;
+}
+
+@media (--phone) {
+  .routine-pending {
+    margin: 0 calc(var(--spacing) * 2) calc(var(--spacing) * 2);
+  }
 }
 
 /* In a phone's sheet the sheet's own margins frame the list. */

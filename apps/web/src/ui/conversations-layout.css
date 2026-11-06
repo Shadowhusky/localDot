@@ -4,8 +4,8 @@
 @layer utilities {
   .conversations-pick > .ui-button-content {
     display: grid;
-    grid-template-columns: 16px minmax(0, 1fr) auto;
-    column-gap: calc(var(--spacing) * 3);
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    column-gap: calc(var(--spacing) * 2);
     align-items: center;
     width: 100%;
     min-width: 0;
@@ -26,15 +26,83 @@
     gap: calc(var(--spacing) * 2);
   }
 
-  /* A row's status glyph and, at the row's leading edge, its colour tag. */
-  :is(.sessions-glyph, .conversations-glyph) {
+  /* A row's dot, its status on a badge at the corner, and at the row's leading edge its colour tag.
+     The frame round the ball is its hats' room, so the mark lies a little over the row's padding. */
+  .conversation-avatar {
     position: relative;
     display: grid;
     place-items: center;
+    width: 32px;
+    height: 32px;
+    margin-block: calc(var(--spacing) * -1.5);
   }
 
-  .conversations-glyph > .ui-tag-mark {
-    left: calc(var(--spacing) * -3);
+  .conversation-avatar-status {
+    position: absolute;
+    right: -1px;
+    bottom: 0;
+    display: grid;
+    place-items: center;
+    width: calc(var(--spacing) * 4);
+    height: calc(var(--spacing) * 4);
+    border-radius: var(--radius-full);
+    background-color: var(--color-overlay);
+    box-shadow: 0 0 0 1px var(--color-hairline);
+  }
+
+  /* In a card or the peek, beside the status in words. */
+  .conversation-avatar[data-size="28"] {
+    width: 28px;
+    height: 28px;
+    margin-block: calc(var(--spacing) * -1);
+  }
+
+  /* Changing a conversation's look (LookChooser): the dot as it will be, then what it can wear. */
+  .look-chooser {
+    display: grid;
+    gap: calc(var(--spacing) * 3);
+    min-width: 0;
+  }
+
+  .look-preview {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 3);
+  }
+
+  .look-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .look-choices {
+    display: grid;
+    gap: calc(var(--spacing) * 3);
+    max-height: min(52vh, calc(var(--spacing) * 96));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .look-group-name {
+    margin-block-end: calc(var(--spacing) * 1.5);
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+  }
+
+  .look-tile {
+    display: grid;
+    place-items: center;
+    height: calc(var(--spacing) * 12);
+    border-radius: var(--radius-row);
+    background: linear-gradient(180deg, var(--color-void), var(--color-raised-2));
+  }
+
+  .conversations-pick .conversation-avatar > .ui-tag-mark {
+    left: calc(var(--spacing) * -2 + 1px);
   }
 
   /* The conversations rail (SessionRail). Collapsed or expanded, a row's mark keeps one column
@@ -59,13 +127,20 @@
     text-align: start;
   }
 
+  /* The mark's middle stays in the rail's one column of marks, under the toggle. */
   .sessions-row > .ui-button-content {
     display: grid;
-    grid-template-columns: 16px minmax(0, 1fr) auto;
-    column-gap: calc(var(--spacing) * 2.5);
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    column-gap: calc(var(--spacing) * 2);
     align-items: center;
     width: 100%;
     min-width: 0;
+    margin-inline-start: calc(var(--spacing) * -2);
+  }
+
+  /* A glyph (New conversation, Search) is narrower than a dot, so it keeps to the column's middle. */
+  .sessions-row > .ui-button-content > .ui-icon {
+    justify-self: center;
   }
 
   .sessions-row:focus-visible {
@@ -120,9 +195,9 @@
     width: 100%;
   }
 
-  /* 3 px in from the row's edge, which is its border and padding away from the glyph. */
-  .sessions-glyph > .ui-tag-mark {
-    left: calc(var(--spacing) * -3 + 3px);
+  /* 3 px in from the row's edge, which is its border and padding away from the mark. */
+  .sessions-row .conversation-avatar > .ui-tag-mark {
+    left: calc(var(--spacing) * -1 + 1px);
   }
 
   .sessions-search {

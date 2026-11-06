@@ -955,6 +955,7 @@ describe("a blank tab in front", () => {
     expect(browserCommands(fixture, from)).toEqual([
       { method: "Target.getTargets", params: expect.any(Object) },
       { method: "Target.createTarget", params: { url: "about:blank" } },
+      { method: "Browser.getWindowForTarget", params: { targetId: "page-2" } },
       { method: "Target.activateTarget", params: { targetId: "page-2" } },
     ]);
     expect(layoutCommands(fixture, from)).toEqual(laidOut("page-2-session"));
@@ -1067,5 +1068,113 @@ describe("a blank tab in front", () => {
     expect(fixture.targets.closed).toBe(false);
     fixture.targets.close();
     await expect(fixture.targets.openTab(new AbortController().signal)).rejects.toThrow("closed");
+  });
+});
+
+describe("tabs in windows of their own", () => {
+  const page = (targetId: string, extra: Record<string, unknown> = {}) => ({
+    ...info(targetId),
+    ...extra,
+  });
+  // A window per target, as Chromium's own answer names it.
+  const windowed = (
+    fixture: Awaited<ReturnType<typeof started>>,
+    windows: Record<string, number>,
+  ) => {
+    fixture.intercept((command) => {
+      if (command.method !== "Browser.getWindowForTarget") return false;
+      queueMicrotask(() =>
+        fixture.reply(command, {
+          windowId: windows[command.params.targetId as string] ?? 7,
+          bounds: { left: 0, top: 0, width: 1280, height: 800, windowState: "normal" },
+        }),
+      );
+      return true;
+    });
+  };
+  const attachPage = async (
+    fixture: Awaited<ReturnType<typeof started>>,
+    targetId: string,
+    extra: Record<string, unknown> = {},
+  ) => {
+    fixture.event("Target.targetCreated", { targetInfo: page(targetId, extra) });
+    fixture.event("Target.attachedToTarget", {
+      sessionId: `${targetId}-session`,
+      targetInfo: page(targetId, extra),
+      waitingForDebugger: true,
+    });
+    await settle();
+    const found = fixture.targets.pages().at(-1);
+    if (!found) throw new Error("the tab did not attach");
+    return found;
+  };
+
+  it("knows each tab's window, the tab that opened it, and its neighbours", async () => {
+    const fixture = await started();
+    windowed(fixture, { "page-2": 8, "page-3": 8 });
+    const second = await attachPage(fixture, "page-2", { openerId: "page-1" });
+    const third = await attachPage(fixture, "page-3");
+    expect(second).toMatchObject({ windowId: 8, opener: fixture.tabId, ready: true });
+    expect(third.opener).toBeUndefined();
+    expect(fixture.targets.windowOf(second.id)).toBe(8);
+    expect(fixture.targets.tabsBeside(second.id).map((tab) => tab.id)).toEqual([
+      second.id,
+      third.id,
+    ]);
+    expect(fixture.targets.tabsBeside(fixture.tabId).map((tab) => tab.id)).toEqual([fixture.tabId]);
+  });
+
+  it("does not let a frame arriving in one window stop what another is doing", async () => {
+    const fixture = await started();
+    windowed(fixture, { "page-2": 8 });
+    const second = await attachPage(fixture, "page-2");
+    const held = fixture.targets.documents(fixture.tabId)[0] as BrowserDocument;
+    fixture.event("Target.targetCreated", {
+      targetInfo: { ...info("frame-1", "iframe"), parentId: "page-2" },
+    });
+    await settle();
+    expect(() => fixture.targets.check(held)).not.toThrow();
+    // The window it arrived in waits for it.
+    expect(() => fixture.targets.documents(second.id)).toThrow("unready");
+    expect(fixture.targets.documents(fixture.tabId)).toHaveLength(1);
+  });
+
+  it("still holds up every page for a frame that names none", async () => {
+    const fixture = await started();
+    const held = fixture.targets.documents(fixture.tabId)[0] as BrowserDocument;
+    fixture.event("Target.targetCreated", { targetInfo: info("frame-1", "iframe") });
+    await settle();
+    expect(() => fixture.targets.check(held)).toThrow();
+  });
+
+  it("names the tab a frame is in", async () => {
+    const fixture = await started();
+    fixture.event("Page.frameAttached", { frameId: "sub", parentFrameId: "page-1" }, "session-1");
+    expect(fixture.targets.tabOfFrame("page-1")).toBe(fixture.tabId);
+    expect(fixture.targets.tabOfFrame("sub")).toBe(fixture.tabId);
+    expect(fixture.targets.tabOfFrame("elsewhere")).toBeUndefined();
+  });
+
+  it("keeps one tab's file chooser through another tab's", async () => {
+    const fixture = await started();
+    windowed(fixture, { "page-2": 8 });
+    const second = await attachPage(fixture, "page-2");
+    fixture.event(
+      "Page.fileChooserOpened",
+      { frameId: "page-1", mode: "selectSingle", backendNodeId: 5 },
+      "session-1",
+    );
+    const first = fixture.targets.fileChooser(fixture.tabId);
+    expect(first).toBeDefined();
+    fixture.event(
+      "Page.fileChooserOpened",
+      { frameId: "page-2", mode: "selectSingle", backendNodeId: 6 },
+      "page-2-session",
+    );
+    expect(fixture.targets.fileChooser(fixture.tabId)).toBe(first);
+    expect(fixture.targets.fileChooser(second.id)).toBeDefined();
+    fixture.targets.clearFileChooser(second.id);
+    expect(fixture.targets.fileChooser(fixture.tabId)).toBe(first);
+    expect(fixture.targets.fileChooser(second.id)).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import { BudgetRaiseRequest, STALL } from "@localdot/protocol";
+import { BudgetRaiseRequest, refusalAdvice, STALL } from "@localdot/protocol";
 import { useState } from "react";
 import { dollars } from "../copy/format.ts";
 import { ownedPause } from "../session/status.ts";
@@ -26,6 +26,7 @@ const ANOTHER_MODEL =
 function knownReason(
   reason: string | undefined,
   local: boolean,
+  detail?: string,
 ): { title: string; text: string } | undefined {
   if (reason === STALL.budget)
     return {
@@ -50,7 +51,7 @@ function knownReason(
   if (reason === STALL.modelRefused)
     return {
       title: "The provider could not process my request",
-      text: `Check the error details, API address, API type and model ID, then try again, or ${ANOTHER_MODEL}`,
+      text: `${refusalAdvice(detail)}, then try again, or ${ANOTHER_MODEL}`,
     };
   if (reason === STALL.keyReenter)
     return {
@@ -308,7 +309,7 @@ export function TaskRecovery({
     );
   // A held Pause stands in for the paused state the spending limit published.
   const reason = hold ? "budget" : state.reason;
-  const known = knownReason(reason, local);
+  const known = knownReason(reason, local, state.detail);
   const taskBudget =
     !subscription &&
     budget?.data.scope === "task" &&
@@ -377,7 +378,9 @@ export function TaskRecovery({
       </p>
       {reason && !known && <p className="thread-recovery-reason">Reported reason: {reason}</p>}
       {state.detail && !reentry && !changed && (
-        <p className="thread-recovery-reason">The model said: {state.detail}</p>
+        <p className="thread-recovery-reason">
+          {reason === STALL.modelRefused ? "The provider said" : "The model said"}: {state.detail}
+        </p>
       )}
       {resets && (
         <p className="thread-recovery-reason">

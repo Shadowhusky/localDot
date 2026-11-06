@@ -1,0 +1,10 @@
+{
+  "name": "@localdot/film-update",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.8.160 preview --port 3013",
+    "check": "npx --yes hyperframes@0.8.160 check",
+    "render": "npx --yes hyperframes@0.8.160 render"
+  }
+}

@@ -99,6 +99,39 @@ it("never lets a slower read undo a choice made after it", async () => {
   expect(f.view.result.current.sessions).toEqual([]);
 });
 
+it("takes up a conversation chosen while another is on its way once that one is in, the latest", async () => {
+  const MIDDLE = "01JXYZ0000000000000000AAA3";
+  const waiting: (() => void)[] = [];
+  const f = setup(async (method, _path, body) => {
+    if (method === "GET") return Response.json({ sessions: [LATEST], more: false });
+    await new Promise<void>((resolve) => waiting.push(resolve));
+    return Response.json({ sessions: [(body as { sessionId: string }).sessionId], more: false });
+  });
+  await settle();
+  const chosen: Promise<boolean>[] = [];
+  act(() => {
+    chosen.push(f.view.result.current.continueFrom(OLD));
+    chosen.push(f.view.result.current.continueFrom(MIDDLE));
+    chosen.push(f.view.result.current.continueFrom(LATEST));
+  });
+  await settle();
+  expect(f.view.result.current.busy).toBe(true);
+  expect(waiting).toHaveLength(1);
+  await act(async () => waiting.shift()?.());
+  await settle();
+  expect(waiting).toHaveLength(1);
+  expect(f.view.result.current.busy).toBe(true);
+  await act(async () => waiting.shift()?.());
+  await settle();
+  expect(await Promise.all(chosen)).toEqual([true, false, true]);
+  expect(f.view.result.current).toMatchObject({ busy: false, sessions: [LATEST], choice: 2 });
+  expect(f.asked).toEqual([
+    "GET /api/conversation",
+    "POST /api/conversation/continue",
+    "POST /api/conversation/continue",
+  ]);
+});
+
 it("says to finish the task at work first when the daemon refuses", async () => {
   const f = setup(async (method) =>
     method === "GET"

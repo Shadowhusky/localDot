@@ -33,6 +33,7 @@ export const ZH: Readonly<Record<string, string>> = {
   "I do real work on a computer of my own, right on yours.":
     "我在你的电脑里有一台自己的小电脑。你交代的事，我来帮你做。",
   "Watch the film": "观看短片",
+  "See what's new": "看看更新了什么",
 
   // Watch me work.
   "Watch dot work": "观看 dot 工作",
@@ -40,25 +41,38 @@ export const ZH: Readonly<Record<string, string>> = {
   "Live, from your laptop or your phone. You see every click and keystroke as it happens.":
     "手机、电脑，随时查看。我点了哪里、输入了什么，你都看得清清楚楚。",
   "Step in any time.": "随时接管。",
-  "Take control and the mouse is yours. Hand it back and I pick up where you left off.":
-    "点「接管」就由你来操作，交还后我从你停下的地方接着做。",
+  "Send a message and I read it at my next step. Or take control and the mouse is yours.":
+    "发句话给我，我下一步就能看到。也可以点「接管」，鼠标归你。",
   "Take control": "接管",
   "Hand back": "交还",
   "You decide how often I ask.": "问不问你，你说了算。",
   "How often dot asks": "dot 多久问你一次",
-  Ask: "每次都问",
+  Custom: "自定义",
   Auto: "自动",
   "Full access": "完全放手",
-  "I check with you before anything that changes something.": "只要会改动东西，我都先问你一声。",
+  "I check with you before I send, post, pay, upload your files or change things online.":
+    "发消息、付钱、上传文件、改动网上的内容之前，我都先问你一声。",
   "Routine steps just happen. Anything risky waits for you.":
     "平常的操作我直接做，有风险的等你点头。",
   "I get on with it, and still ask before buying anything or deleting things online.":
     "我会直接完成任务，只在购物、删除网上内容之前问你。",
 
+  // Chat and Studio.
+  "Chat and Studio": "Chat 和 Studio",
+  "Text me.": "给我\u200b发消息。",
+  "Chat works like messaging me, with my computer a tap away. It's where a phone starts.":
+    "Chat 就像跟我发微信，想看我的电脑，点一下就行。手机上默认就是它。",
+  "Or sit beside me.": "或者\u200b坐旁边看。",
+  "Studio keeps my computer, the chat and every step on one screen. Choose when you set up and switch any time, on each device.":
+    "Studio 把我的电脑、对话和每一步都摆在一个屏幕上。安装时选一个，之后随时能换，每台设备各选各的。",
+  "Several at once.": "几件事，\u200b一起来。",
+  "Each task gets its own dot and browser window, and they share your sign-ins, so two can work in the same site. Routines bring regular jobs back on schedule.":
+    "每个任务都有自己的 dot 和浏览器窗口，登录状态是共用的，两个任务可以同时在同一个网站上干活。固定要做的事，做成例行任务，到点我自己开工。",
+
   // Use any model.
   "Use any model.": "什么模型都能用。",
   "models.body":
-    "支持 {n} 家服务商的 API Key，也能直接用你的 ChatGPT 或 Claude 会员，还可以用你自己电脑上的本地模型。随时可以切换。",
+    "支持 {n} 家服务商的 API Key，也能直接用你的 ChatGPT 或 Claude 会员，还可以用你自己电脑上的本地模型。每个任务、每条消息都能单独选，每一步用的是哪个模型也看得到。",
   "Some of the models dot can use": "dot 支持的部分模型",
   "ChatGPT plan": "ChatGPT 会员",
   "Claude plan": "Claude 会员",
@@ -117,8 +131,8 @@ export const ZH: Readonly<Record<string, string>> = {
   "Visual design": "视觉设计",
   Slides: "做 PPT",
   "Pick yours.": "挑一个\u200b你喜欢的。",
-  "Choose when you set up and change any time: just press me. Then give your localDot a look of its own.":
-    "安装时先选一个，之后想换，点一下我就行。还可以给你的 localDot 挑个配饰。",
+  "Choose when you set up and change any time: just press me. Every task wears a look of its own, and your localDot can have an accessory too.":
+    "安装时先选一个，之后想换，点一下我就行。每个任务都有自己的造型，一眼就认得出来，还可以给你的 localDot 挑个配饰。",
   Accessory: "配饰",
   None: "不戴",
   Cap: "帽子",
@@ -150,7 +164,9 @@ export const ZH: Readonly<Record<string, string>> = {
 
   // The app in the window.
   Chat: "对话",
-  Activity: "过程",
+  Workspace: "工作区",
+  Tasks: "任务",
+  Back: "返回",
   Mode: "模式",
   Conversation: "对话",
   "Hi, I'm dot. Pick a task and I'll show you how I did it.":

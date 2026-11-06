@@ -12,6 +12,8 @@ import {
   KeydForgotten,
   KeydKeyCopy,
   KeydMinted,
+  type KeydOAuthGrant,
+  KeydOAuthRenewal,
   KeydOpened,
   KeydPushKey,
   KeydPushRequest,
@@ -24,8 +26,11 @@ import {
   KeydStatus,
   KeydVault,
   type KeyMetadata,
+  LoginImport,
   ModelAdmissionSnapshot,
   ModelAdmissionWrite,
+  SavedLogin,
+  SavedLogins,
   type Sealed,
   type SecretBinding,
   type TaskPricing,
@@ -108,6 +113,10 @@ interface Reply {
 const segment = (value: string) => encodeURIComponent(value);
 const MAX_REPLY_BYTES = 1024 * 1024;
 const MAX_EVENT_LINE_BYTES = 64 * 1024;
+// keyd calls the app's sign-in service for these, which it gives 15 seconds.
+const OAUTH_TIMEOUT_MS = 20_000;
+// Each login takes keyd a few Keychain writes, so a long export takes minutes.
+const IMPORT_TIMEOUT_MS = 10 * 60_000;
 
 // HTTP/1.1 on keyd's 0600 admin socket (Part 4a, "Admin API"). Every reply is validated, and
 // anything unexpected is an error, never a guess.
@@ -121,13 +130,19 @@ export class KeydClient {
     return this.#json("GET", "/v1/status", undefined, KeydStatus);
   }
 
-  async login(origin: string): Promise<{ username: string; password: string } | undefined> {
+  async login(
+    origin: string,
+  ): Promise<{ username: string; password: string; confirm?: boolean } | undefined> {
     try {
       return await this.#json(
         "POST",
         "/v1/logins",
         { origin },
-        z.strictObject({ username: z.string().max(2000), password: z.string().min(1).max(1000) }),
+        z.strictObject({
+          username: z.string().max(2000),
+          password: z.string().min(1).max(1000),
+          confirm: z.boolean().optional(),
+        }),
       );
     } catch (error) {
       if (error instanceof KeydError && error.status === 404) return undefined;
@@ -150,6 +165,32 @@ export class KeydClient {
         throw new VaultLockedError();
       throw new Error("The sign-in could not be saved.");
     }
+  }
+
+  // Sites and accounts: the password stays in keyd.
+  async savedLogins(): Promise<SavedLogin[]> {
+    return (await this.#json("GET", "/v1/logins", undefined, SavedLogins)).logins;
+  }
+
+  // Whether a site has a saved login, without its password leaving keyd.
+  async findLogin(origin: string): Promise<SavedLogin | undefined> {
+    const reply = await this.#send("POST", "/v1/logins/find", { origin });
+    if (reply.status === 404) return undefined;
+    return this.#parse(reply, "/v1/logins/find", SavedLogin);
+  }
+
+  // A login from Settings, sealed to keyd in the page, so this daemon never reads it.
+  putSealedLogin(sealed: Sealed): Promise<SavedLogin> {
+    return this.#json("POST", "/v1/logins/sealed", { sealed }, SavedLogin);
+  }
+
+  // A password manager's export, sealed to keyd in the page: keyd alone reads it.
+  importLogins(sealed: Sealed): Promise<LoginImport> {
+    return this.#json("POST", "/v1/logins/import", { sealed }, LoginImport, IMPORT_TIMEOUT_MS);
+  }
+
+  async deleteLogin(origin: string): Promise<void> {
+    await this.#json("DELETE", "/v1/logins", { origin }, z.strictObject({ ok: z.literal(true) }));
   }
 
   // The passphrase arrives sealed to keyd, so this daemon never reads it. A new vault takes the
@@ -187,6 +228,31 @@ export class KeydClient {
 
   putMetadata(id: string, metadata: KeyMetadata): Promise<KeydRecord> {
     return this.#json("PUT", `/v1/secrets/${segment(id)}/metadata`, metadata, KeydRecord);
+  }
+
+  // Finishes a sign-in: keyd redeems the code, so this daemon never holds a token, and stores the
+  // access token under this binding, ending any surrogates of the secret it replaces.
+  connectOAuth(
+    binding: { id: string; hosts: string[]; header: string; format: string },
+    grant: KeydOAuthGrant,
+  ): Promise<KeydRecord> {
+    const { id, ...fields } = binding;
+    return this.#json(
+      "POST",
+      `/v1/secrets/${segment(id)}/oauth`,
+      { hosts: fields.hosts, header: fields.header, format: fields.format, ...grant },
+      KeydRecord,
+      OAUTH_TIMEOUT_MS,
+    );
+  }
+
+  // The app refused this secret's token before it should have ended. Says where the sign-in stands;
+  // a secret keyd keeps no sign-in for is one only the user can replace.
+  async renewOAuth(id: string): Promise<KeydOAuthRenewal["state"]> {
+    const path = `/v1/secrets/${segment(id)}/oauth/refresh`;
+    const reply = await this.#send("POST", path, {}, OAUTH_TIMEOUT_MS);
+    if (reply.status === 404) return "reconnect";
+    return this.#parse(reply, path, KeydOAuthRenewal).state;
   }
 
   async deleteSecret(id: string): Promise<boolean> {
@@ -412,8 +478,14 @@ export class KeydClient {
     });
   }
 
-  async #json<T>(method: string, path: string, body: unknown, schema: Schema<T>): Promise<T> {
-    return this.#parse(await this.#send(method, path, body), path, schema);
+  async #json<T>(
+    method: string,
+    path: string,
+    body: unknown,
+    schema: Schema<T>,
+    timeoutMs?: number,
+  ): Promise<T> {
+    return this.#parse(await this.#send(method, path, body, timeoutMs), path, schema);
   }
 
   #parse<T>(reply: Reply, path: string, schema: Schema<T>): T {
@@ -434,7 +506,7 @@ export class KeydClient {
     throw new KeydError(reply.status, code, message, path);
   }
 
-  #send(method: string, path: string, body?: unknown): Promise<Reply> {
+  #send(method: string, path: string, body?: unknown, timeoutMs = this.timeoutMs): Promise<Reply> {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const unsafe = privateSocketProblem(this.socketPath);
     if (unsafe) return Promise.reject(new KeydUnavailableError(`refusing ${unsafe}`, path));
@@ -476,8 +548,8 @@ export class KeydClient {
       );
       // Socket inactivity timeouts can be extended forever by a trickling reply.
       const deadline = setTimeout(
-        () => req.destroy(new Error(`no complete answer within ${this.timeoutMs} ms`)),
-        this.timeoutMs,
+        () => req.destroy(new Error(`no complete answer within ${timeoutMs} ms`)),
+        timeoutMs,
       );
       req.once("close", () => clearTimeout(deadline));
       req.on("error", (err: NodeJS.ErrnoException) =>

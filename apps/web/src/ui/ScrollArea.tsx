@@ -14,10 +14,19 @@ export interface ScrollAreaProps extends ComponentProps<"div"> {
   ref?: Ref<HTMLDivElement>;
   // Which edges fade while content lies past them. A sticky header makes its own top edge.
   fade?: "both" | "bottom";
+  // Inside another scroller: at either end the reader's scrolling goes on in the one around it.
+  chains?: boolean;
 }
 
 // The edge marks are written straight onto the element, so scrolling never re-renders the panel.
-export function ScrollArea({ ref, fade = "both", className, onScroll, ...props }: ScrollAreaProps) {
+export function ScrollArea({
+  ref,
+  fade = "both",
+  chains = false,
+  className,
+  onScroll,
+  ...props
+}: ScrollAreaProps) {
   const observer = useRef<ResizeObserver | null>(null);
   const attach = useCallback(
     (element: HTMLDivElement | null) => {
@@ -40,6 +49,7 @@ export function ScrollArea({ ref, fade = "both", className, onScroll, ...props }
       ref={attach}
       className={clsx("ui-scroll-area", className)}
       data-fade={fade}
+      data-chains={chains || undefined}
       onScroll={(event) => {
         edges(event.currentTarget);
         onScroll?.(event);

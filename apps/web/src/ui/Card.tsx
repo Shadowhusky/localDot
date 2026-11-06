@@ -1,6 +1,8 @@
 import { clsx } from "clsx";
 import { type ComponentProps, type ReactNode, useId } from "react";
+import { Button } from "./Button.tsx";
 import { Icon } from "./Icon.tsx";
+import { MiddleName } from "./MiddleTruncate.tsx";
 import { pressHandlers } from "./press.ts";
 
 export interface CardProps extends ComponentProps<"div"> {
@@ -38,7 +40,7 @@ function extension(name: string): string {
 }
 
 // One file in a file card: its type on a tile, its name and where it is, and what you can do with it.
-// A long name gives way in the middle, so its end (the extension) stays in view.
+// A long name gives way in the middle, so its start and its extension stay in view.
 export function FileRow({
   name,
   meta,
@@ -51,7 +53,6 @@ export function FileRow({
   compact = false,
   className,
 }: FileRowProps) {
-  const tail = Math.min(8, Math.max(0, name.length - 4));
   const body = (
     <>
       {onToggle && <Icon name="chevron-down" size={12} className="ui-file-chevron" />}
@@ -60,9 +61,8 @@ export function FileRow({
         {thumbnail}
       </span>
       <span className="ui-file-text">
-        <span className="ui-file-name" title={name}>
-          <span className="ui-file-name-head">{name.slice(0, name.length - tail)}</span>
-          <span className="ui-file-name-tail">{name.slice(name.length - tail)}</span>
+        <span className="ui-file-name">
+          <MiddleName name={name} />
         </span>
         {meta && <span className="ui-file-meta">{meta}</span>}
       </span>
@@ -90,6 +90,52 @@ export function FileRow({
         <span className="ui-file-main">{body}</span>
       )}
       {actions && <span className="ui-file-actions">{actions}</span>}
+    </div>
+  );
+}
+
+// A file that can't be shown where it is: what it is and what can be done with it. Having no preview
+// needs no explaining; `problem` says what went wrong when something did, with Try again if that may
+// help.
+export function FileCard({
+  name,
+  meta,
+  problem,
+  detail,
+  onRetry,
+  actions,
+}: {
+  name: string;
+  meta: string;
+  problem?: string;
+  detail?: ReactNode;
+  onRetry?(): void;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="ui-file-card">
+      <FileRow
+        name={name}
+        meta={meta}
+        actions={
+          (onRetry || actions) && (
+            <>
+              {onRetry && (
+                <Button size="sm" onClick={onRetry}>
+                  Try again
+                </Button>
+              )}
+              {actions}
+            </>
+          )
+        }
+      />
+      {problem && (
+        <div className="ui-file-card-problem">
+          <p>{problem}</p>
+          {detail && <div className="ui-file-card-detail">{detail}</div>}
+        </div>
+      )}
     </div>
   );
 }

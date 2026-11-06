@@ -39,6 +39,10 @@ export function useConversation(api: ApiClient): Conversation {
   const [revision, setRevision] = useState(0);
   const latest = useRef(0);
   const mutation = useRef(false);
+  // The choice on its way, and how many have been made: one made meanwhile waits for it, and only
+  // the latest of those goes.
+  const running = useRef<Promise<unknown> | null>(null);
+  const made = useRef(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new revision reads it again.
   useEffect(() => {
     if (mutation.current) return;
@@ -72,12 +76,18 @@ export function useConversation(api: ApiClient): Conversation {
   }, [api, revision]);
   const act = useCallback(
     async (path: string, body?: unknown) => {
-      if (mutation.current) return false;
+      const turn = ++made.current;
+      setBusy(true);
+      while (running.current) {
+        await running.current;
+        if (turn !== made.current) return false;
+      }
       mutation.current = true;
       const ask = ++latest.current;
-      setBusy(true);
+      const request = api.post(path, body);
+      running.current = request.catch(() => {});
       try {
-        const snapshot = ConversationSnapshot.parse(await api.post(path, body));
+        const snapshot = ConversationSnapshot.parse(await request);
         if (ask === latest.current) setState({ snapshot, known: true });
         setChoice((value) => value + 1);
         return true;
@@ -91,8 +101,9 @@ export function useConversation(api: ApiClient): Conversation {
         );
         return false;
       } finally {
+        running.current = null;
         mutation.current = false;
-        setBusy(false);
+        if (turn === made.current) setBusy(false);
       }
     },
     [api],

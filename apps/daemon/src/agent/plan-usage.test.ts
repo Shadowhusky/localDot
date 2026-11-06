@@ -246,6 +246,31 @@ describe("reading a plan's usage from its own app", () => {
     expect(read).toHaveBeenCalledOnce();
   });
 
+  it("drops a window that has ended once the plan's app stops listing it", async () => {
+    const [fiveHour, weekly] = claude().windows;
+    if (!fiveHour?.resetsAt || !weekly) throw new Error("fixture");
+    let now = T;
+    const plans = store(home(), () => now, {
+      "claude-code": async () => ({ usage: claude({ windows: [weekly] }), observedAt: now }),
+    });
+    plans.record(claude(), T);
+    // Before its reset an unlisted window still holds what was used in it.
+    now = fiveHour.resetsAt * 1000 - 60_000;
+    await plans.refresh();
+    expect(plans.list()[0]?.windows.map((window) => window.window)).toEqual([
+      "primary",
+      "secondary",
+    ]);
+    // A task's report carries only the window it touched, so it never ends another.
+    now = fiveHour.resetsAt * 1000 + 3 * 60_000;
+    plans.record(claude({ windows: [weekly] }), now);
+    expect(plans.list()[0]?.windows).toHaveLength(2);
+    now += 60_000;
+    await plans.refresh();
+    expect(plans.list()[0]?.windows.map((window) => window.window)).toEqual(["secondary"]);
+    expect(plans.list()[0]?.windows[0]?.observedAt).toBe(now);
+  });
+
   it("forgets the plan when its app says nobody is signed in", async () => {
     const plans = store(home(), () => T, { chatgpt: async () => "signed_out" });
     plans.record({ provider: "chatgpt", windows: [], limitReached: true }, T - 600_000);

@@ -416,12 +416,47 @@ body {
 }
 
 :is(.no-js, .no-gl) .cards,
-:is(.no-js, .no-gl) .ring {
+:is(.no-js, .no-gl) .ring,
+:is(.no-js, .no-gl) .site-phone,
+:is(.no-js, .no-gl) .site-several {
   display: none;
+}
+
+/* Several tasks at once, captured from the app: Studio at a desktop's size, or a tablet's where the
+   stage stands tall. Laid out once, like the phone, and placed by the scene (panel.ts). */
+.site-several {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1440px;
+  height: 900px;
+  overflow: hidden;
+  border-radius: 24px;
+  background-color: var(--color-void);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.14),
+    0 40px 120px rgb(0 0 0 / 0.65);
+  transform-origin: 0 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.site-several img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-aspect-ratio: 4 / 5) {
+  .site-several {
+    width: 820px;
+    height: 1180px;
+  }
 }
 
 /* Words beside dot's monitor on the left; centred under dot when it is centre stage. */
 [data-chapter="watch"] .beat,
+[data-chapter="views"] .beat,
 [data-chapter="replay"] .beat,
 [data-chapter="yours"] .beat {
   left: 6vw;
@@ -465,8 +500,21 @@ body {
   bottom: 4vh;
 }
 
-[data-chapter="out"] .site-button {
+.film-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
   margin-top: 18px;
+}
+
+.film-links .site-button {
+  margin-top: 0;
+}
+
+.film-links .site-button-quiet {
+  background: rgb(255 255 255 / 0.12);
+  color: var(--color-fg-1);
 }
 
 .roles,
@@ -684,6 +732,10 @@ body {
     font-size: 18px;
   }
 
+  .film-links {
+    justify-content: flex-start;
+  }
+
   .site-segments span {
     min-width: 0;
     padding: 0 12px;
@@ -734,6 +786,7 @@ body {
 
 @media (height < 500px) and (width >= 700px) {
   [data-chapter="watch"] .beat,
+  [data-chapter="views"] .beat,
   [data-chapter="replay"] .beat,
   [data-chapter="yours"] .beat,
   [data-chapter="install"] .beat {
@@ -747,6 +800,7 @@ body {
 
   /* Clear of dot's monitor and of dot beside it. */
   [data-chapter="watch"] .beat,
+  [data-chapter="views"] .beat,
   [data-chapter="replay"] .beat {
     width: 27vw;
   }

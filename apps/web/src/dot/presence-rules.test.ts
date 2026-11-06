@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type PresenceInput, presencePlace } from "./presence-rules.ts";
+import { type PresenceInput, phonePresencePlace, presencePlace } from "./presence-rules.ts";
 
 const LIVE: PresenceInput = {
   showDot: true,
@@ -39,5 +39,31 @@ describe("where the one live dot is", () => {
       for (const replaying of [false, true])
         expect(presencePlace({ ...LIVE, setup: true, curtain, replaying })).toBe("intro");
     expect(presencePlace({ ...LIVE, setup: true, showDot: false })).toBeNull();
+  });
+});
+
+describe("where the live dot is on a phone", () => {
+  const AT = { showDot: true, replaying: false, opening: false, level: 1, curtain: false } as const;
+
+  it("wakes on the curtain while the page opens, then sits at the thread's foot", () => {
+    expect(phonePresencePlace({ ...AT, opening: true })).toBe("hero");
+    expect(phonePresencePlace(AT)).toBe("dock");
+  });
+
+  it("stays off the list, whose rows have dots of their own", () => {
+    expect(phonePresencePlace({ ...AT, level: 0 })).toBeNull();
+  });
+
+  it("follows the computer, onto the curtain when it has no picture", () => {
+    expect(phonePresencePlace({ ...AT, level: 2 })).toBe("dock");
+    expect(phonePresencePlace({ ...AT, level: 2, curtain: true })).toBe("hero");
+    expect(phonePresencePlace({ ...AT, curtain: true })).toBe("dock");
+  });
+
+  it("goes when it is hidden, and sits over setup and in Replay as anywhere", () => {
+    expect(phonePresencePlace({ ...AT, showDot: false })).toBeNull();
+    expect(phonePresencePlace({ ...AT, setup: true })).toBe("intro");
+    expect(phonePresencePlace({ ...AT, replaying: true, level: 0 })).toBe("dock");
+    expect(phonePresencePlace({ ...AT, replaying: true, browsing: true })).toBeNull();
   });
 });

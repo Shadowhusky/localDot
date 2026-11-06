@@ -1,4 +1,4 @@
-import { clipText, INTENT_CHARS, type ToolResult } from "@localdot/protocol";
+import { clipText, INTENT_CHARS, type ResultPreview, type ToolResult } from "@localdot/protocol";
 import type { ScreenLease } from "../../browser/screen-controller.ts";
 import type { ConnectorHub } from "../../connectors/hub.ts";
 import type { DesktopdClient } from "../../desktopd/client.ts";
@@ -27,6 +27,8 @@ export interface RecallHit {
 
 export interface ToolDeps {
   hideWork?(id: string): Promise<void>;
+  // The web apps this turn started or changed that answer now, for its reply.
+  previewOffers?(id: string, reply: string): Promise<ResultPreview[]>;
   recallExperience?(query: string, excludeSessionId: string): string;
   saveExperience?(
     id: string,
@@ -39,7 +41,8 @@ export interface ToolDeps {
   gateway: Pick<ActionGateway, "run" | "observe" | "cursorOf"> &
     Partial<Pick<ActionGateway, "find">>;
   // Turns on the computer, one action at a time across the tasks sharing it.
-  computer?: Pick<ComputerTurns, "take" | "owners" | "busy">;
+  computer?: Pick<ComputerTurns, "take" | "owners" | "busy"> &
+    Partial<Pick<ComputerTurns, "shared">>;
   // Installed with the session's screen controller; one private binding per admitted tool.
   bindScreen?(session: AgentSession, lease: ScreenLease): NativeScreenBinding;
   // The cell's scale, to bring the gateway's device-pixel cursor back to model pixels.
@@ -88,11 +91,26 @@ export interface ToolDeps {
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
   askTimeoutMs?: number;
   logins?: {
-    login(origin: string): Promise<{ username: string; password: string } | undefined>;
+    login(
+      origin: string,
+    ): Promise<{ username: string; password: string; confirm?: boolean } | undefined>;
     saveLogin(origin: string, username: string, password: string): Promise<void>;
   };
   routines?: import("./routine.ts").RoutineToolPort;
-  connectors?: Pick<ConnectorHub, "access" | "check" | "call" | "observation">;
+  connectors?: Pick<
+    ConnectorHub,
+    | "access"
+    | "check"
+    | "call"
+    | "observation"
+    | "connectable"
+    | "connectTarget"
+    | "isConnected"
+    | "refresh"
+    | "remove"
+  >;
+  // The app's tools join this task's list: its harness starts again with them, resuming the task.
+  appsChanged?(session: AgentSession): void;
   // The web tools' own way out, through keyd, without the screen or the user's sign-ins.
   web?: WebAccess;
   credentials?: Pick<import("../../keyd/service-keys.ts").ServiceKeys, "list" | "request">;
@@ -130,7 +148,8 @@ export function screenContext(ctx: ToolCallContext): ActionContext {
     step: ctx.step,
     signal: ctx.signal,
     ...(ctx.nativeScreen ? { screen: ctx.nativeScreen } : {}),
-    // Other tasks' windows are on the desktop; the web browser works for one task at a time.
+    // Other tasks' windows are on the desktop too; in the web browser each permit stops at its
+    // task's own window.
     ...(ctx.turn && ctx.screen?.selection.screen !== "browser"
       ? { foreign: ctx.turn.foreign, hidden: ctx.turn.hidden }
       : {}),
@@ -143,12 +162,18 @@ export function fail(message: string): ToolResult {
 
 // What dot hears when the user's message ends one of its waits; the message itself follows.
 export const USER_SPOKE = "Stopped waiting early: the user sent a new message.";
-// A wait of dot's that the user's new message ends early. The brain's delegated agents (their
-// calls are named `sub-…`) don't hear the user, so their waits run their course.
-export function listenForUser(ctx: ToolCallContext, signal = ctx.signal): UserListener {
-  return ctx.callId.startsWith("sub-")
-    ? { signal, spoke: false, end: () => {} }
-    : ctx.session.listenForUser(signal);
+const USER_QUEUED =
+  "Stopped waiting early: the user queued a message for after this task. Finish what you were waiting for first, unless the message says otherwise.";
+export const woken = (listening: UserListener) => (listening.queued ? USER_QUEUED : USER_SPOKE);
+// The brain's delegated agents (their calls are named `sub-…`) don't hear the user.
+export const hearsUser = (ctx: ToolCallContext) => !ctx.callId.startsWith("sub-");
+// A wait of dot's that the user's new message ends early, their waits running their course. A wait
+// this long also ends for a message queued for after this task; a shorter one is soon over anyway.
+const WAIT_TAKES_QUEUED_MS = 5000;
+export function listenForUser(ctx: ToolCallContext, signal = ctx.signal, waitMs = 0): UserListener {
+  return hearsUser(ctx)
+    ? ctx.session.listenForUser(signal, waitMs >= WAIT_TAKES_QUEUED_MS)
+    : { signal, spoke: false, queued: false, end: () => {} };
 }
 
 // The tail of long output: the end of a log is where the error usually is.

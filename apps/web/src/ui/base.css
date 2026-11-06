@@ -5,7 +5,11 @@
     padding: 0;
   }
 
+  /* Left alone, a phone's browser enlarges some blocks of text by how long they are: a long line of
+     code would draw larger than the short ones around it. */
   :root {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
     color-scheme: dark;
     accent-color: var(--color-fg-1);
     caret-color: var(--color-fg-1);

@@ -32,6 +32,8 @@ export type WorkStep = EntryView & {
   readGroup?: string;
   entry: ActivityEntry;
   changes: readonly AgentChange[];
+  // The model that was running as it started, when the record says.
+  model?: ModelRef;
 };
 export interface ModelRef {
   readonly route: string;
@@ -59,7 +61,12 @@ interface Item<K extends string> {
 }
 export type ThreadItem =
   // `narration`: dot's words before more of its work in the turn, rather than its answer.
-  | (Item<"message"> & { message: AgentMessage; narration?: true })
+  | (Item<"message"> & {
+      message: AgentMessage;
+      narration?: true;
+      // A chat's reply with no steps keeps its turn's last line for its menu.
+      turnLine?: Extract<ThreadItem, { kind: "meta" }>;
+    })
   | (Item<"question"> & { question: AgentQuestion })
   | (Item<"answer"> & { question: AgentQuestion })
   | (Item<"result"> & { result: AgentResult })
@@ -81,6 +88,11 @@ export type ThreadItem =
       sessionId?: string;
       // What the turn's model calls cost, when any cost something; on the turn's last steps.
       spend?: { usd: number; estimated: boolean };
+      // The run starts on another model than the run before it.
+      changedTo?: ModelRef;
+      // A chat's caption gathers a turn's steps: when its reply came, and the turn's last line.
+      at?: number;
+      meta?: Extract<ThreadItem, { kind: "meta" }>;
     })
   // A finished turn's quiet last line: the model, and what the turn's calls reported.
   | (Item<"meta"> & {
@@ -301,6 +313,9 @@ export function workSteps(
               readGroup: activityReadGroup(entry),
               entry,
               changes: own,
+              ...(entry.row.kind === "step" && entry.row.agent?.model
+                ? { model: entry.row.agent.model }
+                : {}),
               ...entryView(entry, own, ended),
             };
       built.set(entry.key, { row: entry.row, keys: entry.keys, changes: own, ended, step });
@@ -340,11 +355,17 @@ function seenAt(item: ThreadItem): number | null {
   return at === undefined ? null : microsToMs(at);
 }
 
-const said = (item: ThreadItem) =>
+const hasSaid = (item: ThreadItem) =>
   item.kind === "result" ||
   item.kind === "question" ||
   item.kind === "routine" ||
   (item.kind === "message" && item.message.role === "assistant");
+
+// Your message is the thread's latest word: dot has said nothing since.
+export function unanswered(items: readonly ThreadItem[]): boolean {
+  const last = items.findLast((item) => item.kind === "message" || hasSaid(item));
+  return last?.kind === "message" && last.message.role === "user";
+}
 
 function turnModels(calls: readonly UsageCall[]): TurnModel[] {
   const models = new Map<string, TurnModel>();
@@ -387,7 +408,7 @@ function turnMeta(
   main?: ModelRef,
 ): Extract<ThreadItem, { kind: "meta" }> | null {
   const models = turnModels(calls);
-  if (!(turn.items.some(said) || own.length) || !(models.length || main)) return null;
+  if (!(turn.items.some(hasSaid) || own.length) || !(models.length || main)) return null;
   const ends = [
     ...turn.items.map(seenAt),
     ...own.map((step) => step.endT ?? step.startT),
@@ -420,6 +441,8 @@ type WorkItem = Extract<ThreadItem, { kind: "work" }>;
 // reached dot not at all: neither splits the steps dot takes meanwhile.
 const waits = (item: ThreadItem) =>
   item.kind === "message" && (!!item.message.queued || dropped(item.message));
+const steered = (item: ThreadItem | undefined) =>
+  item?.kind === "message" && item.message.role === "user" && item.message.kind === "steer";
 
 // A turn as it happened: what was said and handed over, and between them each run of steps dot took,
 // after the item it followed. While the turn is live it ends with a run, empty until dot takes a step,
@@ -427,6 +450,9 @@ const waits = (item: ThreadItem) =>
 function interleave(turn: Turn, own: readonly WorkStep[], open: boolean): ThreadItem[] {
   const placed: ThreadItem[] = [];
   let after: ThreadItem | undefined;
+  // A run goes by the first thing said since the last run, so the run dot is at stays the same row
+  // as it says more before its next step, rather than a new one under each thing it says.
+  let namedAfter: ThreadItem | undefined;
   let run: WorkStep[] | null = null;
   let held: ThreadItem[] = [];
   let clock = Number.NEGATIVE_INFINITY;
@@ -439,15 +465,17 @@ function interleave(turn: Turn, own: readonly WorkStep[], open: boolean): Thread
     if (next > from) run = [...(run ?? []), ...own.slice(from, next)];
   };
   const close = () => {
-    if (run)
+    if (run) {
       placed.push({
         kind: "work",
-        key: `work-${after?.key ?? turn.key}`,
+        key: `work-${namedAfter?.key ?? turn.key}`,
         speaker: "dot",
         turn: turn.key,
         steps: run,
         startMs: (after && (seenAt(after) ?? after.atMs)) ?? run[0]?.startT ?? null,
       });
+      namedAfter = undefined;
+    }
     run = null;
     placed.push(...held);
     held = [];
@@ -461,10 +489,21 @@ function interleave(turn: Turn, own: readonly WorkStep[], open: boolean): Thread
       close();
       placed.push(item);
       after = item;
+      namedAfter ??= item;
     }
   }
   take();
-  if (open) run ??= [];
+  // Until dot's next step, a message sent while it works stays below the run it is at, where it
+  // waited to arrive.
+  if (open && !run) {
+    let at = placed.length;
+    while (steered(placed[at - 1])) at--;
+    if (at === placed.length || placed[at - 1]?.kind !== "work") {
+      if (at < placed.length) after = placed[at - 1];
+      held = placed.splice(at);
+      run = [];
+    }
+  }
   close();
   return placed;
 }
@@ -569,6 +608,20 @@ export function withWork(
   });
 }
 
+// A thread's runs of steps name their model only where it changes from the run before, across the
+// conversation's tasks too; the turn's last line names the model of a thread that never changes.
+export function withModelChanges(items: readonly ThreadItem[]): ThreadItem[] {
+  let last: ModelRef | undefined;
+  return items.map((item) => {
+    if (item.kind !== "work") return item;
+    const first = item.steps.find((step) => step.model)?.model;
+    const changed =
+      first && last && (first.route !== last.route || first.model !== last.model) ? first : null;
+    last = item.steps.findLast((step) => step.model)?.model ?? last;
+    return changed ? { ...item, changedTo: changed } : item;
+  });
+}
+
 const PAUSE_MS = 10 * 60_000;
 const DAY_MS = 86_400_000;
 
@@ -606,4 +659,50 @@ export function threadRows(items: readonly ThreadItem[], now = Date.now()): Thre
       separator,
     };
   });
+}
+
+// The thread as a chat draws it: each turn's steps gathered behind one caption under what dot said
+// last in it, with the turn's last line inside them. While dot works on a turn it has said nothing
+// in, there is no caption yet: the foot of the thread says what it is doing.
+export function chatItems(items: readonly ThreadItem[], live: boolean): ThreadItem[] {
+  const out: ThreadItem[] = [];
+  let runs: WorkItem[] = [];
+  let line: Extract<ThreadItem, { kind: "meta" }> | undefined;
+  let said = -1;
+  const close = (last: boolean) => {
+    const final = runs.at(-1);
+    if (final) {
+      const steps = runs.flatMap((run) => run.steps);
+      const anchor = out[said];
+      const caption: WorkItem = {
+        ...final,
+        key: `steps-${final.turn}`,
+        steps,
+        startMs: runs[0]?.startMs ?? null,
+        ...(anchor?.time !== undefined ? { at: anchor.time } : {}),
+        ...(line ? { meta: line } : {}),
+      };
+      if (said >= 0) out.splice(said + 1, 0, caption);
+      else if (!(last && live)) out.push(caption);
+    } else if (line) {
+      const anchor = out[said];
+      if (anchor?.kind === "message") out[said] = { ...anchor, turnLine: line };
+    }
+    runs = [];
+    line = undefined;
+    said = -1;
+  };
+  for (const item of items) {
+    if (item.kind === "work") {
+      if (runs[0] && runs[0].turn !== item.turn) close(false);
+      if (item.steps.length) runs.push(item);
+    } else if (item.kind === "meta") line = item;
+    else {
+      if (startsTurn(item)) close(false);
+      out.push(item);
+      if (hasSaid(item)) said = out.length - 1;
+    }
+  }
+  close(true);
+  return out;
 }

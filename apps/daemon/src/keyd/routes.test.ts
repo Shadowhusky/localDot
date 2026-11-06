@@ -484,22 +484,22 @@ describe("unlocking saved keys from the app", () => {
 });
 
 describe("KeydMonitor", () => {
-  it("tells listeners when keyd goes away and comes back with a new boot", async () => {
+  it("tells listeners when keyd comes back with a new boot, even within the offline grace", async () => {
     const client = new KeydClient(keyd.socketPath, 500);
     const monitor = new KeydMonitor(client);
     const seen: string[] = [];
     monitor.subscribe((now, before) =>
-      seen.push(`${before.online}->${now.online}:${now.bootId ?? "-"}`),
+      seen.push(`${before.online}->${now.online}:${now.bootId ?? "-"}:${cameUp(now, before)}`),
     );
     const first = keyd.bootId;
     await monitor.refresh();
     await keyd.stop();
-    await monitor.refresh();
+    expect((await monitor.refresh()).online).toBe(true);
     keyd.restart();
     await keyd.start();
     await monitor.refresh();
     await monitor.refresh();
-    expect(seen).toEqual([`false->true:${first}`, "true->false:-", `false->true:${keyd.bootId}`]);
+    expect(seen).toEqual([`false->true:${first}:true`, `true->true:${keyd.bootId}:true`]);
     expect(keyd.bootId).not.toBe(first);
   });
 

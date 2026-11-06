@@ -1,6 +1,13 @@
 import { DEFAULT_AUTONOMY } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { formOf, needsPrice, priceOf, sameSettingsValue, validateForm } from "./settings-form.ts";
+import {
+  formOf,
+  issueOf,
+  needsPrice,
+  priceOf,
+  sameSettingsValue,
+  validateForm,
+} from "./settings-form.ts";
 import { providerFixture } from "./testing.ts";
 
 const custom = () =>
@@ -612,4 +619,41 @@ it("compares saved settings independently of property order and omitted optional
     ),
   ).toBe(true);
   expect(sameSettingsValue({ model: "saved" }, { model: "changed" })).toBe(false);
+});
+
+describe("issueOf", () => {
+  it("says where each problem is put right, and which field says so", () => {
+    expect(issueOf("Choose a main provider and model.")).toMatchObject({
+      section: "models",
+      field: "main",
+    });
+    expect(issueOf("Fast: this model cannot call the required tools.")).toEqual({
+      section: "models",
+      field: "fast",
+      text: "this model cannot call the required tools.",
+    });
+    expect(
+      issueOf("Name this localDot in up to 40 letters, numbers and punctuation."),
+    ).toMatchObject({ section: "dot", field: "name" });
+    expect(
+      issueOf("Enter a limit per task, per day or both, or turn the spending limit off."),
+    ).toMatchObject({ section: "spending", field: "task" });
+    expect(
+      issueOf("Enter a limit per task from $0.01 to $10,000, or leave it empty."),
+    ).toMatchObject({ section: "spending", field: "task" });
+    expect(
+      issueOf("Enter a limit per day from $0.01 to $10,000, or leave it empty."),
+    ).toMatchObject({ section: "spending", field: "day" });
+    expect(issueOf("Check in after 2 to 100 failed actions in a row.")).toMatchObject({
+      section: "autonomy",
+      field: "failures",
+    });
+    expect(
+      issueOf("Research reads 3 to 100 sources for 2 to 120 minutes, in whole numbers."),
+    ).toMatchObject({ section: "autonomy", field: "research" });
+    expect(issueOf("Load current model and key metadata before saving.")).toEqual({
+      section: "models",
+      text: "Load current model and key metadata before saving.",
+    });
+  });
 });

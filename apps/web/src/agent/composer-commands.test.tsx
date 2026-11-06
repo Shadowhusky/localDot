@@ -183,7 +183,7 @@ describe("slash commands", () => {
       expect(f.requests).toEqual([
         {
           path: `/api/agent/sessions/${sessionId}/messages`,
-          body: { kind: "followup", text: "/imagine a cat" },
+          body: { kind: "steer", text: "/imagine a cat" },
         },
       ]),
     );

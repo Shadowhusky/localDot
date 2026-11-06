@@ -2,6 +2,7 @@ import type { PreviewItem, PreviewRequest, PreviewServer } from "@localdot/proto
 import { useEffect } from "react";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
+import { Disclosure } from "../ui/Disclosure.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Group, GroupRow } from "../ui/Group.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -12,16 +13,22 @@ import "../ui/previews.css";
 const shownAddress = (address: string) => address.replace(/^https?:\/\//, "").replace(/\/$/, "");
 
 // One web app to open: a server answering in the computer, or a *.localhost site one names (several
-// can share a port).
+// can share a port), which answers for itself.
 interface App {
   address: string;
   request: PreviewRequest;
   server: PreviewServer;
+  state: PreviewServer["state"];
 }
 
 function appsOf(servers: readonly PreviewServer[], previews: readonly PreviewItem[]): App[] {
   return servers.flatMap((server) => [
-    { address: shownAddress(server.url), request: { port: server.port }, server },
+    {
+      address: shownAddress(server.url),
+      request: { port: server.port },
+      server,
+      state: server.state,
+    },
     ...previews
       .filter((preview) => {
         const url = new URL(preview.target);
@@ -31,18 +38,35 @@ function appsOf(servers: readonly PreviewServer[], previews: readonly PreviewIte
         address: shownAddress(preview.target),
         request: { url: preview.target },
         server,
+        state: preview.state ?? server.state,
       })),
   ]);
 }
 
+// The apps this conversation runs lead. Another conversation's, and a copy that has been replaced or
+// has stopped answering, are real, so they stay reachable, but folded away. A computer that can't say
+// who started a server (one not yet updated) lists them all as its own.
+export function arrangeApps(apps: readonly App[]): {
+  running: App[];
+  others: App[];
+  fading: App[];
+} {
+  const fades = (app: App) => app.state !== "answering" || !!app.server.older;
+  return {
+    running: apps.filter((app) => !fades(app) && app.server.here !== false),
+    others: apps.filter((app) => !fades(app) && app.server.here === false),
+    fading: apps.filter(fades),
+  };
+}
+
 // A server that stops answering leaves the list ten minutes after it last did.
-function stateText(server: PreviewServer, now: number): string {
-  if (server.state === "answering") return "Running";
-  const minutes = Math.floor((now - Date.parse(server.seenAt)) / 60_000);
+function stateText(app: App, now: number): string {
+  if (app.state === "answering") return app.server.older ? "Replaced by a newer copy" : "Running";
+  const minutes = Math.floor((now - Date.parse(app.server.seenAt)) / 60_000);
   return minutes < 1 ? "Not answering" : `Not answering for ${minutes} min`;
 }
 
-// The web apps dot runs in its computer, to open on the owner's devices: the Activity's Previews tab.
+// The web apps dot runs in its computer, to open on the owner's devices: the panel's Previews tab.
 export function PreviewsPanel({ active }: { active: boolean }) {
   const previews = usePreviews();
   const watch = previews?.watch;
@@ -58,6 +82,7 @@ export function PreviewsPanel({ active }: { active: boolean }) {
       </p>
     );
   const apps = appsOf(status.servers, status.previews);
+  const { running, others, fading } = arrangeApps(apps);
   const notice = status.state === "ready" ? null : unavailable(status.state, status.message);
   return (
     <div className="previews-panel">
@@ -91,14 +116,19 @@ export function PreviewsPanel({ active }: { active: boolean }) {
           {notice?.message}
         </EmptyState>
       )}
-      {apps.length > 0 && (
+      {running.length > 0 && (
         <section aria-label="Web apps in dot's computer">
-          <Group>
-            {apps.map((app) => (
-              <AppRow key={app.address} app={app} previews={previews} />
-            ))}
-          </Group>
+          <AppRows apps={running} previews={previews} />
         </section>
+      )}
+      {status.state === "ready" && !running.length && apps.length > 0 && (
+        <EmptyState layout="start" title="None running from this conversation" />
+      )}
+      {others.length > 0 && (
+        <FoldedApps label="From other conversations" apps={others} previews={previews} />
+      )}
+      {fading.length > 0 && (
+        <FoldedApps label="Replaced or not answering" apps={fading} previews={previews} />
       )}
       {apps.length > 0 && status.previews.length > 0 && (
         <Group>
@@ -127,19 +157,49 @@ export function PreviewsPanel({ active }: { active: boolean }) {
   );
 }
 
+function AppRows({ apps, previews }: { apps: readonly App[]; previews: Previews }) {
+  return (
+    <Group>
+      {apps.map((app) => (
+        <AppRow key={app.address} app={app} previews={previews} />
+      ))}
+    </Group>
+  );
+}
+
+function FoldedApps({
+  label,
+  apps,
+  previews,
+}: {
+  label: string;
+  apps: readonly App[];
+  previews: Previews;
+}) {
+  return (
+    <Disclosure
+      className="previews-folded"
+      summary={label}
+      meta={<span className="num">{apps.length}</span>}
+    >
+      <AppRows apps={apps} previews={previews} />
+    </Disclosure>
+  );
+}
+
 function AppRow({ app, previews }: { app: App; previews: Previews }) {
   const { server, address, request } = app;
   const title = "url" in request ? undefined : server.title;
-  // A title names the app, so its address says where it is; else its program does.
-  const where = title ? address : server.name;
+  // A title names the app, so its address says where it is; else its folder or program does.
+  const where = title ? address : (server.project ?? server.name);
   return (
     <GroupRow
       label={title ?? address}
       detail={
         <>
           {where && `${where} · `}
-          <span className="preview-app-state" data-state={server.state}>
-            {stateText(server, Date.now())}
+          <span className="preview-app-state" data-state={app.state}>
+            {stateText(app, Date.now())}
           </span>
         </>
       }
@@ -159,6 +219,15 @@ function AppRow({ app, previews }: { app: App; previews: Previews }) {
           >
             Open
           </Button>
+          {/* A *.localhost site is a name on a port its proxy serves: stopping it would stop them all. */}
+          {"port" in request && (
+            <IconButton
+              icon="x"
+              label={`Stop ${address}`}
+              aria-busy={previews.pending.has(`stop ${server.port}`) || undefined}
+              onClick={(event) => previews.stop(server.port, event.currentTarget)}
+            />
+          )}
         </>
       }
     />

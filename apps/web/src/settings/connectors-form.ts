@@ -41,7 +41,16 @@ export function toolLabel(tool: Pick<ConnectorToolView, "name" | "title">): stri
   return words ? `${words[0]?.toUpperCase()}${words.slice(1)}` : tool.name;
 }
 
+// Whether the app signs in, and whether it has been signed in at all: an app whose sign-in ended is
+// reconnected, one that never had one is connected.
+export function signInOf(view: Pick<ConnectorView, "server">): { signedIn: boolean } | undefined {
+  const { server } = view;
+  if (server.kind !== "remote" || server.auth.kind !== "oauth") return undefined;
+  return { signedIn: Boolean(server.auth.secret) };
+}
+
 export function statusLine(view: ConnectorView): string {
+  if (view.enabled && view.signIn) return "Waiting for your approval";
   switch (view.status) {
     case "off":
       return "Off";
@@ -50,7 +59,7 @@ export function statusLine(view: ConnectorView): string {
     case "needs_key":
       return "No key yet";
     case "needs_sign_in":
-      return "Not signed in yet";
+      return signInOf(view)?.signedIn ? "Needs reconnecting" : "Not connected";
     case "failed":
       return "Not connected";
     case "ready": {
@@ -165,7 +174,7 @@ export const EMPTY_CUSTOM: CustomForm = {
   kind: "address",
   name: "",
   url: "",
-  signIn: "none",
+  signIn: "oauth",
   command: "",
   keyEnv: "",
   keyHost: "",

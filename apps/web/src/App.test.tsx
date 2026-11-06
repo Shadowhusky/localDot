@@ -10,6 +10,7 @@ import { GREETINGS } from "./dot/tips.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { ONBOARDING_KEY } from "./onboarding/wizard.ts";
 import { providerFixture } from "./settings/testing.ts";
+import { VIEW_STYLE_KEY } from "./shell/view-style.ts";
 import { FakeWorker, fakeChromium, playInClient } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 import { setListening } from "./voice/listening.ts";
@@ -50,7 +51,10 @@ function daemon(answer: (call: Call) => Response | Promise<Response>) {
   }) as typeof fetch;
   // These assertions cover cell/token traffic; key, conversation and download reads have their own
   // suites.
-  const seen = () => calls.filter((c) => !keyReply(c.path)).map((c) => `${c.method} ${c.path}`);
+  const seen = () =>
+    calls
+      .filter((c) => !keyReply(c.path) && c.path !== "/api/browser/engine")
+      .map((c) => `${c.method} ${c.path}`);
   return { fetchImpl, calls, seen };
 }
 
@@ -478,6 +482,7 @@ describe("App token states", () => {
       restore();
       Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
     });
+    window.localStorage.setItem(VIEW_STYLE_KEY, "studio");
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: /width < (700|1100)px/.test(query),
       media: query,
@@ -571,7 +576,10 @@ describe("App token states", () => {
     expect(screen.getByRole("radiogroup", { name: "Mode" }).textContent).toBe("WatchReplay");
     start.click();
     await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Starting…"));
-    expect(calls).toEqual(["GET /api/cells", "POST /api/cells"]);
+    expect(calls.filter((call) => call !== "GET /api/browser/engine")).toEqual([
+      "GET /api/cells",
+      "POST /api/cells",
+    ]);
   });
 
   it("forgets a rejected token and says so, without asking the daemon again", async () => {

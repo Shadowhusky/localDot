@@ -1,5 +1,11 @@
 import { rootCertificates } from "node:tls";
-import { connectorHost, KeydOpened, type KeydRecord, type RemoteServer } from "@localdot/protocol";
+import {
+  connectorHost,
+  KEYD_OAUTH_UNAVAILABLE,
+  KeydOpened,
+  type KeydRecord,
+  type RemoteServer,
+} from "@localdot/protocol";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
 import type { KeydClient } from "../keyd/client.ts";
@@ -8,7 +14,7 @@ import { openConnectorListener } from "./open-listener.ts";
 import { ConnectorProblem } from "./problem.ts";
 
 export interface RemoteLinksDeps {
-  keyd: Pick<KeydClient, "openCell" | "closeCell" | "secrets">;
+  keyd: Pick<KeydClient, "openCell" | "closeCell" | "secrets" | "renewOAuth">;
   ports: { reserve(): number; release(port: number): void };
   fetch?: typeof undiciFetch;
 }
@@ -79,7 +85,7 @@ export class RemoteLinks {
     let record: KeydRecord | undefined;
     if (secret) {
       record = (await this.deps.keyd.secrets()).find((each) => each.id === secret);
-      if (!record || record.reenter || record.rebound)
+      if (!record || record.reenter || record.rebound || record.oauth?.reconnect)
         throw new ConnectorProblem(
           server.auth.kind === "oauth" ? "needs_sign_in" : "needs_key",
           server.auth.kind === "oauth" ? "Sign in to use this app." : "Add the app's key.",
@@ -101,27 +107,52 @@ export class RemoteLinks {
       throw error;
     }
     const send = this.deps.fetch ?? undiciFetch;
+    const signedIn = server.auth.kind === "oauth" ? secret : undefined;
     const fetch: FetchLike = async (input, init) => {
       const url = new URL(String(input instanceof Request ? input.url : input));
       if (url.protocol !== "https:" || url.hostname.toLowerCase() !== host)
         throw new Error("A connector reaches only its own address.");
       const headers = new Headers(init?.headers);
       if (auth) headers.set(auth.name, auth.value);
-      const reply = await send(url, {
-        ...(init as Record<string, unknown>),
-        headers,
-        dispatcher: agent,
-        redirect: "manual",
-      } as Parameters<typeof undiciFetch>[1]);
-      return reply as unknown as Response;
+      const go = async () =>
+        (await send(url, {
+          ...(init as Record<string, unknown>),
+          headers,
+          dispatcher: agent,
+          redirect: "manual",
+        } as Parameters<typeof undiciFetch>[1])) as unknown as Response;
+      const reply = await go();
+      // The app refused a token that should have been good. keyd swaps a new one in behind the same
+      // stand-in, and nothing has run at the app, so the request goes once more. keyd's own refusal
+      // says the sign-in has ended, and no refresh can help.
+      if (
+        !signedIn ||
+        reply.status !== 401 ||
+        reply.headers.has("x-keyd-reason") ||
+        (init?.body !== undefined && typeof init.body !== "string")
+      )
+        return reply;
+      const state = await this.deps.keyd.renewOAuth(signedIn).catch(() => "unavailable" as const);
+      if (state === "reconnect") return reply;
+      await reply.body?.cancel().catch(() => {});
+      if (state === "fresh") return go();
+      return new Response(`keyd: ${KEYD_OAUTH_UNAVAILABLE}`, {
+        status: 503,
+        headers: { "x-keyd-reason": KEYD_OAUTH_UNAVAILABLE },
+      });
     };
     return { fetch, close };
   }
 
-  // The sign-in's own requests: discovery and the token exchange may reach the app's sign-in
-  // service on another host, so these go anywhere on the web through keyd, with no key.
-  async signIn(connectorId: string): Promise<RemoteLink> {
-    const { agent, close } = await this.#listener(`${connectorCellId(connectorId)}-signin`, []);
+  // The sign-in's own requests: discovery and registration may reach the app's sign-in service on
+  // another host, so these go anywhere on the web through keyd, sending no key. An app signing in
+  // again has its key in keyd, and keyd lets a listener reach a key's host only if it holds that key.
+  async signIn(connectorId: string, secret?: string): Promise<RemoteLink> {
+    const held = secret && (await this.deps.keyd.secrets()).some((each) => each.id === secret);
+    const { agent, close } = await this.#listener(
+      `${connectorCellId(connectorId)}-signin`,
+      held ? [secret] : [],
+    );
     const send = this.deps.fetch ?? undiciFetch;
     const fetch: FetchLike = async (input, init) => {
       const url = new URL(String(input instanceof Request ? input.url : input));

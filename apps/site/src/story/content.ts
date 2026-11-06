@@ -121,6 +121,12 @@ export function rolesHtml(): string {
     .join("\n        ");
 }
 
+// The link to the update video goes when the build has no such file, so the page never offers a dead
+// link.
+export function updateFilm(html: string, present: boolean): string {
+  return present ? html : html.replace(/<!-- update-film -->[\s\S]*?<!-- \/update-film -->/, "");
+}
+
 export function ringHtml(): string {
   return RING.map((name) => `<li data-i18n>${esc(name)}</li>`).join("");
 }

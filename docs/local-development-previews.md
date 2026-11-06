@@ -143,14 +143,47 @@ in dot's messages or in a command's output (`localhost`, `127.0.0.1`, `0.0.0.0`,
 `*.localhost` name, or the computer's own network address or name, any port) gets **Open preview**.
 Stored messages are never rewritten: the action is added when the text is shown.
 
-The Activity panel's **Previews** tab lists the web apps in the computer, including ones that never
-printed an address: each by its first page's title (else its address), with its address, program
-and whether it is **Running** or **Not answering** (with when it last answered), and **Open** and
-**Copy link**. Only servers that answer HTTP are listed; databases, debuggers and other listeners
-are not. A server leaves the list as soon as it stops listening, and one that stops answering (a
-stopped or hung process) is marked so and leaves ten minutes after it last answered. A copied
-link opens the app once, on any of the owner's devices, within two minutes. **Signed-in devices ›
-Sign out** ends every preview link; the servers keep running.
+The panel's **Previews** tab lists the web apps in the computer, including ones that never
+printed an address: each by its first page's title (else its address), with its address, folder
+or program and whether it is **Running** or **Not answering** (with when it last answered), and
+**Open**, **Copy link** and **Stop**, which ends the server in the computer. Only servers that
+answer HTTP are listed; databases, debuggers and other listeners are not. A server leaves the list
+as soon as it stops listening, and one that stops answering (a stopped or hung process) is marked
+so and leaves ten minutes after it last answered. A copied link opens the app once, on any of the
+owner's devices, within two minutes. **Signed-in devices › Sign out** ends every preview link; the
+servers keep running.
+
+The list reads the computer's listening sockets each time, so a row is a process that is really
+there. What makes it long is that dot's servers outlive the commands that start them: dot starts
+them with `nohup` or `setsid`, they are not tied to the task, and a later conversation on the same
+computer lists them too. So each shell command carries its task in `LOCALDOT_TASK`, which a server
+inherits, `setsid` included, and desktopd's `LIST` reports it with the server's folder, start,
+processor time and open connections. With that:
+
+- The tab leads with this conversation's servers. Other conversations' fold under **From other
+  conversations**; a copy replaced by a newer one (same folder, program and page title on another
+  port) and anything not answering fold under **Replaced or not answering**. A computer without the
+  new desktopd can't say who started a server, so it lists them as before, and never stops any.
+- A `*.localhost` row answers for itself, by name: its proxy keeps answering on the port after the
+  name has gone (Portless says 404, or 502 for an app that has died). A site that doesn't answer
+  folds away and leaves ten minutes after it last did, once no device has used it.
+- A server a task started is **stopped by the daemon** once its task's servers have all gone unused
+  for two hours, or at once when the same app has been started again. Used means a connection open
+  to it, from the computer's browser or a device; a preview loaded in the last five minutes; or
+  processes using at least 5% of a processor, for work with nobody connected. A task's servers count
+  together, as a web app and its API do. Nothing is stopped while a task is under way or the user
+  holds the computer, and a program no task started (the user's own, from a terminal) never is. The
+  forwarder's `STOP <port>` asks each process holding the socket to end, and makes it after three
+  seconds. It refuses localDot's own ports, and can signal only its own user's processes.
+
+When a turn ends, its reply comes with a card for each web app it left running (at most four) that
+it started, named in the reply, went to in dot's browser, or wrote a file of, the last two needing no
+address printed. One it only started or changed must serve a page with a title, so an API isn't
+offered; another conversation's never is. The list travels on the `task.result` event as `previews`,
+so it is read back with the thread. The chat shows each app once, on its newest reply, and the card
+says what the app is now: **Running** with **Open** and **Copy link**, **Not answering**, or
+**Stopped**, with no link. Edits made through the shell leave no record of their files, so a turn
+that only edits that way and looks at nothing offers nothing.
 
 Previews open only over Tailscale: one HTTPS address that works the same on the Mac and the phone,
 on a site separate from this Mac's `localhost`. A preview never opens at `localhost:<port>`, which

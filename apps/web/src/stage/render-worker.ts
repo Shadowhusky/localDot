@@ -11,6 +11,7 @@ import {
 } from "@localdot/stage";
 import { WorkerReplay } from "../replay/worker-replay.ts";
 import { sessionMsAt } from "../session/clock-sync.ts";
+import { browserCamera, browserWindow, desktopPoint } from "./composite.ts";
 import { OracleCapture } from "./oracle.ts";
 import { PixiPresenter } from "./pixi-presenter.ts";
 import { meanLuma, type ProbeRect, wallNow } from "./probe.ts";
@@ -19,6 +20,7 @@ import { RenderGate, sceneKey } from "./render-gate.ts";
 import type {
   FieldMark,
   StageClock,
+  StageComposite,
   StageViewPatch,
   WorkerIn,
   WorkerOut,
@@ -29,16 +31,21 @@ const scope = self as unknown as {
   onmessage: ((e: MessageEvent<WorkerIn>) => void) | null;
 };
 
+// Frames on their way to one of the stage's pictures.
+interface Feed {
+  pump?: { stop(): Promise<void> };
+  generation: number;
+  pushed?: { sourceId?: number; controller: ReadableStreamDefaultController<VideoFrame> };
+  // The track this worker reads (Safari), ended with its pump.
+  track?: MediaStreamTrack;
+  pendingStats?: { generation: number; sourceId?: number; stats: PumpStats };
+}
+
 let presenter: PixiPresenter | undefined;
 let replay: WorkerReplay | undefined;
-let pump: { stop(): Promise<void> } | undefined;
-let sourceGeneration = 0;
-let pushed:
-  | { sourceId?: number; controller: ReadableStreamDefaultController<VideoFrame> }
-  | undefined;
-// The track this worker reads (Safari), ended with its pump.
-let track: MediaStreamTrack | undefined;
-let pendingStats: { generation: number; sourceId?: number; stats: PumpStats } | undefined;
+const main: Feed = { generation: 0 };
+const under: Feed = { generation: 0 };
+let composite: StageComposite | null = null;
 let probe: { rect: ProbeRect; threshold: number; last: boolean | null } | null = null;
 let model: SessionModel = emptyModel();
 let view: View = { reducedMotion: false };
@@ -69,7 +76,7 @@ let hidden = false;
 
 // The rings on the fields dot will fill, on the screen shown.
 function showFields(): void {
-  const shown = selection?.screen ?? "desktop";
+  const shown = composite?.front ?? selection?.screen ?? "desktop";
   presenter?.overlays.setFields(
     fields.filter((field) => field.screen === shown),
     view.reducedMotion,
@@ -92,7 +99,24 @@ function sessionNow(): number | null {
 }
 
 function screenNow(): { w: number; h: number } {
-  return selection?.geometry ?? model.screen ?? presenter?.frameSize ?? { w: 1280, h: 800 };
+  return (
+    composite?.desktop ??
+    selection?.geometry ??
+    model.screen ??
+    presenter?.frameSize ?? { w: 1280, h: 800 }
+  );
+}
+
+function sendStats(feed: Feed, shown: { presented: number; fps: number }, isUnder: boolean): void {
+  if (feed.pendingStats?.generation !== feed.generation) return;
+  // The counts are of painted frames, which the stage keeps across a reconnect's fresh pump.
+  scope.postMessage({
+    type: "stats",
+    sourceId: feed.pendingStats.sourceId,
+    stats: { ...feed.pendingStats.stats, presented: shown.presented, fps: shown.fps },
+    ...(isUnder ? { under: true } : {}),
+  });
+  feed.pendingStats = undefined;
 }
 
 function probing(inner: Presenter): Presenter {
@@ -153,15 +177,17 @@ function tick(): void {
     }
     lookedAt = now;
     const screen = screenNow();
-    presenter.setScreen(selection || model.screen ? screen : null);
+    presenter.setScreen(composite || selection || model.screen ? screen : null);
     // A frozen stage keeps the time it froze at; overlays never animate over a dead picture.
     if (freeze) frozenT ??= sessionNow();
     else frozenT = null;
     const t = freeze ? frozenT : sessionNow();
-    const focus = lastScene?.cursor?.visible
+    const window = composite?.front === "browser" ? browserWindow(composite.desktop) : undefined;
+    const cursor = lastScene?.cursor?.visible
       ? { x: lastScene.cursor.x, y: lastScene.cursor.y }
       : undefined;
-    const cam: Camera = cameraFor({
+    const focus = cursor && window ? desktopPoint(cursor, window) : cursor;
+    const desktopCam: Camera = cameraFor({
       stageW: viewport.w,
       stageH: viewport.h,
       desktopW: screen.w,
@@ -169,11 +195,15 @@ function tick(): void {
       zoom,
       focus,
     });
-    const scene = t === null ? null : sceneAt(model, t, view);
+    const cam = window ? browserCamera(desktopCam, window) : desktopCam;
+    // dot's marks belong to the screen it is on, and a covered screen shows none.
+    const marked = !composite || composite.front === (selection?.screen ?? "desktop");
+    const scene = t === null || !marked ? null : sceneAt(model, t, view);
     lastScene = scene;
     const key = sceneKey(scene, cam, screen, presenter.fades(now));
     if (gate.due(now, key, presenter.hasFrame || oracle.enabled)) {
       presenter.setCamera(cam);
+      if (composite) presenter.setDesktopCamera(desktopCam);
       presenter.draw(scene);
       try {
         presenter.render();
@@ -181,15 +211,8 @@ function tick(): void {
         renderError = null;
         // Uploading a texture does not make it visible. Manual admission acknowledges only
         // a successful canvas render, and a retired pump cannot publish its pending stats.
-        if (pendingStats?.generation === sourceGeneration) {
-          // The counts are of painted frames, which the stage keeps across a reconnect's fresh pump.
-          scope.postMessage({
-            type: "stats",
-            sourceId: pendingStats.sourceId,
-            stats: { ...pendingStats.stats, presented: presenter.presented, fps: presenter.fps },
-          });
-          pendingStats = undefined;
-        }
+        sendStats(main, presenter, false);
+        sendStats(under, presenter.under, true);
         if (oracle.enabled && t !== null)
           oracle.onTick(presenter, model, t, scene, cam, viewport, screen);
       } catch (err) {
@@ -243,7 +266,8 @@ async function handle(m: WorkerIn): Promise<void> {
       }
       case "resize":
         viewport = { w: m.width, h: m.height };
-        presenter?.setViewport(m.width, m.height);
+        presenter?.setViewport(m.width, m.height, m.dpr);
+        oracle.dpr = m.dpr;
         replay?.invalidate();
         return;
       case "probe":
@@ -261,6 +285,7 @@ async function handle(m: WorkerIn): Promise<void> {
       case "session-reset":
         replay?.close();
         replay = undefined;
+        presenter?.clearCovered();
         model = emptyModel();
         lastScene = null;
         clock = null;
@@ -280,6 +305,10 @@ async function handle(m: WorkerIn): Promise<void> {
         if (m.view.hidden !== undefined) hidden = m.view.hidden;
         if (m.view.dim !== undefined) presenter?.setDim(m.view.dim, view.reducedMotion);
         if (m.view.fields !== undefined) fields = m.view.fields;
+        if (m.view.composite !== undefined) {
+          composite = m.view.composite;
+          presenter?.setComposite(composite, view.reducedMotion);
+        }
         if (m.view.selection !== undefined) {
           selection = m.view.selection;
           view = {
@@ -289,7 +318,12 @@ async function handle(m: WorkerIn): Promise<void> {
           };
           lastScene = null;
         }
-        if (m.view.fields !== undefined || m.view.selection !== undefined) showFields();
+        if (
+          m.view.fields !== undefined ||
+          m.view.selection !== undefined ||
+          m.view.composite !== undefined
+        )
+          showFields();
         replay?.invalidate();
         return;
       case "theme":
@@ -297,14 +331,13 @@ async function handle(m: WorkerIn): Promise<void> {
         replay?.invalidate();
         return;
       case "replay-open": {
-        sourceGeneration++;
-        pendingStats = undefined;
-        await pump?.stop();
-        pump = undefined;
-        endTrack();
+        await stopFeed(under);
+        await stopFeed(main);
         oracle.dispose();
         replay?.close();
         if (!presenter) throw new Error("replay before init");
+        composite = null;
+        presenter.setComposite(null);
         replay = new WorkerReplay(m.source, {
           presenter,
           model: () => model,
@@ -348,7 +381,7 @@ async function handle(m: WorkerIn): Promise<void> {
         return;
       }
       case "frame": {
-        const target = pushed;
+        const target = (m.under ? under : main).pushed;
         if (
           !target ||
           target.sourceId !== m.sourceId ||
@@ -362,35 +395,43 @@ async function handle(m: WorkerIn): Promise<void> {
       }
       case "stop":
       case "frames": {
-        endPushed();
-        const generation = ++sourceGeneration;
-        pendingStats = undefined;
-        await pump?.stop();
-        pump = undefined;
-        endTrack();
-        oracle.dispose();
+        const feed = m.under ? under : main;
+        const generation = await stopFeed(feed);
+        if (!m.under) oracle.dispose();
         if (m.type === "frames") {
           const readable =
             m.readable ??
-            (m.track ? readTrack(m.track) : m.pushed ? pushedFrames(m.sourceId) : undefined);
+            (m.track
+              ? readTrack(feed, m.track)
+              : m.pushed
+                ? pushedFrames(feed, m.sourceId)
+                : undefined);
           if (replay || !readable) {
             m.first?.close();
             void readable?.cancel().catch(() => {});
-            endTrack();
+            endTrack(feed);
             return;
           }
           if (!presenter) {
             m.first?.close();
             await readable.cancel();
-            endTrack();
+            endTrack(feed);
             throw new Error("frames before init");
           }
-          pump = pumpFrames(
+          const shown = presenter.under;
+          feed.pump = pumpFrames(
             readable,
-            probing(presenter),
+            m.under
+              ? {
+                  present(frame) {
+                    shown.present(frame);
+                    wake();
+                  },
+                }
+              : probing(presenter),
             (stats) => {
-              if (generation !== sourceGeneration) return;
-              pendingStats = { generation, sourceId: m.sourceId, stats };
+              if (generation !== feed.generation) return;
+              feed.pendingStats = { generation, sourceId: m.sourceId, stats };
             },
             { first: m.first, onError: report },
           );
@@ -403,37 +444,48 @@ async function handle(m: WorkerIn): Promise<void> {
   }
 }
 // A one-frame queue for frames the page posts one by one: one that would wait is dropped.
-function pushedFrames(sourceId: number | undefined): ReadableStream<VideoFrame> {
+function pushedFrames(feed: Feed, sourceId: number | undefined): ReadableStream<VideoFrame> {
   return new ReadableStream<VideoFrame>(
     {
       start(controller) {
-        pushed = { sourceId, controller };
+        feed.pushed = { sourceId, controller };
       },
       cancel() {
-        if (pushed?.sourceId === sourceId) pushed = undefined;
+        if (feed.pushed?.sourceId === sourceId) feed.pushed = undefined;
       },
     },
     new CountQueuingStrategy({ highWaterMark: 1 }),
   );
 }
 
-function readTrack(next: MediaStreamTrack): ReadableStream<VideoFrame> {
-  track = next;
+function readTrack(feed: Feed, next: MediaStreamTrack): ReadableStream<VideoFrame> {
+  feed.track = next;
   return new MediaStreamTrackProcessor({ track: next as MediaStreamTrack & MediaStreamVideoTrack })
     .readable;
 }
 
-function endTrack(): void {
-  track?.stop();
-  track = undefined;
+function endTrack(feed: Feed): void {
+  feed.track?.stop();
+  feed.track = undefined;
 }
 
-function endPushed(): void {
-  const ending = pushed;
-  pushed = undefined;
+function endPushed(feed: Feed): void {
+  const ending = feed.pushed;
+  feed.pushed = undefined;
   try {
     ending?.controller.close();
   } catch {}
+}
+
+// Ends what the feed was reading, and returns the generation of whatever it reads next.
+async function stopFeed(feed: Feed): Promise<number> {
+  endPushed(feed);
+  const generation = ++feed.generation;
+  feed.pendingStats = undefined;
+  await feed.pump?.stop();
+  feed.pump = undefined;
+  endTrack(feed);
+  return generation;
 }
 
 function report(err: unknown): void {

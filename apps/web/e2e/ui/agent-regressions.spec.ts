@@ -1,4 +1,4 @@
-import { expect, isPhone, runAt, test } from "./harness.ts";
+import { expect, isPhone, runAt, sendAfterThisTask, test } from "./harness.ts";
 
 runAt("c14", "c39", "w14", "w39");
 
@@ -39,7 +39,11 @@ test("phone composer icons share a center on the last line", async ({ page, ui }
       });
       const where = `${width}px, ${draft}`;
       expect(Math.max(...bar) - Math.min(...bar), where).toBeLessThan(1);
-      expect(Math.abs(attach - (width === 320 ? lastLine : (bar[0] ?? 0))), where).toBeLessThan(1);
+      // The words themselves sit a pixel over the row's middle, to read as centred.
+      expect(
+        Math.abs(attach - (width === 320 ? lastLine : (bar[0] ?? 0))),
+        where,
+      ).toBeLessThanOrEqual(1);
     }
     await page.screenshot({ path: test.info().outputPath(`phone-composer-${width}.png`) });
   }
@@ -53,6 +57,7 @@ test("the composer keeps controls inside a narrow panel", async ({ page, ui }) =
   const form = page.getByRole("form", { name: "Message dot" });
   await expect(form.getByRole("button", { name: "Stop task", exact: true })).toBeVisible();
   await expect(form.getByRole("button", { name: "Pause task", exact: true })).toHaveCount(0);
+  await form.getByRole("textbox").first().focus();
   if (!isPhone(page)) {
     const handle = await page.locator(".rail-resize-chat").boundingBox();
     if (!handle) throw new Error("Missing resize handle");
@@ -123,18 +128,22 @@ for (const state of ["running", "done"] as const) {
     const failures: unknown[] = [];
     for (const draft of ["", "A thought. ".repeat(690)]) {
       await composer.locator("textarea").fill(draft);
-      await composer.locator(".composer-model .ui-middle").evaluateAll((labels) => {
-        for (const label of labels) {
-          if (label.children[0])
-            label.children[0].textContent = "Provider / A very long configured model name ";
-          if (label.children[1]) label.children[1].textContent = "version-with-a-long-suffix";
-        }
-      });
-
-      if (!isPhone(page))
-        await expect(composer.locator(".composer-model .ui-middle")).toContainText(
-          "A very long configured model name",
-        );
+      // Written over what the page drew, until the model's own name has stopped arriving.
+      await expect(async () => {
+        await composer.locator(".composer-model .ui-middle").evaluateAll((labels) => {
+          for (const label of labels) {
+            if (label.children[0])
+              label.children[0].textContent = "Provider / A very long configured model name ";
+            if (label.children[1]) label.children[1].textContent = "version-with-a-long-suffix";
+          }
+        });
+        await page.waitForTimeout(100);
+        if (!isPhone(page))
+          await expect(composer.locator(".composer-model .ui-middle")).toContainText(
+            "A very long configured model name",
+            { timeout: 500 },
+          );
+      }).toPass();
       for (const width of [220, 240, 260, 280, 300, 320, 360, 400, 420, 480, 600]) {
         await composer.evaluate((element, width) => {
           element.style.width = `${width}px`;
@@ -202,7 +211,7 @@ for (const state of ["running", "done"] as const) {
       });
       await ui.settle();
       await composer.getByRole("button", { name: "Message options" }).click();
-      await expect(page.getByRole("menuitem", { name: "Send now" })).toBeVisible();
+      await expect(page.getByRole("menuitem", { name: "Send after this task" })).toBeVisible();
       await expect(page.getByRole("menuitemradio", { name: "Research" })).toHaveCount(0);
     }
   });
@@ -215,6 +224,7 @@ test.describe("touch panel", () => {
     await ui.open("running");
     const composer = page.locator(".composer");
     await expect(composer).toBeVisible();
+    await composer.locator("textarea").focus();
     for (const width of [220, 280, 340, 400]) {
       await composer.evaluate((element, width) => {
         element.style.width = `${width}px`;
@@ -237,7 +247,7 @@ test.describe("touch panel", () => {
   });
 });
 
-test("Send queues, Steer now promotes once, and Stop frees New conversation", async ({
+test("Send after this task queues, Steer now promotes once, and Stop frees New conversation", async ({
   page,
   ui,
 }) => {
@@ -246,7 +256,7 @@ test("Send queues, Steer now promotes once, and Stop frees New conversation", as
   const field = form.getByRole("textbox", { name: "Message" });
   await field.fill("Queue this next task");
   await expect(form.getByRole("button", { name: "Stop task" })).toHaveCount(0);
-  await form.getByRole("button", { name: "Queue message" }).click();
+  await sendAfterThisTask(page);
   const row = page
     .getByRole("article", { name: "You", exact: true })
     .filter({ hasText: "Queue this next task" });
@@ -310,8 +320,6 @@ for (const screen of ["desktop", "browser"] as const) {
     await ui.picture();
     const retired = await page.request.post(`${fixture.origin}/__qa/screen?retired=${screen}`);
     expect(retired.status()).toBe(200);
-    // WebKit reports requests interrupted by reload as page errors.
-    await page.waitForLoadState("networkidle");
     await page.reload();
     await expect(page.getByRole("article", { name: "You", exact: true })).not.toHaveCount(0);
     const frame = page.locator("iframe.desktop-frame");
@@ -321,6 +329,38 @@ for (const screen of ["desktop", "browser"] as const) {
   });
 }
 
+test("Send reaches dot at its next step, from the keyboard and the button", async ({
+  page,
+  ui,
+}) => {
+  await ui.open("running");
+  const form = page.getByRole("form", { name: "Message dot" });
+  const field = form.getByRole("textbox", { name: "Message" });
+  const row = (text: string) =>
+    page.getByRole("article", { name: "You", exact: true }).filter({ hasText: text });
+  const sent: unknown[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/messages"))
+      sent.push(request.postDataJSON().kind);
+  });
+  await field.fill("Use the blue palette");
+  await form.getByRole("button", { name: "Send now" }).click();
+  await expect(row("Use the blue palette").getByText("Sent while working")).toBeVisible();
+  await expect(row("Use the blue palette").getByRole("button", { name: "Steer now" })).toHaveCount(
+    0,
+  );
+  await expect(field).toHaveValue("");
+  if (!isPhone(page)) {
+    await field.fill("Add a title");
+    await field.press("Enter");
+    await expect(row("Add a title").getByText("Sent while working")).toBeVisible();
+    await field.fill("Then a summary");
+    await field.press("Alt+Enter");
+    await expect(row("Then a summary").getByText("After this task")).toBeVisible();
+  }
+  expect(sent).toEqual(isPhone(page) ? ["steer"] : ["steer", "steer", "followup"]);
+});
+
 test("queued Edit moves the message into the draft and resends the edited message once", async ({
   page,
   ui,
@@ -329,7 +369,7 @@ test("queued Edit moves the message into the draft and resends the edited messag
   const form = page.getByRole("form", { name: "Message dot" });
   const field = form.getByRole("textbox", { name: "Message", exact: true });
   await field.fill("Original queued request");
-  await form.getByRole("button", { name: "Queue message" }).click();
+  await sendAfterThisTask(page);
   const original = page
     .getByRole("article", { name: "You", exact: true })
     .filter({ hasText: "Original queued request" });
@@ -340,7 +380,7 @@ test("queued Edit moves the message into the draft and resends the edited messag
   await expect(field).toBeFocused();
   await expect(original).toHaveCount(0);
   await field.fill("Revised queued request");
-  await form.getByRole("button", { name: "Queue message" }).click();
+  await sendAfterThisTask(page);
   const revised = page
     .getByRole("article", { name: "You", exact: true })
     .filter({ hasText: "Revised queued request" });

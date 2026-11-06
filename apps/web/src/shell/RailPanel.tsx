@@ -42,6 +42,7 @@ export function RailPanel({
               aria-label="Show"
               size={32}
               compact
+              fit
               items={views}
               value={view}
               onValueChange={onView}

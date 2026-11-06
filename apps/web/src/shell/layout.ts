@@ -20,13 +20,33 @@ export function useLayout(): Layout {
 
 // The on-screen keyboard takes this much of a phone's height or more when it is up.
 const KEYBOARD_PX = 120;
+// A keyboard has gone once the viewport has held still this long after the focus left its field.
+const KEYBOARD_GONE_MS = 1200;
 
-function keyboardUp(): boolean {
-  const view = window.visualViewport;
-  return !!view && view.scale === 1 && window.innerHeight - view.height > KEYBOARD_PX;
+// Only a field in focus keeps a keyboard up.
+export function typing(): boolean {
+  const active = document.activeElement;
+  return (
+    active instanceof HTMLElement &&
+    (active.isContentEditable || active.matches("input, textarea, select"))
+  );
 }
 
-const onViewport = (onChange: () => void) => {
+// The layout viewport's height. As Safari pans the page to show a field it takes the pan off
+// innerHeight too, so innerHeight less the visual viewport stops measuring the keyboard; this holds.
+export const pageHeight = () => document.documentElement.clientHeight;
+
+// Pinched in, the visual viewport is narrower than the page. Its own scale can't say so: held
+// sideways, iOS 26 reports the ratio of the screen's sides with no zoom at all.
+export const pinched = (view: VisualViewport) =>
+  view.width < document.documentElement.clientWidth - 1;
+
+export function keyboardUp(): boolean {
+  const view = window.visualViewport;
+  return !!view && !pinched(view) && pageHeight() - view.height > KEYBOARD_PX;
+}
+
+export const onViewport = (onChange: () => void) => {
   const view = window.visualViewport;
   view?.addEventListener("resize", onChange);
   view?.addEventListener("scroll", onChange);
@@ -46,6 +66,7 @@ let computerKeyboard = false;
 const readComputerKeyboard = () => {
   computerKeyboard =
     keyboardUp() &&
+    typing() &&
     !document.activeElement?.matches(".composer-field") &&
     !document.querySelector(".app[data-composer-keyboard]");
 };
@@ -75,8 +96,8 @@ const onComputerKeyboard = (onChange: () => void) => {
 const noKeyboard = () => () => {};
 
 // Computer keyboard input can collapse the band. Composer typing keeps the background static.
-export function useKeyboardUp(): boolean {
-  const handheld = useMediaQuery(HANDHELD);
+export function useKeyboardUp(on = true): boolean {
+  const handheld = useMediaQuery(HANDHELD) && on;
   const up = useSyncExternalStore(
     handheld ? onComputerKeyboard : noKeyboard,
     () => handheld && computerKeyboard,
@@ -88,8 +109,8 @@ export function useKeyboardUp(): boolean {
 // Keep handheld layouts fitted to the visible viewport, including Home Screen launches and
 // keyboard dismissal. Restricting this to an open keyboard can leave stale browser-chrome space.
 // Pinch zoom is a viewing operation and must not reflow the app.
-export function useViewportFit(page: { current: HTMLElement | null }): void {
-  const handheld = useMediaQuery(HANDHELD);
+export function useViewportFit(page: { current: HTMLElement | null }, on = true): void {
+  const handheld = useMediaQuery(HANDHELD) && on;
   useLayoutEffect(() => {
     const element = page.current;
     const view = window.visualViewport;
@@ -102,18 +123,26 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
     let focusedHeight: number | undefined;
     let sawKeyboard = false;
     let dismissed = false;
+    // Once the keyboard has had time to go, WebKit can still leave the visual viewport as short as
+    // the keyboard made it, with no event to come. While it stays at just that measure the page
+    // keeps the height it had before the keyboard, rather than a gap under the composer.
+    let stale: { height: number; rest: number } | undefined;
+    // The height from before the keyboard, while it may be on its way down.
+    let leaving: number | undefined;
+    let goneTimer: ReturnType<typeof setTimeout> | undefined;
     const fit = () => {
       frame = 0;
       // Background tabs and keyboard transitions can briefly report an empty viewport.
       // Never save that transient geometry as the next resting layout.
-      if (document.hidden || view.scale !== 1 || !Number.isFinite(view.height) || view.height <= 0)
+      if (document.hidden || pinched(view) || !Number.isFinite(view.height) || view.height <= 0)
         return;
       const focused = document.activeElement?.matches(".composer-field");
+      if (stale?.height !== view.height) stale = undefined;
+      const visible = stale ? stale.rest : view.height;
       if (focused && focusedHeight === undefined) focusedHeight = restingHeight;
       // OS keyboard controls can reopen it without pointerdown or focusin. A stale
       // dismissal flag must not let that resize shrink the entire app.
-      if (focused && dismissed && (focusedHeight ?? restingHeight) - view.height > 1)
-        dismissed = false;
+      if (focused && dismissed && (focusedHeight ?? restingHeight) - visible > 1) dismissed = false;
       // Lock on focus, before the first keyboard frame, and keep the lock through
       // dismissal. The 120px detection threshold must never resize the background.
       const toolbar = element.querySelector<HTMLElement>(".thread-toolbar");
@@ -126,7 +155,7 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
           );
         composing = true;
       }
-      const covered = (focusedHeight ?? restingHeight) - view.height;
+      const covered = (focusedHeight ?? restingHeight) - visible;
       if (covered > KEYBOARD_PX) sawKeyboard = true;
       if (composing && (!focused || sawKeyboard) && covered <= 1) {
         composing = false;
@@ -134,24 +163,20 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
         sawKeyboard = false;
         dismissed = !!focused;
       }
-      if (!composing) restingHeight = view.height;
+      if (!composing) restingHeight = visible;
       element.toggleAttribute("data-composer-keyboard", composing);
-      const height = `${composing ? (focusedHeight ?? restingHeight) : view.height}px`;
+      const height = `${composing ? (focusedHeight ?? restingHeight) : visible}px`;
       // A fixed shell follows the visual viewport's origin while the toolbar
       // follows its bottom. Merely shrinking the app lets Safari pan it away.
       // WebKit can leave offsetTop at the previous keyboard pan after restoring height.
       // Clamp it to real occluded space, and never apply a stale pan to a resting shell.
-      const layoutHeight = Math.max(
-        window.innerHeight,
-        focusedHeight ?? restingHeight,
-        view.height,
-      );
+      const layoutHeight = Math.max(pageHeight(), focusedHeight ?? restingHeight, visible);
       const offset = Math.min(
         Math.max(0, view.offsetTop || 0),
-        Math.max(0, layoutHeight - view.height),
+        Math.max(0, layoutHeight - visible),
       );
-      const top = `${composing || keyboardUp() ? offset : 0}px`;
-      const bottom = `${offset + view.height}px`;
+      const top = `${composing || (keyboardUp() && !stale) ? offset : 0}px`;
+      const bottom = `${offset + visible}px`;
       if (toolbar && toolbar.style.getPropertyValue("--_composer-bottom") !== bottom)
         toolbar.style.setProperty("--_composer-bottom", bottom);
       if (element.style.getPropertyValue("--_visible-h") !== height)
@@ -163,9 +188,26 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
       if (!frame) frame = requestAnimationFrame(fit);
     };
     fit();
-    const stop = onViewport(schedule);
+    const waitForGone = () => {
+      clearTimeout(goneTimer);
+      goneTimer = setTimeout(() => {
+        if (leaving !== undefined && !typing() && view.height < leaving - 1)
+          stale = { height: view.height, rest: leaving };
+        leaving = undefined;
+        schedule();
+      }, KEYBOARD_GONE_MS);
+    };
+    const stop = onViewport(() => {
+      if (leaving !== undefined) waitForGone();
+      schedule();
+    });
     const focus = () => {
       dismissed = false;
+      if (typing()) {
+        stale = undefined;
+        leaving = undefined;
+        clearTimeout(goneTimer);
+      }
       if (document.activeElement?.matches(".composer-field") && focusedHeight === undefined)
         focusedHeight = restingHeight;
       // Safari may begin caret reveal before the next animation frame.
@@ -179,14 +221,20 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
         focus();
     };
     document.addEventListener("pointerdown", pointer, true);
+    const blur = () => {
+      schedule();
+      leaving = focusedHeight;
+      waitForGone();
+    };
     document.addEventListener("focusin", focus);
-    document.addEventListener("focusout", schedule);
+    document.addEventListener("focusout", blur);
     document.addEventListener("visibilitychange", schedule);
     return () => {
       stop();
+      clearTimeout(goneTimer);
       document.removeEventListener("pointerdown", pointer, true);
       document.removeEventListener("focusin", focus);
-      document.removeEventListener("focusout", schedule);
+      document.removeEventListener("focusout", blur);
       document.removeEventListener("visibilitychange", schedule);
       element.removeAttribute("data-composer-keyboard");
       element
@@ -206,8 +254,8 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
 // than a keyboard is Safari's toolbars coming and going, which cover nothing.
 function keyboardInset(): number {
   const view = window.visualViewport;
-  if (view?.scale !== 1) return 0;
-  const inset = Math.round(window.innerHeight - view.height - view.offsetTop);
+  if (!view || pinched(view)) return 0;
+  const inset = Math.round(pageHeight() - view.height - view.offsetTop);
   return inset >= KEYBOARD_PX ? inset : 0;
 }
 

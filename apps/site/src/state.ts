@@ -17,6 +17,8 @@ export const site: {
   film: boolean;
   // The story is at Step in: dot's game is on its screen, for the visitor to take over.
   game: boolean;
+  // The story is near Chat and Studio: the task on show is on the phone as well.
+  phone: boolean;
   version: number;
 } = {
   control: "dot",
@@ -26,6 +28,7 @@ export const site: {
   rewind: null,
   film: false,
   game: false,
+  phone: false,
   version: 0,
 };
 

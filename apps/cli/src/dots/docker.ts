@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { ULID_PATTERN, ulid } from "../../../../packages/protocol/src/ids.ts";
+import { readBrowserEngine } from "../../../daemon/src/cells/browser-engine.ts";
 import { type DockerClient, DockerError } from "../../../daemon/src/cells/docker.ts";
 import { NAME_PREFIX } from "../../../daemon/src/cells/spec.ts";
 import { CellStore } from "../../../daemon/src/cells/store.ts";
@@ -141,6 +142,16 @@ export async function copySignins(
     from,
     to,
   });
+  // Sign-ins Chrome has opened need Chrome, which the new dot installs for itself. The backup isn't
+  // copied: it is the source dot's way back.
+  const engine = readBrowserEngine(options.source);
+  if (engine?.choice === "chrome" && engine.handOver === "done")
+    writePrivateJson(join(options.destination, "browser-engine.json"), {
+      v: 1,
+      choice: "chrome",
+      acceptedAt: engine.acceptedAt,
+      handOver: "done",
+    });
   return true;
 }
 
@@ -283,7 +294,7 @@ export async function removeDotDocker(docker: Docker, home: string): Promise<voi
       if (raw(volume) && typeof volume.Name === "string") volumes.push(volume.Name);
   }
   try {
-    volumes.push(accountsVolume(home));
+    volumes.push(accountsVolume(home), `${accountsVolume(home)}-backup`);
   } catch {}
   for (const volume of volumes)
     await docker

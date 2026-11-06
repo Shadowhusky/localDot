@@ -1,3 +1,4 @@
+import type { Wearable } from "@localdot/protocol";
 import type { Point } from "./engine/engine.ts";
 import type { DotState } from "./engine/states.ts";
 import { type Box, Flight } from "./flight.ts";
@@ -40,6 +41,9 @@ export interface PresenceOptions {
   state: DotState;
   control: boolean;
   reducedMotion: boolean;
+  wearables?: readonly Wearable[] | undefined;
+  // Where it starts, so its plates are fetched once, at the size that place draws them.
+  place?: PresencePlace | null;
 }
 
 // The one live dot, moved between the places that keep room for it. At rest it sits inside its place,
@@ -59,6 +63,7 @@ export class Presence {
   private place: PresencePlace | null = null;
   // Put away because its place had no box to draw it over.
   private lost = false;
+  private showing = false;
   private drawn = 0;
   private fade: ReturnType<typeof setTimeout> | undefined;
   private reduced: boolean;
@@ -67,13 +72,21 @@ export class Presence {
   private readonly sizes =
     typeof ResizeObserver === "function" ? new ResizeObserver(() => this.follow(false)) : null;
   private watched: Element | null = null;
+  // While dot flies, its place can move with nothing to say so, as the thread's foot does under a
+  // growing composer: it looks each frame and is carried along.
+  private looking = 0;
 
   constructor(frame: HTMLElement, host: HTMLElement, o: PresenceOptions) {
     this.frame = frame;
     this.host = host;
     this.layer = frame.parentElement ?? document.body;
     this.reduced = o.reducedMotion;
-    this.view = new DotView(host, { size: 96, ...o });
+    const { place, wearables, ...start } = o;
+    this.view = new DotView(host, {
+      ...start,
+      size: boxOf(place ? placeElement(place) : null)?.size ?? 96,
+      ...(wearables ? { wearables } : {}),
+    });
   }
 
   setReducedMotion(on: boolean): void {
@@ -129,7 +142,8 @@ export class Presence {
   }
 
   // The place changed under dot. Resting in it, dot has already moved with it and only takes on its
-  // size; flying, or given a new box for the same place, it turns toward where the place is now. A
+  // size; flying to a place that only moved, as the thread's foot does under an opening composer, it
+  // is carried with it on the same curve; given a new box, it turns toward where the place is now. A
   // window resize lands it there, and a dot put away while its place had no box comes back at once.
   follow(resized: boolean): void {
     const element = this.place && placeElement(this.place);
@@ -156,6 +170,11 @@ export class Presence {
       return;
     }
     const t = frameTime();
+    if (!this.home && box.size === this.flight.target.size) {
+      this.flight.carry(box, t);
+      this.animate(t);
+      return;
+    }
     this.leave(t);
     this.draw(Math.max(this.drawn, box.size));
     this.flight.follow(box, t);
@@ -175,6 +194,7 @@ export class Presence {
   }
 
   destroy(): void {
+    cancelAnimationFrame(this.looking);
     this.motion?.cancel();
     clearTimeout(this.fade);
     this.sizes?.disconnect();
@@ -190,14 +210,18 @@ export class Presence {
   }
 
   private show(on: boolean): void {
+    this.showing = on;
     if (!on) {
       delete this.frame.dataset.shown;
       return;
     }
-    if (this.frame.dataset.shown !== undefined) return;
-    // A frame that has just moved into its place has no style yet for the fade to start from.
-    void this.frame.offsetWidth;
-    this.frame.dataset.shown = "";
+    // dot comes on to the page whole, with all it wears.
+    this.view.whenDressed(() => {
+      if (!this.showing || this.frame.dataset.shown !== undefined) return;
+      // A frame that has just moved into its place has no style yet for the fade to start from.
+      void this.frame.offsetWidth;
+      this.frame.dataset.shown = "";
+    });
   }
 
   private draw(size: number): void {
@@ -270,6 +294,7 @@ export class Presence {
     });
     motion.startTime = t;
     this.motion = motion;
+    this.look();
     motion.finished.then(
       () => {
         if (this.motion !== motion) return;
@@ -280,6 +305,17 @@ export class Presence {
       },
       () => {},
     );
+  }
+
+  private look(): void {
+    cancelAnimationFrame(this.looking);
+    this.looking = requestAnimationFrame(() => {
+      this.looking = 0;
+      if (!this.motion || !this.flight) return;
+      const box = this.place && boxOf(placeElement(this.place));
+      if (box && !sameBox(box, this.flight.target)) this.follow(false);
+      else this.look();
+    });
   }
 
   private centre(): Point | null {

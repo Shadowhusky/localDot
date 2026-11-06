@@ -12,7 +12,7 @@ export const BROWSER_LIMITS = {
   shmBytes: 512 * 1024 ** 2,
 } as const;
 
-const SECCOMP = readFileSync(runtimeLayout.browserSeccomp, "utf8");
+export const BROWSER_SECCOMP = readFileSync(runtimeLayout.browserSeccomp, "utf8");
 
 export function browserNames(id: string, prefix = NAME_PREFIX) {
   if (!ULID_PATTERN.test(id) || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*-$/u.test(prefix))
@@ -83,7 +83,7 @@ export function browserSpec(
       Mounts: [{ Type: "volume", Source: profileVolume, Target: "/profile" }],
       ReadonlyRootfs: true,
       CapDrop: ["ALL"],
-      SecurityOpt: ["no-new-privileges", `seccomp=${SECCOMP}`],
+      SecurityOpt: ["no-new-privileges", `seccomp=${BROWSER_SECCOMP}`],
       Init: true,
       ...limits,
       PidsLimit: BROWSER_LIMITS.pids,

@@ -36,30 +36,79 @@ export const TimeZone = z
       return false;
     }
   }, "unknown time zone");
-export const HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12] as const;
+export const ScheduleUnit = z.enum(["minute", "hour", "day", "week", "month"]);
+export type ScheduleUnit = z.infer<typeof ScheduleUnit>;
+// The shortest step keeps a routine from running faster than a run can finish.
+export const SCHEDULE_LIMITS = Object.freeze({
+  schedules: 8,
+  times: 12,
+  every: Object.freeze({
+    minute: { min: 5, max: 720 },
+    hour: { min: 1, max: 23 },
+    day: { min: 1, max: 365 },
+    week: { min: 1, max: 52 },
+    month: { min: 1, max: 36 },
+  }),
+});
+// In a schedule's monthDays: the month's last day, whichever that is.
+export const LAST_DAY = -1;
+const distinct = <T>(items: readonly T[]) => new Set(items).size === items.length;
 
-// Server-side shape only; the model's `routine` tool uses a flat object (tools/routine.ts).
-export const RoutineWhen = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("once"), date: LocalDate, time: ClockTime }),
-  z.strictObject({ kind: z.literal("daily"), time: ClockTime }),
-  z.strictObject({ kind: z.literal("weekdays"), time: ClockTime }),
-  z.strictObject({
-    kind: z.literal("weekly"),
-    days: z
+// A rule on the routine's own clock. Minutes and hours repeat within each day, counted afresh from
+// `from` (default midnight) up to `to` (default the day's end). Days, weeks and months count from the
+// routine's start date, weeks from the Monday of its week, and run at `times`. Weeks fall on
+// `weekdays` and months on `monthDays`, each by default the start date's own; `weekdays` also narrows
+// minutes, hours and days. A month without the chosen day is passed over.
+export const RoutineSchedule = z
+  .strictObject({
+    every: z.number().int().positive(),
+    unit: ScheduleUnit,
+    times: z
+      .array(ClockTime)
+      .min(1)
+      .max(SCHEDULE_LIMITS.times)
+      .refine(distinct, "A time repeats.")
+      .optional(),
+    from: ClockTime.optional(),
+    to: ClockTime.optional(),
+    weekdays: z
       .array(z.number().int().min(0).max(6))
       .min(1)
       .max(7)
-      .refine((days) => new Set(days).size === days.length, "days repeat"),
-    time: ClockTime,
-  }),
-  z.strictObject({
-    kind: z.literal("hours"),
-    every: z.literal([...HOUR_STEPS]),
-    from: ClockTime.optional(),
-  }),
-  z.strictObject({ kind: z.literal("custom"), rule: z.string().min(1).max(256) }),
-]);
-export type RoutineWhen = z.infer<typeof RoutineWhen>;
+      .refine(distinct, "A weekday repeats.")
+      .optional(),
+    monthDays: z
+      .array(
+        z
+          .number()
+          .int()
+          .refine(
+            (day) => day === LAST_DAY || (day >= 1 && day <= 31),
+            "Days of the month go from 1 to 31.",
+          ),
+      )
+      .min(1)
+      .max(32)
+      .refine(distinct, "A day of the month repeats.")
+      .optional(),
+  })
+  .superRefine((rule, context) => {
+    const say = (message: string) => context.addIssue({ code: "custom", message });
+    const { min, max } = SCHEDULE_LIMITS.every[rule.unit];
+    if (rule.every < min || rule.every > max)
+      say(`A step in ${rule.unit}s must be from ${min} to ${max}.`);
+    const within = rule.unit === "minute" || rule.unit === "hour";
+    if (within && rule.times) say(`A step in ${rule.unit}s has no set times: use from and to.`);
+    if (!within && !rule.times?.length) say("Say what time it runs.");
+    if (!within && (rule.from !== undefined || rule.to !== undefined))
+      say("From and to work with minutes and hours.");
+    if (within && rule.from !== undefined && rule.to !== undefined && rule.from >= rule.to)
+      say("The end of the day's stretch must come after its start.");
+    if (rule.monthDays && rule.unit !== "month") say("Days of the month work with months.");
+    if (rule.weekdays && rule.unit === "month") say("Weekdays don't work with months.");
+  });
+export type RoutineSchedule = z.infer<typeof RoutineSchedule>;
+export const RoutineSchedules = z.array(RoutineSchedule).min(1).max(SCHEDULE_LIMITS.schedules);
 
 export const RoutineProfile = z.enum(["ask_first", "read_only", "act_within_rules"]);
 export type RoutineProfile = z.infer<typeof RoutineProfile>;
@@ -109,8 +158,10 @@ export const ROUTINE_LIMITS = Object.freeze({
 export const RoutineDraft = z.strictObject({
   name: RoutineName,
   instruction: RoutineInstruction,
-  when: RoutineWhen,
+  schedules: RoutineSchedules,
   tz: TimeZone.optional(),
+  // First and last local dates, inclusive; the first is today unless given.
+  start: LocalDate.optional(),
   until: LocalDate.optional(),
   profile: RoutineProfile.optional(),
   notify: RoutineNotify.optional(),
@@ -127,9 +178,14 @@ export const RoutineUpdate = RoutineDraft.partial()
   })
   .strict();
 export type RoutineUpdate = z.infer<typeof RoutineUpdate>;
+// What the user changed in a routine dot drafted; a null last day takes dot's away.
+export const RoutineEdits = RoutineDraft.partial().extend({
+  until: LocalDate.nullable().optional(),
+});
+export type RoutineEdits = z.infer<typeof RoutineEdits>;
 export const RoutineConfirm = z.strictObject({
   revision: Counter,
-  edits: RoutineDraft.partial().optional(),
+  edits: RoutineEdits.optional(),
 });
 export type RoutineConfirm = z.infer<typeof RoutineConfirm>;
 
@@ -150,8 +206,9 @@ export const Routine = z.strictObject({
   kind: z.enum(["routine", "follow_up"]),
   name: RoutineName,
   instruction: RoutineInstruction,
-  when: RoutineWhen,
+  schedules: RoutineSchedules,
   tz: TimeZone,
+  start: LocalDate,
   until: LocalDate.nullable(),
   profile: RoutineProfile,
   notify: RoutineNotify,

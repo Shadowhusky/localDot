@@ -1,6 +1,6 @@
 import type { ModelBinding } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { completionCall, gatewayCompletion } from "./judge-model.ts";
+import { completionCall, gatewayCompletion, ModelAnswerError } from "./judge-model.ts";
 
 const SURROGATE = `ld_ant_${"a".repeat(22)}_${"b".repeat(6)}`;
 const binding = (client: ModelBinding["client"], model = "m-1"): ModelBinding => ({
@@ -29,7 +29,12 @@ describe("the fast model as judge", () => {
     expect(openai).toMatchObject({
       path: "responses",
       headers: { authorization: `Bearer ${SURROGATE}` },
-      body: { instructions: "sys", input: "prompt", store: false },
+      body: {
+        instructions: "sys",
+        input: [{ role: "user", content: [{ type: "input_text", text: "prompt" }] }],
+        store: false,
+        stream: true,
+      },
     });
     expect(openai.read({ output: [{ content: [{ type: "output_text", text: "ok" }] }] })).toBe(
       "ok",
@@ -109,7 +114,7 @@ describe("the fast model as judge", () => {
       thinking: { type: "disabled" },
     });
     expect(body(of("google", "google", "gemini-2.5-flash"), "none")).toMatchObject({
-      generationConfig: { maxOutputTokens: 512, thinkingConfig: { thinkingBudget: 0 } },
+      generationConfig: { maxOutputTokens: 1024, thinkingConfig: { thinkingBudget: 0 } },
     });
     expect(body(of("google", "google", "gemini-3-flash"), "minimal")).toMatchObject({
       generationConfig: { thinkingConfig: { thinkingLevel: "minimal" } },
@@ -128,6 +133,103 @@ describe("the fast model as judge", () => {
     // A level the model doesn't offer, or no level, leaves the request as it was.
     expect(body(of("openai", "openai", "gpt-5-mini"), "none")).not.toHaveProperty("reasoning");
     expect(body(of("openai", "openai", "gpt-5-mini"), undefined)).not.toHaveProperty("reasoning");
+  });
+});
+
+// What the custom Responses endpoint in the field does: it refuses a plain string and a reply that
+// isn't streamed, with these bodies, and streams what it accepts.
+function strictRelay() {
+  const sse = [
+    { type: "response.created", response: { id: "r", output: [] } },
+    { type: "response.output_text.delta", delta: "Hel" },
+    { type: "response.output_text.delta", delta: "lo" },
+    { type: "response.completed", response: { id: "r", output: [] } },
+  ]
+    .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+    .join("");
+  return vi.fn(async (_url: string, init: { body: string }) => {
+    const body = JSON.parse(init.body);
+    if (!Array.isArray(body.input))
+      return new Response('{"detail":"Input must be a list"}', { status: 400 });
+    if (body.stream !== true)
+      return new Response('{"detail":"Stream must be set to true"}', { status: 400 });
+    return new Response(sse, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  });
+}
+const relayed = (fetch: unknown) =>
+  gatewayCompletion(
+    () => binding("openai", "gpt-6.1-terra"),
+    () => ({ port: 4788, token: "t".repeat(43) }),
+    fetch as never,
+  );
+
+describe("the Responses API", () => {
+  it("gets an answer from an endpoint that takes only a list and a stream", async () => {
+    await expect(
+      relayed(strictRelay())("sys", "prompt", new AbortController().signal),
+    ).resolves.toBe("Hello");
+  });
+
+  it("reads a stream as one whatever type its relay labels it", async () => {
+    const sse = await (
+      await strictRelay()("", { body: JSON.stringify({ input: [], stream: true }) })
+    ).text();
+    for (const type of ["text/plain; charset=utf-8", "application/json", undefined]) {
+      const fetch = async () =>
+        new Response(sse, { status: 200, headers: type ? { "content-type": type } : {} });
+      await expect(relayed(fetch)("sys", "prompt", new AbortController().signal)).resolves.toBe(
+        "Hello",
+      );
+    }
+  });
+
+  it("says an answer it could not read was given, not that the model could not be reached", async () => {
+    const fetch = async () =>
+      new Response("<html>gateway page</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    await expect(relayed(fetch)("sys", "prompt", new AbortController().signal)).rejects.toThrow(
+      new ModelAnswerError(undefined, "its answer could not be read"),
+    );
+  });
+
+  it("reads the whole answer when only the last event carries it", async () => {
+    const event = {
+      type: "response.completed",
+      response: { output: [{ content: [{ type: "output_text", text: "All at once" }] }] },
+    };
+    const fetch = async () =>
+      new Response(`data: ${JSON.stringify(event)}\n\n`, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    await expect(relayed(fetch)("sys", "prompt", new AbortController().signal)).resolves.toBe(
+      "All at once",
+    );
+  });
+
+  it("says what a stream that failed said", async () => {
+    const event = { type: "response.failed", response: { error: { message: "over quota" } } };
+    const fetch = async () =>
+      new Response(`data: ${JSON.stringify(event)}\n\n`, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    await expect(relayed(fetch)("sys", "prompt", new AbortController().signal)).rejects.toThrow(
+      "over quota",
+    );
+  });
+
+  it("says why a model refused, in the provider's own words", async () => {
+    const fetch = async () =>
+      new Response('{"error":{"message":"The model does not exist"}}', { status: 404 });
+    await expect(relayed(fetch)("sys", "prompt", new AbortController().signal)).rejects.toThrow(
+      "answered 404: The model does not exist",
+    );
   });
 });
 

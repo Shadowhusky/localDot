@@ -1,9 +1,11 @@
+import { type TranscriptMessage, ulid } from "@localdot/protocol";
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 import {
   cachedPrompt,
   compactionEntry,
   estimateTokens,
+  frameMarker,
   fromTranscript,
   imagePart,
   inboxTranscript,
@@ -61,6 +63,69 @@ describe("screenshots in context", () => {
     );
     expect(back).toContain(`again-${A}`);
     expect(back).toContain("(A picture from https://th.example.net/5.jpg was shown here.)");
+  });
+
+  it("sends turns written for an earlier model without what only that model can read", async () => {
+    const stored: TranscriptMessage[] = [
+      { role: "user", content: "Hello" },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "hmm", providerOptions: { anthropic: { signature: "s" } } },
+          { type: "text", text: "Hi", providerOptions: { openai: { itemId: "i" } } },
+          {
+            type: "tool-call",
+            toolCallId: "c1",
+            toolName: "computer",
+            input: {},
+            providerOptions: { google: { thoughtSignature: "t" } },
+          },
+        ],
+      },
+      { role: "assistant", content: [{ type: "reasoning", text: "only thinking" }] },
+      { role: "user", content: { type: "localdot-model-switch" } },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "kept", providerOptions: { openai: { itemId: "n" } } },
+          { type: "text", text: "Next" },
+        ],
+      },
+    ];
+    expect(await fromTranscript(stored, async () => undefined)).toEqual([
+      { role: "user", content: "Hello" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Hi" },
+          { type: "tool-call", toolCallId: "c1", toolName: "computer", input: {} },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "(Nothing said in this turn.)" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "kept", providerOptions: { openai: { itemId: "n" } } },
+          { type: "text", text: "Next" },
+        ],
+      },
+    ]);
+  });
+
+  it("leaves a screenshot from before a change of model as its marker", async () => {
+    const [before, after] = [ulid(), ulid()];
+    const marker = (frameId: string) => frameMarker({ frameId });
+    const stored: TranscriptMessage[] = [
+      { role: "user", content: [{ type: "text", text: marker(before) }] },
+      { role: "user", content: { type: "localdot-model-switch" } },
+      { role: "user", content: [{ type: "text", text: marker(after) }] },
+    ];
+    const fetched: string[] = [];
+    await fromTranscript(stored, async (ref) => {
+      fetched.push(ref.frameId);
+      return "aGk=";
+    });
+    expect(fetched).toEqual([after]);
   });
 
   it("replays a compaction entry over the messages it replaced", async () => {

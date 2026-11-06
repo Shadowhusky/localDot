@@ -678,9 +678,49 @@ export function statusFor({
   };
 }
 
+// Rows dot rests in until a message wakes it.
+const WAKES = new Set<StatusRow>(["ready", "done", "stopped", "interrupted", "failed", "limit"]);
+
+// What a message was sent to: the task shown and its row, or none yet.
+export interface SentTo {
+  readonly session: string | null;
+  readonly row: TaskRow | null;
+}
+
+// A message sent while dot rests, or before there is a task, shows dot thinking until the task does.
+export const sentToRest = (session: string | null, task: TaskHud | null): SentTo | null =>
+  !task || WAKES.has(task.row) ? { session, row: task?.row ?? null } : null;
+
+// The task has said nothing of its own since the message: the one it was sent to rests as it did,
+// or the task the message started has only just begun.
+export function awaitingWord(sent: SentTo, session: string | null, task: TaskHud | null): boolean {
+  if (session === sent.session) return (task?.row ?? null) === sent.row;
+  return !task || (task.row === "working" && task.caption === STARTING_OUT);
+}
+
+// The thread's foot while dot thinks about a message just sent, as the task's own thinking shows.
+export const SENT_THINKING: TaskHud = {
+  row: "thinking",
+  phase: "running",
+  label: THINKING,
+  caption: THINKING,
+  elapsedS: null,
+  countdownS: null,
+  timer: null,
+  control: false,
+};
+
 // A message just sent shows dot thinking at once, before the task's first word arrives; the task's
-// own status replaces it as soon as it says anything.
+// own status replaces it as soon as it says anything. Until then dot has nothing to say about it.
 export function withSending(status: Status, sending: boolean): Status {
-  if (!sending || (status.row !== "ready" && status.row !== "done")) return status;
-  return { ...status, row: "thinking", label: "Thinking…", dotPose: "thinking" };
+  if (!sending || !(WAKES.has(status.row) || status.row === "working")) return status;
+  return {
+    ...status,
+    row: "thinking",
+    label: THINKING,
+    caption: { speaker: "dot", text: "" },
+    dotPose: TASK_POSE.thinking,
+    attention: TASK_ATTENTION.thinking,
+    title: `localDot — ${THINKING}`,
+  };
 }

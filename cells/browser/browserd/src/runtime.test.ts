@@ -9,6 +9,7 @@ import {
   BROWSER_RESTARTS,
   BROWSER_RUNTIME_START_MS,
   BrowserRuntime,
+  failureDetail,
 } from "./runtime.ts";
 import {
   type BrowserProcessName,
@@ -550,6 +551,20 @@ describe("Chromium supervision", () => {
       kind: "unresponsive",
       detail: "no answer to a liveness check",
     });
+  });
+
+  it("reports a browser's exit, unless it ended that browser itself for not responding", () => {
+    const exited = { code: 0, signal: null };
+    expect(failureDetail("browser_exited", undefined, exited, false)).toBe("exited with code 0");
+    expect(failureDetail("control_lost", "control closed", exited, false)).toBe(
+      "control closed, exited with code 0",
+    );
+    expect(failureDetail("unresponsive", "control timeout (Page.enable)", exited, false)).toBe(
+      "control timeout (Page.enable)",
+    );
+    expect(failureDetail("unresponsive", "control timeout (Page.enable)", exited, true)).toBe(
+      "control timeout (Page.enable), out of memory",
+    );
   });
 
   it("reloads a crashed tab and keeps the browser", async () => {

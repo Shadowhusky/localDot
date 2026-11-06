@@ -75,6 +75,13 @@ describe("a model chosen since the task started", () => {
     ]);
   });
 
+  it("sends each message with the model chosen for the task", async () => {
+    const model = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
+    const f = setup(task("idle"), { sendModel: model });
+    await f.send("Now do March");
+    expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "Now do March", model });
+  });
+
   it("follows up as before when the model is the task's own", async () => {
     const f = setup(task("idle"));
     screen.getByRole("button", { name: "Send follow-up" });
@@ -82,8 +89,9 @@ describe("a model chosen since the task started", () => {
     expect(f.requests[0]?.path).toBe(`/api/agent/sessions/${sessionId}/messages`);
   });
 
-  it("queues a message while the current model is still working", async () => {
-    const f = setup(task("running"), { modelChanged: true });
+  it("queues a message for it while the current model is still working", async () => {
+    const f = setup(task("running"), { modelChanged: true, modelAfter: "Claude Opus 5.5" });
+    screen.getByRole("button", { name: "Send after this task" });
     await f.send("Use the blue theme");
     expect(f.requests).toEqual([
       {
@@ -91,6 +99,14 @@ describe("a model chosen since the task started", () => {
         body: { kind: "followup", text: "Use the blue theme" },
       },
     ]);
+  });
+
+  it("steers on the model at work, saying nothing of models", async () => {
+    const model = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
+    const f = setup(task("running"), { sendModel: model });
+    screen.getByRole("button", { name: "Send now" });
+    await f.send("Use the blue theme");
+    expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "Use the blue theme", model });
   });
 
   it("keeps model controls available in both card and phone composers", () => {

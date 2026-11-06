@@ -170,6 +170,23 @@ describe("the preview forwarder", () => {
     });
   });
 
+  it("stops the server on a port, but never localDot's own or for a wrong token", async () => {
+    const asked: number[] = [];
+    const port = await forwarder({
+      stopListening: async (stopped) => {
+        asked.push(stopped);
+        return stopped !== 5174;
+      },
+    });
+    expect(await exchange(port, previewPreface(TOKEN, { stop: 5173 }))).toBe("OK\n");
+    expect(await exchange(port, previewPreface(TOKEN, { stop: 5174 }))).toBe("NO unreachable\n");
+    expect(await exchange(port, previewPreface(TOKEN, { stop: 7700 }))).toBe("NO refused-port\n");
+    expect(await exchange(port, previewPreface("x".repeat(43), { stop: 5173 }))).toBe(
+      "NO unauthorized\n",
+    );
+    expect(asked).toEqual([5173, 5174]);
+  });
+
   it("keeps a long-lived upgraded connection open in both directions", async () => {
     const server = await listen(
       createServer((socket) => {

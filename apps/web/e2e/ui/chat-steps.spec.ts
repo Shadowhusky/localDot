@@ -1,3 +1,4 @@
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
@@ -17,13 +18,13 @@ test("a chat step unfolds its details in place, by pointer and keyboard", async 
   await expect(frame).toBeVisible();
   await expect(frame.locator("img")).toBeVisible();
   await expect(row.getByRole("list", { name: "Keys used" })).toBeAttached();
-  if (isPhone(page)) await expect(page.getByRole("dialog", { name: "Activity" })).toHaveCount(0);
+  if (isPhone(page)) await expect(page.getByRole("dialog", { name: PANEL_NAME })).toHaveCount(0);
   else {
     await expect(page.getByRole("radio", { name: "Chat", exact: true })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    await expect(page.getByRole("tablist", { name: "Activity" })).toBeHidden();
+    await expect(page.getByRole("tablist", { name: PANEL_NAME })).toBeHidden();
   }
   await ui.settle();
   await page.screenshot({ path: test.info().outputPath("chat-step-open.png") });

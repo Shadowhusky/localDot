@@ -64,7 +64,7 @@ describe("routine tool", () => {
       op: "propose",
       name: `Morning bills ${PROXY_TOKEN}`,
       instruction: `Use ${PROXY_TOKEN} and check statements`,
-      when: { kind: "weekdays", time: "08:30" },
+      schedules: [{ every: 1, unit: "week" as const, weekdays: [1, 2, 3, 4, 5], times: ["08:30"] }],
     });
     expect(result.body.ok).toBe(true);
     expect(result.body.content[0]?.text).toContain("Save routine");

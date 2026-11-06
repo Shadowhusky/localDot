@@ -79,7 +79,7 @@ it("announces only a gap that lasts, once, and withdraws it once the picture is 
 });
 
 it("says dot moved only when its running task chose the screen", () => {
-  expect(screenMoveNote("browser", true)).toBe("dot moved to the web browser");
+  expect(screenMoveNote("browser", true)).toBe("dot is working in the web browser");
   expect(screenMoveNote("desktop", true)).toBe("dot is back on the desktop");
   // A task that ended, or a new conversation, leaves the page on the desktop with dot still.
   expect(screenMoveNote("desktop", false)).toBeNull();

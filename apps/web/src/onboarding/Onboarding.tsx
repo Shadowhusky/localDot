@@ -8,6 +8,7 @@ import {
 } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import type { BrowserEngineName } from "../../../../packages/protocol/src/browser-engine.ts";
 import { AUTONOMY_PRESETS, presetOf } from "../copy/autonomy.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import {
@@ -26,8 +27,10 @@ import { useComputerSize } from "../settings/ComputerSize.tsx";
 import { matchingKeys, type RoleChoice } from "../settings/choices.ts";
 import { recommendedSize, sameSize, saveSize, sizeProblem } from "../settings/computer-size.ts";
 import type { ProviderIndex } from "../settings/settings-api.ts";
+import { useBrowserEngine } from "../settings/useBrowserEngine.ts";
 import { useChatgpt } from "../settings/useChatgpt.ts";
 import { useClaudeCode } from "../settings/useClaudeCode.ts";
+import { VIEW_NAMES, type ViewStyleControl } from "../shell/view-style.ts";
 import { Button } from "../ui/Button.tsx";
 import { afterMotion } from "../ui/finished.ts";
 import { Icon } from "../ui/Icon.tsx";
@@ -35,6 +38,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { PersonaPicker } from "./PersonaPicker.tsx";
 import { saveSetup } from "./save.ts";
 import {
+  BrowserStep,
   CustomKeyStep,
   KeyStep,
   LocalStep,
@@ -46,6 +50,7 @@ import {
   WelcomeStep,
 } from "./steps.tsx";
 import type { OnboardingControl } from "./useOnboarding.ts";
+import { ViewStylePicker } from "./ViewStylePicker.tsx";
 import {
   appKind,
   CUSTOM_PROVIDERS,
@@ -79,6 +84,7 @@ export interface OnboardingProps {
   // Turns the computer on; null while it is already on.
   turnOn: { run(): void; reason?: string } | null;
   showDot: boolean;
+  view: Pick<ViewStyleControl, "value" | "recommended" | "choose">;
 }
 
 export interface SetupDraft {
@@ -155,6 +161,9 @@ export function Onboarding(props: OnboardingProps) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [typed, setTyped] = useState(false);
+  const engine = useBrowserEngine(api, true);
+  const [chosenBrowser, setBrowserChoice] = useState<BrowserEngineName | null>(null);
+  const browserChoice = chosenBrowser ?? engine.status?.choice ?? "chrome";
   const secret = useRef<HTMLInputElement>(null);
   const alive = useRef(true);
   useEffect(
@@ -233,9 +242,12 @@ export function Onboarding(props: OnboardingProps) {
         : sizeView.size))
     : null;
 
+  // An image that can't take Chrome, or that was built with it, has nothing to choose.
+  const browserOffered = !!engine.status?.offered;
   const advance = (extra: Partial<WizardProgress> = {}) =>
     control.update((now) => {
-      const to = nextStep(now);
+      const next = nextStep(now);
+      const to = next === "browser" && !browserOffered ? nextStep({ ...now, step: next }) : next;
       return { ...now, ...extra, step: to, back: to === now.back ? undefined : now.back };
     });
   const run = async (work: () => Promise<string | null>, then: () => void) => {
@@ -346,6 +358,19 @@ export function Onboarding(props: OnboardingProps) {
         props.onSaved();
         advance();
       },
+    );
+
+  const saveBrowser = () =>
+    run(
+      async () =>
+        (await engine.choose(
+          browserChoice === "chrome"
+            ? { choice: "chrome", acceptGoogleTerms: true }
+            : { choice: "chromium" },
+        ))
+          ? null
+          : "Couldn't save your choice of browser. Try again.",
+      () => advance(),
     );
 
   const savePersona = () =>
@@ -578,6 +603,29 @@ export function Onboarding(props: OnboardingProps) {
           primary: "Continue",
           run: savePersona,
         };
+      case "view":
+        return {
+          title: "How would you like to see dot?",
+          sub: "Just for this device. You can switch any time from the ⋯ menu.",
+          body: (
+            <ViewStylePicker
+              aria-label="View"
+              value={props.view.value}
+              recommended={props.view.recommended}
+              onChange={props.view.choose}
+            />
+          ),
+          primary: "Continue",
+          run: () => advance(),
+        };
+      case "browser":
+        return {
+          title: "Which web browser should dot use?",
+          sub: "dot signs in to sites and works on the web with it. You can change this in Settings.",
+          body: <BrowserStep value={browserChoice} onChange={setBrowserChoice} />,
+          primary: browserChoice === "chrome" ? "Accept and continue" : "Continue",
+          run: saveBrowser,
+        };
       case "turn-on":
         return {
           title: "You're all set.",
@@ -617,6 +665,22 @@ export function Onboarding(props: OnboardingProps) {
                   value: personaOf(saved?.persona).name,
                   change: () => go("dot", "turn-on"),
                 },
+                {
+                  icon: "layout-grid",
+                  label: "View",
+                  value: VIEW_NAMES[props.view.value],
+                  change: () => go("view", "turn-on"),
+                },
+                ...(browserOffered
+                  ? [
+                      {
+                        icon: "globe" as const,
+                        label: "Web browser",
+                        value: engine.status?.choice === "chrome" ? "Google Chrome" : "Chromium",
+                        change: () => go("browser", "turn-on"),
+                      },
+                    ]
+                  : []),
               ]}
             >
               {sizeView && chosenSize && (
@@ -671,7 +735,8 @@ export function Onboarding(props: OnboardingProps) {
       {view.primary}
     </Button>
   );
-  const back = () => go(previousStep(step));
+  const before = previousStep(step);
+  const back = () => go(before === "browser" && !browserOffered ? previousStep(before) : before);
   const footer = (
     <div className="onboarding-footer">
       {!phone && shown !== "welcome" && (

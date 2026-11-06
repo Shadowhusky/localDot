@@ -261,22 +261,4 @@ describe("tasks sharing a computer", () => {
     }
     expect(live.lease("cell").holder).toBeUndefined();
   });
-
-  it("gives the web browser to one task at a time until it lets go or ends", async () => {
-    const live = new LiveSessions();
-    live.start("cell", "a", forever);
-    live.start("cell", "b", forever);
-    expect(live.claimBrowser("cell", "a")).toBe(true);
-    expect(live.claimBrowser("cell", "a")).toBe(true);
-    expect(live.claimBrowser("cell", "b")).toBe(false);
-    expect(live.browserHolder("cell")).toBe("a");
-    live.releaseBrowser("cell", "b");
-    expect(live.browserHolder("cell")).toBe("a");
-    live.stop("a");
-    await live.settled("a");
-    expect(live.browserHolder("cell")).toBeUndefined();
-    expect(live.claimBrowser("cell", "b")).toBe(true);
-    live.stop("b");
-    await live.settled("b");
-  });
 });

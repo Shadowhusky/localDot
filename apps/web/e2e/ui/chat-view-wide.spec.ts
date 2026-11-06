@@ -1,0 +1,107 @@
+import type { Page } from "@playwright/test";
+import { expect, runAt, test } from "./harness.ts";
+
+test.use({ viewStyle: "chat", phoneList: true });
+
+const look = (page: Page, appearance: string) =>
+  page.addInitScript((value) => localStorage.setItem("localdot.appearance.v1", value), appearance);
+
+test.describe("a touch tablet", () => {
+  runAt("c39");
+  test.use({ viewport: { width: 820, height: 1180 } });
+
+  test("a touch tablet shows the list beside the conversation", async ({ page, ui }) => {
+    await ui.open("running");
+    const stack = page.locator(".phone-stack");
+    await expect(stack).toHaveAttribute("data-split");
+    const list = await page.locator(".phone-list").boundingBox();
+    const chat = await page.locator(".phone-chat").boundingBox();
+    expect(list?.width).toBeGreaterThanOrEqual(300);
+    expect(list?.width).toBeLessThanOrEqual(368);
+    expect(chat?.x).toBe(list?.width);
+    await expect(page.getByPlaceholder("Message dot")).toBeVisible();
+    await expect(page.locator(".phone-row").first()).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("split.png") });
+    await page.getByRole("button", { name: "Show or hide the list" }).click();
+    await expect(stack).toHaveAttribute("data-list-hidden");
+    await page.getByRole("button", { name: "Show or hide the list" }).click();
+    await expect(stack).not.toHaveAttribute("data-list-hidden");
+    await page.locator(".phone-thumb").click();
+    await expect(page.getByRole("button", { name: "Take control" })).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("split-computer.png") });
+  });
+});
+
+test.describe("a desktop", () => {
+  runAt("c14", "w14");
+
+  for (const { width, height, appearance } of [
+    { width: 1440, height: 900, appearance: "graphite" },
+    { width: 1920, height: 1080, appearance: "daylight" },
+    { width: 1100, height: 700, appearance: "daylight" },
+    { width: 760, height: 700, appearance: "graphite" },
+  ]) {
+    test(`at ${width} by ${height}, ${appearance}: the list beside a thread of a readable width, the computer over it`, async ({
+      page,
+      ui,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await look(page, appearance);
+      await ui.open("running");
+      await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
+      const stack = page.locator(".phone-stack");
+      await expect(stack).toHaveAttribute("data-split");
+      const chat = await page.locator(".phone-chat").boundingBox();
+      if (!chat) throw new Error("No conversation");
+      const field = await page.getByPlaceholder("Message dot").boundingBox();
+      const content = await page.locator(".phone-thread .thread-content").boundingBox();
+      expect(content?.width).toBeLessThanOrEqual(760);
+      expect((field?.x ?? 0) + (field?.width ?? 0)).toBeLessThanOrEqual(chat.x + chat.width);
+      await ui.settle();
+      await page.screenshot({ path: test.info().outputPath("thread.png") });
+
+      await page.locator(".phone-thumb").click();
+      await expect(page.getByRole("button", { name: "Take control" })).toBeVisible();
+      await ui.settle();
+      const picture = await page.locator(".phone-picture").boundingBox();
+      expect(picture?.x).toBeGreaterThanOrEqual(chat.x);
+      expect((picture?.x ?? 0) + (picture?.width ?? 0)).toBeLessThanOrEqual(chat.x + chat.width);
+      expect((picture?.y ?? 0) + (picture?.height ?? 0)).toBeLessThan(height - 120);
+      await expect(page.locator(".phone-row").first()).toBeVisible();
+      await page.screenshot({ path: test.info().outputPath("computer.png") });
+      await page.getByRole("button", { name: "Back to the conversation" }).click();
+      await expect(stack).not.toHaveAttribute("data-level", "2");
+    });
+  }
+
+  test("a mouse selects text, and a right click opens what a hold would", async ({ page, ui }) => {
+    await ui.open("done");
+    await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
+    const reply = page.locator('.phone-thread .thread-message[data-role="dot"]').first();
+    expect(await reply.evaluate((element) => getComputedStyle(element).userSelect)).not.toBe(
+      "none",
+    );
+    const box = await reply.boundingBox();
+    if (!box) throw new Error("No reply");
+    // A drag across a reply is a selection, not a way back.
+    await page.mouse.move(box.x + 10, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 10, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator(".phone-stack")).toHaveAttribute("data-level", /^[01]$/);
+    await reply.click({ button: "right" });
+    await expect(page.getByRole("menu", { name: "Message actions" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.locator(".phone-row").first().click({ button: "right" });
+    await expect(page.getByRole("menuitem", { name: /Pin|Unpin/ })).toBeVisible();
+  });
+
+  test("Replay comes up with the top bar, and back", async ({ page, ui }) => {
+    await ui.open("done");
+    await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
+    await page.getByRole("button", { name: "See all in Replay" }).click();
+    await expect(page.getByRole("textbox", { name: "Search recordings" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".phone-stack")).toHaveAttribute("data-split");
+  });
+});

@@ -16,11 +16,15 @@ export interface BrowserDownloadServiceDeps {
   readonly control: Pick<BrowserControl, "admit" | "admitManual">;
   readonly targets: Pick<BrowserTargets, "downloadBehavior" | "cancelDownload">;
   openSpool?(): Promise<Spool>;
+  // The task whose window the frame is in.
+  attribute?(frameId: string): string | undefined;
   fence(): void;
 }
 
+// One collector for the browser, which Chromium's one download directory requires; each download
+// goes to the task whose page started it, by that task's own binding.
 export class BrowserDownloadService {
-  #binding?: BrowserDownloadBinding;
+  readonly #bindings = new Map<string, BrowserDownloadBinding>();
   #owner?: BrowserDownloadEvents;
   #arming?: Promise<void>;
   #closing?: Promise<void>;
@@ -29,9 +33,9 @@ export class BrowserDownloadService {
 
   constructor(private readonly deps: BrowserDownloadServiceDeps) {}
 
-  // The grant downloads are armed for, which a browser restarted in place arms again.
-  get binding(): BrowserDownloadBinding | undefined {
-    return this.#binding;
+  // The grants downloads are armed for, which a browser restarted in place arms again.
+  get bindings(): readonly BrowserDownloadBinding[] {
+    return [...this.#bindings.values()];
   }
 
   owns(guid: string): boolean {
@@ -66,8 +70,18 @@ export class BrowserDownloadService {
       check();
       if (this.#arming) throw new BrowserDownloadError("busy");
       if (this.#owner && this.#same(binding)) return;
+      // Another task's downloads go on: this one joins the running collection.
+      if (
+        this.#owner &&
+        binding.holder === "agent" &&
+        [...this.#bindings.values()].every((other) => other.holder === "agent") &&
+        this.#bindings.size > 0
+      ) {
+        this.#bindings.set(binding.sessionId, binding);
+        return;
+      }
       this.#arming = settled.promise;
-      this.#binding = undefined;
+      this.#bindings.clear();
       const current = AbortSignal.any([signal, lease.signal]);
       await this.deps.targets.downloadBehavior(false, current);
       check();
@@ -78,19 +92,19 @@ export class BrowserDownloadService {
       check();
       const owner = new BrowserDownloadEvents({
         spool,
-        admit: () => {
-          if (!this.#same(binding) || this.#owner !== owner)
-            throw new BrowserDownloadError("stale");
-          const admitted = this.#admit(binding);
+        admit: (frameId) => {
+          const chosen = this.#bindingFor(frameId);
+          if (!chosen || this.#owner !== owner) throw new BrowserDownloadError("stale");
+          const admitted = this.#admit(chosen);
           return {
             signal: admitted.signal,
             check: admitted.check,
             finish: admitted.finish,
             origin: {
-              browserCellId: binding.permit.browserCellId,
-              parentCellId: binding.permit.parentCellId,
-              browserInstance: binding.permit.instance,
-              sessionId: binding.sessionId,
+              browserCellId: chosen.permit.browserCellId,
+              parentCellId: chosen.permit.parentCellId,
+              browserInstance: chosen.permit.instance,
+              sessionId: chosen.sessionId,
             },
           };
         },
@@ -99,12 +113,12 @@ export class BrowserDownloadService {
       });
       this.#owner = owner;
       spool = undefined;
-      this.#binding = binding;
+      this.#bindings.set(binding.sessionId, binding);
       await this.deps.targets.downloadBehavior(true, current);
       check();
     } catch (error) {
       if (this.#arming === settled.promise) {
-        this.#binding = undefined;
+        this.#bindings.clear();
         // A partly delivered enable command is uncertain. Contain the browser; do not just clear state.
         this.deps.fence();
       }
@@ -121,17 +135,18 @@ export class BrowserDownloadService {
   }
 
   list(raw: unknown, signal: AbortSignal): readonly DownloadOffer[] {
-    const { lease, owner } = this.#access(raw, signal);
+    const { lease, owner, binding } = this.#access(raw, signal);
     try {
-      return owner.list();
+      return owner.list().filter((offer) => offer.origin.sessionId === binding.sessionId);
     } finally {
       lease.finish();
     }
   }
 
   async *read(raw: unknown, guid: string, signal: AbortSignal): AsyncGenerator<Uint8Array> {
-    const { lease, owner } = this.#access(raw, signal);
+    const { lease, owner, binding } = this.#access(raw, signal);
     try {
+      this.#ownFile(owner, binding, guid);
       yield* owner.read(guid, {
         signal: AbortSignal.any([signal, lease.signal]),
         check: () => {
@@ -150,8 +165,9 @@ export class BrowserDownloadService {
     receipt: { bytes: number; sha256: string },
     signal: AbortSignal,
   ): Promise<void> {
-    const { lease, owner } = this.#access(raw, signal);
+    const { lease, owner, binding } = this.#access(raw, signal);
     try {
+      this.#ownFile(owner, binding, guid);
       await owner.acknowledge(guid, receipt, {
         signal: AbortSignal.any([signal, lease.signal]),
         check: () => {
@@ -166,7 +182,7 @@ export class BrowserDownloadService {
 
   writersExited(): void {
     this.#closed = true;
-    this.#binding = undefined;
+    this.#bindings.clear();
     this.#writersGone = true;
     this.#owner?.writersExited();
   }
@@ -174,7 +190,7 @@ export class BrowserDownloadService {
   close(): Promise<void> {
     if (this.#closing) return this.#closing;
     this.#closed = true;
-    this.#binding = undefined;
+    this.#bindings.clear();
     const retirement = this.#owner?.close();
     void retirement?.catch(() => {});
     this.#closing = (async () => {
@@ -191,9 +207,24 @@ export class BrowserDownloadService {
   #same(binding: BrowserDownloadBinding): boolean {
     return (
       !this.#closed &&
-      this.#binding !== undefined &&
-      JSON.stringify(this.#binding) === JSON.stringify(binding)
+      JSON.stringify(this.#bindings.get(binding.sessionId)) === JSON.stringify(binding)
     );
+  }
+
+  // The user holds the whole browser: what they download is theirs. Otherwise a download goes to
+  // the task whose window started it, never to whichever task happens to be armed.
+  #bindingFor(frameId: string): BrowserDownloadBinding | undefined {
+    const bindings = [...this.#bindings.values()];
+    const only = bindings.length === 1 ? bindings[0] : undefined;
+    if (only?.holder === "user" || !this.deps.attribute) return only;
+    const sessionId = this.deps.attribute(frameId);
+    return sessionId ? this.#bindings.get(sessionId) : undefined;
+  }
+
+  #ownFile(owner: BrowserDownloadEvents, binding: BrowserDownloadBinding, guid: string): void {
+    const offer = owner.list().find((candidate) => candidate.guid === guid);
+    if (offer && offer.origin.sessionId !== binding.sessionId)
+      throw new BrowserDownloadError("stale");
   }
 
   #admit(binding: BrowserDownloadBinding): BrowserActionLease {
@@ -212,11 +243,15 @@ export class BrowserDownloadService {
   #access(
     raw: unknown,
     signal: AbortSignal,
-  ): { lease: BrowserActionLease; owner: BrowserDownloadEvents } {
+  ): {
+    lease: BrowserActionLease;
+    owner: BrowserDownloadEvents;
+    binding: BrowserDownloadBinding;
+  } {
     const binding = BrowserDownloadBinding.parse(raw);
     signal.throwIfAborted();
     if (!this.#owner || !this.#same(binding)) throw new BrowserDownloadError("stale");
     const lease = this.#admit(binding);
-    return { lease, owner: this.#owner };
+    return { lease, owner: this.#owner, binding };
   }
 }

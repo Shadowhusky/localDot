@@ -46,23 +46,7 @@ export class LiveSessions {
     { cellId: string; controller: AbortController; done: Promise<void>; since: number }
   >();
   readonly #leases = new Map<string, ComputerLease>();
-  // The task each computer's web browser works for: it has one signed-in profile and one holder.
-  readonly #browsers = new Map<string, string>();
   #starts = 0;
-
-  claimBrowser(cellId: string, sessionId: string): boolean {
-    const holder = this.browserHolder(cellId);
-    if (holder && holder !== sessionId) return false;
-    this.#browsers.set(cellId, sessionId);
-    return true;
-  }
-  browserHolder(cellId: string): string | undefined {
-    const holder = this.#browsers.get(cellId);
-    return holder && this.#bySession.get(holder)?.cellId === cellId ? holder : undefined;
-  }
-  releaseBrowser(cellId: string, sessionId: string): void {
-    if (this.#browsers.get(cellId) === sessionId) this.#browsers.delete(cellId);
-  }
 
   lease(cellId: string): ComputerLease {
     const existing = this.#leases.get(cellId);
@@ -142,7 +126,6 @@ export class LiveSessions {
         if (this.#bySession.get(sessionId) === entry) this.#bySession.delete(sessionId);
         for (const [alias, id] of this.#aliases) if (id === sessionId) this.#aliases.delete(alias);
         this.#leases.get(cellId)?.revoke(sessionId);
-        this.releaseBrowser(cellId, sessionId);
         settle();
       });
   }

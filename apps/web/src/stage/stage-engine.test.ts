@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { APPEARANCE_EVENT } from "../onboarding/appearance.ts";
 import { FakeWorker, fakeChromium } from "../testing/fake-chromium.ts";
 import type { FrameSource } from "./frame-source.ts";
-import { holdEngine, RESIZE_SETTLE_MS } from "./stage-engine.ts";
+import { backingScale, holdEngine, RESIZE_SETTLE_MS } from "./stage-engine.ts";
 
 // A kept stage outlives its page in tests and on a remount; one that is away read the theme from
 // whatever the document held then, and threw where it held no tokens.
@@ -221,5 +221,24 @@ describe("the frames of a tap that carries a track", () => {
     } finally {
       done();
     }
+  });
+});
+
+describe("backingScale", () => {
+  it("takes every pixel of the device until the picture is drawn one to one", () => {
+    expect(backingScale({ width: 968, height: 605 }, 2)).toBe(2);
+    expect(backingScale({ width: 374, height: 234 }, 3)).toBe(3);
+    expect(backingScale({ width: 1000, height: 625 }, 1)).toBe(1);
+    expect(backingScale({ width: 1728, height: 1080 }, 2)).toBeCloseTo(2560 / 1728);
+    expect(backingScale({ width: 2560, height: 1440 }, 2)).toBeCloseTo(1600 / 1440);
+  });
+
+  it("never gives a stage fewer pixels than its own CSS size", () => {
+    expect(backingScale({ width: 3840, height: 2400 }, 2)).toBe(1);
+    expect(backingScale({ width: 3840, height: 2400 }, 1)).toBe(1);
+  });
+
+  it("follows a box with no size yet to the device", () => {
+    expect(backingScale({ width: 0, height: 0 }, 2)).toBe(2);
   });
 });

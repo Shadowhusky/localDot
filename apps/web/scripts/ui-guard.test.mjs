@@ -21,6 +21,12 @@ const rulesIn = (path, text, declared = APP_TOKENS) =>
 // Each case seeds one violation and a near miss that must pass.
 const CASES = [
   {
+    rule: "track-surface",
+    path: "src/ui/a.css",
+    bad: ".a input::-webkit-slider-runnable-track { background: var(--color-raised); }",
+    good: ".a input::-webkit-slider-runnable-track { background: var(--color-slider-rail); }",
+  },
+  {
     rule: "raw-colour",
     path: "src/agent/a.css",
     bad: ".a { color: #fff; }",

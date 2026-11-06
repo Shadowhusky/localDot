@@ -1,7 +1,8 @@
 import type { AgentSettingsDocument } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
+import type { RoleChoice } from "./choices.ts";
 import { modelNames } from "./model-names.ts";
-import { currentOption, modelGroups, type PlanAccount } from "./model-options.ts";
+import { modelGroups, optionId, type PlanAccount } from "./model-options.ts";
 import { providerFixture } from "./testing.ts";
 
 const index = providerFixture();
@@ -43,7 +44,7 @@ describe("the models the composer can switch to", () => {
       ["Claude Code", ["sonnet", "opus"]],
       ["ChatGPT plan", ["plan-model"]],
     ]);
-    expect(groups[0]?.options[0]?.id).toBe(currentOption(saved));
+    expect(groups[0]?.options[0]?.id).toBe(optionId(saved.main as RoleChoice));
     expect(groups[1]?.options[0]?.choice).toEqual(saved.fast);
   });
 
@@ -156,5 +157,42 @@ describe("model names", () => {
   it("names a plan app's call by its maker's catalog, and keeps an unknown ID as it is", () => {
     expect(named.name("claude-code", "claude-sonnet-5-5")).toBe("Claude Sonnet 5.5");
     expect(named.name("some-key", "mystery-1")).toBe("mystery-1");
+  });
+
+  it("offers the task's own model first, leaves a model that's off out, and keeps the default on offer", () => {
+    const own: RoleChoice = { provider: "openai", model: "gpt-6.1-sol", key: "openai" };
+    const groups = modelGroups(
+      {
+        ...saved,
+        models: [
+          own,
+          {
+            provider: "anthropic",
+            model: "claude-haiku-4-5-20251001",
+            key: "anthropic",
+            off: true,
+          },
+        ],
+      },
+      index,
+      { chatgpt: signedOut, claudeCode: signedOut },
+      names,
+      own,
+    );
+    const ids = groups.flatMap((group) => group.options.map((option) => option.choice.model));
+    expect(ids[0]).toBe("gpt-6.1-sol");
+    expect(ids).toContain("claude-sonnet-5-5");
+    expect(ids).not.toContain("claude-haiku-4-5-20251001");
+  });
+  it("keeps a task on a model that has since been turned off", () => {
+    const own: RoleChoice = { provider: "openai", model: "gpt-6.1-sol", key: "openai", off: true };
+    const groups = modelGroups(
+      { ...saved, models: [own] },
+      index,
+      { chatgpt: signedOut, claudeCode: signedOut },
+      names,
+      own,
+    );
+    expect(groups[0]?.options[0]?.choice.model).toBe("gpt-6.1-sol");
   });
 });

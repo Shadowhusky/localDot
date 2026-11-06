@@ -103,7 +103,8 @@ describe("a quick question before the task's brain starts", () => {
     expect(JSON.parse(init?.body ?? "{}")).toMatchObject({
       model: "gpt-6-luna",
       instructions: "sys",
-      input: "prompt",
+      input: [{ role: "user", content: [{ type: "input_text", text: "prompt" }] }],
+      stream: true,
       reasoning: { effort: "none" },
     });
     expect(q.calls).toEqual([

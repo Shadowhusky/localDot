@@ -41,8 +41,9 @@ export interface BrowserDownloadEventsDeps {
     BrowserDownloadSpool,
     "reserve" | "rejected" | "completed" | "cancelled" | "read" | "remove" | "close"
   >;
-  // Acquires a current browser action lease and pins its daemon-supplied session binding.
-  admit(): DownloadAdmission;
+  // Acquires a current browser action lease and pins the session binding of the task whose page
+  // started the download.
+  admit(frameId: string): DownloadAdmission;
   cancel(guid: string): Promise<void>;
   // Starts containment. Call writersExited only after verified Chromium group exit.
   fence(): void;
@@ -111,7 +112,7 @@ export class BrowserDownloadEvents {
     };
     this.#records.set(record.guid, record);
     try {
-      record.admission = this.deps.admit();
+      record.admission = this.deps.admit(event.frameId);
       record.admission.check();
       record.admission.signal.throwIfAborted();
       // Retain only a hostname. Raw URLs, credentials, query strings and CDP filePath never escape.

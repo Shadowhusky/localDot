@@ -28,9 +28,8 @@ export function intentLeadMs(speed: Speed): number {
   return speed === "instant" ? 0 : INTENT_LEAD_MS / SPEED_FACTOR[speed];
 }
 
-// Research §4.3.6: readable for the first 60 characters, then fast with "+N more" in the pill.
+// Watched, the first 60 characters still appear one by one, several times faster than anyone types.
+// Past them, and with nobody watching, keys go as fast as the app takes them.
 export function typingPaceMs(speed: Speed, index: number): number {
-  if (speed === "instant") return 0;
-  if (speed === "fast") return 8;
-  return index < 60 ? 35 : 6;
+  return speed === "watch" && index < 60 ? 12 : 0;
 }

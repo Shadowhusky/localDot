@@ -123,6 +123,20 @@ function endpoint(raw: string): string {
   if (url.username || url.password || url.search || url.hash) throw new Error("invalid endpoint");
   return url.href.replace(/\/+$/, "");
 }
+// A custom endpoint's model is sent as it was typed, and a server that matches names exactly
+// refuses `gpt-6.1-Terra` for `gpt-6.1-terra`. A model the user's library holds for the same
+// endpoint (its key), differing only in case, gives its spelling.
+export function librarySpelling(choice: RoleChoice, library: readonly RoleChoice[]): RoleChoice {
+  if (!choice.key || !providerById(choice.provider)?.custom) return choice;
+  const known = new Set(
+    library
+      .filter((other) => other.key === choice.key && providerById(other.provider)?.custom)
+      .map((other) => other.model),
+  );
+  if (known.has(choice.model)) return choice;
+  const spelled = [...known].filter((id) => id.toLowerCase() === choice.model.toLowerCase());
+  return spelled.length === 1 && spelled[0] ? { ...choice, model: spelled[0] } : choice;
+}
 export function resolveRole(
   role: Role,
   raw: RoleChoice,

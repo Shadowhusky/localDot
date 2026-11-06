@@ -201,6 +201,18 @@ export class DockerClient {
   }
 }
 
+// Docker's non-TTY log stream: eight-byte frame headers, then the text. A malformed frame ends it.
+export function dockerLogLines(buffer: Buffer): string[] {
+  const text: string[] = [];
+  for (let offset = 0; offset + 8 <= buffer.length; ) {
+    const length = buffer.readUInt32BE(offset + 4);
+    if (offset + 8 + length > buffer.length) break;
+    text.push(buffer.subarray(offset + 8, offset + 8 + length).toString("utf8"));
+    offset += 8 + length;
+  }
+  return text.join("").split("\n").filter(Boolean);
+}
+
 function messageOf(text: string): string {
   try {
     return (JSON.parse(text) as { message?: string }).message ?? text;

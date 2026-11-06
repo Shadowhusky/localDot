@@ -8,6 +8,7 @@ export const ASK_FIELD_KINDS = [
   "longtext",
   "secret",
   "api_key",
+  "connect_app",
   "code",
   "choice",
   "multichoice",
@@ -71,9 +72,9 @@ export interface AskFieldRule {
   readonly required?: boolean;
 }
 
-// Kinds only an answer completes: what is typed into a sign-in, a code, a saved key, and a QR code
-// the user deals with.
-const ANSWER_ONLY = new Set<AskFieldKind>(["secret", "code", "api_key", "qr"]);
+// Kinds only an answer completes: what is typed into a sign-in, a code, a saved key, an app connected
+// and a QR code the user deals with.
+const ANSWER_ONLY = new Set<AskFieldKind>(["secret", "code", "api_key", "connect_app", "qr"]);
 
 // Whether a field needs an answer; any other the user may leave to dot. A question asked before
 // fields could be left blank says nothing about it, and needed every answer.
@@ -147,6 +148,8 @@ export function askValueProblem(
   switch (field.kind) {
     case "api_key":
       return value === true ? undefined : "Save the key to continue";
+    case "connect_app":
+      return value === true ? undefined : "Connect the app to continue";
     case "confirm":
       return value === true ? undefined : "Confirm to continue";
     case "qr":

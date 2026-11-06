@@ -31,7 +31,7 @@ test("a long conversation name never squeezes its status glyph or wraps its time
         if (!element) throw new Error(`Missing ${selector}`);
         return element;
       };
-      const point = part(".conversations-status").getBoundingClientRect();
+      const point = part(".conversation-avatar").getBoundingClientRect();
       const title = part(".conversations-title");
       const when = part(".conversations-when");
       return {
@@ -46,6 +46,6 @@ test("a long conversation name never squeezes its status glyph or wraps its time
     }),
   );
   expect(rows.length).toBeGreaterThan(1);
-  for (const row of rows) expect(row).toEqual({ point: [16, 16], gap: 12, cut: true, lines: 1 });
+  for (const row of rows) expect(row).toEqual({ point: [32, 32], gap: 8, cut: true, lines: 1 });
   await page.screenshot({ path: test.info().outputPath("conversations-long.png") });
 });

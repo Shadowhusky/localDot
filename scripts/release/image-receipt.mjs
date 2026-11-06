@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
+import { scanImage } from "./no-chrome.mjs";
 
 const run = (command, args) =>
   execFileSync(command, args, { encoding: "utf8", timeout: 30_000 }).trim();
@@ -18,7 +19,10 @@ for (const role of ["gate", "brain", "desktop", "browser"]) {
     image.Size <= 0
   )
     throw new Error("Unexpected built image");
-  images[role] = { imageId: image.Id, installedBytes: image.Size };
+  const { layers, entries, found } = await scanImage(`localdot/${role}:dev`);
+  if (found.length)
+    throw new Error(`Chrome is in the ${role} image: ${found.slice(0, 5).join(", ")}`);
+  images[role] = { imageId: image.Id, installedBytes: image.Size, noChrome: { layers, entries } };
 }
 await writeFile(
   process.argv[2],

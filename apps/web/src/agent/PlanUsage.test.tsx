@@ -90,6 +90,30 @@ function open(usage: PlanUsageFeed, groups: ModelGroup[] = [apiGroup, claudeGrou
 const plan = (panel: HTMLElement, name: RegExp) => within(panel).getByRole("region", { name });
 
 describe("plan usage in the model menu", () => {
+  it("says it is checking only for the first read, so timed reads don't flip its words", () => {
+    const empty = (checking: PlanUsageReply["checking"]) => feed([], checking).usage;
+    const view = (usage: PlanUsageFeed) => (
+      <ModelChip
+        name="Claude Sonnet"
+        groups={[apiGroup, claudeGroup]}
+        current="cc-sonnet"
+        choice={{ provider: "claude-code", model: "sonnet" }}
+        onChoose={vi.fn()}
+        onManage={vi.fn()}
+        usage={usage}
+      />
+    );
+    const { rerender } = render(view(empty(["claude-code"])));
+    fireEvent.click(screen.getByRole("button", { name: /^Model/ }));
+    const panel = screen.getByRole("dialog", { name: "Model and thinking" });
+    expect(panel.textContent).toContain("Checking usage…");
+    rerender(view(empty([])));
+    expect(panel.textContent).toContain("Usage appears after the first reply.");
+    rerender(view(empty(["claude-code"])));
+    expect(panel.textContent).toContain("Usage appears after the first reply.");
+    expect(panel.textContent).not.toContain("Checking usage…");
+  });
+
   it("shows each plan's 5-hour and weekly limits with when they reset", () => {
     const { usage, stop } = feed([claude([42, 12])]);
     const { chip, panel } = open(usage);

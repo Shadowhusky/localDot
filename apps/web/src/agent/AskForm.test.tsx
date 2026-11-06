@@ -60,6 +60,68 @@ it("answers a sign-in with its fields, the password masked and gone once sent", 
   expect(f.container.innerHTML).not.toContain("correct horse");
 });
 
+const touchscreen = () =>
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query.includes("pointer: coarse"),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+
+it("on a phone, sends a whole code by itself, once for each value", async () => {
+  touchscreen();
+  try {
+    const answer = vi.fn(async () => false);
+    render(
+      <AskForm
+        draft={
+          new AskDraft({
+            ...login,
+            fields: [{ id: "code", kind: "code", label: "Code", length: 6 }],
+            submit: "Send code",
+          })
+        }
+        layout="thread"
+        answer={answer}
+      />,
+    );
+    const cells = screen.getAllByRole("textbox", { name: /^Code, \d of 6$/ }) as HTMLInputElement[];
+    await act(async () => {
+      fireEvent.paste(cells[0] as HTMLInputElement, { clipboardData: { getData: () => "48151" } });
+    });
+    expect(answer).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.paste(cells[0] as HTMLInputElement, { clipboardData: { getData: () => "481516" } });
+    });
+    expect(answer).toHaveBeenCalledExactlyOnceWith({ askId: ASK, fields: { code: "481516" } });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it("offers a phone's text-message code on a code of unknown length, and a way to paste", async () => {
+  touchscreen();
+  const readText = vi.fn(async () => " 777-888 ");
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { readText } });
+  try {
+    const f = mount({
+      ...login,
+      fields: [{ id: "code", kind: "code", label: "Code" }],
+      submit: "Send code",
+    });
+    const field = screen.getByRole("textbox", { name: "Code" });
+    expect(field.getAttribute("autocomplete")).toBe("one-time-code");
+    expect(field.getAttribute("enterkeyhint")).toBe("send");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Paste code" }));
+    });
+    expect(f.draft.state().draft.values.code).toBe("777-888");
+    expect(f.answer).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("fills every code cell from one paste and offers the text message's code", () => {
   const f = mount({
     ...login,

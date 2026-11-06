@@ -150,7 +150,7 @@ export function hudFor({
     return hud(
       "unavailable",
       "Unavailable",
-      "Use Replace computer to recover on a verified fresh computer. Old files are retained.",
+      "Your computer needs a fresh start. Your apps, settings and files are kept.",
       "retry",
       false,
     );

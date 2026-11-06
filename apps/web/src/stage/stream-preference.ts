@@ -43,7 +43,7 @@ export function chooseStreamPreference(next: StreamPreference): boolean {
 const names: Record<StreamPreference, string> = { auto: "Auto", sharp: "Sharp", smooth: "Smooth" };
 const details: Record<StreamPreference, string> = {
   auto: "Adapts to your connection and device.",
-  sharp: "Prioritizes crisp text when the stream slows down.",
+  sharp: "Keeps text crisp while the screen moves, using more data.",
   smooth: "Prioritizes fluid motion when the stream slows down.",
 };
 type Notify = (notice: { id: string; title: string; description: string }) => void;

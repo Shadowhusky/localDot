@@ -15,7 +15,7 @@ import { BootConfig } from "./tool-api.ts";
 const draft = {
   name: "Morning bills",
   instruction: "Check my utility and bank sites for new statements and save the PDFs to Bills.",
-  when: { kind: "weekdays", time: "08:30" },
+  schedules: [{ every: 1, unit: "week" as const, weekdays: [1, 2, 3, 4, 5], times: ["08:30"] }],
 };
 
 describe("routine drafts", () => {
@@ -25,10 +25,18 @@ describe("routine drafts", () => {
   it.each([
     [{ ...draft, active: true }],
     [{ ...draft, budget_usd: 100 }],
-    [{ ...draft, when: { kind: "daily", time: "24:00" } }],
-    [{ ...draft, when: { kind: "once", date: "2026-02-30", time: "09:00" } }],
-    [{ ...draft, when: { kind: "hours", every: 5 } }],
-    [{ ...draft, when: { kind: "weekly", days: [1, 1], time: "09:00" } }],
+    [{ ...draft, schedules: [{ every: 1, unit: "day", times: ["24:00"] }] }],
+    [
+      {
+        ...draft,
+        schedules: [{ every: 1, unit: "day", times: ["09:00"] }],
+        start: "2026-02-30",
+        until: "2026-02-30",
+      },
+    ],
+    [{ ...draft, schedules: [{ every: 24, unit: "hour" }] }],
+    [{ ...draft, schedules: [] }],
+    [{ ...draft, schedules: [{ every: 1, unit: "week", weekdays: [1, 1], times: ["09:00"] }] }],
     [{ ...draft, tz: "Mars/Olympus_Mons" }],
     [{ ...draft, name: "two\nlines" }],
     [{ ...draft, instruction: "   " }],
@@ -106,8 +114,9 @@ describe("origins and runs", () => {
       kind: "routine",
       name: "Morning bills",
       instruction: draft.instruction,
-      when: draft.when,
+      schedules: draft.schedules,
       tz: "Europe/London",
+      start: "2026-10-08",
       until: null,
       profile: "ask_first",
       notify: "changes",

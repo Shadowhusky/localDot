@@ -339,3 +339,20 @@ func TestForgetLeavesTheDotsVaultEmpty(t *testing.T) {
 		t.Fatalf("status: %d %v", code, body)
 	}
 }
+
+func TestKeysCopyKeepsALoginsTap(t *testing.T) {
+	src, dst := keysDot(t), newDot(t)
+	src.s.VerifyPeer = acceptPeer
+	if err := src.s.Logins.Put("https://tap.example.com", vault.Login{Username: "tap", Password: "fixture password", Confirm: true}); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := src.call(t, "POST", "/v1/keys/copy", map[string]any{"home": dst.home}); code != 200 || body["logins"] != 2.0 {
+		t.Fatalf("copy: %d %v", code, body)
+	}
+	if login, err := dst.s.Logins.Get("https://tap.example.com"); err != nil || !login.Confirm {
+		t.Fatalf("login = %+v, %v", login, err)
+	}
+	if login, err := dst.s.Logins.Get("https://github.com"); err != nil || login.Confirm {
+		t.Fatalf("login = %+v, %v", login, err)
+	}
+}

@@ -37,6 +37,21 @@ from mathutils.geometry import barycentric_transform
 from mathutils.kdtree import KDTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# The wearables the site shows; the app's plates go further.
+SITE_WEARABLES = (
+    "hoodie",
+    "cap",
+    "sunglasses",
+    "bow",
+    "star-pin",
+    "round-glasses",
+    "mustache",
+    "suit",
+    "scarf",
+    "headphones",
+    "mortarboard",
+    "beret",
+)
 sys.path.insert(0, HERE)
 import build_plates as bp  # noqa: E402
 import build_wearables as bw  # noqa: E402
@@ -905,7 +920,7 @@ def main():
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
-    ap.add_argument("--only", default=",".join(bw.WEARABLES))
+    ap.add_argument("--only", default=",".join(SITE_WEARABLES))
     ap.add_argument("--samples", type=int, default=256)
     ap.add_argument("--cfg", default=os.path.join(HERE, "plates.json"))
     args = ap.parse_args(argv)

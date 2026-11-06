@@ -122,6 +122,7 @@
   }
 
   .ui-file-row {
+    container: file-row / inline-size;
     display: flex;
     align-items: center;
     gap: calc(var(--spacing) * 1.5);
@@ -229,20 +230,11 @@
   .ui-file-name {
     display: flex;
     min-width: 0;
+    overflow: hidden;
     font:
       var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
     letter-spacing: var(--text-body--letter-spacing);
     white-space: nowrap;
-  }
-
-  .ui-file-name-head {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .ui-file-name-tail {
-    flex-shrink: 0;
   }
 
   .ui-file-meta {
@@ -258,6 +250,56 @@
     flex-shrink: 0;
     align-items: center;
     gap: calc(var(--spacing) * 1.5);
+  }
+
+  /* A row in a side panel or on a phone gives its room to the name: Open waits in the row's menu. */
+  @container file-row (width < 400px) {
+    .ui-file-open {
+      display: none;
+    }
+  }
+
+  /* A file that can't be shown where it is: its own row on the well. Several actions take a line of
+     their own on a narrow card. */
+  .ui-file-card {
+    container: file-card / inline-size;
+    min-width: 0;
+    border-radius: var(--radius-md);
+    background-color: var(--color-well);
+    box-shadow: inset 0 0 0 1px var(--color-hairline);
+  }
+
+  @container file-card (width < 400px) {
+    .ui-file-row:has(.ui-file-actions > :nth-child(2)) {
+      flex-wrap: wrap;
+      padding-block-end: calc(var(--spacing) * 2);
+      padding-inline-end: calc(var(--spacing) * 2);
+
+      & > .ui-file-main {
+        flex-basis: 100%;
+        min-height: calc(var(--spacing) * 12);
+      }
+
+      & > .ui-file-actions {
+        flex: 1;
+        padding-inline-start: calc(var(--spacing) * 2);
+      }
+
+      & > .ui-file-actions > .ui-button {
+        flex: 1;
+      }
+    }
+  }
+
+  .ui-file-card-problem {
+    padding: 0 calc(var(--spacing) * 2) calc(var(--spacing) * 2.5);
+    color: var(--color-fg-1);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    text-wrap: pretty;
+  }
+
+  .ui-file-card-detail {
+    color: var(--color-fg-3);
   }
 
   /* Compact: one line 40 px tall, the meta beside the name and a 30 px tile, untracked so a four
@@ -377,6 +419,48 @@
   .ui-thumbnail[data-pressed] {
     scale: 0.97;
     transition-duration: var(--dur-press);
+  }
+
+  /* A picture is pressed anywhere to open it; the glyph at its centre says so. */
+  .ui-picture-cover {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-fg-1);
+    cursor: zoom-in;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .ui-picture-cover:focus-visible {
+    outline: var(--focus-width) solid var(--color-fg-1);
+    outline-offset: calc(var(--focus-width) * -1);
+  }
+
+  .ui-picture-cover-glyph {
+    display: grid;
+    place-items: center;
+    width: calc(var(--spacing) * 8);
+    height: calc(var(--spacing) * 8);
+    border-radius: var(--radius-full);
+    background-color: var(--color-glass-solid);
+    box-shadow: var(--shadow-glass);
+    opacity: 0;
+    transition: opacity var(--dur-fade) var(--ease-enter);
+  }
+
+  .ui-picture-cover:is(:hover, :focus-visible) > .ui-picture-cover-glyph {
+    opacity: 1;
+  }
+
+  @media (hover: none), (pointer: coarse) {
+    .ui-picture-cover-glyph {
+      opacity: 1;
+    }
   }
 
   .ui-thumbnail:focus-visible {
@@ -631,6 +715,18 @@
     overflow: visible;
   }
 
+  /* Sized to its content from the height it is given, whatever that content does while it is open. */
+  .ui-collapse[data-fit] {
+    display: block;
+    height: 0;
+    overflow: hidden;
+    transition-property: height;
+  }
+
+  .ui-collapse[data-fit] > .ui-collapse-inner {
+    overflow: visible;
+  }
+
   .ui-disclosure-trigger {
     position: relative;
     display: flex;
@@ -783,6 +879,10 @@
     transition:
       --ui-fade-top var(--dur-fade) var(--ease-standard),
       --ui-fade-bottom var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-scroll-area[data-chains] {
+    overscroll-behavior: auto;
   }
 
   .ui-scroll-area[data-edge-top]:not([data-fade="bottom"]) {
@@ -946,7 +1046,19 @@
     white-space: nowrap;
   }
 
+  /* A row's value words give way before a short label does. */
+  .ui-group-row-trailing:has(> .ui-group-row-value) {
+    max-width: 50%;
+  }
+
+  .ui-group-row-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .ui-group-row-chevron {
+    flex: none;
     color: var(--color-fg-4);
     stroke-width: 2;
     transition: transform var(--dur-default) var(--ease-spring);
@@ -1004,6 +1116,26 @@
 
   .ui-middle > :nth-child(2) {
     flex: none;
+  }
+
+  /* The name's two ends stay whole; its ellipsis always has room, so the ends never seem to meet. */
+  .ui-middle-name {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: pre;
+  }
+
+  .ui-middle-name > span {
+    flex: none;
+  }
+
+  .ui-middle-name > .ui-middle-name-between {
+    flex: 0 1 auto;
+    min-width: 1em;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .ui-tile {

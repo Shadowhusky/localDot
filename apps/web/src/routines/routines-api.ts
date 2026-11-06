@@ -1,4 +1,5 @@
 import {
+  ConversationOf,
   Routine,
   RoutineAppEvent,
   type RoutineConfirm,
@@ -45,6 +46,17 @@ export function routinesApi(api: ApiClient) {
     setStartAtLogin: async (enabled: boolean) =>
       LoginReply.parse(await api.put("/api/start-at-login", { enabled })).state,
   };
+}
+
+// The latest task of the conversation a routine's run went on in; null for any other task, or when
+// the daemon can't say.
+export async function conversationOfRun(api: ApiClient, sessionId: string): Promise<string | null> {
+  try {
+    const found = ConversationOf.parse(await api.get(`/api/conversations/${sessionId}/latest`));
+    return found.routine ? found.sessionId : null;
+  } catch {
+    return null;
+  }
 }
 
 // Routine changes from every device and every run, as they happen.

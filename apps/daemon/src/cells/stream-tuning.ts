@@ -7,7 +7,7 @@ import { WebSocket } from "ws";
 import type { StreamEndpoint } from "./types.ts";
 
 // The cell image's own start values (SELKIES_FRAMERATE, Selkies' CRF default): what a capture
-// runs at while no visible viewer asks for less.
+// runs at while no visible viewer asks for anything.
 export const FULL_QUALITY: StreamQuality = { framerate: 60, crf: 25 };
 // Changes are spaced at least this far apart, however often the viewers change their minds.
 const APPLY_GAP_MS = 2000;
@@ -26,13 +26,14 @@ export interface ViewerWish {
 // viewer's wish: the lowest frame rate and the highest CRF any of them asks for. A hidden page, or
 // one whose client paused its video, asks for nothing.
 export function sharedQuality(viewers: Iterable<ViewerWish>): StreamQuality {
-  let { framerate, crf } = FULL_QUALITY;
+  let { framerate } = FULL_QUALITY;
+  let crf: number | undefined;
   for (const { paused, report } of viewers) {
     if (paused || !report?.visible) continue;
     framerate = Math.min(framerate, report.framerate);
-    crf = Math.max(crf, report.crf);
+    crf = Math.max(crf ?? report.crf, report.crf);
   }
-  return { framerate, crf };
+  return { framerate, crf: crf ?? FULL_QUALITY.crf };
 }
 
 export interface TunedViewer {

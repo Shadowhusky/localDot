@@ -249,6 +249,22 @@ describe("missing-input handoff", () => {
       "Never use a confirmation question to bypass the action-approval system",
     );
   });
+
+  // A browser keeps a sign-in's code screen between tasks; its old code has long expired.
+  it("asks for a code only after this task had one sent", () => {
+    for (const hands of MODES) {
+      const rules = workingRules(hands);
+      expect(rules).toContain("Ask for a code only once this task had one sent");
+      expect(rules).toContain(
+        "for a stale code screen or an expired code, Resend or re-enter the number first",
+      );
+      expect(rules).not.toContain("Never restart sign-in");
+    }
+    expect(HUMAN_INPUT_GUIDANCE).toContain("Ask only for a code this task had sent");
+    expect(HUMAN_INPUT_GUIDANCE).toContain(
+      "send a new code first (Resend, or edit the number and submit it)",
+    );
+  });
 });
 
 it("tells every harness the app adds Other, what required means and how a skip comes back", () => {
@@ -261,6 +277,15 @@ it("tells every harness the app adds Other, what required means and how a skip c
     "use your recommended or default choice, state it as an assumption, and don't ask again unless you're blocked",
   ])
     expect(ASK_FORM_GUIDANCE, rule).toContain(rule);
+});
+
+// Evidence: dot asked for a phone number with its country code, was given a UK number written
+// the UK way, and then asked "Is that a UK number (+44)?".
+it("tells every harness to ask once and take an answer as given", () => {
+  expect(ASK_FORM_GUIDANCE).toContain("Ask once, with every field you need.");
+  expect(ASK_FORM_GUIDANCE).toContain(
+    "Take an answer as given: never ask to confirm what it states or plainly implies",
+  );
 });
 
 it("distinguishes routine visible verification from evidence-based manual handoff", () => {

@@ -33,3 +33,9 @@ const read = () => current;
 export function useReplayPresence(): ReplayPresence | null {
   return useSyncExternalStore(subscribe, read, read);
 }
+
+// Whether Replay has said yet what dot does, without following each thing it does.
+const hasPresence = () => current !== null;
+export function useHasReplayPresence(): boolean {
+  return useSyncExternalStore(subscribe, hasPresence, hasPresence);
+}

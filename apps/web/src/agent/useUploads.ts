@@ -14,6 +14,10 @@ export interface UploadRow {
   readonly path?: string;
   readonly explanation?: string;
   readonly preview?: string;
+  // A text the composer moved out of its field: what its chip is called, and the words, which stay
+  // here so they can be read and survive a change of computer.
+  readonly label?: string;
+  readonly text?: string;
 }
 const previewOf = (file: File) =>
   file.type.startsWith("image/") &&
@@ -75,10 +79,22 @@ export function useUploads(props: Owner) {
     const old = current.current;
     current.current = { api, cellId, ready, enabled };
     if (old.api !== api || old.cellId !== cellId) {
-      const removed = list.current.length > 0;
+      const texts = list.current.filter((row) => row.text !== undefined);
+      const removed = list.current.length > texts.length;
       pause();
       sources.current.clear();
-      update([]);
+      for (const row of texts)
+        sources.current.set(row.id, {
+          file: new File([row.text ?? ""], row.name, { type: "text/plain" }),
+          uploadId: crypto.randomUUID(),
+        });
+      update(
+        texts.map(({ path: _path, uploaded: _uploaded, explanation: _why, ...row }) => ({
+          ...row,
+          phase: "pending",
+        })),
+      );
+      pumpRef.current();
       if (removed)
         setNotice("Switched computers. Files already uploaded stay on the previous computer.");
     } else if (old.ready && !ready) pause();
@@ -197,6 +213,19 @@ export function useUploads(props: Owner) {
     update([...list.current, ...added]);
     void pump();
   };
+  // A text moved out of the field goes whenever it can: it waits for a computer that isn't ready,
+  // and the field's words never have to stay behind for a file limit.
+  const addText = (file: File, label: string, text: string) => {
+    const id = ++nextId.current;
+    sources.current.set(id, { file, uploadId: crypto.randomUUID() });
+    setProblem(null);
+    setNotice(null);
+    update([
+      ...list.current,
+      { id, name: file.name, bytes: file.size, phase: "pending", label, text },
+    ]);
+    void pump();
+  };
   // Files a message already carried, back in the draft: they are on the computer, so nothing
   // uploads, and removing one leaves the file where it is.
   const restore = (paths: readonly string[]) => {
@@ -241,6 +270,7 @@ export function useUploads(props: Owner) {
     problem,
     notice,
     select,
+    addText,
     restore,
     remove,
     retry,

@@ -54,10 +54,11 @@ describe("side questions", () => {
       { path: `/api/agent/sessions/${SESSION}/side-question`, body: { question: "What now?" } },
     ]);
     const cases: [number, string, RegExp, boolean][] = [
-      [409, "no-fast-model", /need a Fast model/, true],
-      [409, "fast-model-not-running", /answers through a running task/, true],
+      [409, "no-model", /Choose a model/, true],
+      [409, "no-spare-model", /one request at a time/, true],
       [409, "busy", /Wait for the answer/, false],
-      [502, "no-answer", /didn't answer/, false],
+      [502, "no-answer", /No model could answer/, false],
+      [502, "no-answer\nanswered 400: Input must be a list", /Input must be a list/, false],
       [400, "invalid user text", /up to 2,000 characters/, false],
     ];
     for (const [status, text, said, setup] of cases) {
@@ -103,6 +104,36 @@ describe("side questions", () => {
     expect(view.result.current.aside).toBeNull();
   });
 
+  it("says which model answered and why the one asked first didn't", () => {
+    render(
+      <SideNote
+        plans={[]}
+        usage={null}
+        modelName={(_provider: string, model: string) => model}
+        onDismiss={vi.fn()}
+        onRetry={vi.fn()}
+        onModels={vi.fn()}
+        onSpending={vi.fn()}
+        aside={{
+          kind: "question",
+          id: 1,
+          sessionId: SESSION,
+          question: "Which airline?",
+          phase: "answered",
+          answer: {
+            answer: "TAP.",
+            provider: "custom",
+            model: "gpt-6.1-sol",
+            failed: { model: "gpt-6.1-terra", reason: "answered 400: Input must be a list" },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Side question" }).textContent).toContain(
+      "Answered by gpt-6.1-sol, as gpt-6.1-terra didn't: answered 400: Input must be a list",
+    );
+  });
+
   it("marks the answer as the user's alone, and offers the fix for what failed", () => {
     const onDismiss = vi.fn();
     const onModels = vi.fn();
@@ -132,7 +163,7 @@ describe("side questions", () => {
     const note = screen.getByRole("region", { name: "Side question" });
     expect(note.textContent).toContain("Only you see this. dot doesn't.");
     expect(note.querySelector("strong")?.textContent).toBe("TAP");
-    expect(note.textContent).toContain("Answered by Claude Haiku, your Fast model");
+    expect(note.textContent).toContain("Answered by Claude Haiku");
     fireEvent.click(screen.getByRole("button", { name: "Close side question" }));
     expect(onDismiss).toHaveBeenCalledOnce();
     view.rerender(
@@ -144,13 +175,13 @@ describe("side questions", () => {
           sessionId: SESSION,
           question: "Why?",
           phase: "failed",
-          problem: "Side questions need a Fast model.",
+          problem: "Choose a model for this task first.",
           setup: true,
         }}
       />,
     );
-    expect(screen.getByRole("alert").textContent).toBe("Side questions need a Fast model.");
-    fireEvent.click(screen.getByRole("button", { name: "Choose a Fast model" }));
+    expect(screen.getByRole("alert").textContent).toBe("Choose a model for this task first.");
+    fireEvent.click(screen.getByRole("button", { name: "Choose a model" }));
     expect(onModels).toHaveBeenCalledOnce();
     view.rerender(<SideNote {...props} aside={{ kind: "usage", id: 3 }} />);
     expect(screen.getByRole("region", { name: "Plan usage" }).textContent).toContain(

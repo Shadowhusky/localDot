@@ -4,6 +4,8 @@ import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { compareReleaseVersions } from "../../packages/protocol/src/app-update.ts";
 import { releaseNotesProblems } from "../../packages/protocol/src/release-notes.ts";
+// @ts-expect-error: a plain script, shared with the image workflow, which has no types.
+import { unprovenImages } from "../release/no-chrome.mjs";
 import { authenticatedCatalog, type CatalogNote, validateCatalog } from "./catalog.ts";
 
 /** The notes a verified package ships, checked against its build inventory and the notes rules.
@@ -33,6 +35,8 @@ export async function packageNotes(
 export async function assemble(input: {
   packages: string[];
   images: unknown;
+  // scripts/release/no-chrome.mjs's evidence that no image in `images` contains Chrome.
+  noChrome: string;
   key: string;
   output: string;
   // Freeze the old channel at the bridge release; do not strand older verifiers.
@@ -44,6 +48,11 @@ export async function assemble(input: {
     throw new Error("The release signing key must be an owner-only local file.");
   const key = createPrivateKey(await readFile(input.key));
   if (key.asymmetricKeyType !== "ed25519") throw new Error("An Ed25519 release key is required.");
+  const unproven = unprovenImages(input.images, JSON.parse(await readFile(input.noChrome, "utf8")));
+  if (unproven.length)
+    throw new Error(
+      `These images have no clean scan for Chrome: ${unproven.join(", ")}. Run scripts/release/no-chrome.mjs.`,
+    );
   const entries = await Promise.all(
     input.packages.map(async (dir) => {
       const receipt = JSON.parse(await readFile(join(dir, "artifact.json"), "utf8"));
@@ -54,6 +63,7 @@ export async function assemble(input: {
         check.sha512 !== receipt.artifact.sha512 ||
         [
           "inventory",
+          "noChrome",
           "cli",
           "nativeImageModule",
           "helper",

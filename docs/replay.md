@@ -33,6 +33,10 @@ Left/Right scrub one second and Home/End seek to the range edges.
 
 ## Privacy and gaps
 
+When several tasks work at once, each task's recording shows only its own window. The time another
+task's window was on the screen is a gap, marked as such, and the picture holds until the task's
+window is back.
+
 No video or observe screenshots are recorded while you have taken control. Replay and export
 hold the preceding picture and show **You had control here** for that interval. A lost stream,
 full disk, recording size cap, or recorder failure is shown as a gap rather than silently hidden.

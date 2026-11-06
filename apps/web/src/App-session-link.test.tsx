@@ -184,7 +184,52 @@ it("lands on the question a tapped notification's task asks", async () => {
   expect(document.activeElement?.textContent).toBe("Which account pays it?");
 });
 
-it("opens a tapped notification's other task in Replay once the live one is known", async () => {
+it("opens another live task at its decision, not its recording, from the task on show", async () => {
+  const d = daemon();
+  const current = ulid();
+  // The computer runs both; it names the chosen conversation's own.
+  let chosen = current;
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    if (path === "/api/conversation/continue") {
+      chosen = JSON.parse(String(init?.body)).sessionId;
+      return json({ sessions: [chosen], more: false });
+    }
+    if (path === "/api/conversation") return json({ sessions: [chosen], more: false });
+    if (path === `/api/cells/${d.cellId}/live`)
+      return json({ sessionId: chosen, sessions: [current, d.sessionId], current: chosen });
+    if (path === `/api/agent/sessions/${current}`)
+      return json({ sessionId: current, cellId: d.cellId, status: "running", toolCalls: 1 });
+    if (path === `/api/sessions/${current}/clock`) return json({ originMicros: 0 });
+    if (path === `/api/sessions/${current}/history`) return new Response("");
+    return d.fetchImpl(input, init);
+  }) as typeof fetch;
+  render(<App fetchImpl={fetchImpl} />);
+  const status = await socket(`/api/cells/${d.cellId}/status`);
+  act(() => {
+    status.onopen?.();
+    status.onmessage?.({ data: JSON.stringify(d.cell) });
+  });
+  await socket(`/api/sessions/${current}/stream`);
+  // A notification tapped in an open window, or a toast's Open.
+  act(() => {
+    window.location.hash = `#session=${d.sessionId}`;
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+  const feed = await socket(`/api/sessions/${d.sessionId}/stream`);
+  act(() => {
+    feed.onopen?.();
+    for (const event of d.events) feed.onmessage?.({ data: JSON.stringify(event) });
+  });
+  await presentFrame();
+  const title = await screen.findByRole("heading", { name: "Send the statement" });
+  await waitFor(() => expect(document.activeElement).toBe(title));
+  expect(chosen).toBe(d.sessionId);
+  expect(new URLSearchParams(window.location.search).get("replay")).toBeNull();
+  expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
+});
+
+it("opens a tapped notification's task no conversation can take up in Replay", async () => {
   const d = daemon();
   const older = ulid();
   window.history.replaceState(null, "", `/#session=${older}`);

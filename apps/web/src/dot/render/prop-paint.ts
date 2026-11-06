@@ -3,11 +3,12 @@ import { clamp, smoothstep } from "../engine/math.ts";
 import { hash01 } from "../engine/rng.ts";
 import {
   BOOK,
+  type CrewMore,
   commandChars,
   dragSway,
   FILE_EVERY_MS,
   flipOf,
-  HELPER_SLOTS,
+  HAPPY_MS,
   type HelperPose,
   handAt,
   KEYBOARD,
@@ -60,13 +61,14 @@ export function paintProps(
   xenon: string,
   plate: CanvasImageSource | null = null,
 ): void {
-  if (!pose.props.length) return;
+  if (!pose.props.length && !pose.helpers.length && !pose.crewMore) return;
   const ball: Ball = {
     x: 32 + pose.body.x,
     y: 56 + pose.body.y - 24 * pose.body.sy,
     r: 24 * pose.body.sx,
   };
   const accent = mix(PROP.accentRest, xenon, pose.plate.rim * (1 - pose.plate.dim));
+  if (layer === "back") crew(ctx, ball, pose, plate);
   for (const p of pose.props) {
     ctx.save();
     ctx.lineJoin = "round";
@@ -75,20 +77,13 @@ export function paintProps(
       if (p.tool === "thinking") sparks(ctx, p, ball, accent, "back");
       else if (p.tool === "needs-you") hand(ctx, p, ball);
     } else {
-      PAINT[p.tool]?.(ctx, p, ball, accent, pose, plate);
+      PAINT[p.tool]?.(ctx, p, ball, accent, pose);
     }
     ctx.restore();
   }
 }
 
-type Painter = (
-  ctx: Context,
-  p: PropPose,
-  ball: Ball,
-  accent: string,
-  pose: DotPose,
-  plate: CanvasImageSource | null,
-) => void;
+type Painter = (ctx: Context, p: PropPose, ball: Ball, accent: string, pose: DotPose) => void;
 
 const PAINT: Partial<Record<PropPose["tool"], Painter>> = {
   typing: (ctx, p, ball, accent, pose) => keyboard(ctx, p, ball, accent, pose.fine),
@@ -108,7 +103,6 @@ const PAINT: Partial<Record<PropPose["tool"], Painter>> = {
   filing: (ctx, p, ball, accent) => folder(ctx, p, ball, accent),
   recalling: (ctx, p, ball, accent) => book(ctx, p, ball, accent),
   remembering: (ctx, p, ball, accent) => book(ctx, p, ball, accent),
-  delegating: (ctx, p, ball, _accent, pose, plate) => helpers(ctx, p, ball, pose.helpers, plate),
 };
 
 // A prop comes out of dot's edge: from `from` to its place, growing and fading in on the prop's
@@ -1183,44 +1177,74 @@ function calendar(ctx: Context, p: PropPose, ball: Ball, accent: string): void {
   ctx.fill();
 }
 
-// Sub-agents at work: a small dot hops out of dot for each and floats beside it, bobbing, its eyes
-// on dot. When its work is done it smiles if it went well, and pops back in.
-function helpers(
-  ctx: Context,
-  p: PropPose,
-  ball: Ball,
-  list: readonly HelperPose[],
-  plate: CanvasImageSource | null,
-): void {
-  for (const h of list) {
-    const slot = HELPER_SLOTS[h.slot];
-    if (!slot) continue;
-    const out = h.amount * p.amount;
-    const from = edge(ball, Math.atan2(slot.y - ball.y, slot.x - ball.x), 0.55);
-    let { x, y } = slot;
-    let r = slot.r;
+// Sub-agents at work: behind dot, so each comes out from under it and goes back the same way, a small
+// dot hops out for each and sits on the arc, its eyes on dot. When its work is done it smiles and
+// hops back if it went well, or droops and fades where it is if it failed.
+function crew(ctx: Context, ball: Ball, pose: DotPose, plate: CanvasImageSource | null): void {
+  ctx.save();
+  ctx.imageSmoothingQuality = "high";
+  for (const h of pose.helpers) {
+    const out = Math.min(h.amount, 1);
+    const sad = h.end && !h.end.ok ? (h.still ? 1 : smoothstep(0, 220, h.end.age)) : 0;
+    let { x, y } = h;
+    let r = h.r;
     ctx.save();
-    if (p.still) ctx.globalAlpha *= out;
-    else {
-      x = from.x + (slot.x - from.x) * out;
-      y = from.y + (slot.y - from.y) * out - 4.5 * Math.sin(Math.PI * out);
-      r *= 0.35 + 0.65 * out;
-      ctx.globalAlpha *= Math.min(1, out * 1.6);
-      // Out and settled, it bobs gently, each to its own time.
-      const period = 2000 + 700 * h.seed;
-      const bob = 0.5 - 0.5 * Math.cos((2 * Math.PI * (h.age + 2000 * h.seed)) / period);
-      y -= 0.7 * bob * smoothstep(0.85, 1, h.amount);
+    if (h.still) ctx.globalAlpha *= out * (1 - 0.35 * sad);
+    else if (sad > 0) {
+      y += 1.4 * sad + 4 * (1 - out);
+      r *= 0.8 + 0.2 * out;
+      ctx.globalAlpha *= out * (1 - 0.35 * sad);
+    } else {
+      const from = edge(ball, Math.atan2(h.y - ball.y, h.x - ball.x), 0.72);
+      x = from.x + (h.x - from.x) * h.amount;
+      y = from.y + (h.y - from.y) * h.amount - 3 * Math.sin(Math.PI * out);
+      r *= 0.45 + 0.55 * h.amount;
+      ctx.globalAlpha *= Math.min(1, out * 2);
+      if (h.fine) {
+        // Settled, the crew rise and fall in a slow ripple along the arc.
+        const ripple = Math.sin((2 * Math.PI * (h.age - 260 * h.index)) / 3400);
+        y -= 0.45 * ripple * smoothstep(0.9, 1, h.amount);
+      }
+      if (h.end?.ok) y -= 1.2 * Math.sin(Math.PI * clamp(h.end.age / HAPPY_MS, 0, 1));
     }
     const s = r / 24;
     if (plate) ctx.drawImage(plate, x - 32 * s, y - 32 * s, 64 * s, 64 * s);
     else pearl(ctx, x, y, r);
-    helperEyes(ctx, x, y, s, h, ball, p.still);
+    if (r > 4) helperEyes(ctx, x, y, s, h, ball, sad);
     ctx.restore();
   }
+  if (pose.crewMore) crewMore(ctx, pose.crewMore, plate);
+  ctx.restore();
 }
 
-// A helper's eyes, a small copy of dot's own, turned toward dot; they blink now and then and become
-// smiles when its work is done well.
+// The rest of the crew: the same small body with how many more there are on it where that can be
+// read, and three points where it can't.
+function crewMore(ctx: Context, m: CrewMore, plate: CanvasImageSource | null): void {
+  const out = Math.min(m.amount, 1);
+  const r = m.still ? m.r : m.r * (0.6 + 0.4 * m.amount);
+  const s = r / 24;
+  ctx.save();
+  ctx.globalAlpha *= out;
+  if (plate) ctx.drawImage(plate, m.x - 32 * s, m.y - 32 * s, 64 * s, 64 * s);
+  else pearl(ctx, m.x, m.y, r);
+  ctx.fillStyle = PROP.ink;
+  if (m.fine) {
+    ctx.font = `600 ${(r * (m.count > 9 ? 0.92 : 1.12)).toFixed(2)}px system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`+${Math.min(m.count, 99)}`, m.x, m.y + 0.06 * r);
+  } else {
+    for (const side of [-1, 0, 1]) {
+      ctx.beginPath();
+      ctx.arc(m.x + side * 0.42 * r, m.y, 0.15 * r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// A helper's eyes, a small copy of dot's own, turned toward dot; they blink now and then where there
+// is detail to show it, become smiles when its work is done well and droop when it failed.
 function helperEyes(
   ctx: Context,
   x: number,
@@ -1228,14 +1252,16 @@ function helperEyes(
   s: number,
   h: HelperPose,
   toward: Point,
-  still: boolean,
+  sad: number,
 ): void {
-  const happy = h.end?.ok ? (still ? 1 : smoothstep(0, 160, h.end.age)) : 0;
+  const happy = h.end?.ok ? (h.still ? 1 : smoothstep(0, 160, h.end.age)) : 0;
   const d = Math.hypot(toward.x - x, toward.y - y) || 1;
   const gx = (1.8 * (toward.x - x)) / d;
   const gy = (1.2 * (toward.y - y)) / d;
-  const cycle = still ? 1000 : (h.age + 4100 * h.seed) % 3900;
+  const cycle = h.still || !h.fine ? 1000 : (h.age + 4100 * h.seed) % 3900;
   const blink = cycle < 150 ? Math.sin((Math.PI * cycle) / 150) : 0;
+  // Where a helper is only a few pixels across its eyes grow, as dot's do at the badge size.
+  const grow = h.fine ? 1 : 1.25;
   ctx.fillStyle = PROP.ink;
   ctx.strokeStyle = PROP.ink;
   ctx.lineCap = "round";
@@ -1243,18 +1269,20 @@ function helperEyes(
     const ex = x + (side * 5.5 + gx) * s;
     const ey = y + (-4.5 + gy) * s;
     if (happy < 1) {
-      const w = 5.4 * s;
-      const hgt = 10 * s * (1 - 0.85 * blink);
+      const w = 5.4 * s * grow;
+      const hgt = 10 * s * grow * (1 - 0.85 * blink) * (1 - 0.55 * sad);
       ctx.save();
       ctx.globalAlpha *= 1 - happy;
-      rounded(ctx, ex - w / 2, ey - hgt / 2, w, hgt, w / 2);
+      ctx.translate(ex, ey + 1.2 * s * sad);
+      ctx.rotate(side * 0.3 * sad);
+      rounded(ctx, -w / 2, -hgt / 2, w, hgt, w / 2);
       ctx.fill();
       ctx.restore();
     }
     if (happy > 0) {
       ctx.save();
       ctx.globalAlpha *= happy;
-      ctx.lineWidth = 2.1 * s;
+      ctx.lineWidth = 2.1 * s * grow;
       ctx.beginPath();
       ctx.moveTo(ex - 3.45 * s, ey + 1.1 * s);
       ctx.quadraticCurveTo(ex, ey - 4.1 * s, ex + 3.45 * s, ey + 1.1 * s);

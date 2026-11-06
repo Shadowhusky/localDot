@@ -1,4 +1,4 @@
-import type { ManualStreamInput, TakeoverInputRequest } from "@localdot/protocol";
+import type { ManualStreamInput, ScreenName, TakeoverInputRequest } from "@localdot/protocol";
 import type { BrowserScope } from "../browser/client.ts";
 import type { DesktopdClient } from "../desktopd/client.ts";
 import { AgentError } from "./runner.ts";
@@ -17,9 +17,11 @@ export interface ManualDesktop {
   // anything left down: input whose landing was unknown is then settled.
   confirm?(): Promise<void>;
 }
+// `screen`: which of the session's screens the input is for; without it, the one dot is on.
 export type ManualDesktopSource = (
   session: AgentSession,
   scope: BrowserScope,
+  screen?: ScreenName,
 ) => ManualDesktop | undefined;
 
 // Root supplies the exact ready cell/endpoint owner. Plaintext never enters its journal or model.
@@ -52,14 +54,19 @@ export function openManualDesktop(
   session: AgentSession,
   lease: ManualLease,
   desktop: ManualDesktopSource | undefined,
+  screen?: ScreenName,
 ): ManualDesktop {
-  const access = desktop?.(session, {
-    signal: lease.signal,
-    check: () => {
-      lease.signal.throwIfAborted();
-      lease.check();
+  const access = desktop?.(
+    session,
+    {
+      signal: lease.signal,
+      check: () => {
+        lease.signal.throwIfAborted();
+        lease.check();
+      },
     },
-  });
+    screen,
+  );
   if (!access) throw new AgentError(503, "manual control is unavailable");
   return access;
 }

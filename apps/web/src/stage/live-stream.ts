@@ -106,6 +106,14 @@ function look(client: Client | null) {
   return { video, track, decoded, transport: view?.selkiesTransport, stats: view?.stream_stats };
 }
 
+// Selkies focuses its own input as it attaches, and `inert` does not stop a frame's own script, so
+// each new client would take the keys from whatever the user is typing in. Nothing in a client needs
+// focus. The frame's first window carries over to the same-origin page it navigates to.
+function withoutFocus(frame: HTMLIFrameElement): void {
+  const view = frame.contentWindow as (Window & typeof globalThis) | null;
+  if (view?.HTMLElement) view.HTMLElement.prototype.focus = () => {};
+}
+
 let host: HTMLElement | null = null;
 // Clients live outside every stage, so moving or remounting the stage never reloads them.
 function clientHost(): HTMLElement {
@@ -449,6 +457,7 @@ export class LiveStream {
     frame.setAttribute("inert", "");
     frame.src = `${path}#shared`;
     clientHost().append(frame);
+    withoutFocus(frame);
     this.#next = {
       frame,
       path,
@@ -696,7 +705,7 @@ interface Held {
 const held = new WeakMap<ApiClient, Map<string, Held>>();
 const closers = new Set<() => void>();
 const keyOf = (target: StreamTarget) =>
-  `${target.surface}/${target.cellId}/${target.parentId ?? ""}`;
+  `${target.surface}/${target.cellId}/${target.surface === "browser" ? (target.parentId ?? "") : ""}`;
 
 // The stream a stage that remounts can show at once, held or kept.
 export function findStream(target: StreamTarget): LiveStream | undefined {

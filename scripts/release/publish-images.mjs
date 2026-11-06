@@ -37,6 +37,9 @@ if (
   !["amd64", "arm64"].includes(receipt.architecture)
 )
   throw new Error("Candidate source or platform mismatch");
+for (const role of ["gate", "brain", "desktop", "browser"])
+  if (!(receipt.images[role]?.noChrome?.layers > 0))
+    throw new Error("Every candidate image must be scanned for Chrome before publication");
 run("docker", ["login", "ghcr.io", "--username", process.env.GITHUB_ACTOR, "--password-stdin"], {
   input: process.env.GH_TOKEN,
 });

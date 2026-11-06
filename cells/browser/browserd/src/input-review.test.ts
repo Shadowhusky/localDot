@@ -143,10 +143,11 @@ async function fixture() {
         await step("inspect");
         return { filled: false, nodeIds: state.protected ? [30] : [] };
       },
-      secretFocused: async () => {
+      focus: async () => {
         await step("focused");
-        return state.secret;
+        return { secret: state.secret, nodes: [{ document, node: 42 }] };
       },
+      focusHolds: async () => !state.secret,
     },
     onFatal: vi.fn(() => {
       void control.close();
@@ -324,23 +325,32 @@ describe("independent BrowserInput permit and effect boundary", () => {
     expect(f.effects().map((r) => r.cmd)).toEqual(["char", "char"]);
   });
 
-  it("B6 takeover during a pending real native character fences and drains without a lease cycle", async () => {
+  it("B6 takeover during a pending real native character waits for it to land, without a lease cycle", async () => {
     const f = await fixture();
     const charSeen = f.seen("char");
+    let held: Parameters<Parameters<typeof f.respondWith>[0]>[0] | undefined;
     f.respondWith((r) => {
-      if (r.cmd !== "char") f.respond(r);
+      if (r.cmd === "char") held = r;
+      else f.respond(r);
     });
     const pending = f.input.type(permit, "tab", text, f.requestSignal.signal, () => {});
     const refused = expect(pending).rejects.toThrow("aborted");
     await charSeen;
-    const changing = f.takeover();
+    let taken = false;
+    const changing = f.takeover().then(() => {
+      taken = true;
+    });
     expect(f.control.holder).toBe("user");
-    expect(f.native.alive).toBe(false);
-    const denied = expect(changing).rejects.toThrow("locked");
+    expect(f.native.alive).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    // The character is still on its way: the user isn't told they may act until it landed.
+    expect(taken).toBe(false);
+    if (!held) throw new Error("the character never reached the helper");
+    f.respond(held);
     await refused;
-    await denied;
+    await changing;
     await f.input.close();
-    expect(f.nativeFatal).toHaveBeenCalledOnce();
+    expect(f.nativeFatal).not.toHaveBeenCalled();
     expect(f.effects()).toHaveLength(1);
   });
 
@@ -374,6 +384,19 @@ describe("independent BrowserInput permit and effect boundary", () => {
     await expect(
       f.input.inject(permit, "tab", click, f.requestSignal.signal),
     ).resolves.toMatchObject({ presses: [101] });
+    expect(f.options.onFatal).not.toHaveBeenCalled();
+  });
+
+  it("P3 a typed key whose raw press comes up late on a busy machine still counts", async () => {
+    const f = await fixture();
+    f.respondWith((r) => {
+      if (r.cmd !== "char") return f.respond(r);
+      f.reply(r, { keycode: 38, mods: [] });
+      setTimeout(() => f.event("key", 38, 101), 200);
+    });
+    await expect(
+      f.input.type(permit, "tab", { ...text, text: "a" }, f.requestSignal.signal, () => {}),
+    ).resolves.toMatchObject({ done: true, count: 1 });
     expect(f.options.onFatal).not.toHaveBeenCalled();
   });
 

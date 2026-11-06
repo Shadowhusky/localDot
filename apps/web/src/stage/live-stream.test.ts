@@ -57,6 +57,20 @@ it("lets a stream go at once when its computer stops, or a minute after its stag
   expect(holdStream(target, () => [CELL]).stream).not.toBe(first.stream);
 });
 
+it("leaves focus where the user is typing while a client starts, as Selkies' takes it for itself", async () => {
+  const { api } = daemon((n) => Response.json({ path: ticket(n) }));
+  const { stream, release } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
+  stream.connect(() => {});
+  await vi.advanceTimersByTimeAsync(0);
+  const inner = clients()[0]?.contentDocument;
+  const input = inner?.createElement("input");
+  if (!inner || !input) throw new Error("no client");
+  (inner.documentElement ?? inner.appendChild(inner.createElement("html"))).append(input);
+  input.focus({ preventScroll: true });
+  expect(inner.activeElement).not.toBe(input);
+  release(0);
+});
+
 it("gives a client that keeps failing to load longer each time, instead of reloading every 10 s", async () => {
   const { api, minted } = daemon((n) => Response.json({ path: ticket(n) }));
   const { stream } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
@@ -204,7 +218,7 @@ it("gives up frames before detail on a queued link once the viewer chose Sharp",
     chooseStreamPreference("sharp");
     rtt = 400;
     for (let n = 0; n < 3; n++) await second();
-    expect(reports().at(-1)).toBe(qualityMessage({ visible: true, framerate: 45, crf: 25 }));
+    expect(reports().at(-1)).toBe(qualityMessage({ visible: true, framerate: 45, crf: 20 }));
   } finally {
     chooseStreamPreference("auto");
     restore();

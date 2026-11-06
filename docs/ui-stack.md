@@ -217,8 +217,9 @@ T03 (UI plan §4.1). Files: `src/ui/tokens.css`, `base.css`, `motion.css`; tests
   steps carry about .038, because at .02 they sat .015 from Graphite in OKLab (below a just-noticeable
   difference), so the picker tiles looked the same and choosing Midnight barely changed the page. The
   unit test holds those steps, and the tiles' top band, at least .03 apart. xenon (chroma .12, hue 225)
-  still reads as the accent on them. fg-2 and fg-3 are shared, so fg-2 against fg-3 is 1.59:1 in both
-  (it was 1.24:1 in the old Midnight). The theme picker's preview tiles read the ramps directly.
+  still reads as the accent on them. fg-2 against fg-3 is 1.5:1 in both (it was 1.24:1 in the old
+  Midnight), and fg-3 holds 4.5:1 on every surface; on a row lit over one, its quiet words read fg-2.
+  The theme picker's preview tiles read the ramps directly.
 - **Daylight.** A third ramp, `--daylight-*`, under `:root[data-appearance="daylight"]`, which also
   sets `color-scheme: light` (in `base.css`). Lift reverses: the void (`#f2f3f5`) is the floor, cards
   are white, and raised-2 is a grey tile or bubble. Every white alpha of the dark house becomes the
@@ -228,7 +229,18 @@ T03 (UI plan §4.1). Files: `src/ui/tokens.css`, `base.css`, `motion.css`; tests
   4.5:1 on its own tint. Glass is light (.8 holds fg-2 at 4.8:1 over a black frame). The curtain is
   pale cloth. What the stage paints over the picture and into a video reads `--color-stage-*`
   (`stage/theme.ts`), which follow the house in the dark appearances and keep Graphite's values in
-  Daylight, so dot's marks and an exported video look the same whatever the page.
+  Daylight, so dot's marks and an exported video look the same whatever the page. A knob on a thin
+  line is ink.
+- **Rails.** `--color-rail` is the quietest line that holds 3:1 on every surface: white at .38 in the
+  dark appearances, ink at .5 in Daylight (`--daylight-rail`). What a value runs along (slider rails,
+  the scrubber, bars and meters), a switch's off track, the thread through a list of steps, a sheet's
+  grabber, fg-4's quiet icons and a filled search's edge all read it (the composer's edge is .41, as a
+  sheet's shadow may fall on it), and a fill reads fg-1 so it stands 3:1 clear of it. Left quieter on
+  purpose: hairlines and separators, which only divide; hover and selected fills, whose words carry
+  them; the segmented track, which its thumb and words identify; scrollbars and a quote's bar, which
+  would make a page busy. `src/ui/tokens.test.ts` holds the roles and `e2e/ui/contrast.spec.ts`
+  measures the main states in all three appearances, in both views and at both widths, against the
+  pixels really drawn behind them.
 - **Choosing.** `onboarding/appearance.ts` keeps the choice (`localdot.appearance.v1`: `graphite`,
   `midnight`, `daylight` or `system`; anything else is Graphite, so nobody's page changes under them)
   and, apart, the dark appearance System shows while the device is dark (the dark one chosen last).
@@ -242,13 +254,13 @@ T03 (UI plan §4.1). Files: `src/ui/tokens.css`, `base.css`, `motion.css`; tests
   purple): one set for both dark appearances, a deeper one in Daylight, each at least 3:1 on the
   house, a lit row and a popover. None is xenon or attention, so a tag never reads as who has the
   computer or as a call for the user. It is a 3 px bar at the row's leading edge (`TagMark`),
-  inside the status glyph's box, so it never covers the glyph and moves with it; a corner dot was
-  tried and read as an unread badge.
+  inside the row's mark, so it never covers the dot or its status and moves with them; a corner dot
+  was tried and read as an unread badge.
 - **Modes.** `prefers-contrast: more` brightens fg-2 and fg-3, turns hairlines into field lines, makes
   the HUD solid and widens the focus ring to 3 px. `prefers-reduced-transparency` makes the HUD solid.
   `motion.css` maps every duration into 120–150 ms under reduced motion.
-- **HUD alpha .8, not .72.** At .72 the elapsed time (fg-2) on the HUD is 3.4:1 over a white frame; .8
-  is the lowest alpha that keeps 4.5:1.
+- **HUD alpha .82, not .72.** At .72 the elapsed time (fg-2) on the HUD is 3.4:1 over a white frame;
+  .82 is the lowest alpha that keeps 4.5:1 in both dark appearances.
 - **Legacy names are aliases** in `theme.css`: `--color-surface` → raised, `--color-surface-2` →
   raised-2, `--color-text`/`-2`/`-3` → fg-1/2/3. `--color-line` maps to the overlay step, not to
   hairline: legacy CSS uses it for dividers and field edges alike, and hairline would leave the Keys
@@ -465,25 +477,42 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
   known. The side sheet slides 24 px and fades in on `--ease-spring`; the bottom sheet rises from 100%
   on `--ease-spring` and leaves on `--ease-exit`. Exits retrace the entrance. Every movement is scaled
   by `--_motion` on `.ui-layer`, which reduced motion sets to 0, leaving opacity alone.
+- **A row's menu.** `ConversationMenu` is placed `against` its list (`levelWith`): beside the list's
+  edge, its top level with the row, flipped to the other side when that has the room, and slid up to
+  stay on screen. The anchor is only the control focus returns to, so a right click, the menu key
+  and More land in the same place in Studio's rail and popover and in Chat beside the conversation.
+  Where neither side has room (a phone's list), `place` puts it under the row, or over it. Read each
+  frame, so a list scrolled or a row moved by the dock's lens is followed. A held row on a phone still
+  lifts into its preview with the menu under it.
 - **Bottom sheet drag.** Any pointer picks a sheet up by its grips (`data-sheet-grip`, `touch-action:
   none`): the grabber strip and the header below it, together at least 52 px tall; a press on a button,
-  link, field or tab there stays the control's. A finger or pen also moves it by its content, as an iOS
-  sheet does, and its first move decides (the browser commits to scrolling on the first touch move it is
-  not stopped on): up, while the sheet rests below its top height (Activity's medium, a collapsed
-  question), raises the sheet; down, once everything that scrolls under the finger is at its top, lowers
-  it; any other move, sideways included, scrolls the content. A mouse on the content selects text. There
-  is no hand-over within one gesture: a sheet raised to its top stretches rather than scrolling on. Past
-  10 px of slop it follows the finger 1:1 from where it was grabbed; pulled up past rest it stretches by a
-  rubber band that never exceeds the 48 px of surface below the screen's edge. A release is projected with
-  deceleration .998: past 30% of the height it closes, otherwise it springs to the nearest height, with
-  the release velocity handed to a closed-form spring from `@localdot/stage` (ζ 1, or ζ .8 after a
+  link, field or tab there stays the control's. Inside scrollable content a swipe scrolls the content,
+  at any height: a swipe up never raises a sheet whose content can scroll. A finger or pen moves the
+  sheet by its content in only two ways, and its first move decides (the browser commits to scrolling
+  on the first touch move it is not stopped on): down, once everything that scrolls under the finger is
+  at its top, lowers it; and over content with nothing to scroll, up raises a sheet below its top height
+  as well. Any other move, sideways included, is the content's. What floats over a list (its Jump to
+  latest) counts as the list. A mouse on the content selects text. A pull that reaches the content's top
+  in the same gesture takes the sheet down from there: the browser has the finger by then, so only touch
+  moves still say where it is and they can't be stopped; what scrolls under the finger holds still
+  (`overflow-y: hidden`, and `overscroll-behavior-y: none` set on it as the finger lands, so it doesn't
+  bounce as well; never on what doesn't scroll, as Chromium then finds no scroller at all). Back above where the pull began, the sheet is home again. Chromium sends such moves
+  about five times a second, so on Android the sheet follows in steps; WebKit sends them every frame. A
+  sheet pulled down off content that can scroll goes no higher than it was. Past 10 px of slop it
+  follows the finger 1:1 from where it was grabbed; pulled up past rest by a grip it stretches by a
+  rubber band that never exceeds the 48 px of surface below the screen's edge. A release is projected
+  with deceleration .998: past 30% of the height it closes, otherwise it springs to the nearest height,
+  with the release velocity handed to a closed-form spring from `@localdot/stage` (ζ 1, or ζ .8 after a
   flick). A sheet that may not close (a question, or unsaved changes, which ask) also rests at the height
   nearest its landing. A sheet still moving can be grabbed again from where it is. Moves are followed on
   the window, since the first ones can leave the sheet before the drag takes the pointer. The question
   sheet counts only an inset of 120 px or more as a keyboard, and reads it as a drag lets go, so Safari's
-  toolbars resizing the viewport neither drop a drag nor force the sheet to full height.
+  toolbars resizing the viewport neither drop a drag nor force the sheet to full height. Resting in
+  medium, a sheet that can also be large gives up what lies below the screen's edge, so its content ends
+  on the screen; it takes that room back as a drag raises it (`--_lowered`).
   `e2e/ui/sheet-drag.spec.ts` drags the grips in both engines but the content only in Chromium:
-  Playwright's WebKit sends no touch moves.
+  Playwright's WebKit sends no touch moves. Scrolling, the pull past the top and the content's end were
+  checked by hand with real touches on the iOS Simulator.
 - **Nested pages.** `page` names the page on show and `back` gives it a Back above its title. A new
   page slides 24 px in from the right over the old one, which slides 24 px left and fades; Back runs the
   same path the other way. The pages a nested page was opened from stay mounted under it, faded out and
@@ -508,9 +537,9 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
 - **Not yet.** Select and Combobox drawn on `Anchored` and `Sheet` (see "Pickers open through this
   stack"; they already register with it while open, so a trapping sheet leaves their focus alone), with T08's
   Playwright scenarios (a), (b) and (f) and the `ui-select-*` and `ui-combobox-search` baselines.
-  G3a on iOS Safari: Playwright's WebKit sends no touch moves, so a content drag from the top, the
-  `<html>` scroll lock against rubber-banding, the fixed bottom sheet with the keyboard up and the 48 px
-  bleed have been seen only in Chrome's touch emulation.
+  G3a on iOS Safari: Playwright's WebKit sends no touch moves, so the `<html>` scroll lock against
+  rubber-banding, the fixed bottom sheet with the keyboard up and the 48 px bleed have been seen only in
+  Chrome's touch emulation.
 
 ## Feedback
 
@@ -623,7 +652,7 @@ rest of the kit. No screen uses them yet. `feedback.css` adds 1.9 kB gz to the a
 
 ## Phone conversations
 
-A phone has no rail, so its conversations are a sheet (`ConversationList` with `layout="sheet"`),
+Studio's phone has no rail, so its conversations are a sheet (`ConversationList` with `layout="sheet"`),
 opened from the bubble in the corner over the picture (`ConversationsBubble`) or from More. The
 desktop rail magnifies marks under a pointer; a phone has no pointer to follow, so it magnifies what
 a finger holds and puts what is live where a thumb is. Files: `shell/LiveDeck.tsx`,
@@ -637,7 +666,8 @@ unit tests beside them and in `shell/ConversationList-sheet.test.tsx`, e2e in
   second Live Activity sits beside the Dynamic Island; its description says "2 others under way, 1
   needs you". The one on show is left out: the island already speaks for it.
 - **Thumb reach.** The sheet opens at the medium detent, so the stage stays in view and the search,
-  the cards and the first rows sit in the lower half of the screen; drag or scroll up for the rest.
+  the cards and the first rows sit in the lower half of the screen; the list scrolls there, and its head
+  drags up for the rest.
   More (bottom right) opens the same sheet for a hand that can't reach the top corner.
 - **Cards under way.** Above the rows, a deck of cards, one per conversation under way, the one asking
   for the user first, then those at work, waiting, at rest and paused (`liveConversations`). Each
@@ -660,13 +690,15 @@ unit tests beside them and in `shell/ConversationList-sheet.test.tsx`, e2e in
   what was first asked, how many tasks and since when, its tag, while the sheet dims and blurs
   behind, and the row's menu opens under it, as iOS's preview does. The card is placed so it and the
   menu fit. The click its lifting sends is spent wherever it lands, so a menu item that came up under
-  the finger is never chosen by letting go. Escape or a tap outside shrinks it back into its row.
+  the finger is never chosen by letting go. Escape or a tap outside shrinks it back into its row (see
+  "Lifting" under Chat's stack).
 - **Tags.** The tags in use show as chips under the search; one tap shows only that colour, in the
   cards and the rows, another shows them all. Rows and cards keep the leading-edge tag bar.
 - **Every gesture has a button.** Each row and card keeps its Actions button, which opens the same
   menu (rename, pin, archive, tags, delete), and every name a screen reader hears says the status and
   tag. The swipe faces are hidden from assistive technology and the keyboard.
-- **Reduced motion.** Swipes and springs land at once, the hold does not sink, the peek fades, the
+- **Reduced motion.** Swipes and springs land at once, the hold does not sink, the peek fades over its
+  row, the
   commit glyph does not tick and the deck's lens is off; a drag still follows the finger.
 - **Rejected.** A sideways swipe on the stage or the island strip to change conversation: the stage
   takes the user's own touches when they hold the computer, the strip is out of a thumb's reach and
@@ -675,6 +707,151 @@ unit tests beside them and in `shell/ConversationList-sheet.test.tsx`, e2e in
   from the top lowers or closes the sheet. iOS-style app-switcher cards with thumbnails: a
   conversation has no picture of its own, only the one computer's. A touch "dock" scrubbed along the
   bubble: the bubble is at the top, out of a thumb's reach.
+
+## Chat and Studio
+
+Two view styles, on every device. Studio is the computer and its panels on one screen; on a phone it
+is the stage over the thread, as in "Phone conversations" above. Chat is the stack below. `useViewStyle`
+(`shell/view-style.ts`) keeps the choice per device (`localdot.view-style.v1`); with none, a phone has
+Chat and anything else Studio, and a desktop window narrowed to a phone's width is still a desktop.
+`VIEW_NAMES` is the one place the styles are named. Switching is a fade (`changeCalmly`; at once under
+reduced motion), with no reload: the task on show stays (`nav.enter`, `nav.leave`) and the draft comes
+back, because the composer leaving keeps what was typed at once. The ways to switch: a step in setup
+(`ViewStylePicker`, also in Settings above the theme), the main menu in either style, the action
+palette, and dot's tip, whose `used` signal (`localdot.view-style-tried.v1`) ends it once the person
+has been in the other style. A pick in setup is not a try.
+
+## Chat's stack
+
+Chat is a stack of three screens, the list of conversations, a conversation over it and the computer
+over that, not the desktop's stage and rail folded up. Files: `shell/PhoneStack.tsx` (the springs and
+the swipe back), `shell/phone-route.ts`, `shell/phone-spring.ts`, `shell/phone-flyer.ts`, `shell/phone-lift.ts`,
+`shell/chat-fit.ts`, `shell/PhoneList.tsx`, `shell/PhoneBar.tsx`, `shell/PhoneParts.tsx`,
+`shell/phone-conversation.ts`, `shell/DotStrip.tsx`, `shell/ComputerScreen.tsx`, `shell/CoachMark.tsx`,
+`shell/PhoneBanner.tsx`, `shell/dot-tuck.ts`, `shell/ConversationDetails.tsx`, `agent/BubbleMenu.tsx`,
+`agent/LatestSteps.tsx`; styles in `ui/phone-layout.css`. `App.tsx` composes them from the same hooks
+Studio uses. E2e: `e2e/ui/chat-view-*.spec.ts` and `view-style.spec.ts`. `.phone-*` rules are written
+outside any media query, since a wide screen uses them too; `.app[data-stack]` turns the page's grid
+off.
+
+- **The address.** `#/c/<id>` and `#/c/<id>/computer`, each a browser history entry, so browser Back,
+  reload and links all work. A link builds the stack under it. `<id>` is a conversation's latest task,
+  `new`, or `current` for whichever the daemon has as current, and the address follows as a new task
+  starts. Taking a conversation up is still the daemon's (`/api/conversation/continue`): the address
+  asks for it, as the row's tap does. `#session=` links and toasts land on the same route. Replay's
+  `?replay=` sits beside it, so leaving Replay comes back to the same level.
+- **Motion.** `Spring` takes a response and a damping ratio, always from where the value is now; a
+  finger drives the same spring, so a change of mind takes over mid-flight. Navigation is response .42
+  damping 1, and the list drifts 28% under the conversation. A release is projected at .998 and carries
+  the finger's speed. Under reduced motion every spring goes straight there and flights don't run.
+- **Swipe back.** From anywhere on the conversation, 1:1. A finger on a table or block of code that
+  doesn't fit stays with that (`touch-action` is written ahead of the finger, since the browser reads
+  it as the finger lands). In a Safari tab the leftmost 20 px stay Safari's. A Back Safari drew itself
+  (`hasUAVisualTransition`, or a touch at the edge within 1.5 s) is drawn at once, not animated again.
+  That fallback has only been seen in emulation.
+- **One dot.** `PresenceLayer` is still the one live dot, in the place named `dock`: the `NarratorBand`
+  at the thread's foot (`DotStrip`) or under the picture. It wears the conversation's own look, as its
+  row does. A `Flyer` stands in while it travels between a row and the foot, or into ⋯, and the live
+  one stays hidden meanwhile (`.app[data-dot-away]`). Landing, the real one comes back under it and it
+  dissolves into that, so how each is looking just then never shows as a jump. Into ⋯ it shrinks and
+  fades over the button, so nothing of it is left to vanish; out, the same way back.
+- **Lifting.** A held row or bubble goes up as a copy (`shell/phone-lift.ts`, for `ConversationPeek` and
+  `BubbleMenu`): what it came from is hidden, by opacity so its pictures stay decoded, and the copy is
+  drawn from one spring, 0 on the source and 1 lifted, reading each frame where the source now is. So a
+  close from anywhere turns back from where it has got to, a list that moves is followed, and it lands
+  on the source's pixels: it is drawn there exactly for one frame, then the two change over in the next.
+  `copyInto` keeps the look: the copy sits in a chain of its ancestors' names with `display: contents`,
+  and neighbours in name only, so rules written against where it sits still reach it; it takes the
+  source's size to the fraction, as a rounded width rewraps text. The dimming and everything that comes
+  with the lift (a card and its plate, a shadow) are functions of the same spring, so nothing is left to
+  pop off. On its way home it passes over the menu going (z-index 51). If the row goes, or a choice covers
+  it (Rename, Archive, Open conversation, a sheet or dialog), it fades on its way (`data-gone`). Under
+  reduced motion nothing travels: the copy fades in and out over its source, which stays.
+  `e2e/ui/lift-motion.spec.ts` samples every frame of these and compares the pixels at the swap. Test
+  locators that match a row's or a thread's class see the chain too while something is lifted.
+- **One picture.** The stage is rendered once, through a portal into `.phone-picture`, an element the
+  screen moves. At rest it sits scaled inside the thumbnail, which is why the thumbnail is the live
+  picture; opening the computer moves it to a layer over the conversation and zooms it from there, with the
+  corners it arrives with; it lands bare, then the thumbnail's rim and time come up around it. Out
+  of sight, on the list or for a task that doesn't hold the computer, it asks for no frames (`covered`),
+  and that reads as live, not as a lost stream. Only the task holding the computer has a thumbnail or a
+  lamp. A curtain shows on the computer screen, with its full recovery actions, and only a line with the
+  action shows above the composer and in the list.
+- **One composer.** Moving to the computer moves the same dock, composer and decisions, to its foot as
+  the steer box (`Conversation`'s `dockTo`), so what is written and what must be decided stay in reach.
+- **Bubbles.** `Conversation` with `chat` draws messages as bubbles and `chatItems` gathers each turn's
+  steps behind one caption, "9:20 · 7 steps", under what dot said last in it, files included; it unfolds
+  them with the turn's model line under them. While dot works on a turn it has said nothing in there is
+  no caption: the foot speaks for it. A held bubble lifts behind glass with its menu (`BubbleMenu`), and
+  sliding to an item and letting go chooses it. iOS's long press fights selection, so Select text opens
+  a sheet the text can be selected in.
+- **Decisions.** Approvals and pending routine confirmations dock above the composer until answered,
+  with every value `ApprovalDecision` shows anywhere. A question is answered in the thread: one choice
+  of a few by a chip (`AskForm`'s `quick`), anything else, secrets included, by its usual form.
+- **The list.** Whichever needs the user first (`mostUrgent`), with two lines and an amber point;
+  pinned ones in a rail; a row's last line is the first line of what dot last said (`line` on
+  `ConversationEntry`). **Swipe a row:** right shows Pin; left shows More and Archive (Archive is left
+  out while the task runs). A long swipe past 55% commits, and only a drag past the line does. **Hold:**
+  450 ms (or a right click) grows the row into its preview with its menu under it; the click its
+  lifting sends is spent. Beside the conversation it opens the menu instead (see Wider screens).
+  **Every gesture has a button:** each row keeps an Actions button, drawn only with the focus.
+  **One gutter:** `--_gutter` on `.phone-list-screen` sets the left and right edge of everything in it,
+  at any width. The tags and the pinned rail scroll edge to edge and come to rest at it; a row's ball
+  and a long pinned name sit on it. Studio's sheet does the same with its own `--_gutter`.
+- **Minimal mode.** "Hide dot" from the dot's menu (`useShowDot`, so it persists and Settings agrees):
+  dot glances at ⋯, hops in on response .56 damping .92, the button takes it in and `CoachMark` says
+  where it went. ⋯ then offers "Show dot", the same path back. Status moves under the name. List avatars
+  stay.
+- **Keyboard.** `useChatFit` fits `.app` to the visual viewport, so the composer rides the keyboard
+  and `useFollowScroll` keeps the thread's end. `data-keyboard-up` drops the home indicator's room from
+  under the composer. A tap on the thread drops the keyboard.
+- **Wider screens.** From 700 px up the list sits beside the conversation, 38% wide between 300 and
+  368 px, with no swipe back and a toggle in Back's place. The thread and its foot keep a 760 px measure.
+  The computer zooms over the conversation's pane rather than taking a third one, which keeps Chat one
+  thing at a time, and its picture grows with the window; seeing everything at once is what Studio is
+  for. A mouse selects text; the swipes are touch only. Beside the conversation a row is not lifted:
+  a hold, a right click, the menu key (or Shift+F10) and its Actions button all open the same menu,
+  as every list of conversations does (see "A row's menu" under Overlays).
+- **Rejected.** Two composers, one for the thread and one to steer: drafts and uploads would have to
+  agree. A second stream for the thumbnail: the computer would pay for a picture nobody can read. A
+  sheet for approvals: it covered the thread dot was asking about. The overview grid is for later.
+
+## Task looks
+
+A status glyph alone can't tell one conversation from another in a long list, so each has a dot of
+its own. Files: `taskOutfit` and `WEAR_SLOT` in `@localdot/protocol` (`task-look.ts`), which any
+surface can reuse; `dot/DotAvatar.tsx`; `shell/ConversationAvatar.tsx`; `shell/LookChooser.tsx`; the
+gallery's `#looks` page; `e2e/ui/task-looks.spec.ts`.
+
+- **Chosen once, from the task.** A look is drawn from the conversation's first task, one thing for
+  each of head, face and body, so it needs no storage, reads the same on every device and existing
+  conversations have one. It starts from what the conversation's dot is known by (`wearables[0]`:
+  the hoodie, the headphones, the suit, the mortarboard, the beret), which only that dot's tasks wear.
+  The row's menu changes it for good (**Change look**, kept with its tag); Reset gives back the
+  drawn one.
+- **One look everywhere.** `conversationLook` is the only source: the row, the rail, the deck under
+  way, the phone's header and banners, the dot on screen in Chat and Studio, the lines that name a
+  dot (each as the dot it names) and Replay all wear it, never this localDot's accessory. It follows
+  the dot the conversation works as now, so Auto's pick, a late pick or the user's switch changes it
+  everywhere at once (the live status names the dot, and the task's own events say it on screen).
+- **Cheap at any length.** Most rows are `DotAvatar`: a plate, two capsules and what it wears, with no
+  engine, timer or canvas. Only rows under way (`working`, `needs-you`) are live `Dot`s, at the badge's
+  rates, and the shared scheduler gives those off screen no frames. Each plate is fetched once.
+- **Status.** A badge at the mark's corner, on the overlay colour with a hairline so it holds on any
+  row in both houses, with the same glyph and tones as before.
+- **Arriving.** On a reload dot comes on to the page once, in its final look (`dot/arrival.ts`, and
+  `e2e/ui/dot-arrival.spec.ts` records every look shown). What it wears hangs on settings, the
+  conversation and task on show, what the task works as and the list's entry, which answer
+  in any order. So the look shown is remembered per device (`localdot.dot-look.v1`) and worn from the
+  first frame; with nothing to go on (a first visit, or an address naming another conversation) dot
+  stays off the page until they have all answered, or a plain dot stands in after 3 s. Wrong memory
+  gives way with no hop; only a change after that hops.
+- **Plates.** All a dot shows comes in together (`whenImagesIn`, `whenPlatesIn` in `dot/plates.ts`): a
+  dot or a row's mark waits until its whole set is decoded, a plain ball standing in only if that
+  takes over 200 ms, and a change of outfit keeps the old one on until the new one can be drawn.
+- **Rejected.** Tinting the body: dot is porcelain, and a tinted ball stops being dot. Hue-rotating
+  plates in the browser: the shadows they carry go wrong. A shuffled look when the list changes: two
+  neighbours would then never match, and no row would keep its face.
 
 ## Guards
 

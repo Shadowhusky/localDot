@@ -48,7 +48,12 @@ function fakeClock(start = 10_000_000): Clock & { advance(us: number): void } {
 
 function setup(
   script: FakeScript = {},
-  opts: { viewers?: number; scale?: 1 | 2; heldButtonMs?: number } = {},
+  opts: {
+    viewers?: number;
+    scale?: 1 | 2;
+    heldButtonMs?: number;
+    pause?: Promise<void>;
+  } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), "local dot's gateway-"));
   const clock = fakeClock();
@@ -85,6 +90,11 @@ function setup(
     // Advances the fake clock, then yields one macrotask so a hit test that started beside the
     // travel resolves before the dispatch, as it does with real timers.
     sleep: async (ms, signal) => {
+      if (opts.pause) {
+        sleeps.push(ms);
+        await opts.pause;
+        return;
+      }
       signal?.throwIfAborted();
       sleeps.push(ms);
       clock.advance(msToMicros(ms));
@@ -861,7 +871,7 @@ describe("ActionGateway type and key", () => {
     expect(JSON.stringify(s.events())).not.toContain("hunter2");
     expect(s.fake.calls.find((c) => c.path === "/type")?.body).toMatchObject({
       masked: true,
-      pace: { firstMs: 35, firstCount: 60, restMs: 6 },
+      pace: { firstMs: 12, firstCount: 60, restMs: 0 },
     });
   });
 
@@ -895,7 +905,7 @@ describe("ActionGateway type and key", () => {
       { count: 2, chunk: "i", masked: false },
     ]);
     expect(s.fake.calls.find((c) => c.path === "/type")?.body).toMatchObject({
-      pace: { firstMs: 8, firstCount: 60, restMs: 8 },
+      pace: { firstMs: 0, firstCount: 60, restMs: 0 },
     });
     const dispatch = s.ofType("action.dispatch")[0];
     expect((dispatch?.data.ringAt ?? 0) - (dispatch?.data.pressT ?? 0)).toBe(29_300);
@@ -948,7 +958,7 @@ describe("ActionGateway type and key", () => {
         pace:
           firstMs === 0
             ? { firstMs: 0, firstCount: 0, restMs: 0 }
-            : { firstMs: 35, firstCount: 60, restMs: 6 },
+            : { firstMs: 12, firstCount: 60, restMs: 0 },
         injector: "xtest",
         window: 77,
       });
@@ -1004,6 +1014,17 @@ describe("ActionGateway type and key", () => {
     const dispatch = s.ofType("action.dispatch")[0];
     expect((dispatch?.data.ringAt ?? 0) - (dispatch?.data.pressT ?? 0)).toBe(29_300);
     expect(s.sleeps).toEqual([90]);
+  });
+
+  it("takes no place in the screen's queue for a wait, ahead of another task", async () => {
+    const pause = Promise.withResolvers<void>();
+    const s = setup({}, { pause: pause.promise });
+    const ctx = { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId };
+    const first = s.gateway.run(ctx, { verb: "wait", ms: 500 });
+    const second = s.gateway.run(ctx, { verb: "wait", ms: 250 });
+    await vi.waitFor(() => expect(s.sleeps).toEqual([500, 250]));
+    pause.resolve();
+    await Promise.all([first, second]);
   });
 
   it("waits without touching the desktop", async () => {

@@ -2,8 +2,9 @@
    a kit button's display, padding, or its intrinsic label size. */
 @layer utilities {
   .composer-model {
-    flex: 1 1 0;
+    flex: 0 1 auto;
     min-width: 28px;
+    margin-inline-end: auto;
     padding-inline: var(--spacing);
   }
 
@@ -14,8 +15,11 @@
     gap: calc(var(--spacing) / 2);
   }
 
+  /* The room under the name lifts its words half a pixel, so that its capitals and its lowercase
+     straddle the icons' line while its box stays centred on it. */
   .composer-model .ui-middle {
     overflow: hidden;
+    padding-block-end: 1px;
   }
 
   .composer-model .ui-middle > :nth-child(2) {
@@ -37,25 +41,36 @@
     flex-shrink: 0;
   }
 
+  /* With no model to fill the row, the row's end stays at its end. */
+  .composer-bar > .composer-permissions {
+    margin-inline-start: auto;
+  }
+
   .composer-card[data-layout="pill"] {
+    --_field-start: var(--spacing);
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    padding: calc(var(--spacing) * 2);
+    padding: var(--spacing);
     gap: 0;
   }
 
+  /* The words keep the place under the card's top that they have with the card closed, and as much
+     again over them as lies between them and what is drawn in the row. */
   .composer-card[data-layout="pill"] > .composer-field {
     order: 0;
     width: 100%;
-    padding: var(--spacing);
-    min-height: 32px;
+    padding: calc(var(--spacing) * 2 + 1px) var(--spacing) 1px var(--_field-start);
+    min-height: 34px;
     max-height: 144px;
   }
 
+  /* As tall as its 44 px controls, also while the card folds shorter than what it holds: a shorter
+     row would move the field with the card's height. */
   .composer-card[data-layout="pill"] > .composer-bar {
     display: flex;
     align-items: center;
     gap: var(--spacing);
+    min-height: auto;
     margin: 0;
   }
 
@@ -64,10 +79,17 @@
     margin-block: 0;
   }
 
+  /* A 36 px face in a 44 px target, round so that its corners keep clear of the card's. */
   .composer-card[data-layout="pill"] .composer-model {
     flex: 1 1 0;
     min-width: 44px;
     height: 44px;
+    padding-inline: calc(var(--spacing) * 2 - 1px);
+    border-radius: var(--radius-full);
+  }
+
+  .composer-card[data-layout="pill"] .composer-model::before {
+    inset-block: 3px;
   }
 
   .composer-card[data-layout="pill"] .composer-effort {
@@ -78,6 +100,7 @@
   .composer-card[data-layout="pill"] .composer-send {
     width: 44px;
     height: 44px;
+    border-radius: var(--radius-full);
   }
 
   .composer-bar > .ui-icon-button::after,
@@ -182,17 +205,31 @@
      field never slide under it; one line sits in the middle of the field's 44 px, inside its 1 px
      border. */
   @container (max-width: 260px) {
+    .composer-card[data-layout="pill"]:not([data-compact]) {
+      --_field-start: calc(var(--spacing) * 12);
+    }
+
     .composer-card[data-layout="pill"] > .composer-field {
       min-height: 44px;
-      padding-block: calc((var(--spacing) * 11 - 1lh) / 2 - 1px);
-      padding-inline-start: calc(var(--spacing) * 12);
+      padding-block: calc((var(--spacing) * 11 - 1lh) / 2 - 2px)
+        calc((var(--spacing) * 11 - 1lh) / 2);
     }
 
     .composer-card[data-layout="pill"] .composer-bar > .ui-icon-button:first-child {
       position: absolute;
-      bottom: calc(var(--spacing) * 2 + 44px);
-      left: calc(var(--spacing) * 2);
+      bottom: calc(var(--spacing) + 44px);
+      left: var(--spacing);
     }
+  }
+
+  /* Chat attaches through the + beside the card, so the model has the card's corner: its 36 px face
+     runs concentric with the corner, 8 px clear all round, and the words keep to its label's line. */
+  :is(.phone-thread, .phone-computer-dock) .composer-card[data-layout="pill"] {
+    --_field-start: calc(var(--spacing) * 3 - 1px);
+  }
+
+  :is(.phone-thread, .phone-computer-dock) .composer-card .composer-model {
+    margin-inline-start: var(--spacing);
   }
 
   /* Recording gets the phone's full row; navigation returns when it finishes. */
@@ -206,15 +243,6 @@
     .composer-card[data-layout="pill"]:has(.voice-strip) > .composer-field {
       min-height: 44px;
     }
-  }
-
-  .composer-count {
-    min-width: 0;
-    text-align: end;
-  }
-
-  .composer-card[data-layout="pill"] > .composer-count {
-    flex-basis: 100%;
   }
 
   @container (max-width: 400px) {
@@ -252,6 +280,144 @@
     .composer-more {
       display: none;
     }
+  }
+
+  /* Unfocused with nothing written: one row of Attach, the field, Voice and Send, which stay on the
+     card's last line, in the same place, when focus opens the other controls and the card grows
+     upward around them (agent/useComposerFold.ts). */
+  .composer-card {
+    --_composer-row: calc(var(--spacing) * 8);
+    align-content: end;
+  }
+
+  .composer-card[data-folding] {
+    overflow: clip;
+  }
+
+  .composer-card[data-compact] {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    align-content: flex-end;
+    padding-block-start: calc(var(--spacing) * 2);
+  }
+
+  .composer-card[data-compact] > :not(.composer-field, .composer-bar) {
+    flex-basis: 100%;
+    order: -1;
+  }
+
+  /* A pixel over the middle of the row: a line box centres its capitals, and the lowercase that
+     makes up most of what is written then reads as sitting low. */
+  .composer-card[data-compact] > .composer-field {
+    flex: 1 1 0;
+    order: 1;
+    width: auto;
+    min-width: 0;
+    min-height: var(--_composer-row);
+    padding-block: calc((var(--_composer-row) - 1lh) / 2 - 2px)
+      calc((var(--_composer-row) - 1lh) / 2);
+  }
+
+  .composer-card[data-compact] > .composer-bar {
+    display: contents;
+  }
+
+  .composer-card[data-compact]
+    .composer-bar
+    > :not(.ui-icon-button:first-child, .voice-mic, .composer-send) {
+    display: none;
+  }
+
+  .composer-card[data-compact] .composer-bar > .ui-icon-button:first-child {
+    position: relative;
+    inset: auto;
+    margin-inline-start: calc(var(--spacing) * -1);
+  }
+
+  .composer-card[data-compact] .composer-bar > .voice-mic {
+    order: 2;
+  }
+
+  .composer-card[data-compact] .composer-bar > .composer-send {
+    order: 3;
+    margin-inline-start: var(--spacing);
+  }
+
+  .composer-card[data-layout="pill"][data-compact] {
+    padding-block-start: var(--spacing);
+  }
+
+  .composer-card[data-layout="pill"][data-compact] > .composer-field {
+    min-height: calc(var(--spacing) * 8);
+    padding-block: calc(var(--spacing) - 1px) calc(var(--spacing) + 1px);
+  }
+
+  .composer-card[data-layout="pill"][data-compact] .composer-bar > .ui-icon-button:first-child {
+    margin-inline-start: 0;
+  }
+
+  /* At 320px, the field's words need the room more than these two need their last 8 px across. */
+  @container (max-width: 260px) {
+    .composer-card[data-layout="pill"][data-compact] .composer-bar > .ui-icon-button:first-child,
+    .composer-card[data-layout="pill"][data-compact] .voice-mic > button {
+      width: 36px;
+    }
+  }
+
+  .composer-card:not([data-compact])
+    .composer-bar
+    > :not(.ui-icon-button:first-child, .voice-mic, .composer-send) {
+    animation: composer-reveal var(--dur-fade) var(--ease-standard);
+  }
+
+  @keyframes composer-reveal {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .composer-card:not([data-compact])
+      .composer-bar
+      > :not(.ui-icon-button:first-child, .voice-mic, .composer-send) {
+      animation: none;
+    }
+  }
+
+  @media (pointer: coarse) {
+    .composer-card {
+      --_composer-row: calc(var(--spacing) * 11);
+    }
+  }
+
+  /* Over the kit's button: a press on the handle drags, it never scrolls the thread. */
+  .thread-queue-handle {
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .thread-row[data-queue-dragged] .thread-queue-handle {
+    cursor: grabbing;
+  }
+
+  /* A long text moved out of the field, as the words it holds. */
+  .composer-text-view {
+    margin: 0;
+    color: var(--color-fg-1);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-mono);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .composer-files .file-chip[data-opens] {
+    position: relative;
+    cursor: pointer;
+  }
+
+  .composer-files .file-chip[data-opens] > :is(.file-chip-remove, .file-chip-retry) {
+    position: relative;
+    z-index: 1;
   }
 }
 
@@ -391,12 +557,12 @@
   .model-effort-slider input::-webkit-slider-runnable-track {
     height: 8px;
     border-radius: var(--radius-full);
-    background: var(--color-raised);
+    background: var(--color-slider-rail);
   }
   .model-effort-slider input::-moz-range-track {
     height: 8px;
     border-radius: var(--radius-full);
-    background: var(--color-raised);
+    background: var(--color-slider-rail);
   }
   .model-effort-slider input::-webkit-slider-thumb {
     appearance: none;

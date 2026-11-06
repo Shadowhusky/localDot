@@ -1,51 +1,20 @@
-import {
-  HOUR_STEPS,
-  LocalDate,
-  type RoutineToolWhen,
-  type RoutineWhen,
-  RoutineWhen as WhenSchema,
-} from "@localdot/protocol";
+import { LocalDate, parseDateKey, type RoutineToolSchedule, zonedToUtc } from "@localdot/protocol";
 import type { RoutineToolPort } from "../agent/tools/routine.ts";
-import { parseDateKey, zonedToUtc } from "./schedule.ts";
 import { RoutineError, type RoutineStore, type StoredRoutine, toRoutine } from "./store.ts";
 
 const DAY: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
-const need = (value: string | undefined, message: string) => {
-  if (!value) throw new RoutineError(400, message);
-  return value;
-};
 
-export function whenFromTool(input: RoutineToolWhen): { when: RoutineWhen; until?: string } {
-  let when: unknown;
-  switch (input.kind) {
-    case "once":
-      when = {
-        kind: "once",
-        date: need(input.date, "A one-off routine needs date and time."),
-        time: need(input.time, "A one-off routine needs date and time."),
-      };
-      break;
-    case "daily":
-    case "weekdays":
-      when = { kind: input.kind, time: need(input.time, "Say what time it runs.") };
-      break;
-    case "weekly":
-      if (!input.days?.length) throw new RoutineError(400, "A weekly routine needs days.");
-      when = {
-        kind: "weekly",
-        days: input.days.map((d) => DAY[d]),
-        time: need(input.time, "Say what time it runs."),
-      };
-      break;
-    case "hours":
-      if (!(HOUR_STEPS as readonly number[]).includes(input.every ?? 0))
-        throw new RoutineError(400, "Every N hours works with 1, 2, 3, 4, 6, 8 or 12.");
-      when = { kind: "hours", every: input.every, ...(input.time ? { from: input.time } : {}) };
-      break;
-  }
-  const parsed = WhenSchema.safeParse(when);
-  if (!parsed.success) throw new RoutineError(400, "That schedule isn't valid.");
-  return { when: parsed.data, ...(input.until ? { until: input.until } : {}) };
+// The store checks what the rule says as it checks the app's own.
+export function scheduleFromTool(input: RoutineToolSchedule) {
+  return {
+    every: input.every ?? 1,
+    unit: input.unit,
+    ...(input.times ? { times: input.times } : {}),
+    ...(input.days ? { weekdays: input.days.map((day) => DAY[day] as number) } : {}),
+    ...(input.month_days ? { monthDays: input.month_days } : {}),
+    ...(input.from ? { from: input.from } : {}),
+    ...(input.to ? { to: input.to } : {}),
+  };
 }
 
 /** What the agent's tools may do with routines: propose (inactive), list, pause, follow up. */
@@ -57,20 +26,20 @@ export function routineToolPort(deps: {
 }): RoutineToolPort {
   return {
     propose(sessionId, input) {
-      const { when, until } = whenFromTool(input.when);
       const created = deps.store.create(
         {
           name: input.name,
           instruction: input.instruction,
-          when,
-          ...(until ? { until } : {}),
+          schedules: input.schedules.map(scheduleFromTool),
+          ...(input.start ? { start: input.start } : {}),
+          ...(input.until ? { until: input.until } : {}),
           ...(input.notify ? { notify: input.notify } : {}),
           ...(input.profile ? { profile: input.profile } : {}),
         },
         { state: "proposed", createdFromSession: sessionId },
       );
       deps.changed(created);
-      const view = toRoutine(created, undefined);
+      const view = toRoutine(created, undefined, deps.now());
       return {
         routineId: created.id,
         revision: created.revision,
@@ -89,7 +58,7 @@ export function routineToolPort(deps: {
         .list()
         .filter((r) => r.state !== "finished")
         .map((r) => {
-          const view = toRoutine(r, undefined);
+          const view = toRoutine(r, undefined, deps.now());
           return {
             id: r.id,
             name: r.name,
@@ -121,7 +90,9 @@ export function routineToolPort(deps: {
         {
           name: "Follow-up",
           instruction: note,
-          when: { kind: "once", date, time },
+          schedules: [{ every: 1, unit: "day", times: [time] }],
+          start: date,
+          until: date,
           profile: "ask_first",
         },
         {
@@ -132,7 +103,10 @@ export function routineToolPort(deps: {
         },
       );
       deps.changed(created);
-      return { routineId: created.id, summary: toRoutine(created, undefined).summary };
+      return {
+        routineId: created.id,
+        summary: toRoutine(created, undefined, deps.now()).summary,
+      };
     },
   };
 }

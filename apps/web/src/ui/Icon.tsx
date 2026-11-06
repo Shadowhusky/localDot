@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import { createElement, type SVGProps } from "react";
+import { createElement, memo, type SVGProps } from "react";
 import { ICONS, type IconName, type IconNode } from "./icons.ts";
 
 const GRID = 24;
@@ -12,7 +12,8 @@ export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {
   label?: string;
 }
 
-export function Icon({ name, size = 16, label, className, ...props }: IconProps) {
+// Memoized: a page redraw reaches dozens of these, and their lines never change.
+export const Icon = memo(function Icon({ name, size = 16, label, className, ...props }: IconProps) {
   const nodes: IconNode = ICONS[name];
   return (
     <svg
@@ -36,4 +37,4 @@ export function Icon({ name, size = 16, label, className, ...props }: IconProps)
       )}
     </svg>
   );
-}
+});

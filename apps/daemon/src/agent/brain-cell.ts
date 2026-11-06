@@ -12,7 +12,7 @@ import { hostAddress } from "../cells/ipv4.ts";
 import { requireNoGateway } from "../cells/orchestrator.ts";
 import type { PortRange } from "../cells/ports.ts";
 import { type GateRelay, HOST_RELAY } from "../cells/relay.ts";
-import type { KeydClient } from "../keyd/client.ts";
+import { type KeydClient, KeydError } from "../keyd/client.ts";
 import {
   BRAIN_GATE_OFFSET,
   BRAIN_OFFSET,
@@ -50,6 +50,20 @@ export interface BrainCellsDeps {
   relay?: () => Promise<GateRelay>;
 
   pollMs?: number;
+  // How long cleanup keeps trying while Docker or keyd is not answering, and the waits between.
+  cleanupPatience?: { ms: number; waitsMs: readonly number[] };
+}
+
+// A busy Mac can keep Docker or keyd from answering for minutes. Until both confirm the brain is
+// gone it may still be running, so cleanup keeps asking, and only an answer that refuses, or this
+// long without one, leaves it unconfirmed.
+const CLEANUP_PATIENCE = { ms: 5 * 60_000, waitsMs: [1000, 2000, 4000, 8000, 15_000, 30_000] };
+
+// Docker or keyd did not answer, or answered that it is busy: asking again may settle it.
+function unanswered(error: unknown): boolean {
+  if (error instanceof DockerError)
+    return error.status === 0 || error.status === 409 || error.status >= 500;
+  return error instanceof KeydError && (error.status === 0 || error.status >= 500);
 }
 export interface BrainCell extends BrainLayout {
   readonly proxyUrl: string;
@@ -62,6 +76,9 @@ export interface OpenBrain {
   sessionId: string;
   secrets: string[];
   pricing: TaskPricing;
+  // keyd's name for the task's spending on these prices, which keyd never lets change under one
+  // name: the session, until the task's model changes.
+  account?: string;
   // Resend the originally captured initial value (including omission), never a current raise.
   budgetUSD?: number;
   signal?: AbortSignal;
@@ -289,7 +306,9 @@ export class BrainCells {
         secrets.some((secret) => !SURROGATE_PATTERN.test(surrogates[secret] ?? ""))
       )
         throw new BrainStateError("keyd returned different brain credentials");
-      await step(() => this.deps.keyd.beginPricedTask(id, layout.sessionId, pricing, budget));
+      await step(() =>
+        this.deps.keyd.beginPricedTask(id, opts.account ?? layout.sessionId, pricing, budget),
+      );
       const toolToken = randomBytes(32).toString("base64url");
       await create(
         { kind: "containers", name: layout.names.gate, role: "brain-gate" },
@@ -388,9 +407,15 @@ export class BrainCells {
         })
         .catch((error) => {
           if (is404(error)) return { State: { Running: false, ExitCode: -1 } };
+          // A slow Docker says nothing about the brain, which goes on without it.
+          if (unanswered(error)) return null;
           throw error;
         });
       if (signal.aborted || ended()) return undefined;
+      if (info === null) {
+        await sleep(this.deps.pollMs ?? 2000, signal);
+        continue;
+      }
       if (typeof info?.State?.Running !== "boolean" || !Number.isInteger(info.State.ExitCode))
         throw new BrainStateError("invalid brain exit status");
       if (!info.State.Running) return info.State.ExitCode;
@@ -429,15 +454,36 @@ export class BrainCells {
     return owned.closing;
   }
   async #remove(owned: Owned): Promise<void> {
-    const failed: string[] = [];
+    const patience = this.deps.cleanupPatience ?? CLEANUP_PATIENCE;
+    const deadline = Date.now() + patience.ms;
+    for (let attempt = 0; ; attempt++) {
+      const failed = await this.#removeOnce(owned);
+      if (!failed.length) break;
+      const wait = patience.waitsMs[Math.min(attempt, patience.waitsMs.length - 1)] ?? 30_000;
+      if (!failed.every((f) => unanswered(f.error)) || Date.now() + wait > deadline) {
+        owned.phase = "cleanup-failed";
+        throw new BrainCleanupError(
+          owned.layout.id,
+          failed.map((f) => f.role),
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+    owned.phase = "closed";
+    this.#reserved.delete(owned.layout.keydPort);
+    if (owned.cell) this.#closed.add(owned.cell);
+    this.#owned.delete(owned.layout.id);
+  }
+  async #removeOnce(owned: Owned): Promise<{ role: string; error: unknown }[]> {
+    const failed: { role: string; error: unknown }[] = [];
     let keydClosed = !owned.keydAttempted;
     if (owned.keydAttempted) {
       try {
         await this.deps.keyd.closeCell(owned.layout.id);
         keydClosed = true;
         owned.keydAttempted = false;
-      } catch {
-        failed.push("keyd");
+      } catch (error) {
+        failed.push({ role: "keyd", error });
       }
     }
     // Stop key access before waiting for an in-flight start, then delete after it settles.
@@ -448,18 +494,11 @@ export class BrainCells {
       try {
         await this.#removeResource(owned.layout, resource);
         owned.resources.splice(owned.resources.indexOf(resource), 1);
-      } catch {
-        failed.push(resource.role);
+      } catch (error) {
+        failed.push({ role: resource.role, error });
       }
     }
-    if (failed.length > 0) {
-      owned.phase = "cleanup-failed";
-      throw new BrainCleanupError(owned.layout.id, failed);
-    }
-    owned.phase = "closed";
-    this.#reserved.delete(owned.layout.keydPort);
-    if (owned.cell) this.#closed.add(owned.cell);
-    this.#owned.delete(owned.layout.id);
+    return failed;
   }
   async #removeResource(layout: BrainLayout, resource: Resource): Promise<void> {
     try {

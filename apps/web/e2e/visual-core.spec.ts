@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { PANEL_NAME } from "../src/shell/panel-name.ts";
 import { type CellRef, createReadyCell, removeCell } from "./cells.ts";
 import { desktopContainer, type RunningDaemon, startDaemon } from "./daemon.ts";
 import { runPuppet, sessionEvents, waitForSessionEnd } from "./puppet.ts";
@@ -96,7 +97,7 @@ test("the puppet runs a multi-app sequence live in the Theatre with the overlays
   expect(events.filter((e) => e.type === "action.cancel")).toEqual([]);
   await expect(page.getByTestId("hud-status")).toHaveText("Done", { timeout: 15_000 });
   await expect(page.locator(".stage.control")).toHaveCount(0);
-  const rail = page.getByRole("complementary", { name: "Plan and steps" });
+  const rail = page.getByRole("complementary", { name: PANEL_NAME });
   const rows = rail.getByTestId("step-row");
   await expect(rows).toHaveCount(SCRIPT.steps.length);
   await rows.first().locator(".activity-row-head").click();

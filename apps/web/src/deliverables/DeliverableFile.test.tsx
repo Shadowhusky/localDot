@@ -102,13 +102,81 @@ describe("a handed-over file", () => {
     expect(await screen.findByRole("img", { name: "Preview of report.ods" })).toBeTruthy();
     expect(screen.getByText("Preview made on your computer")).toBeTruthy();
   });
-  it("says there is no preview for an svg, and never asks for one or draws it", async () => {
+  it("shows an svg's card, and never asks for a preview or draws it", async () => {
     const d = daemon({ "/versions": () => versions("diagram.svg", 1) });
     const view = file(d.api, "diagram.svg");
-    expect(screen.getByText("No preview for this kind of file.")).toBeTruthy();
+    expect(view.container.querySelector(".ui-file-card")?.textContent).toContain("SVG picture");
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
     await waitFor(() => expect(d.calls.length).toBeGreaterThan(0));
     expect(d.calls.some((path) => path.includes("/preview"))).toBe(false);
     expect(view.container.querySelectorAll("img, iframe, object, embed")).toHaveLength(0);
+  });
+  it("shows a zip's card with its kind, its size and a download, explaining nothing", async () => {
+    const d = daemon({
+      "/versions": () => versions("archive.zip", 1),
+      "/preview?v=1": () => Response.json({ kind: "none", reason: "binary" }),
+    });
+    const view = file(d.api, "archive.zip");
+    await waitFor(() =>
+      expect(view.container.querySelector(".ui-file-card")?.textContent).toContain(
+        "ZIP file · 10 bytes",
+      ),
+    );
+    const card = view.container.querySelector(".ui-file-card") as HTMLElement;
+    expect(card.querySelector(".ui-file-name")?.textContent).toContain("archive");
+    expect(card.querySelector(".ui-file-card-problem")).toBeNull();
+    // A zip has no viewer to open and no app the Mac may open it in.
+    expect(within(card).queryByRole("button", { name: "Open" })).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Download" }));
+    expect(downloads.request).toHaveBeenCalled();
+  });
+  it("offers to open a video it can't play on this Mac, and says nothing of why", async () => {
+    const d = daemon({
+      "/versions": () => versions("film.mov", 1),
+      "/preview-link": () => Response.json({ base: `/file-previews/${"t".repeat(43)}/` }),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 200 })),
+    );
+    const view = file(d.api, "film.mov", 1, true);
+    const video = await waitFor(() => {
+      const found = view.container.querySelector("video");
+      expect(found).toBeTruthy();
+      return found as HTMLVideoElement;
+    });
+    expect(video.getAttribute("src")).toContain(`/file-previews/${"t".repeat(43)}/film.mov`);
+    expect(video.playsInline).toBe(true);
+    expect(video.controls).toBe(true);
+    fireEvent.error(video);
+    await waitFor(() => expect(view.container.querySelector(".ui-file-card")).toBeTruthy());
+    const card = view.container.querySelector(".ui-file-card") as HTMLElement;
+    expect(card.textContent).toContain("MOV video · 10 bytes");
+    expect(card.querySelector(".ui-file-card-problem")).toBeNull();
+    expect(within(card).getByRole("button", { name: "Open" })).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "Download" })).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+  it("says a video failed to load, not that it has no preview, and tries again", async () => {
+    const d = daemon({
+      "/versions": () => versions("film.mp4", 1),
+      "/preview-link": () => Response.json({ base: `/file-previews/${"t".repeat(43)}/` }),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 404 })),
+    );
+    const view = file(d.api, "film.mp4");
+    const video = await waitFor(() => {
+      const found = view.container.querySelector("video");
+      expect(found).toBeTruthy();
+      return found as HTMLVideoElement;
+    });
+    fireEvent.error(video);
+    expect(await screen.findByText("Couldn't load this file.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(view.container.querySelector("video")).toBeTruthy());
+    vi.unstubAllGlobals();
   });
   it("offers Try again after a failed preview and loads it again", async () => {
     let n = 0;

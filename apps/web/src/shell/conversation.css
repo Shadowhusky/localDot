@@ -171,12 +171,20 @@
   color: var(--color-fg-3);
 }
 
-/* Message-shaped bones at the end of the thread, where the newest messages will land. */
+/* Message-shaped bones at the end of the thread, where the newest messages will land. They appear
+   only if the reading lasts, as the kit's Skeleton's do, so a quick switch shows no flash of grey. */
 .thread-skeleton {
   display: flex;
   flex-direction: column;
   gap: calc(var(--spacing) * 5);
   margin-top: auto;
+  animation: thread-skeleton-in var(--dur-fade) var(--ease-standard) 200ms backwards;
+}
+
+@keyframes thread-skeleton-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .thread-bone {
@@ -351,7 +359,7 @@
 
 @media (hover: none) and (pointer: coarse) {
   .thread-copy-slot {
-    opacity: 0.5;
+    opacity: var(--opacity-touch-rest);
   }
 }
 
@@ -831,7 +839,7 @@
   left: calc(var(--spacing) * 4);
   width: 1px;
   translate: -50% 0;
-  background-color: var(--color-separator);
+  background-color: var(--color-step-line);
 }
 
 .thread-work-steps .thread-work-window-row[data-index="0"]::before {
@@ -849,7 +857,6 @@
 .thread-work-scroll {
   max-height: min(280px, 32dvh, var(--work-history-room));
   padding-inline: calc(var(--spacing) * 2);
-  overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 
@@ -864,6 +871,15 @@
 /* Steps that failed, which dot may have worked around, stay in sight in a folded run's summary. */
 .thread-work-failed {
   color: var(--color-danger-fg);
+}
+
+/* Where a list of steps moves to another model, in the quiet of a section label. */
+.work-model-change {
+  margin: 0;
+  padding-block: calc(var(--spacing) * 1);
+  font-size: var(--text-footnote);
+  color: var(--color-fg-3);
+  overflow-wrap: anywhere;
 }
 
 /* A single step reads as a run's summary does, in the same quiet line. */
@@ -898,6 +914,51 @@
   margin: var(--spacing) 0 calc(var(--spacing) * 1.5);
   padding: 0 0 0 calc(var(--spacing) * 6);
   list-style: none;
+}
+
+/* All of them in one row that scrolls sideways, the last in view cut off to say so. The room above and below keeps the
+   thumbnails' shadows and focus rings from being cut off by the scroller, and is taken back from
+   its margins so the row doesn't grow when it opens. */
+.thread-pictures[data-strip] {
+  --_room: var(--spacing);
+  display: flex;
+  margin-block: calc(var(--spacing) - var(--_room)) calc(var(--spacing) * 1.5 - var(--_room));
+  padding-block: var(--_room);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline-start: calc(var(--spacing) * 6);
+  scroll-snap-type: x mandatory;
+}
+
+.thread-pictures[data-strip] > li {
+  flex: 0 0 calc(var(--spacing) * 26);
+  scroll-snap-align: start;
+}
+
+.thread-picture-expand {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: calc(var(--spacing) * 6);
+  height: calc(var(--spacing) * 6);
+  border-radius: var(--radius-full);
+  background-color: var(--color-glass-solid);
+  box-shadow: var(--shadow-glass);
+  color: var(--color-fg-1);
+  opacity: 0;
+  translate: -50% -50%;
+  transition: opacity var(--dur-fade) var(--ease-enter);
+  pointer-events: none;
+}
+
+/* A finger presses the picture itself; only a pointer has a moment to say what a press will do. */
+@media (hover: hover) and (pointer: fine) {
+  .thread-picture:is(:hover, :focus-visible) > .thread-picture-expand {
+    opacity: 1;
+  }
 }
 
 .thread-pictures-more {
@@ -1063,23 +1124,6 @@
   pointer-events: none;
 }
 
-/* A file's name on one line: the middle gives way, so its end (the extension) stays in view. */
-.file-name {
-  display: flex;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.file-name-head {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.file-name-tail {
-  flex-shrink: 0;
-}
-
 /* What a file looks like: a picture or page in a well of fixed height, so nothing moves when it
    arrives; the first lines or rows scroll inside their own box. */
 .file-preview-picture {
@@ -1171,19 +1215,6 @@
     var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
     var(--font-ui);
   letter-spacing: var(--text-footnote--letter-spacing);
-}
-
-.file-preview-note {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
-  min-height: calc(var(--spacing) * 7);
-  color: var(--color-fg-3);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
-
-.file-preview-retry {
-  margin-left: auto;
 }
 
 /* The proof: one row under the files, set in as far as their rows are. */
@@ -1561,16 +1592,16 @@
   border-radius: var(--radius-lg);
   background-color: var(--color-raised);
   box-shadow:
-    var(--shadow-raised),
-    0 0 0 1px var(--color-hairline);
+    0 0 0 1px var(--color-card-field-line),
+    var(--shadow-raised);
   transition: box-shadow var(--dur-hover) var(--ease-standard);
 }
 
 .composer-card:focus-within {
   box-shadow:
-    var(--shadow-raised),
-    0 0 0 1px var(--color-fg-4),
-    0 0 0 4px var(--color-hairline);
+    0 0 0 1px var(--color-card-field-focus),
+    0 0 0 4px var(--color-hairline),
+    var(--shadow-raised);
 }
 
 .composer-bar {
@@ -1599,8 +1630,7 @@
   flex-shrink: 0;
 }
 
-.composer-note,
-.composer-count {
+.composer-note {
   color: var(--color-fg-3);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   white-space: nowrap;
@@ -1610,10 +1640,6 @@
   overflow: hidden;
   padding-inline: var(--spacing);
   text-overflow: ellipsis;
-}
-
-.composer-count {
-  padding-inline: var(--spacing);
 }
 
 .composer-notice-icon {
@@ -1754,8 +1780,10 @@
   }
 }
 
+/* The card's edges keep its own padding: 2 px at the top over the field, 10 px at the left to line
+   up the field's words. The notice stands 8 px clear of each. */
 .composer-key .ui-banner {
-  margin-bottom: calc(var(--spacing) * 2);
+  margin: calc(var(--spacing) * 1.5) 0 calc(var(--spacing) * 2) calc(var(--spacing) * -0.5);
 }
 
 .key-found-text,
@@ -1841,8 +1869,7 @@
     display: flex;
     align-items: flex-end;
     gap: calc(var(--spacing) * 2);
-    padding: calc(var(--spacing) * 2) var(--spacing)
-      max(calc(var(--spacing) * 2), env(safe-area-inset-bottom));
+    padding: calc(var(--spacing) * 2) var(--spacing) max(calc(var(--spacing) * 2), var(--home-foot));
     background-color: var(--_toolbar);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
     backdrop-filter: blur(20px) saturate(160%);
@@ -1877,7 +1904,7 @@
      face stays 8 px clear of the field without narrowing it. */
   .toolbar-button {
     --_icon-fg: var(--color-fg-1);
-    margin-block-end: var(--spacing);
+    margin-block-end: calc(var(--spacing) * 2);
   }
 }
 
@@ -1905,15 +1932,15 @@
   min-height: 44px;
   padding: calc(var(--spacing) * 1) calc(var(--spacing) * 1.5) calc(var(--spacing) * 1)
     var(--spacing);
-  /* Half of one line's height, so a field grown to more lines keeps the same corners. */
-  border-radius: calc(var(--spacing) * 5.5);
+  /* Half of one row's height, so a field grown to more lines keeps the same corners. */
+  border-radius: calc(var(--spacing) * 6.5);
   background-color: var(--color-raised);
-  box-shadow: 0 0 0 1px var(--color-hairline);
+  box-shadow: 0 0 0 1px var(--color-card-field-line);
 }
 
 .composer-card[data-layout="pill"]:focus-within {
   box-shadow:
-    0 0 0 1px var(--color-fg-4),
+    0 0 0 1px var(--color-card-field-focus),
     0 0 0 4px var(--color-hairline);
 }
 
@@ -1926,9 +1953,9 @@
    than squeezing into the one-line field. */
 .composer-card[data-layout="pill"] > .composer-key {
   position: absolute;
-  right: calc(-44px - var(--spacing) * 2);
+  right: calc(-36px - var(--spacing));
   bottom: calc(100% + var(--spacing) * 3);
-  left: calc(-44px - var(--spacing) * 2);
+  left: calc(-36px - var(--spacing));
 }
 
 .composer-card[data-layout="pill"] > .composer-key:has(.ui-banner-reveal[data-open]) {
@@ -2251,6 +2278,33 @@
   max-width: 100%;
 }
 
+/* A waiting message moves by its handle: the row follows the pointer over the others, which make
+   room for it as it passes them. */
+.thread-row[data-queue-moving] {
+  position: relative;
+  transition: translate var(--dur-hover) var(--ease-standard);
+}
+
+.thread-row[data-queue-dragged] {
+  z-index: 2;
+  transition: none;
+}
+
+/* The bubble and its handle travel; its other controls would write over the rows it passes. */
+.thread-row[data-queue-dragged] .thread-queue > :not(.thread-queue-handle) {
+  visibility: hidden;
+}
+
+.thread-row[data-queue-dragged] .thread-bubble {
+  box-shadow: var(--shadow-overlay);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-row[data-queue-moving] {
+    transition: none;
+  }
+}
+
 .thread-foot {
   min-height: 0;
   max-height: 100%;
@@ -2267,6 +2321,11 @@
 
 .thread-browser-signin {
   margin-block: calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 3);
+  border-radius: var(--radius-lg);
+  background: var(--color-raised);
+  color: var(--color-fg-1);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   min-width: 0;
   overflow-wrap: anywhere;
   display: flex;
@@ -2274,12 +2333,16 @@
   align-items: flex-start;
   gap: calc(var(--spacing) * 2);
 }
-.thread-browser-signin strong {
-  color: var(--color-fg-1);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
 .thread-browser-signin p {
   margin-top: 0;
   color: var(--color-fg-2);
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+.thread-browser-signin-saved {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--spacing) * 2);
+  margin-block-end: calc(var(--spacing) * 2);
+  min-width: 0;
 }

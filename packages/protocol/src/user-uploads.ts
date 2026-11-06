@@ -72,3 +72,10 @@ export function splitAttachments(text: string): { body: string; files: string[] 
     return { body: text, files: [] };
   return { body: text.slice(0, at), files: lines.map((line) => line.slice(2)) };
 }
+
+// What a message is called before it has a name: its words, or with none its first file's name.
+export function messageName(text: string): string {
+  const { body, files } = splitAttachments(text);
+  const file = files[0];
+  return body.trim() || (file ? file.slice(file.lastIndexOf("/") + 1) : text);
+}

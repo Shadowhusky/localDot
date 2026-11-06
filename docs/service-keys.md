@@ -24,7 +24,7 @@ When access is missing, `credentials` with `action: request` specifies the exact
 
 The new service path can use a saved key immediately; an existing browser or process that inherited an older key selection may still need its normal refresh. Editing Name, Service or Use for changes only metadata, without opening the secret or changing its bound destination. Existing keys need no re-entry. Metadata is optional, with bounded plain-text fields.
 
-Authentication mechanisms requiring OAuth, request signing or query-string secrets use their dedicated connectors; they are not represented as a generic header key. Browser passwords, passkeys and one-time codes remain in the separate private sign-in flow.
+Authentication mechanisms requiring OAuth, request signing or query-string secrets use their dedicated connectors; they are not represented as a generic header key. Apps that sign in connect from Settings → Connectors or from dot's offer in a conversation (`credentials` with `action: connect`, for an app in `work_context.connectableApps`): the user approves in the Mac's browser, keyd keeps and refreshes the tokens, and nothing but "connected" reaches the conversation. Browser passwords, passkeys and one-time codes remain in the separate private sign-in flow; saved logins are listed and imported under **Saved logins** in Keys ([details](browser-workspace.md#saved-logins)).
 
 ## Verification
 

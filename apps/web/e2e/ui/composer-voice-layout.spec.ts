@@ -1,4 +1,4 @@
-import { composer, expect, runAt, test } from "./harness.ts";
+import { expect, openComposer, runAt, test } from "./harness.ts";
 
 runAt("c14", "w14", "c39", "w39");
 
@@ -62,7 +62,7 @@ for (const width of [320, 390, 1440]) {
     });
     await ui.open("running");
     await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
-    const card = await composer(page);
+    const card = await openComposer(page);
     const send = card.locator(".composer-send");
     const mic = card.getByRole("button", { name: "Start voice input" });
     await expect(mic).toBeVisible();

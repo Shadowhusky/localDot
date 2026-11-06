@@ -57,23 +57,51 @@ export function restingStop(
 }
 
 // Whether a finger moving this way on a sheet's content takes the sheet rather than scrolling it:
-// up while the sheet rests below its top height, to raise it; down once everything that scrolls
-// under the finger is at its top, to lower it. A move more sideways than up or down never does.
-export function takesSheet(dx: number, dy: number, lowered: boolean, atTop: boolean): boolean {
+// down once everything that scrolls under the finger is at its top, to lower it; up only over
+// content that can't scroll, to raise a sheet resting below its top height. A move more sideways
+// than up or down never does.
+export function takesSheet(
+  dx: number,
+  dy: number,
+  lowered: boolean,
+  atTop: boolean,
+  scrolls: boolean,
+): boolean {
   if (dy === 0 || Math.abs(dx) > Math.abs(dy)) return false;
-  return dy < 0 ? lowered : atTop;
+  return dy > 0 ? atTop : lowered && !scrolls;
 }
+
+const scrollsDown = (node: Element) => /(auto|scroll)/.test(getComputedStyle(node).overflowY);
 
 // Whether everything that scrolls between a press and its sheet is scrolled to its top.
 export function scrolledToTop(target: Element, panel: Element): boolean {
   for (let node: Element | null = target; node && node !== panel; node = node.parentElement)
-    if (node.scrollTop > 0 && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) return false;
+    if (node.scrollTop > 0 && scrollsDown(node)) return false;
   return true;
+}
+
+// At its top, what scrolls hands the finger to the sheet rather than bouncing as well. Only on what
+// does scroll: Chromium ends a scroll's search for a scroller at any element that says this.
+function holdBounce(target: Element, panel: Element) {
+  for (let node: Element | null = target; node && node !== panel; node = node.parentElement)
+    if (node instanceof HTMLElement && scrollsDown(node)) node.style.overscrollBehaviorY = "none";
+}
+
+// Whether anything between a press and its sheet has more to show than fits.
+export function canScroll(target: Element, panel: Element): boolean {
+  for (let node: Element | null = target; node && node !== panel; node = node.parentElement)
+    if (node.scrollHeight > node.clientHeight + 1 && scrollsDown(node)) return true;
+  return false;
 }
 
 interface Sample {
   t: number;
   y: number;
+}
+
+function note(samples: Sample[], t: number, y: number) {
+  samples.push({ t, y });
+  if (samples.length > 32) samples.shift();
 }
 
 export function velocityOf(samples: readonly Sample[]): number {
@@ -117,6 +145,18 @@ interface Press {
   from: number;
   // How far it may stretch up past rest: the surface it runs on below the screen.
   stretch: number;
+  // Pulled down off content that can scroll, it goes no higher than it was.
+  ceiling?: number;
+  samples: Sample[];
+}
+
+// A finger the content took. The browser has it now and sends only touches, which can't be stopped,
+// so the content scrolls until it reaches its top; if the finger is still pulling down there, the
+// sheet follows it, in the one gesture, while whatever scrolls under the finger stands still.
+interface Carry {
+  target: Element;
+  y: number;
+  pull?: { y: number; from: number; held: { element: HTMLElement; overflow: string }[] };
   samples: Sample[];
 }
 
@@ -126,6 +166,7 @@ interface Press {
 export function attachSheetDrag(host: SheetDragHost): () => void {
   const { panel, scrim } = host;
   let press: Press | undefined;
+  let carry: Carry | undefined;
   let offset = 0;
   let frame = 0;
   // Where the spring under way is taking the sheet.
@@ -135,13 +176,17 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
     offset = value;
     const height = panel.offsetHeight || 1;
     if (host.presentation) host.presentation.apply(value);
-    else panel.style.translate = `0 ${value}px`;
+    else {
+      panel.style.translate = `0 ${value}px`;
+      panel.style.setProperty("--_lowered", `${Math.max(0, value)}px`);
+    }
     if (scrim) scrim.style.opacity = `${Math.min(1, Math.max(0, 1 - value / height))}`;
   };
 
   const settle = () => {
     panel.style.removeProperty("transition");
     panel.style.removeProperty("translate");
+    panel.style.removeProperty("--_lowered");
     host.presentation?.clear();
     scrim?.style.removeProperty("transition");
     scrim?.style.removeProperty("opacity");
@@ -212,17 +257,22 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
     animate(stops[index] ?? 0, velocity, landed);
   };
 
-  const begin = (current: Press) => {
-    current.dragging = true;
+  const takeOver = () => {
     cancelAnimationFrame(frame);
     frame = 0;
-    panel.setPointerCapture(current.id);
     panel.style.transition = "none";
     if (scrim) scrim.style.transition = "none";
   };
 
+  const begin = (current: Press) => {
+    current.dragging = true;
+    takeOver();
+    panel.setPointerCapture(current.id);
+  };
+
   const onPointerDown = (event: PointerEvent) => {
     if (press || (event.pointerType === "mouse" && event.button !== 0)) return;
+    if (!carry?.pull) carry = undefined;
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
     const grip = target.closest(GRIP);
@@ -235,6 +285,7 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
       // cancelled: WebKit would drop its tap's click.
       event.preventDefault();
     }
+    if (!grip) holdBounce(target, panel);
     const at = frame ? offset : presented();
     press = {
       id: event.pointerId,
@@ -258,16 +309,25 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
     const dx = x - current.x;
     const dy = y - current.y;
     if (!dx && !dy) return undefined;
-    if (!takesSheet(dx, dy, current.lowered, scrolledToTop(current.content, panel))) {
+    // What floats over a list (its Jump to latest) counts as the list.
+    const under = [current.content, ...(document.elementsFromPoint?.(x, y) ?? [])].filter((each) =>
+      panel.contains(each),
+    );
+    const scrolls = under.some((each) => canScroll(each, panel));
+    const atTop = under.every((each) => scrolledToTop(each, panel));
+    if (!takesSheet(dx, dy, current.lowered, atTop, scrolls)) {
       press = undefined;
+      if (Math.abs(dy) >= Math.abs(dx)) carry = { target: current.content, y, samples: [] };
       return false;
     }
+    if (scrolls) current.ceiling = current.from;
     current.content = null;
     // Caught on its way, it stops where it is and follows the finger from there.
     if (frame) {
       begin(current);
       current.from = offset;
       current.y = y;
+      if (current.ceiling !== undefined) current.ceiling = offset;
     }
     return true;
   };
@@ -286,30 +346,99 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
       }
       begin(current);
     }
-    const raw = current.from + (event.clientY - current.y);
+    const raw = Math.max(
+      current.from + (event.clientY - current.y),
+      current.ceiling ?? Number.NEGATIVE_INFINITY,
+    );
     apply(raw >= 0 ? raw : -rubberband(-raw, current.stretch));
-    current.samples.push({ t: event.timeStamp, y: raw });
-    if (current.samples.length > 32) current.samples.shift();
+    note(current.samples, event.timeStamp, raw);
+  };
+
+  const speedAt = (samples: readonly Sample[], t: number) => {
+    const recent = samples.at(-1);
+    return !recent || t - recent.t > WINDOW_MS / 2 ? 0 : velocityOf(samples);
   };
 
   const onPointerEnd = (event: PointerEvent) => {
     const current = press;
     if (!current || event.pointerId !== current.id) return;
     press = undefined;
-    if (!current.dragging) return;
+    if (!current.dragging) {
+      // The browser took the finger before a move could say whose it was.
+      if (event.type === "pointercancel" && current.content)
+        carry = { target: current.content, y: event.clientY || current.y, samples: [] };
+      return;
+    }
     if (panel.hasPointerCapture(event.pointerId)) panel.releasePointerCapture(event.pointerId);
-    const recent = current.samples.at(-1);
-    const still = !recent || event.timeStamp - recent.t > WINDOW_MS / 2;
-    release(event.type === "pointercancel" || still ? 0 : velocityOf(current.samples));
+    release(event.type === "pointercancel" ? 0 : speedAt(current.samples, event.timeStamp));
+  };
+
+  const letContentGo = (pull: NonNullable<Carry["pull"]>) => {
+    for (const { element, overflow } of pull.held) element.style.overflowY = overflow;
+  };
+
+  const startPull = (current: Carry, y: number) => {
+    const from = frame ? offset : presented();
+    takeOver();
+    const held: { element: HTMLElement; overflow: string }[] = [];
+    for (
+      let node: HTMLElement | null = current.target as HTMLElement;
+      node && node !== panel;
+      node = node.parentElement
+    )
+      if (node.scrollHeight > node.clientHeight && scrollsDown(node)) {
+        held.push({ element: node, overflow: node.style.overflowY });
+        node.style.overflowY = "hidden";
+      }
+    current.pull = { y, from, held };
+  };
+
+  const followCarry = (current: Carry, y: number, t: number) => {
+    const step = y - current.y;
+    const before = current.y;
+    current.y = y;
+    if (!current.pull) {
+      if (step <= 0 || !scrolledToTop(current.target, panel)) return;
+      startPull(current, before);
+    }
+    const pull = current.pull as NonNullable<Carry["pull"]>;
+    const raw = pull.from + (y - pull.y);
+    if (raw <= pull.from) {
+      // Back up above where it took over: the sheet is home, and the content is free to scroll.
+      letContentGo(pull);
+      current.pull = undefined;
+      current.samples = [];
+      apply(pull.from);
+      settle();
+      return;
+    }
+    apply(raw);
+    note(current.samples, t, raw);
+  };
+
+  const endCarry = (t: number, cancelled: boolean) => {
+    const current = carry;
+    carry = undefined;
+    if (!current?.pull) return;
+    letContentGo(current.pull);
+    release(cancelled ? 0 : speedAt(current.samples, t));
   };
 
   // A finger the sheet takes moves only the sheet. The browser commits to scrolling on the first
   // move it is not stopped on, so the content's fate is settled by then.
   const onTouchMove = (event: TouchEvent) => {
-    const current = press;
     const touch = event.touches[0];
-    if (!current || !touch) return;
-    if (current.dragging || claims(current, touch.clientX, touch.clientY)) event.preventDefault();
+    if (!touch) return;
+    const current = press;
+    if (current && (current.dragging || claims(current, touch.clientX, touch.clientY))) {
+      if (event.cancelable) event.preventDefault();
+      return;
+    }
+    if (carry) followCarry(carry, touch.clientY, event.timeStamp);
+  };
+
+  const onTouchEnd = (event: TouchEvent) => {
+    if (event.touches.length === 0) endCarry(event.timeStamp, event.type === "touchcancel");
   };
 
   // A press is followed on the window: before the drag takes the pointer, the first moves can
@@ -319,13 +448,18 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
   window.addEventListener("pointerup", onPointerEnd);
   window.addEventListener("pointercancel", onPointerEnd);
   panel.addEventListener("touchmove", onTouchMove, { passive: false });
+  panel.addEventListener("touchend", onTouchEnd);
+  panel.addEventListener("touchcancel", onTouchEnd);
   return () => {
     cancelAnimationFrame(frame);
+    if (carry?.pull) letContentGo(carry.pull);
     if (host.presentation) settle();
     panel.removeEventListener("pointerdown", onPointerDown);
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerEnd);
     window.removeEventListener("pointercancel", onPointerEnd);
     panel.removeEventListener("touchmove", onTouchMove);
+    panel.removeEventListener("touchend", onTouchEnd);
+    panel.removeEventListener("touchcancel", onTouchEnd);
   };
 }

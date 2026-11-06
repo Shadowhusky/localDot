@@ -86,7 +86,12 @@ for (const [range, expected] of [
   assert.deepEqual([...new Uint8Array(await r.arrayBuffer())], expected, range);
 }
 // Every cut of the film, in each language and size, streams the same way.
-for (const cut of ["localdot-film-720", "localdot-film-zh", "localdot-film-zh-720"]) {
+for (const cut of [
+  "localdot-film-720",
+  "localdot-film-zh",
+  "localdot-film-zh-720",
+  "localdot-update",
+]) {
   const r = await worker.fetch(
     new Request(`https://localdot.dev/film/${cut}.mp4`, {
       headers: { Range: "bytes=5000000-5000001" },

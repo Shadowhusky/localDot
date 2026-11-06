@@ -21,7 +21,7 @@ import { autonomyFor } from "../routines/policy.ts";
 import type { BrainCell, OpenBrain } from "./brain-cell.ts";
 import { MemoryStore } from "./memory.ts";
 import { agentRoutes } from "./routes.ts";
-import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { AgentRunner, type AgentRunnerDeps, BRAIN_LOST } from "./runner.ts";
 import { decideAutonomy } from "./safety/autonomy.ts";
 import { ComputerFences } from "./safety/fences.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
@@ -333,6 +333,34 @@ describe("serialized agent lifecycle", () => {
     await h.ready(3);
     expect(h.boots[2]).toMatchObject({ resume: true, inboxAfter: 0 });
     expect(h.opens[2]?.budgetUSD).toBe(5);
+  });
+  it("restarts a brain that lost its connection without counting it as a crash", async () => {
+    const h = setup();
+    const session = await h.runner.start(h.cellId, "Task");
+    const reasons = () =>
+      h.log
+        .read(session.id)
+        .flatMap((e) =>
+          e.type === "agent.state" && e.data.state === "error" ? [e.data.reason] : [],
+        );
+    await h.ready();
+    for (let n = 0; n < 5; n++) {
+      h.exit(n, BRAIN_LOST);
+      await h.ready(n + 2);
+    }
+    expect(reasons()).toEqual(
+      Array(5).fill("the brain lost its connection; restarting from saved history"),
+    );
+    for (let n = 5; n < 8; n++) {
+      h.exit(n, 1);
+      await h.ready(n + 2);
+    }
+    h.exit(8, 1);
+    await until(() => session.stopped);
+    expect(reasons().slice(5)).toEqual([
+      ...Array(3).fill("the brain stopped; restarting from saved history"),
+      "the brain kept crashing",
+    ]);
   });
   it.each(["before", "after"] as const)(
     "retries original initialization after %s-commit open failure",

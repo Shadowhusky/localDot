@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, type Harness, isPhone, runAt, test } from "./harness.ts";
 
 // Files on dot's computer open in the one viewer: the files a message carried, from their chips,
@@ -40,11 +41,11 @@ async function next(viewer: Locator) {
 }
 
 async function activityFiles(page: Page) {
-  if (isPhone(page)) await page.getByRole("button", { name: "Activity", exact: true }).click();
+  if (isPhone(page)) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
   else
-    await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
+    await page.locator(".rail-chat").getByRole("radio", { name: PANEL_NAME, exact: true }).click();
   await page
-    .getByRole("tablist", { name: "Activity" })
+    .getByRole("tablist", { name: PANEL_NAME })
     .getByRole("tab", { name: /^Files/ })
     .click();
 }
@@ -85,7 +86,7 @@ test("a message's files open from their chips, each kind as itself", async ({ pa
   await shoot(page, ui, "viewer-code");
 
   await next(viewer);
-  await expect(viewer.getByText("This file isn't text")).toBeVisible();
+  await expect(viewer.locator(".ui-file-card")).toBeVisible();
   await shoot(page, ui, "viewer-binary");
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -143,9 +144,9 @@ test("a changed file opens from Activity's Files, beside its changes", async ({ 
 
 test("a change's own preview opens the file at its changes", async ({ page, ui }) => {
   await place(page, ui);
-  if (isPhone(page)) await page.getByRole("button", { name: "Activity", exact: true }).click();
+  if (isPhone(page)) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
   else
-    await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
+    await page.locator(".rail-chat").getByRole("radio", { name: PANEL_NAME, exact: true }).click();
   const row = page
     .locator(".activity-rail")
     .getByTestId("tool-row")

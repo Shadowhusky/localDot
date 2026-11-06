@@ -29,8 +29,28 @@ export const AgentRoleChoice = z.strictObject({
   plan: z.literal(true).optional(),
   // A custom endpoint that takes OpenAI's service_tier, so its models offer Fast and Ultrafast.
   speedTiers: z.literal(true).optional(),
+  // Kept in the user's list, but not offered when choosing a model.
+  off: z.literal(true).optional(),
 });
 export type AgentRoleChoice = z.infer<typeof AgentRoleChoice>;
+// Which of the user's models a task or a message is to run on. The daemon finds what else it knows
+// of the model (its price, what it can do) in the saved settings.
+export const TaskModelRef = AgentRoleChoice.pick({
+  provider: true,
+  model: true,
+  key: true,
+  options: true,
+});
+export type TaskModelRef = z.infer<typeof TaskModelRef>;
+export const TaskModelReply = z.strictObject({ choice: AgentRoleChoice.nullable() });
+export type TaskModelReply = z.infer<typeof TaskModelReply>;
+// The models an endpoint's key can reach, as its own list names them.
+export const KeyModelsReply = z.strictObject({
+  models: z.array(
+    z.strictObject({ id: AgentRoleChoice.shape.model, name: z.string().max(128).optional() }),
+  ),
+});
+export type KeyModelsReply = z.infer<typeof KeyModelsReply>;
 export const AgentDenyFolder = z
   .string()
   .min(1)
@@ -84,7 +104,7 @@ export const AgentSettingsDocument = z.strictObject({
   main: AgentRoleChoice.optional(),
   fast: AgentRoleChoice.optional(),
   local: AgentRoleChoice.optional(),
-  // Previously configured models remain available when the active provider changes.
+  // The user's other models: each stays on offer when choosing one, unless it is off.
   models: z.array(AgentRoleChoice).max(100).optional(),
   permissionMode: z.enum(["custom", "auto", "full"]).optional(),
   codexDenyRead: z.array(AgentDenyFolder).max(32).optional(),

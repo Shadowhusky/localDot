@@ -1,5 +1,6 @@
 import type { Socket } from "node:net";
 import { isIP } from "node:net";
+import { basename } from "node:path";
 import type { Duplex } from "node:stream";
 import { connect as tlsConnect } from "node:tls";
 import {
@@ -12,10 +13,11 @@ import {
   type PreviewsStatus,
   type PreviewTarget,
   previewTarget,
+  type ResultPreview,
 } from "@localdot/protocol";
 import type { PortRange } from "../cells/ports.ts";
 import type { CellEndpoints, CellSummary, PreviewEndpoint } from "../cells/types.ts";
-import { checkServer, titleOf } from "./check.ts";
+import { checkServer, siteAnswers, titleOf } from "./check.ts";
 import {
   frontFor,
   frontHosts,
@@ -26,7 +28,13 @@ import {
 import type { Computer } from "./rewrite.ts";
 import type { PreviewServe } from "./serve.ts";
 import { ENTRY_PATH, PreviewSite } from "./site.ts";
-import { ForwarderMissing, listServers, openTunnel } from "./tunnel.ts";
+import {
+  ForwarderMissing,
+  ForwarderRefused,
+  listServers,
+  openTunnel,
+  stopServer,
+} from "./tunnel.ts";
 
 const IDLE_MS = 2 * 60 * 60_000;
 const SWEEP_MS = 60_000;
@@ -41,6 +49,13 @@ const RECHECK_MS = 10_000;
 const TITLE_MS = 8_000;
 // A server that stops answering stays listed, as not answering, this long after it last did.
 const FORGET_MS = 10 * 60_000;
+// A preview someone loaded this lately is in use, even with no socket left open.
+const IN_USE_MS = 5 * 60_000;
+// The computer's clock runs at 100 ticks a second, and a server using this share of a processor is
+// working for someone (a render, a job) even with nobody connected.
+const TICKS_PER_SECOND = 100;
+const BUSY_SHARE = 0.05;
+const MAX_OFFERS = 4;
 const COMPUTER_OFF = "Turn on your computer to open previews.";
 const NO_ANSWER = "Your computer isn't answering. Try again in a moment.";
 const NEEDS_UPDATE = "Update your computer to open previews.";
@@ -59,6 +74,7 @@ export class PreviewError extends Error {
 
 export interface PreviewCells {
   get(id: string): CellSummary | undefined;
+  list?(): readonly CellSummary[];
   endpoints(id: string): CellEndpoints | undefined;
   subscribe(listener: (cell: CellSummary) => void): () => void;
 }
@@ -68,6 +84,10 @@ export interface PreviewsDeps {
   cells: PreviewCells;
   // The computer a task ran on.
   cellOf(sessionId: string): string | undefined;
+  // The tasks of the conversation a task belongs to, itself included.
+  conversation?(sessionId: string): readonly string[];
+  // A task is under way on this computer, or the user holds it: nothing of dot's is stopped then.
+  working?(cellId: string): boolean;
   fronts(): Promise<PreviewFronts>;
   serve?: Pick<PreviewServe, "add" | "remove" | "close">;
   now?: () => number;
@@ -82,6 +102,11 @@ interface Open {
   key: string;
   openedAt: string;
   served: boolean;
+  // A *.localhost site's own answer, when it was last asked.
+  answered: boolean;
+  seenAt: number;
+  checkedAt?: number;
+  checking?: Promise<void>;
 }
 
 // What localDot last heard from a listening server.
@@ -91,17 +116,42 @@ interface Health {
   checkedAt?: number;
   scheme?: "http" | "https";
   answered: boolean;
+  firstSeen: number;
   seenAt?: number;
   title?: string;
   titled: boolean;
+  titling?: Promise<void>;
   // It speaks something other than HTTP, so it isn't asked again.
   other?: boolean;
   checking?: Promise<void>;
 }
 
+// When a server dot started was last used, and how much processor it had used then.
+interface Use {
+  usedAt: number;
+  cpu?: number;
+  at: number;
+}
+
+// What a turn did, for the previews its reply comes with.
+export interface PreviewTurn {
+  // When it began.
+  startedAt: number;
+  reply: string;
+  // The addresses dot's browser went to, as host:port.
+  navigated: readonly string[];
+  // The files it wrote, ~/ under the computer's home.
+  changed: readonly string[];
+}
+
 // The previews of servers in the owner's computers, each on a loopback port of its own from the
 // daemon's block. Only the owner opens them; one ends on Stop (the server keeps running), after two
 // hours unused, or when its computer stops or is replaced.
+//
+// Servers dot starts outlive the commands that started them, so what nobody uses is stopped: a
+// server a task's shell started, once its task's servers have gone unused for the same two hours,
+// or at once when the same app has been started again. Nothing is stopped while a task is under way
+// or the user holds the computer, nor anything dot can't be said to have started.
 export class Previews {
   readonly #open = new Map<number, Open>();
   readonly #lastKey = new Map<number, string>();
@@ -112,12 +162,14 @@ export class Previews {
   >();
   readonly #computers = new Map<string, { at: number; computer: Computer }>();
   readonly #health = new Map<string, Map<number, Health>>();
+  readonly #use = new Map<string, Map<string, Use>>();
   readonly #now: () => number;
   readonly #checkMs: number;
   readonly #unsubscribe: () => void;
   readonly #sweep: NodeJS.Timeout;
   #fronts: PreviewFronts = previewFronts([]);
   #queue: Promise<unknown> = Promise.resolve();
+  #sweeping = false;
 
   constructor(private readonly deps: PreviewsDeps) {
     this.#now = deps.now ?? Date.now;
@@ -125,7 +177,7 @@ export class Previews {
     this.#unsubscribe = deps.cells.subscribe((cell) => {
       if (cell.state !== "ready" || cell.paused) this.#endCell(cell.id);
     });
-    this.#sweep = setInterval(() => this.#expire(), deps.sweepEveryMs ?? SWEEP_MS);
+    this.#sweep = setInterval(() => void this.sweep(), deps.sweepEveryMs ?? SWEEP_MS);
     this.#sweep.unref();
   }
 
@@ -146,8 +198,10 @@ export class Previews {
         ? { state: "needs-update", message: NEEDS_UPDATE, ...base }
         : { state: "computer-off", message: NO_ANSWER, ...base };
     }
-    const servers = await this.#servers(cellId, listing);
+    const tasks = new Set(this.deps.conversation?.(sessionId) ?? [sessionId]);
+    const servers = await this.#servers(cellId, listing, tasks);
     const listed = new Set(servers.map((server) => server.port));
+    await this.#sites(cellId);
     const found = {
       addresses: listing.addresses,
       previews: this.#items(cellId, front, listed),
@@ -168,6 +222,95 @@ export class Previews {
     const open = [...this.#open.values()].find((o) => o.cellId === cellId && o.site.id === id);
     if (open) this.#end(open);
     return !!open;
+  }
+
+  // Ends the server on a port in the computer, and the preview of it.
+  async stopServer(sessionId: string, port: number): Promise<void> {
+    const cellId = this.#cell(sessionId);
+    const endpoint = this.#endpoint(cellId);
+    if (endpoint === "off")
+      throw new PreviewError(409, { state: "computer-off", message: COMPUTER_OFF });
+    if (!endpoint) throw new PreviewError(409, { state: "needs-update", message: NEEDS_UPDATE });
+    const listing = await this.#listing(cellId, endpoint, true).catch(() => {
+      throw new PreviewError(409, { state: "computer-off", message: NO_ANSWER });
+    });
+    if (!serversOf(listing).some((server) => server.port === port))
+      throw new PreviewError(409, {
+        message: `Nothing is listening on port ${port} in your computer anymore.`,
+      });
+    try {
+      await stopServer(endpoint, port);
+    } catch (error) {
+      throw error instanceof ForwarderRefused && error.reason === "bad-request"
+        ? new PreviewError(409, { state: "needs-update", message: NEEDS_UPDATE })
+        : new PreviewError(409, { message: "localDot couldn't stop it. Try again in a moment." });
+    }
+    this.#stopped(cellId, port);
+  }
+
+  // The web apps a turn started or changed that answer now, for its reply. One it named or went to
+  // in dot's browser is plainly a page to look at; one it only started, or changed a file of, must
+  // serve a page, so an API or a database beside it isn't offered. Another conversation's never is.
+  async offers(sessionId: string, turn: PreviewTurn): Promise<ResultPreview[]> {
+    const cellId = this.deps.cellOf(sessionId);
+    const endpoint = cellId && this.#endpoint(cellId);
+    if (!cellId || !endpoint || endpoint === "off") return [];
+    const listing = await this.#listing(cellId, endpoint, true);
+    const tasks = new Set(this.deps.conversation?.(sessionId) ?? [sessionId]);
+    await this.#servers(cellId, listing, tasks);
+    const table = this.#health.get(cellId);
+    await Promise.all([...(table?.values() ?? [])].map((health) => health.titling));
+    const servers = await this.#servers(cellId, listing, tasks);
+    const facts = new Map(serversOf(listing).map((server) => [server.port, server]));
+    const named = namedPorts(turn.reply, listing.addresses);
+    const went = new Map(
+      turn.navigated.flatMap((address) => {
+        const port = Number(/:(\d{1,5})$/.exec(address)?.[1]);
+        return port ? [[port, address] as const] : [];
+      }),
+    );
+    const rank = (server: PreviewServer): number | undefined => {
+      const project = facts.get(server.port)?.project;
+      if (named.has(server.port)) return 0;
+      if (went.has(server.port)) return 1;
+      if (!server.title) return undefined;
+      if ((table?.get(server.port)?.firstSeen ?? 0) >= turn.startedAt) return 2;
+      return project && turn.changed.some((path) => path.startsWith(`${project}/`)) ? 3 : undefined;
+    };
+    return servers
+      .filter((server) => server.state === "answering" && server.here !== false && !server.older)
+      .flatMap((server) => {
+        const order = rank(server);
+        return order === undefined ? [] : [{ order, server }];
+      })
+      .sort((a, b) => a.order - b.order)
+      .slice(0, MAX_OFFERS)
+      .map(({ server }) => {
+        const host = went.get(server.port)?.split(":")[0];
+        const site = host?.endsWith(".localhost")
+          ? `${new URL(server.url).protocol}//${went.get(server.port)}/`
+          : undefined;
+        return {
+          port: server.port,
+          url: site ?? server.url,
+          ...(server.title && !site ? { title: server.title } : {}),
+          ...(server.project ? { project: server.project } : {}),
+          ...(server.name ? { name: server.name } : {}),
+        };
+      });
+  }
+
+  // Runs every minute: what has gone unused ends. Public for its tests.
+  async sweep(): Promise<void> {
+    if (this.#sweeping) return;
+    this.#sweeping = true;
+    try {
+      this.#expire();
+      for (const cell of this.deps.cells.list?.() ?? [])
+        await this.#reap(cell.id).catch(() => undefined);
+    } finally {
+      this.#sweeping = false;
+    }
   }
 
   async close(): Promise<void> {
@@ -283,6 +426,8 @@ export class Previews {
         key,
         openedAt: new Date(this.#now()).toISOString(),
         served: false,
+        answered: true,
+        seenAt: this.#now(),
       };
       if (front.serve && this.deps.serve) {
         try {
@@ -365,7 +510,11 @@ export class Previews {
 
   // The listening servers that answer HTTP, each asked again when its answer is old. A server seen
   // for the first time is waited for (a check is short); one asked again shows its answer next time.
-  async #servers(cellId: string, listing: PreviewListing): Promise<PreviewServer[]> {
+  async #servers(
+    cellId: string,
+    listing: PreviewListing,
+    tasks?: ReadonlySet<string>,
+  ): Promise<PreviewServer[]> {
     const listening = serversOf(listing);
     const table = this.#health.get(cellId) ?? new Map<number, Health>();
     this.#health.set(cellId, table);
@@ -374,10 +523,10 @@ export class Previews {
     const now = this.#now();
     const first: Promise<void>[] = [];
     for (const server of listening) {
-      const key = `${server.name ?? ""} ${server.url}`;
+      const key = `${server.name ?? ""} ${server.url} ${server.started ?? ""}`;
       let health = table.get(server.port);
       if (health?.key !== key) {
-        health = { key, answered: false, titled: false };
+        health = { key, answered: false, titled: false, firstSeen: now };
         table.set(server.port, health);
       }
       const due = health.checkedAt === undefined || now - health.checkedAt >= RECHECK_MS;
@@ -386,20 +535,24 @@ export class Previews {
       if (health.checking && health.checkedAt === undefined) first.push(health.checking);
     }
     await Promise.all(first);
-    return listening.flatMap((server) => {
+    const found = listening.flatMap((server) => {
       const health = table.get(server.port);
       if (!health?.scheme || health.seenAt === undefined) return [];
       if (!health.answered && this.#now() - health.seenAt > FORGET_MS) return [];
-      return [
-        {
-          ...server,
-          url: health.scheme === "https" ? server.url.replace(/^http:/, "https:") : server.url,
-          ...(health.title ? { title: health.title } : {}),
-          state: health.answered ? "answering" : "not-answering",
-          seenAt: new Date(health.seenAt).toISOString(),
-        },
-      ];
+      return [{ server, health, seenAt: health.seenAt, scheme: health.scheme }];
     });
+    const older = olderCopies(found);
+    return found.map(({ server, health, seenAt, scheme }) => ({
+      port: server.port,
+      url: scheme === "https" ? server.url.replace(/^http:/, "https:") : server.url,
+      ...(server.name ? { name: server.name } : {}),
+      ...(health.title ? { title: health.title } : {}),
+      state: health.answered ? "answering" : "not-answering",
+      seenAt: new Date(seenAt).toISOString(),
+      ...(server.project ? { project: basename(server.project).slice(0, 128) } : {}),
+      ...(server.task && tasks ? { here: tasks.has(server.task) } : {}),
+      ...(older.has(server.port) ? { older: true as const } : {}),
+    }));
   }
 
   async #check(
@@ -419,9 +572,12 @@ export class Previews {
       if (check.answered) health.seenAt = this.#now();
       if (check.answered && health.scheme && !health.titled) {
         health.titled = true;
-        void titleOf(connect, { ...target, scheme: health.scheme }, TITLE_MS).then((title) => {
-          if (title) health.title = title;
-        });
+        health.titling = titleOf(connect, { ...target, scheme: health.scheme }, TITLE_MS).then(
+          (title) => {
+            if (title) health.title = title;
+            health.titling = undefined;
+          },
+        );
       }
     } finally {
       health.checkedAt = this.#now();
@@ -501,7 +657,124 @@ export class Previews {
       target: `${scheme}://${host}/`,
       origin: front ? `https://${front.hostname}:${open.site.port}` : "",
       openedAt: open.openedAt,
+      ...(named(open) ? { state: open.answered ? "answering" : "not-answering" } : {}),
     };
+  }
+
+  // Asks each *.localhost site whether it is still there. A site seen for the first time is waited
+  // for; one asked again shows its answer next time.
+  async #sites(cellId: string): Promise<void> {
+    const first: Promise<void>[] = [];
+    const now = this.#now();
+    for (const open of this.#open.values()) {
+      if (open.cellId !== cellId || !named(open) || open.checking) continue;
+      if (open.checkedAt !== undefined && now - open.checkedAt < RECHECK_MS) continue;
+      const known = open.checkedAt !== undefined;
+      open.checking = siteAnswers(
+        (to) => this.#connect(cellId, to),
+        open.site.target,
+        this.#checkMs,
+      )
+        .catch(() => false)
+        .then((answered) => {
+          open.answered = answered;
+          if (answered) open.seenAt = this.#now();
+          open.checkedAt = this.#now();
+          open.checking = undefined;
+        });
+      if (!known) first.push(open.checking);
+    }
+    await Promise.all(first);
+  }
+
+  // Whether what a server dot started is doing counts as use now.
+  #inUse(cellId: string, server: Listening): boolean {
+    return (
+      (server.clients ?? 0) > 0 ||
+      [...this.#open.values()].some(
+        (open) =>
+          open.cellId === cellId &&
+          open.site.target.port === server.port &&
+          open.site.idleFor() < IN_USE_MS,
+      )
+    );
+  }
+
+  async #reap(cellId: string): Promise<void> {
+    const endpoint = this.#endpoint(cellId);
+    if (!endpoint || endpoint === "off") return;
+    const listing = await this.#listing(cellId, endpoint, true);
+    const servers = await this.#servers(cellId, listing);
+    await this.#sites(cellId);
+    const now = this.#now();
+    for (const open of [...this.#open.values()])
+      if (
+        open.cellId === cellId &&
+        named(open) &&
+        !open.answered &&
+        now - open.seenAt > FORGET_MS &&
+        open.site.idleFor() > FORGET_MS
+      )
+        this.#end(open);
+    const working = this.deps.working?.(cellId) ?? true;
+    const dots = serversOf(listing).filter((server) => server.task);
+    const usedAt = this.#noteUse(cellId, dots, working, now);
+    if (working) return;
+    const idleMs = this.deps.idleMs ?? IDLE_MS;
+    const older = new Set(servers.filter((server) => server.older).map((server) => server.port));
+    for (const server of dots) {
+      const unused = now - (usedAt.get(server.task ?? "") ?? now) >= idleMs;
+      const replaced = older.has(server.port) && !this.#inUse(cellId, server);
+      if (!unused && !replaced) continue;
+      try {
+        await stopServer(endpoint, server.port);
+        console.info(
+          `previews: stopped ${server.name ?? "a server"} on port ${server.port} (${replaced ? "started again" : "unused"})`,
+        );
+        this.#stopped(cellId, server.port);
+      } catch {
+        // A computer too old to stop one, or one that wouldn't: it stays listed for the owner.
+      }
+    }
+  }
+
+  // When each task's servers were last used: they work together, as a web app and its API do.
+  #noteUse(
+    cellId: string,
+    dots: readonly Listening[],
+    working: boolean,
+    now: number,
+  ): Map<string, number> {
+    const table = this.#use.get(cellId) ?? new Map<string, Use>();
+    this.#use.set(cellId, table);
+    const keyOf = (server: Listening) => `${server.port} ${server.started ?? ""}`;
+    const keys = new Set(dots.map(keyOf));
+    for (const key of table.keys()) if (!keys.has(key)) table.delete(key);
+    const usedAt = new Map<string, number>();
+    for (const server of dots) {
+      const key = keyOf(server);
+      const use = table.get(key) ?? { usedAt: now, at: now };
+      table.set(key, use);
+      const seconds = (now - use.at) / 1000;
+      const busy =
+        seconds > 0 &&
+        server.cpu !== undefined &&
+        use.cpu !== undefined &&
+        (server.cpu - use.cpu) / TICKS_PER_SECOND / seconds >= BUSY_SHARE;
+      if (working || busy || this.#inUse(cellId, server)) use.usedAt = now;
+      use.cpu = server.cpu;
+      use.at = now;
+      const task = server.task ?? "";
+      usedAt.set(task, Math.max(usedAt.get(task) ?? 0, use.usedAt));
+    }
+    return usedAt;
+  }
+
+  #stopped(cellId: string, port: number): void {
+    this.#listings.delete(cellId);
+    this.#health.get(cellId)?.delete(port);
+    for (const open of [...this.#open.values()])
+      if (open.cellId === cellId && open.site.target.port === port) this.#end(open);
   }
 
   #end(open: Open): void {
@@ -516,6 +789,7 @@ export class Previews {
     this.#listings.delete(cellId);
     this.#computers.delete(cellId);
     this.#health.delete(cellId);
+    this.#use.delete(cellId);
     for (const open of [...this.#open.values()]) if (open.cellId === cellId) this.#end(open);
   }
 
@@ -525,29 +799,73 @@ export class Previews {
   }
 }
 
-type Listening = Pick<PreviewServer, "port" | "url" | "name">;
+type Listening = Pick<PreviewServer, "port" | "url" | "name"> &
+  Pick<PreviewListing["listeners"][number], "task" | "project" | "started" | "cpu" | "clients">;
+
+// A *.localhost site is one name among those its port's proxy routes.
+const named = (open: Open) =>
+  new URL(`${open.site.target.scheme}://${open.site.target.host}`).hostname.endsWith(".localhost");
+
+// A web app started again on another port is the same folder, program and first page's title. An API
+// beside it has no title of its own, so it never reads as an older copy of it.
+function olderCopies(found: readonly { server: Listening; health: Health }[]): ReadonlySet<number> {
+  const newest = new Map<string, { port: number; at: number }>();
+  const older = new Set<number>();
+  for (const { server, health } of found) {
+    if (!health.title || !health.answered) continue;
+    const app = `${server.project ?? ""}\n${server.name ?? ""}\n${health.title}`;
+    const at = server.started ?? health.firstSeen;
+    const best = newest.get(app);
+    if (best && best.at >= at) older.add(server.port);
+    else {
+      if (best) older.add(best.port);
+      newest.set(app, { port: server.port, at });
+    }
+  }
+  return older;
+}
+
+const ADDRESS = /(\[::1\]|[a-z0-9.-]+):(\d{1,5})\b/gi;
+
+// The ports of the computer's servers a reply names.
+function namedPorts(reply: string, addresses: readonly string[]): ReadonlySet<number> {
+  const ports = new Set<number>();
+  for (const [, host = "", port] of reply.matchAll(ADDRESS)) {
+    const name = host.toLowerCase();
+    if (
+      LOOPBACK.has(name) ||
+      ANY.has(name) ||
+      name.endsWith(".localhost") ||
+      addresses.includes(name)
+    )
+      ports.add(Number(port));
+  }
+  return ports;
+}
 
 // The servers the computer listens with, one per port, at an address a preview can open: loopback
 // for one that listens there or everywhere, else the computer's own address it listens on.
 export function serversOf(listing: PreviewListing): Listening[] {
-  const ports = new Map<number, { local: boolean; address?: string; name?: string }>();
-  for (const { address, port, name } of listing.listeners) {
+  const ports = new Map<
+    number,
+    { local: boolean; address?: string; facts: Omit<Listening, "port" | "url"> }
+  >();
+  for (const { address, port, ...facts } of listing.listeners) {
     const local = ANY.has(address) || address.startsWith("127.");
     const own = listing.addresses.includes(address);
     if (!local && !own) continue;
-    const entry = ports.get(port) ?? { local: false };
+    const entry = ports.get(port) ?? { local: false, facts };
     entry.local ||= local;
     if (own) entry.address ??= address;
-    entry.name ??= name;
     ports.set(port, entry);
   }
   return [...ports]
     .sort(([a], [b]) => a - b)
     .slice(0, 256)
-    .map(([port, { local, address, name }]) => ({
+    .map(([port, { local, address, facts }]) => ({
       port,
       url: `http://${local ? "localhost" : address}:${port}/`,
-      ...(name ? { name } : {}),
+      ...facts,
     }));
 }
 

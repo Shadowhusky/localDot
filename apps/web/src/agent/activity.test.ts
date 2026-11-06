@@ -3,7 +3,14 @@ import { emptyModel, foldEvents } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import { timelineRows } from "../session/key-uses.ts";
 import { stepRows } from "../session/session-view.ts";
-import { activityRows, entryView, foldKeyUses, groupActivity, stepStatus } from "./activity.ts";
+import {
+  activityRows,
+  entryView,
+  foldKeyUses,
+  groupActivity,
+  modelMarks,
+  stepStatus,
+} from "./activity.ts";
 import { emptyAgentModel } from "./model.ts";
 import { createAgentFeed, projectAgentEvent } from "./reducer.ts";
 
@@ -147,5 +154,26 @@ it("does not repeat the intent as its own subtitle", () => {
   expect(entryView(entry, [], false)).toMatchObject({
     title: "Checking the export",
     meta: "Terminal",
+  });
+});
+
+describe("where a list of steps changes model", () => {
+  const step = (key: string, model?: string) => ({
+    key,
+    model: model ? { route: "r", model } : undefined,
+  });
+  const of = (row: ReturnType<typeof step>) => row.model;
+  it("marks the step that starts each run after the first", () => {
+    const marks = modelMarks(
+      [step("a", "sol"), step("b"), step("c", "terra"), step("d", "terra")],
+      of,
+    );
+    expect([...marks.keys()]).toEqual(["c"]);
+  });
+  it("names the first too when asked, only once there is more than one", () => {
+    expect(modelMarks([step("a", "sol"), step("b", "sol")], of, true).size).toBe(0);
+    const marks = modelMarks([step("a", "sol"), step("b", "terra")], of, true);
+    expect(marks.get("a")?.model).toBe("sol");
+    expect(marks.get("b")?.model).toBe("terra");
   });
 });

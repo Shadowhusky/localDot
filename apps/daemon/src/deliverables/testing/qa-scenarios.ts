@@ -156,7 +156,8 @@ function fakeRevise(
   };
 }
 
-// /__qa/files hands over one file of every kind (?count=<n>, the first n); /__qa/revise answers a
+// /__qa/files hands over one file of every kind (?count=<n>, the first n); /__qa/long-names hands
+// over files whose names don't fit a narrow row; /__qa/revise answers a
 // follow-up with v2 of totals.csv; /__qa/previews hands over real files of every kind the full
 // preview shows, the page and the SVG carrying scripts that would call /__qa/canary if they ever
 // ran. ?probe=<port> also points the page's connection hints and links at that port, for a listener
@@ -219,6 +220,16 @@ export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
     });
     const count = Number(c.req.query("count") ?? files.length);
     hand(s, "Here are the sample files.", Object.fromEntries(files.slice(0, count)));
+    return c.json({ ok: true });
+  });
+  app.post("/__qa/long-names", (c) => {
+    const s = f.session();
+    if (!s) return c.text("no session", 409);
+    hand(s, "Here are the files with long names.", {
+      "quarterly-revenue-report-final-version-2-reviewed.pdf": "%PDF-1.7 sample",
+      "Board pack for the quarter with every appendix included.xlsx": "sample spreadsheet bytes",
+      "a.csv": "Month,Net\nDec,12000\n",
+    });
     return c.json({ ok: true });
   });
   app.get("/__qa/canary", (c) => {

@@ -44,14 +44,17 @@ available through `build:holding` for recovery.
 
 ## How it fits together
 
-- `src/hero`: the app in the hero. Its chat, Activity, plan, file viewer and Theatre frame are the
-  app's own components; a demo's events go through the app's own reducer and stage model as its
-  recording plays (`DemoFeed`). `site-api.ts` stands in for the daemon and serves only what a demo
-  recorded about its results.
+- `src/hero`: the app in the hero. Its chat, Workspace, plan, file viewer, Theatre frame and the
+  phone's Chat (`ChatPhone`) are the app's own components; a demo's events go through the app's own
+  reducer and stage model as its recording plays (`DemoFeed`). `site-api.ts` stands in for the daemon
+  and serves only what a demo recorded about its results.
 - `src/dot3d`: dot in Three.js. The body's shader paints the eyes from the app's eye geometry, the
   app's `DotEngine` moves it, and outfits are the GLBs from `tools/dot-plates/export_glb.py`.
-- `src/scene`: the renderer, the app's screen placed in 3D with a CSS `matrix3d`, the ring of
-  models and the export clips.
+- `src/scene`: the renderer, the app's screen placed in 3D with a CSS `matrix3d`, the phone and the
+  picture of several tasks (`panel.ts`), the ring of models and the export clips.
+- `public/screens`: the app's own screens, Chat's list and Studio with several tasks under way, captured
+  from the app's UI fixture with `node --import tsx e2e/ui/readme-capture.ts` in `apps/web`, which needs
+  the Kyoto demo's video (Demos) for the frame on dot's screen.
 - `src/story`: scroll to chapter progress (`Director`), the camera and dot keyframes (`shots.ts`),
   each chapter's words fading in on their beats, and the places the address names (`places.ts`).
 
@@ -125,6 +128,10 @@ cwebp -q 82 poster.png -o public/film/poster.webp
 
 The Chinese cut is encoded the same way to `localdot-film-zh.mp4`, `localdot-film-zh-720.mp4` and
 `poster-zh.webp`.
+
+`public/film/localdot-update.mp4` is the update video. Put the file there and build: "See what's new"
+then shows beside the film in the Hi, I'm dot chapter. Without the file the link is left out of the
+page (`updateFilm` in `src/story/content.ts`). The Worker serves its byte ranges as it does the film's.
 
 The score (`film/score.py`) arranges Apple Loops from GarageBand's Disco Funk pack. The GarageBand
 licence allows them, royalty free, in an original soundtrack, but not on their own, so the loops

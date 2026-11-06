@@ -163,6 +163,7 @@ describe("scoped BrowserTargets correction interactions", () => {
         "Accessibility.enable",
         "Page.setInterceptFileChooserDialog",
         "Runtime.runIfWaitingForDebugger",
+        "Browser.getWindowForTarget",
       ]);
       const next = f.targets.documents(tab?.id ?? "missing")[0] as BrowserDocument;
       const admitted = f.writes.length;

@@ -17,6 +17,8 @@ interface CaptureRequest {
   readonly id: number;
   readonly result: PromiseWithResolvers<Buffer>;
   cleanup(): void;
+  // Its caller gave up: the helper still sends the picture, and the next request waits for that.
+  drained?: PromiseWithResolvers<void>;
 }
 
 export interface BrowserCaptureOptions {
@@ -77,6 +79,8 @@ export class BrowserCapture {
     if (this.#closed) return Promise.reject(new BrowserCaptureError("closed"));
     if (signal?.aborted) return Promise.reject(new BrowserCaptureError("aborted"));
     if (!this.#ready) return Promise.reject(new BrowserCaptureError("unready"));
+    if (this.#pending?.drained)
+      return this.#pending.drained.promise.then(() => this.#request(mask, signal));
     if (this.#pending) return Promise.reject(new BrowserCaptureError("busy"));
     if (this.#nextId > 0xffffffff) {
       this.#fail("closed");
@@ -84,7 +88,11 @@ export class BrowserCapture {
     }
     const id = this.#nextId++;
     const result = Promise.withResolvers<Buffer>();
-    const cancel = () => this.#fail("aborted");
+    const cancel = () => {
+      if (this.#pending?.id !== id) return;
+      this.#pending.drained = Promise.withResolvers<void>();
+      result.reject(new BrowserCaptureError("aborted"));
+    };
     const timeout = setTimeout(() => this.#fail("timeout"), BROWSER_CAPTURE_TIMEOUT_MS);
     this.#pending = {
       id,
@@ -195,6 +203,7 @@ export class BrowserCapture {
       this.#imageBytes = 0;
       this.#headerBytes = 0;
       pending.result.resolve(image);
+      pending.drained?.resolve();
     }
   };
 
@@ -212,6 +221,7 @@ export class BrowserCapture {
     } catch {}
     this.#startup.reject(error);
     pending?.result.reject(error);
+    pending?.drained?.resolve();
     try {
       this.options.output.removeListener("data", this.#receive);
     } catch {}

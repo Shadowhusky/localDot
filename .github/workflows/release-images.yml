@@ -60,9 +60,10 @@ jobs:
           pnpm exec vitest run --config vitest.docker.config.ts \
             apps/daemon/src/cells/gate-image.docker.test.ts \
             apps/daemon/src/cells/desktop-image.docker.test.ts \
+            apps/daemon/src/cells/chrome-image.docker.test.ts \
             --reporter=default --reporter=json --outputFile=candidate-evidence/tests.json
           node scripts/release/require-test-pass.mjs candidate-evidence/tests.json
-      - name: Record candidate image identities and sizes
+      - name: Record candidate image identities and sizes, and prove none contains Chrome
         env:
           EXPECTED_ARCH: ${{ matrix.architecture }}
         run: node scripts/release/image-receipt.mjs candidate-evidence/images.json

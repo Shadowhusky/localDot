@@ -8,12 +8,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import {
   addConnector,
+  cancelSignIn,
+  disconnectConnector,
   loadConnectors,
   problemOf,
   refreshConnector,
   removeConnector,
   saveConnectorKey,
-  signInUrl,
+  startSignIn,
   updateConnector,
 } from "./connectors-api.ts";
 
@@ -44,9 +46,12 @@ export interface ConnectorsView {
   saveKey(id: string, key: ConnectorKey, patch?: ConnectorPatch): Promise<boolean>;
   refresh(id: string): void;
   remove(id: string): Promise<boolean>;
-  // Opens the app's sign-in page in a new tab; the tab is opened in the click (or given, when the
-  // click had work to do first), so no pop-up blocker stops it.
-  signIn(id: string, tab?: Window | null): void;
+  // Has the daemon open the app's sign-in page in the browser on its own computer.
+  signIn(id: string): void;
+  cancelSignIn(id: string): void;
+  disconnect(id: string): void;
+  // A sign-in page the daemon couldn't open itself, for this browser to open.
+  page: { id: string; url: string } | null;
   clear(): void;
 }
 
@@ -56,6 +61,7 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
   const [catalog, setCatalog] = useState<readonly CatalogEntry[]>([]);
   const [pending, setPending] = useState<string | null>(null);
   const [failure, setFailure] = useState<ConnectorsView["failure"]>(null);
+  const [page, setPage] = useState<ConnectorsView["page"]>(null);
   const [attempt, setAttempt] = useState(0);
   const loaded = useRef(false);
 
@@ -85,8 +91,9 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
     return () => window.removeEventListener("focus", again);
   }, [visible]);
 
-  // An app still connecting is asked about again until it settles.
-  const connecting = connectors.some((c) => c.status === "connecting");
+  // An app still connecting, or waiting for the user in the browser, is asked about again until it
+  // settles.
+  const connecting = connectors.some((c) => c.status === "connecting" || c.signIn);
   // biome-ignore lint/correctness/useExhaustiveDependencies: each fresh list waits its turn again
   useEffect(() => {
     if (!visible || !connecting) return;
@@ -168,19 +175,35 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
   );
 
   const signIn = useCallback(
-    (id: string, given?: Window | null) => {
-      const tab = given === undefined ? window.open("", "_blank") : given;
+    (id: string) => {
+      setPage(null);
       void run(id, "Couldn't open the app's sign-in. Try again.", async () => {
-        const url = await signInUrl(api, id);
-        if (tab) {
-          tab.opener = null;
-          tab.location.href = url;
-        } else window.open(url, "_blank", "noopener");
-      }).then((opened) => {
-        if (opened === null) tab?.close();
+        const started = await startSignIn(api, id);
+        if (started.url) setPage({ id, url: started.url });
+        setConnectors((await loadConnectors(api)).connectors);
       });
     },
     [api, run],
+  );
+
+  const stopSignIn = useCallback(
+    (id: string) => {
+      setPage(null);
+      void run(id, "Couldn't cancel that. Try again.", async () => {
+        await cancelSignIn(api, id);
+        setAttempt((n) => n + 1);
+      });
+    },
+    [api, run],
+  );
+
+  const disconnect = useCallback(
+    (id: string) => {
+      void run(id, "Couldn't disconnect the app. Try again.", async () =>
+        put(await disconnectConnector(api, id)),
+      );
+    },
+    [api, put, run],
   );
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
@@ -199,6 +222,9 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
     refresh,
     remove,
     signIn,
+    cancelSignIn: stopSignIn,
+    disconnect,
+    page,
     clear,
   };
 }

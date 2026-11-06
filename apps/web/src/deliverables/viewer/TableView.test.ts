@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kindLabel } from "./FileViewer.tsx";
+import { kindLabel } from "../kind-label.ts";
 import { rowsNote } from "./TableView.tsx";
 
 describe("the table's caption", () => {

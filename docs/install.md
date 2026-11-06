@@ -216,6 +216,21 @@ require administrator access or `sudo`; Windows may request elevation for WSL se
 The installers prepare supported prerequisites before downloading the app and explain anything
 that needs your attention. The Windows wrapper waits for Docker integration to become ready.
 
+## Google Chrome
+
+dot's web browser is Chromium, which comes with localDot. Setup offers Google Chrome instead, and so
+does **Settings → Accounts** at any time. Chrome comes from Google, under
+[Google's Terms of Service](https://policies.google.com/terms) and
+[Chrome's Additional Terms](https://www.google.com/chrome/terms/), so localDot doesn't ship it: choosing
+it means you accept those terms, and localDot downloads it from Google to your computer, checking
+Google's signature. It takes about 150 MB to download and 700 MB of Docker's disk space, and needs a
+connection to `dl.google.com`. If the install fails, Chromium keeps working and localDot says why.
+
+Your sign-ins are backed up first, then Chrome updates them in a way Chromium can't read. **Go back to
+Chromium** in the same place returns to that backup. Anything you signed in to since then is lost. An
+existing computer changes only when you choose this. localDot checks Google for a new version of
+Chrome once a day; it installs in the background and opens the next time the web browser starts.
+
 ## Saved keys and logins
 
 Your provider keys are kept by the key service, and the computers only ever see stand-ins.
@@ -377,7 +392,7 @@ task keeps running.
 | `localdot remote on` / `off` / `status` | Turn remote access through the localDot relay on or off, or show it |
 | `localdot tailscale on` / `status` | Share localDot with your devices on Tailscale (prints the page that allows HTTPS when Tailscale asks), or show its state |
 | `localdot computer list` / `start` / `stop` / `restart` / `resume [--cell ID]` | List computers and their tasks, start, stop or restart one (refused while a task runs on it), or resume one that `localdot stop` froze |
-| `localdot doctor` | Check Docker, computer container states, task recovery, and the app |
+| `localdot doctor` | Check Docker, computer container states, task recovery, and the app, and say which web browser dot uses |
 | `localdot recover --cell ID` | Show the confirmation command for an older interrupted native task |
 | `localdot doctor --fix` | Stop localDot services and containers, preserve their data, restart the app, and check again. Interrupts running tasks; does not restart Docker. |
 | `localdot unlock` | Enter the passphrase that protects your saved keys |

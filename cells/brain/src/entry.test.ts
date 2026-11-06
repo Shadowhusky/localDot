@@ -2,11 +2,12 @@ import { EventEmitter } from "node:events";
 import { type TranscriptMessage, ulid } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { imagePart, toTranscript } from "./context.ts";
-import { type BrainEntryDeps, runBrain } from "./entry.ts";
+import { BRAIN_CRASHED, BRAIN_LOST, type BrainEntryDeps, runBrain } from "./entry.ts";
 import { EventSink } from "./events.ts";
 import type { AgentOptions } from "./loop.ts";
 import type { ProxyFetch } from "./proxy-fetch.ts";
 import { bootConfig, PROXY_TOKEN, scriptedModel } from "./testing/scripted.ts";
+import { ToolApiLost } from "./tool-client.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -200,6 +201,16 @@ describe("brain entry lifecycle", () => {
       return "gave_up" as never;
     });
     expect(await runBrain(stopped.deps)).toBe(0);
+  });
+  it("says the tool API was lost, not that it crashed, once it had booted", async () => {
+    const f = fixture();
+    f.run.mockRejectedValueOnce(new Error("harness step failed", { cause: new ToolApiLost() }));
+    expect(await runBrain(f.deps)).toBe(BRAIN_LOST);
+    expect(f.log).toHaveBeenCalledWith("brain: tool API lost");
+    expect(f.api.close).toHaveBeenCalledTimes(1);
+    const unbooted = fixture();
+    unbooted.api.boot.mockRejectedValueOnce(new ToolApiLost());
+    expect(await runBrain(unbooted.deps)).toBe(BRAIN_CRASHED);
   });
 });
 

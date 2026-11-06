@@ -29,24 +29,30 @@ const (
 // Record describes a secret and where it may be used. keys.FromRecord validates the binding
 // fields; the vault checks only the id, the kind and the value.
 type Record struct {
-	ID        string    `json:"id"`
-	Kind      Kind      `json:"kind"`
-	Provider  string    `json:"provider,omitempty"`
-	BaseURL   string    `json:"baseURL,omitempty"`
-	Hosts     []string  `json:"hosts,omitempty"`
-	Header    string    `json:"header,omitempty"`
-	Format    string    `json:"format,omitempty"`
-	Methods   []string  `json:"methods,omitempty"`
-	Paths     []string  `json:"paths,omitempty"`
-	Metadata  *Metadata `json:"metadata,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID       string    `json:"id"`
+	Kind     Kind      `json:"kind"`
+	Provider string    `json:"provider,omitempty"`
+	BaseURL  string    `json:"baseURL,omitempty"`
+	Hosts    []string  `json:"hosts,omitempty"`
+	Header   string    `json:"header,omitempty"`
+	Format   string    `json:"format,omitempty"`
+	Methods  []string  `json:"methods,omitempty"`
+	Paths    []string  `json:"paths,omitempty"`
+	Metadata *Metadata `json:"metadata,omitempty"`
+	// OAuth is set on a secret keyd keeps current by itself. It is no part of the binding.
+	OAuth     *OAuthStatus `json:"oauth,omitempty"`
+	CreatedAt time.Time    `json:"createdAt"`
+	UpdatedAt time.Time    `json:"updatedAt"`
 }
 
 func (r Record) clone() Record {
 	if r.Metadata != nil {
 		m := *r.Metadata
 		r.Metadata = &m
+	}
+	if r.OAuth != nil {
+		o := *r.OAuth
+		r.OAuth = &o
 	}
 	r.Hosts = slices.Clone(r.Hosts)
 	r.Methods = slices.Clone(r.Methods)
@@ -76,7 +82,7 @@ const PushKeyID = "webpush-vapid"
 
 // Writable reports whether a user secret may be stored under id.
 func Writable(id string) bool {
-	return ValidID(id) && id != PushKeyID && !strings.HasPrefix(id, "login-")
+	return ValidID(id) && id != PushKeyID && !strings.HasPrefix(id, "login-") && !oauthItem.MatchString(id)
 }
 
 // ValidID reports whether id can name a secret.
@@ -127,6 +133,7 @@ type Vault struct {
 	cache   map[string][]byte
 	reads   map[string]*read
 	failed  map[string]failure
+	former  map[string][]byte
 	// attention holds the records whose stored values cannot be used as they are stored, and why.
 	attention map[string]Attention
 }
@@ -176,7 +183,7 @@ func Open(store Store, path string) (*Vault, error) {
 	v := &Vault{
 		store: store, path: path, now: time.Now, write: writeFileAtomic,
 		records: map[string]Record{}, cache: map[string][]byte{}, reads: map[string]*read{}, failed: map[string]failure{},
-		attention: map[string]Attention{},
+		attention: map[string]Attention{}, former: map[string][]byte{},
 	}
 	if path == "" {
 		return v, nil
@@ -305,6 +312,7 @@ func (v *Vault) settleLocked(id string, value []byte) {
 	delete(v.reads, id)
 	delete(v.failed, id)
 	delete(v.attention, id)
+	delete(v.former, id)
 	if value == nil {
 		delete(v.cache, id)
 	} else {
@@ -427,6 +435,7 @@ func (v *Vault) Forget() (int, error) {
 	n := len(v.records)
 	v.records = map[string]Record{}
 	v.cache, v.reads, v.failed, v.attention = map[string][]byte{}, map[string]*read{}, map[string]failure{}, map[string]Attention{}
+	v.former = map[string][]byte{}
 	return n, v.saveLocked()
 }
 

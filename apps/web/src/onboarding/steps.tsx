@@ -1,8 +1,10 @@
 import type { ComputerSize, ComputerSizeView } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
+import type { BrowserEngineName } from "../../../../packages/protocol/src/browser-engine.ts";
 import { AUTONOMY_PRESETS } from "../copy/autonomy.ts";
 import { DOCTOR } from "../keys/Protection.tsx";
+import { ChromeTerms } from "../settings/BrowserEngineSettings.tsx";
 import { SizeSlider, tooSmall } from "../settings/ComputerSize.tsx";
 import { modelAllowed, type PickerModel, type SubscriptionModel } from "../settings/choices.ts";
 import { modelItems } from "../settings/chooser.ts";
@@ -630,6 +632,48 @@ export function PermissionsStep({
         description: lines[preset.label] ?? preset.summary,
       }))}
     />
+  );
+}
+
+// Chrome is the suggestion and needs the user's own accept, which the step's button makes.
+export function BrowserStep({
+  value,
+  onChange,
+}: {
+  value: BrowserEngineName;
+  onChange(engine: BrowserEngineName): void;
+}) {
+  return (
+    <>
+      <RadioCards
+        className="onboarding-choices"
+        aria-label="Which web browser dot uses"
+        mark="end"
+        roomy
+        value={value}
+        onValueChange={(next) => onChange(next as BrowserEngineName)}
+        options={[
+          {
+            value: "chrome",
+            label: "Google Chrome",
+            tag: "Recommended",
+            icon: "globe",
+            description: "The browser most sites are built for. It also plays protected video.",
+          },
+          {
+            value: "chromium",
+            label: "Chromium",
+            icon: "shield",
+            description: "Comes with localDot, with nothing more to install or accept.",
+          },
+        ]}
+      />
+      {value === "chrome" && (
+        <p className="onboarding-note">
+          <ChromeTerms />
+        </p>
+      )}
+    </>
   );
 }
 

@@ -56,7 +56,7 @@
 .rail-head > .ui-segmented {
   flex: 1 1 216px;
   min-width: 0;
-  max-width: 252px;
+  max-width: 264px;
 }
 
 /* A panel's width handle: a hairline in the gap that thickens under the pointer or while held. The
@@ -221,7 +221,7 @@
 
 .conversations-note {
   flex: none;
-  padding: calc(var(--spacing) * 1) calc(var(--spacing) * 1) 0;
+  padding: calc(var(--spacing) * 1) 0 0;
   color: var(--color-fg-2);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
@@ -344,6 +344,10 @@
   background-color: var(--color-state-pressed);
 }
 
+.conversations-row:is([data-current], [data-active]) .conversations-when {
+  color: var(--color-fg-2);
+}
+
 .conversations-row[data-current] .conversations-title {
   font-weight: var(--font-weight-semibold);
 }
@@ -388,7 +392,26 @@
 }
 
 .app[data-sessions="expanded"] {
-  --_sessions-w: calc(var(--spacing) * 64);
+  --_sessions-w: var(--sessions-w);
+}
+
+/* Its width handle, in the gap between the rail and the page: the rail's rows reach its edge, and
+   they answer to a press of their own. */
+.rail-resize-sessions {
+  position: fixed;
+  inset-block: 0;
+  left: var(--_sessions-w);
+  z-index: 3;
+  translate: none;
+  transition: left var(--dur-default) var(--ease-spring);
+}
+
+.rail-resize-sessions[data-dragging] {
+  transition: none;
+}
+
+.app[data-entering] .rail-resize-sessions {
+  opacity: 0;
 }
 
 .sessions {
@@ -409,6 +432,12 @@
 .app[data-entering] .sessions {
   opacity: 0;
   translate: calc(var(--spacing) * -6) 0;
+  transition: none;
+}
+
+/* While its edge is held the rail follows the pointer, with nothing easing behind it. */
+.app:has(> .watch > .rail-resize-sessions[data-dragging]),
+.app:has(> .watch > .rail-resize-sessions[data-dragging]) .sessions {
   transition: none;
 }
 

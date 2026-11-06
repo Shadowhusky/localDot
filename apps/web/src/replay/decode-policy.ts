@@ -50,7 +50,8 @@ export function sourceAt(
   const containing = video.gaps.filter(
     (gap) => gap.from <= atMicros && (gap.to === null || atMicros < gap.to),
   );
-  if (containing.some((gap) => gap.reason === "user-control")) return "hold";
+  if (containing.some((gap) => gap.reason === "user-control" || gap.reason === "other-task"))
+    return "hold";
   if (
     containing.length ||
     (video.lastMs !== null && tMs > video.lastMs && video.gaps.some((gap) => gap.to === null))

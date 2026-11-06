@@ -19,11 +19,17 @@ const whole = (value: number) => value.toLocaleString();
 // not a key, paid for the turn, then how long the whole turn took: each run of steps times only
 // itself. Cost belongs with model usage here.
 function metaParts(item: MetaItem, names?: ModelNames) {
-  const lead: Partial<TurnModel> | undefined = item.models[0] ?? item.main;
+  // A turn a message moved to another model names both, in the order they ran.
+  const mains = item.models.filter((row) => row.role === "main");
+  const lead: Partial<TurnModel> | undefined = mains.at(-1) ?? item.models[0] ?? item.main;
   if (!lead?.route || !lead.model) return undefined;
   const tokens = item.models.reduce((sum, row) => sum + row.inputTokens + row.outputTokens, 0);
+  const named = (row: { route: string; model: string }) =>
+    names?.name(row.route, row.model) ?? row.model;
   return {
-    name: names?.name(lead.route, lead.model) ?? lead.model,
+    name: (mains.length > 1 ? mains : [{ route: lead.route, model: lead.model }])
+      .map(named)
+      .join(" → "),
     speed: lead.speed,
     rest: [
       subscription(lead.route) ? providerName(lead.route) : "",

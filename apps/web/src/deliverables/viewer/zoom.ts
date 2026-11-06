@@ -77,3 +77,9 @@ export function swipeTurn(dx: number, velocity: number, width: number): -1 | 0 |
   if (Math.abs(landing) < width * 0.35 || Math.sign(landing) !== Math.sign(dx)) return 0;
   return landing < 0 ? 1 : -1;
 }
+
+// Where a drag puts a row of `count` pages, in pages: 1:1 between them, giving less past either end.
+export function draggedPlace(wanted: number, count: number, pitch: number): number {
+  const over = wanted < 0 ? wanted : wanted > count - 1 ? wanted - (count - 1) : 0;
+  return wanted - over + rubberband(over * pitch, pitch) / pitch;
+}

@@ -1,7 +1,10 @@
 import "../ui/work-layout.css";
 import {
   memo,
+  type ReactNode,
+  type RefObject,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -11,18 +14,19 @@ import {
 } from "react";
 import { count } from "../copy/format.ts";
 import type { TaskRow } from "../session/status.ts";
+import type { ModelNames } from "../settings/model-names.ts";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
 import { GroupHeading } from "../ui/GroupHeading.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { ActivityDetail } from "./ActivityDetails.tsx";
-import { ActivityRow, RunningTime, revealOpened } from "./ActivityRow.tsx";
-import { clock, groupReadSteps, hasDetails } from "./activity.ts";
+import { ActivityRow, PlainSteps, RunningTime, revealOpened } from "./ActivityRow.tsx";
+import { clock, groupReadSteps, hasDetails, modelMarks } from "./activity.ts";
 import { useStepPreviewEnvironment } from "./StepPreview.tsx";
-import type { WorkStep } from "./thread.ts";
+import type { ModelRef, WorkStep } from "./thread.ts";
 import { useFollowScroll } from "./useFollowScroll.ts";
-import { WorkPictures } from "./WorkPictures.tsx";
+import { RunPicturesScope, WorkPictures } from "./WorkPictures.tsx";
 
 export interface LiveWork {
   phase: "running" | "waiting" | "finished";
@@ -32,6 +36,9 @@ export interface LiveWork {
   label: string;
   // Session ms, when the line is not to keep its own time while the task runs.
   nowMs?: number;
+  // Shown on a message just sent, ahead of the task's own word: it takes up only a turn that
+  // message began.
+  ahead?: boolean;
 }
 
 const PAUSED = new Set<TaskRow | undefined>(["pausing", "paused", "resuming", "recovery"]);
@@ -79,6 +86,9 @@ interface LiveWorkLineProps {
   ended?: "done" | "stopped" | "interrupted" | "error";
   // The task an earlier turn's steps were recorded in; otherwise the task the thread shows.
   sessionId?: string;
+  // The run starts on another model than the run before it.
+  changedTo?: ModelRef;
+  names?: ModelNames;
 }
 
 // A turn's steps are rebuilt with every event; they draw the same while what the line shows of
@@ -100,6 +110,8 @@ export function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): b
             step.title === other.title &&
             step.meta === other.meta &&
             step.time === other.time &&
+            step.model?.route === other.model?.route &&
+            step.model?.model === other.model?.model &&
             step.startT === other.startT &&
             step.endT === other.endT)
         );
@@ -121,29 +133,20 @@ const sameLine = (was: LiveWorkLineProps, now: LiveWorkLineProps) =>
   was.spend?.estimated === now.spend?.estimated &&
   sameLive(was.live, now.live) &&
   was.ended === now.ended &&
-  was.sessionId === now.sessionId;
+  was.sessionId === now.sessionId &&
+  was.names === now.names &&
+  was.changedTo?.route === now.changedTo?.route &&
+  was.changedTo?.model === now.changedTo?.model;
 
-// A run of steps between what dot said. The run dot is at stays open while it works, so its steps
-// stream in; the others fold to their summary unless the reader opened them. A single finished step
-// is its own row.
-export const LiveWorkLine = memo(function LiveWorkLine({
-  steps,
-  startMs,
-  live,
-  ended,
-  sessionId,
-}: LiveWorkLineProps) {
-  const [chosen, setChosen] = useState<boolean | null>(null);
-  const open = chosen ?? !!live;
-  const root = useRef<HTMLDivElement>(null);
+// The run's head stays in view with its list, which keeps room for a few steps however short the
+// thread.
+function useHistoryRoom(root: RefObject<HTMLDivElement | null>, open: boolean) {
   useLayoutEffect(() => {
     const node = root.current;
     const viewport = node?.closest<HTMLElement>(".thread-scroll");
     if (!open || !node || !viewport) return;
     const trigger = node.querySelector<HTMLElement>(".ui-disclosure-trigger");
     let frame = 0;
-    // The run's head stays in view with its list, which keeps room for a few steps however short
-    // the thread.
     const measure = () => {
       const available = viewport.clientHeight - (trigger?.offsetHeight ?? 0) - 24;
       node.style.setProperty("--work-history-room", `${Math.max(MIN_ROOM, available)}px`);
@@ -160,7 +163,25 @@ export const LiveWorkLine = memo(function LiveWorkLine({
       observer?.disconnect();
       node.style.removeProperty("--work-history-room");
     };
-  }, [open]);
+  }, [root, open]);
+}
+
+// A run of steps between what dot said. The run dot is at stays open while it works, so its steps
+// stream in; the others fold to their summary unless the reader opened them. A single finished step
+// is its own row.
+export const LiveWorkLine = memo(function LiveWorkLine({
+  steps,
+  startMs,
+  live,
+  ended,
+  sessionId,
+  changedTo,
+  names,
+}: LiveWorkLineProps) {
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? !!live;
+  const root = useRef<HTMLDivElement>(null);
+  useHistoryRoom(root, open);
   const running = live?.phase === "running";
   const waiting = live?.phase === "waiting";
   const lastEnd = steps.reduce<number | null>(
@@ -177,8 +198,15 @@ export const LiveWorkLine = memo(function LiveWorkLine({
   const said = useRef(live?.label ?? "");
   if (running && live) said.current = live.label;
   const { lines, retire } = useHeldLines(said.current);
+  const modelLine = (model: ModelRef) => names?.name(model.route, model.model) ?? model.model;
   if (steps.length === 1 && !live && (!ended || ended === "done"))
-    return <OneStep step={steps[0] as WorkStep} sessionId={sessionId} />;
+    return (
+      <OneStep
+        step={steps[0] as WorkStep}
+        sessionId={sessionId}
+        model={changedTo && modelLine(changedTo)}
+      />
+    );
   const summary = running
     ? "Working"
     : waiting
@@ -223,6 +251,7 @@ export const LiveWorkLine = memo(function LiveWorkLine({
               </>
             )}
             {counting && <RunningTime from={startMs} nowMs={live?.nowMs} lead=" · " />}
+            {changedTo && ` · ${modelLine(changedTo)}`}
           </span>
         )}
       </span>
@@ -242,7 +271,12 @@ export const LiveWorkLine = memo(function LiveWorkLine({
           open={open}
           onOpenChange={setChosen}
         >
-          <WorkHistory steps={steps} startMs={startMs} sessionId={sessionId} />
+          <WorkHistory
+            steps={steps}
+            startMs={startMs}
+            sessionId={sessionId}
+            modelLine={modelLine}
+          />
         </Disclosure>
       ) : (
         <p className="thread-work-status">{face}</p>
@@ -267,10 +301,67 @@ export const LiveWorkLine = memo(function LiveWorkLine({
         </p>
       </Collapse>
       {/* An open list unfolds each step's own pictures; a folded run shows them under its head. */}
-      {!open && <WorkPictures steps={steps} sessionId={sessionId} onMore={() => setChosen(true)} />}
+      {!open && <WorkPictures steps={steps} sessionId={sessionId} />}
     </div>
   );
 }, sameLine);
+
+// A chat's quiet line under a reply, "9:20 · 7 steps", which unfolds what dot did to get there.
+export const StepsCaption = memo(function StepsCaption({
+  steps,
+  startMs,
+  at,
+  ended,
+  sessionId,
+  names,
+  open,
+  onOpenChange,
+  children,
+}: {
+  steps: readonly WorkStep[];
+  startMs: number | null;
+  // When the reply came, as the thread prints a time.
+  at?: string;
+  ended?: LiveWorkLineProps["ended"];
+  sessionId?: string;
+  names?: ModelNames;
+  open: boolean;
+  onOpenChange(open: boolean): void;
+  // The turn's last line, under its steps.
+  children?: ReactNode;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  useHistoryRoom(root, open);
+  const modelLine = (model: ModelRef) => names?.name(model.route, model.model) ?? model.model;
+  const failed = steps.filter((step) => step.state === "failed").length;
+  const line = [
+    at,
+    ended === "stopped"
+      ? "Stopped"
+      : ended === "interrupted"
+        ? "Interrupted"
+        : ended === "error"
+          ? "Ended"
+          : undefined,
+    count(steps.length, "step", "steps"),
+    failed > 0 ? `${failed} failed` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div ref={root} className="thread-work chat-steps">
+      <Disclosure
+        className="thread-work-steps"
+        summary={<span className="chat-steps-line num">{line}</span>}
+        open={open}
+        onOpenChange={onOpenChange}
+      >
+        <WorkHistory steps={steps} startMs={startMs} sessionId={sessionId} modelLine={modelLine} />
+        {children}
+      </Disclosure>
+    </div>
+  );
+});
 
 // A step with the details it unfolds in place, where there is a task to read them from. A step that
 // has not changed is not drawn again as the steps after it arrive.
@@ -288,7 +379,8 @@ const StepRow = memo(function StepRow({
   onToggle(key: string, trigger: HTMLButtonElement): void;
 }) {
   const preview = useStepPreviewEnvironment();
-  const detail = !!preview && hasDetails(step.entry, step.changes);
+  const plain = useContext(PlainSteps);
+  const detail = !!preview && hasDetails(step.entry, step.changes, plain);
   return (
     <ActivityRow
       id={id}
@@ -310,7 +402,15 @@ const StepRow = memo(function StepRow({
   );
 });
 
-function OneStep({ step, sessionId }: { step: WorkStep; sessionId?: string }) {
+function OneStep({
+  step,
+  sessionId,
+  model,
+}: {
+  step: WorkStep;
+  sessionId?: string;
+  model?: string;
+}) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const show = (_key: string, trigger: HTMLButtonElement) => {
@@ -319,23 +419,27 @@ function OneStep({ step, sessionId }: { step: WorkStep; sessionId?: string }) {
   };
   return (
     <div className="thread-work" data-single="">
+      {model && <p className="work-model-change">{model}</p>}
       <StepRow id={id} step={step} sessionId={sessionId} open={open} onToggle={show} />
-      <WorkPictures steps={[step]} sessionId={sessionId} onMore={() => setOpen(true)} />
+      <WorkPictures steps={[step]} sessionId={sessionId} />
     </div>
   );
 }
 
 const estimateWorkStep = () => 56;
 const readGroupOf = (step: WorkStep) => step.readGroup;
+const modelOfStep = (step: WorkStep) => step.model;
 // Drawn again only when its steps are, not as the run's clock ticks.
 const WorkHistory = memo(function WorkHistory({
   steps,
   startMs,
   sessionId,
+  modelLine,
 }: {
   steps: readonly WorkStep[];
   startMs: number | null;
   sessionId?: string;
+  modelLine(model: ModelRef): string;
 }) {
   const id = useId();
   const [opened, setOpened] = useState<string | null>(null);
@@ -351,6 +455,7 @@ const WorkHistory = memo(function WorkHistory({
   const list = useRef<HTMLOListElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const groups = useMemo(() => groupReadSteps(steps, readGroupOf), [steps]);
+  const marks = useMemo(() => modelMarks(steps, modelOfStep), [steps]);
   const display = useMemo(
     () =>
       groups.flatMap<{
@@ -358,78 +463,91 @@ const WorkHistory = memo(function WorkHistory({
         step?: WorkStep;
         child?: boolean;
         group?: (typeof groups)[number];
+        model?: ModelRef;
       }>((group) => {
-        if (group.entries.length === 1) return [{ key: group.key, step: group.entries[0] }];
+        const mark = marks.get(group.entries[0]?.key ?? "");
+        const lead = mark ? [{ key: `model-${group.key}`, model: mark }] : [];
+        if (group.entries.length === 1)
+          return [...lead, { key: group.key, step: group.entries[0] }];
         const header = { key: `group-${group.key}`, group };
         return expanded.has(group.key)
-          ? [header, ...group.entries.map((step) => ({ key: step.key, step, child: true }))]
-          : [header];
+          ? [
+              ...lead,
+              header,
+              ...group.entries.map((step) => ({ key: step.key, step, child: true })),
+            ]
+          : [...lead, header];
       }),
-    [groups, expanded],
+    [groups, expanded, marks],
   );
   const keys = useMemo(() => display.map((row) => row.key), [display]);
   const virtual = useVirtualRows(list, keys, estimateWorkStep, { anchored: true });
   return (
-    <ScrollArea
-      className="thread-work-scroll"
-      ref={follow.ref}
-      tabIndex={0}
-      role="region"
-      aria-label="Work history"
-      onScroll={follow.onScroll}
-      {...follow.gestures()}
-    >
-      <ol ref={list} className="thread-work-list" aria-label="Steps">
-        <li role="presentation" aria-hidden="true" style={{ height: virtual.before }} />
-        {virtual.indexes.map((index) => {
-          const item = display[index];
-          if (!item) return null;
-          const { step, group } = item;
-          const open = !!group && expanded.has(group.key);
-          return (
-            <li
-              key={item.key}
-              ref={virtual.measure}
-              data-index={index}
-              data-last={index === display.length - 1 || undefined}
-              data-anchor
-              className="thread-work-window-row"
-              data-group-child={item.child || undefined}
-            >
-              {step ? (
-                <StepRow
-                  id={`${id}-${step.key}`}
-                  step={step}
-                  sessionId={sessionId}
-                  open={opened === step.key}
-                  onToggle={toggle}
-                />
-              ) : (
-                group && (
-                  <GroupHeading
-                    className="activity-read-group"
-                    leading={<StatusGlyph state="done" />}
-                    title={group.label}
-                    meta={`${group.entries.length} read-only steps · ${open ? "Hide" : "Show"} details`}
-                    count={group.entries.length}
-                    open={open}
-                    onToggle={(trigger) => {
-                      follow.anchorTo(trigger);
-                      setExpanded((previous) => {
-                        const next = new Set(previous);
-                        if (next.has(group.key)) next.delete(group.key);
-                        else next.add(group.key);
-                        return next;
-                      });
-                    }}
+    <RunPicturesScope steps={steps}>
+      <ScrollArea
+        className="thread-work-scroll"
+        chains
+        ref={follow.ref}
+        tabIndex={0}
+        role="region"
+        aria-label="Work history"
+        onScroll={follow.onScroll}
+        {...follow.gestures()}
+      >
+        <ol ref={list} className="thread-work-list" aria-label="Steps">
+          <li role="presentation" aria-hidden="true" style={{ height: virtual.before }} />
+          {virtual.indexes.map((index) => {
+            const item = display[index];
+            if (!item) return null;
+            const { step, group } = item;
+            const open = !!group && expanded.has(group.key);
+            return (
+              <li
+                key={item.key}
+                ref={virtual.measure}
+                data-index={index}
+                data-last={index === display.length - 1 || undefined}
+                data-anchor
+                className="thread-work-window-row"
+                data-group-child={item.child || undefined}
+              >
+                {item.model ? (
+                  <p className="work-model-change">{modelLine(item.model)}</p>
+                ) : step ? (
+                  <StepRow
+                    id={`${id}-${step.key}`}
+                    step={step}
+                    sessionId={sessionId}
+                    open={opened === step.key}
+                    onToggle={toggle}
                   />
-                )
-              )}
-            </li>
-          );
-        })}
-        <li role="presentation" aria-hidden="true" style={{ height: virtual.after }} />
-      </ol>
-    </ScrollArea>
+                ) : (
+                  group && (
+                    <GroupHeading
+                      className="activity-read-group"
+                      leading={<StatusGlyph state="done" />}
+                      title={group.label}
+                      meta={`${group.entries.length} read-only steps · ${open ? "Hide" : "Show"} details`}
+                      count={group.entries.length}
+                      open={open}
+                      onToggle={(trigger) => {
+                        follow.anchorTo(trigger);
+                        setExpanded((previous) => {
+                          const next = new Set(previous);
+                          if (next.has(group.key)) next.delete(group.key);
+                          else next.add(group.key);
+                          return next;
+                        });
+                      }}
+                    />
+                  )
+                )}
+              </li>
+            );
+          })}
+          <li role="presentation" aria-hidden="true" style={{ height: virtual.after }} />
+        </ol>
+      </ScrollArea>
+    </RunPicturesScope>
   );
 });

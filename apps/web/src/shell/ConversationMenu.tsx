@@ -1,14 +1,19 @@
-import type { ConversationEntry } from "@localdot/protocol";
-import { type ReactNode, type RefObject, useRef } from "react";
+import type { ConversationEntry, LookWearables } from "@localdot/protocol";
+import { type ReactNode, type RefObject, useRef, useState } from "react";
 import type { Organize } from "../agent/conversation-list.ts";
 import { TagSwatches } from "../ui/ConversationTag.tsx";
 import { Menu, MenuItem, MenuSeparator } from "../ui/Menu.tsx";
-import type { Align, Side } from "../ui/position.ts";
+import { type Align, levelWith, type Side } from "../ui/position.ts";
+import { LookChooser } from "./LookChooser.tsx";
 
 export interface ConversationMenuProps {
   // The conversation acted on; the menu is open while there is one.
   entry: ConversationEntry | null;
   anchor: RefObject<HTMLElement | null>;
+  // The row acted on and the list it sits in: the menu stands against the list's edge, level with
+  // the row, however it was opened. Without them it hangs from the anchor.
+  row?: RefObject<HTMLElement | null>;
+  list?: RefObject<HTMLElement | null>;
   onClose(): void;
   side?: Side;
   align?: Align;
@@ -17,16 +22,20 @@ export interface ConversationMenuProps {
   renameKeys?: readonly string[];
   onRename(): void;
   onOrganize(change: Organize): void;
+  // Its dot's look, which outlives the menu: the chooser stays open once the menu has gone.
+  onLook(entry: ConversationEntry, look: LookWearables | null): void;
   onDelete(): void;
   // Items of the list's own, above the rest.
   children?: ReactNode;
 }
 
-// What can be done to one conversation from its row: name it, keep it on top, put it away, tell it
-// apart by colour, or delete it.
+// What can be done to one conversation from its row: name it, dress its dot, keep it on top, put it
+// away, tell it apart by colour, or delete it.
 export function ConversationMenu({
   entry,
   anchor,
+  row,
+  list,
   onClose,
   side,
   align = "start",
@@ -34,52 +43,68 @@ export function ConversationMenu({
   renameKeys,
   onRename,
   onOrganize,
+  onLook,
   onDelete,
   children,
 }: ConversationMenuProps) {
+  const [dressing, setDressing] = useState<ConversationEntry | null>(null);
   // While it closes it still says what it said, rather than what the choice just changed.
   const last = useRef(entry);
   if (entry) last.current = entry;
   const shown = entry ?? last.current;
   const archived = !!shown?.archived;
   return (
-    <Menu
-      open={entry !== null}
-      onClose={onClose}
-      anchor={anchor}
-      label="Conversation actions"
-      side={side}
-      align={align}
-    >
-      {children}
-      <MenuItem icon="type" kbd={renameKeys} onSelect={onRename}>
-        Rename
-      </MenuItem>
-      <MenuItem
-        icon={shown?.pinned ? "pin-off" : "pin"}
-        onSelect={() => onOrganize({ pinned: !shown?.pinned })}
-      >
-        {shown?.pinned ? "Unpin" : "Pin to top"}
-      </MenuItem>
-      <MenuItem
-        icon={archived ? "archive-restore" : "archive"}
-        disabledReason={
-          running && !archived ? "Stop this task before archiving its conversation." : undefined
+    <>
+      <Menu
+        open={entry !== null}
+        onClose={onClose}
+        anchor={anchor}
+        against={() =>
+          row?.current && list?.current ? levelWith(row.current, list.current) : undefined
         }
-        onSelect={() => onOrganize({ archived: !archived })}
+        label="Conversation actions"
+        side={side}
+        align={align}
       >
-        {archived ? "Unarchive" : "Archive"}
-      </MenuItem>
-      <MenuSeparator />
-      <TagSwatches value={shown?.tag ?? null} onSelect={(tag) => onOrganize({ tag })} />
-      <MenuSeparator />
-      <MenuItem
-        icon="trash"
-        disabledReason={running ? "Stop this task before deleting its conversation." : undefined}
-        onSelect={onDelete}
-      >
-        Delete conversation
-      </MenuItem>
-    </Menu>
+        {children}
+        <MenuItem icon="type" kbd={renameKeys} onSelect={onRename}>
+          Rename
+        </MenuItem>
+        <MenuItem icon="smile" onSelect={() => setDressing(shown)}>
+          Change look
+        </MenuItem>
+        <MenuItem
+          icon={shown?.pinned ? "pin-off" : "pin"}
+          onSelect={() => onOrganize({ pinned: !shown?.pinned })}
+        >
+          {shown?.pinned ? "Unpin" : "Pin to top"}
+        </MenuItem>
+        <MenuItem
+          icon={archived ? "archive-restore" : "archive"}
+          disabledReason={
+            running && !archived ? "Stop this task before archiving its conversation." : undefined
+          }
+          onSelect={() => onOrganize({ archived: !archived })}
+        >
+          {archived ? "Unarchive" : "Archive"}
+        </MenuItem>
+        <MenuSeparator />
+        <TagSwatches value={shown?.tag ?? null} onSelect={(tag) => onOrganize({ tag })} />
+        <MenuSeparator />
+        <MenuItem
+          icon="trash"
+          disabledReason={running ? "Stop this task before deleting its conversation." : undefined}
+          onSelect={onDelete}
+        >
+          Delete conversation
+        </MenuItem>
+      </Menu>
+      <LookChooser
+        entry={dressing}
+        anchor={anchor}
+        onChange={onLook}
+        onClose={() => setDressing(null)}
+      />
+    </>
   );
 }

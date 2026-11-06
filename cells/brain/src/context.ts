@@ -1,4 +1,10 @@
-import type { InboxItem, ToolContent, ToolResult, TranscriptMessage } from "@localdot/protocol";
+import {
+  type InboxItem,
+  MODEL_SWITCH_ENTRY,
+  type ToolContent,
+  type ToolResult,
+  type TranscriptMessage,
+} from "@localdot/protocol";
 import type {
   AssistantModelMessage,
   ModelMessage,
@@ -268,8 +274,15 @@ export async function fromTranscript(
   if (!Number.isSafeInteger(keep) || keep < 0) throw new RangeError("Invalid screenshot count");
   signal?.throwIfAborted();
   let messages: ModelMessage[] = [];
+  // Screenshots before a change of model stay out: where one sits depends on the model's client.
+  let frames = 0;
   for (const s of stored) {
     if (s.harnessEvent) continue;
+    if (isModelSwitch(s)) {
+      messages = messages.map(portable);
+      frames = messages.length;
+      continue;
+    }
     // Private compaction metadata is a structured record, never a magic string that a user or
     // a model can accidentally put into ordinary message text. Inbox records remain untouched.
     const entry = s.content as {
@@ -300,7 +313,7 @@ export async function fromTranscript(
     } as ModelMessage);
   }
   let restored = 0;
-  for (let i = messages.length - 1; i >= 0 && restored < keep; i--) {
+  for (let i = messages.length - 1; i >= frames && restored < keep; i--) {
     for (const arr of contentArrays(messages[i] as ModelMessage).reverse()) {
       for (let j = arr.length - 1; j >= 0 && restored < keep; j--) {
         const part = arr[j] as { type?: string; text?: string };
@@ -321,6 +334,26 @@ export async function fromTranscript(
     }
   }
   return messages;
+}
+
+function isModelSwitch(s: TranscriptMessage): boolean {
+  const entry = s.content as { type?: unknown } | null;
+  return s.role === "user" && !s.sourceInbox && entry?.type === MODEL_SWITCH_ENTRY.type;
+}
+
+// A turn written for one model as another can be sent it: no thinking, which only its writer's
+// provider can read, and none of the provider's own metadata on what is left. The turn stays, even
+// if only its place does, as compaction counts the turns it replaces.
+function portable(message: ModelMessage): ModelMessage {
+  const { providerOptions: _message, ...plain } = message;
+  if (typeof plain.content === "string") return plain as ModelMessage;
+  const content = (plain.content as { type: string; providerOptions?: unknown }[])
+    .filter((part) => part.type !== "reasoning" && part.type !== "reasoning-file")
+    .map(({ providerOptions: _part, ...part }) => part);
+  return {
+    ...plain,
+    content: content.length ? content : [{ type: "text", text: "(Nothing said in this turn.)" }],
+  } as ModelMessage;
 }
 
 export function compactionEntry(replaced: number, summary: string): TranscriptMessage {

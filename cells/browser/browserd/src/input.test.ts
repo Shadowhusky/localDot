@@ -43,6 +43,8 @@ async function setup(scale: 1 | 2 = 2) {
     rawEvents: true,
     contentX: 20 * scale,
     revision: 1,
+    focusNodeHolds: true,
+    unnamedFocus: false,
   };
   const hooks = new Map<string, () => void | Promise<void>>();
   const counts = new Map<string, number>();
@@ -214,10 +216,13 @@ async function setup(scale: 1 | 2 = 2) {
         await checkpoint("inspect");
         return { filled: false, nodeIds: state.protectedNode ? [10] : [] };
       }),
-      secretFocused: vi.fn(async () => {
+      focus: vi.fn(async () => {
         await checkpoint("focused");
-        return state.secret;
+        return { secret: state.secret, nodes: state.unnamedFocus ? [] : [{ document, node: 42 }] };
       }),
+      focusHolds: vi.fn(
+        async () => !state.secret && state.focusNodeHolds && state.focus === "page",
+      ),
     },
     native: {
       command: nativeCommand as unknown as BrowserNative["command"],
@@ -477,7 +482,7 @@ describe("guarded browser input", () => {
     expect(f.effects().map((effect) => effect.args.ch)).toEqual(["密", "碼", "A", "🦊"]);
     expect(f.geometry.read).not.toHaveBeenCalled();
     expect(f.command).not.toHaveBeenCalled();
-    expect(f.options.secrets.secretFocused).not.toHaveBeenCalled();
+    expect(f.options.secrets.focus).not.toHaveBeenCalled();
     expect(f.progress).not.toHaveBeenCalled();
     await expect(
       f.input.manual(permit, { kind: "text", text: "x" }, f.abort.signal),
@@ -652,7 +657,156 @@ describe("guarded browser input", () => {
     });
     expect(peer.progress).toHaveBeenCalledWith({ count: 7, pressMono: 113 });
     expect(JSON.stringify(peer.progress.mock.calls)).not.toContain("chunk");
-    expect(peer.options.secrets.secretFocused).toHaveBeenCalledTimes(7);
+    // One page-sized read, then one node's for each key after the first.
+    expect(peer.options.secrets.focus).toHaveBeenCalledTimes(1);
+    expect(peer.options.secrets.focusHolds).toHaveBeenCalledTimes(6);
+    await peer.control.close();
+  });
+
+  it("reads the whole page again when the field loses focus, after Return or Tab, and on time", async () => {
+    const peer = await setup();
+    const reads = () => vi.mocked(peer.options.secrets.focus).mock.calls.length;
+    let keys = 0;
+    const everyKey = { firstCount: 60, firstMs: 0, restMs: 0 };
+    await peer.input.type(
+      permit,
+      "tab",
+      { ...typing, text: "abcd", pace: everyKey },
+      peer.abort.signal,
+      () => {
+        keys += 1;
+        peer.state.focusNodeHolds = keys !== 2;
+      },
+    );
+    // The first key, and the third once the field lost focus after the second.
+    expect(reads()).toBe(2);
+    peer.state.focusNodeHolds = true;
+    vi.mocked(peer.options.secrets.focus).mockClear();
+    await peer.input.type(
+      permit,
+      "tab",
+      { ...typing, text: "a\nb\tc" },
+      peer.abort.signal,
+      () => {},
+    );
+    expect(reads()).toBe(3);
+    vi.mocked(peer.options.secrets.focus).mockClear();
+    const now = vi.spyOn(performance, "now");
+    let clock = 0;
+    now.mockImplementation(() => clock);
+    await peer.input.type(
+      permit,
+      "tab",
+      { ...typing, text: "abc", pace: everyKey },
+      peer.abort.signal,
+      () => {
+        clock += 1200;
+      },
+    );
+    now.mockRestore();
+    // 0, 1.2 and 2.4 s: the first read is due again at the third key.
+    expect(reads()).toBe(2);
+    await peer.control.close();
+  });
+
+  it("keeps typing through a full read that fails while the field still has focus", async () => {
+    const peer = await setup();
+    const now = vi.spyOn(performance, "now");
+    let clock = 0;
+    now.mockImplementation(() => clock);
+    const pace = { firstCount: 60, firstMs: 0, restMs: 0 };
+    const typed = peer.input.type(
+      permit,
+      "tab",
+      { ...typing, text: "abcd", pace },
+      peer.abort.signal,
+      ({ count }) => {
+        clock += 2500;
+        // The read before the second key fails; a read that finds a protected field still stops.
+        if (count === 1)
+          vi.mocked(peer.options.secrets.focus).mockRejectedValueOnce(new Error("busy"));
+        if (count === 2) peer.state.secret = true;
+      },
+    );
+    await expect(typed).rejects.toThrow("secret");
+    now.mockRestore();
+    expect(peer.effects().map((entry) => entry.args.ch)).toEqual(["a", "b"]);
+    await peer.control.close();
+  });
+
+  it("stops at a full read that finds browser UI holding the keys, though the field looks focused", async () => {
+    const peer = await setup();
+    const now = vi.spyOn(performance, "now");
+    let clock = 0;
+    now.mockImplementation(() => clock);
+    const fieldStillFocused = vi.mocked(peer.options.secrets.focusHolds);
+    fieldStillFocused.mockImplementation(async () => true);
+    const typed = peer.input.type(
+      permit,
+      "tab",
+      { ...typing, text: "abcd", pace: { firstCount: 60, firstMs: 0, restMs: 0 } },
+      peer.abort.signal,
+      () => {
+        clock += 2500;
+        peer.state.focus = "chrome";
+      },
+    );
+    await expect(typed).rejects.toThrow("focus");
+    now.mockRestore();
+    expect(peer.effects()).toHaveLength(1);
+    await peer.control.close();
+  });
+
+  it("asks after focus every few keys once a text is past a field's length", async () => {
+    const peer = await setup();
+    await peer.input.type(
+      permit,
+      "tab",
+      { ...typing, text: "x".repeat(100) },
+      peer.abort.signal,
+      () => {},
+    );
+    expect(peer.effects()).toHaveLength(100);
+    // A key each for the first 60, less the first's full read, then one in every eight.
+    expect(peer.options.secrets.focusHolds).toHaveBeenCalledTimes(59 + 5);
+    await peer.control.close();
+  });
+
+  it("reads the new page when a long text's document goes away between its focus checks", async () => {
+    const peer = await setup();
+    let keys = 0;
+    await peer.input.type(
+      permit,
+      "tab",
+      { ...typing, text: "x".repeat(70), pace: { firstCount: 70, firstMs: 0, restMs: 0 } },
+      peer.abort.signal,
+      () => {
+        keys += 1;
+        if (keys !== 62) return;
+        peer.state.focusNodeHolds = false;
+        peer.check.mockImplementationOnce(() => {
+          throw new Error("stale");
+        });
+      },
+    );
+    expect(peer.effects()).toHaveLength(70);
+    expect(peer.options.secrets.focus).toHaveBeenCalledTimes(2);
+    await peer.control.close();
+  });
+
+  it("keeps a full read every few keys where the page can't name its focus", async () => {
+    const peer = await setup();
+    peer.state.unnamedFocus = true;
+    await peer.input.type(
+      permit,
+      "tab",
+      { ...typing, text: "abcdefghijklmnopqrs" },
+      peer.abort.signal,
+      () => {},
+    );
+    expect(peer.effects()).toHaveLength(19);
+    expect(peer.options.secrets.focus).toHaveBeenCalledTimes(3);
+    expect(peer.options.secrets.focusHolds).not.toHaveBeenCalled();
     await peer.control.close();
   });
 

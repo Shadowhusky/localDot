@@ -1,3 +1,4 @@
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, runAt, test } from "./harness.ts";
 
 runAt("c39", "w39");
@@ -13,7 +14,7 @@ test("file actions clear dividers and Activity remains comfortable on narrow pho
     await page.setViewportSize({ width, height: 740 });
     const file = page.locator(".deliverable").first();
     await file.scrollIntoViewIfNeeded();
-    const action = file.getByRole("button", { name: /^Open / }).first();
+    const action = file.getByRole("button", { name: /^More for / }).first();
     await expect(action).toBeVisible();
     const clearance = await action.evaluate((button) => {
       const parent = button.closest(".ui-file-row");
@@ -26,7 +27,7 @@ test("file actions clear dividers and Activity remains comfortable on narrow pho
     expect(clearance.bottom).toBeGreaterThanOrEqual(8);
     expect(clearance.height).toBeLessThanOrEqual(32);
     await page.screenshot({ path: test.info().outputPath(`files-${width}.png`) });
-    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
     const filter = page.getByRole("radiogroup", { name: "Activity filter" });
     await expect(filter).toBeVisible();
     for (const radio of await filter.getByRole("radio").all()) {
@@ -36,7 +37,7 @@ test("file actions clear dividers and Activity remains comfortable on narrow pho
       expect(box.width).toBeGreaterThanOrEqual(70);
       expect(box.x + box.width).toBeLessThanOrEqual(width);
     }
-    await page.getByRole("dialog", { name: "Activity" }).evaluate(async (element) => {
+    await page.getByRole("dialog", { name: PANEL_NAME }).evaluate(async (element) => {
       await Promise.all(
         element
           .getAnimations({ subtree: true })
@@ -47,7 +48,7 @@ test("file actions clear dividers and Activity remains comfortable on narrow pho
     await ui.settle();
     await page.screenshot({ path: test.info().outputPath(`activity-${width}.png`) });
     await page
-      .getByRole("dialog", { name: "Activity" })
+      .getByRole("dialog", { name: PANEL_NAME })
       .getByRole("button", { name: "Done", exact: true })
       .click();
   }

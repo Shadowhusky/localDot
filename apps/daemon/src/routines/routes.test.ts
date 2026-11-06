@@ -17,7 +17,7 @@ afterEach(() => {
 const draft = {
   name: "Morning bills",
   instruction: "Check statements.",
-  when: { kind: "weekdays" as const, time: "08:30" },
+  schedules: [{ every: 1, unit: "week" as const, weekdays: [1, 2, 3, 4, 5], times: ["08:30"] }],
 };
 const stopped = {
   sessions: [],
@@ -115,7 +115,7 @@ describe("routine routes", () => {
     expect(routine).toMatchObject({
       tz: "Europe/London",
       state: "active",
-      summary: "Weekdays at 08:30 · London time",
+      summary: "Weekdays at 8:30 · London time",
     });
     expect(f.deps.scheduler.replan).toHaveBeenCalled();
     expect(f.deps.publish).toHaveBeenCalledWith({
@@ -141,14 +141,14 @@ describe("routine routes", () => {
     expect((await f.json(ok)).instruction).toBe("use [key]");
   });
 
-  it("explains a custom rule it cannot use", async () => {
+  it("explains a schedule it cannot use", async () => {
     const f = fixture();
     const res = await f.call("POST", "/api/routines", {
       ...draft,
-      when: { kind: "custom", rule: "FREQ=HOURLY;BYHOUR=9" },
+      schedules: [{ every: 24, unit: "hour" }],
     });
     expect(res.status).toBe(400);
-    expect(await res.text()).toBe("FREQ must be DAILY, WEEKLY or MONTHLY.");
+    expect(await res.text()).toBe("A step in hours must be from 1 to 23.");
   });
 
   it("refuses a stale revision and never touches a run in flight", async () => {
@@ -215,7 +215,9 @@ describe("routine routes", () => {
       {
         name: "Follow-up",
         instruction: "x",
-        when: { kind: "once", date: "2026-10-12", time: "15:00" },
+        schedules: [{ every: 1, unit: "day", times: ["15:00"] }],
+        start: "2026-10-12",
+        until: "2026-10-12",
       },
       { state: "active", kind: "follow_up", followUp: { sessionId: ulid(), note: "x" } },
     );

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { LocalDotEvent } from "@localdot/protocol";
 import { expect, type Page, test } from "@playwright/test";
 import { serveUi } from "../../daemon/src/static-ui.ts";
+import { PANEL_NAME } from "../src/shell/panel-name.ts";
 import { fits, isPhone } from "./layout.ts";
 
 // Layout acceptance uses the built production page and its unchanged CSP. Only the API/stream
@@ -230,19 +231,19 @@ test("desktop, tablet, phone, keyboard and 200 percent zoom keep the stage, rail
     await fits(page);
     if (width >= 700) {
       // The rail switches its views over the one thread, which is out of reach while covered.
-      for (const view of ["Activity", "Chat"]) {
+      for (const view of [PANEL_NAME, "Chat"]) {
         const radio = views.getByRole("radio", { name: view, exact: true });
         await radio.click();
         await expect(radio).toHaveAttribute("aria-checked", "true");
         await fits(page);
         expect(await threadInert(page)).toBe(view !== "Chat");
       }
-      await expect(page.getByRole("complementary", { name: "Plan and steps" })).toBeAttached();
+      await expect(page.getByRole("complementary", { name: PANEL_NAME })).toBeAttached();
     } else {
       // A phone has no views to switch: Activity is a sheet over the thread.
       await expect(views).toHaveCount(0);
-      await page.getByRole("button", { name: "Activity", exact: true }).click();
-      const sheet = page.getByRole("dialog", { name: "Activity" });
+      await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+      const sheet = page.getByRole("dialog", { name: PANEL_NAME });
       await sheet.getByRole("button", { name: /^Plan/ }).click();
       await expect(sheet.getByRole("list", { name: "Task plan" })).toContainText(
         "Calculate monthly totals",
@@ -257,7 +258,7 @@ test("desktop, tablet, phone, keyboard and 200 percent zoom keep the stage, rail
   const chat = views.getByRole("radio", { name: "Chat", exact: true });
   await chat.focus();
   await page.keyboard.press("ArrowRight");
-  await expect(views.getByRole("radio", { name: "Activity", exact: true })).toBeFocused();
+  await expect(views.getByRole("radio", { name: PANEL_NAME, exact: true })).toBeFocused();
   await page.keyboard.press("Home");
   await expect(chat).toBeFocused();
   await expect(chat).toHaveAttribute("aria-checked", "true");

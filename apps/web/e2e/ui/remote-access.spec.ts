@@ -21,17 +21,19 @@ test("remote access requires opt-in and keeps its privacy and pairing controls i
       enabled = route.request().postDataJSON().enabled;
       mutations++;
     }
-    const isLink = new URL(route.request().url()).pathname.endsWith("/link");
+    const { pathname } = new URL(route.request().url());
     await route.fulfill({
-      json: isLink
-        ? { url: link, expiresAt: Date.parse("2026-10-08T09:02:00Z") }
-        : {
-            supported: true,
-            enabled,
-            state: enabled ? "online" : "off",
-            url: enabled ? "https://device--dot.example.com" : null,
-            detail: "",
-          },
+      json: pathname.endsWith("/links")
+        ? { links: [] }
+        : pathname.endsWith("/link")
+          ? { url: link, expiresAt: Date.parse("2026-10-08T09:02:00Z") }
+          : {
+              supported: true,
+              enabled,
+              state: enabled ? "online" : "off",
+              url: enabled ? "https://device--dot.example.com" : null,
+              detail: "",
+            },
     });
   });
   await ui.open("ready");

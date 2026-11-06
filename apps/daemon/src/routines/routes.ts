@@ -14,10 +14,16 @@ import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import type { RoutineLauncher } from "./launch.ts";
-import { parseRule, RecurrenceError } from "./recurrence.ts";
 import type { RoutineScheduler } from "./scheduler.ts";
 import { StartAtLoginError, type StartAtLoginPort } from "./start-at-login.ts";
-import { RoutineError, type RoutineStore, type StoredRoutine, toRoutine, toRun } from "./store.ts";
+import {
+  RoutineError,
+  type RoutineStore,
+  type StoredRoutine,
+  toRoutine,
+  toRun,
+  validRoutine,
+} from "./store.ts";
 
 export interface RoutineRoutesDeps {
   store: RoutineStore;
@@ -41,16 +47,12 @@ export function routineRoutes(app: Hono, deps: RoutineRoutesDeps): void {
       return await work(c);
     } catch (error) {
       if (error instanceof RoutineError) return c.text(error.message, error.status);
-      if (error instanceof RecurrenceError) return c.text(error.message, 400);
       if (error instanceof StartAtLoginError) return c.text(error.message, 503);
       throw error;
     }
   };
-  const read = async <T extends z.ZodType>(c: Context, schema: T): Promise<z.infer<T>> => {
-    const parsed = schema.safeParse(await c.req.json().catch(() => undefined));
-    if (!parsed.success) throw new RoutineError(400, "That routine isn't valid.");
-    return parsed.data;
-  };
+  const read = async <T extends z.ZodType>(c: Context, schema: T): Promise<z.infer<T>> =>
+    validRoutine(schema, await c.req.json().catch(() => undefined));
   const idOf = (c: Context) => {
     const id = c.req.param("id") ?? "";
     if (!ULID_PATTERN.test(id)) throw new RoutineError(400, "That routine id isn't valid.");
@@ -61,19 +63,17 @@ export function routineRoutes(app: Hono, deps: RoutineRoutesDeps): void {
     if (!routine) throw new RoutineError(404, "There is no such routine.");
     return routine;
   };
-  const clean = <T extends { name?: string; instruction?: string; when?: RoutineDraft["when"] }>(
-    draft: T,
-  ): T => {
+  const clean = <T extends { name?: string; instruction?: string }>(draft: T): T => {
     for (const text of [draft.name, draft.instruction])
       if (text !== undefined && keyLikePresent(text)) throw new RoutineError(400, KEY_TEXT);
-    if (draft.when?.kind === "custom") parseRule(draft.when.rule);
     return {
       ...draft,
       ...(draft.name !== undefined ? { name: deps.redact(draft.name) } : {}),
       ...(draft.instruction !== undefined ? { instruction: deps.redact(draft.instruction) } : {}),
     };
   };
-  const view = (routine: StoredRoutine) => toRoutine(routine, deps.store.lastRun(routine.id));
+  const view = (routine: StoredRoutine) =>
+    toRoutine(routine, deps.store.lastRun(routine.id), deps.now());
   const changed = (routineId: string, revision: number, state: Routine["state"] | "deleted") => {
     deps.scheduler.replan();
     deps.publish({ type: "routine.changed", routineId, revision, state });

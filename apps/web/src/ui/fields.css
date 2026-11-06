@@ -110,9 +110,9 @@
     }
   }
 
-  /* A search bar on a phone: a raised fill and no edge until it has focus. */
+  /* A search bar on a phone: a raised fill and a quiet edge until it has focus. */
   .ui-text-field[data-filled]:not(:focus-within) {
-    border-color: transparent;
+    border-color: var(--color-filled-field-line);
   }
 
   .ui-text-field[data-filled] {
@@ -128,6 +128,24 @@
   .ui-input:focus-visible,
   .ui-text-area:focus-visible {
     outline: none;
+  }
+
+  /* A field the user was just taken to because it needs them: a soft light that swells and settles
+     on its red edge, with nothing moving. */
+  [data-reveal] {
+    animation: ui-field-reveal calc(var(--dur-gentle) * 2.5) var(--ease-standard);
+  }
+
+  @keyframes ui-field-reveal {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-danger-fg) 0%, transparent);
+    }
+
+    30%,
+    55% {
+      box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-danger-fg) 32%, transparent);
+    }
   }
 
   .ui-field-box[data-invalid],
@@ -738,6 +756,22 @@
       width var(--dur-snappy) var(--ease-spring);
   }
 
+  /* Names of very different lengths: each segment as wide as its name, sharing what is left, with
+     the thumb placed from the segment as laid out. */
+  .ui-segmented[data-fit] {
+    grid-auto-columns: auto;
+  }
+
+  .ui-segmented[data-fit] > .ui-segmented-thumb {
+    width: calc(var(--_thumb-w, 100% / var(--_count)) - 4px);
+    translate: var(--_thumb-x, calc(var(--_index) * (100% + 4px))) 0;
+    transition:
+      translate var(--dur-snappy) var(--ease-spring),
+      scale var(--dur-snappy) var(--ease-spring),
+      opacity var(--dur-fade) var(--ease-standard),
+      width var(--dur-snappy) var(--ease-spring);
+  }
+
   .ui-segmented[data-variant="quiet"] {
     background-color: transparent;
   }
@@ -806,6 +840,7 @@
   }
 
   .ui-segmented[data-variant="line"] > .ui-segment {
+    gap: var(--spacing);
     min-width: 0;
     padding-inline: calc(var(--spacing) * 2);
   }
@@ -1191,7 +1226,7 @@
     margin-top: calc((var(--_lane) - var(--_grip)) / 2);
     appearance: none;
     border-radius: var(--radius-full);
-    background-image: var(--porcelain-knob);
+    background-image: var(--porcelain-line-knob);
     box-shadow: var(--shadow-knob);
     transition: scale var(--dur-snappy) var(--ease-spring);
   }
@@ -1201,7 +1236,7 @@
     height: var(--_grip);
     border: 0;
     border-radius: var(--radius-full);
-    background-image: var(--porcelain-knob);
+    background-image: var(--porcelain-line-knob);
     box-shadow: var(--shadow-knob);
     transition: scale var(--dur-snappy) var(--ease-spring);
   }

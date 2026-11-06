@@ -91,8 +91,8 @@ for (const finished of [false, true]) {
       (node as HTMLElement).style.maxHeight = "210px";
     });
     const toggle = page.locator(".thread-work-steps > .ui-disclosure-trigger:visible").last();
-    // The live run is open already; a finished one opens on a press.
-    if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+    // The live run opens by itself; a finished one opens on a press.
+    if (finished && (await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await ui.settle();
     await page.screenshot({ path: test.info().outputPath("expanded.png") });

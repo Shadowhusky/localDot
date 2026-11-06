@@ -1,4 +1,5 @@
 import { ManualInput } from "@localdot/protocol";
+import type { ScreenName } from "../../../../packages/protocol/src/screens.ts";
 import { type ManualDesktop, ManualInputRejected } from "../agent/manual-input.ts";
 import type { AgentSession } from "../agent/session.ts";
 import type { BrowserOrchestrator } from "../cells/browser-orchestrator.ts";
@@ -26,13 +27,12 @@ export class SessionScreens {
       browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get"> &
         Partial<Pick<BrowserOrchestrator, "health">>;
       streams: BrowserStreams;
-      recordings: Pick<ScreenRecordings, "attach" | "fence">;
+      recordings: Pick<ScreenRecordings, "attach" | "fence"> &
+        Partial<Pick<ScreenRecordings, "coming" | "up">>;
       registry: Pick<DesktopdRegistry, "for">;
       downloads?: Pick<BrowserDownloadCollector, "collect">;
       pendingStop?(sessionId: string): Promise<StopOutcome> | undefined;
-      live?: Pick<LiveSessions, "claimBrowser" | "releaseBrowser" | "browserHolder">;
-      // Ends a finished task that only waits for a follow-up; false when it is still at work.
-      makeWay?(sessionId: string, signal: AbortSignal): Promise<boolean>;
+      live?: Pick<LiveSessions, "lease" | "sessionsOn">;
       report?(message: string): void;
       now(): number;
     },
@@ -50,13 +50,14 @@ export class SessionScreens {
       : undefined;
   }
 
-  install(session: AgentSession, cell: CellSummary, freshTab = false): void {
+  install(session: AgentSession, cell: CellSummary, freshTab = false, continues?: string): void {
     if (session.cellId !== cell.id) throw new Error("The session computer changed.");
     session.attachScreens(
       new ScreenController({
         sessionId: session.id,
         parentCellId: cell.id,
         freshTab,
+        ...(continues ? { continues } : {}),
         desktopGeometry: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
         desktopReady: () => {
           const current = this.deps.cells.get(cell.id);
@@ -117,16 +118,21 @@ export class SessionScreens {
         fenceRecording: () => this.deps.recordings.fence(session.id),
         publish: (event) => session.append("screen.switch", event),
         fenceSession: () => session.stop(),
+        remind: (text) => session.remind(text),
         ...(this.deps.live
           ? {
-              claimBrowser: async (signal: AbortSignal) => {
-                const live = this.deps.live;
-                if (!live || live.claimBrowser(cell.id, session.id)) return true;
-                const holder = live.browserHolder(cell.id);
-                if (!holder || !(await this.deps.makeWay?.(holder, signal))) return false;
-                return live.claimBrowser(cell.id, session.id);
-              },
-              releaseBrowser: () => this.deps.live?.releaseBrowser(cell.id, session.id),
+              turn: (signal: AbortSignal) =>
+                (this.deps.live as NonNullable<typeof this.deps.live>)
+                  .lease(cell.id)
+                  .acquire(session.id, { signal }),
+              coming: (screen: ScreenName) =>
+                this.deps.recordings.coming?.(
+                  cell.id,
+                  session.id,
+                  screen,
+                  this.deps.live?.sessionsOn(cell.id) ?? [],
+                ),
+              up: (screen: ScreenName) => this.deps.recordings.up?.(session.id, screen),
             }
           : {}),
         contain: async () => {
@@ -186,12 +192,22 @@ export class SessionScreens {
   }
 
   manual(session: AgentSession, scope: BrowserScope): ManualDesktop {
-    const access = session.screens?.manualAccess(scope);
-    if (!access) throw new Error("The selected browser is unavailable.");
+    const screens = session.screens;
+    if (!screens) throw new Error("The selected browser is unavailable.");
+    // With dot on the desktop, the user's first input here is what takes the web browser.
+    let access = screens.selection.screen === "browser" ? screens.manualAccess(scope) : undefined;
+    const held = () => {
+      if (!access) throw new Error("The selected browser is unavailable.");
+      return access;
+    };
     return {
-      screen: access.selection.geometry,
-      check: access.check,
+      screen: screens.selection.geometry,
+      check: () => (access ? access.check() : scope.check()),
       prepare: async (input) => {
+        if (!access) {
+          await screens.reachBrowser(scope);
+          access = screens.manualAccess(scope);
+        }
         access.check();
         try {
           checkManualBrowserInput(input);
@@ -199,16 +215,16 @@ export class SessionScreens {
           throw new ManualInputRejected();
         }
       },
-      release: access.finish,
-      confirm: access.confirm,
+      release: () => access?.finish(),
+      confirm: () => held().confirm(),
       client: {
         input: async (request, signal) => {
-          const result = await access.input(ManualInput.parse(request.input), signal);
+          const result = await held().input(ManualInput.parse(request.input), signal);
           if (result.kind !== "input") throw new Error("Manual input was not confirmed.");
           return result.receipt;
         },
         type: async (request, _onProgress, signal) => {
-          const result = await access.input({ kind: "text", text: request.text }, signal);
+          const result = await held().input({ kind: "text", text: request.text }, signal);
           if (result.kind !== "text") throw new Error("Manual input was not confirmed.");
           return result.receipt;
         },

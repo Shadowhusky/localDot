@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   attachSheetDrag,
+  canScroll,
   DISMISS_AT,
   detentStops,
   nearestStop,
@@ -75,16 +76,34 @@ describe("sheet drag", () => {
     expect(velocityOf(samples)).toBe(1000);
   });
 
-  it("gives a finger on the content to the sheet only when the sheet can go that way", () => {
-    // Up raises a sheet resting below its top height; at its top the content scrolls instead.
-    expect(takesSheet(2, -12, true, false)).toBe(true);
-    expect(takesSheet(2, -12, false, true)).toBe(false);
+  it("gives a finger on the content to the sheet only when the content has no use for it", () => {
+    // Up scrolls what can scroll, at any height, and raises only a lowered sheet over what can't.
+    expect(takesSheet(2, -12, true, true, true)).toBe(false);
+    expect(takesSheet(2, -12, true, false, true)).toBe(false);
+    expect(takesSheet(2, -12, true, true, false)).toBe(true);
+    expect(takesSheet(2, -12, false, true, false)).toBe(false);
     // Down lowers it once the content is scrolled to its top, at any height.
-    expect(takesSheet(-3, 12, false, true)).toBe(true);
-    expect(takesSheet(-3, 12, true, false)).toBe(false);
+    expect(takesSheet(-3, 12, false, true, true)).toBe(true);
+    expect(takesSheet(-3, 12, true, false, true)).toBe(false);
+    expect(takesSheet(-3, 12, false, true, false)).toBe(true);
     // Sideways belongs to the content (Activity's pages swipe).
-    expect(takesSheet(12, 4, true, true)).toBe(false);
-    expect(takesSheet(3, 0, true, true)).toBe(false);
+    expect(takesSheet(12, 4, true, true, false)).toBe(false);
+    expect(takesSheet(3, 0, true, true, false)).toBe(false);
+  });
+
+  it("knows content that can scroll from content that fits", () => {
+    const panel = document.createElement("section");
+    panel.innerHTML = '<div class="list"><p class="row">Row</p></div>';
+    document.body.append(panel);
+    const list = panel.querySelector(".list") as HTMLElement;
+    const row = panel.querySelector(".row") as Element;
+    list.style.overflowY = "auto";
+    expect(canScroll(row, panel)).toBe(false);
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 500 });
+    expect(canScroll(row, panel)).toBe(true);
+    list.style.overflowY = "hidden";
+    expect(canScroll(row, panel)).toBe(false);
+    panel.remove();
   });
 
   it("counts only what scrolls between the finger and the sheet", () => {
@@ -169,9 +188,10 @@ describe("picking a sheet up", () => {
       target.dispatchEvent(event);
     };
     // The browser's own touch event for the same move: whether it was stopped says who scrolls.
-    const touchMove = (target: Element, y: number, x = 20) => {
+    const touchMove = (target: Element, y: number, x = 20, t = 0) => {
       const event = new TouchEvent("touchmove", { bubbles: true, cancelable: true });
       Object.defineProperty(event, "touches", { value: [{ clientX: x, clientY: y }] });
+      Object.defineProperty(event, "timeStamp", { value: t });
       target.dispatchEvent(event);
       return event.defaultPrevented;
     };
@@ -209,6 +229,70 @@ describe("picking a sheet up", () => {
     pointer("pointermove", part(".row"), 200, { t: 30 });
     pointer("pointerup", part(".row"), 200, { t: 35 });
     expect(rest).toHaveBeenCalledWith(1);
+  });
+
+  // A list with more in it than fits, scrolled this far.
+  function scrollable(list: HTMLElement, top: number) {
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 900 });
+    Object.defineProperty(list, "clientHeight", { configurable: true, value: 300 });
+    list.scrollTop = top;
+  }
+
+  it("leaves a finger moving up on content that can scroll to the content, at any height", () => {
+    const { list, moved, pointer, touchMove, part } = sheet({ at: 198, stops: [198, 0] });
+    scrollable(list, 0);
+    pointer("pointerdown", part(".row"), 400);
+    expect(touchMove(part(".row"), 397)).toBe(false);
+    pointer("pointermove", part(".row"), 300, { t: 20 });
+    expect(moved).toEqual([]);
+  });
+
+  it("hands a pull past the content's top to the sheet, in the one gesture", () => {
+    const { list, moved, rest, pointer, touchMove, part } = sheet({ at: 0, stops: [0, 198] });
+    scrollable(list, 40);
+    pointer("pointerdown", part(".row"), 100);
+    expect(touchMove(part(".row"), 110), "the content has it").toBe(false);
+    pointer("pointercancel", part(".row"), 110);
+    touchMove(part(".row"), 130);
+    expect(moved).toEqual([]);
+    // At its top, and the finger still pulling: the sheet moves as far as the finger does from here.
+    list.scrollTop = 0;
+    touchMove(part(".row"), 150);
+    expect(moved.at(-1)).toBe(20);
+    expect(list.style.overflowY, "the content stands still").toBe("hidden");
+    touchMove(part(".row"), 190);
+    expect(moved.at(-1)).toBe(60);
+    // Let go, it comes to rest and the content is free again.
+    const end = new TouchEvent("touchend", { bubbles: true });
+    Object.defineProperty(end, "touches", { value: [] });
+    part(".row").dispatchEvent(end);
+    expect(rest).toHaveBeenCalledWith(0);
+    expect(list.style.overflowY).toBe("auto");
+  });
+
+  it("gives the finger back when a pull goes back above where it began", () => {
+    const { list, moved, pointer, touchMove, part } = sheet({ at: 0, stops: [0, 198] });
+    scrollable(list, 40);
+    pointer("pointerdown", part(".row"), 100);
+    touchMove(part(".row"), 110);
+    list.scrollTop = 0;
+    touchMove(part(".row"), 150);
+    expect(moved.at(-1)).toBe(40);
+    touchMove(part(".row"), 90);
+    expect(moved.at(-1)).toBe(0);
+    expect(list.style.overflowY).toBe("auto");
+  });
+
+  it("stops a sheet pulled off content that can scroll at the height it had", () => {
+    const { list, moved, pointer, touchMove, part } = sheet({ at: 0, stops: [0, 198] });
+    scrollable(list, 0);
+    pointer("pointerdown", part(".row"), 100);
+    expect(touchMove(part(".row"), 112)).toBe(true);
+    pointer("pointermove", part(".row"), 112, { t: 10 });
+    pointer("pointermove", part(".row"), 160, { t: 20 });
+    expect(moved.at(-1)).toBe(60);
+    pointer("pointermove", part(".row"), 40, { t: 30 });
+    expect(moved.at(-1)).toBe(0);
   });
 
   it("leaves the content to scroll once the sheet is at its top height, until it is scrolled up", () => {

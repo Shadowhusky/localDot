@@ -6,6 +6,7 @@ export interface KeydHealth {
   bootId?: string;
   sealKey?: string;
   generalSecrets?: boolean;
+  savedLogins?: boolean;
   // keyd swaps no secret while its audit log cannot be written (Part 4a, P4a-R17).
   audit?: { ok: boolean; error?: string };
   // Whether keyd knows the public address it denies (hairpin NAT); a keyd that does not say is
@@ -23,6 +24,10 @@ export interface KeydHealth {
 export type KeydHealthListener = (now: KeydHealth, before: KeydHealth) => void;
 
 const OFFLINE: KeydHealth = { online: false, error: "not checked yet" };
+// A busy Mac can hold keyd's answer past its deadline. Going offline retires the web browser and
+// its open pages, so keyd is offline only after this many failed reads in a row, over at least
+// this long. A reply with another boot is a restart whenever it comes, and is told at once.
+export const OFFLINE_AFTER = { reads: 3, ms: 15_000 } as const;
 
 // Watches keyd's status so the UI can say "Key layer offline" and the daemon can rewire its
 // cells when keyd comes back with a new boot (every cell's listener, CA and surrogates are gone).
@@ -32,6 +37,7 @@ export class KeydMonitor {
   #running = false;
   #generation = 0;
   #pending: Promise<KeydHealth> | undefined;
+  #failing: { since: number; reads: number } | undefined;
   readonly #listeners = new Set<KeydHealthListener>();
 
   constructor(
@@ -63,6 +69,7 @@ export class KeydMonitor {
         bootId: s.bootId,
         sealKey: s.sealKey,
         ...(s.generalSecrets !== undefined ? { generalSecrets: s.generalSecrets } : {}),
+        ...(s.savedLogins !== undefined ? { savedLogins: s.savedLogins } : {}),
         audit: s.audit,
         hairpin: s.hairpin ?? { state: "unknown", addresses: 0 },
         reenter: s.reenter ?? 0,
@@ -76,6 +83,8 @@ export class KeydMonitor {
     // start(). The request itself has the client's bounded deadline.
     if (generation !== this.#generation) return next;
     const before = this.#health;
+    if (next.online) this.#failing = undefined;
+    else if (before.online && !this.#gone()) return before;
     this.#health = next;
     if (healthState(next) !== healthState(before)) {
       for (const listener of this.#listeners) {
@@ -89,6 +98,14 @@ export class KeydMonitor {
       }
     }
     return next;
+  }
+
+  // Counts one more failed read; keyd is gone once they are enough and long enough.
+  #gone(): boolean {
+    const now = Date.now();
+    const failing = { since: this.#failing?.since ?? now, reads: (this.#failing?.reads ?? 0) + 1 };
+    this.#failing = failing;
+    return failing.reads >= OFFLINE_AFTER.reads && now - failing.since >= OFFLINE_AFTER.ms;
   }
 
   subscribe(listener: KeydHealthListener): () => void {
@@ -113,6 +130,7 @@ export class KeydMonitor {
     this.#running = false;
     this.#generation += 1;
     this.#pending = undefined;
+    this.#failing = undefined;
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = undefined;
   }

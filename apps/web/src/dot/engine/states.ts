@@ -171,6 +171,9 @@ export const SPRINGS = {
   // A prop comes out of dot's edge and tucks back in, without overshoot.
   propIn: spring(1, 0.42),
   propOut: spring(1, 0.3),
+  // A helper hops out a little past its seat and settles, and glides when the crew makes room.
+  helperIn: spring(0.8, 0.42),
+  helperSeat: spring(1, 0.38),
   scroll: spring(1, 0.32),
   // Reduced motion keeps short critically damped morphs in place of every other spring.
   reduced: spring(1, 0.24),

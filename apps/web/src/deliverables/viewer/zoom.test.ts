@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   centred,
   dragged,
+  draggedPlace,
   fitScale,
   project,
   settle,
@@ -55,5 +56,20 @@ describe("swiping between files", () => {
     // A flick back cancels a long drag.
     expect(swipeTurn(-200, 900, 390)).toBe(0);
     expect(project(1000)).toBeCloseTo(499, 0);
+  });
+});
+
+describe("draggedPlace", () => {
+  it("moves 1:1 between the pages and gives less and less past either end", () => {
+    expect(draggedPlace(1.4, 3, 400)).toBe(1.4);
+    const past = draggedPlace(-0.5, 3, 400);
+    expect(past).toBeLessThan(0);
+    expect(past).toBeGreaterThan(-0.5);
+    expect(draggedPlace(-1, 3, 400)).toBeGreaterThan(-0.55);
+    const beyond = draggedPlace(2.5, 3, 400);
+    expect(beyond).toBeGreaterThan(2);
+    expect(beyond).toBeLessThan(2.5);
+    // With one page, both ways are past an end.
+    expect(draggedPlace(0.3, 1, 400)).toBeLessThan(0.3);
   });
 });

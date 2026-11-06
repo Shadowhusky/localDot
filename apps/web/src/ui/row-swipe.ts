@@ -261,6 +261,12 @@ export function attachSwipe(element: HTMLElement, host: SwipeHost, faces: SwipeF
     }
   };
 
+  // One row rests open at a time: a press anywhere else closes it, as Mail's does. Its faces lie
+  // beside it in its parent.
+  const onPressElsewhere = (event: PointerEvent) => {
+    if (offset !== 0 && !element.parentElement?.contains(event.target as Node)) restAt(null, 0);
+  };
+
   // The click that ends a swipe is not a press on the row.
   const onClick = (event: MouseEvent) => {
     if (!swiped) return;
@@ -271,6 +277,7 @@ export function attachSwipe(element: HTMLElement, host: SwipeHost, faces: SwipeF
 
   element.addEventListener("pointerdown", onPointerDown);
   element.addEventListener("click", onClick, true);
+  window.addEventListener("pointerdown", onPressElsewhere, true);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerEnd);
   window.addEventListener("pointercancel", onPointerEnd);
@@ -289,6 +296,7 @@ export function attachSwipe(element: HTMLElement, host: SwipeHost, faces: SwipeF
       cancelAnimationFrame(frame);
       element.removeEventListener("pointerdown", onPointerDown);
       element.removeEventListener("click", onClick, true);
+      window.removeEventListener("pointerdown", onPressElsewhere, true);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerEnd);
       window.removeEventListener("pointercancel", onPointerEnd);

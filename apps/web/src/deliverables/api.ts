@@ -1,6 +1,7 @@
 import {
   CompareReply,
   ComputerFileReply,
+  ConversationFilesReply,
   FileVersionsReply,
   isComputerPath,
   JsonPreview,
@@ -285,6 +286,18 @@ export async function loadTable(
   return TableFileReply.parse(JSON.parse(new TextDecoder().decode(body)));
 }
 // Open on Mac is offered only where the daemon allows it: the page itself is on loopback.
+export async function loadConversationFiles(
+  api: ApiClient,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<ConversationFilesReply> {
+  if (!ULID_PATTERN.test(sessionId)) throw new DeliverableError(400, "invalid task");
+  const response = await request(api, `/api/agent/sessions/${sessionId}/conversation-files`, {
+    signal,
+  });
+  return ConversationFilesReply.parse(await response.json());
+}
+
 export function isLoopbackPage(
   location: Pick<Location, "protocol" | "hostname"> = window.location,
 ): boolean {

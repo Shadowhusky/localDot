@@ -8,6 +8,7 @@ import { DesktopdError } from "../../desktopd/client.ts";
 import { localdotTools } from "../claude-code/mcp-server.ts";
 import { codexTools } from "../codex/mcp-tools.ts";
 import { toolHarness } from "../testing/harness.ts";
+import { dispatchTool } from "./index.ts";
 import { chooseRoute } from "./work-context.ts";
 
 const cleanups: (() => void)[] = [];
@@ -25,6 +26,27 @@ function data(raw: unknown) {
   if (text?.type !== "text") throw new Error("no result");
   return JSON.parse(text.text.split("\n").slice(1, -1).join("\n"));
 }
+
+describe("apps dot could offer to connect", () => {
+  it("are listed for it, with the way to offer them", async () => {
+    const h = setup();
+    h.tools.connectors = {
+      connectable: () => [{ id: "linear", name: "Linear", description: "Your issues." }],
+    } as never;
+    const { result } = await dispatchTool(
+      { tools: h.tools },
+      h.session,
+      "work_context",
+      "call",
+      {},
+      (s) => s,
+    );
+    const said = JSON.stringify(result.content);
+    expect(said).toContain("connectableApps");
+    expect(said).toContain("Your issues.");
+    expect(said).toContain("credentials/connect");
+  });
+});
 
 describe("work context across agent backends", () => {
   it("exposes one flat schema and description for API, Codex and Claude", () => {

@@ -51,6 +51,8 @@ const (
 	ReasonReenter       = "secret-reenter"
 	ReasonRebound       = "secret-rebound"
 	ReasonVaultLocked   = "vault-locked"
+	ReasonReconnect     = "oauth-reconnect"
+	ReasonOAuthDown     = "oauth-unavailable"
 	ReasonNoAudit       = "audit-unavailable"
 	ReasonConnectionCap = "connection-cap"
 )

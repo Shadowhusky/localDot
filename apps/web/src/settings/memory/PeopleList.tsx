@@ -6,6 +6,7 @@ import { Group, GroupHead, GroupNote, GroupRow, Monogram } from "../../ui/Group.
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../../ui/Menu.tsx";
 import { triggerProps } from "../../ui/Popover.tsx";
+import { useRevealInvalid } from "../../ui/reveal-field.ts";
 import { Skeleton } from "../../ui/Skeleton.tsx";
 import { TextField } from "../../ui/TextField.tsx";
 import { showToast } from "../../ui/Toast.tsx";
@@ -52,9 +53,13 @@ function PersonForm({
   const [draft, setDraft] = useState(initial);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
+  // The field the note is about: a name or an app still to give, else the first of them.
+  const wrong = !note ? null : draft.name.trim() && !draft.app.trim() ? "app" : "name";
   const field = (key: keyof PersonDraft, label: string, placeholder: string) => (
     <TextField
       aria-label={label}
+      aria-invalid={wrong === key ? true : undefined}
       placeholder={placeholder}
       value={draft[key]}
       autoComplete="off"
@@ -66,6 +71,7 @@ function PersonForm({
   );
   return (
     <form
+      ref={scope}
       className="ui-group-row memory-person-form"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
@@ -78,6 +84,7 @@ function PersonForm({
         const problem = personProblem(draft);
         if (problem) {
           setNote(problem);
+          reveal();
           return;
         }
         setBusy(true);

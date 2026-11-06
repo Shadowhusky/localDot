@@ -5,22 +5,23 @@ export interface SideAnswer {
   readonly answer: string;
   readonly provider: string;
   readonly model: string;
+  // The model asked first, which failed, and why.
+  readonly failed?: { readonly model: string; readonly reason: string };
 }
 
 // The daemon's reasons, as the user reads them.
 const PROBLEMS: Record<string, string> = {
-  "no-fast-model":
-    "Side questions need a Fast model on Claude Code or an API key. Choose one in Settings → Models.",
-  "fast-model-not-running":
-    "Your Fast model answers through a running task. Ask while dot is working, or choose a Fast model on Claude Code.",
+  "no-model": "Choose a model for this task first.",
+  "no-spare-model":
+    "The ChatGPT plan answers one request at a time, so it can't take a side question. Choose another model for this task.",
   busy: "Wait for the answer to your last side question.",
 };
-const NO_ANSWER = "Your Fast model didn't answer. Try again.";
+const NO_ANSWER = "No model could answer. Try again.";
 
 export class SideQuestionFailure extends Error {
   constructor(
     message: string,
-    // The fix is choosing a Fast model.
+    // The fix is choosing a model.
     readonly setup = false,
   ) {
     super(message);
@@ -28,8 +29,8 @@ export class SideQuestionFailure extends Error {
   }
 }
 
-// Asks the task's Fast model one question about the task. Neither the question nor the answer ever
-// reaches dot.
+// Asks the task's Fast model, or its main one, one question about the task. Neither the question nor
+// the answer ever reaches dot.
 export async function askSideQuestion(
   api: ApiClient,
   sessionId: string,
@@ -66,6 +67,7 @@ export async function askSideQuestion(
         answer: reply.answer,
         provider: String(reply.provider ?? ""),
         model: String(reply.model ?? ""),
+        ...(reply.failed ? { failed: reply.failed } : {}),
       };
     throw new SideQuestionFailure(NO_ANSWER);
   }
@@ -74,8 +76,10 @@ export async function askSideQuestion(
       "Write a question of up to 2,000 characters, with no keys in it.",
     );
   if (response.status === 404) throw new SideQuestionFailure("This task can't be asked about.");
+  const [problem = "", reason] = text.split("\n");
+  const said = PROBLEMS[problem] ?? NO_ANSWER;
   throw new SideQuestionFailure(
-    PROBLEMS[text] ?? NO_ANSWER,
-    text === "no-fast-model" || text === "fast-model-not-running",
+    reason ? `${said} (${reason})` : said,
+    problem === "no-model" || problem === "no-spare-model",
   );
 }

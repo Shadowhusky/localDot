@@ -12,8 +12,8 @@ export function nestedKeys(page: Page): Locator {
   return settingsSheet(page).getByRole("region", { name: "Keys", exact: true });
 }
 
-// Settings opens from the top bar's gear, or from More on a phone, which has no top bar and lists
-// the sections, so it goes into `section` there.
+// Settings opens from the top bar's gear, from More on Studio's phone, or from the computer pill over
+// Chat's list. Neither phone has a top bar and each lists the sections, so it goes into `section`.
 export async function openSettings(
   page: Page,
   press: (target: Locator) => Promise<void> = (target) => target.click(),
@@ -21,14 +21,17 @@ export async function openSettings(
 ): Promise<Locator> {
   const gear = page.getByRole("button", { name: "Settings", exact: true });
   const more = page.getByRole("button", { name: "More", exact: true });
-  await expect(gear.or(more).first()).toBeVisible();
+  const back = page.getByRole("button", { name: "Back to conversations" });
+  const pill = page.getByRole("button", { name: /this computer and app settings$/ });
+  await expect(gear.or(more).or(pill).first()).toBeVisible();
   const sheet = settingsSheet(page);
   if (await gear.isVisible()) {
     await press(gear);
     if (section) await sheet.getByRole("button", { name: section, exact: true }).click();
     return sheet;
   }
-  await press(more);
+  if (await back.isVisible()) await press(back);
+  await press((await pill.isVisible()) ? pill : more);
   await press(page.getByRole("menuitem", { name: "Settings", exact: true }));
   if (section) await press(sheet.getByRole("button", { name: new RegExp(`^${section}`) }));
   return sheet;
@@ -46,6 +49,8 @@ export async function closeSettings(page: Page): Promise<void> {
       .getByRole("button", { name: "Done", exact: true })
       .click();
   await expect(sheet).toBeHidden();
+  // Chat's list was only the way to Settings: back to the conversation it came from.
+  if (await page.locator(".phone-stack[data-level='0']").count()) await page.goForward();
 }
 
 export function roleCard(scope: Page | Locator, role: keyof typeof ROLE_TITLES): Locator {

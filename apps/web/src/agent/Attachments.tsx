@@ -1,9 +1,13 @@
+import { useRef, useState } from "react";
 import { bytes } from "../copy/format.ts";
 import { Button } from "../ui/Button.tsx";
+import { HitButton } from "../ui/HitButton.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { Sheet } from "../ui/Sheet.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
+import { CopyButton } from "./CopyButton.tsx";
 import { FileName } from "./ResultFiles.tsx";
 import type { UploadRow } from "./useUploads.ts";
 
@@ -16,6 +20,25 @@ const STATUS: Record<UploadRow["phase"], string> = {
   refused: "Not uploaded",
 };
 
+// What a long text moved out of the field says, opened from its chip.
+function LongTextSheet({ row, onClose }: { row?: UploadRow; onClose(): void }) {
+  const shown = useRef(row);
+  if (row) shown.current = row;
+  const text = shown.current?.text ?? "";
+  return (
+    <Sheet
+      open={!!row}
+      onClose={onClose}
+      modal
+      title={shown.current?.label}
+      doneLabel="Done"
+      footer={<CopyButton text={text} label="Copy this text" />}
+    >
+      <pre className="composer-text-view">{text}</pre>
+    </Sheet>
+  );
+}
+
 // The files added to a draft, over its field. Each chip says where its upload stands.
 export function AttachmentChips({
   rows,
@@ -26,13 +49,26 @@ export function AttachmentChips({
   onRemove(id: number): void;
   onRetry?(id: number): void;
 }) {
+  const [reading, setReading] = useState<number | null>(null);
   // Each reason once: the chips already say which files it applies to.
   const reasons = [...new Set(rows.flatMap((row) => (row.explanation ? [row.explanation] : [])))];
   return (
     <div className="file-chips-block">
       <ul className="file-chips" aria-label="Attached files">
         {rows.map((row) => (
-          <li key={row.id} className="file-chip" data-phase={row.phase}>
+          <li
+            key={row.id}
+            className="file-chip"
+            data-phase={row.phase}
+            data-opens={row.text !== undefined ? "" : undefined}
+          >
+            {row.text !== undefined && (
+              <HitButton
+                className="file-chip-hit"
+                label={`Read ${row.label}`}
+                onClick={() => setReading(row.id)}
+              />
+            )}
             {row.preview && (
               <img className="file-chip-thumb" src={row.preview} alt="" decoding="async" />
             )}
@@ -45,7 +81,7 @@ export function AttachmentChips({
                 className="file-chip-icon"
               />
             )}
-            <FileName name={row.name} />
+            <FileName name={row.label ?? row.name} />
             {row.phase === "complete" ? (
               <>
                 {row.bytes !== undefined && (
@@ -88,6 +124,10 @@ export function AttachmentChips({
           {reason}
         </p>
       ))}
+      <LongTextSheet
+        row={rows.find((row) => row.id === reading)}
+        onClose={() => setReading(null)}
+      />
     </div>
   );
 }

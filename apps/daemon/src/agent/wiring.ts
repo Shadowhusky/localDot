@@ -28,6 +28,7 @@ import {
 import {
   CLAUDE_CODE_MODEL,
   type PersonaId,
+  type ScreenName,
   type SkillSummary,
   TOOL_API_PORT,
 } from "@localdot/protocol";
@@ -48,6 +49,7 @@ import { ConnectorCells, connectorImages } from "../connectors/cell.ts";
 import { ConnectorHub } from "../connectors/hub.ts";
 import { CellAndRemoteLinks } from "../connectors/links.ts";
 import { ConnectorSignIn } from "../connectors/oauth.ts";
+import { openInBrowser } from "../connectors/open-browser.ts";
 import { RemoteLinks } from "../connectors/remote.ts";
 import { ConnectorStore } from "../connectors/store.ts";
 import type { ComputerAccess } from "../deliverables/convert.ts";
@@ -61,10 +63,12 @@ import type { KillSwitch } from "../gateway/kill-switch.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import type { KeydClient } from "../keyd/client.ts";
 import { JudgeCell } from "../keyd/judge-cell.ts";
+import { KeyModels } from "../keyd/key-models.ts";
 import { ModelCatalog } from "../keyd/model-catalog.ts";
 import type { KeydMonitor } from "../keyd/monitor.ts";
 import { QuickModel } from "../keyd/quick-model.ts";
 import { ServiceKeys } from "../keyd/service-keys.ts";
+import type { ScreenRecordings } from "../recorder/screen-recordings.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
@@ -87,12 +91,13 @@ import { CodexDriver } from "./codex/driver.ts";
 import { codexInstructions } from "./codex/instructions.ts";
 import { openMcpEndpoint } from "./codex/mcp-endpoint.ts";
 import { ChatgptSetup, SANDBOX_REASONS, SETUP_UNSAVED } from "./codex/setup.ts";
-import { ComputerTurns } from "./computer-turn.ts";
+import { type ComputerTurn, ComputerTurns } from "./computer-turn.ts";
 import { Conversations } from "./conversation.ts";
 import { ExperienceRecorder } from "./experience-recorder.ts";
 import { FramePng } from "./frame-png.ts";
 import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
+import { workEvents, workRecord } from "./native-recap.ts";
 import { OutputStore } from "./output-store.ts";
 import { PeopleStore } from "./people.ts";
 import { PlanUsageStore } from "./plan-usage.ts";
@@ -146,12 +151,14 @@ export interface AgentWiringDeps {
   relay?: () => Promise<GateRelay>;
   codex?: { realHome: string; user: string };
   claudeCode?: { realHome: string };
+  recordings?: Pick<ScreenRecordings, "coming" | "up" | "forUser">;
   sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual" | "startBrowser"> &
     Partial<Pick<SessionScreens, "workEndpoint">>;
   transfers?: Transfers;
   quarantine?: QuarantineStore;
   // Earlier tasks for the recall tool, from the search index.
   recall?: ToolDeps["recall"];
+  previewOffers?: ToolDeps["previewOffers"];
   notesChanged?(file: string): void;
   liveChanged?: AgentRunnerDeps["liveChanged"];
 }
@@ -302,6 +309,10 @@ export function createAgent(d: AgentWiringDeps) {
     keyd: d.keyd,
     ports: { reserve: () => brains.reservePort(), release: (port) => brains.releasePort(port) },
   });
+  const keyModels = new KeyModels({
+    keyd: d.keyd,
+    ports: { reserve: () => brains.reservePort(), release: (port) => brains.releasePort(port) },
+  });
   const purposeService = new PurposeService({
     keys: () => d.keyd.secrets(),
     settings: () => settings.get(),
@@ -330,7 +341,8 @@ export function createAgent(d: AgentWiringDeps) {
   const connectorSignIn = new ConnectorSignIn({
     hub: connectors,
     keyd: d.keyd,
-    fetchFor: (id) => remoteLinks.signIn(id),
+    fetchFor: (id, secret) => remoteLinks.signIn(id, secret),
+    open: (url) => openInBrowser(url),
   });
   const skills = () => listSkills(BUILTIN_SKILLS, join(d.home, "skills"));
   const installSkills = async (
@@ -446,12 +458,24 @@ export function createAgent(d: AgentWiringDeps) {
       const client = d.registry.for(id)?.client;
       return client?.windows ? (request, signal) => client.windows(request, signal) : undefined;
     },
+    browser: (id) => runner.get(id)?.browserTurn,
+    ...(d.recordings
+      ? {
+          screens: {
+            coming: (cellId, id) =>
+              d.recordings?.coming(cellId, id, "desktop", d.live.sessionsOn(cellId)),
+            up: (id) => d.recordings?.up(id, "desktop"),
+            forUser: (cellId, id) => d.recordings?.forUser(cellId, id, d.live.sessionsOn(cellId)),
+          },
+        }
+      : {}),
   });
   const dispatch: DispatchDeps = {
     ...(d.policy ? { policy: d.policy } : {}),
     tools: {
       saveExperience: (id, lesson) => experience.save(id, lesson),
       recallExperience: (query, id) => memory.recallMemory(query, id),
+      ...(d.previewOffers ? { previewOffers: d.previewOffers } : {}),
       uploads: { desktop, transfers },
       gateway: d.gateway,
       computer: turns,
@@ -500,6 +524,7 @@ export function createAgent(d: AgentWiringDeps) {
       sleep: (ms, signal) => sleep(ms, undefined, { signal }),
       ...(d.routines ? { routines: d.routines } : {}),
       connectors,
+      appsChanged: (session) => runner.refreshApps(session),
       web: webCell,
       credentials: serviceKeys,
     },
@@ -512,6 +537,7 @@ export function createAgent(d: AgentWiringDeps) {
   ) => {
     const lease = session.admit(generation, signal);
     let screen: ScreenLease | undefined;
+    let turn: ComputerTurn | undefined;
     const endpoint = d.cells.endpoints(session.cellId)?.desktopd;
     const check = () => {
       lease.check();
@@ -532,6 +558,8 @@ export function createAgent(d: AgentWiringDeps) {
         throw new AgentError(409, "The task computer changed during observation.");
     };
     try {
+      // Reading the desktop waits for nobody; the web browser's one display takes turns.
+      if (session.browserTurn) turn = await turns.take(session.id, session.cellId, lease.signal);
       screen = session.screens ? session.screenLease(lease) : undefined;
       if (screen) await session.screens?.refreshBrowser(screen);
       const binding = screen ? d.sessionScreens?.bind(session, screen) : undefined;
@@ -556,10 +584,12 @@ export function createAgent(d: AgentWiringDeps) {
       return { frameId: frame.frameId, full: true as const, png: full };
     } finally {
       screen?.finish();
+      await turn?.release().catch(() => {});
       lease.finish();
     }
   };
   const nativeTasks = new NativeTasks(d.home);
+  const nativeWork = (sessionId: string) => workRecord(workEvents(d.eventLog.logFile(sessionId)));
   const nativeRetired = (sessionId: string) => {
     try {
       nativeTasks.confirmed(sessionId);
@@ -576,6 +606,7 @@ export function createAgent(d: AgentWiringDeps) {
           onRetired: nativeRetired,
           auth,
           transcripts,
+          work: nativeWork,
           openEndpoint: (input) =>
             openMcpEndpoint({
               ...input,
@@ -758,6 +789,7 @@ export function createAgent(d: AgentWiringDeps) {
           ).result,
         observe,
         transcripts,
+        work: nativeWork,
         instructions: (session) =>
           claudeCodeInstructions({
             memory: tainting(session, memory.bootMemory(session.task)),
@@ -919,10 +951,14 @@ export function createAgent(d: AgentWiringDeps) {
       },
     };
   };
-  const manual = (session: AgentSession, scope: BrowserScope): ManualDesktop | undefined => {
+  const manual = (
+    session: AgentSession,
+    scope: BrowserScope,
+    screen: ScreenName | undefined = session.screens?.selection.screen,
+  ): ManualDesktop | undefined => {
     const cell = d.cells.get(session.cellId);
     if (!cell) throw new AgentError(404, "the computer is unavailable");
-    const browser = session.screens?.selection.screen === "browser";
+    const browser = screen === "browser";
     const target = browser ? undefined : d.registry.for(session.cellId);
     if (!browser && !target) return undefined;
     const endpoint = target?.client.endpoint;
@@ -1044,7 +1080,9 @@ export function createAgent(d: AgentWiringDeps) {
     conversations,
     settings,
     catalog,
+    keyModels,
     keyd: d.keyd,
+    savedLogins: d.keyd,
     memory,
     notesChanged: d.notesChanged,
     people,

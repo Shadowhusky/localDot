@@ -1,0 +1,10 @@
+assets/
+renders/
+models/
+.hyperframes/
+.waveform-cache/
+.thumbnails/
+cover/out/
+cover/art/src/
+cover/ui/frames/
+cover/ui/*.png

@@ -8,6 +8,8 @@ import { StageFrame } from "../shell/StageFrame.tsx";
 import { FeedbackPage } from "../ui/gallery/FeedbackPage.tsx";
 import { OverlaysPage } from "../ui/gallery/OverlaysPage.tsx";
 import { ActivityPage } from "./ActivityPage.tsx";
+import { HelpersPage } from "./HelpersPage.tsx";
+import { LooksPage } from "./LooksPage.tsx";
 import { StillFrame } from "./StillFrame.tsx";
 import { SystemPage } from "./SystemPage.tsx";
 
@@ -112,6 +114,18 @@ export const GALLERY_PAGES: GalleryPage[] = [
     Page: SystemPage,
   },
   { id: "dot", title: "dot", about: "Every state at hero and badge size", Page: DotPage },
+  {
+    id: "helpers",
+    title: "Helpers",
+    about: "dot's sub-agents at each size, coming, finishing and failing",
+    Page: HelpersPage,
+  },
+  {
+    id: "looks",
+    title: "Task looks",
+    about: "What dots can wear, and tasks told apart by it",
+    Page: LooksPage,
+  },
   { id: "stage", title: "Stage", about: "The lit stage around a still frame", Page: StagePage },
   {
     id: "overlays",

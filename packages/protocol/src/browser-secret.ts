@@ -39,3 +39,18 @@ export const BrowserSecretReply = z.strictObject({
   submitted: z.boolean().optional(),
 });
 export type BrowserSecretReply = z.infer<typeof BrowserSecretReply>;
+
+// Where a saved login would go on the page the user sees, for the user's own tap while they hold
+// the browser. It says nothing of what the page holds; `field` is asked for only when it is needed.
+export const BrowserSignInPageRequest = z.strictObject({ fields: z.boolean() });
+export const BrowserSignInPage = z.strictObject({
+  tabId: z.string().max(128),
+  origin: z.string().max(2048).nullable(),
+  field: z
+    .strictObject({
+      kind: z.enum(["password", "account"]),
+      at: BrowserSecretRequest.shape.at,
+    })
+    .optional(),
+});
+export type BrowserSignInPage = z.infer<typeof BrowserSignInPage>;

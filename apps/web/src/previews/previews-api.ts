@@ -29,6 +29,11 @@ export function stopPreview(api: ApiClient, sessionId: string, id: string): Prom
   return api.del(`${previewsPath(sessionId)}/${encodeURIComponent(id)}`);
 }
 
+// Ends the server itself, in the computer.
+export function stopServer(api: ApiClient, sessionId: string, port: number): Promise<void> {
+  return api.del(`${previewsPath(sessionId)}/servers/${port}`);
+}
+
 const COULD_NOT_OPEN = "localDot couldn't open the preview. Try again in a moment.";
 
 // The daemon refuses in its own plain words; anything else stays out of sight.

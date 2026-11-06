@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
 import { expect, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
@@ -7,11 +8,11 @@ runAt("c14", "c39", "w39");
 // More has Activity instead.
 async function agentsTab(page: Page, holding = false) {
   if (!isPhone(page))
-    await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
-  else if (!holding) await page.getByRole("button", { name: "Activity", exact: true }).click();
+    await page.locator(".rail-chat").getByRole("radio", { name: PANEL_NAME, exact: true }).click();
+  else if (!holding) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
   else {
     await page.getByRole("button", { name: "More", exact: true }).click();
-    await page.getByRole("menuitem", { name: "Activity", exact: true }).click();
+    await page.getByRole("menuitem", { name: PANEL_NAME, exact: true }).click();
   }
   await page.getByRole("tab", { name: /Agents/ }).click();
   return page.getByRole("tabpanel", { name: /Agents/ });
@@ -112,7 +113,7 @@ test("a child agent cut off when the user takes the computer reads Interrupted, 
   // A phone's Activity sheet covers the island, so it is closed to reach Take control.
   if (isPhone(page))
     await page
-      .getByRole("dialog", { name: "Activity" })
+      .getByRole("dialog", { name: PANEL_NAME })
       .getByRole("button", { name: "Done" })
       .click();
   await page.locator(".island").getByRole("button", { name: "Take control" }).click();

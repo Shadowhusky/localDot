@@ -1,4 +1,4 @@
-import { composer, expect, runAt, test } from "./harness.ts";
+import { expect, openComposer, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
 
@@ -9,7 +9,7 @@ test("the model menu shows each plan's limits, near, reached, stale, reset and u
   ui,
 }, testInfo) => {
   const fixture = await ui.open("plan-usage");
-  const chip = (await composer(page)).getByRole("button", { name: /^Model:/ });
+  const chip = (await openComposer(page)).getByRole("button", { name: /^Model:/ });
   const panel = page.getByRole("dialog", { name: "Model and thinking" });
   const claude = panel.getByRole("region", { name: /^Claude plan/ });
   const chatgpt = panel.getByRole("region", { name: /^ChatGPT plan/ });
@@ -73,4 +73,33 @@ test("the model menu shows each plan's limits, near, reached, stale, reset and u
       }).toPass();
     }
   }
+});
+
+test("the open menu follows the plan's figures without being opened again, with no flash", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("plan-usage");
+  const chip = (await openComposer(page)).getByRole("button", { name: /^Model:/ });
+  await page.request.post(`${fixture.origin}/__qa/plan-usage/normal`);
+  await chip.click();
+  const panel = page.getByRole("dialog", { name: "Model and thinking" });
+  const claude = panel.getByRole("region", { name: /^Claude plan/ });
+  const session = claude.getByRole("meter", { name: "5-hour limit" });
+  await expect(session).toHaveAttribute("aria-valuetext", "42% used");
+  const element = await session.elementHandle();
+  // Every change the block goes through is written down: its figures never leave the page.
+  await claude.evaluate((block) => {
+    (window as unknown as { emptied: number }).emptied = 0;
+    new MutationObserver(() => {
+      if (!block.querySelector('[role="meter"]') || /Checking usage/.test(block.textContent ?? ""))
+        (window as unknown as { emptied: number }).emptied += 1;
+    }).observe(block, { childList: true, subtree: true, characterData: true });
+  });
+  await page.request.post(`${fixture.origin}/__qa/plan-usage/near`);
+  await expect(session).toHaveAttribute("aria-valuetext", "93% used, almost at limit", {
+    timeout: 15_000,
+  });
+  expect(await session.evaluate((node, first) => node === first, element)).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as { emptied: number }).emptied)).toBe(0);
 });

@@ -1,6 +1,6 @@
 import type { KeydStatus } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cameUp, KeydMonitor } from "./monitor.ts";
+import { cameUp, KeydMonitor, OFFLINE_AFTER } from "./monitor.ts";
 import { FAKE_SEAL_KEY } from "./testing/fake-keyd.ts";
 
 const status = (bootId = "boot-1"): KeydStatus => ({
@@ -137,6 +137,38 @@ describe("credential service health polling", () => {
     expect(seen).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(log.mock.calls)).not.toContain("sensitive-health-diagnostic");
+  });
+
+  it("waits out slow answers before calling keyd offline, but tells a new boot at once", async () => {
+    vi.useFakeTimers();
+    const read = vi.fn<() => Promise<KeydStatus>>().mockResolvedValue(status());
+    const monitor = new KeydMonitor({ status: read });
+    const seen: string[] = [];
+    monitor.subscribe((now, before) =>
+      seen.push(`${before.online}->${now.online}:${now.bootId ?? "-"}`),
+    );
+    await monitor.refresh();
+    read.mockRejectedValue(new Error("no complete answer within 5000 ms"));
+    for (let n = 0; n < 4; n++) {
+      expect((await monitor.refresh()).online).toBe(true);
+      await vi.advanceTimersByTimeAsync(3000);
+    }
+    read.mockResolvedValue(status());
+    await monitor.refresh();
+    expect(seen).toEqual(["false->true:boot-1"]);
+    read.mockRejectedValue(new Error("no complete answer within 5000 ms"));
+    await monitor.refresh();
+    read.mockResolvedValue(status("boot-2"));
+    await monitor.refresh();
+    expect(seen).toEqual(["false->true:boot-1", "true->true:boot-2"]);
+    read.mockRejectedValue(new Error("connect ENOENT"));
+    await monitor.refresh();
+    await vi.advanceTimersByTimeAsync(OFFLINE_AFTER.ms);
+    await monitor.refresh();
+    expect(monitor.health.online).toBe(true);
+    await monitor.refresh();
+    expect(monitor.health.online).toBe(false);
+    expect(seen).toEqual(["false->true:boot-1", "true->true:boot-2", "true->false:-"]);
   });
 
   it("rewires only when the service becomes online or changes its boot", () => {

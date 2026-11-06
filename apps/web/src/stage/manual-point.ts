@@ -1,10 +1,11 @@
 import type { Point } from "@localdot/protocol";
 import { cameraFor, toWorld } from "@localdot/stage";
 
-// Same zoom-one camera and backing-store viewport as the render worker. Reject letterboxing
-// before rounding so an off-desktop click can never be clamped onto a desktop control; a pointer
+// Where a page point falls in the world of a screen drawn on the stage, not yet rounded. Same
+// zoom-one camera and backing-store viewport as the render worker. Letterboxing is rejected before
+// any rounding, so an off-desktop click can never be clamped onto a desktop control; a pointer
 // already pressed on the desktop (`clamp`) follows its edge instead.
-export function manualPoint(
+export function worldPoint(
   rect: { left: number; top: number; width: number; height: number },
   screen: { w: number; h: number },
   point: Point,
@@ -39,6 +40,18 @@ export function manualPoint(
   });
   if (!clamp && (world.x < 0 || world.y < 0 || world.x >= screen.w || world.y >= screen.h))
     return null;
+  return world;
+}
+
+export function manualPoint(
+  rect: { left: number; top: number; width: number; height: number },
+  screen: { w: number; h: number },
+  point: Point,
+  backing: { w: number; h: number },
+  clamp = false,
+): Point | null {
+  const world = worldPoint(rect, screen, point, backing, clamp);
+  if (!world) return null;
   return {
     x: Math.max(0, Math.min(screen.w - 1, Math.floor(world.x))),
     y: Math.max(0, Math.min(screen.h - 1, Math.floor(world.y))),

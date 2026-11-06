@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AgentStep, emptyAgentModel } from "../agent/model.ts";
 import { appendTerminal, emptyTerminal } from "../agent/terminal-text.ts";
@@ -269,20 +269,186 @@ describe("ActivityRail", () => {
         line.textContent,
         line.getAttribute("title"),
       ]),
-    ).toEqual([
-      ["Check the totals", "Check the totals"],
-      ["Write the report", "Write the report"],
-    ]);
+    ).toEqual([["Check the totals", "Check the totals"]]);
     expect(screen.queryByRole("list", { name: "Task plan" })).toBeNull();
     fireEvent.click(strip);
     expect(strip.getAttribute("aria-expanded")).toBe("true");
-    // The whole list takes the place of the two lines, so no item shows twice.
+    // The whole list takes the line's place, so no item shows twice.
     expect(container.querySelector(".plan-strip-text")).toBeNull();
     expect(
       within(screen.getByRole("list", { name: "Task plan" }))
         .getAllByRole("listitem")
         .map((item) => item.textContent),
     ).toEqual(["Open the sheet", "Check the totals", "Write the report", "Send it"]);
+  });
+
+  it("keeps the plan to the steps' tab, and says how far it has got on that tab", () => {
+    const model = {
+      ...emptyAgentModel(),
+      steps: new Map([tool("a", "x", 1)]),
+      plan: [
+        { id: "a", text: "Open the sheet", status: "done" as const },
+        { id: "b", text: "Check the **totals**", status: "doing" as const },
+      ],
+    };
+    const { rerender } = render(
+      <ActivityRail rows={[]} sessionId="plan-tabs" scale={1} api={api} agent={model} />,
+    );
+    const steps = screen.getByRole("tab", { name: /^Steps/ });
+    expect(steps.textContent).toContain("1/2");
+    expect(screen.getByRole("button", { name: /^Plan/ }).closest("[role=tabpanel]")).toBe(
+      document.getElementById(steps.getAttribute("aria-controls") ?? ""),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /^Agents/ }));
+    const panel = screen.getByRole("tabpanel");
+    expect(within(panel).queryByRole("button", { name: /^Plan/ })).toBeNull();
+    expect(steps.textContent).toContain("1/2");
+    // A finished plan gives the tab its count back.
+    rerender(
+      <ActivityRail
+        rows={[]}
+        sessionId="plan-tabs"
+        scale={1}
+        api={api}
+        agent={{
+          ...model,
+          plan: model.plan.map((item) => ({ ...item, status: "done" as const })),
+        }}
+      />,
+    );
+    expect(steps.textContent).not.toContain("/");
+    // So does a task that ended with its plan unfinished: nothing is under way to count.
+    rerender(
+      <ActivityRail
+        rows={[]}
+        sessionId="plan-tabs"
+        scale={1}
+        api={api}
+        agent={{ ...model, completion: "blocked" }}
+      />,
+    );
+    expect(steps.textContent).not.toContain("/");
+  });
+
+  it("lists the whole conversation's files, and is honest about one that has gone", async () => {
+    const earlier = "01JXYZ00000000000000000001";
+    const current = "01JXYZ00000000000000000002";
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/conversation-files"))
+        return new Response(
+          JSON.stringify({
+            more: false,
+            files: [
+              {
+                sessionId: current,
+                resultId: "01JXYZ0000000000000000R002",
+                name: "new.txt",
+                path: "new.txt",
+                bytes: 3,
+                version: 1,
+                tMs: 1000,
+                available: true,
+              },
+              {
+                sessionId: earlier,
+                resultId: "01JXYZ0000000000000000R001",
+                name: "old.txt",
+                path: "old.txt",
+                bytes: 3,
+                version: 1,
+                tMs: 1000,
+                available: false,
+              },
+            ],
+          }),
+        );
+      return new Response(JSON.stringify({ name: "x", versions: [] }));
+    });
+    const client = createApi("token", { origin: "http://127.0.0.1:4750", fetchImpl });
+    render(
+      <ActivityRail
+        rows={[]}
+        sessionId={current}
+        scale={1}
+        api={client}
+        agent={{
+          ...emptyAgentModel(),
+          results: [
+            {
+              id: "01JXYZ0000000000000000R002",
+              summary: "Done",
+              files: [{ name: "new.txt", path: "new.txt", bytes: 3, version: 1 }],
+            },
+          ],
+        }}
+      />,
+    );
+    const files = await screen.findByRole("tab", { name: /^Files/ });
+    await waitFor(() => expect(files.textContent).toContain("2"));
+    fireEvent.click(files);
+    const rows = screen.getAllByRole("listitem", { name: /\.txt$/ });
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual(["new.txt", "old.txt"]);
+    expect(rows[1]?.textContent).toContain("No longer available");
+    expect(
+      within(rows[1] as HTMLElement)
+        .getByRole("button", { name: "Open old.txt" })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+    expect(
+      fetchImpl.mock.calls.some(([input]) =>
+        String(input).includes(`/api/agent/sessions/${current}/conversation-files`),
+      ),
+    ).toBe(true);
+  });
+
+  it("downloads an earlier run's file from that run", async () => {
+    const earlier = "01JXYZ00000000000000000001";
+    const current = "01JXYZ00000000000000000002";
+    const asked: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      asked.push(path);
+      if (path.endsWith("/conversation-files"))
+        return new Response(
+          JSON.stringify({
+            more: false,
+            files: [
+              {
+                sessionId: earlier,
+                resultId: "01JXYZ0000000000000000R001",
+                name: "old.txt",
+                path: "old.txt",
+                bytes: 3,
+                version: 2,
+                tMs: 1000,
+                available: true,
+              },
+            ],
+          }),
+        );
+      if (path.endsWith("/versions"))
+        return new Response(JSON.stringify({ name: "old.txt", versions: [] }));
+      return new Response("old", { headers: { "content-length": "3" } });
+    });
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    const client = createApi("token", { origin: "http://127.0.0.1:4750", fetchImpl });
+    render(
+      <ActivityRail
+        rows={[]}
+        sessionId={current}
+        scale={1}
+        api={client}
+        agent={emptyAgentModel()}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("tab", { name: /^Files/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "More for old.txt" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Download" }));
+    await waitFor(() =>
+      expect(asked).toContain(`/api/agent/sessions/${earlier}/files/old.txt/versions/2`),
+    );
   });
 
   it("has no plan strip without a plan", () => {

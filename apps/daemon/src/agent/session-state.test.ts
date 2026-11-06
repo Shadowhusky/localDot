@@ -1,6 +1,6 @@
 import { type ActionClass, ulid } from "@localdot/protocol";
 import { expect, it } from "vitest";
-import { AgentSession } from "./session.ts";
+import { AgentSession, type MessageTurn } from "./session.ts";
 
 function setup(fail?: (type: string) => boolean) {
   const events: { type: string; data: Record<string, unknown> }[] = [];
@@ -126,6 +126,19 @@ it("reports a plain hand-back as running, and keeps a held Pause paused with no 
   expect(session.pendingTakeover).toBeUndefined();
   expect(session.safetyPause?.phase).toBe("paused");
   expect(session.status).toBe("paused");
+});
+
+it("says what sending a queued message early would cost when its model isn't the one at work", () => {
+  const { session, events } = setup();
+  session.setStatus("running");
+  const model = { provider: "fixture", model: "other" };
+  const ref = { kind: "api" as const, ...model } as unknown as MessageTurn["ref"];
+  const turn = { model, ref, moves: () => false, reached: () => {} };
+  session.enqueue("Same model", undefined, turn);
+  session.enqueue("Another model", undefined, { ...turn, moves: () => true });
+  session.enqueue("Another task", undefined, { ...turn, moves: () => true, handOver: () => {} });
+  const waits = events.filter((e) => e.type === "message.user").map((e) => e.data.waitsFor);
+  expect(waits).toEqual([undefined, "switch", "handover"]);
 });
 
 it("holds queued messages outside the inbox, promotes exactly once, and releases the rest at task completion", async () => {

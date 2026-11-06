@@ -51,10 +51,21 @@ const focusSchema = schema.object({
     .max(MAX_SECRET_NODES),
 });
 
+const isFocused = (node: schema.infer<typeof focusSchema>["nodes"][number]) =>
+  !!node.properties?.some(
+    (property) => property.name === "focused" && property.value.value === true,
+  );
+
 export class BrowserSecretError extends Error {
   constructor(readonly reason: "inspection" | "stale" | "aborted" | "cleanup") {
     super(`Browser secret protection refused: ${reason}`);
   }
+}
+
+export interface BrowserFocus {
+  // Whether a protected field holds focus.
+  readonly secret: boolean;
+  readonly nodes: readonly { readonly document: BrowserDocument; readonly node: number }[];
 }
 
 export interface BrowserSecretMetadata {
@@ -263,7 +274,8 @@ export function secretMetadata(raw: unknown): BrowserSecretMetadata {
   }
 }
 
-type SecretTargets = Pick<BrowserTargets, "tabs" | "documents" | "command" | "check" | "reload">;
+type SecretTargets = Pick<BrowserTargets, "tabs" | "documents" | "command" | "check" | "reload"> &
+  Partial<Pick<BrowserTargets, "rememberNodes">>;
 
 export class BrowserSecrets {
   constructor(
@@ -296,9 +308,9 @@ export class BrowserSecrets {
     return result;
   }
 
-  async secretPages(signal: AbortSignal): Promise<readonly string[]> {
+  async secretPages(signal: AbortSignal, among?: readonly string[]): Promise<readonly string[]> {
     this.#check(signal);
-    const tabs = this.targets.tabs();
+    const tabs = this.targets.tabs().filter((tab) => !among || among.includes(tab.id));
     if (tabs.length > 256 || tabs.some((tab) => !tab.ready)) throw new BrowserSecretError("stale");
     const documents = tabs.flatMap((tab) => this.targets.documents(tab.id));
     const pages = new Set<string>();
@@ -306,7 +318,7 @@ export class BrowserSecrets {
       if ((await this.inspect(document, signal)).filled) pages.add(document.tabId);
       this.#check(signal, documents);
     }
-    const current = this.targets.tabs();
+    const current = this.targets.tabs().filter((tab) => !among || among.includes(tab.id));
     if (
       current.length !== tabs.length ||
       current.some((tab, position) => !tab.ready || tab.id !== tabs[position]?.id)
@@ -317,9 +329,15 @@ export class BrowserSecrets {
   }
 
   async secretFocused(tabId: string, signal: AbortSignal): Promise<boolean> {
+    return (await this.focus(tabId, signal)).secret;
+  }
+
+  // Reads every document whole: a page's size in time. focusHolds asks again for far less.
+  async focus(tabId: string, signal: AbortSignal): Promise<BrowserFocus> {
     this.#check(signal);
     const documents = this.targets.documents(tabId);
-    let found = false;
+    let secret = false;
+    const nodes: { document: BrowserDocument; node: number }[] = [];
     for (const document of documents) {
       const metadata = await this.inspect(document, signal);
       const raw = await this.targets.command(document, "Accessibility.getFullAXTree", {}, signal);
@@ -327,18 +345,39 @@ export class BrowserSecrets {
       const parsed = focusSchema.safeParse(raw);
       if (!parsed.success) throw new BrowserSecretError("inspection");
       for (const node of parsed.data.nodes) {
-        if (
-          !node.properties?.some(
-            (property) => property.name === "focused" && property.value.value === true,
-          )
-        )
-          continue;
+        if (!isFocused(node)) continue;
         if (!node.backendDOMNodeId) throw new BrowserSecretError("inspection");
-        if (metadata.nodeIds.includes(node.backendDOMNodeId)) found = true;
+        if (metadata.nodeIds.includes(node.backendDOMNodeId)) secret = true;
+        nodes.push({ document, node: node.backendDOMNodeId });
+        this.targets.rememberNodes?.(document, [node.backendDOMNodeId]);
       }
     }
     this.#check(signal, documents);
-    return found;
+    return Object.freeze({ secret, nodes: Object.freeze(nodes) });
+  }
+
+  // Whether the nodes `focus` found still hold focus. Focus can have gone nowhere else while they do,
+  // so this answers for the whole page at the price of one node. False also when it can't tell.
+  async focusHolds(focus: BrowserFocus, signal: AbortSignal): Promise<boolean> {
+    if (!focus.nodes.length) return false;
+    for (const { document, node } of focus.nodes) {
+      const raw = await this.targets
+        .command(
+          document,
+          "Accessibility.getPartialAXTree",
+          { backendNodeId: node, fetchRelatives: false },
+          signal,
+        )
+        .catch(() => null);
+      this.#check(signal);
+      const parsed = focusSchema.safeParse(raw);
+      if (
+        !parsed.success ||
+        !parsed.data.nodes.some((one) => one.backendDOMNodeId === node && isFocused(one))
+      )
+        return false;
+    }
+    return true;
   }
 
   async reload(tabId: string, signal: AbortSignal): Promise<void> {

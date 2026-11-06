@@ -408,6 +408,7 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
     };
     await client.control({ ...control, holder: "agent" }, owner());
     permit = control;
+    await client.enterWindow(permit, {}, owner());
     for (let i = 0; i < 40 && !tabId; i++) {
       tabId = (await client.tabs(owner())).tabs.find((tab) => tab.ready)?.id ?? "";
       if (!tabId) await sleep(250);
@@ -857,7 +858,7 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
     const processes = docker("top", names.browser, "-eo", "pid,comm,args");
     const chromium = processes
       .split("\n")
-      .filter((line) => /\s+chromium\s+/.test(line) && !line.includes("--type="));
+      .filter((line) => /\s+(?:chromium|chrome)\s+/.test(line) && !line.includes("--type="));
     expect(chromium).toHaveLength(1);
     expect(chromium[0]).not.toMatch(/remote-debugging|enable-automation|no-sandbox/);
     expect(chromium[0]).toContain("--user-data-dir=/profile/chromium");
@@ -880,6 +881,7 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
     });
     permit = { ...identity, owner: agentOwner, requestId: ulid(), revision: manual.revision + 1 };
     await client.control({ ...permit, holder: "agent" }, owner());
+    await client.enterWindow(permit, {}, owner());
     const resumed = (await client.tabs(owner())).tabs.find((tab) => tab.ready);
     if (!resumed) throw new Error("missing restored tab");
     tabId = resumed.id;

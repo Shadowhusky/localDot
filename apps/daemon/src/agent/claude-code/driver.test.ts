@@ -517,7 +517,8 @@ describe("Claude Code driver", () => {
     f.session.post("resume", "");
     const next = await f.started(1);
     const recap = firstText(next);
-    expect(recap).toContain("localDot restarted you");
+    expect(recap).toContain("carrying on this task in a new run");
+    expect(recap).not.toMatch(/conversation is gone|restarted you/);
     expect(recap).toContain("Draw a dog");
     await next.call("done", { summary: "ok" });
     expect(await result).toBe(CLAUDE_CODE_DONE);

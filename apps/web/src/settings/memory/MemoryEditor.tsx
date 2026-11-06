@@ -5,6 +5,7 @@ import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { Group, GroupHead, GroupNote, GroupRow } from "../../ui/Group.tsx";
 import { MiddleTruncate } from "../../ui/MiddleTruncate.tsx";
+import { useRevealInvalid } from "../../ui/reveal-field.ts";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Skeleton } from "../../ui/Skeleton.tsx";
 import { Spinner } from "../../ui/Spinner.tsx";
@@ -86,6 +87,7 @@ export function MemoryEditor({
   const [problem, setProblem] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [markdown, setMarkdown] = useState(false);
+  const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
   const notes = shelf === "notes";
   const noun = notes ? "Note" : "Fact";
   const facts = notes ? known.notes : factOrder(known.files[shelf]);
@@ -109,7 +111,8 @@ export function MemoryEditor({
     const text = fact.trim();
     const issue = factProblem(text);
     if (issue) {
-      setProblem(fact ? issue : null);
+      setProblem(issue);
+      reveal();
       return;
     }
     setAdding(true);
@@ -178,6 +181,7 @@ export function MemoryEditor({
       <Group>
         {!notes && (
           <form
+            ref={scope}
             className="ui-group-row memory-add"
             onSubmit={(event) => {
               event.preventDefault();

@@ -113,25 +113,22 @@ test("the outputs can be worked from the keyboard alone", async ({ page, ui }) =
     });
   await card.getByRole("button", { name: "Download all 5 files" }).focus();
   const order = [await label()];
-  for (let stop = 0; stop < 12; stop++) {
+  for (let stop = 0; stop < 9; stop++) {
     await page.keyboard.press("Tab");
     order.push(await label());
   }
-  expect(order.slice(0, 11)).toEqual([
+  expect(order.slice(0, 8)).toEqual([
     "Download all 5 files",
     "Show chart.png",
-    "Open chart.png",
-    "Download chart.png",
+    "More for chart.png",
     "Show totals.csv",
-    "Open totals.csv",
-    "Download totals.csv",
+    "More for totals.csv",
     "Show notes.md",
-    "Open notes.md",
-    "Download notes.md",
+    "More for notes.md",
     "Show 2 more files",
   ]);
-  expect(order[11]).toMatch(WATCH);
-  expect(order[12]).toBe("More for this replay");
+  expect(order[8]).toMatch(WATCH);
+  expect(order[9]).toBe("More for this replay");
 
   // The menu takes the keyboard and gives focus back when it closes.
   await page.keyboard.press("Enter");
@@ -150,7 +147,6 @@ test("the outputs can be worked from the keyboard alone", async ({ page, ui }) =
   await expect(
     card.getByRole("list", { name: /^Files in result / }).getByRole("listitem"),
   ).toHaveCount(5);
-  await page.keyboard.press("Shift+Tab");
   await page.keyboard.press("Shift+Tab");
   await page.keyboard.press("Shift+Tab");
   expect(await label()).toBe("Show brief.docx");

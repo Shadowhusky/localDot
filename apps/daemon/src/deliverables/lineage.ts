@@ -1,4 +1,4 @@
-import type { FileVersion } from "@localdot/protocol";
+import { CONVERSATION_FILES, type ConversationFile, type FileVersion } from "@localdot/protocol";
 import type { TaskScan } from "./task-scan.ts";
 
 export const LINEAGE_DEPTH = 16;
@@ -45,4 +45,36 @@ export async function fileVersions(
     });
   }
   return versions.map((v, i) => ({ ...v, label: i + 1 })).slice(-64);
+}
+
+// Every file a conversation's tasks handed over, newest first: each name once per task, under the
+// result that last handed it over. A task revising a file takes over the row of the one it revises.
+export async function conversationFiles(
+  deps: LineageDeps,
+  sessions: readonly string[],
+): Promise<{ files: ConversationFile[]; more: boolean }> {
+  const latest = new Map<string, ConversationFile>();
+  for (const id of sessions) {
+    const scan = await deps.scan(id);
+    if (!scan) continue;
+    for (const result of scan.results)
+      for (const file of result.files) {
+        const key = `${id}/${file.name}`;
+        latest.delete(key);
+        if (scan.revises?.name === file.name)
+          latest.delete(`${scan.revises.sessionId}/${file.name}`);
+        latest.set(key, {
+          sessionId: id,
+          resultId: result.id,
+          name: file.name,
+          path: file.path,
+          bytes: file.bytes,
+          ...(file.version === null ? {} : { version: file.version }),
+          tMs: result.tMs,
+          available: deps.stored(id, file.name, file.version),
+        });
+      }
+  }
+  const files = [...latest.values()].reverse();
+  return { files: files.slice(0, CONVERSATION_FILES), more: files.length > CONVERSATION_FILES };
 }

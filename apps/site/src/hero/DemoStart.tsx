@@ -1,10 +1,10 @@
 import { Dot } from "@app/dot/Dot.tsx";
 import { dayPart } from "@app/dot/idle-line.ts";
 import { VOICES } from "@app/dot/voices.ts";
-import { outfit, personaOf } from "@localdot/protocol";
+import { personaOf } from "@localdot/protocol";
 import { ZH_GREETINGS } from "../i18n/zh.ts";
 import { LANG, t } from "../i18n.ts";
-import { DEMOS, type DemoEntry } from "./catalog.ts";
+import { DEMOS, type DemoEntry, lookOf } from "./catalog.ts";
 
 const greeting = () => {
   const part = dayPart(new Date().getHours());
@@ -34,7 +34,7 @@ export function DemoStart({
               aria-current={current === entry.id || undefined}
               onClick={() => onPick(entry)}
             >
-              <Dot size={34} wearables={outfit(entry.persona)} />
+              <Dot size={34} wearables={lookOf(entry)} />
               <span className="site-demo-ask">{t(entry.ask)}</span>
               <span className="site-demo-who">{t(personaOf(entry.persona).name)}</span>
             </button>

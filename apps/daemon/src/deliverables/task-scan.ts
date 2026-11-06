@@ -5,6 +5,7 @@ import { streamEventLines } from "../sessions/ndjson.ts";
 
 export interface ScannedFile {
   name: string;
+  path: string;
   bytes: number;
   version: number | null;
 }
@@ -21,6 +22,9 @@ interface Turn {
   changes: Map<string, { size: number; seq: number }>;
   settles: Map<string, number>;
   checked: string | null;
+  // The files it wrote and the addresses dot's browser went to, for the previews its reply offers.
+  paths: Set<string>;
+  navigated: Set<string>;
 }
 export interface ScannedResult extends Turn {
   id: string;
@@ -32,12 +36,18 @@ export interface TaskScan {
   title: string | null;
   revises: ReviseLink | null;
   results: ScannedResult[];
+  // The turn under way, since the last result.
+  open: Turn;
 }
 
 const ms = (t: number) => Math.round(t / 1000);
+// What a turn may note of each, so a long one stays small.
+const TURN_NOTES = 64;
 // The only events a scan uses; every other log line is skipped before it is parsed again.
 const SCANNED =
-  /"type":"(?:session\.start|observe|file\.change|screen\.settle|step\.verify|task\.result)"/;
+  /"type":"(?:session\.start|observe|file\.change|screen\.settle|step\.verify|task\.result)"|"tool":"browser_navigate"/;
+// "Opening 127.0.0.1:4181", as the browser tool titles its step.
+const NAVIGATED = /([^\s/]+:\d{1,5})(?:\/|$|\s)/;
 
 export function scanEvents(events: Iterable<LocalDotEvent>): TaskScan {
   const scanner = taskScan();
@@ -45,8 +55,8 @@ export function scanEvents(events: Iterable<LocalDotEvent>): TaskScan {
   return scanner.scan;
 }
 function taskScan(): { scan: TaskScan; push(e: LocalDotEvent): void } {
-  const scan: TaskScan = { title: null, revises: null, results: [] };
   let open = fresh(0);
+  const scan: TaskScan = { title: null, revises: null, results: [], open };
   const push = (e: LocalDotEvent) => {
     switch (e.type) {
       case "session.start":
@@ -62,6 +72,7 @@ function taskScan(): { scan: TaskScan; push(e: LocalDotEvent): void } {
         });
         break;
       case "file.change":
+        if (open.paths.size < TURN_NOTES) open.paths.add(e.data.path);
         if (e.step) {
           const prior = open.changes.get(e.step);
           open.changes.set(e.step, {
@@ -80,6 +91,12 @@ function taskScan(): { scan: TaskScan; push(e: LocalDotEvent): void } {
       case "step.verify":
         open.checked = e.data.status === "success" && e.data.evidence ? e.data.evidence : null;
         break;
+      case "tool.start": {
+        const address =
+          e.data.tool === "browser_navigate" && NAVIGATED.exec(e.data.title ?? "")?.[1];
+        if (address && open.navigated.size < TURN_NOTES) open.navigated.add(address);
+        break;
+      }
       case "task.result":
         scan.results.push({
           ...open,
@@ -88,18 +105,28 @@ function taskScan(): { scan: TaskScan; push(e: LocalDotEvent): void } {
           tMs: ms(e.t),
           files: e.data.files.map((f) => ({
             name: f.name,
+            path: f.path,
             bytes: f.bytes,
             version: f.version ?? null,
           })),
         });
         open = fresh(ms(e.t));
+        scan.open = open;
         break;
     }
   };
   return { scan, push };
 }
 function fresh(startMs: number): Turn {
-  return { startMs, frames: [], changes: new Map(), settles: new Map(), checked: null };
+  return {
+    startMs,
+    frames: [],
+    changes: new Map(),
+    settles: new Map(),
+    checked: null,
+    paths: new Set(),
+    navigated: new Set(),
+  };
 }
 
 // One streaming pass over a task's log, cached until the log grows.

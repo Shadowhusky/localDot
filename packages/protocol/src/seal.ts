@@ -71,10 +71,27 @@ export function sealPassphrase(
   return seal(publicKey, utf8(`${SEAL_INFO}:vault-passphrase`), passphrase, opts);
 }
 
+// A saved login, its site with it, opens only as a login; a password manager's export only as one.
+export function sealLogin(
+  publicKey: string,
+  login: { origin: string; username: string; password?: string },
+  opts: SealOptions = {},
+): Promise<Sealed> {
+  return seal(publicKey, utf8(`${SEAL_INFO}:saved-login`), JSON.stringify(login), opts);
+}
+
+export function sealLoginImport(
+  publicKey: string,
+  file: Uint8Array<ArrayBuffer>,
+  opts: SealOptions = {},
+): Promise<Sealed> {
+  return seal(publicKey, utf8(`${SEAL_INFO}:login-import`), file, opts);
+}
+
 async function seal(
   publicKey: string,
   aad: Uint8Array<ArrayBuffer>,
-  value: string,
+  value: string | Uint8Array<ArrayBuffer>,
   opts: SealOptions,
 ): Promise<Sealed> {
   const { subtle } = globalThis.crypto;
@@ -111,7 +128,7 @@ async function seal(
   const ct = await subtle.encrypt(
     { name: "AES-GCM", iv: nonce, additionalData: aad },
     key,
-    utf8(value),
+    typeof value === "string" ? utf8(value) : value,
   );
   return {
     v: 1,

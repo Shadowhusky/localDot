@@ -32,11 +32,15 @@ import {
   type ToolDeps,
   text,
   USER_SPOKE,
+  woken,
 } from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
 const LOOK_AGAIN =
   "Not done: the user had the computer, so the screen may have changed. Here is the screen now; look again before acting.";
+
+// How often a wait looks at the screen while other tasks share it: each look brings its window back.
+const SHARED_WAIT_LOOK_MS = 5000;
 
 export const UNCHANGED = "The screen did not change: it still matches your last screenshot.";
 
@@ -402,13 +406,14 @@ export async function runInput(
   let outcome: ActionOutcome;
   let waitedFrameId: string | undefined;
   let spoke = false;
+  let wokenBy = USER_SPOKE;
   try {
     if (action.verb === "wait") {
       // A wait is bounded observation, not a blind sleep. Compare against the last
       // delivered frame so a change that arrived before the call returns immediately. A new
       // message from the user ends it within a second.
       const same = deps.png.same;
-      const listening = listenForUser(ctx, nativeContext.signal ?? ctx.signal);
+      const listening = listenForUser(ctx, nativeContext.signal ?? ctx.signal, action.ms);
       try {
         const watchContext = { ...selected, signal: nativeContext.signal };
         let baseline: string | undefined;
@@ -425,9 +430,12 @@ export async function runInput(
         while (remaining > 0 && !listening.spoke && unchanged()) {
           ctx.check();
           nativeContext.signal?.throwIfAborted();
-          const interval = Math.min(remaining, 1000);
+          const shared = deps.computer?.shared?.(session.cellId) === true;
+          const interval = Math.min(remaining, shared ? SHARED_WAIT_LOOK_MS : 1000);
           const started = performance.now();
-          outcome = await deps.gateway.run(nativeContext, { ...action, ms: interval });
+          // Waiting for a page holds up nobody: the turn comes back for the look.
+          const pause = () => deps.gateway.run(nativeContext, { ...action, ms: interval });
+          outcome = await (ctx.turn ? ctx.turn.yielding(pause) : pause());
           ctx.check();
           if (!outcome.ok) break;
           if (same) {
@@ -438,6 +446,7 @@ export async function runInput(
           remaining -= Math.max(interval, performance.now() - started);
         }
         spoke = listening.spoke;
+        if (spoke) wokenBy = woken(listening);
       } finally {
         listening.end();
       }
@@ -461,7 +470,7 @@ export async function runInput(
     const frameId = waitedFrameId ?? (await deps.gateway.observe(selected)).frameId;
     ctx.check();
     return spoke
-      ? { ok: true, notes: [text(USER_SPOKE)], frameId, spoke: true }
+      ? { ok: true, notes: [text(wokenBy)], frameId, spoke: true }
       : { ok: true, notes: [], frameId };
   }
   const notes: ToolResult["content"] = [];

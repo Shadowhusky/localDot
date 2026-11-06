@@ -34,3 +34,35 @@ export function presencePlace({
   if (curtain) return "hero";
   return keyboard || full ? "badge" : "dock";
 }
+
+export interface PhonePresenceInput {
+  showDot: boolean;
+  setup?: boolean;
+  replaying: boolean;
+  browsing?: boolean;
+  // The page is still opening, with dot waking on the curtain over it.
+  opening: boolean;
+  // Which level of the stack is on show: the list, the conversation or the computer.
+  level: 0 | 1 | 2;
+  // There is no picture, so the computer shows the curtain.
+  curtain: boolean;
+}
+
+// On a phone: at the thread's foot and under the picture, nowhere over the list, whose rows have
+// dots of their own.
+export function phonePresencePlace({
+  showDot,
+  setup,
+  replaying,
+  browsing = false,
+  opening,
+  level,
+  curtain,
+}: PhonePresenceInput): PresencePlace | null {
+  if (!showDot) return null;
+  if (setup) return "intro";
+  if (replaying) return browsing ? null : "dock";
+  if (opening) return "hero";
+  if (level === 0) return null;
+  return level === 2 && curtain ? "hero" : "dock";
+}

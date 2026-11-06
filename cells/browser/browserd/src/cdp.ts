@@ -4,6 +4,7 @@ import { type CdpTransport, MAX_CDP_MESSAGE_BYTES } from "./pipe.ts";
 export const MAX_CDP_PENDING = 32;
 export const CDP_REQUEST_TIMEOUT_MS = 5000;
 const MAX_RETIRED_SESSIONS = 4096;
+const DEADLINE_TICK_MS = 250;
 
 const events = new Set([
   "Target.attachedToTarget",
@@ -35,13 +36,34 @@ const PAGE_READS = new Set([
   "Page.getLayoutMetrics",
   "DOMSnapshot.captureSnapshot",
   "Accessibility.getFullAXTree",
+  "Accessibility.getPartialAXTree",
   "Browser.getWindowForTarget",
   "DOM.getNodeForLocation",
+  "DOM.describeNode",
+  "DOM.getBoxModel",
 ]);
+
+// Counts only time this process ran. After the Mac slept or the computer's VM stalled, a plain timer
+// fires before the replies that arrived meanwhile are read, and Chromium needs a moment to wake too.
+function awakeDeadline(expire: () => void, ms: number): () => void {
+  let left = ms;
+  let last = Date.now();
+  const tick = setInterval(() => {
+    const now = Date.now();
+    left -= Math.max(0, Math.min(now - last, DEADLINE_TICK_MS * 2));
+    last = now;
+    if (left > 0) return;
+    clearInterval(tick);
+    expire();
+  }, DEADLINE_TICK_MS);
+  return () => clearInterval(tick);
+}
 
 export class CdpRequestError extends Error {
   constructor(
     readonly reason: "closed" | "busy" | "cancelled" | "timeout" | "protocol" | "failed",
+    // The command left unanswered: a CDP method's name, never its parameters.
+    readonly method?: string,
   ) {
     super(`Browser request refused: ${reason}`);
   }
@@ -84,7 +106,10 @@ export class GuardedCdp {
   send(
     method: string,
     params: unknown = {},
-    options: { sessionId?: string; signal?: AbortSignal } = {},
+    // With `patience`, a command that may take that long; given up on, it is no longer waited for
+    // and its caller answers for what it may yet do, where one left unanswered otherwise fences the
+    // connection.
+    options: { sessionId?: string; signal?: AbortSignal; patience?: number } = {},
   ): Promise<Readonly<Record<string, unknown>>> {
     try {
       if (this.#closed) throw new CdpRequestError("closed");
@@ -103,8 +128,8 @@ export class GuardedCdp {
       const id = this.#nextId++;
       const reply = Promise.withResolvers<Readonly<Record<string, unknown>>>();
       const unanswered = (reason: "timeout" | "cancelled") => {
-        if (!PAGE_READS.has(method)) {
-          this.#fail(new CdpRequestError(reason));
+        if (!PAGE_READS.has(method) && options.patience === undefined) {
+          this.#fail(new CdpRequestError(reason, method));
           return;
         }
         if (this.#pending.get(id) !== request) return;
@@ -112,7 +137,10 @@ export class GuardedCdp {
         request.cleanup();
         request.reject(new CdpRequestError(reason));
       };
-      const timeout = setTimeout(() => unanswered("timeout"), CDP_REQUEST_TIMEOUT_MS);
+      const stopDeadline = awakeDeadline(
+        () => unanswered("timeout"),
+        options.patience ?? CDP_REQUEST_TIMEOUT_MS,
+      );
       const cancelled = () => unanswered("cancelled");
       const signal = options.signal;
       const request: PendingRequest = {
@@ -120,7 +148,7 @@ export class GuardedCdp {
         resolve: reply.resolve,
         reject: reply.reject,
         cleanup: () => {
-          clearTimeout(timeout);
+          stopDeadline();
           signal?.removeEventListener("abort", cancelled);
         },
       };

@@ -1,7 +1,9 @@
 import { join } from "node:path";
 import { isDeepStrictEqual as equal } from "node:util";
-import { IMAGE_ROLES } from "../../../../packages/protocol/src/release.ts";
+import { IMAGE_ROLES, imageRef } from "../../../../packages/protocol/src/release.ts";
+import { DockerClient } from "../../../daemon/src/cells/docker.ts";
 import type { DoctorCheck } from "../../../daemon/src/doctor.ts";
+import { browserInUseCheck } from "../../../daemon/src/doctor-browser.ts";
 import { recoveryChecks } from "../../../daemon/src/doctor-recovery.ts";
 import type { ConsoleIO, RuntimeContext } from "../runtime.ts";
 import { readContainerInventory } from "./container-containment.ts";
@@ -100,7 +102,14 @@ export async function runInstalledDoctor(context: RuntimeContext, io: ConsoleIO)
           const images = await inspectDoctorImages(release.manifest, client, signal);
           engineId = images.engineId;
           imageIds = images.images;
-          checks.push(...images.checks);
+          checks.push(
+            ...images.checks,
+            await browserInUseCheck(
+              new DockerClient(input.settings.dockerSocket),
+              home,
+              imageRef(release.manifest.images.browser),
+            ),
+          );
         } catch {
           signal.throwIfAborted();
           checks.push(

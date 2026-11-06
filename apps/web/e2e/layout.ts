@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { PANEL_NAME } from "../src/shell/panel-name.ts";
 import { reach } from "./reach.ts";
 
 // A phone has no top bar and keeps Activity in a sheet over the thread.
@@ -6,15 +7,15 @@ export const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 700;
 
 // Activity: a view of the rail beside the stage, or a sheet on a phone.
 export async function showActivity(page: Page) {
-  if (isPhone(page)) await page.getByRole("button", { name: "Activity", exact: true }).click();
-  else await page.getByRole("radio", { name: "Activity", exact: true }).click();
-  return page.getByRole("complementary", { name: "Plan and steps" });
+  if (isPhone(page)) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+  else await page.getByRole("radio", { name: PANEL_NAME, exact: true }).click();
+  return page.getByRole("complementary", { name: PANEL_NAME });
 }
 
 // Back to the chat: the rail's first view, or the thread under a phone's Activity sheet.
 export async function showChat(page: Page) {
   if (isPhone(page)) {
-    const sheet = page.getByRole("dialog", { name: "Activity" });
+    const sheet = page.getByRole("dialog", { name: PANEL_NAME });
     if (await sheet.isVisible()) {
       await sheet.getByRole("button", { name: "Done", exact: true }).click();
       await expect(sheet).toBeHidden();

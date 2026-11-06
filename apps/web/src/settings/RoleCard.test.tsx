@@ -161,6 +161,18 @@ describe("role card", () => {
       /Can use files and the shell, not the screen\./,
     );
   });
+  it("says, under the fast model, why it failed dot's last quick request", () => {
+    render(
+      <RoleCard
+        {...base()}
+        modelRole="fast"
+        failure="answered 400: The 'gpt-6.1-Terra' model is not supported"
+      />,
+    );
+    expect(
+      within(card("Fast model")).getByText(/^dot's last quick request to it failed/),
+    ).toBeTruthy();
+  });
   it("lets a custom endpoint take a typed model ID, say whether it sees images, its context and a flat-rate plan", () => {
     const changes: RoleChoice[] = [];
     function Form() {

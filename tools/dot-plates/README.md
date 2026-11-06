@@ -32,6 +32,11 @@ headphones and the bow take a share of the turn about the point where their fron
 (`HEAD` in `render/wearables.ts`); clothes and the star pin turn only with the face's roll. On the
 site, whatever sits on the head turns with the face whole.
 
+Twenty-six of them exist to tell tasks apart in the conversation list (`taskOutfit` in
+`@localdot/protocol`); the site has models only of the first twelve. A new one must stay inside the
+frame (it has 8 units above the ball) and, right of the ball, within 32.5 units of its centre, where
+dot's sub-agents sit when it delegates. Asymmetric hats lean left for that reason.
+
 ## Regenerate
 
 Render the 1024 px, 16-bit masters outside the repo (about 70 s with Cycles on Metal), then derive the
@@ -47,7 +52,8 @@ python3 -I tools/dot-plates/derive.py /tmp/dot-wear
 ```
 
 The wearables take about 30 s each at full quality; `--res 512 --samples 64` previews one in a few
-seconds.
+seconds. Add a new one to `WEARABLES` here and in `derive.py`, to `Wearable` in `@localdot/protocol`
+(with its `WEAR_SLOT`), and to `LAYER`, and `HEAD` or `FACE`, in `render/wearables.ts`.
 
 `derive.py` needs ImageMagick (`magick`) and `cwebp`. Commit the WebP files only. The masters and the
 `.blend` stay out of git; attach the `.blend` to a release if it needs keeping.
@@ -79,7 +85,7 @@ Blender --background --factory-startup --python tools/dot-plates/export_glb.py -
 cp /tmp/dot-web/wear-*.glb /tmp/dot-web/shadow-*.webp apps/site/public/models/
 ```
 
-All twelve take about five minutes with Cycles on Metal.
+All twelve the site shows take about five minutes with Cycles on Metal.
 
 Conventions:
 

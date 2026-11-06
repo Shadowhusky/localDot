@@ -206,7 +206,7 @@ describe("admitted blank tab", () => {
   it("opens a blank tab for the current holder and names it", async () => {
     const { owner, openTab } = await fixture();
     expect(await owner.openTab(permit, new AbortController().signal)).toEqual({ tabId });
-    expect(openTab).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal));
+    expect(openTab).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal), undefined);
     await owner.close();
   });
 
@@ -238,7 +238,7 @@ describe("admitted blank tab", () => {
     expect(openTab).not.toHaveBeenCalled();
   });
 
-  it("shares the navigation slot and hides a failure's cause", async () => {
+  it("opens one at a time beside a load, and hides a failure's cause", async () => {
     const { owner, navigate, openTab } = await fixture();
     const complete = Promise.withResolvers<void>();
     navigate.mockImplementation(() => complete.promise);
@@ -248,7 +248,10 @@ describe("admitted blank tab", () => {
       "https://example.test/",
       new AbortController().signal,
     );
-    await expect(owner.openTab(permit, new AbortController().signal)).rejects.toThrow("busy");
+    await expect(
+      owner.navigate(permit, tabId, "https://example.test/", new AbortController().signal),
+    ).rejects.toThrow("busy");
+    expect(await owner.openTab(permit, new AbortController().signal)).toEqual({ tabId });
     complete.resolve();
     await navigating;
     openTab.mockRejectedValueOnce(new Error("private target detail"));

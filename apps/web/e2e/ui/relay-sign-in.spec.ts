@@ -10,6 +10,7 @@ test("a fresh sign-in code reaches the daemon behind a cookie-protected relay", 
   page.on("request", (request) => {
     if (new URL(request.url()).pathname === "/auth/exchange-code") exchanges++;
   });
+  ui.leaving();
   await page.goto(`${fixture.origin}/__qa/relay-sign-in`);
   await expect(page.locator(".composer")).toBeVisible();
   expect(exchanges).toBe(1);

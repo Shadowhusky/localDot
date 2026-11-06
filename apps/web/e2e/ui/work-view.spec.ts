@@ -215,10 +215,11 @@ test("refresh waits for slow history and reveals the restored work without a des
   release();
   await expect(page.locator(".curtain")).toHaveCount(0);
   await expect(page.getByLabel("Work output")).toContainText("Checking the project");
-  const samples = await page.evaluate(
-    () => (window as unknown as { restorationSamples: string[] }).restorationSamples,
-  );
-  expect(samples.length).toBeGreaterThan(0);
+  const sampled = () =>
+    page.evaluate(() => (window as unknown as { restorationSamples: string[] }).restorationSamples);
+  // Sampled on animation frames, the first of which may still be to come.
+  await expect.poll(async () => (await sampled()).length).toBeGreaterThan(0);
+  const samples = await sampled();
   expect(
     samples.every((text) => text.includes("Checking the project")),
     JSON.stringify(samples),

@@ -11,7 +11,7 @@ const TOAST = "stop-all";
 export function stoppedText(outcome: StopAllOutcome): string {
   const parts = [
     outcome.sessions.length ? count(outcome.sessions.length, "task stopped", "tasks stopped") : "",
-    outcome.cells.length ? count(outcome.cells.length, "computer frozen", "computers frozen") : "",
+    outcome.cells.length ? count(outcome.cells.length, "computer paused", "computers paused") : "",
     outcome.routinesPaused
       ? count(outcome.routinesPaused, "routine paused", "routines paused")
       : "",

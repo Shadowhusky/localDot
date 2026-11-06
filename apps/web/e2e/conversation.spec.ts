@@ -5,6 +5,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { PANEL_NAME } from "../src/shell/panel-name.ts";
 import { startUiFixture, TOKEN, type UiFixture } from "./fixtures/start-ui-fixture.ts";
 import { reach } from "./reach.ts";
 import { ENGINES } from "./ui-fixture.ts";
@@ -171,7 +172,7 @@ for (const [engine, size, options] of MATRIX) {
     await expect(thread.getByRole("button", { name: /Worked for/ })).toBeVisible();
     await expect(
       page
-        .getByRole("complementary", { name: "Plan and steps", includeHidden: true })
+        .getByRole("complementary", { name: PANEL_NAME, includeHidden: true })
         .locator(".result-card, [aria-label='Question history']"),
     ).toHaveCount(0);
     if (size === "phone") {

@@ -1,4 +1,5 @@
 import { type BrowserContextOptions, expect, type Page, test } from "@playwright/test";
+import { PANEL_NAME } from "../src/shell/panel-name.ts";
 import { startUiFixture, TOKEN, type UiFixture } from "./fixtures/start-ui-fixture.ts";
 import { showActivity } from "./layout.ts";
 import { ENGINES } from "./ui-fixture.ts";
@@ -47,7 +48,7 @@ const SCROLLER = {
   phone: "ui-sheet-body",
 } as const;
 const pane = (size: keyof typeof SCROLLER) =>
-  size === "phone" ? "[role=dialog]:has(.activity-sheet)" : "[aria-label='Plan and steps']";
+  size === "phone" ? "[role=dialog]:has(.activity-sheet)" : `[aria-label='${PANEL_NAME}']`;
 
 function scrollers(page: Page, size: keyof typeof SCROLLER = "desktop") {
   return page.evaluate(
@@ -80,12 +81,9 @@ for (const [engine, size, options] of MATRIX) {
     await expect(rail.locator("[data-current]")).toContainText("Fill the tail with brown");
     expect(await scrollers(page, size)).toEqual([SCROLLER[size]]);
     await expect(rail.locator(".activity-group, .activity-timeline .ui-disclosure")).toHaveCount(0);
-    // The plan stays pinned over the steps as one strip: its progress, the item dot is on and the next.
+    // The plan stays over the steps as one line: its progress and the item dot is on.
     await expect(rail.locator(".plan-strip-count")).toHaveText("3 of 6");
-    expect(await rail.locator(".plan-strip-text").allTextContents()).toEqual([
-      "Colour the dog in",
-      "Save it as dog.png in Pictures",
-    ]);
+    expect(await rail.locator(".plan-strip-text").allTextContents()).toEqual(["Colour the dog in"]);
     // Every model call uses a key; those fold into their step. Only the blocked use is a row.
     await expect(rail.getByTestId("key-use")).toHaveCount(1);
     await expect(rail.getByTestId("key-use")).toContainText("Blocked stock-images key");
@@ -266,7 +264,7 @@ test("steps arriving while the reader follows shift nothing in the rail (chrome)
       })[])
         if (
           entry.sources.some((source) =>
-            source.node?.parentElement?.closest("[aria-label='Plan and steps']"),
+            source.node?.parentElement?.closest(`[aria-label='${PANEL_NAME}']`),
           )
         )
           shifts.push(entry.value);

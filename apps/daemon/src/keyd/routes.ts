@@ -1,7 +1,9 @@
 import {
   KEYD_VAULT_LOCKED,
   KeyMetadata,
+  LoginOrigin,
   SECRET_ID_PATTERN,
+  SealedLogin,
   SealedSecret,
   scanKeyLike,
   surrogateEnvClash,
@@ -31,6 +33,8 @@ export const VAULT_LOCKED = "Saved keys are locked. Unlock them in Keys, then tr
 const MAX_BODY = 64 * 1024;
 // A passphrase is at most 1024 bytes, which seals to under 1.5 KB.
 const MAX_UNLOCK_BODY = 4 * 1024;
+// A password manager's export is at most 4 MiB, which seals to under 5.4 MiB.
+const MAX_EXPORT_BODY = 6 * 1024 * 1024;
 
 // Wrong passphrases from the app: five tries, then a wait that doubles from 30 s up to 15 min, so
 // a page left open or a stolen owner link can't guess at keyd's pace. A right one clears it.
@@ -186,6 +190,45 @@ export function keyRoutes(
       return refuse(c, 400, "bad-metadata", "Use a short description without secret values");
     return withKeyd(c, () =>
       mutate(async () => c.json({ key: await keyd.putMetadata(id, metadata.data) })),
+    );
+  });
+
+  // Saved logins: sites and accounts go to the page, and a password only ever comes from it, sealed
+  // to keyd, as a whole export does. This daemon relays ciphertext it can't open.
+  app.get("/api/logins", (c) =>
+    withKeyd(c, async () => c.json({ logins: await keyd.savedLogins() })),
+  );
+
+  app.post("/api/logins", limit, async (c) => {
+    const input = SealedLogin.safeParse(await c.req.json().catch(() => null));
+    if (!input.success)
+      return refuse(c, 400, "bad-request", "send a sealed login: { sealed } and nothing else");
+    return withKeyd(c, () =>
+      mutate(async () => c.json({ login: await keyd.putSealedLogin(input.data.sealed) })),
+    );
+  });
+
+  const exportLimit = bodyLimit({
+    maxSize: MAX_EXPORT_BODY,
+    onError: (c) => refuse(c, 413, "too-large", "This file is too big to be a password export"),
+  });
+  app.post("/api/logins/import", exportLimit, async (c) => {
+    const input = SealedLogin.safeParse(await c.req.json().catch(() => null));
+    if (!input.success)
+      return refuse(c, 400, "bad-request", "send a sealed export: { sealed } and nothing else");
+    return withKeyd(c, () =>
+      mutate(async () => c.json(await keyd.importLogins(input.data.sealed))),
+    );
+  });
+
+  app.delete("/api/logins/:origin", async (c) => {
+    const origin = LoginOrigin.safeParse(c.req.param("origin"));
+    if (!origin.success) return refuse(c, 400, "bad-request", "not a saved login's site");
+    return withKeyd(c, () =>
+      mutate(async () => {
+        await keyd.deleteLogin(origin.data);
+        return c.body(null, 204);
+      }),
     );
   });
 

@@ -5,12 +5,21 @@ import { EventSink, type EventSinkOptions } from "./events.ts";
 import { Agent, type AgentOptions } from "./loop.ts";
 import { languageModel } from "./models.ts";
 import { type ProxyFetch, proxyFetch } from "./proxy-fetch.ts";
-import { ToolClient } from "./tool-client.ts";
+import { ToolApiLost, ToolClient } from "./tool-client.ts";
 
 export const BRAIN_DONE = 0;
 export const BRAIN_CRASHED = 1;
 export const BRAIN_INVALID_ENV = 2;
 export const BRAIN_GAVE_UP = 3;
+// Booted, then lost the tool API for the whole reconnect window: not a crash of the brain's own.
+export const BRAIN_LOST = 4;
+
+function lost(error: unknown, depth = 0): boolean {
+  if (error instanceof ToolApiLost) return true;
+  if (depth > 4 || !(error instanceof Error)) return false;
+  if (error instanceof AggregateError && error.errors.some((e) => lost(e, depth + 1))) return true;
+  return lost(error.cause, depth + 1);
+}
 type StopSignal = "SIGTERM" | "SIGINT";
 type BrainApi = Pick<
   ToolClient,
@@ -82,6 +91,7 @@ export async function runBrain(overrides: Partial<BrainEntryDeps> = {}): Promise
   let proxy: ProxyFetch | undefined;
   let sink: EventSink | undefined;
   let code = BRAIN_CRASHED;
+  let booted = false;
   try {
     const url = deps.env.LOCALDOT_TOOL_URL ?? "";
     const token = deps.env.LOCALDOT_TOOL_TOKEN ?? "";
@@ -92,6 +102,7 @@ export async function runBrain(overrides: Partial<BrainEntryDeps> = {}): Promise
       stop.signal.throwIfAborted();
       api = deps.api(url, token);
       const boot = await api.boot(stop.signal);
+      booted = true;
       stop.signal.throwIfAborted();
       proxy = deps.proxy(boot.proxy.url, boot.proxy.token);
       const models = {
@@ -124,9 +135,13 @@ export async function runBrain(overrides: Partial<BrainEntryDeps> = {}): Promise
           ? BRAIN_DONE
           : BRAIN_GAVE_UP;
     }
-  } catch {
-    code = stop.signal.aborted ? BRAIN_DONE : BRAIN_CRASHED;
-    if (!stop.signal.aborted) deps.log("brain: run failed");
+  } catch (error) {
+    code = stop.signal.aborted ? BRAIN_DONE : booted && lost(error) ? BRAIN_LOST : BRAIN_CRASHED;
+    if (code === BRAIN_LOST) {
+      deps.log("brain: tool API lost");
+      // Its events cannot get through either; draining them would only hold up the restart.
+      sink?.bind(AbortSignal.abort());
+    } else if (!stop.signal.aborted) deps.log("brain: run failed");
   } finally {
     // Drain final events on normal completion; Stop already cancelled sends. Even a failed sink
     // cleanup cannot prevent either owned transport from being destroyed.

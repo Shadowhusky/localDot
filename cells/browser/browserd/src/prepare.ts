@@ -2,12 +2,14 @@ import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { lstat, mkdir, open } from "node:fs/promises";
 import { prepareProfilePreferences, releaseProfileLocks } from "./profile-preferences.ts";
+import { BrowserProfileTooNewError, refuseNewerProfile } from "./profile-version.ts";
 import {
   BROWSER_DOWNLOAD_DIR,
   BROWSER_PROFILE_DIR,
   BROWSER_RUNTIME_DIR,
   type BrowserRuntimeConfig,
   browserProcessSpecs,
+  resolveBrowserExecutable,
 } from "./runtime-config.ts";
 
 export const BROWSER_PREPARATION_COMMAND_MS = 10_000;
@@ -183,6 +185,8 @@ export async function prepareBrowserRuntime(
     }
     check(signal);
     await directory(BROWSER_PROFILE_DIR, "profile");
+    await refuseNewerProfile(BROWSER_PROFILE_DIR, resolveBrowserExecutable());
+    check(signal);
     await releaseProfileLocks(BROWSER_PROFILE_DIR, signal);
     await prepareProfilePreferences(BROWSER_PROFILE_DIR, signal);
     check(signal);
@@ -224,7 +228,8 @@ export async function prepareBrowserRuntime(
     }
     check(signal);
   } catch (error) {
-    if (error instanceof BrowserPreparationError) throw error;
+    if (error instanceof BrowserPreparationError || error instanceof BrowserProfileTooNewError)
+      throw error;
     throw new BrowserPreparationError();
   }
 }

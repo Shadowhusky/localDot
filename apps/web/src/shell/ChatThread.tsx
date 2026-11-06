@@ -1,14 +1,17 @@
-import type { TaskModelSelection } from "@localdot/protocol";
+import type { PersonaId, TaskModelSelection, Wearable } from "@localdot/protocol";
 import { type ReactNode, useMemo, useRef } from "react";
 import { Conversation } from "../agent/Conversation.tsx";
 import { useEarlierThread } from "../agent/earlier.ts";
 import type { LiveWork } from "../agent/LiveWorkLine.tsx";
 import type { AgentWords, SpendCall } from "../agent/model.ts";
 import {
+  chatItems,
   type ModelRef,
   threadItems,
+  unanswered,
   type WorkStep,
   type WorkStepCache,
+  withModelChanges,
   withWork,
   workSteps,
 } from "../agent/thread.ts";
@@ -16,6 +19,7 @@ import { billedPerCall } from "../agent/UsageFooter.tsx";
 import type { AgentSessionView } from "../agent/useAgentSession.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { type Previews, PreviewsScope } from "../previews/PreviewsContext.tsx";
+import { PendingRoutines } from "../routines/RoutineCard.tsx";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import type { ModelNames } from "../settings/model-names.ts";
@@ -64,6 +68,10 @@ export function ChatThread({
   lead,
   trail,
   tools,
+  chat = false,
+  foot,
+  dock,
+  dockTo,
   pinned = false,
   cover,
   covered = false,
@@ -85,6 +93,7 @@ export function ChatThread({
   reveal,
   words,
   names,
+  dotLook,
   scale,
   previews = null,
 }: {
@@ -96,6 +105,14 @@ export function ChatThread({
   trail?: ReactNode;
   // A phone's control toolbar in the composer's place, while the user has the computer.
   tools?: ReactNode;
+  // A phone's chat: bubbles, with each turn's steps folded under its reply.
+  chat?: boolean;
+  // Under the thread's last row: dot and what it is doing.
+  foot?: ReactNode;
+  // Above the composer until answered: what must be decided.
+  dock?: ReactNode;
+  // Elsewhere the composer and the decisions go for now.
+  dockTo?: HTMLElement | null;
   pinned?: boolean;
   cover?: ReactNode;
   covered?: boolean;
@@ -105,7 +122,7 @@ export function ChatThread({
   live?: LiveWork | null;
   api?: ApiClient | null;
   onReplay?: () => void;
-  onReplayTask?: (sessionId: string) => void;
+  onReplayTask?: (sessionId: string, atMs?: number) => void;
   computerReady?: boolean;
   computerUpdating?: boolean;
   // What an empty chat offers to start with, in the chosen dot's line of work.
@@ -125,6 +142,8 @@ export function ChatThread({
   // A streaming message's new words, which redraw only that message.
   words?: AgentWords;
   names?: ModelNames;
+  // The conversation's look as each dot.
+  dotLook?: (persona: PersonaId) => readonly Wearable[];
   // The computer's display scale, for the screenshots a step unfolds.
   scale?: number;
   // The owner's previews of the servers dot starts; none for anyone else.
@@ -153,7 +172,8 @@ export function ChatThread({
         : [],
     [model],
   );
-  const working = !!live && live.phase !== "finished" && !ended;
+  const working =
+    !!live && live.phase !== "finished" && !ended && (!live.ahead || unanswered(items));
   const selection = agent?.snapshot?.models;
   const spends = model && billedPerCall(selection) ? model.spendCalls : NO_SPEND;
   const usage = model?.usageCalls;
@@ -166,18 +186,22 @@ export function ChatThread({
   const earlier = useEarlierThread(api, sessions, latest, agent?.history ?? true);
   const before = earlier.items;
   const shown = useMemo(() => {
-    if (!before.length) return thread;
     const own = new Set(thread.map((item) => item.key));
-    return [
-      ...before.map((item) => (own.has(item.key) ? { ...item, key: `${item.key}@earlier` } : item)),
-      ...thread,
-    ];
-  }, [before, thread]);
+    const all = before.length
+      ? withModelChanges([
+          ...before.map((item) =>
+            own.has(item.key) ? { ...item, key: `${item.key}@earlier` } : item,
+          ),
+          ...thread,
+        ])
+      : withModelChanges(thread);
+    return chat ? chatItems(all, working) : all;
+  }, [before, thread, chat, working]);
   const conversation = (
     <Conversation
       visible={visible}
       suggestions={suggestions}
-      ownerKey={sessions[0] ?? sessionId ?? ""}
+      ownerKey={earlier.owner}
       items={shown}
       truncated={model?.historyTruncated ?? false}
       loading={pending || earlier.opening}
@@ -187,6 +211,7 @@ export function ChatThread({
       live={working ? live : null}
       ended={ended}
       pendingAsk={model?.pendingAsk ?? null}
+      queueOrder={model?.queueOrder}
       api={api}
       sessionId={sessionId}
       scale={scale}
@@ -196,10 +221,19 @@ export function ChatThread({
       computerReady={computerReady}
       computerUpdating={computerUpdating}
       composer={composer}
+      decisions={
+        <>
+          {dock}
+          <PendingRoutines sessions={sessionId ? [...sessions, sessionId] : sessions} />
+        </>
+      }
       ask={ask}
       lead={lead}
       trail={trail}
       tools={tools}
+      chat={chat}
+      foot={foot}
+      dockTo={dockTo}
       pinned={pinned}
       cover={cover}
       covered={covered}
@@ -207,6 +241,7 @@ export function ChatThread({
       reveal={reveal}
       words={words}
       names={names}
+      dotLook={dotLook}
     />
   );
   return <PreviewsScope value={previews}>{conversation}</PreviewsScope>;

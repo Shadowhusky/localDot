@@ -67,7 +67,10 @@ const commands = Object.freeze({
     flatten: schema.literal(true),
   }),
   "Target.detachFromTarget": schema.strictObject({ sessionId: identifier }),
-  "Target.createTarget": schema.strictObject({ url: schema.literal("about:blank") }),
+  "Target.createTarget": schema.strictObject({
+    url: schema.literal("about:blank"),
+    newWindow: schema.literal(true).optional(),
+  }),
   "Target.activateTarget": target,
   "Target.closeTarget": target,
   "Runtime.runIfWaitingForDebugger": empty,

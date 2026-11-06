@@ -1,8 +1,10 @@
 import {
   type DeleteSessionsResult,
   microsToMs,
+  type PersonaId,
   type SessionCard,
   type SessionVerdict,
+  type Wearable,
 } from "@localdot/protocol";
 import { chapters, planAt, stepAt } from "@localdot/stage";
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
@@ -136,6 +138,10 @@ export interface ReplayViewProps {
   onLibrary(): void;
   backLabel?: string;
   onGoLive(): void;
+  // Where the library's way back goes, on a phone.
+  liveLabel?: string;
+  // What a model reads as under the recording's steps.
+  modelName?(provider: string, model: string): string | undefined;
   onDeleted(id: string): void;
   // What the top bar names while a recording plays; null once it closes.
   onTitle?(title: RecordedTitle | null): void;
@@ -146,6 +152,8 @@ export interface ReplayViewProps {
   visible?: boolean;
   // Settings → Appearance → Show dot.
   showDot?: boolean;
+  // A task's conversation's look as a dot, as its row wears it.
+  dotLook?(sessionId: string, persona: PersonaId | undefined): readonly Wearable[];
 }
 
 // Replay (design-v2 §11 H): the library of recordings in the stage's column with the chosen one
@@ -157,6 +165,8 @@ export function ReplayView({
   onLibrary,
   backLabel = "Replay",
   onGoLive,
+  liveLabel = "Watch",
+  modelName,
   onDeleted,
   onTitle,
   continueTask,
@@ -164,6 +174,7 @@ export function ReplayView({
   hostExports,
   visible = true,
   showDot = true,
+  dotLook,
 }: ReplayViewProps) {
   const tasks = useTaskIndex(api);
   const [chosen, setChosen] = useState<string | null>(sessionId);
@@ -194,6 +205,7 @@ export function ReplayView({
       onChoose={setChosen}
       onOpen={onSelect}
       onGoLive={onGoLive}
+      liveLabel={liveLabel}
       onDeleted={onDeleted}
       continueTask={proceed}
       visible={visible}
@@ -208,6 +220,7 @@ export function ReplayView({
       onLibrary={onLibrary}
       backLabel={backLabel}
       onGoLive={onGoLive}
+      modelName={modelName}
       onDeleted={onDeleted}
       onTitle={onTitle}
       continueTask={proceed}
@@ -215,6 +228,7 @@ export function ReplayView({
       hostExports={hostExports}
       visible={visible}
       showDot={showDot}
+      dotLook={dotLook}
     />
   );
 }
@@ -273,6 +287,7 @@ function Library({
   onChoose,
   onOpen,
   onGoLive,
+  liveLabel,
   onDeleted,
   continueTask,
   visible,
@@ -285,6 +300,7 @@ function Library({
   onChoose(id: string): void;
   onOpen(id: string): void;
   onGoLive(): void;
+  liveLabel: string;
   onDeleted(id: string): void;
   continueTask?: ContinueTask;
   visible: boolean;
@@ -345,7 +361,7 @@ function Library({
     <div className="replay" data-view="library">
       <main className="replay-library" aria-label="Replay">
         {phone ? (
-          <NavBar back="Watch" onBack={onGoLive} title="Replay" />
+          <NavBar back={liveLabel} onBack={onGoLive} title="Replay" />
         ) : (
           <h1 className="ui-visually-hidden">Replay</h1>
         )}
@@ -678,6 +694,7 @@ function Player({
   onLibrary,
   backLabel = "Replay",
   onGoLive,
+  modelName,
   onDeleted,
   onTitle,
   continueTask,
@@ -685,6 +702,7 @@ function Player({
   hostExports,
   visible,
   showDot,
+  dotLook,
 }: {
   api: ApiClient;
   sessionId: string;
@@ -693,6 +711,7 @@ function Player({
   onLibrary(): void;
   backLabel?: string;
   onGoLive(): void;
+  modelName?(provider: string, model: string): string | undefined;
   onDeleted(id: string): void;
   onTitle?(title: RecordedTitle | null): void;
   continueTask?: ContinueTask;
@@ -700,6 +719,7 @@ function Player({
   hostExports: HostExports;
   visible: boolean;
   showDot: boolean;
+  dotLook?(sessionId: string, persona: PersonaId | undefined): readonly Wearable[];
 }) {
   const stage = useRef<StageHandle>(null);
   const hostView = useHostExports(hostExports);
@@ -814,7 +834,12 @@ function Player({
   const lost = replay.status === "error" && !replay.map && !replay.model.steps.length;
   const recorded = recordedPresence(replay.model, replay.tMs, hud);
   const line = opening ? "" : lost ? LOST_LINE : recorded.line;
-  const feed: DotFeed = lost ? { ...recorded.feed, state: "error" } : recorded.feed;
+  const look = dotLook?.(sessionId, recorded.feed.persona);
+  const feed: DotFeed = {
+    ...recorded.feed,
+    ...(lost ? { state: "error" as const } : {}),
+    ...(look ? { look } : {}),
+  };
   useEffect(() => setReplayPresence({ feed, line }));
   const support = exportSupport();
   // A link from a result asks for its part of the recording: Export opens on it once the recording
@@ -914,6 +939,7 @@ function Player({
       asOfMs={replay.tMs}
       onSelect={replay.selectStep}
       planSnapshot={planAt(replay.model, replay.tMs)}
+      modelName={modelName}
     />
   );
 

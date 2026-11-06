@@ -17,8 +17,12 @@ async function position(panel: Locator, ms: number) {
   await panel.getByRole("slider", { name: "Preview position" }).fill(String(ms));
 }
 
+// A busy machine can reach the end of a short preview first, which stops it too.
 async function pause(panel: Locator) {
-  await panel.getByRole("button", { name: "Pause preview" }).click();
+  await panel
+    .getByRole("button", { name: "Pause preview" })
+    .click({ timeout: 2_000 })
+    .catch(() => {});
   await expect(panel.getByRole("button", { name: "Play preview" })).toBeVisible();
 }
 

@@ -4,6 +4,8 @@ import type { PreviewEndpoint } from "../cells/types.ts";
 
 const OPEN_MS = 10_000;
 const LIST_MS = 10_000;
+// The forwarder gives a server three seconds to end before making it.
+const STOP_MS = 10_000;
 // A listing of 512 listeners is about 40 KiB.
 const ANSWER_BYTES = 128 * 1024;
 
@@ -50,6 +52,16 @@ export async function listServers(
   } catch {
     throw new ForwarderRefused("bad-request");
   }
+}
+
+export async function stopServer(
+  endpoint: PreviewEndpoint,
+  port: number,
+  ms = STOP_MS,
+): Promise<void> {
+  const { socket, line } = await ask(endpoint, { stop: port }, ms);
+  socket.destroy();
+  if (line !== "OK") throw refusal(line);
 }
 
 function refusal(line: string): Error {

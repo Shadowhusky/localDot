@@ -10,7 +10,7 @@ import { BrowserStartCancelled } from "../cells/browser-ledger.ts";
 import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { BrowserClientError, type BrowserScope } from "./client.ts";
 import {
-  BrowserInUseError,
+  BROWSER_WINDOW_LOST,
   browserUnavailableText,
   ScreenControlError,
   ScreenController,
@@ -311,13 +311,23 @@ function fixture(downloads?: ScreenControllerDeps["downloads"], signInSupported 
       scope.check();
       if (request.revision <= revision) throw new Error("stale");
       revision = request.revision;
-      if (request.holder === "user") holder = "user";
+      if (request.holder !== "agent") holder = "user";
       await controlBarrier(request);
       scope.check();
       if (request.revision !== revision) throw new Error("superseded");
-      holder = request.holder;
-      const { owner: _owner, ...receipt } = { owner: undefined, ...request };
-      return { ...receipt, reloaded: 0, selectionsCleared: true };
+      const held: "user" | "agent" = request.holder === "agent" ? "agent" : "user";
+      holder = held;
+      const { browserCellId, parentCellId, instance, requestId } = request;
+      return {
+        browserCellId,
+        parentCellId,
+        instance,
+        requestId,
+        revision: request.revision,
+        holder: held,
+        reloaded: 0,
+        selectionsCleared: true,
+      };
     }),
     close: vi.fn(),
     observe: vi.fn(async () => {
@@ -365,6 +375,11 @@ function fixture(downloads?: ScreenControllerDeps["downloads"], signInSupported 
     controlBarrier,
     tabId,
     holder: () => holder,
+    endpointIdentity: () => ({
+      browserCellId: current.browserCellId,
+      parentCellId: current.parentCellId,
+      instance: current.instance,
+    }),
     replace: () => {
       current = { ...current, instance: randomUUID() };
     },
@@ -734,7 +749,7 @@ describe("session screen coordinator", () => {
     opened.resolve(f.endpoint);
     expect(await switching).toBeInstanceOf(Error);
     await held;
-    expect(f.client.control.mock.calls.every(([request]) => request.holder === "user")).toBe(true);
+    expect(f.client.control.mock.calls.every(([request]) => request.holder !== "agent")).toBe(true);
     expect(f.deps.publish).not.toHaveBeenCalled();
     expect(f.deps.fenceSession).not.toHaveBeenCalled();
     expect(() => f.controller.lease(f.scope)).toThrow();
@@ -774,6 +789,49 @@ describe("session screen coordinator", () => {
     expect(f.deps.browser.stop).toHaveBeenCalledWith(f.deps.parentCellId);
     expect(f.deps.contain).not.toHaveBeenCalled();
     expect(f.deps.fenceSession).not.toHaveBeenCalled();
+  });
+
+  it("takes the web browser for the user at their first input there, leaving dot on the desktop", async () => {
+    const f = downloadingFixture();
+    await f.controller.activate(f.scope);
+    await f.controller.takeOver();
+    // A hold that stays on the desktop takes nothing from the browser.
+    expect(f.client.control).not.toHaveBeenCalled();
+    expect(() => f.controller.manualAccess(f.scope)).toThrow();
+    await f.controller.reachBrowser(f.scope);
+    expect(f.client.control).toHaveBeenCalledTimes(1);
+    expect(f.client.control.mock.calls[0]?.[0]).toMatchObject({
+      holder: "user",
+      front: f.scope.sessionId,
+    });
+    expect(f.records.at(-1)?.binding.holder).toBe("user");
+    const manual = f.controller.manualAccess(f.scope);
+    await manual.input({ kind: "text", text: "x" });
+    expect(f.client.manual).toHaveBeenCalledTimes(1);
+    expect(f.controller.selection.screen).toBe("desktop");
+    expect(f.deps.publish).not.toHaveBeenCalledWith(expect.objectContaining({ screen: "browser" }));
+    await f.controller.reachBrowser(f.scope);
+    expect(f.client.control).toHaveBeenCalledTimes(1);
+    manual.finish();
+    const back = await f.controller.handback(f.scope);
+    expect(back.screen).toBe("desktop");
+    expect(f.client.control.mock.calls.some(([request]) => request.holder === "agent")).toBe(false);
+    expect(() => f.controller.manualAccess(f.scope)).toThrow();
+    // The next agent grant is what ends the user's control; browserd clears their pages for it.
+    await f.controller.switchTo("browser", f.scope);
+    expect(f.client.control.mock.calls.at(-1)?.[0]).toMatchObject({ holder: "agent" });
+    await f.close();
+  });
+
+  it("refuses to take the web browser unless the user holds the computer", async () => {
+    const f = fixture();
+    await f.controller.activate(f.scope);
+    await expect(f.controller.reachBrowser(f.scope)).rejects.toThrow(ScreenControlError);
+    expect(f.client.control).not.toHaveBeenCalled();
+    await f.controller.takeOver(false);
+    await expect(f.controller.reachBrowser(f.scope)).rejects.toThrow(ScreenControlError);
+    expect(f.client.control).not.toHaveBeenCalled();
+    await f.controller.close();
   });
 
   it("handback explicitly grants the selected screen to the current generation", async () => {
@@ -869,7 +927,7 @@ describe("session screen coordinator", () => {
     const f = fixture();
     f.client.clock.mockRejectedValue(new BrowserClientError("unavailable"));
     f.controlBarrier.mockImplementation(async (request) => {
-      if (request.holder === "user") throw new BrowserClientError("unavailable");
+      if (request.holder !== "agent") throw new BrowserClientError("unavailable");
     });
     await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(ScreenUnavailableError);
     expect(f.deps.browser.stop).toHaveBeenCalledWith(f.deps.parentCellId);
@@ -884,7 +942,7 @@ describe("session screen coordinator", () => {
       if (grant === "previous") await f.controller.switchTo("browser", f.scope);
       else f.client.clock.mockRejectedValue(new BrowserClientError("unavailable"));
       f.controlBarrier.mockImplementation(async (request) => {
-        if (request.holder === "user") throw new BrowserClientError("unavailable");
+        if (request.holder !== "agent") throw new BrowserClientError("unavailable");
       });
       f.deps.browser.stop.mockRejectedValueOnce(new Error("shutdown unconfirmed"));
       await expect(
@@ -1490,17 +1548,6 @@ describe("a new conversation's first look at the web browser", () => {
     await f.controller.close();
   });
 
-  it("opens the blank tab once the task gets the web browser from another task", async () => {
-    const claimBrowser = vi.fn(() => claimBrowser.mock.calls.length > 1);
-    const f = fresh({ claimBrowser, releaseBrowser: vi.fn() });
-    await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(BrowserInUseError);
-    expect(f.openTab).not.toHaveBeenCalled();
-    await f.controller.switchTo("browser", f.scope);
-    expect(f.openTab).toHaveBeenCalledOnce();
-    expect(f.shown()).toBe(f.opened);
-    await f.controller.close();
-  });
-
   it("stops a switch cancelled while the tab opens, without granting the page in front", async () => {
     const f = fresh();
     f.openTab.mockImplementationOnce(async (_permit, scope) => {
@@ -1513,5 +1560,209 @@ describe("a new conversation's first look at the web browser", () => {
     expect(f.deps.publish).not.toHaveBeenCalled();
     expect(f.holder()).toBe("user");
     await f.controller.close();
+  });
+});
+
+describe("a task's window beside other tasks", () => {
+  const entering = (f: ReturnType<typeof fixture>) => {
+    const enterWindow = vi.fn(async (_permit: unknown, _place: unknown, scope: BrowserScope) => {
+      scope.check();
+      return { tabs: [{ id: f.tabId, ready: true }], opened: false };
+    });
+    Object.assign(f.client, { enterWindow });
+    return enterWindow;
+  };
+  const holders = (f: ReturnType<typeof fixture>) =>
+    f.client.control.mock.calls.map(([request]) => request.holder);
+
+  it("lets go of only its own grant when it leaves for the desktop or finishes", async () => {
+    const f = fixture();
+    entering(f);
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.switchTo("desktop", f.scope);
+    const left = f.client.control.mock.calls.at(-1)?.[0];
+    expect(left).toMatchObject({ holder: "release", keep: true });
+    await f.controller.switchTo("browser", f.scope);
+    f.deps.desktopReady.mockReturnValue(true);
+    await f.controller.cancel();
+    const last = f.client.control.mock.calls.at(-1)?.[0];
+    expect(last?.holder).toBe("release");
+    expect(last).not.toHaveProperty("keep");
+    expect(holders(f)).not.toContain("user");
+  });
+
+  it("asks for the whole browser only when the user takes it", async () => {
+    const f = fixture();
+    entering(f);
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.takeOver();
+    expect(f.client.control.mock.calls.at(-1)?.[0]).toMatchObject({
+      holder: "user",
+      front: f.deps.sessionId,
+    });
+    expect(f.client.control.mock.calls.at(-1)?.[0]).not.toHaveProperty("alone");
+    await f.controller.close();
+  });
+
+  it("at a brain's retirement asks for the browser only if no other task is at work", async () => {
+    const f = fixture();
+    entering(f);
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.takeOver(false);
+    expect(f.client.control.mock.calls.at(-1)?.[0]).toMatchObject({ holder: "user", alone: true });
+    // The user taking it after that asks for all of it.
+    await f.controller.takeOver();
+    const taken = f.client.control.mock.calls.at(-1)?.[0];
+    expect(taken?.holder).toBe("user");
+    expect(taken).not.toHaveProperty("alone");
+    await f.controller.close();
+  });
+
+  it("holds no manual permit when other tasks kept the browser as it came to rest", async () => {
+    const f = fixture();
+    entering(f);
+    await f.controller.switchTo("browser", f.scope);
+    f.client.control.mockImplementationOnce(async (request) => ({
+      ...f.endpointIdentity(),
+      revision: request.revision,
+      requestId: request.requestId,
+      holder: "agent",
+      reloaded: 0,
+      selectionsCleared: false,
+    }));
+    await f.controller.takeOver(false);
+    expect(() => f.controller.manualAccess({ signal: f.abort.signal, check: () => {} })).toThrow(
+      ScreenControlError,
+    );
+    await f.controller.close();
+  });
+
+  it("takes back a request it can't confirm when a takeover overtakes it", async () => {
+    const f = fixture();
+    entering(f);
+    const grant = Promise.withResolvers<void>();
+    f.controlBarrier.mockImplementation((request) =>
+      request.holder === "agent" ? grant.promise : Promise.resolve(),
+    );
+    const switching = f.controller.switchTo("browser", f.scope).catch((error: unknown) => error);
+    await until(() => holders(f).includes("agent"));
+    const held = f.controller.takeOver();
+    grant.resolve();
+    expect(await switching).toBeInstanceOf(Error);
+    await held;
+    expect(holders(f).at(-1)).toBe("release");
+    await f.controller.close();
+  });
+
+  it("brings its window forward on a turn, and on nothing while the user has it", async () => {
+    const f = fixture();
+    const enter = entering(f);
+    await f.controller.switchTo("browser", f.scope);
+    expect(enter).toHaveBeenCalledTimes(1);
+    await f.controller.enterTurn(f.scope);
+    expect(enter).toHaveBeenCalledTimes(2);
+    await f.controller.takeOver();
+    await f.controller.enterTurn(f.scope);
+    expect(enter).toHaveBeenCalledTimes(2);
+    await f.controller.close();
+  });
+
+  it("asks for its grant again on a turn after the user's control ended it", async () => {
+    const f = fixture();
+    const enter = entering(f);
+    await f.controller.switchTo("browser", f.scope);
+    const grants = () => holders(f).filter((holder) => holder === "agent").length;
+    expect(grants()).toBe(1);
+    enter.mockRejectedValueOnce(new BrowserClientError("refused"));
+    await f.controller.enterTurn(f.scope);
+    expect(grants()).toBe(2);
+    expect(f.controller.selection.screen).toBe("browser");
+    await f.controller.close();
+  });
+
+  it("takes a new grant on a turn after the browser was started anew", async () => {
+    const f = fixture();
+    entering(f);
+    let revisions = 0;
+    Object.assign(f.deps, { revision: () => ++revisions });
+    await f.controller.switchTo("browser", f.scope);
+    const before = f.client.control.mock.calls.filter(([r]) => r.holder === "agent").length;
+    f.replace();
+    await f.controller.enterTurn(f.scope);
+    expect(f.client.control.mock.calls.filter(([r]) => r.holder === "agent").length).toBe(
+      before + 1,
+    );
+    expect(f.controller.selection.screen).toBe("browser");
+    await f.controller.close();
+  });
+
+  it("waits out a browser restarting in place instead of failing the task", async () => {
+    const f = fixture();
+    const enter = entering(f);
+    await f.controller.switchTo("browser", f.scope);
+    const grants = holders(f).filter((holder) => holder === "agent").length;
+    enter.mockRejectedValueOnce(new BrowserClientError("restarting"));
+    await f.controller.enterTurn(f.scope);
+    expect(enter).toHaveBeenCalledTimes(3);
+    expect(holders(f).filter((holder) => holder === "agent").length).toBe(grants);
+    await f.controller.close();
+  });
+
+  it("tells a task its window went, and not when it got its first or its popup closed", async () => {
+    const f = fixture();
+    const enter = entering(f);
+    const remind = vi.fn();
+    Object.assign(f.deps, { remind });
+    const controller = new ScreenController(f.deps);
+    const popup = "b5a7d1a4-0c9e-4b4f-9b0b-4a5d6a9e1c11";
+    enter.mockResolvedValueOnce({
+      tabs: [
+        { id: f.tabId, ready: true },
+        { id: popup, ready: true },
+      ],
+      opened: true,
+    });
+    await controller.switchTo("browser", f.scope);
+    await controller.enterTurn(f.scope);
+    expect(remind).not.toHaveBeenCalled();
+    enter.mockResolvedValueOnce({
+      tabs: [{ id: "c5a7d1a4-0c9e-4b4f-9b0b-4a5d6a9e1c12", ready: true }],
+      opened: false,
+    });
+    await controller.enterTurn(f.scope);
+    expect(remind).toHaveBeenCalledExactlyOnceWith(BROWSER_WINDOW_LOST);
+    await controller.close();
+  });
+
+  it("waits while the task before it finishes, on a browser that says so", async () => {
+    const f = fixture();
+    const enter = entering(f);
+    await f.controller.switchTo("browser", f.scope);
+    enter.mockRejectedValueOnce(new BrowserClientError("busy"));
+    await f.controller.enterTurn(f.scope);
+    expect(holders(f).filter((holder) => holder === "agent").length).toBe(1);
+    await f.controller.close();
+  });
+
+  it("takes its turn on the computer for a grant, and tells the recording around its window", async () => {
+    const f = fixture();
+    entering(f);
+    const said: string[] = [];
+    const released = vi.fn();
+    Object.assign(f.deps, {
+      turn: vi.fn(async () => {
+        said.push("turn");
+        return { release: released };
+      }),
+      coming: (screen: string) => said.push(`coming ${screen}`),
+      up: (screen: string) => said.push(`up ${screen}`),
+    });
+    const controller = new ScreenController(f.deps);
+    await controller.switchTo("browser", f.scope);
+    expect(said).toEqual(["turn", "coming browser", "up browser"]);
+    expect(released).toHaveBeenCalledOnce();
+    await controller.switchTo("desktop", f.scope);
+    expect(said).toEqual(["turn", "coming browser", "up browser", "coming desktop", "up desktop"]);
+    await controller.close();
   });
 });

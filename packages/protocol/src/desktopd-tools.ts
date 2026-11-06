@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ULID_PATTERN } from "./ids.ts";
 import { DesktopMemory } from "./work-context.ts";
 
 // desktopd's shell, files and browser routes (spec "desktopd" table: shell(cmd), files.*,
@@ -19,6 +20,8 @@ export const ShellRequest = z.object({
     .string()
     .regex(/^[A-Za-z0-9-]{16,64}$/)
     .optional(),
+  // The task it runs for, which what it starts keeps in its environment. Older desktopd strips it.
+  task: z.string().regex(ULID_PATTERN).optional(),
 });
 export type ShellRequest = z.input<typeof ShellRequest>;
 

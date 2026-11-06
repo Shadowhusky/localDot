@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactNode } from "react";
+import { createContext, type KeyboardEvent, type ReactNode, useContext } from "react";
 import { useSessionNow } from "../session/useNowMs.ts";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -15,10 +15,24 @@ export function reveal(element: Element | null) {
   element?.scrollIntoView?.({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
 }
 
-// Brings a row that has just been opened into view once its detail has unfolded.
+// Brings a row that has just been opened into view once its detail has unfolded, unless the reader
+// has moved on by then.
 export function revealOpened(row: Element | null) {
-  window.setTimeout(() => reveal(row), REVEAL_AFTER);
+  const moved = ["wheel", "touchstart", "keydown"];
+  const settle = () => {
+    clearTimeout(timer);
+    for (const type of moved) window.removeEventListener(type, settle, true);
+  };
+  const timer = setTimeout(() => {
+    settle();
+    reveal(row);
+  }, REVEAL_AFTER);
+  for (const type of moved) window.addEventListener(type, settle, true);
 }
+
+// Chat reads a step as dot's own sentence and its time. Which tool did what, in which window, waits
+// in the step's unfold; only a failure's meta line, which says what went wrong, stays on the row.
+export const PlainSteps = createContext(false);
 
 export interface ActivityRowProps {
   id: string;
@@ -61,6 +75,9 @@ export function ActivityRow({
   nowMs,
   children,
 }: ActivityRowProps) {
+  const plain = useContext(PlainSteps);
+  const step = view.testId === "step-row" || view.testId === "tool-row";
+  const meta = plain && step && !view.failed ? "" : view.meta;
   const face = (
     <>
       {view.icon ? (
@@ -70,7 +87,7 @@ export function ActivityRow({
       )}
       <span className="activity-row-text">
         <span className="activity-row-title">{view.title}</span>{" "}
-        {view.meta && <span className="activity-row-meta">{view.meta}</span>}
+        {meta && <span className="activity-row-meta">{meta}</span>}
       </span>{" "}
       <span className="activity-row-trailing">
         <span className="activity-row-time num">

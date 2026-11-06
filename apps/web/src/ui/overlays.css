@@ -17,6 +17,43 @@
     pointer-events: auto;
   }
 
+  /* A held thing lifts in a layer of its own (phone-lift.ts), under the menu open from it and, on
+     its way home, over that menu going. */
+  .ui-layer.lift-layer[data-closing] {
+    z-index: 51;
+  }
+
+  .lift-copy {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    pointer-events: none;
+  }
+
+  /* What it came from has gone: it fades where it is. */
+  .lift-layer[data-gone] {
+    opacity: 0;
+    transition: opacity var(--dur-exit) var(--ease-exit);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lift-layer {
+      transition: opacity var(--dur-fade) var(--ease-standard);
+    }
+
+    @starting-style {
+      .lift-layer {
+        opacity: 0;
+      }
+    }
+
+    .lift-layer[data-closing] {
+      opacity: 0;
+      transition-duration: var(--dur-exit);
+    }
+  }
+
   /* A trigger stays lit while the menu or popover it opened is showing. */
   .ui-button[aria-expanded="true"] {
     --_face: var(--_bg-pressed);
@@ -216,7 +253,7 @@
   }
 
   /* An item without an icon keeps its label in line with those of the items that have one. */
-  .ui-menu:has(.ui-menu-icon) .ui-menu-item:not(:has(> .ui-menu-icon)) {
+  .ui-menu:has(.ui-menu-icon) .ui-menu-item:not([data-glyph], :has(> .ui-menu-icon)) {
     padding-inline-start: calc(var(--spacing) * 9.5);
   }
 
@@ -269,6 +306,7 @@
 
   .ui-menu-group-label {
     padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2.5) var(--spacing);
+    overflow-wrap: anywhere;
     color: var(--color-fg-2);
     font:
       var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
@@ -335,7 +373,14 @@
   }
 
   .ui-sheet[data-side="bottom"][data-detents~="large"][data-detent="medium"] {
-    translate: 0 calc(var(--sheet-medium-top) - var(--sheet-large-top));
+    --_medium: calc(var(--sheet-medium-top) - var(--sheet-large-top));
+    translate: 0 var(--_medium);
+  }
+
+  /* Resting in medium, what is below the screen's edge holds nothing, so the content can reach its
+     end; it takes that room back as a drag raises the sheet. */
+  .ui-sheet[data-side="bottom"][data-detents~="large"][data-detent="medium"] > .ui-sheet-pages {
+    margin-bottom: min(var(--_medium), var(--_lowered, var(--_medium)));
   }
 
   /* At the large detent the page behind recedes, as a stack of sheets does. */
@@ -689,18 +734,6 @@
     color: var(--color-fg-1);
   }
 
-  .ui-sheet[data-side="bottom"][data-detents~="large"][data-detent="medium"]
-    .ui-sheet-main
-    > .ui-sheet-body {
-    padding-bottom: calc(
-      var(--spacing) *
-      5 +
-      var(--sheet-medium-top) -
-      var(--sheet-large-top) +
-      env(safe-area-inset-bottom)
-    );
-  }
-
   .ui-sheet-footer {
     display: flex;
     flex-shrink: 0;
@@ -728,7 +761,7 @@
   }
 
   .ui-sheet[data-side="bottom"] .ui-sheet-footer {
-    padding-bottom: calc(var(--spacing) * 3 + env(safe-area-inset-bottom));
+    padding-bottom: max(calc(var(--spacing) * 3), var(--home-foot));
   }
 
   /* Asking before discarding covers the footer in place, so nothing above it moves. */
@@ -763,7 +796,7 @@
 
   .ui-sheet[data-side="bottom"] .ui-sheet-prompt {
     bottom: var(--_bleed);
-    padding-bottom: calc(var(--spacing) * 3 + env(safe-area-inset-bottom));
+    padding-bottom: max(calc(var(--spacing) * 3), var(--home-foot));
   }
 
   .ui-sheet-prompt-text {

@@ -17,6 +17,8 @@ export const KEYD_REBOUND = "secret-rebound";
 // keyd's refusal of a request that needs a saved key or password while the passphrase vault is
 // locked; its admin API answers 423 with the same code.
 export const KEYD_VAULT_LOCKED = "vault-locked";
+// keyd's refusal of a request for an app whose token ended while its sign-in service is down.
+export const KEYD_OAUTH_UNAVAILABLE = "oauth-unavailable";
 export const SURROGATE_PATTERN = /^ld_[a-z0-9]{2,12}_[0-9A-Za-z]{22}_[0-9A-Za-z]{6}$/;
 export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 export const LLM_PROVIDERS = [
@@ -147,8 +149,36 @@ export const KeydRecord = z.object({
   // Its destination was changed outside localDot after the value was stored: keyd won't send it
   // there, and the user removes the key and adds it again.
   rebound: z.boolean().optional(),
+  // A signed-in app's token, which keyd keeps good to send. No token is ever in here.
+  oauth: z
+    .object({
+      refreshes: z.boolean().optional(),
+      expiresAt: z.string().optional(),
+      account: z.string().max(200).optional(),
+      reconnect: z.boolean().optional(),
+    })
+    .optional()
+    .catch(undefined),
 });
 export type KeydRecord = z.infer<typeof KeydRecord>;
+
+// A finished sign-in, for keyd to redeem itself: the code the app sent back, and where and how. The
+// binding says where the access token goes; the rest stays with keyd beside the refresh token.
+export interface KeydOAuthGrant {
+  tokenEndpoint: string;
+  revocationEndpoint?: string;
+  clientId: string;
+  clientSecret?: string;
+  authMethod?: string;
+  resource?: string;
+  code: string;
+  codeVerifier: string;
+  redirectUri: string;
+}
+export const KeydOAuthRenewal = z.object({
+  state: z.enum(["fresh", "reconnect", "unavailable"]).catch("unavailable"),
+});
+export type KeydOAuthRenewal = z.infer<typeof KeydOAuthRenewal>;
 
 // keyd's hairpin-NAT guard: whether it knows the public address it must deny like the Mac's own.
 // "unknown" while neither the router nor STUN has answered (keyd keeps asking), "off"
@@ -200,9 +230,13 @@ export const KeydStatus = z.object({
   // keyd takes a desktop gate's capture token; one from before capture refuses it.
   capture: z.boolean().optional(),
   generalSecrets: z.boolean().optional(),
+  // keyd lists saved logins, takes them sealed and imports a password manager's export.
+  savedLogins: z.boolean().optional(),
   // keyd copies its keys to another dot's key service, and forgets them all when a dot goes.
   keyCopy: z.boolean().optional(),
   vaultForget: z.boolean().optional(),
+  // keyd redeems a sign-in's code itself and keeps the app connected.
+  oauth: z.boolean().optional(),
 });
 export type KeydStatus = z.infer<typeof KeydStatus>;
 

@@ -2,10 +2,12 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { type ManualInput, ULID_PATTERN, ulid } from "@localdot/protocol";
 import type {
   BrowserActionPermit,
+  BrowserAgentOwner,
   BrowserManualPermit,
   BrowserStatus,
 } from "../../../../packages/protocol/src/browser-control.ts";
 import type { BrowserDownloadBinding } from "../../../../packages/protocol/src/browser-downloads.ts";
+import type { BrowserSecretRequest } from "../../../../packages/protocol/src/browser-secret.ts";
 import {
   ScreenGeometry,
   ScreenName,
@@ -45,7 +47,20 @@ type Client = Pick<
   | "lookup"
   | "read"
 > &
-  Partial<Pick<BrowserClient, "manual" | "uploadChooser" | "upload" | "signIn" | "openTab">>;
+  Partial<
+    Pick<
+      BrowserClient,
+      | "manual"
+      | "uploadChooser"
+      | "upload"
+      | "signIn"
+      | "openTab"
+      | "enterWindow"
+      | "ownTabs"
+      | "signInPage"
+      | "manualSecret"
+    >
+  >;
 interface BrowserOwner {
   readonly endpoint: ReadyBrowser;
   readonly client: Client;
@@ -53,6 +68,8 @@ interface BrowserOwner {
   permit?: BrowserActionPermit;
   manualPermit?: BrowserManualPermit;
   userPermit?: BrowserManualPermit;
+  // A grant asked for and not yet confirmed: it may be in force whatever became of the request.
+  granting?: BrowserAgentOwner;
   tabId?: string;
   revoking?: Promise<void>;
 }
@@ -85,13 +102,19 @@ export interface ScreenControllerDeps {
   // Synchronously stop agent admission, then physically contain both cells independently.
   fenceSession(): void;
   contain(): Promise<void>;
-  // The web browser works for one task at a time on its computer; a finished task holding it may
-  // make way first.
-  claimBrowser?(signal: AbortSignal): boolean | Promise<boolean>;
-  releaseBrowser?(): void;
+  // The computer's one lane: changing what a task holds of a screen waits for its turn.
+  turn?(signal: AbortSignal): Promise<{ release(): void }>;
+  // What a screen shows is about to change to this task's, and has: its recording, and no other
+  // task's, takes in what comes after.
+  coming?(screen: ScreenName): void;
+  up?(screen: ScreenName): void;
+  // A word to dot, with its next look at its inbox.
+  remind?(text: string): void;
   // A new conversation's task first sees the web browser on a blank tab, the page the task before
-  // it left kept in a tab behind; a task that continues a conversation carries on from that page.
+  // it left kept in a tab behind; a task that continues a conversation carries on from that page,
+  // in the window of the task it continues.
   readonly freshTab?: boolean;
+  readonly continues?: string;
 }
 export class ScreenControlError extends Error {
   constructor() {
@@ -101,14 +124,9 @@ export class ScreenControlError extends Error {
 }
 class SignInStillHeldError extends ScreenControlError {}
 
-export class BrowserInUseError extends Error {
-  constructor() {
-    super(
-      "Another task is using the web browser. Use the desktop meanwhile, or switch to the web browser later.",
-    );
-    this.name = "BrowserInUseError";
-  }
-}
+// What a task hears when its window did not survive something it waited for.
+export const BROWSER_WINDOW_LOST =
+  "localDot: your web browser window was closed while you waited (the browser restarted, or was relaunched for a sign-in). Saved sign-ins are kept. A new blank window is yours: open your page again with browser_navigate.";
 
 export class ScreenUnavailableError extends Error {
   constructor(
@@ -155,6 +173,8 @@ export const BROWSER_RESTART_REQUEST_MS = 60_000;
 // While browserd restarts its Chromium in place, a switch waits this long for it.
 const RESTART_WAIT_MS = 500;
 const RESTART_WAITS = 40;
+const BUSY_WAIT_MS = 100;
+const BUSY_WAITS = 50;
 
 // This object belongs to a session, not a model call. Display selection never grants
 // input: every operation needs a lease bound to this screen, generation and revision.
@@ -167,6 +187,10 @@ export class ScreenController {
   #pending = 0;
   #epoch = 0;
   #held = false;
+  // The user, not a brain's retirement, took it: the whole browser is theirs.
+  #userHeld = false;
+  // The user's hold has reached the web browser while dot's screen stays the desktop.
+  #userBrowser = false;
   #failed = false;
   #closed = false;
   #returning = false;
@@ -187,6 +211,8 @@ export class ScreenController {
   #restartRequested = Number.NEGATIVE_INFINITY;
   readonly #downloadRetiring = new Set<Promise<void>>();
   #freshTab: boolean;
+  // The tabs of the task's windows when it last came forward.
+  #windowTabs: ReadonlySet<string> = new Set();
 
   constructor(private readonly deps: ScreenControllerDeps) {
     if (!ULID_PATTERN.test(deps.sessionId) || !ULID_PATTERN.test(deps.parentCellId))
@@ -346,6 +372,37 @@ export class ScreenController {
     }
   }
 
+  // The user's hold reaches both screens, and the web browser is theirs from the first input they
+  // send it: a hold that stays on the desktop takes nothing from a task at work there, and costs no
+  // page its reload when the hold ends. dot's own screen doesn't change.
+  async reachBrowser(scope: BrowserScope): Promise<void> {
+    if (
+      !this.#held ||
+      !this.#userHeld ||
+      !this.#userReady ||
+      this.#returning ||
+      this.#closed ||
+      this.#failed
+    )
+      throw new ScreenControlError();
+    if (this.#selection.screen === "browser" || (this.#userBrowser && this.#browser?.manualPermit))
+      return;
+    this.#userBrowser = true;
+    try {
+      await this.#prepare(scope);
+      scope.check();
+      await this.#revoke();
+      scope.check();
+    } catch (error) {
+      this.#userBrowser = false;
+      throw error;
+    }
+  }
+
+  get #userOnBrowser(): boolean {
+    return this.#selection.screen === "browser" || this.#userBrowser;
+  }
+
   // The session's manual lease is required in addition to the physical user grant.
   // It expires before handback, even while the underlying native request is draining.
   manualAccess(scope: BrowserScope) {
@@ -359,7 +416,7 @@ export class ScreenController {
 
   #manualAccess(scope: BrowserScope) {
     const owner = this.#browser;
-    const permit = owner?.manualPermit;
+    const permit = this.#userHeld ? owner?.manualPermit : undefined;
     if (!owner?.client.manual || !permit) throw new ScreenControlError();
     const send = owner.client.manual.bind(owner.client);
     const selection = this.#selection;
@@ -379,7 +436,7 @@ export class ScreenController {
         this.#failed ||
         !this.deps.desktopReady() ||
         selection !== this.#selection ||
-        selection.screen !== "browser" ||
+        !this.#userOnBrowser ||
         !owner ||
         owner !== this.#browser ||
         !permit ||
@@ -407,6 +464,16 @@ export class ScreenController {
         const result = await owner.client.signIn(permit, "signin", { signal, check });
         check();
         return { available: true as const, ...result };
+      },
+      // Sign-in mode has no page to read: browserd refuses these, and only the mode's own path runs.
+      signInPage: async (fields: boolean) => {
+        check();
+        return (await owner.client.signInPage?.(permit, fields, { signal, check })) ?? null;
+      },
+      fillSecret: (tabId: string, request: BrowserSecretRequest) => {
+        check();
+        if (!owner.client.manualSecret) throw new ScreenControlError();
+        return owner.client.manualSecret(permit, tabId, request, { signal, check });
       },
       input: (input: ManualInput, cancel?: AbortSignal) => {
         check();
@@ -465,10 +532,14 @@ export class ScreenController {
     return this.#switch(this.#selection.screen, scope, true);
   }
 
-  takeOver(): Promise<void> {
+  // `user` false: a brain's retirement, which leaves the computer to the user when no other task
+  // is at work on the browser and otherwise only lets go of this task's own grant.
+  takeOver(user = true): Promise<void> {
     if (this.#closed || this.#failed) return Promise.reject(new ScreenControlError());
-    if (this.#holding && !this.#returning) return this.#holding;
+    if (this.#holding && !this.#returning && (this.#userHeld || !user)) return this.#holding;
     this.#held = true;
+    this.#userHeld ||= user;
+    this.#userBrowser = false;
     this.#userReady = false;
     this.#manual.abort();
     this.#manual = new AbortController();
@@ -509,6 +580,7 @@ export class ScreenController {
     if (!this.#held || this.#returning || this.#closed || this.#failed)
       throw new ScreenControlError();
     this.#returning = true;
+    this.#userBrowser = false;
     this.#userReady = false;
     this.#manual.abort();
     const epoch = this.#epoch;
@@ -520,6 +592,7 @@ export class ScreenController {
       const result = await this.#switch(this.#selection.screen, scope, true);
       if (epoch !== this.#epoch || this.#closed || this.#failed) throw new ScreenControlError();
       this.#held = false;
+      this.#userHeld = false;
       this.#holding = undefined;
       return result;
     } catch (error) {
@@ -528,7 +601,7 @@ export class ScreenController {
       this.#returning = false;
       if (epoch === this.#epoch && !this.#closed && !this.#failed) {
         this.#holding = undefined;
-        await this.takeOver();
+        await this.takeOver(this.#userHeld);
       }
       throw error;
     } finally {
@@ -616,7 +689,6 @@ export class ScreenController {
   #shutdown(contain: boolean): Promise<void> {
     const completion = Promise.withResolvers<void>();
     this.#closing = completion.promise;
-    this.deps.releaseBrowser?.();
     this.#finishing = !contain;
     this.#closed = true;
     this.#userReady = false;
@@ -661,7 +733,7 @@ export class ScreenController {
             this.deps.browser.endpoints(this.deps.parentCellId)?.instance ===
               owner.endpoint.instance
           )
-            await this.#revoke().catch(stop);
+            await this.#revoke(true).catch(stop);
           if (contain || this.#failed) await stop();
         } catch {
           throw new ScreenControlError();
@@ -712,7 +784,11 @@ export class ScreenController {
     let published = false;
     const operation = this.#tail
       .then(async () => {
+        let turn: { release(): void } | undefined;
         try {
+          guard();
+          // A grant and a window change what the browser's one display shows.
+          if (screen === "browser") turn = await this.deps.turn?.(operationScope.signal);
           guard();
           await Promise.all([...this.#active, downloadsRetired]);
           guard();
@@ -724,9 +800,6 @@ export class ScreenController {
           let cellId = this.deps.parentCellId;
           let geometry = this.#desktopGeometry;
           if (screen === "browser") {
-            if ((await this.deps.claimBrowser?.(operationScope.signal)) === false)
-              throw new BrowserInUseError();
-            guard();
             const owner = await this.#prepare(operationScope, restart);
             guard();
             // A fresh physical user receipt owns profile restoration. Reconnect before
@@ -734,6 +807,10 @@ export class ScreenController {
             const health = await owner.client.health(this.#browserScope(owner, operationScope));
             guard();
             if (health.signIn?.mode === "signin" || health.signIn?.changing) {
+              // Sign-in mode has no agent grant to disturb: this asks for the user's receipt that
+              // restores the managed browser, if the task holds none.
+              if (!owner.userPermit)
+                await this.#userReceipt(owner, this.#browserScope(owner, operationScope));
               if (!owner.userPermit || !owner.client.signIn) throw new ScreenControlError();
               try {
                 await owner.client.signIn(
@@ -768,6 +845,7 @@ export class ScreenController {
             };
             const browserScope = this.#browserScope(owner, operationScope);
             granted = true;
+            owner.granting = request.owner;
             await owner.client.control(request, browserScope);
             guard();
             owner.permit = Object.freeze({
@@ -776,6 +854,8 @@ export class ScreenController {
               requestId: request.requestId,
               owner: Object.freeze({ ...request.owner }),
             });
+            await this.#enterWindow(owner, browserScope);
+            guard();
             if (this.#freshTab) owner.tabId = await this.#openTab(owner, browserScope);
             owner.tabId = await this.#foreground(owner, browserScope);
             guard();
@@ -783,7 +863,10 @@ export class ScreenController {
             // BrowserOrchestrator creates the separate display at its parent's scale.
             const scale = this.#desktopGeometry.scale;
             geometry = { w: 1280 * scale, h: 800 * scale, scale };
-          } else if (!this.deps.desktopReady()) throw new ScreenControlError();
+          } else {
+            if (!this.deps.desktopReady()) throw new ScreenControlError();
+            this.deps.coming?.("desktop");
+          }
           const result = ScreenSwitchData.parse({
             screen,
             cellId,
@@ -835,7 +918,7 @@ export class ScreenController {
           guard();
           this.#selection = selection;
           this.#ownerGeneration = scope.generation;
-          if (screen === "desktop") this.deps.releaseBrowser?.();
+          if (screen === "desktop") this.deps.up?.("desktop");
           else this.#freshTab = false;
           return result;
         } catch (error) {
@@ -846,14 +929,10 @@ export class ScreenController {
             // A web browser that fails, its recording included, costs dot the web browser, never
             // the task or the computer: no grant of it is left, and the session goes on recorded
             // on the desktop.
-            const inUse = error instanceof BrowserInUseError;
-            if (!inUse) {
-              if (granted || handback) await this.#revoke().catch(() => this.#retireBrowser());
-              this.#reportBrowser(error);
-            }
+            if (granted || handback) await this.#revoke().catch(() => this.#retireBrowser());
+            this.#reportBrowser(error);
             const desktop = await this.#onDesktop(scope, operationScope, handback, recorded);
             if (handback && desktop) return desktop;
-            if (inUse) throw error;
             throw await this.#browserUnavailable();
           } else if (handback || integrity) {
             // An unrecorded screen, an unjournaled selection or a daemon handback that cannot
@@ -870,6 +949,8 @@ export class ScreenController {
             );
           }
           throw new ScreenControlError();
+        } finally {
+          turn?.release();
         }
       })
       .finally(() => {
@@ -948,7 +1029,6 @@ export class ScreenController {
       if (!this.deps.desktopReady()) throw new ScreenControlError();
       this.deps.publish(result);
       this.#selection = selection;
-      this.deps.releaseBrowser?.();
       if (handback) this.#ownerGeneration = scope.generation;
       return result;
     } catch {
@@ -984,7 +1064,9 @@ export class ScreenController {
     try {
       if (!owner.permit) throw new ScreenControlError();
       for (;;) {
-        const listing = await owner.client.tabs(scope);
+        const listing = owner.client.ownTabs
+          ? await owner.client.ownTabs(owner.permit, scope)
+          : await owner.client.tabs(scope);
         scope.check();
         if (!listing.tabs.length) throw new ScreenControlError();
         let settling = listing.tabs.some((tab) => !tab.ready);
@@ -1024,6 +1106,8 @@ export class ScreenController {
       const why = await this.deps.browser.failure?.(this.deps.parentCellId).catch(() => undefined);
       scope.check();
       this.deps.report?.(`dot restarted the web browser${why ? `: ${why}` : ""}`);
+      // It is told what that costs in the tool's own reply.
+      this.#windowTabs = new Set();
       this.deps.browser.noteProblem?.(
         this.deps.parentCellId,
         `dot restarted the web browser${why ? ` (${why})` : ""}.`,
@@ -1091,29 +1175,66 @@ export class ScreenController {
       }
     }
   }
-  #revoke(): Promise<void> {
+  // Ends what this task holds of the browser. Only the user's own control reaches further, and
+  // takes the whole browser from every task; a task's release leaves the others at work. `over`
+  // says the task is done with its window as well.
+  #revoke(over = false): Promise<void> {
     const owner = this.#browser;
     if (!owner) return this.#retireDownloads();
-    if (owner.revoking) return owner.revoking;
+    if (owner.revoking)
+      return over ? owner.revoking.then(() => this.#revoke(true)) : owner.revoking;
     const downloadsRetired = this.#retireDownloads();
+    const granted = owner.permit?.owner ?? owner.granting;
     owner.permit = undefined;
+    owner.granting = undefined;
     owner.tabId = undefined;
     owner.manualPermit = undefined;
     owner.userPermit = undefined;
-    const request = {
+    const toUser = this.#held && this.#userOnBrowser && (!over || this.#userHeld);
+    if (!toUser && !granted && !over) return downloadsRetired;
+    const scope = this.#browserScope(owner, { signal: AbortSignal.timeout(5000), check: () => {} });
+    const identity = () => ({
       ...this.#identity(owner),
       revision: this.#nextRevision(owner),
       requestId: ulid(),
-      holder: "user" as const,
-    };
-    const scope = this.#browserScope(owner, { signal: AbortSignal.timeout(5000), check: () => {} });
+    });
+    const release = (keep: boolean) =>
+      owner.client.control(
+        {
+          ...identity(),
+          holder: "release",
+          owner: granted ?? {
+            sessionId: this.deps.sessionId,
+            generation: this.#ownerGeneration ?? 1,
+          },
+          ...(keep ? { keep: true } : {}),
+        },
+        scope,
+      );
     const pending = this.#safe(async () => {
       await downloadsRetired;
-      await owner.client.control(request, scope);
-      if (this.#browser === owner && owner.revision === request.revision) {
-        const { holder: _, ...permit } = request;
-        owner.userPermit = Object.freeze(permit);
+      if (!toUser) {
+        await release(!over);
+        return;
       }
+      const request = identity();
+      const reply = await owner.client.control(
+        {
+          ...request,
+          holder: "user",
+          front: this.deps.sessionId,
+          ...(this.#userHeld ? {} : { alone: true }),
+        },
+        scope,
+      );
+      // The user's receipt of a task that is over dies with it: the window goes free as well.
+      if (over) {
+        await release(false);
+        return;
+      }
+      if (reply.holder !== "user") return;
+      const permit = Object.freeze(request);
+      if (this.#browser === owner && owner.revision === request.revision) owner.userPermit = permit;
       if (
         this.#browser === owner &&
         owner.revision === request.revision &&
@@ -1122,14 +1243,9 @@ export class ScreenController {
         !this.#closed &&
         !this.#failed
       ) {
-        const { holder: _, ...permit } = request;
-        owner.manualPermit = Object.freeze(permit);
+        owner.manualPermit = permit;
         const health = await owner.client.health(scope);
-        if (
-          this.#selection.screen === "browser" &&
-          health.signIn?.mode !== "signin" &&
-          !health.signIn?.changing
-        ) {
+        if (this.#userOnBrowser && health.signIn?.mode !== "signin" && !health.signIn?.changing) {
           await this.#startDownloads(
             owner,
             {
@@ -1147,6 +1263,90 @@ export class ScreenController {
     owner.revoking = pending;
     return pending;
   }
+
+  async #userReceipt(owner: BrowserOwner, scope: BrowserScope): Promise<void> {
+    const identity = {
+      ...this.#identity(owner),
+      revision: this.#nextRevision(owner),
+      requestId: ulid(),
+    };
+    await owner.client.control({ ...identity, holder: "user" }, scope);
+    owner.userPermit = Object.freeze(identity);
+  }
+
+  // The task's window comes forward, a new one if it has none. A window it lost while it waited is
+  // something it should hear. The task before it may still be draining an action it was stopped in.
+  async #enterWindow(owner: BrowserOwner, scope: BrowserScope): Promise<void> {
+    if (!owner.permit || !owner.client.enterWindow) return;
+    this.deps.coming?.("browser");
+    for (let waits = 0; ; waits++) {
+      try {
+        const { tabs } = await owner.client.enterWindow(
+          owner.permit,
+          {
+            ...(this.deps.continues ? { continues: this.deps.continues } : {}),
+            ...(this.#freshTab ? { fresh: true } : {}),
+          },
+          scope,
+        );
+        if (this.#windowTabs.size && !tabs.some((tab) => this.#windowTabs.has(tab.id)))
+          this.deps.remind?.(BROWSER_WINDOW_LOST);
+        this.#windowTabs = new Set(tabs.map((tab) => tab.id));
+        break;
+      } catch (error) {
+        scope.check();
+        if (!(error instanceof BrowserClientError) || error.code !== "busy" || waits >= BUSY_WAITS)
+          throw error;
+        await sleep(BUSY_WAIT_MS, undefined, { signal: scope.signal });
+        scope.check();
+      }
+    }
+    this.deps.up?.("browser");
+  }
+
+  // The task's turn on the computer is starting: on the web browser, its window comes to the front.
+  // A browser restarting in place is waited for. A grant the user's control ended, or a browser
+  // that was started anew, is taken again on this turn; the task hears only if its page went.
+  async enterTurn(raw: ScreenScope): Promise<void> {
+    const scope = this.#scope(raw);
+    if (this.#selection.screen !== "browser" || this.#held || this.#closed || this.#failed) return;
+    await this.#tail;
+    scope.check();
+    if (this.#selection.screen !== "browser" || this.#held || this.#closed || this.#failed) return;
+    const owner = this.#browser;
+    if (owner?.permit && this.#sameBrowser(owner)) {
+      const browserScope = this.#browserScope(owner, scope);
+      for (let waits = 0; ; waits++) {
+        try {
+          await this.#enterWindow(owner, browserScope);
+          scope.check();
+          return;
+        } catch (error) {
+          scope.check();
+          if (!(error instanceof BrowserClientError) || error.code !== "restarting") break;
+          if (waits >= RESTART_WAITS) break;
+          await sleep(RESTART_WAIT_MS, undefined, { signal: scope.signal });
+          scope.check();
+        }
+      }
+    }
+    // A browser started anew holds no grant of this task's to give back.
+    if (owner && !this.#sameBrowser(owner)) {
+      owner.client.close();
+      this.#browser = undefined;
+    }
+    await this.#switch("browser", scope, true);
+  }
+
+  #sameBrowser(owner: BrowserOwner): boolean {
+    try {
+      this.#checkBrowser(owner);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // While the user holds the web browser's screen, a browser that stopped or started again holds
   // no grant of theirs: the running one is prepared and handed to them, so their input reaches it.
   #regrant(): void {
@@ -1159,7 +1359,7 @@ export class ScreenController {
       this.#pending ||
       this.#closed ||
       this.#failed ||
-      this.#selection.screen !== "browser" ||
+      !this.#userOnBrowser ||
       !this.deps.desktopReady() ||
       (owner?.manualPermit &&
         this.deps.browser.endpoints(this.deps.parentCellId)?.instance === owner.endpoint.instance)
@@ -1337,6 +1537,7 @@ export class ScreenController {
     this.#userReady = false;
     this.#manual.abort();
     this.#held = true;
+    this.#userHeld = false;
     this.#epoch++;
     this.#control.abort();
     this.#actions.abort();

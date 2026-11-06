@@ -41,6 +41,7 @@ import {
   type TakeComputerReply,
   type TakeControlReply,
   TakeoverInputRequest,
+  TaskModelRef,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { capabilityOf, PROVIDERS } from "@localdot/providers";
@@ -57,11 +58,16 @@ import {
   UserBrowserSignInReply,
   UserBrowserSignInRequest,
 } from "../../../../packages/protocol/src/browser-sign-in.ts";
-import type { BrowserScope } from "../browser/client.ts";
 import { type QuarantineRoutesDeps, quarantineRoutes } from "../browser/quarantine-routes.ts";
+import {
+  fillSavedLogin,
+  type SavedLoginKeys,
+  signInPageAsks,
+} from "../browser/saved-login-fill.ts";
 import { DesktopdError } from "../desktopd/client.ts";
 import type { DesktopdTools } from "../desktopd/tools-client.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
+import type { KeyModels } from "../keyd/key-models.ts";
 import {
   activeRoles,
   BindingError,
@@ -79,10 +85,11 @@ import { chatgptRoutes } from "./codex/routes.ts";
 import { type ChatgptSetupControl, SANDBOX_REASONS } from "./codex/setup.ts";
 import type { Conversations } from "./conversation.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
-import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
+import { type ManualDesktopSource, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore, type StoredEntry } from "./memory.ts";
 import { PeopleError, type PeopleStore, type StoredPerson } from "./people.ts";
 import type { PlanUsageStore } from "./plan-usage.ts";
+import { addTaskSecret } from "./redact.ts";
 import { AgentError, type AgentRunner, CLAUDE_CODE_OFF, RAISE_BUDGET_FIRST } from "./runner.ts";
 import type { PurposeService } from "./safety/purpose-service.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
@@ -120,8 +127,13 @@ export interface AgentRoutesDeps {
         | "holds"
         | "signIn"
         | "sideAnswer"
+        | "messageTurn"
+        | "chooseTaskModel"
+        | "taskModel"
         | "switchPersona"
         | "liveStatus"
+        | "dotOf"
+        | "fastFailure"
       >
     >;
   conversations?: Pick<
@@ -133,13 +145,18 @@ export interface AgentRoutesDeps {
     | "has"
     | "list"
     | "withdrawStopped"
+    | "latest"
+    | "chain"
     | "leave"
     | "discard"
   >;
   settings: Pick<SettingsStore, "get" | "put">;
   purpose?: Pick<PurposeService, "status" | "test">;
   catalog: Pick<CatalogStore, "get" | "refresh" | "fresh" | "freshness">;
+  keyModels?: Pick<KeyModels, "list">;
   keyd: Pick<KeydClient, "secrets"> & DayLimitKeyd;
+  // Saved logins, for the user's tap while they hold the web browser.
+  savedLogins?: SavedLoginKeys;
   memory: Pick<
     MemoryStore,
     "readBoth" | "undo" | "entries" | "notes" | "addEntry" | "editEntry" | "deleteEntry"
@@ -155,7 +172,7 @@ export interface AgentRoutesDeps {
   taskMutationReady?(session: AgentSession): boolean;
   // Root owns admission, control/cell lifetime and drain registration. No task is required.
   desktop(cellId: string, requestSignal: AbortSignal): UploadAccess | undefined;
-  manual?(session: AgentSession, scope: BrowserScope): ManualDesktop | undefined;
+  manual?: ManualDesktopSource;
   // The address of the page the desktop's own browser shows, if it is open.
   desktopPage?(cellId: string, signal: AbortSignal): Promise<string | undefined>;
   redactUserText(text: string, sessionId?: string, cellId?: string): string;
@@ -186,8 +203,15 @@ const Task = z.strictObject({
   mode: z.literal("research").optional(),
   // The conversation's latest task, or null for a new conversation; left out, the current one.
   continues: z.string().regex(ULID_PATTERN).nullable().optional(),
+  // The model chosen when this was sent; left out, the conversation's, or the default.
+  model: TaskModelRef.optional(),
 });
-const Message = z.strictObject({ text: nonempty(8000), kind: z.enum(["steer", "followup"]) });
+const Message = z.strictObject({
+  text: nonempty(8000),
+  kind: z.enum(["steer", "followup"]),
+  model: TaskModelRef.optional(),
+});
+const QueueMove = z.strictObject({ before: z.string().regex(ULID_PATTERN).nullable() });
 const Budget = BudgetRaiseRequest;
 const SideQuestion = z.strictObject({ question: nonempty(SIDE_QUESTION_CHARS) });
 
@@ -316,6 +340,23 @@ function fail(error: unknown): Response {
 }
 
 // Auth remains the application's existing /api guard; no route introduces another credential.
+// A look at what the page in front asks, made every few seconds while the user holds the browser. It
+// takes no input, so it takes no turn from theirs: a manual lease is theirs alone, one at a time.
+function lookAtHold(session: AgentSession, requestId: string, signal: AbortSignal) {
+  const check = () => {
+    signal.throwIfAborted();
+    const control = session.manualControl;
+    if (
+      session.stopped ||
+      session.pendingTakeover !== requestId ||
+      (control !== "ready" && control !== "busy")
+    )
+      throw new ControlHeldError();
+  };
+  check();
+  return { signal, check, finish() {} };
+}
+
 export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   if (deps.uploads) userUploadRoutes(app, deps.uploads.store, deps.uploads.hasCell);
   if (deps.quarantine) quarantineRoutes(app, deps.quarantine);
@@ -500,11 +541,13 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         keyLayer = "offline";
       }
       check(c.req.raw.signal);
+      const fastFailure = deps.runner.fastFailure?.();
       return c.json({
         catalog: catalog
           ? { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped, ...deps.catalog.freshness() }
           : null,
         keyLayer,
+        ...(fastFailure ? { fastFailure } : {}),
         subscriptions: [
           { id: CHATGPT, name: "ChatGPT plan", ...harness() },
           {
@@ -550,6 +593,22 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           })),
         })),
       });
+    }),
+  );
+  // The models a saved key reaches, as the provider lists them. Only names cross this route.
+  app.get(
+    "/api/agent/keys/:id/models",
+    route(async (c) => {
+      const id = c.req.param("id") ?? "";
+      const key = (await deps.keyd.secrets()).find((row) => row.id === id && row.kind === "llm");
+      if (!key || !deps.keyModels) throw new RouteError(404, "no such key");
+      try {
+        return c.json({ models: await deps.keyModels.list(key, c.req.raw.signal) });
+      } catch (error) {
+        if (error instanceof KeydUnavailableError) throw error;
+        check(c.req.raw.signal);
+        throw new RouteError(502, "the model list could not be read");
+      }
     }),
   );
   app.post(
@@ -647,6 +706,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         const startOptions = {
           ...(parsed.mode === "research" ? { research: true } : {}),
           ...(parsed.continues !== undefined ? { continues: parsed.continues } : {}),
+          // A shared link's model is the link's to set, never the request's.
+          ...(parsed.model && !grant ? { model: parsed.model } : {}),
           ...(reservation
             ? {
                 main: reservation.model,
@@ -691,7 +752,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           ...listed,
           conversations: listed.conversations.map((entry) => {
             const live = deps.runner.liveStatus?.(entry.sessionId);
-            return live ? { ...entry, live } : entry;
+            const persona = deps.runner.dotOf?.(entry.sessionId);
+            return { ...entry, ...(live ? { live } : {}), ...(persona ? { persona } : {}) };
           }),
         });
       }),
@@ -753,14 +815,46 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (deps.runner.holds?.(s.id))
         throw new RouteError(409, "hand back the computer, then message dot");
       const text = redact(parsed.text, s.id, s.cellId);
+      const grant = c.get("remoteGrant");
+      const turn =
+        parsed.model && !grant
+          ? await deps.runner.messageTurn?.(s.id, parsed.model, c.req.raw.signal)
+          : undefined;
+      check(c.req.raw.signal);
+      if (s.stopped) throw new RouteError(409, "task has stopped");
       if (s.pendingTakeover) {
+        turn?.reached();
         // A deliberate Send hands control back. Publish this instruction before
         // waking the model, so it cannot resume the old plan ahead of the message.
         if (!(await s.handback(s.pendingTakeover, text, c.req.raw.signal)))
           throw new RouteError(409, "The computer is still changing hands. Try sending again.");
-      } else if (parsed.kind === "followup") s.enqueue(text, c.get("remoteGrant")?.id);
-      else s.post(parsed.kind, text, c.get("remoteGrant")?.id);
+      }
+      // A message for another model waits for the task to finish, steered or not: moving dot now
+      // would end what it has running.
+      else if (parsed.kind === "followup" || turn?.moves()) s.enqueue(text, grant?.id, turn);
+      else s.post(parsed.kind, text, grant?.id, turn);
       return c.body(null, 202);
+    }),
+  );
+  // The model chosen for this task's conversation: it runs from the next message, on that task alone.
+  app.get(
+    "/api/agent/sessions/:id/model",
+    route((c) => {
+      const id = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(id)) throw new RouteError(400, "invalid task id");
+      if (!deps.conversations?.has(id)) throw new RouteError(404, "no such task");
+      return c.json({ choice: deps.runner.taskModel?.(id) ?? null });
+    }),
+  );
+  app.put(
+    "/api/agent/sessions/:id/model",
+    route(async (c) => {
+      const id = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(id)) throw new RouteError(400, "invalid task id");
+      const ref = await json(c.req.raw, TaskModelRef);
+      if (!deps.conversations?.has(id) || !deps.runner.chooseTaskModel)
+        throw new RouteError(404, "no such task");
+      return c.json({ choice: deps.runner.chooseTaskModel(id, ref) });
     }),
   );
   // One at a time for each task; the answer goes back to the user alone.
@@ -777,11 +871,30 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       asking.add(id);
       const late = AbortSignal.timeout(90_000);
       try {
+        const reply = await deps.runner.sideAnswer(
+          id,
+          text,
+          AbortSignal.any([c.req.raw.signal, late]),
+        );
         return c.json(
-          await deps.runner.sideAnswer(id, text, AbortSignal.any([c.req.raw.signal, late])),
+          reply.failed
+            ? {
+                ...reply,
+                failed: {
+                  ...reply.failed,
+                  reason: redact(reply.failed.reason, id, undefined, SIDE_QUESTION_CHARS),
+                },
+              }
+            : reply,
         );
       } catch (error) {
-        if (error instanceof SideQuestionError) throw new RouteError(error.status, error.problem);
+        if (error instanceof SideQuestionError)
+          throw new RouteError(
+            error.status,
+            error.reason
+              ? `${error.problem}\n${redact(error.reason, id, undefined, SIDE_QUESTION_CHARS)}`
+              : error.problem,
+          );
         if (late.aborted) throw new RouteError(502, "no-answer");
         throw error;
       } finally {
@@ -853,6 +966,19 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!ULID_PATTERN.test(messageId)) throw new RouteError(400, "invalid message id");
       check(c.req.raw.signal);
       if (!s.cancelQueued(messageId)) throw new RouteError(409, "message is no longer queued");
+      return c.body(null, 204);
+    }),
+  );
+  app.post(
+    "/api/agent/sessions/:id/messages/:messageId/move",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const messageId = c.req.param("messageId") ?? "";
+      if (!ULID_PATTERN.test(messageId)) throw new RouteError(400, "invalid message id");
+      const { before } = await json(c.req.raw, QueueMove);
+      check(c.req.raw.signal);
+      if (!s.moveQueued(messageId, before))
+        throw new RouteError(409, "message is no longer queued");
       return c.body(null, 204);
     }),
   );
@@ -949,6 +1075,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const s = active(c.req.param("id") ?? "");
       const parsed = await json(c.req.raw, QuestionAnswerRequest);
       check(c.req.raw.signal);
+      if (c.get("remoteGrant") && parsed.fields && s.asksSavedLogin(parsed.askId))
+        return c.text("Only the owner of this localDot can use its saved logins", 403);
       if (parsed.fields && s.pendingAsk === parsed.askId) {
         for (const field of s.requestedCredentials(parsed.askId)) {
           if (field.kind !== "api_key") continue;
@@ -1043,14 +1171,36 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     route(async (c) => {
       const s = active(c.req.param("id") ?? "");
       const parsed = await json(c.req.raw, UserBrowserSignInRequest);
-      const lease = s.admitManual(parsed.requestId, c.req.raw.signal);
+      const lease =
+        parsed.action === "status"
+          ? lookAtHold(s, parsed.requestId, c.req.raw.signal)
+          : s.admitManual(parsed.requestId, c.req.raw.signal);
       let access: ReturnType<NonNullable<typeof s.screens>["manualAccess"]> | undefined;
       try {
         if (!s.screens) throw new RouteError(503, "browser sign-in is unavailable");
         access = s.screens.manualAccess({ signal: lease.signal, check: lease.check });
         const result = await access.signIn(parsed.action === "start");
         lease.check();
-        return c.json(UserBrowserSignInReply.parse(result));
+        if (!result.available || result.mode !== "standard" || result.changing)
+          return c.json(UserBrowserSignInReply.parse(result));
+        const keys = deps.savedLogins;
+        const on = { ...access, secretFilled: (value: string) => addTaskSecret(s, value) };
+        const fill =
+          parsed.action === "fill" || parsed.action === "fill-password"
+            ? keys
+              ? await fillSavedLogin(on, keys, parsed.action === "fill-password")
+              : "refused"
+            : undefined;
+        lease.check();
+        const page = keys && (await signInPageAsks(on, keys));
+        lease.check();
+        return c.json(
+          UserBrowserSignInReply.parse({
+            ...result,
+            ...(page ? { page } : {}),
+            ...(fill ? { fill } : {}),
+          }),
+        );
       } finally {
         access?.finish();
         lease.finish();

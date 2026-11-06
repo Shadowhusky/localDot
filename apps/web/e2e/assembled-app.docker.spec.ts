@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
+import { PANEL_NAME } from "../src/shell/panel-name.ts";
 import { assembledProcess } from "./fixtures/assembled-process.ts";
 import { approveCurrent, fixtureRequest } from "./fixtures/safety-flow.ts";
 import { saveFixtureModel, search } from "./settings-ui.ts";
@@ -65,7 +66,7 @@ for (const pending of ["wait", "shell"] as const)
         }),
       );
       const phone = (page.viewportSize()?.width ?? 1440) < 1100;
-      const showPane = async (name: "Computer" | "Conversation" | "Activity") => {
+      const showPane = async (name: "Computer" | "Conversation" | typeof PANEL_NAME) => {
         const tab = page.getByRole("tab", { name: new RegExp(`^${name}(?:,|$)`) });
         if (await tab.isVisible()) await tab.click();
       };
@@ -406,7 +407,7 @@ for (const pending of ["wait", "shell"] as const)
       owner = nextOwner;
       await approveCurrent(page, f); // only the new task's current CSV write
       await approveCurrent(page, f); // explicitly collect the new task's current output file
-      await showPane("Activity");
+      await showPane(PANEL_NAME);
       await expect(
         page.getByRole("button", { name: "Download assembled.csv", exact: true }),
       ).toBeEnabled({ timeout: 60_000 });
@@ -458,7 +459,7 @@ for (const pending of ["wait", "shell"] as const)
       await page.getByRole("button", { name: "Send follow-up", exact: true }).click();
       await approveCurrent(page, f); // explicit follow-up CSV update
       await approveCurrent(page, f); // explicitly collect the updated output file
-      await showPane("Activity");
+      await showPane(PANEL_NAME);
       await expect(
         page.getByText("Follow-up updated Alpha quantity to 4; total 30.50.", { exact: true }),
       ).toBeVisible({ timeout: 30_000 });

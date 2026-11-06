@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withExtractedDependency } from "../../apps/cli/src/install/extract-release.ts";
+// @ts-expect-error: a plain script, shared with the image workflow, which has no types.
+import { forbiddenPath } from "../release/no-chrome.mjs";
 
 /** Verify the exact archive inventory and boot its bundled app with a new isolated home.
  * This smoke test never connects to the user's Docker engine, creates computers or registers services.
@@ -43,6 +45,7 @@ export async function verifyDistribution(directory: string) {
             file.mode !== expected.mode
           )
             throw new Error(`Archive inventory differs: ${path}`);
+          if (forbiddenPath(path)) throw new Error(`Chrome in the package: ${path}`);
         }
         const cwd = extracted.root;
         const environment = {
@@ -157,6 +160,7 @@ export async function verifyDistribution(directory: string) {
       version: receipt.version,
       sha512: receipt.artifact.sha512,
       inventory: true,
+      noChrome: true,
       cli: true,
       nativeImageModule: true,
       helper: true,

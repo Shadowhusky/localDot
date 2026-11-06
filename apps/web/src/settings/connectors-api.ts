@@ -50,8 +50,25 @@ export function removeConnector(api: ApiClient, id: string): Promise<void> {
   return api.del(path(id));
 }
 
-export async function signInUrl(api: ApiClient, id: string): Promise<string> {
-  return z.object({ url: z.url() }).parse(await api.post(path(id, "/sign-in"))).url;
+const SignInStarted = z.object({
+  opened: z.boolean(),
+  url: z.url().optional(),
+  expiresAt: z.number(),
+  remote: z.boolean(),
+});
+export type SignInStarted = z.infer<typeof SignInStarted>;
+
+// The daemon opens the app's sign-in page in the browser on its own computer.
+export async function startSignIn(api: ApiClient, id: string): Promise<SignInStarted> {
+  return SignInStarted.parse(await api.post(path(id, "/sign-in")));
+}
+
+export function cancelSignIn(api: ApiClient, id: string): Promise<void> {
+  return api.del(path(id, "/sign-in"));
+}
+
+export async function disconnectConnector(api: ApiClient, id: string): Promise<ConnectorView> {
+  return One.parse(await api.post(path(id, "/disconnect"))).connector;
 }
 
 // A connector's key, sealed in this page to keyd and bound to where the app sends it.

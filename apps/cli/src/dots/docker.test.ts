@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -182,6 +189,30 @@ describe("copying browser sign-ins", () => {
         ],
       },
     });
+    expect(existsSync(join(destination, "browser-engine.json"))).toBe(false);
+  });
+
+  it("carries the choice of Chrome with sign-ins Chrome has opened, but not the backup", async () => {
+    const source = folder();
+    const destination = folder();
+    writeFileSync(
+      join(source, "browser-engine.json"),
+      JSON.stringify({
+        v: 1,
+        choice: "chrome",
+        acceptedAt: "2026-11-05T00:00:00.000Z",
+        handOver: "done",
+        backup: { at: "2026-11-05T00:00:00.000Z", version: "154.0.8037.57" },
+      }),
+    );
+    const engine = docker({ volumes: [accountsVolume(source)] });
+    await copySignins(engine, { source, destination, image: "localdot/browser:dev" });
+    expect(JSON.parse(readFileSync(join(destination, "browser-engine.json"), "utf8"))).toEqual({
+      v: 1,
+      choice: "chrome",
+      acceptedAt: "2026-11-05T00:00:00.000Z",
+      handOver: "done",
+    });
   });
 
   it("refuses while the source's browser is open, and skips a dot with no sign-ins", async () => {
@@ -213,6 +244,9 @@ describe("removing a dot's Docker objects", () => {
     );
     expect(asked).toContain(`DELETE /containers/${"a".repeat(64)} {"force":"true","v":"true"}`);
     expect(asked).toContain(`DELETE /networks/${"n".repeat(64)} {}`);
+    expect(asked).toContain(
+      `DELETE /volumes/${encodeURIComponent(`${accountsVolume(home)}-backup`)} {}`,
+    );
     expect(asked).toContain("DELETE /volumes/localdot-home-x {}");
     expect(asked).toContain(`DELETE /volumes/${accountsVolume(home)} {}`);
     expect(existsSync(join(home, "computer-import.json"))).toBe(false);

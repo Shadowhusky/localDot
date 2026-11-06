@@ -22,7 +22,7 @@ export function pickFrames(
   for (let index = 0; index < plan.frames; index++) {
     const time = plan.sessionMsAt(index);
     const source =
-      plan.gapAt(index) === "user-control"
+      plan.gapAt(index) === "user-control" || plan.gapAt(index) === "other-task"
         ? "hold"
         : sourceAt(time, {
             hasVideo: !!video,

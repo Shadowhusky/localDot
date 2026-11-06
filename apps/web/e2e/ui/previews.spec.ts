@@ -1,7 +1,7 @@
 import { createServer } from "node:net";
 import { expect, type Page, test } from "@playwright/test";
 import { startUiFixture, TOKEN, type UiFixture } from "../fixtures/start-ui-fixture.ts";
-import { FIXTURE_START } from "./harness.ts";
+import { chooseView, FIXTURE_START, openFile } from "./harness.ts";
 
 // The full preview of a page and an SVG dot made: their scripts never run (inline, handlers,
 // javascript: links, a meta refresh), nothing they ask for leaves the Mac, and the frame holds only
@@ -11,8 +11,9 @@ import { FIXTURE_START } from "./harness.ts";
 const AT = ["c14", "w39"];
 // Blocking service workers injects a probe into every frame, which throws inside the sandboxed one.
 test.use({ serviceWorkers: "allow" });
-test.beforeEach(() => {
+test.beforeEach(({ page }) => {
   test.skip(!AT.includes(test.info().project.name), `Runs at ${AT.join(" and ")}`);
+  return chooseView(page, "studio");
 });
 
 function watch(page: Page, fixture: UiFixture) {
@@ -55,7 +56,7 @@ test("a page and an SVG preview inert, with nothing leaving the Mac", async ({ p
     expect(handed.ok(), await handed.text()).toBe(true);
     await page.goto(`${fixture.origin}/#token=${TOKEN}`);
     const card = page.getByRole("region", { name: "Task result" }).last();
-    await card.getByRole("button", { name: "Open summary.html", exact: true }).click();
+    await openFile(page, "summary.html", card);
 
     const frame = page.locator("iframe.viewer-frame");
     await expect(frame).toHaveAttribute("sandbox", "");
@@ -174,7 +175,7 @@ test("a slow first picture opens one stable sheet and fades in after fitting", a
       await route.continue();
     });
     const card = page.getByRole("region", { name: "Task result" }).last();
-    await card.getByRole("button", { name: "Open chart.png", exact: true }).click();
+    await openFile(page, "chart.png", card);
     const sheet = page.getByRole("dialog", { name: "chart.png" });
     await expect(sheet).toBeVisible();
     await expect(sheet.getByRole("progressbar", { name: "Loading picture" })).toBeVisible();

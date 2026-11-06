@@ -267,6 +267,56 @@ long-evidence nonterminal wait, read again, and emitted one `task.result` with o
 not a complete real multiplayer game. The temporary activation heartbeat remains disabled;
 no further automatic restart is needed.
 
+## Messages during a command
+
+Comparable agents hand a message over at the next tool boundary and let a long command go to the
+background. In localDot a message sent while dot works is a steer (the default: Enter or Send, or
+Steer now on a queued one) or a follow-up queued for after the task (Alt+Enter, or Send after this
+task). Voice messages are still queued. The model hears a steer at its next inbox fetch, which a
+running tool holds back.
+
+- A pure wait ends as soon as a steer arrives, and the model is told: `done` waiting, a `computer`
+  wait, a command's opening `sleep`. A queued follow-up also ends a wait of 5 seconds or more,
+  and reaches the model as a steer, told to finish what it was waiting for first unless the message
+  says otherwise. A shorter wait or a command leaves it queued, as does a wait when the message is
+  for another model.
+- Any other `shell` command is not stopped. If it is still running 3 seconds after a steer, its call
+  answers with the output so far and says the command goes on. It keeps its own tool lease, so Stop,
+  a takeover and a retired brain end it as they end any command, and cleanup waits for it. When it
+  ends, the model hears the result the call would have given through its inbox, with the middle of
+  long output cut.
+- The receipts are unchanged. `DesktopdTools.shell` still decides how a command ended from its
+  terminal line or a strict receipt, an unproved end still holds the computer, and `tool.end` and
+  `step.end` are written only then. Until then the step shows as running and `done` refuses to
+  finish the task. A command's own timeout (600 seconds at most) bounds all of this.
+- A message says what happened to it: "dot stopped waiting to read this" or "dot left its command
+  running to read this".
+- A message for another model than the one at work doesn't steer. Moving dot retires its brain, and
+  a retired brain ends what it has running, so the composer queues the message and says "Runs on
+  <model> after this task", and the daemon queues a steer that asks for another model all the same.
+  Switch now on such a message is the one way to move dot at once. It ends a running command, so it
+  takes a second press that says so. A message another task must take over offers neither.
+- Stop gives back a steer as it does any message: while dot has said nothing and started no call
+  since it arrived, whatever was already running. Words or a call in flight as it lands count as
+  acting on it, since nothing says when each model path read it, so it then stays in the thread.
+
+Delegated agents don't hear the user, so their commands and waits run their course. A batch of
+commands answers only once each has ended or gone to the background.
+
+## Carrying on after a restart
+
+| What restarted | What the model keeps |
+| --- | --- |
+| A page refresh | Nothing restarts. A run belongs to the daemon, not to the page watching it. |
+| The API brain's process | Everything: it reads its whole stored transcript back, and is told so. |
+| A Claude Code or Codex run | Their conversations live in memory (`persistSession: false`, `ephemeral: true`), so every new run starts from a record: task, plan, the user's messages, its own messages and its newest steps with the end of their output. A new run starts after any follow-up to a finished turn, a hand-back, Resume or a retried model call, none of which is a daemon restart. |
+| The daemon | The task ends, and Continue starts the conversation's next task. It gets what was said and a short checkpoint, not the old transcript. |
+
+A new run's prompt says the record is routine and nothing was lost. It used to open "localDot
+restarted you, so the earlier conversation is gone", which models repeated to users as "my earlier
+notes were lost when I restarted". Resuming native threads for real would need persisted threads
+and new Codex acceptance, and has not been done.
+
 ### Task state and plan synchronization
 
 The plan is a checklist, not an independent task lifecycle. Activity and expanded chat

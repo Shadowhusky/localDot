@@ -62,6 +62,8 @@ function sameCard(a: unknown, b: unknown) {
   return x.success && y.success && JSON.stringify(x.data) === JSON.stringify(y.data);
 }
 const storageKey = (cell: string) => `localdot-replacement:${cell}`;
+// How long a running replacement's status may go unanswered before it's reported.
+const REPLACEMENT_QUIET_MS = 120_000;
 // The card on screen: the task's own decision first, then a connection's, which waits behind it.
 function shownCard(
   from: { approval?: ApprovalCard | null; connection?: ApprovalCard | null } | null | undefined,
@@ -90,6 +92,7 @@ export function useSafety(props: SafetyProps) {
   const replacementRequest = useRef<ReplacementRequest | null>(null);
   const replacementAttempt = useRef<object | null>(null);
   const replacementAbort = useRef<AbortController | null>(null);
+  const replacementQuietUntil = useRef(0);
   const replacingRef = useRef(false);
   const identity = useRef({ api: props.api, cell: props.cell?.id, session: props.agent.sessionId });
   useLayoutEffect(() => {
@@ -113,6 +116,7 @@ export function useSafety(props: SafetyProps) {
     if (old.api !== props.api || old.cell !== props.cell?.id) {
       replacementAbort.current?.abort();
       replacementRequest.current = null;
+      replacementQuietUntil.current = 0;
       replacementRefusal.current = null;
       replacementSending.current = null;
       setReplacementRetry(false);
@@ -448,6 +452,10 @@ export function useSafety(props: SafetyProps) {
         setReplacement(value);
         setError(null);
         setReplacementRetry(false);
+        replacementQuietUntil.current =
+          value.phase === "ready" || value.phase === "blocked"
+            ? 0
+            : Date.now() + REPLACEMENT_QUIET_MS;
         if (value.phase === "ready" && value.newCellId) {
           // Even a successful mutation reply must pass a separate current status read and an unheld Ready cell read.
           const selected = await current.current.selectReady(value.newCellId);
@@ -482,6 +490,12 @@ export function useSafety(props: SafetyProps) {
           // Status can race the POST before its durable record exists. The mutation
           // still owns the outcome; a speculative read must not report it as failed.
           if (replacementSending.current) return;
+          if (
+            failure instanceof ControlFailure &&
+            failure.uncertain &&
+            Date.now() < replacementQuietUntil.current
+          )
+            return;
           // A rejected POST has no durable record. Retain its idempotency key, but
           // let the user retry instead of polling a 404 forever with a disabled button.
           setReplacementRetry(true);
@@ -602,6 +616,16 @@ export function useSafety(props: SafetyProps) {
         current.current.api !== p.api ||
         current.current.cell?.id !== id ||
         current.current.cell.fenced?.revision !== revision
+      )
+        return false;
+      // Copying a large home outlasts the request's wait. Once its status has been seen running,
+      // that status, not this reply, says how it went.
+      if (
+        failure instanceof ControlFailure &&
+        failure.uncertain &&
+        !failure.detail &&
+        replacementRequest.current &&
+        Date.now() < replacementQuietUntil.current
       )
         return false;
       replacementRefusal.current =

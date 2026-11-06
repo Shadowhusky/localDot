@@ -46,6 +46,15 @@ describe("notifications copy", () => {
     expect(deviceCopy({ kind: "this-mac" }).action).toBeNull();
   });
 
+  it("steers a Home Screen install away from an address an iPhone doesn't trust", () => {
+    expect(deviceCopy({ kind: "needs-home-screen" }).line).not.toMatch(/certificate/);
+    const { line, action } = deviceCopy({ kind: "needs-home-screen", bareAddress: true });
+    expect(line).toMatch(/Tailscale link/);
+    expect(line).toMatch(/certificate/);
+    expect(line).toMatch(/Add to Home Screen/);
+    expect(action).toBe("copy-link");
+  });
+
   it("turns failures into plain sentences, never raw errors", () => {
     expect(errorLine(new ApiError(503, "the key layer is offline"))).toMatch(/key protection/);
     expect(

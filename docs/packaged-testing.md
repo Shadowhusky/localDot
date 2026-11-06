@@ -54,10 +54,12 @@ silicon/Intel hardware, prerequisites and live computer startup have been exerci
 1. Build and test all four computer images for each advertised architecture. Publish only clean
    image builds from the reviewed Dockerfiles, never commits of a user's computer. Record registry
    manifest digests, not local image IDs. Verify anonymous access after making packages public.
+   Then scan those digests for Chrome, which must never ship:
+   `node scripts/release/no-chrome.mjs --out /path/to/no-chrome.json <image>…` (or the input JSON below).
 2. Upload only `localdot-<version>-<target>.tgz` to a prerelease in `Shadowhusky/localdot`,
    with `docs/releases/<version>.md` as its text (`gh release create … --notes-file`). Under it,
    say which actual platforms were tested and any remaining limitations.
-3. Create an input JSON with `packages` (candidate directories), `images` (architecture → role →
+3. Create an input JSON with `noChrome` (that file), `packages` (candidate directories), `images` (architecture → role →
    GHCR digest), `key` (private signing key path), `output` (new static site directory),
    and `legacyCatalog` (the previously published, signed `channels/testing.json`).
 4. Run `node --experimental-transform-types scripts/distribution/assemble.ts /path/to/input.json`.

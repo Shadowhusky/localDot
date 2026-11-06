@@ -39,6 +39,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/nativepid"
 	"github.com/shadowhusky/localdot/keyd/internal/nativewatch"
 	"github.com/shadowhusky/localdot/keyd/internal/netguard"
+	"github.com/shadowhusky/localdot/keyd/internal/oauth"
 	"github.com/shadowhusky/localdot/keyd/internal/servicelease"
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
 	"github.com/shadowhusky/localdot/keyd/internal/webpush"
@@ -164,6 +165,7 @@ type Daemon struct {
 	lock         *os.File
 	log          *audit.Log
 	manager      *egress.Manager
+	tokens       *oauth.Broker
 	server       *http.Server
 	closeOnce    sync.Once
 	cancel       context.CancelFunc
@@ -261,11 +263,14 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	local := keys.LocalRoutes()
 	d.public = &netguard.Public{}
 	guard := netguard.New(netguard.WithPublic(netguard.InterfacePrefixes, d.public))
+	dialer := &netguard.Dialer{Guard: guard, Resolver: net.DefaultResolver}
+	d.tokens = oauth.New(oauth.Deps{Store: store, Vault: v, Client: oauth.Client(dialer.DialContext, nil), Audit: d.log})
 	d.manager = egress.NewManager(egress.ManagerDeps{
 		Deps: egress.Deps{
 			Registry: registry, Vault: v, Audit: d.log, Events: hub,
-			Dialer: &netguard.Dialer{Guard: guard, Resolver: net.DefaultResolver},
+			Dialer: dialer,
 			Budget: budget, Settings: settings, Local: local, LocalDialer: egress.PinnedFor(local),
+			Tokens: d.tokens,
 		},
 		Ports:    cfg.Ports,
 		CellsDir: cells,
@@ -275,7 +280,7 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	api := &admin.Server{Manager: d.manager, Vault: v, Logins: vault.NewLogins(store), Registry: registry, Opener: opener, Settings: settings,
+	api := &admin.Server{Manager: d.manager, Vault: v, Logins: vault.NewLogins(store), Tokens: d.tokens, Registry: registry, Opener: opener, Settings: settings,
 		Budget: budget, Audit: d.log, Events: hub, BootID: d.BootID, Version: version, Hairpin: d.public,
 		VaultState: backend.state, Unlock: backend.unlock, Home: cfg.Home}
 	if cfg.Service != nil {
@@ -360,6 +365,9 @@ func (d *Daemon) Close() {
 		// Server.Close interrupts socket reads but does not wait for handlers.
 		// Keep the home lock until every admitted admin mutation has returned.
 		d.handlers.Wait()
+		if d.tokens != nil {
+			d.tokens.Close()
+		}
 		d.learning.Wait()
 		if d.log != nil {
 			d.log.Write(audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "stop", Detail: "boot " + d.BootID})

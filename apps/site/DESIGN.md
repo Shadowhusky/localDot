@@ -57,18 +57,22 @@ back reverses it exactly. Copy lives in the DOM in reading order.
   the app. A tablet on its side keeps the rail beside the stage; a small phone drops the subheading;
   a phone on its side drops the headline.
 - In the window, the app's top bar has its wordmark, the replayed task's title marked "Replay", and
-  Watch/Replay. Desktop: the Theatre plays the demo, dot sits docked under it with its caption, and
-  the rail has Chat and Activity. Phone: the app's phone layout, without its top bar.
-- Nothing pretends to take a request. Where the composer would be, a one-line note says "A replay.
-  A real task with DeepSeek V4.1 Flash, sped up." The top bar has Get localDot.
+  Watch/Replay. Desktop: the app's Studio view, with a slim rail of the tasks' dots on the left, the
+  Theatre playing the demo, dot docked under it with its caption, and the rail with Chat and
+  Workspace. Phone: the app's phone layout, without its top bar.
+- Nothing pretends to take a request. Where the composer rests, folded to one row, a one-line note
+  says "A replay. A real task with DeepSeek V4.1 Flash, sped up." The top bar has Get localDot.
 - The page opens still on the app as it starts: the empty chat greets the visitor in dot's voice
   for their time of day and offers the demos, each with the dot that did it. Nothing plays until
   one is picked, so the window never changes under the visitor. The story shows a task at work from
   its Watch chapter, so reaching it without picking starts the first; a page reopened a little way
   down stays still.
 - Choosing a demo shows its request as the conversation's first message; dot listens a moment, then
-  steps stream in, the plan fills and the Theatre plays. The docked dot stays in its own skin with
-  its own face, following the work with its eyes. It ends on a result card: the task's files with
+  steps stream in, the plan fills and the Theatre plays. Each task has a dot of its own, in the
+  picker, the rail and the dock: the dot for that job with an accessory, as the app tells its tasks
+  apart. The app draws from a bigger wardrobe, but this dot has to wear it in 3D, so a task keeps to
+  what has a model. The docked dot keeps its own face, following the work with its eyes, and leaves
+  the look in the dock as it steps out. It ends on a result card: the task's files with
   their real previews, moments from the recording that replay from that point, and the next demos
   to try.
 - A link to a chapter far down the page fades the stage out, cuts there and fades back in, instead
@@ -90,8 +94,9 @@ back reverses it exactly. Copy lives in the DOM in reading order.
 
 - The screen comes back beside dot as its monitor, and dot watches it work.
 - Copy: "Watch me work." / "Live, from your laptop or your phone. You see every click and keystroke
-  as it happens." Then "Step in any time." with a "Take control" control that turns the xenon glow
-  off and gives the pointer to the visitor; dot shows its your-turn face.
+  as it happens." Then "Step in any time." / "Send a message and I read it at my next step. Or take
+  control and the mouse is yours." with a "Take control" control that turns the xenon glow off and
+  gives the pointer to the visitor; dot shows its your-turn face.
 - As those words come, dot's game comes to its screen: the replay speeds through dot's work to it
   (up to 16 times, easing off to land), or winds back through the game if it has passed it, and
   from another task the screen crossfades into it; the island says which. While the visitor reads,
@@ -102,18 +107,36 @@ back reverses it exactly. Copy lives in the DOM in reading order.
   moves the paddle, and the arrow keys, Space, P and R work as the page says. "Hand back" fades the
   game into the recording, which plays on. Anywhere else their pointer shows on dot's screen and
   their clicks land there.
-- "You decide how often I ask." with an Ask / Auto / Full access control: dot's face shows how often
-  it checks in.
+- "You decide how often I ask." with a Custom / Auto / Full access control, the app's own names.
 
-### 4. Any model
+### 4. Text me, or sit beside me
+
+- "Text me." A phone rises in front of the window, which dims behind it, on Chat's list of
+  conversations, captured from the app: four tasks under way and earlier ones, each with its dressed
+  dot. dot looks up at it.
+- "Or sit beside me." The window comes forward whole, Studio, and the phone comes down to its corner
+  as the window's task opens on it over the list: Chat, the app's own bar, bubbles and foot, with dot
+  and a small live picture of the computer, fed by the same recording as the window. It is the same
+  task, shown the other way. Copy: "Studio keeps my computer, the chat and every step on one screen.
+  Choose when you set up and switch any time, on each device."
+- "Several at once." The phone goes, and the app with several tasks under way, captured in Studio,
+  comes up in front of the dimmed window: each task's dot in the rail, and dot reading Wikivoyage in
+  its own browser window, a frame of the Kyoto demo. Where the stage stands tall it is Studio at a
+  tablet's size. Copy: "Each task gets its own dot and browser window, and they share your sign-ins,
+  so two can work in the same site. Routines bring regular jobs back on schedule."
+- With reduced motion the chapter is one still: the window with the phone at its corner, and the
+  picture of several tasks over it while its words show.
+
+### 5. Any model
 
 - A ring of the twelve best-known provider names orbits dot, tilted so the near side passes below
   it and the far side above; the front one lights up as the ring turns with scroll. More names
   would crowd the near side.
 - Copy: "Use any model." / "An API key from any of 25 providers, your ChatGPT or Claude plan, or a
-  model running on your own machine." The count comes from `packages/providers` at build time.
+  model running on your own machine. Choose per task or per message, and the steps show which model
+  did them." The count comes from `packages/providers` at build time.
 
-### 5. Rewind, then share
+### 6. Rewind, then share
 
 - The screen returns in Replay mode; scroll scrubs the task back through its steps.
 - The screen gives way to three real clips the app exported from the Breakout recording: with
@@ -122,7 +145,7 @@ back reverses it exactly. Copy lives in the DOM in reading order.
   "Trim to the moment, speed it up as much as 16 times, add captions, and keep me under the picture
   or in its corner. Then save it as a video."
 
-### 6. A dot for every job
+### 7. A dot for every job
 
 - dot on a turntable. Each beat of scroll sends it into a spin-jump: a crouch, a leap into a full
   turn that springs a little past and settles, the outfit changing halfway round, facing away, and a
@@ -134,13 +157,13 @@ back reverses it exactly. Copy lives in the DOM in reading order.
 - Then all six stand in a row: "Pick yours." Accessories (cap, shades, bow, star) can be tried on,
   and every dot in the row wears the choice.
 
-### 7. Yours
+### 8. Yours
 
 - Copy: "Open source, and yours." / "MIT licensed. The app, my computer and every recording stay on
   your machine, and your keys live in a local vault."
 - dot pins on its star next to the GitHub link.
 
-### 8. Get localDot
+### 9. Get localDot
 
 - The install card: macOS, Windows, Linux, the copy button, the install guide. dot greets it with
   happy eyes and a hop. On a phone the command wraps so all of it can be read before running it.
@@ -163,11 +186,13 @@ back reverses it exactly. Copy lives in the DOM in reading order.
   differ shows, and they hold to be read; and the name lands on the last hit.
 - The film has a Chinese cut, rendered from the same composition, for the Chinese page.
 - It uses the site's own 3D dot, lit and shaded as on the page, so the two always match.
+- Beside "Watch the film" in chapter 2, "See what's new" opens the update video in the same sheet. Its
+  link is in the page only when the build has `public/film/localdot-update.mp4`.
 
 ## Places
 
-- The address names the beat the story is at (`#hello`, `#watch`, `#step-in`, `#ask`, `#models`,
-  `#replay`, `#share`, `#dots`, each dot's own, `#pick`, `#yours`, `#get`), updated in place as the
+- The address names the beat the story is at (`#hello`, `#watch`, `#step-in`, `#ask`, `#chat`,
+  `#studio`, `#several`, `#models`, `#replay`, `#share`, `#dots`, each dot's own, `#pick`, `#yours`, `#get`), updated in place as the
   visitor scrolls, never adding to the history.
 - Opened at a place, by a reload or a shared link, the page lands on that beat at once, where its
   words show whole; the story never plays down to it, and the browser does not restore the scroll
@@ -225,6 +250,13 @@ layout and display type.
   the scene; the WebGL layer punches a transparent hole there, so the live app shows through and dot
   can pass in front of it. At rest the transform is removed so text stays sharp.
 - Provider ring: provider names are HTML positioned from the ring's 3D points.
+- The phone and the picture of several tasks in chapter 4 are HTML too, placed with a CSS `matrix3d`
+  as the export clips are (`scene/panel.ts`), from keys in fractions of the stage, so they sit right
+  at any size. Their code, styles and pictures load only as the story nears them, and they can't be
+  pressed or read out: they show what the words already say. The phone's Chat keeps dot's line in the
+  thread's flow, not sticky as in the app: WebKit measures sticky against the phone's scaled size.
+- The pictures in `public/screens` are captured from the app's UI fixture by
+  `apps/web/e2e/ui/readme-capture.ts`, in dark, at twice the size the site lays them out.
 - Fallback without WebGL: the app's 2D DotView with its plates, and the chapters as plain sections.
 
 ## Demos

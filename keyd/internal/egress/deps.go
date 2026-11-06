@@ -51,4 +51,11 @@ type Deps struct {
 	// Local are the gateway's routes to model servers on the Mac; LocalDialer reaches only them.
 	Local       map[string]keys.Binding
 	LocalDialer Dialer
+	// Tokens keeps signed-in apps' access tokens good to send; nil means there are none.
+	Tokens TokenKeeper
+}
+
+// TokenKeeper is satisfied by *oauth.Broker.
+type TokenKeeper interface {
+	Fresh(ctx context.Context, secretID string) error
 }

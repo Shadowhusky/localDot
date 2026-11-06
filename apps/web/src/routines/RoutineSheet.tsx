@@ -30,8 +30,8 @@ export interface RoutineSheetProps {
   target: RoutineTarget | null;
   onClose(): void;
   onWatch?(sessionId: string): void;
-  // Goes to the task a waiting run asks in.
-  onAnswer?(): void;
+  // Opens the routine's conversation, which goes on from the task of any of its runs.
+  onConversation?(sessionId: string): void;
   returnFocus?: RefObject<HTMLElement | null>;
 }
 
@@ -41,7 +41,7 @@ export function RoutineSheet({
   target,
   onClose,
   onWatch,
-  onAnswer,
+  onConversation,
   returnFocus,
 }: RoutineSheetProps) {
   const zone = routines.reply?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -78,9 +78,8 @@ export function RoutineSheet({
   const save = async () => {
     if (!form) return;
     const result = draftFromForm(form, {
-      tz: zone,
       now: Date.now(),
-      ...(target?.mode === "detail" && routine ? { saved: routine.when } : {}),
+      ...(target?.mode === "detail" && routine ? { saved: routine } : {}),
     });
     if (!result.ok) {
       setErrors(result.errors);
@@ -93,7 +92,10 @@ export function RoutineSheet({
       if (target?.mode === "new") return api.create(draft);
       if (!routine) throw new Error("gone");
       if (target?.mode === "confirm")
-        return api.confirm(routine.id, { revision: routine.revision, edits: draft });
+        return api.confirm(routine.id, {
+          revision: routine.revision,
+          edits: { ...draft, until: draft.until ?? null },
+        });
       return api.update(routine.id, {
         ...draft,
         revision: routine.revision,
@@ -182,7 +184,7 @@ export function RoutineSheet({
             routine={routine}
             routines={routines}
             onWatch={onWatch}
-            onAnswer={onAnswer}
+            onConversation={onConversation}
           />
         ) : (
           <EmptyState title="This routine was deleted" icon="repeat" />
@@ -210,12 +212,12 @@ function RoutineDetail({
   routine,
   routines,
   onWatch,
-  onAnswer,
+  onConversation,
 }: {
   routine: Routine;
   routines: RoutinesView;
   onWatch?(sessionId: string): void;
-  onAnswer?(): void;
+  onConversation?(sessionId: string): void;
 }) {
   const [runs, setRuns] = useState<readonly RoutineRun[] | undefined>(undefined);
   const lastRun = routine.lastRun;
@@ -238,6 +240,7 @@ function RoutineDetail({
 
   const on = routine.state === "active";
   const switchable = routine.state === "active" || routine.state === "paused";
+  const conversation = runs?.find((run) => run.sessionId)?.sessionId;
   return (
     <div className="routine-detail">
       {routine.keepAsked && (
@@ -305,7 +308,17 @@ function RoutineDetail({
         <GroupRow label="Spending limit per run" trailing={budgetText(routine.budgetUSD)} />
       </Group>
       <div>
-        <GroupHead title="Recent runs" />
+        <GroupHead
+          title="Recent runs"
+          aside={
+            conversation &&
+            onConversation && (
+              <Button variant="quiet" size="sm" onClick={() => onConversation(conversation)}>
+                Open conversation
+              </Button>
+            )
+          }
+        />
         <RunHistory
           runs={runs}
           tz={routine.tz}
@@ -316,7 +329,7 @@ function RoutineDetail({
               onWatch(sessionId);
             })
           }
-          onAnswer={onAnswer}
+          onAnswer={onConversation}
         />
       </div>
     </div>

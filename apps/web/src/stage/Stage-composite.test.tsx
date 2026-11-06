@@ -1,0 +1,334 @@
+// @vitest-environment jsdom
+import type { ManualStreamInput, ScreenSelectionSnapshot } from "@localdot/protocol";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CellSummary } from "../cells/types.ts";
+import { createApi } from "../lib/api.ts";
+import { FakeWorker, fakeChromium, playInClient } from "../testing/fake-chromium.ts";
+import { closeStreams } from "./live-stream.ts";
+import { Stage } from "./Stage.tsx";
+import type { StageFront } from "./useStageFront.ts";
+import { UNDER_AWAKE_MS, UNDER_REFRESH_MS } from "./useUnderDesktop.ts";
+
+const DESKTOP = "01JXYZ0000000000000000AAAA";
+const BROWSER = "01JXYZ0000000000000000BBBB";
+const cell = (id: string): CellSummary => ({
+  id,
+  state: "ready",
+  scale: 2,
+  createdAt: "2026-10-01T10:00:00.000Z",
+  stream: { connection: "none", viewers: 0, lastUpstreamAt: null },
+});
+const geometry = { w: 2560, h: 1600, scale: 2 as const };
+const onBrowser: ScreenSelectionSnapshot = {
+  screen: "browser",
+  cellId: BROWSER,
+  geometry,
+  revision: 2,
+};
+const onDesktop: ScreenSelectionSnapshot = {
+  screen: "desktop",
+  cellId: DESKTOP,
+  geometry,
+  revision: 3,
+};
+
+const frames = (of: "desktop" | "browser") =>
+  [...document.querySelectorAll<HTMLIFrameElement>("iframe.desktop-frame")].filter((frame) =>
+    frame.src.includes(`/${of}/`),
+  );
+const worker = () => FakeWorker.instances[0];
+const sent = (type: string) =>
+  worker()
+    ?.sent.filter((row) => row.message.type === type)
+    .map((row) => row.message) ?? [];
+const fakeTimers = () =>
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
+    shouldAdvanceTime: true,
+  });
+
+function daemon() {
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const browser = String(input).includes("browser-stream-ticket");
+    const id = browser ? BROWSER : DESKTOP;
+    const path = `/cells/${id}/${browser ? "browser" : "desktop"}/${"T".repeat(22)}/`;
+    return Response.json({ ticket: "T", cellId: id, path });
+  });
+  return { api: createApi("a".repeat(43), { fetchImpl }), fetchImpl };
+}
+
+describe("the stage's one screen", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = fakeChromium();
+  });
+  afterEach(() => {
+    cleanup();
+    closeStreams();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    restore();
+  });
+
+  const props = (api: ReturnType<typeof daemon>["api"]) => ({
+    api,
+    reconnects: 0,
+    listed: [DESKTOP],
+    parentId: DESKTOP,
+    parent: cell(DESKTOP),
+  });
+  const underStats = (presented = 1) =>
+    act(() =>
+      worker()?.onmessage?.({
+        data: {
+          type: "stats",
+          under: true,
+          sourceId: sent("frames").findLast((message) => message.under)?.sourceId,
+          stats: { presented, fps: 30, lastFrameAt: 1, width: 2560, height: 1600 },
+        },
+      }),
+    );
+  const mainStats = () =>
+    act(() =>
+      worker()?.onmessage?.({
+        data: {
+          type: "stats",
+          sourceId: sent("frames").findLast((message) => !message.under)?.sourceId,
+          stats: { presented: 1, fps: 30, lastFrameAt: 1, width: 2560, height: 1600 },
+        },
+      }),
+    );
+  async function bothOn(api: ReturnType<typeof daemon>["api"], extra = {}) {
+    const view = render(
+      <Stage {...props(api)} cell={cell(BROWSER)} selection={onBrowser} {...extra} />,
+    );
+    await waitFor(() => expect(frames("browser")).toHaveLength(1));
+    await waitFor(() => expect(frames("desktop")).toHaveLength(1));
+    const send = vi.fn();
+    const desktop = frames("desktop")[0] as HTMLIFrameElement;
+    Object.assign(desktop.contentWindow as object, { selkiesTransport: { readyState: 1, send } });
+    playInClient(frames("browser")[0] as HTMLIFrameElement, "browser-track");
+    playInClient(desktop, "desktop-track");
+    await waitFor(() => expect(sent("frames").filter((m) => m.under)).toHaveLength(1));
+    await waitFor(() => expect(sent("frames").filter((m) => !m.under)).toHaveLength(1));
+    return { view, send };
+  }
+
+  it("tells the worker which screen is in front, on the desktop's own size", async () => {
+    const { api } = daemon();
+    render(<Stage {...props(api)} cell={cell(DESKTOP)} selection={onDesktop} />);
+    await waitFor(() => expect(sent("view").some((message) => message.view)).toBe(true));
+    expect(
+      sent("view").findLast(
+        (message) => (message.view as { composite?: unknown }).composite !== undefined,
+      )?.view,
+    ).toEqual({ composite: { front: "desktop", desktop: { w: 2560, h: 1600 } } });
+    // With the desktop in front there is one stream.
+    await waitFor(() => expect(frames("desktop")).toHaveLength(1));
+    expect(frames("browser")).toHaveLength(0);
+  });
+
+  it("puts the web browser's entry on the desktop's menu bar, and no switch by the picture", async () => {
+    const { api } = daemon();
+    const pick = vi.fn();
+    const front: StageFront = {
+      screen: "desktop",
+      dot: "desktop",
+      browser: undefined,
+      problem: null,
+      pick,
+      route: (input) => input,
+    };
+    render(<Stage {...props(api)} cell={cell(DESKTOP)} selection={onDesktop} front={front} />);
+    const entry = await screen.findByRole("button", { name: "Show the web browser" });
+    expect(entry.closest(".desktop-bar-screen")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /^(desktop|web browser)$/i })).toBeNull();
+    fireEvent.click(entry);
+    expect(pick).toHaveBeenCalledWith("browser");
+  });
+
+  it("draws one screen in Replay, and no desktop under it", () => {
+    const { api, fetchImpl } = daemon();
+    render(<Stage {...props(api)} mode="replay" cell={null} />);
+    expect(
+      sent("view").findLast(
+        (message) => (message.view as { composite?: unknown }).composite !== undefined,
+      )?.view,
+    ).toEqual({ composite: null });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps the desktop under the window as a picture, refreshed now and then", async () => {
+    fakeTimers();
+    const { api } = daemon();
+    const { send } = await bothOn(api);
+    const stops = () => send.mock.calls.filter(([text]) => text === "STOP_VIDEO").length;
+    expect(stops()).toBe(0);
+    underStats();
+    // A fresh picture has time to come, then nothing is decoded.
+    await act(() => vi.advanceTimersByTimeAsync(UNDER_AWAKE_MS + 10));
+    expect(stops()).toBe(1);
+    expect(frames("desktop")).toHaveLength(1);
+    send.mockClear();
+    await act(() => vi.advanceTimersByTimeAsync(UNDER_REFRESH_MS));
+    expect(send).toHaveBeenCalledWith("START_VIDEO");
+    expect(send).toHaveBeenCalledWith("REQUEST_KEYFRAME");
+  });
+
+  it("keeps the desktop live while the user's hands may reach it", async () => {
+    fakeTimers();
+    const { api } = daemon();
+    const manual = {
+      enabled: true,
+      screen: { w: 2560, h: 1600 },
+      pointer: "click" as const,
+      send: vi.fn(),
+    };
+    const { send } = await bothOn(api, { manual });
+    underStats();
+    await act(() => vi.advanceTimersByTimeAsync(UNDER_AWAKE_MS + 10));
+    expect(send).not.toHaveBeenCalledWith("STOP_VIDEO");
+  });
+
+  it("uses the stream it already has when the desktop comes forward", async () => {
+    const { api, fetchImpl } = daemon();
+    const { view } = await bothOn(api);
+    const minted = fetchImpl.mock.calls.filter(([url]) =>
+      String(url).includes("/stream-ticket"),
+    ).length;
+    view.rerender(<Stage {...props(api)} cell={cell(DESKTOP)} selection={onDesktop} />);
+    await waitFor(() =>
+      expect(
+        sent("view").findLast(
+          (message) => (message.view as { composite?: unknown }).composite !== undefined,
+        )?.view,
+      ).toEqual({ composite: { front: "desktop", desktop: { w: 2560, h: 1600 } } }),
+    );
+    await waitFor(() => expect(sent("stop").some((message) => message.under)).toBe(true));
+    expect(
+      fetchImpl.mock.calls.filter(([url]) => String(url).includes("/stream-ticket")),
+    ).toHaveLength(minted);
+    expect(frames("desktop")).toHaveLength(1);
+  });
+
+  describe("under the user's hands", () => {
+    const rect = {
+      left: 0,
+      top: 0,
+      width: 1280,
+      height: 800,
+      right: 1280,
+      bottom: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    };
+    async function held(front?: Partial<StageFront>) {
+      vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(rect);
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(readonly report: ResizeObserverCallback) {}
+          observe() {
+            this.report(
+              [{ contentRect: { width: 1280, height: 800 } }] as ResizeObserverEntry[],
+              this as unknown as ResizeObserver,
+            );
+          }
+          disconnect() {}
+        },
+      );
+      const { api } = daemon();
+      const sendInput = vi.fn<(input: ManualStreamInput) => void>();
+      const pick = vi.fn();
+      const stageFront: StageFront = {
+        screen: "browser",
+        dot: "browser",
+        browser: onBrowser,
+        problem: null,
+        pick,
+        route: (input) => input,
+        ...front,
+      };
+      await bothOn(api, {
+        front: stageFront,
+        manual: { enabled: true, screen: { w: 2560, h: 1600 }, pointer: "click", send: sendInput },
+      });
+      mainStats();
+      const surface = document.querySelector(".manual-surface") as HTMLElement;
+      await waitFor(() => expect(surface.hasAttribute("data-live")).toBe(true));
+      return { surface, sendInput, pick };
+    }
+    const press = (surface: HTMLElement, clientX: number, clientY: number) => {
+      const at = { pointerId: 1, pointerType: "mouse", button: 0, clientX, clientY };
+      fireEvent.pointerDown(surface, at);
+      fireEvent.pointerUp(surface, at);
+    };
+
+    it("sends a press on the window to the browser's own pixels", async () => {
+      const { surface, sendInput, pick } = await held();
+      press(surface, 640, 412);
+      const down = sendInput.mock.calls.map(([input]) => input).find((i) => i.kind === "down");
+      expect(down).toMatchObject({
+        screen: "browser",
+        at: { x: 1280, y: Math.floor((824 - 48) / 0.97) },
+      });
+      expect(Object.keys((down as { at: object }).at)).toEqual(["x", "y"]);
+      expect(pick).not.toHaveBeenCalled();
+    });
+
+    it("sends a press on the bar to the desktop, and brings it forward once it lets go", async () => {
+      const { surface, sendInput, pick } = await held();
+      const at = { pointerId: 1, pointerType: "mouse", button: 0, clientX: 640, clientY: 10 };
+      fireEvent.pointerDown(surface, at);
+      expect(sendInput.mock.calls.at(-1)?.[0]).toMatchObject({
+        kind: "down",
+        screen: "desktop",
+        at: { x: 1280, y: 20 },
+      });
+      expect(pick).not.toHaveBeenCalled();
+      fireEvent.pointerUp(surface, at);
+      expect(sendInput.mock.calls.at(-1)?.[0]).toMatchObject({ kind: "up", screen: "desktop" });
+      expect(pick).toHaveBeenCalledWith("desktop");
+    });
+
+    it("brings the desktop forward from a press beside the window, and sends it nothing", async () => {
+      const { surface, sendInput, pick } = await held();
+      press(surface, 4, 400);
+      expect(sendInput).not.toHaveBeenCalled();
+      expect(pick).toHaveBeenCalledWith("desktop");
+    });
+
+    it("scrolls the screen under the pointer", async () => {
+      const { surface, sendInput } = await held();
+      fireEvent.wheel(surface, { clientX: 640, clientY: 412, deltaY: 120, deltaMode: 0 });
+      fireEvent.wheel(surface, { clientX: 640, clientY: 10, deltaY: 120, deltaMode: 0 });
+      await waitFor(() =>
+        expect(
+          sendInput.mock.calls.map(([input]) => [input.kind, "screen" in input && input.screen]),
+        ).toEqual([
+          ["scroll", "browser"],
+          ["scroll", "desktop"],
+        ]),
+      );
+    });
+
+    it("says where keys go: to the window in front", async () => {
+      await held();
+      expect(screen.getByLabelText("Type on the computer").getAttribute("aria-description")).toBe(
+        "Keys go to the web browser's window.",
+      );
+    });
+
+    it("keeps a drag on its own screen, at that screen's edge", async () => {
+      const { surface, sendInput } = await held();
+      const at = { pointerId: 1, pointerType: "mouse", button: 0 };
+      fireEvent.pointerDown(surface, { ...at, clientX: 640, clientY: 400 });
+      fireEvent.pointerMove(surface, { ...at, clientX: 640, clientY: 2 });
+      fireEvent.pointerUp(surface, { ...at, clientX: 640, clientY: 2 });
+      const moved = sendInput.mock.calls.map(([input]) => input).filter((i) => i.kind === "up")[0];
+      expect(moved).toMatchObject({ screen: "browser", at: { y: 0 } });
+    });
+  });
+});

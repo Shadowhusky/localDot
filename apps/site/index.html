@@ -66,12 +66,20 @@
     </div>
     <section id="hero" class="hero" aria-label="A replay of localDot at work" data-i18n-label></section>
     <canvas id="scene" class="site-scene" aria-hidden="true"></canvas>
+    <div class="site-phone" data-phone aria-hidden="true" inert><img class="site-phone-list" data-src="/screens/chat-list.webp" alt="" width="390" height="800" decoding="async" /></div>
+    <picture class="site-several" aria-hidden="true">
+      <source media="(max-aspect-ratio: 4/5)" data-srcset="/screens/several-tall.webp" width="820" height="1180" />
+      <img data-src="/screens/several.webp" alt="" width="1440" height="900" decoding="async" />
+    </picture>
     <div class="site-chapters">
       <section class="chapter" data-chapter="out" aria-labelledby="hello-title">
         <div class="beat" data-place="hello" data-span="0.66 1.1">
           <h2 id="hello-title" data-i18n>Hi, I'm dot.</h2>
           <p data-i18n>I do real work on a computer of my own, right on yours.</p>
-          <a class="site-button" href="/film/localdot-film.mp4" data-film><span class="film-play" aria-hidden="true"></span><span data-i18n>Watch the film</span></a>
+          <div class="film-links">
+            <a class="site-button" href="/film/localdot-film.mp4" data-film><span class="film-play" aria-hidden="true"></span><span data-i18n>Watch the film</span></a>
+            <!-- update-film --><a class="site-button site-button-quiet" href="/film/localdot-update.mp4" data-film="update"><span class="film-play" aria-hidden="true"></span><span data-i18n>See what's new</span></a><!-- /update-film -->
+          </div>
         </div>
       </section>
       <section class="chapter" data-chapter="watch" aria-label="Watch dot work" data-i18n-label>
@@ -81,7 +89,7 @@
         </div>
         <div class="beat" data-place="step-in" data-span="0.4 0.7">
           <h2 data-i18n>Step in any time.</h2>
-          <p data-i18n>Take control and the mouse is yours. Hand it back and I pick up where you left off.</p>
+          <p data-i18n>Send a message and I read it at my next step. Or take control and the mouse is yours.</p>
           <button type="button" class="site-button" data-act="control" data-i18n>Take control</button>
         </div>
         <div class="beat" data-place="ask" data-span="0.7 0.98">
@@ -89,16 +97,30 @@
           <p data-permission-copy data-i18n>Routine steps just happen. Anything risky waits for you.</p>
           <fieldset class="site-segments">
             <legend class="sr-only" data-i18n>How often dot asks</legend>
-            <label><input type="radio" name="permission" value="ask" /><span data-i18n>Ask</span></label>
+            <label><input type="radio" name="permission" value="ask" /><span data-i18n>Custom</span></label>
             <label><input type="radio" name="permission" value="auto" checked /><span data-i18n>Auto</span></label>
             <label><input type="radio" name="permission" value="full" /><span data-i18n>Full access</span></label>
           </fieldset>
         </div>
       </section>
+      <section class="chapter" data-chapter="views" aria-label="Chat and Studio" data-i18n-label>
+        <div class="beat" data-place="chat" data-span="0.05 0.4">
+          <h2 data-i18n>Text me.</h2>
+          <p data-i18n>Chat works like messaging me, with my computer a tap away. It's where a phone starts.</p>
+        </div>
+        <div class="beat" data-place="studio" data-span="0.4 0.7">
+          <h2 data-i18n>Or sit beside me.</h2>
+          <p data-i18n>Studio keeps my computer, the chat and every step on one screen. Choose when you set up and switch any time, on each device.</p>
+        </div>
+        <div class="beat" data-place="several" data-span="0.7 0.98">
+          <h2 data-i18n>Several at once.</h2>
+          <p data-i18n>Each task gets its own dot and browser window, and they share your sign-ins, so two can work in the same site. Routines bring regular jobs back on schedule.</p>
+        </div>
+      </section>
       <section class="chapter" data-chapter="models" aria-labelledby="models-title">
         <div class="beat" data-place="models" data-span="0.06 0.96">
           <h2 id="models-title" data-i18n>Use any model.</h2>
-          <p data-i18n="models.body">An API key from any of <!-- provider-count --> providers, your ChatGPT or Claude plan, or a model running on your own machine. Switch whenever you like.</p>
+          <p data-i18n="models.body">An API key from any of <!-- provider-count --> providers, your ChatGPT or Claude plan, or a model running on your own machine. Choose per task or per message, and the steps show which model did them.</p>
         </div>
         <ul class="ring" aria-label="Some of the models dot can use" data-i18n-label><!-- ring --></ul>
       </section>
@@ -127,7 +149,7 @@
         </ol>
         <div class="beat" data-place="pick" data-span="0.8 0.98">
           <h2 data-i18n>Pick yours.</h2>
-          <p data-i18n>Choose when you set up and change any time: just press me. Then give your localDot a look of its own.</p>
+          <p data-i18n>Choose when you set up and change any time: just press me. Every task wears a look of its own, and your localDot can have an accessory too.</p>
           <fieldset class="site-segments">
             <legend class="sr-only" data-i18n>Accessory</legend>
             <label><input type="radio" name="accessory" value="" checked /><span data-i18n>None</span></label>

@@ -1,31 +1,32 @@
 import { chmodSync } from "node:fs";
 import { join } from "node:path";
 import {
+  describeSchedules,
+  isOneOff,
+  localDateOf,
   MissedPolicy,
+  nextDue,
   PausedReason,
   ROUTINE_DEFAULTS,
   ROUTINE_LIMITS,
   type Routine,
   RoutineDraft,
+  RoutineEdits,
   RoutineNotify,
   RoutineOutcome,
   RoutineProfile,
   type RoutineRun,
+  type RoutineSchedule,
+  RoutineSchedules,
   RoutineState,
+  type RoutineTiming,
   RoutineUpdate,
-  RoutineWhen,
   ULID_PATTERN,
   ulid,
 } from "@localdot/protocol";
 import { z } from "zod";
 import { DatabaseSync } from "../sqlite.ts";
-import {
-  describeSchedule,
-  localDateOf,
-  parseDateKey,
-  type Schedule,
-  zonedToUtc,
-} from "./schedule.ts";
+import { migrateSchedules } from "./migrate.ts";
 
 export class RoutineError extends Error {
   constructor(
@@ -42,10 +43,10 @@ export interface StoredRoutine {
   kind: "routine" | "follow_up";
   name: string;
   instruction: string;
-  when: RoutineWhen;
+  schedules: RoutineSchedule[];
   tz: string;
+  start: string;
   until: string | null;
-  anchor: string;
   profile: RoutineProfile;
   notify: RoutineNotify;
   approvalWindowMinutes: number;
@@ -80,6 +81,7 @@ export interface CreateInit {
   followUp?: { sessionId: string; note: string };
 }
 
+// `anchor` is the routine's first local date, `end_at` its last.
 const SCHEMA = `
 PRAGMA busy_timeout=2000;
 CREATE TABLE IF NOT EXISTS routines(
@@ -103,28 +105,35 @@ const FULL = `You already have ${ROUTINE_LIMITS.routines} routines. Delete one f
 const INVALID: Record<string, string> = {
   name: "A routine's name is one line of up to 80 characters.",
   instruction: "Say what the routine should do, in up to 8,000 characters.",
+  start: "The start date isn't a real date.",
   until: "The end date isn't a real date.",
-  when: "That schedule isn't valid.",
 };
-// The model and the HTTP routes both reach the store; neither gets a raw validation dump.
-function valid<T extends z.ZodType>(schema: T, input: unknown): z.infer<T> {
+// The model and the HTTP routes both reach the store; neither gets a raw validation dump. A schedule
+// says what is wrong with it in plain words.
+export function validRoutine<T extends z.ZodType>(schema: T, input: unknown): z.infer<T> {
   const parsed = schema.safeParse(input);
   if (parsed.success) return parsed.data;
-  const path = parsed.error.issues[0]?.path ?? [];
-  const field = String(path[0] ?? "");
-  const message =
-    field === "when" && path[1] === "date"
-      ? "That date isn't a real date."
-      : (INVALID[field] ?? "That routine isn't valid.");
-  throw new RoutineError(400, message);
+  const issue = parsed.error.issues[0];
+  const field = String(issue?.path[0] ?? "");
+  throw new RoutineError(
+    400,
+    field === "schedules"
+      ? issue?.code === "custom"
+        ? issue.message
+        : "That schedule isn't valid."
+      : (INVALID[field] ?? "That routine isn't valid."),
+  );
 }
-const sameWhen = (a: RoutineWhen, b: RoutineWhen) => JSON.stringify(a) === JSON.stringify(b);
+const sameSchedules = (a: readonly RoutineSchedule[], b: readonly RoutineSchedule[]) =>
+  JSON.stringify(a) === JSON.stringify(b);
 export const PASSED = "That time has passed. Pick a later one.";
+const NO_RUNS_LEFT = "No runs are left on those dates. Pick a later last day.";
 const COLUMNS = new Set([
   "name",
   "instruction",
   "schedule_json",
   "tz",
+  "anchor",
   "end_at",
   "profile",
   "notify",
@@ -206,6 +215,7 @@ export class RoutineStore {
     this.#db = new DatabaseSync(file);
     chmodSync(file, 0o600);
     this.#db.exec(SCHEMA);
+    migrateSchedules(this.#db);
     this.#now = opts.now;
     this.#zone = opts.zone;
     this.#prune();
@@ -231,12 +241,12 @@ export class RoutineStore {
     this.#db.exec("DELETE FROM routine_runs WHERE routine_id NOT IN (SELECT id FROM routines)");
   }
 
-  // A one-off whose time has passed would finish at once without running.
-  #refusePassed(when: RoutineWhen, tz: string): void {
-    if (when.kind !== "once") return;
-    const [hh, mm] = when.time.split(":").map(Number) as [number, number];
-    if (zonedToUtc(parseDateKey(when.date), hh, mm, tz) <= this.#now())
-      throw new RoutineError(400, PASSED);
+  // A schedule with no run left would finish at once without running.
+  #refuseEnded(timing: RoutineTiming): void {
+    if (timing.until && timing.until < timing.start)
+      throw new RoutineError(400, "The last day comes before the first.");
+    if (nextDue(timing, this.#now()) === null)
+      throw new RoutineError(400, isOneOff(timing) ? PASSED : NO_RUNS_LEFT);
   }
 
   #full(): boolean {
@@ -253,10 +263,10 @@ export class RoutineStore {
       kind: row.kind === "follow_up" ? "follow_up" : "routine",
       name: row.name,
       instruction: row.instruction,
-      when: RoutineWhen.parse(JSON.parse(row.schedule_json)),
+      schedules: RoutineSchedules.parse(JSON.parse(row.schedule_json)),
       tz: row.tz,
+      start: row.anchor,
       until: row.end_at,
-      anchor: row.anchor,
       profile: RoutineProfile.parse(row.profile),
       notify: RoutineNotify.parse(row.notify),
       approvalWindowMinutes: row.approval_window_s / 60,
@@ -305,8 +315,9 @@ export class RoutineStore {
     const fields: Record<string, Value> = {};
     if (patch.name !== undefined) fields.name = patch.name;
     if (patch.instruction !== undefined) fields.instruction = patch.instruction;
-    if (patch.when !== undefined) fields.schedule_json = JSON.stringify(patch.when);
+    if (patch.schedules !== undefined) fields.schedule_json = JSON.stringify(patch.schedules);
     if (patch.tz !== undefined) fields.tz = patch.tz;
+    if (patch.start !== undefined) fields.anchor = patch.start;
     if (patch.until !== undefined) fields.end_at = patch.until;
     if (patch.profile !== undefined) fields.profile = patch.profile;
     if (patch.notify !== undefined) fields.notify = patch.notify;
@@ -316,8 +327,10 @@ export class RoutineStore {
     if (patch.missedPolicy !== undefined) fields.missed_policy = patch.missedPolicy;
     // Only a schedule that really changed is planned again; a rename keeps a due time pending.
     if (
-      (patch.when !== undefined && !(current && sameWhen(patch.when, current.when))) ||
+      (patch.schedules !== undefined &&
+        !(current && sameSchedules(patch.schedules, current.schedules))) ||
       (patch.tz !== undefined && patch.tz !== current?.tz) ||
+      (patch.start !== undefined && patch.start !== current?.start) ||
       (patch.until !== undefined && patch.until !== current?.until)
     )
       fields.next_due_at = null;
@@ -325,7 +338,7 @@ export class RoutineStore {
   }
 
   create(input: RoutineDraft, init: CreateInit): StoredRoutine {
-    const draft = valid(RoutineDraft, input);
+    const draft = validRoutine(RoutineDraft, input);
     const kind = init.kind ?? "routine";
     if (kind === "routine" && init.state === "active" && this.#full())
       throw new RoutineError(409, FULL);
@@ -347,8 +360,9 @@ export class RoutineStore {
       throw new RoutineError(409, "Too many follow-ups are waiting.");
     const now = this.#now(),
       tz = draft.tz ?? this.#zone(),
+      start = draft.start ?? localDateOf(now, tz),
       id = ulid();
-    this.#refusePassed(draft.when, tz);
+    this.#refuseEnded({ schedules: draft.schedules, tz, start, until: draft.until ?? null });
     this.#db
       .prepare(
         `INSERT INTO routines(id, kind, name, instruction, schedule_json, tz, end_at, anchor, profile,
@@ -362,10 +376,10 @@ export class RoutineStore {
         kind,
         draft.name,
         draft.instruction,
-        JSON.stringify(draft.when),
+        JSON.stringify(draft.schedules),
         tz,
         draft.until ?? null,
-        localDateOf(now, tz),
+        start,
         draft.profile ?? ROUTINE_DEFAULTS.profile,
         draft.notify ?? ROUTINE_DEFAULTS.notify,
         (draft.approvalWindowMinutes ?? ROUTINE_DEFAULTS.approvalWindowMinutes) * 60,
@@ -399,7 +413,7 @@ export class RoutineStore {
   }
 
   update(id: string, input: RoutineUpdate): StoredRoutine {
-    const patch = valid(RoutineUpdate, input);
+    const patch = validRoutine(RoutineUpdate, input);
     const current = this.#require(id);
     if (current.revision !== patch.revision) throw new RoutineError(409, STALE);
     if (current.state === "proposed" && patch.state)
@@ -410,8 +424,7 @@ export class RoutineStore {
         "This routine has finished. Change its schedule to run it again.",
       );
     const fields = this.#draftFields(patch, current);
-    if (fields.next_due_at === null)
-      this.#refusePassed(patch.when ?? current.when, patch.tz ?? current.tz);
+    if (fields.next_due_at === null) this.#refuseEnded(timingAfter(current, patch));
     if (patch.state === "paused") Object.assign(fields, { state: "paused", paused_reason: "user" });
     if (patch.state === "active")
       Object.assign(fields, {
@@ -429,13 +442,13 @@ export class RoutineStore {
     return this.#write(id, fields, true);
   }
 
-  confirm(id: string, revision: number, edits?: Partial<RoutineDraft>): StoredRoutine {
+  confirm(id: string, revision: number, edits?: RoutineEdits): StoredRoutine {
     const current = this.#require(id);
     if (current.state !== "proposed") throw new RoutineError(409, "This routine is already saved.");
     if (current.revision !== revision) throw new RoutineError(409, STALE);
     if (this.#full()) throw new RoutineError(409, FULL);
-    const patch = edits ? valid(RoutineDraft.partial(), edits) : {};
-    this.#refusePassed(patch.when ?? current.when, patch.tz ?? current.tz);
+    const patch = edits ? validRoutine(RoutineEdits, edits) : {};
+    this.#refuseEnded(timingAfter(current, patch));
     const fields = this.#draftFields(patch, current);
     Object.assign(fields, {
       state: "active",
@@ -561,6 +574,16 @@ export class RoutineStore {
     return this.runs(routineId, { limit: 1 })[0];
   }
 
+  // The tasks of the routine's latest runs, newest first: the next run goes on in their conversation.
+  recentSessions(routineId: string): string[] {
+    const rows = this.#db
+      .prepare(
+        "SELECT session_id FROM routine_runs WHERE routine_id = ? AND session_id IS NOT NULL ORDER BY due_at DESC, id DESC LIMIT 20",
+      )
+      .all(routineId) as unknown as { session_id: string }[];
+    return rows.map((row) => row.session_id);
+  }
+
   /** A run parked on Needs you is still open; the absence guard's needs_you rows are closed. */
   openRuns(): StoredRun[] {
     return (
@@ -577,8 +600,24 @@ export class RoutineStore {
   }
 }
 
-export function scheduleOf(routine: StoredRoutine): Schedule {
-  return { when: routine.when, tz: routine.tz, until: routine.until, anchor: routine.anchor };
+export function scheduleOf(routine: StoredRoutine): RoutineTiming {
+  return {
+    schedules: routine.schedules,
+    tz: routine.tz,
+    start: routine.start,
+    until: routine.until,
+  };
+}
+function timingAfter(
+  routine: StoredRoutine,
+  patch: Partial<Pick<RoutineDraft, "schedules" | "tz" | "start">> & { until?: string | null },
+): RoutineTiming {
+  return {
+    schedules: patch.schedules ?? routine.schedules,
+    tz: patch.tz ?? routine.tz,
+    start: patch.start ?? routine.start,
+    until: patch.until === undefined ? routine.until : patch.until,
+  };
 }
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
 export function toRun(run: StoredRun): RoutineRun {
@@ -593,14 +632,15 @@ export function toRun(run: StoredRun): RoutineRun {
     note: run.note,
   };
 }
-export function toRoutine(r: StoredRoutine, lastRun: StoredRun | undefined): Routine {
+export function toRoutine(r: StoredRoutine, lastRun: StoredRun | undefined, now: number): Routine {
   return {
     id: r.id,
     kind: r.kind,
     name: r.name,
     instruction: r.instruction,
-    when: r.when,
+    schedules: r.schedules,
     tz: r.tz,
+    start: r.start,
     until: r.until,
     profile: r.profile,
     notify: r.notify,
@@ -611,7 +651,7 @@ export function toRoutine(r: StoredRoutine, lastRun: StoredRun | undefined): Rou
     pausedReason: r.pausedReason,
     revision: r.revision,
     nextDueAt: iso(r.nextDueAt),
-    summary: describeSchedule(scheduleOf(r)),
+    summary: describeSchedules(scheduleOf(r), now),
     createdFromSession: r.createdFromSession,
     createdAt: new Date(r.createdAt).toISOString(),
     updatedAt: new Date(r.updatedAt).toISOString(),

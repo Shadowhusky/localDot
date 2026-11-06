@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { FileVersionsReply, ulid } from "@localdot/protocol";
+import { ConversationFilesReply, FileVersionsReply, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanFixtures, deliverablesFixture } from "./testing/fixture.ts";
 
@@ -83,5 +83,86 @@ describe("file versions", () => {
     // The URL parser folds %2E%2E into "..", so that path is simply not found.
     expect((await f.get(`/api/agent/sessions/${id}/files/%2E%2E/versions`)).status).toBe(404);
     expect((await f.get(`/api/agent/sessions/${ulid()}/files/a.csv/versions`)).status).toBe(404);
+  });
+});
+
+describe("the files of a conversation", () => {
+  const listed = async (f: ReturnType<typeof deliverablesFixture>, id: string) =>
+    ConversationFilesReply.parse(
+      await (await f.get(`/api/agent/sessions/${id}/conversation-files`)).json(),
+    );
+
+  it("lists every task's files, newest first, each still downloadable", async () => {
+    const f = deliverablesFixture({
+      conversation: (id) => ({ sessions: chain.slice(0, chain.indexOf(id) + 1), more: false }),
+    });
+    const first = f.task();
+    const second = f.task();
+    const chain = [first, second];
+    f.result(first, { "plan.txt": "one", "shared.txt": "from the first run" });
+    f.result(second, { "shared.txt": "from the second run", "report.pdf": "%PDF-" });
+    const { files, more } = await listed(f, second);
+    expect(more).toBe(false);
+    expect(files.map((file) => [file.sessionId, file.name, file.available])).toEqual([
+      [second, "report.pdf", true],
+      [second, "shared.txt", true],
+      [first, "shared.txt", true],
+      [first, "plan.txt", true],
+    ]);
+    // Asked of the first run's own task, the second run's file isn't its concern.
+    expect((await listed(f, first)).files.map((file) => file.name)).toEqual([
+      "shared.txt",
+      "plan.txt",
+    ]);
+    const older = files.find((file) => file.sessionId === first && file.name === "shared.txt");
+    const body = await f.get(
+      `/api/agent/sessions/${first}/files/shared.txt/versions/${older?.version}`,
+    );
+    expect(await body.text()).toBe("from the first run");
+  });
+
+  it("shows a file handed over twice in a task once, as its latest", async () => {
+    const f = deliverablesFixture();
+    const id = f.task();
+    f.result(id, { "totals.csv": "1" });
+    f.result(id, { "totals.csv": "22" });
+    const { files } = await listed(f, id);
+    expect(files.map((file) => [file.name, file.version, file.bytes])).toEqual([
+      ["totals.csv", 2, 2],
+    ]);
+  });
+
+  it("lets a revising task take over the row of the file it revises", async () => {
+    const f = deliverablesFixture({
+      conversation: () => ({ sessions: [parent, child], more: false }),
+    });
+    const parent = f.task();
+    f.result(parent, { "totals.csv": "a\n1\n", "notes.txt": "kept" });
+    const child = f.log.createSession("Revise totals.csv: add a total row");
+    f.log.append(child, start({ sessionId: parent, name: "totals.csv", version: 1 }));
+    f.result(child, { "totals.csv": "a\n2\n" });
+    const { files } = await listed(f, child);
+    expect(files.map((file) => [file.sessionId, file.name])).toEqual([
+      [child, "totals.csv"],
+      [parent, "notes.txt"],
+    ]);
+  });
+
+  it("keeps a deleted file listed, saying its bytes are gone", async () => {
+    const f = deliverablesFixture();
+    const id = f.task();
+    f.result(id, { "gone.txt": "bye", "here.txt": "hi" });
+    rmSync(join(f.home, "sessions", id, "versions", "gone.txt"), { recursive: true });
+    rmSync(join(f.home, "sessions", id, "out", "gone.txt"));
+    const { files } = await listed(f, id);
+    expect(files.find((file) => file.name === "gone.txt")?.available).toBe(false);
+    expect(files.find((file) => file.name === "here.txt")?.available).toBe(true);
+    expect((await f.get(`/api/agent/sessions/${id}/files/gone.txt`)).status).toBe(404);
+  });
+
+  it("refuses a task it doesn't know, and says when older tasks are left out", async () => {
+    const f = deliverablesFixture({ conversation: (id) => ({ sessions: [id], more: true }) });
+    expect((await f.get(`/api/agent/sessions/${ulid()}/conversation-files`)).status).toBe(404);
+    expect((await listed(f, f.task())).more).toBe(true);
   });
 });

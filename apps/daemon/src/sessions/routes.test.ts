@@ -104,6 +104,47 @@ afterEach(() => {
 });
 
 describe("replay APIs", () => {
+  it("says which conversation a notification about a run opens in", async () => {
+    const f = await setup();
+    const task = (origin?: object, continues?: string) => {
+      const id = f.log.createSession("task");
+      f.log.append(id, {
+        type: "session.start",
+        agent: "main",
+        data: {
+          screen: { w: 1280, h: 800, scale: 1 },
+          os: "linux",
+          title: "task",
+          ...(origin ? { origin } : {}),
+          ...(continues ? { continues } : {}),
+        },
+      } as never);
+      f.log.append(id, {
+        type: "message.user",
+        agent: "main",
+        data: { messageId: ulid(), text: "task", kind: "task" },
+      });
+      return id;
+    };
+    const origin = {
+      kind: "routine",
+      routineId: ulid(),
+      runId: ulid(),
+      name: "Bills",
+      dueAt: "2026-10-12T07:30:00.000Z",
+    };
+    const run = task(origin);
+    const later = task(origin, run);
+    const plain = task();
+    const read = async (id: string) => {
+      const reply = await f.request(`/api/conversations/${id}/latest`);
+      return reply.status === 200 ? await reply.json() : reply.status;
+    };
+    expect(await read(run)).toEqual({ sessionId: later, routine: true });
+    expect(await read(plain)).toEqual({ sessionId: plain, routine: false });
+    expect(await read(ulid())).toBe(404);
+  });
+
   it("deletes the full conversation, preflights live tasks and clears the selected conversation", async () => {
     const f = await setup();
     const task = (continues?: string) => {
@@ -270,6 +311,7 @@ describe("replay APIs", () => {
         tag: "purple",
         pinned: false,
         archived: false,
+        look: null,
       },
       {
         type: "conversation.organized",
@@ -277,8 +319,14 @@ describe("replay APIs", () => {
         tag: "purple",
         pinned: true,
         archived: false,
+        look: null,
       },
     ]);
+    expect((await post(first, "look", { look: ["crown", "monocle"] })).status).toBe(204);
+    expect(listed()[0]).toMatchObject({ look: ["crown", "monocle"] });
+    expect((await post(first, "look", { look: ["crown", "cap"] })).status).toBe(400);
+    expect((await post(first, "look", { look: null })).status).toBe(204);
+    f.published.splice(2);
 
     // Never while a task of it is under way: it would leave the list while dot works in it.
     f.controlledIds.add(first);

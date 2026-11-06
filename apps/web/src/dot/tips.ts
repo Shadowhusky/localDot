@@ -1,4 +1,5 @@
 import type { SettingsSection } from "../settings/sections.ts";
+import { otherView, VIEW_NAMES, type ViewStyle } from "../shell/view-style.ts";
 
 // What dot says beside the stage while nothing is going on: a greeting on the first quiet moment of
 // a visit, then one tip at a time. Edit freely. Every line is dot's own words: plain, short, no
@@ -46,14 +47,18 @@ export interface TipSignals {
   update: boolean;
   // The computer can be erased and started clean right now.
   freshStart: boolean;
+  // The view style on show, and whether this person has been in the other one.
+  view?: ViewStyle;
+  viewsTried?: boolean;
 }
 
 // The one small step a tip offers: a section of Settings (`finds` is what that section shows for
-// the feature, which a test looks for), Replay, or a new routine.
+// the feature, which a test looks for), Replay, a new routine, or the other view style.
 export type TipAction =
   | { label: string; opens: "settings"; section: SettingsSection; finds: string }
   | { label: string; opens: "replay" }
-  | { label: string; opens: "routine" };
+  | { label: string; opens: "routine" }
+  | { label: string; opens: "view" };
 
 export interface Tip {
   id: string;
@@ -76,6 +81,16 @@ export const TIPS: readonly Tip[] = [
     text: "Tell me “every weekday at 9…” and I'll draft a routine.",
     action: { label: "Try it", opens: "routine" },
     used: (s) => (s.routines === undefined ? undefined : s.routines > 0),
+  },
+  {
+    id: "view-style",
+    text: (s) =>
+      s.view === "chat"
+        ? `Want to see everything at once? Try ${VIEW_NAMES[otherView(s.view)]} view.`
+        : `Prefer texting me? Try ${VIEW_NAMES[otherView(s.view ?? "studio")]} view.`,
+    action: { label: "Try it", opens: "view" },
+    shows: (s) => s.view !== undefined && !s.viewsTried,
+    used: (s) => s.viewsTried,
   },
   {
     id: "passwords",

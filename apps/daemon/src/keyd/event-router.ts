@@ -19,6 +19,11 @@ export interface KeydEventRouterDeps {
   asksMissed?(): void;
   // The computer a web browser's cell belongs to.
   parentOf?(cellId: string): string | undefined;
+  // Of the tasks at work in a computer's web browser, the one whose page is on this host.
+  browsingHost?(parentCellId: string, host: string): string | undefined;
+  // keyd's name for a task's spending on its current model's prices, and what the task had spent
+  // before them.
+  accountOf?(sessionId: string): { id: string; spentBefore: number } | undefined;
   perCellPerSecond?: number;
   retryMs?: { min: number; max: number };
   now?: () => number;
@@ -118,8 +123,15 @@ export class KeydEventRouter {
       event.type === "key.use" && event.data.decision === "deny"
         ? this.deps.parentOf?.(event.cell)
         : undefined;
-    const sessionId = this.deps.live.get(event.cell) ?? (parent && this.deps.live.get(parent));
-    if (!sessionId || (event.type === "model.spend" && event.data.taskId !== sessionId)) return;
+    const sessionId =
+      this.deps.live.get(event.cell) ??
+      (parent &&
+        event.type === "key.use" &&
+        (this.deps.browsingHost?.(parent, event.data.host) ?? this.deps.live.get(parent)));
+
+    if (!sessionId) return;
+    const account = this.deps.accountOf?.(sessionId);
+    if (event.type === "model.spend" && event.data.taskId !== (account?.id ?? sessionId)) return;
     let window = this.#window.get(event.cell);
     if (!window) {
       window = { second, count: 0, dropped: 0 };
@@ -132,6 +144,10 @@ export class KeydEventRouter {
     window.count++;
     const draft = sessionEvent(event);
     if (!draft) return;
+    if (draft.type === "model.spend" && account?.spentBefore) {
+      draft.data.taskSpentUSD += account.spentBefore;
+      if (draft.data.taskLimitUSD !== undefined) draft.data.taskLimitUSD += account.spentBefore;
+    }
     try {
       this.deps.eventLog.append(sessionId, draft);
     } catch {

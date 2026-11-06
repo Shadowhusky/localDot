@@ -33,6 +33,9 @@ const MOMENTS = [
   ["watch", 0.25],
   ["watch", 0.55],
   ["watch", 0.85],
+  ["views", 0.25],
+  ["views", 0.55],
+  ["views", 0.85],
   ["models", 0.5],
   ["replay", 0.3],
   ["replay", 0.8],
@@ -88,6 +91,25 @@ function look(page, chapter, at) {
   );
 }
 
+// How far above the foot of the phone's Chat thread dot's line at work rests; the app keeps it there,
+// over the composer, which the replay's note stands in for. Null while dot is not at work. Measured as
+// laid out, before the scene turns the phone.
+function chatFoot(page) {
+  return page.evaluate(() => {
+    const phone = document.querySelector(".site-phone");
+    const strip = phone?.querySelector(".dot-strip[data-live]");
+    const scroll = phone?.querySelector(".thread-scroll");
+    if (!strip || !scroll) return null;
+    const top = (el) => {
+      let y = 0;
+      for (let at = el; at && at !== phone; at = at.offsetParent) y += at.offsetTop;
+      return y;
+    };
+    const bottom = top(strip) - scroll.scrollTop + strip.offsetHeight;
+    return Math.round(top(scroll) + scroll.clientHeight - bottom);
+  });
+}
+
 const results = [];
 for (const [engine, launcher] of [
   ["chromium", chromium],
@@ -115,6 +137,12 @@ for (const [engine, launcher] of [
       }));
       assert.equal(still.playing, false, `${engine} ${width}x${height}: a demo played by itself`);
       assert.ok(still.tasks > 0, `${engine} ${width}x${height}: no task picker on the landing`);
+      // The window's rail has a dot for each task, except on a phone, which has no rail.
+      const rail = await page.locator(".site-rail .sessions-item").count();
+      assert.ok(
+        rail === still.tasks || (rail === 0 && width < 900),
+        `${engine} ${width}x${height}: ${rail} dots in the rail`,
+      );
       // Picking the first task plays its recording.
       await page.locator(".site-app .site-demo").first().click();
       await page.waitForFunction(
@@ -125,6 +153,20 @@ for (const [engine, launcher] of [
       await page.screenshot({
         path: new URL(`${engine}-${width}x${height}-app.png`, out).pathname,
       });
+      // The chat keeps to the replay's end while it plays, however the window grows round it as it
+      // rises on a phone: nothing offers to jump to the latest.
+      await page.waitForTimeout(3000);
+      const end = await page.evaluate(() => {
+        const scroll = document.querySelector(".site-app .thread-scroll");
+        return {
+          jump: !!document.querySelector(".site-app .thread-jump[data-shown]"),
+          below: scroll ? scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop : 0,
+        };
+      });
+      assert.ok(
+        !end.jump && end.below <= 1,
+        `${engine} ${width}x${height}: the chat left its end (${Math.round(end.below)} px below)`,
+      );
       // Beside the stage, the chat rail follows it with no empty column between them: the stage may
       // sit centred in its column, but an empty Activity column would leave over 300 px.
       const gap = await page.evaluate(() => {
@@ -147,6 +189,13 @@ for (const [engine, launcher] of [
         assert.equal(seen.overflow, false, `${where}: the page overflows sideways`);
         assert.ok(seen.words > 0, `${where}: no words show`);
         assert.ok(seen.inside, `${where}: words run off the screen`);
+        if (chapter === "views") {
+          const above = await chatFoot(page);
+          assert.ok(
+            above === null || Math.abs(above) <= 1,
+            `${where}: dot's line sits ${above} px above the foot of Chat`,
+          );
+        }
       }
       assert.deepEqual(errors, [], `${engine} ${width}x${height} logged errors`);
       await context.close();
@@ -154,6 +203,14 @@ for (const [engine, launcher] of [
   } finally {
     await browser.close();
   }
+}
+
+// The update video's link is in the page only when the build has the file, so it is never dead.
+{
+  const page = await (await fetch(origin)).text();
+  const file = await fetch(`${origin}/film/localdot-update.mp4`, { method: "HEAD" });
+  const present = file.ok && (file.headers.get("content-type") ?? "").startsWith("video/");
+  assert.equal(page.includes('data-film="update"'), present, "the update video's link is wrong");
 }
 
 // Reduced motion: nothing plays by itself, and the story still reads.
@@ -171,6 +228,17 @@ for (const [engine, launcher] of [
   });
   assert.equal(playing, false, "reduced motion still plays a demo by itself");
   await page.screenshot({ path: new URL("reduced.png", out).pathname });
+  await page.goto(`${origin}/#chat`, { waitUntil: "load" });
+  await page.waitForTimeout(2000);
+  const phone = await page.evaluate(() => {
+    const box = document.querySelector(".site-phone")?.getBoundingClientRect();
+    return {
+      shown: getComputedStyle(document.querySelector(".site-phone")).visibility === "visible",
+      inside: !!box && box.left >= -1 && box.right <= innerWidth + 1,
+    };
+  });
+  assert.deepEqual(phone, { shown: true, inside: true }, "with reduced motion the phone is lost");
+  await page.screenshot({ path: new URL("reduced-chat.png", out).pathname });
   await browser.close();
 }
 
@@ -290,10 +358,10 @@ for (const [engine, launcher] of [
       );
       await page.waitForTimeout(3000);
       // The task's result opens in the viewer and downloads as the file itself.
-      await page
-        .locator(".site-app button", { hasText: /^Open$/ })
-        .first()
-        .click();
+      // A row as narrow as the chat's keeps Open and Download in its menu.
+      const more = page.locator('.site-app button[aria-label^="More for"]').first();
+      await more.click();
+      await page.getByRole("menuitem", { name: /^Open/ }).click();
       await page.waitForFunction(
         () => (document.querySelector(".file-viewer canvas")?.width ?? 0) > 0,
         null,
@@ -301,9 +369,10 @@ for (const [engine, launcher] of [
       );
       await page.keyboard.press("Escape");
       await page.waitForTimeout(600);
+      await more.click();
       const [download] = await Promise.all([
         page.waitForEvent("download", { timeout: 15000 }),
-        page.locator('.site-app button[aria-label^="Download"]').first().click(),
+        page.getByRole("menuitem", { name: /^Download/ }).click(),
       ]);
       assert.equal(download.suggestedFilename(), "blue-hour-a3.pdf", `${engine}: wrong download`);
       await page.evaluate(() => {
@@ -362,6 +431,8 @@ for (const [engine, launcher] of [
     "#hello",
     "#watch",
     "#step-in",
+    "#chat",
+    "#several",
     "#models",
     "#share",
     "#dots",

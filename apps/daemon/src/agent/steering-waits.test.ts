@@ -1,5 +1,6 @@
-import type { ShellChunk } from "@localdot/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import type { ShellChunk, ShellDone } from "@localdot/protocol";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ShellExecutionUncertainError } from "../desktopd/tools-client.ts";
 import { toolHarness } from "./testing/harness.ts";
 import { USER_SPOKE } from "./tools/deps.ts";
 import { openingSleepMs } from "./tools/shell.ts";
@@ -153,8 +154,9 @@ describe("a command's opening sleep", () => {
     expect(h.desktop.shellCalls).toEqual([]);
   });
 
-  it("lets other commands finish, and the message ends the next wait instead", async () => {
+  it("lets a command that ends by itself finish, and the message ends the next wait instead", async () => {
     const h = setup();
+    h.tools.sleep = endless;
     let release!: () => void;
     const base = h.tools.desktop("cell");
     if (!base) throw new Error("no desktop");
@@ -181,8 +183,37 @@ describe("a command's opening sleep", () => {
     const { body } = await running;
     expect(body.ok).toBe(true);
     expect(text(body)).toContain("Exit code 0.");
-    h.tools.sleep = endless;
     expect(text((await h.call("done", WAITING)).body)).toContain("A new user instruction arrived");
+  });
+
+  it("tells the wait's message apart when the user queued it for after this task", async () => {
+    const h = setup();
+    const stopped = sleepy(h);
+    const running = h.call("shell", { command: "sleep 90; echo waited", timeout_sec: 120 });
+    setTimeout(() => h.session.enqueue("Then deploy it"), 20);
+    const { body } = await running;
+    expect(stopped).toEqual(["sleep 90; echo waited"]);
+    expect(text(body)).toContain("queued a message for after this task");
+    const inbox = await h.app.request("/v1/inbox?after=0&waitMs=0", { headers: h.auth });
+    const { items } = (await inbox.json()) as { items: { kind: string; text: string }[] };
+    expect(items).toMatchObject([{ kind: "steer", text: "Then deploy it" }]);
+    const delivery = h
+      .events()
+      .filter((e) => e.type === "message.delivery")
+      .map((e) => (e.data as { state: string }).state);
+    expect(delivery).toEqual(["steering", "woke"]);
+  });
+
+  it("leaves a queued message queued through a short wait, and through other commands", async () => {
+    const h = setup();
+    h.tools.sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 1)));
+    h.session.enqueue("Then deploy it");
+    const short = await h.call("shell", { command: "sleep 2; echo waited" });
+    expect(text(short.body)).toContain("Exit code 0.");
+    const other = await h.call("shell", { command: "pnpm test" });
+    expect(text(other.body)).toContain("Exit code 0.");
+    const inbox = await h.app.request("/v1/inbox?after=0&waitMs=0", { headers: h.auth });
+    expect(((await inbox.json()) as { items: unknown[] }).items).toEqual([]);
   });
 
   it("is only the sleep a command starts with, after nothing but cd, export or assignments", () => {
@@ -201,5 +232,224 @@ describe("a command's opening sleep", () => {
       "sleep 10 # for the page",
     ])
       expect(openingSleepMs(command)).toBeUndefined();
+  });
+});
+
+describe("a command that isn't a wait, when the user speaks", () => {
+  // The desktop's shell: runs until the test ends it, printing what it is given.
+  function building(h: ReturnType<typeof setup>) {
+    const run = Promise.withResolvers<ShellDone>();
+    const seen: { signal?: AbortSignal; onChunk?: (c: ShellChunk) => void } = {};
+    const base = h.tools.desktop("cell");
+    if (!base) throw new Error("no desktop");
+    h.tools.desktop = () => ({
+      ...base,
+      shell: async (req, onChunk: (c: ShellChunk) => void, signal?: AbortSignal) => {
+        h.desktop.shellCalls.push(req.command);
+        seen.onChunk = onChunk;
+        if (signal) seen.signal = signal;
+        return run.promise;
+      },
+    });
+    return { run, seen };
+  }
+  const ended = (exitCode = 0): ShellDone => ({
+    done: true,
+    exitCode,
+    signal: null,
+    timedOut: false,
+    truncated: false,
+    ms: 5,
+  });
+  const started = (h: ReturnType<typeof setup>) =>
+    vi.waitFor(() => expect(h.desktop.shellCalls).toHaveLength(1));
+  const inboxOf = async (h: ReturnType<typeof setup>) => {
+    const inbox = await h.app.request("/v1/inbox?after=0&waitMs=0", { headers: h.auth });
+    return ((await inbox.json()) as { items: { kind: string; text: string }[] }).items;
+  };
+  const toolEnds = (h: ReturnType<typeof setup>) => h.events().filter((e) => e.type === "tool.end");
+
+  it("goes on in the background, and dot hears the message at once", async () => {
+    const h = setup();
+    const { run, seen } = building(h);
+    const call = h.call("shell", { command: "pnpm build" });
+    await started(h);
+    seen.onChunk?.({ stream: "stdout", chunk: `compiling ${"the sources ".repeat(20)}\n` });
+    h.session.post("steer", "Also add the changelog");
+    const { body } = await call;
+    expect(body.ok).toBe(true);
+    expect(text(body)).toContain("has not finished");
+    expect(text(body)).toContain("compiling");
+    expect(text(body)).not.toContain("Exit code");
+    // Nothing says it ended, and the command was not asked to stop.
+    expect(toolEnds(h)).toEqual([]);
+    expect(seen.signal?.aborted).toBe(false);
+    expect(h.session.leftRunning).toBe(1);
+    expect(
+      h
+        .events()
+        .filter((e) => e.type === "message.delivery")
+        .map((e) => (e.data as { state: string }).state),
+    ).toEqual(["left_running"]);
+
+    seen.onChunk?.({ stream: "stdout", chunk: "built in 3 s\n" });
+    run.resolve(ended());
+    await vi.waitFor(() => expect(h.session.leftRunning).toBe(0));
+    expect(toolEnds(h).at(-1)?.data).toEqual({ ok: true, exitCode: 0 });
+    const said = (await inboxOf(h)).map((item) => item.text);
+    expect(said[0]).toBe("Also add the changelog");
+    expect(said[1]).toContain("has ended: pnpm build");
+    expect(said[1]).toContain("Exit code 0.");
+    expect(said[1]).toContain("built in 3 s");
+  });
+
+  it("doesn't let dot finish the task while the command runs", async () => {
+    const h = setup();
+    const { run } = building(h);
+    const call = h.call("shell", { command: "pnpm build" });
+    await started(h);
+    h.session.post("steer", "Also add the changelog");
+    await call;
+    const refused = await h.call("done", {
+      summary: "Built",
+      completion: { status: "complete", evidence: "It built" },
+      input_request: null,
+      experience: null,
+    });
+    expect(refused.body.ok).toBe(false);
+    expect(text(refused.body)).toContain("hasn't ended");
+    expect(refused.body.final).toBeUndefined();
+    // The wait ends with the command, well before its 30 seconds.
+    h.tools.sleep = () => new Promise((resolve) => setTimeout(resolve, 1));
+    const waiting = h.call("done", WAITING);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    run.resolve(ended());
+    const waited = text((await waiting).body);
+    expect(waited).toContain("Waited");
+    expect(waited).not.toContain("Waited 30 seconds");
+  });
+
+  it("is stopped by Stop like any command, and cleanup waits for its end", async () => {
+    const h = setup();
+    const { run, seen } = building(h);
+    const call = h.call("shell", { command: "pnpm build" });
+    await started(h);
+    h.session.post("steer", "Also add the changelog");
+    await call;
+    h.session.stop();
+    expect(seen.signal?.aborted).toBe(true);
+    let settled = false;
+    const settling = h.session.toolsSettled().then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    run.resolve({ ...ended(), exitCode: null, signal: "SIGTERM" });
+    await settling;
+    expect(h.session.leftRunning).toBe(0);
+  });
+
+  it("stays stopped by its own lease once the call that started it has its answer", async () => {
+    const h = setup();
+    const { run, seen } = building(h);
+    const asking = new AbortController();
+    const call = h.app.request("/v1/tools/shell", {
+      method: "POST",
+      headers: h.auth,
+      signal: asking.signal,
+      body: JSON.stringify({ callId: "c-1", input: { command: "pnpm build" } }),
+    });
+    await started(h);
+    h.session.post("steer", "Also add the changelog");
+    await call;
+    // The request that started it going away says nothing about the command now.
+    asking.abort();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(seen.signal?.aborted).toBe(false);
+    run.resolve(ended());
+    await vi.waitFor(() => expect(h.session.leftRunning).toBe(0));
+  });
+
+  it("holds the computer when its end can't be proved, exactly as if dot had waited", async () => {
+    const h = setup();
+    const contained = vi.fn(async () => {});
+    h.tools.stopForUncertainty = contained;
+    const { run } = building(h);
+    const call = h.call("shell", { command: "pnpm build" });
+    await started(h);
+    h.session.post("steer", "Also add the changelog");
+    await call;
+    run.reject(new ShellExecutionUncertainError());
+    await vi.waitFor(() =>
+      expect(contained).toHaveBeenCalledWith(h.session, "shell_execution_uncertain", undefined),
+    );
+    await vi.waitFor(() => expect(h.session.leftRunning).toBe(0));
+    expect(h.session.stopped).toBe(true);
+    // Nothing tells dot, or the log, that it ended well.
+    expect(toolEnds(h).at(-1)?.data).toEqual({ ok: false });
+    expect(
+      h
+        .events()
+        .filter((e) => e.type === "step.end")
+        .at(-1)?.data,
+    ).toMatchObject({ status: "failed" });
+  });
+
+  it("is told if the command failed some other way", async () => {
+    const h = setup();
+    const { run } = building(h);
+    const call = h.call("shell", { command: "pnpm build" });
+    await started(h);
+    h.session.post("steer", "Also add the changelog");
+    await call;
+    run.reject(new Error("the computer refused it"));
+    await vi.waitFor(() => expect(h.session.leftRunning).toBe(0));
+    const said = (await inboxOf(h)).map((item) => item.text);
+    expect(said[1]).toContain("the computer refused it");
+    expect(toolEnds(h).at(-1)?.data).toEqual({ ok: false });
+  });
+
+  it("waits a moment first, for a command about to end", async () => {
+    const h = setup();
+    const { run } = building(h);
+    const grace = Promise.withResolvers<void>();
+    h.tools.sleep = () => grace.promise;
+    const call = h.call("shell", { command: "pnpm build" });
+    await started(h);
+    h.session.post("steer", "Also add the changelog");
+    run.resolve(ended());
+    const { body } = await call;
+    expect(text(body)).toContain("Exit code 0.");
+    expect(h.session.leftRunning).toBe(0);
+    grace.resolve();
+  });
+
+  it("isn't left running again for the same message, and a delegated agent's never is", async () => {
+    const h = setup();
+    const first = building(h);
+    const call = h.call("shell", { command: "pnpm build" });
+    await started(h);
+    h.session.post("steer", "Also add the changelog");
+    await call;
+    first.run.resolve(ended());
+    await vi.waitFor(() => expect(h.session.leftRunning).toBe(0));
+    h.desktop.shellCalls.length = 0;
+    const second = building(h);
+    const next = h.call("shell", { command: "pnpm test" });
+    await started(h);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(h.session.leftRunning).toBe(0);
+    second.run.resolve(ended());
+    expect(text((await next).body)).toContain("Exit code 0.");
+
+    h.desktop.shellCalls.length = 0;
+    const third = building(h);
+    const delegated = h.call("shell", { command: "pnpm lint" }, "sub-child-1");
+    await started(h);
+    h.session.post("steer", "And the docs");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(h.session.leftRunning).toBe(0);
+    third.run.resolve(ended());
+    expect(text((await delegated).body)).toContain("Exit code 0.");
   });
 });

@@ -5,7 +5,7 @@ import type {
   RoutineProfile,
   RoutineState,
   RoutineToolInput,
-  RoutineToolWhen,
+  RoutineToolSchedule,
   ToolResult,
 } from "@localdot/protocol";
 import { RoutineError } from "../../routines/store.ts";
@@ -29,7 +29,9 @@ export interface RoutineToolPort {
     input: {
       name: string;
       instruction: string;
-      when: RoutineToolWhen;
+      schedules: readonly RoutineToolSchedule[];
+      start?: string;
+      until?: string;
       notify?: RoutineNotify;
       profile?: "ask_first" | "read_only";
     },
@@ -79,12 +81,14 @@ export async function routineTool(
         ? { ok: true, content: [text("Paused.")] }
         : fail("No active routine has that id.");
     }
-    if (!input.name || !input.instruction || !input.when)
-      return fail("To propose a routine, give name, instruction and when.");
+    if (!input.name || !input.instruction || !input.schedules?.length)
+      return fail("To propose a routine, give name, instruction and schedules.");
     const proposal = port.propose(ctx.session.id, {
       name: ctx.redact(input.name),
       instruction: ctx.redact(input.instruction),
-      when: input.when,
+      schedules: input.schedules,
+      ...(input.start ? { start: input.start } : {}),
+      ...(input.until ? { until: input.until } : {}),
       ...(input.notify ? { notify: input.notify } : {}),
       ...(input.profile ? { profile: input.profile } : {}),
     });

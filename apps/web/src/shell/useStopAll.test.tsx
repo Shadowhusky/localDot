@@ -93,6 +93,6 @@ describe("Stop everything", () => {
         ],
         routinesPaused: 1,
       }),
-    ).toBe("1 task stopped, 1 computer frozen, 1 routine paused.");
+    ).toBe("1 task stopped, 1 computer paused, 1 routine paused.");
   });
 });

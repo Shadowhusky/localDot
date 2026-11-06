@@ -2,12 +2,13 @@ import { expect, type Page, test } from "@playwright/test";
 import { startUiFixture, TOKEN, type UiFixture } from "../fixtures/start-ui-fixture.ts";
 import { openSettings } from "../settings-ui.ts";
 import { skipSetup } from "../skip-setup.ts";
-import { isPhone } from "./harness.ts";
+import { chooseView, isPhone } from "./harness.ts";
 
 // Two localDots on their own addresses, as on two computers: the user adds the office in the
 // studio, switches there, and the office then lists the studio, by its name and its dot's look.
-test.beforeEach(() => {
+test.beforeEach(({ page }) => {
   test.skip(!["c14", "w39"].includes(test.info().project.name), "Runs at c14 and w39");
+  return chooseView(page, "studio");
 });
 
 // WebKit reports the page's own requests and imports that a navigation cuts off as errors.

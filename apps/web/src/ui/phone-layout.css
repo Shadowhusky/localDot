@@ -1,0 +1,1894 @@
+/* A phone's stack: the list, the conversation over it and the computer over that. It lays out kit
+   buttons' own content and restyles the thread for chat, so it follows the kit layer. Every length
+   the springs draw from is read back from these rules. */
+@layer utilities {
+  .app[data-stack] {
+    --_visible-h: 100dvh;
+    --_visible-top: 0px;
+    position: fixed;
+    top: var(--_visible-top);
+    right: 0;
+    left: 0;
+    display: block;
+    height: var(--_visible-h);
+    padding: 0;
+    overflow: hidden;
+    --_safe-top: env(safe-area-inset-top);
+    --_safe-bottom: env(safe-area-inset-bottom);
+    --_safe-left: env(safe-area-inset-left);
+    --_safe-right: env(safe-area-inset-right);
+    --_foot: max(calc(var(--spacing) * 2), var(--home-foot));
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: pan-y;
+  }
+
+  /* A mouse selects text as it does anywhere; a finger holds a bubble for its menu. */
+  @media (pointer: fine) {
+    .app[data-stack] {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+  }
+
+  /* With the keyboard up the composer rests on it, not on the home indicator's room. */
+  .app[data-stack][data-keyboard-up] {
+    --_safe-bottom: 0px;
+    --_foot: calc(var(--spacing) * 2);
+  }
+
+  /* One dot at a time: while the flyer stands in for it, the live one stays out of sight. */
+  .app[data-dot-away] .presence-frame {
+    visibility: hidden;
+  }
+
+  .app[data-stack] :is(input, textarea, [contenteditable]) {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  .app[data-stack] > :is(.replay, .replay-failed) {
+    position: absolute;
+    z-index: 30;
+    inset: 0;
+  }
+
+  .phone-stack {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    background-color: var(--color-void);
+  }
+
+  .phone-screen {
+    position: absolute;
+    inset: 0;
+    background-color: var(--color-void);
+    will-change: transform;
+    contain: layout paint;
+  }
+
+  .phone-screen[data-away] {
+    visibility: hidden;
+  }
+
+  .phone-chat {
+    z-index: 1;
+    overflow: visible;
+    contain: layout;
+  }
+
+  .phone-dim {
+    position: absolute;
+    z-index: 11;
+    inset: 0;
+    background-color: var(--color-scrim);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .phone-edge {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--spacing) * -6);
+    width: calc(var(--spacing) * 6);
+    background: linear-gradient(90deg, transparent, var(--color-scrim));
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .phone-flyer {
+    --dot-size: 64px;
+    position: absolute;
+    z-index: 30;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .phone-flyer[data-shown] {
+    visibility: visible;
+  }
+
+  .conversation-avatar[data-gone] > :is(.dot, .dot-avatar) {
+    visibility: hidden;
+  }
+
+  /* Top bars: glass where the content runs under them, with no rule, as Apple's scroll edge does. */
+  .phone-bar {
+    position: absolute;
+    z-index: 10;
+    top: 0;
+    right: 0;
+    left: 0;
+    padding-top: var(--_safe-top);
+  }
+
+  .phone-bar-glass {
+    position: absolute;
+    inset: 0 0 calc(var(--spacing) * -2.5);
+    /* Solid at the top edge, where it meets the status bar on the same colour. */
+    background-image: linear-gradient(
+      var(--color-void),
+      color-mix(in srgb, var(--color-void) 78%, transparent) calc(var(--spacing) * 4)
+    );
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-mask-image: linear-gradient(black calc(100% - var(--spacing) * 3), transparent);
+    mask-image: linear-gradient(black calc(100% - var(--spacing) * 3), transparent);
+    opacity: 0;
+    transition: opacity var(--dur-fade) var(--ease-standard);
+    pointer-events: none;
+  }
+
+  .phone-bar[data-under] .phone-bar-glass {
+    opacity: 1;
+  }
+
+  .phone-bar-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing);
+    height: var(--bar-h);
+    padding-inline: calc(var(--spacing) * 3 + var(--_safe-left))
+      calc(var(--spacing) * 3 + var(--_safe-right));
+  }
+
+  .phone-bar-row > .ui-icon-button {
+    flex: none;
+  }
+
+  /* Solid on the glass: what scrolls under the bar would otherwise show through the lower half of
+     a control and read as a fade across its upper half. */
+  .phone-bar-row :is(.ui-button[data-variant="secondary"], .ui-icon-button[data-variant="filled"]) {
+    --_image: linear-gradient(var(--_face), var(--_face));
+  }
+
+  .phone-bar-row
+    :is(.ui-button[data-variant="secondary"], .ui-icon-button[data-variant="filled"])::before {
+    background-color: var(--color-void);
+  }
+
+  .phone-title.ui-button,
+  .phone-title:not(.ui-button) {
+    flex: 1;
+    display: grid;
+    align-content: center;
+    justify-items: start;
+    min-width: 0;
+    min-height: 44px;
+    height: 44px;
+    padding: 0 var(--spacing);
+    background: none;
+    box-shadow: none;
+    text-align: start;
+  }
+
+  .phone-title.ui-button {
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
+    overflow: hidden;
+  }
+
+  .phone-title > .ui-button-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+    width: 100%;
+    min-width: 0;
+    gap: 0;
+  }
+
+  .phone-title-text {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-fg-1);
+    font:
+      var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-3--letter-spacing);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .phone-title-sub {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--dur-default) var(--ease-spring);
+  }
+
+  .phone-bar[data-sub] .phone-title-sub {
+    grid-template-rows: 1fr;
+  }
+
+  .phone-title-sub-in {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 1.25);
+    min-height: 0;
+    overflow: hidden;
+    color: var(--color-fg-2);
+    font:
+      var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+    white-space: nowrap;
+  }
+
+  .phone-title-sub-in > i {
+    flex: none;
+    width: calc(var(--spacing) * 1.5);
+    height: calc(var(--spacing) * 1.5);
+    border-radius: var(--radius-full);
+    background-color: var(--color-fg-3);
+  }
+
+  .phone-title-sub-in > i[data-kind="working"] {
+    background-color: var(--color-xenon);
+  }
+
+  .phone-title-sub-in > i[data-kind="needs-you"] {
+    background-color: var(--color-attention);
+  }
+
+  .phone-lamp-host {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+  }
+
+  .phone-lamp {
+    position: absolute;
+    top: calc(var(--spacing) * -0.25);
+    right: calc(var(--spacing) * -0.25);
+    width: calc(var(--spacing) * 2);
+    height: calc(var(--spacing) * 2);
+    border-radius: var(--radius-full);
+    background-color: var(--color-xenon);
+    box-shadow:
+      0 0 0 2px var(--color-void),
+      0 0 8px var(--color-xenon-glow);
+    opacity: 0;
+    scale: 0.6;
+    pointer-events: none;
+    transition:
+      opacity var(--dur-fade) var(--ease-standard),
+      scale var(--dur-default) var(--ease-spring);
+  }
+
+  .phone-lamp-host[data-lamp] > .phone-lamp {
+    opacity: 1;
+    scale: 1;
+  }
+
+  /* The list. */
+  /* One gutter down the whole of the list: the title, the search, the tags, the pinned and the rows. */
+  .phone-list-screen {
+    --_gutter: calc(var(--spacing) * 4);
+    position: absolute;
+    inset: 0;
+    display: block;
+  }
+
+  .phone-list-scroll {
+    position: absolute;
+    inset: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    padding: calc(var(--_safe-top) + var(--bar-h)) 0 calc(var(--_safe-bottom) + var(--spacing) * 6);
+    touch-action: pan-y;
+    scrollbar-width: none;
+  }
+
+  .phone-list-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .phone-list-bar-row {
+    justify-content: space-between;
+  }
+
+  .phone-pill.ui-button {
+    gap: calc(var(--spacing) * 1.5);
+    height: 36px;
+    min-height: 36px;
+    --_pad: calc(var(--spacing) * 2.75);
+    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  }
+
+  .phone-pill.ui-button::after {
+    inset: calc(var(--spacing) * -1.25) -1px;
+  }
+
+  .phone-pill-name {
+    display: block;
+    max-width: 110px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    transition:
+      max-width var(--dur-default) var(--ease-spring),
+      opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  .phone-bar[data-titled] .phone-pill-name {
+    max-width: 0;
+    opacity: 0;
+  }
+
+  .phone-pill-chevron {
+    color: var(--color-fg-3);
+  }
+
+  .phone-list-inline-title {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    height: var(--bar-h);
+    transform: translateX(-50%);
+    font:
+      var(--text-title-2--font-weight) var(--text-title-2) / var(--text-title-2--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-2--letter-spacing);
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity var(--dur-fade) var(--ease-standard);
+    pointer-events: none;
+  }
+
+  .phone-bar[data-titled] .phone-list-inline-title {
+    opacity: 1;
+  }
+
+  .phone-large-title {
+    margin: calc(var(--spacing) / 2) var(--_gutter) calc(var(--spacing) * 2.5);
+    color: var(--color-fg-1);
+    font:
+      var(--text-large-title--font-weight) var(--text-large-title) /
+      var(--text-large-title--line-height) var(--font-ui);
+    letter-spacing: var(--text-large-title--letter-spacing);
+  }
+
+  .phone-search {
+    margin: 0 var(--_gutter) calc(var(--spacing) * 1.5);
+    width: auto;
+  }
+
+  .phone-list-scroll > :is(.conversations-note, .phone-notice) {
+    margin-inline: var(--_gutter);
+    margin-block-end: calc(var(--spacing) * 1.5);
+  }
+
+  /* The tags scroll edge to edge, resting at the gutter. */
+  .phone-list-scroll > .conversations-tags {
+    margin-block-end: calc(var(--spacing) * 1.5);
+  }
+
+  .phone-rail {
+    display: flex;
+    gap: calc(var(--spacing) / 2);
+    list-style: none;
+    margin: calc(var(--spacing) * 2.5) 0 calc(var(--spacing) / 2);
+    /* A long name, the widest thing here, starts at the gutter, less its button's padding and border. */
+    padding: 0 calc(var(--_gutter) - var(--spacing) / 2 - 1px);
+    overflow-x: auto;
+    scrollbar-width: none;
+    touch-action: pan-x pan-y;
+  }
+
+  .phone-rail::-webkit-scrollbar {
+    display: none;
+  }
+
+  .phone-rail-item {
+    flex: none;
+    width: 84px;
+    transition: scale var(--dur-snappy) var(--ease-spring);
+  }
+
+  .phone-rail-item[data-holding] {
+    scale: 0.97;
+    transition-duration: var(--dur-gentle);
+  }
+
+  .phone-rail-button.ui-button {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    padding: var(--spacing) calc(var(--spacing) / 2) calc(var(--spacing) * 1.5);
+    border-radius: var(--radius-group);
+    background: none;
+    box-shadow: none;
+  }
+
+  .phone-rail-button > .ui-button-content {
+    display: grid;
+    justify-items: center;
+    gap: calc(var(--spacing) / 2);
+    width: 100%;
+  }
+
+  .phone-rail-button .conversation-avatar {
+    width: 72px;
+    height: 72px;
+    margin: 0;
+  }
+
+  .phone-rail-name {
+    width: 100%;
+    overflow: hidden;
+    color: var(--color-fg-2);
+    font:
+      var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+    text-align: center;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .phone-rows {
+    margin: calc(var(--spacing) / 2) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .phone-row-wrap {
+    position: relative;
+  }
+
+  .phone-row-wrap > .ui-tag-mark {
+    top: calc(var(--spacing) * 3.5);
+    bottom: calc(var(--spacing) * 3.5);
+    left: 0;
+    width: calc(var(--spacing) * 0.75);
+    height: auto;
+    translate: none;
+    border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  }
+
+  .phone-row.ui-button {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: auto;
+    min-height: 72px;
+    /* The kit's 1 px border is part of the padding. */
+    padding: calc(var(--spacing) * 2.5) calc(var(--_gutter) - 1px);
+    border-radius: 0;
+    background-color: var(--color-void);
+    box-shadow: none;
+    text-align: start;
+    white-space: normal;
+  }
+
+  .phone-row.ui-button::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-color: var(--color-state-pressed);
+    opacity: 0;
+    transition: opacity var(--dur-fade) var(--ease-standard);
+    pointer-events: none;
+  }
+
+  .phone-row.ui-button[data-pressed]::before,
+  .phone-row-selected.ui-button::before {
+    opacity: 1;
+  }
+
+  .phone-row-selected.ui-button::before {
+    background-color: var(--color-selected);
+  }
+
+  .phone-row.ui-button::after {
+    content: "";
+    position: absolute;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: calc(var(--_gutter) + 48px + var(--spacing) * 3);
+    height: 1px;
+    background-color: var(--color-hairline);
+  }
+
+  .phone-row-wrap:last-child .phone-row.ui-button::after {
+    display: none;
+  }
+
+  .phone-row > .ui-button-content {
+    position: relative;
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    column-gap: calc(var(--spacing) * 3);
+    align-items: center;
+    width: 100%;
+  }
+
+  .phone-row-avatar {
+    display: block;
+    width: 48px;
+    height: 48px;
+  }
+
+  .phone-row-avatar > .conversation-avatar {
+    width: 64px;
+    height: 64px;
+    margin: calc(var(--spacing) * -2);
+  }
+
+  .phone-row-main {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .phone-row-head {
+    display: flex;
+    align-items: baseline;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+  }
+
+  .phone-row-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-fg-1);
+    font:
+      var(--font-weight-medium) var(--text-title-3) / var(--text-title-3--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-3--letter-spacing);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .phone-row:is([data-unread], [data-status="needs-you"]) .phone-row-title {
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .phone-row-time {
+    flex: none;
+    color: var(--color-fg-3);
+    font:
+      var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+  }
+
+  .phone-row-foot {
+    display: flex;
+    align-items: flex-start;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+  }
+
+  .phone-row-line {
+    flex: 1;
+    display: -webkit-box;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-fg-2);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    letter-spacing: var(--text-body--letter-spacing);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+  }
+
+  .phone-row[data-status="needs-you"] .phone-row-line {
+    color: var(--color-fg-1);
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  .phone-row[data-status="failed"] .phone-row-line {
+    color: var(--color-danger-fg);
+  }
+
+  .phone-row-mark {
+    flex: none;
+    display: grid;
+    place-items: center;
+    min-width: calc(var(--spacing) * 3.5);
+    height: var(--text-body--line-height);
+  }
+
+  .phone-unread {
+    display: block;
+    width: 9px;
+    height: 9px;
+    border-radius: var(--radius-full);
+    background-color: var(--color-fg-1);
+  }
+
+  /* The amber point: next to the ball, never a fill. */
+  .conversation-avatar-point {
+    position: absolute;
+    top: 14%;
+    right: 14%;
+    width: calc(var(--spacing) * 2.5);
+    height: calc(var(--spacing) * 2.5);
+    border-radius: var(--radius-full);
+    background-color: var(--color-attention);
+    box-shadow: 0 0 0 2px var(--color-void);
+  }
+
+  /* What the row's gestures do, for the keyboard and a screen reader: drawn only with the focus. */
+  .phone-row-actions.ui-icon-button {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    right: calc(var(--spacing) * 2);
+    translate: 0 -50%;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .phone-row-actions.ui-icon-button:focus-visible,
+  .phone-row-actions.ui-icon-button[aria-expanded="true"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .phone-row-renaming {
+    padding: var(--_gutter);
+  }
+
+  .phone-list-body > .ui-empty[data-layout="start"] {
+    padding-inline: var(--_gutter);
+  }
+
+  .phone-list-body > .conversations-foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: calc(var(--spacing) * 4) var(--_gutter) calc(var(--spacing) * 2);
+  }
+
+  /* The rule closes a list; with no rows there is nothing to close. */
+  .phone-list-body:not(:has(.phone-rows)) > .conversations-foot {
+    border-top: 0;
+  }
+
+  /* A search that found nothing keeps the page's margin. */
+  .phone-list-body > .ui-empty[data-layout="start"] {
+    margin-block-start: calc(var(--spacing) * 3);
+    padding-inline: calc(var(--spacing) * 4);
+  }
+
+  /* The conversation, out of sight and reach once the computer has grown over it. */
+  .phone-chat[data-covered] > .phone-chat-col {
+    visibility: hidden;
+  }
+
+  .phone-chat-col {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--color-void);
+  }
+
+  .phone-thread {
+    --rail-surface: var(--color-void);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background-color: var(--color-void);
+  }
+
+  .phone-thread .thread-body {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .phone-thread .thread-scroll {
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    scrollbar-width: none;
+    --ui-fade-top: 0px;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .phone-thread .thread-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .phone-thread .thread-content {
+    justify-content: flex-end;
+    padding-top: calc(var(--_safe-top) + var(--bar-h) + var(--spacing) * 2.5);
+  }
+
+  .phone-thread .thread {
+    flex: none;
+    padding: 0 calc(var(--spacing) * 3 + var(--_safe-right)) calc(var(--spacing) * 1.5)
+      calc(var(--spacing) * 3 + var(--_safe-left));
+  }
+
+  .phone-thread .thread-row {
+    margin-top: calc(var(--spacing) / 2);
+  }
+
+  .phone-thread .thread-row[data-group-start] {
+    margin-top: calc(var(--spacing) * 3);
+  }
+
+  /* A reply's caption keeps a step clear of it: its hover, press and focus are drawn on its edge. */
+  .phone-thread .thread-row[data-kind="work"]:not([data-group-start]) {
+    margin-top: var(--spacing);
+  }
+
+  .phone-thread .thread-time {
+    margin: calc(var(--spacing) * 3.5) 0 calc(var(--spacing) * 2);
+    color: var(--color-fg-3);
+    font:
+      var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+  }
+
+  .phone-thread .thread-divider {
+    justify-self: center;
+    max-width: 80%;
+    margin-block: calc(var(--spacing) * 3);
+    color: var(--color-fg-3);
+    font:
+      var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+    text-align: center;
+  }
+
+  .phone-thread .thread-divider::before,
+  .phone-thread .thread-divider::after {
+    display: none;
+  }
+
+  .phone-thread .thread-copy-slot {
+    display: none;
+  }
+
+  /* Bubbles. dot's sits at the left in a raised card, yours at the right; the last of a run keeps a
+     small corner toward its speaker. */
+  .phone-thread .thread-message {
+    -webkit-touch-callout: none;
+    font:
+      var(--font-weight-normal) var(--text-title-3) / var(--text-reading--line-height)
+      var(--font-ui);
+    letter-spacing: -0.012em;
+  }
+
+  .phone-thread .thread-message[data-role="dot"],
+  .phone-thread .thread-question-text {
+    justify-self: start;
+    width: fit-content;
+    max-width: min(86%, 560px);
+    padding: calc(var(--spacing) * 2.25) calc(var(--spacing) * 3.25) calc(var(--spacing) * 2.5);
+    border-radius: var(--radius-xl);
+    background-color: var(--color-raised);
+    box-shadow: var(--shadow-raised);
+    color: var(--color-fg-1);
+    transition: scale var(--dur-gentle) var(--ease-standard);
+  }
+
+  .phone-thread .thread-message[data-role="dot"][data-narration] {
+    color: var(--color-fg-1);
+  }
+
+  .phone-thread
+    .thread-row[data-speaker="dot"]:not(
+      :has(+ .thread-row[data-kind="message"][data-speaker="dot"])
+    )
+    .thread-message[data-role="dot"],
+  .phone-thread .thread-question-text {
+    border-bottom-left-radius: var(--radius-tail);
+  }
+
+  .phone-thread .thread-message[data-role="user"] {
+    justify-items: end;
+    row-gap: var(--spacing);
+  }
+
+  .phone-thread .thread-said {
+    display: flex;
+    justify-content: flex-end;
+    width: 100%;
+  }
+
+  .phone-thread .thread-bubble {
+    max-width: min(86%, 560px);
+    padding: calc(var(--spacing) * 2.25) calc(var(--spacing) * 3.25) calc(var(--spacing) * 2.5);
+    border-radius: var(--radius-xl) var(--radius-xl) var(--radius-tail) var(--radius-xl);
+    background-color: var(--color-bubble-you);
+    color: var(--color-bubble-you-ink);
+    font: inherit;
+    letter-spacing: inherit;
+    transition: scale var(--dur-gentle) var(--ease-standard);
+  }
+
+  .phone-thread .thread-message[data-holding][data-role="dot"],
+  .phone-thread .thread-message[data-holding] .thread-bubble {
+    scale: 0.97;
+  }
+
+  .phone-thread .thread-bubble-files > .file-chip {
+    background-color: var(--color-bubble-you-file);
+    box-shadow: inset 0 0 0 1px var(--color-bubble-you-file-line);
+    color: inherit;
+  }
+
+  .phone-thread .thread-bubble-files .file-chip-icon {
+    color: inherit;
+  }
+
+  .phone-thread .thread-question {
+    justify-items: start;
+  }
+
+  /* A form to fill in takes the thread's width, whatever its fields hold. */
+  .phone-thread .thread-question > .ask {
+    justify-self: stretch;
+  }
+
+  .phone-thread .thread-row[data-kind="result"] {
+    max-width: min(86%, 560px);
+  }
+
+  .phone-thread .result-card {
+    gap: calc(var(--spacing) * 0.75);
+  }
+
+  .phone-thread .result-summary {
+    justify-self: start;
+    width: fit-content;
+    padding: calc(var(--spacing) * 2.25) calc(var(--spacing) * 3.25) calc(var(--spacing) * 2.5);
+    border-radius: var(--radius-xl);
+    background-color: var(--color-raised);
+    box-shadow: var(--shadow-raised);
+  }
+
+  /* A table that doesn't fit scrolls within its bubble. */
+  .phone-thread .thread-message .md-table {
+    margin-inline: calc(var(--spacing) * -3.25);
+    padding-inline: calc(var(--spacing) * 3.25);
+    border-radius: 0;
+  }
+
+  /* The caption under a reply, and what it unfolds. */
+  .chat-steps .thread-work-steps {
+    margin-inline: 0;
+  }
+
+  .chat-steps .ui-disclosure-trigger {
+    display: inline-flex;
+    flex-direction: row-reverse;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--spacing);
+    min-height: calc(var(--spacing) * 7);
+    width: auto;
+    padding: 0 calc(var(--spacing) * 1.5);
+    color: var(--color-fg-3);
+    font:
+      var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+    position: relative;
+  }
+
+  .chat-steps .ui-disclosure-trigger::before {
+    content: "";
+    position: absolute;
+    inset: calc(var(--spacing) * -2) calc(var(--spacing) * -1);
+  }
+
+  .chat-steps .ui-disclosure-trigger::after {
+    display: none;
+  }
+
+  .chat-steps .ui-disclosure-chevron {
+    order: 0;
+    margin: 0;
+  }
+
+  .chat-steps .ui-disclosure-summary {
+    color: inherit;
+    font: inherit;
+  }
+
+  .chat-steps .thread-meta {
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 1.5) 0;
+  }
+
+  /* Over the reach of the caption that follows, which would take a press meant for a chip. */
+  .ask-quick {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 1.5);
+    max-width: 92%;
+    margin-top: calc(var(--spacing) * 1.5);
+  }
+
+  .phone-thread .thread-suggestions {
+    gap: calc(var(--spacing) * 1.5);
+  }
+
+  :is(.ask-quick, .phone-thread .thread-suggestions) .ui-chip {
+    position: relative;
+    min-height: calc(var(--spacing) * 9.5);
+    padding-inline: calc(var(--spacing) * 3.5);
+    border-radius: var(--radius-full);
+    font: var(--font-weight-medium) var(--text-row) / var(--text-row--line-height) var(--font-ui);
+    letter-spacing: var(--text-row--letter-spacing);
+  }
+
+  /* Each reaches half the gap to the next, which makes 44 px with no dead strip between them. */
+  :is(.ask-quick, .phone-thread .thread-suggestions) .ui-chip::after {
+    content: "";
+    position: absolute;
+    inset: calc(var(--spacing) * -0.75) 0;
+  }
+
+  .phone-thread .thread-jump {
+    z-index: 5;
+  }
+
+  /* dot's line stays at the foot while it works: the button keeps clear of it too. */
+  .phone-thread:has(.dot-strip[data-live]:not([data-hidden])) .thread-jump {
+    bottom: calc(var(--thread-foot-shown) + var(--spacing) * 18);
+  }
+
+  /* What dot checked gets its own line under the replay's length, not the few words beside it. */
+  .phone-stack:not([data-split]) .phone-thread .ui-file-row[data-play] .ui-file-text {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  /* The foot of the thread: dot, its line and the picture, in dot's one place. */
+  .dot-strip {
+    position: relative;
+    z-index: 4;
+    display: grid;
+    grid-template-rows: 1fr;
+    margin-top: calc(var(--spacing) * 1.5);
+    transition:
+      grid-template-rows var(--dur-default) var(--ease-spring),
+      opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  .dot-strip[data-live] {
+    position: sticky;
+    bottom: 0;
+    background: linear-gradient(transparent, var(--color-void) calc(var(--spacing) * 3.5));
+  }
+
+  .dot-strip[data-hidden] {
+    grid-template-rows: 0fr;
+    margin-top: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .dot-strip-clip {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .dot-strip-row {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 1.5);
+    min-height: calc(var(--spacing) * 16);
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3 + var(--_safe-right))
+      calc(var(--spacing) / 2) calc(var(--spacing) * 2 + var(--_safe-left));
+  }
+
+  .dot-strip .narrator,
+  .phone-computer-line .narrator {
+    position: relative;
+    inset: auto;
+    flex: 1;
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    column-gap: calc(var(--spacing) * 1.5);
+    align-items: center;
+    min-width: 0;
+    min-height: 56px;
+  }
+
+  .dot-strip .narrator-dock,
+  .phone-computer-line .narrator-dock {
+    position: relative;
+    top: auto;
+    left: auto;
+    grid-area: 1 / 1;
+    width: 56px;
+    height: 56px;
+  }
+
+  .dot-strip .narrator-dot,
+  .phone-computer-line .narrator-dot {
+    position: relative;
+    top: auto;
+    left: auto;
+    grid-area: 1 / 1;
+    z-index: 1;
+    width: 56px;
+    height: 56px;
+    pointer-events: auto;
+  }
+
+  .dot-strip .narration,
+  .phone-computer-line .narration {
+    position: relative;
+    top: auto;
+    left: auto;
+    grid-area: 1 / 2;
+    width: 100%;
+    height: auto;
+    min-height: var(--text-row--line-height);
+    font: var(--font-weight-medium) var(--text-row) / var(--text-row--line-height) var(--font-ui);
+    letter-spacing: var(--text-row--letter-spacing);
+  }
+
+  .dot-strip .narration-text,
+  .phone-computer-line .narration-text {
+    height: auto;
+  }
+
+  .dot-strip .narration-line,
+  .phone-computer-line .narration-line {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  .dot-strip .narrator:not([data-dot]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dot-strip .narrator:not([data-dot]) .narration {
+    grid-area: 1 / 1;
+  }
+
+  .dot-strip-time {
+    flex: none;
+    color: var(--color-fg-3);
+    font:
+      var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+  }
+
+  .phone-thumb.ui-button {
+    position: relative;
+    flex: none;
+    display: block;
+    width: 72px;
+    height: 45px;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    border-radius: var(--radius-row);
+    background-color: var(--color-raised);
+    box-shadow: var(--rim-none);
+  }
+
+  .phone-thumb[data-gone] {
+    visibility: hidden;
+  }
+
+  /* The picture lands bare, then its rim and time come up around it. */
+  .phone-thumb-rim,
+  .phone-thumb-time {
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  .phone-thumb[data-gone] :is(.phone-thumb-rim, .phone-thumb-time) {
+    opacity: 0;
+    transition: none;
+  }
+
+  /* The slot and the rim take the thumbnail's corners from here, so the rim's glow rounds with it. */
+  .phone-thumb > .ui-button-content {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+  }
+
+  /* The picture is its own layer, which WebKit leaves unclipped by a rounded overflow alone. */
+  .phone-thumb-slot {
+    position: absolute;
+    inset: 0;
+    display: block;
+    overflow: hidden;
+    border-radius: inherit;
+    clip-path: inset(0 round var(--radius-row));
+    pointer-events: none;
+  }
+
+  .phone-thumb-rim {
+    position: absolute;
+    z-index: 3;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  .phone-thumb[data-light="dot"] > .ui-button-content > .phone-thumb-rim {
+    box-shadow: var(--rim-xenon);
+  }
+
+  .phone-thumb[data-light="you"] > .ui-button-content > .phone-thumb-rim {
+    box-shadow: var(--rim-you);
+  }
+
+  .phone-thumb-time {
+    position: absolute;
+    z-index: 3;
+    right: calc(var(--spacing) * 0.75);
+    bottom: calc(var(--spacing) * 0.75);
+    padding: 0 calc(var(--spacing) * 0.75);
+    border-radius: var(--radius-xs);
+    background-color: var(--color-stage-glass);
+    color: var(--color-stage-fg-1);
+    font: var(--text-tile) / var(--text-tile--line-height) var(--font-ui);
+  }
+
+  /* The picture wherever it rests: over the thumbnail, or over the computer screen. */
+  .phone-picture {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 2;
+    transform-origin: 0 0;
+    will-change: transform;
+    touch-action: none;
+  }
+
+  /* The whole thumbnail opens the computer: nothing in the picture catches a tap meant for it. */
+  .phone-picture[data-place="thumb"],
+  .phone-picture[data-place="thumb"] * {
+    pointer-events: none;
+  }
+
+  .phone-picture[data-place="away"] {
+    visibility: hidden;
+  }
+
+  .phone-picture .stage-frame {
+    width: 100%;
+    margin: 0;
+  }
+
+  .phone-picture .stage-band,
+  .phone-picture .stage-spill {
+    display: none;
+  }
+
+  /* The composer in its stack, whose menus open over the foot of the thread. */
+  .phone-thread .thread-foot {
+    position: relative;
+    z-index: 5;
+    padding-right: 0;
+  }
+
+  .phone-thread .thread-dock,
+  .phone-computer-dock > .thread-dock {
+    padding: 0;
+  }
+
+  :is(.phone-thread, .phone-computer-dock) .thread-toolbar {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2 + var(--_safe-right)) var(--_foot)
+      calc(var(--spacing) * 2 + var(--_safe-left));
+    background-color: var(--color-void);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  :is(.phone-thread, .phone-computer-dock) .thread-toolbar::before {
+    content: none;
+  }
+
+  :is(.phone-thread, .phone-computer-dock) .thread-toolbar > .thread-composer {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .thread-toolbar:has(.voice-strip) > .phone-plus {
+    display: none;
+  }
+
+  /* Stop is in reach without drawing the eye from the reply. */
+  :is(.phone-thread, .phone-computer-dock) .composer-send[aria-label="Stop task"] {
+    --_image: none;
+    --_shadow: none;
+    --_face: var(--color-control);
+    color: var(--color-fg-1);
+  }
+
+  :is(.phone-thread, .phone-computer-dock) .thread-toolbar > .phone-plus {
+    margin-block-end: calc(var(--spacing) * 1.75);
+  }
+
+  /* Attaching goes through the + beside the field. */
+  :is(.phone-thread, .phone-computer-dock)
+    .composer-card
+    .composer-bar
+    > .ui-icon-button:first-child {
+    display: none;
+  }
+
+  /* An empty field offers its microphone, a task at work its Stop in the microphone's place. */
+  :is(.phone-thread, .phone-computer-dock)
+    .composer-card[data-compact]
+    .composer-send[aria-disabled="true"]:not([aria-label="Stop task"]) {
+    display: none;
+  }
+
+  .phone-thread .composer-card[data-compact]:has(.composer-send[aria-label="Stop task"]) .voice-mic,
+  .phone-computer-bottom:not(:has([data-testid="hud-stop-session"]))
+    .composer-card[data-compact]:has(.composer-send[aria-label="Stop task"])
+    .voice-mic {
+    display: none;
+  }
+
+  /* On the computer, Stop is among the controls: the field keeps its microphone. */
+  .phone-computer-bottom:has([data-testid="hud-stop-session"])
+    .composer-card[data-compact]
+    .composer-send[aria-label="Stop task"] {
+    display: none;
+  }
+
+  .phone-computer-dock .thread-toolbar {
+    background-color: transparent;
+  }
+
+  /* What must be decided, above the composer until answered. */
+  .phone-decision {
+    max-height: 62vh;
+    margin: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3) 0;
+    overflow: hidden;
+    border-radius: var(--radius-decision);
+    background-color: var(--color-raised);
+    box-shadow: var(--shadow-overlay);
+    display: flex;
+    flex-direction: column;
+    padding-block: calc(var(--spacing) * 3);
+  }
+
+  .phone-decision > .decision {
+    min-height: 0;
+    flex: 1;
+  }
+
+  .phone-decision .decision-body {
+    padding-inline: calc(var(--spacing) * 3);
+  }
+
+  .phone-decision .decision-foot {
+    padding-inline: calc(var(--spacing) * 3);
+  }
+
+  :is(.phone-thread, .phone-computer-dock) :is(.thread-handoff, .thread-browser-signin) {
+    margin: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3) 0;
+  }
+
+  .phone-notice {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    margin: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3) 0;
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2.5);
+    border-radius: var(--radius-group);
+    background-color: var(--color-inset);
+    color: var(--color-fg-2);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  }
+
+  .phone-notice > p {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .phone-notice > .ui-button {
+    flex: none;
+  }
+
+  /* The computer. */
+  .phone-computer {
+    position: absolute;
+    z-index: 12;
+    inset: 0;
+    contain: layout;
+  }
+
+  .phone-computer[data-closed] > :not(.phone-picture) {
+    visibility: hidden;
+  }
+
+  .phone-computer[data-closed] {
+    pointer-events: none;
+  }
+
+  .phone-computer-bg {
+    position: absolute;
+    inset: 0;
+    background-color: var(--color-void);
+    opacity: 0;
+  }
+
+  .phone-computer-ui {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    padding-top: calc(var(--_safe-top) + var(--bar-h));
+    opacity: 0;
+  }
+
+  .phone-computer-ui > * {
+    flex: none;
+  }
+
+  .phone-picture-room {
+    margin: var(--spacing) calc(var(--spacing) * 2) 0;
+  }
+
+  .phone-picture-room[data-empty] {
+    display: none;
+  }
+
+  .phone-computer-curtain {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    overflow-y: auto;
+  }
+
+  .phone-computer-line {
+    position: relative;
+    min-height: calc(var(--spacing) * 15);
+    padding: var(--spacing) calc(var(--spacing) * 3) 0 calc(var(--spacing) * 2);
+    display: flex;
+    align-items: center;
+  }
+
+  .phone-steps {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 calc(var(--spacing) * 4) calc(var(--spacing) * 2.5);
+    touch-action: pan-y;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(
+      transparent,
+      black calc(var(--spacing) * 2),
+      black calc(100% - var(--spacing) * 3.5),
+      transparent
+    );
+    mask-image: linear-gradient(
+      transparent,
+      black calc(var(--spacing) * 2),
+      black calc(100% - var(--spacing) * 3.5),
+      transparent
+    );
+  }
+
+  .phone-steps::-webkit-scrollbar {
+    display: none;
+  }
+
+  .phone-latest-steps > h3 {
+    margin: calc(var(--spacing) * 2) 0 calc(var(--spacing) / 2);
+    color: var(--color-fg-3);
+    font:
+      var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+  }
+
+  .phone-computer-bottom {
+    margin-top: auto;
+  }
+
+  .phone-computer-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: calc(var(--spacing) * 1.5);
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3) calc(var(--spacing) * 2);
+  }
+
+  .phone-controls-gap {
+    flex: 1;
+  }
+
+  .phone-computer-bar {
+    z-index: 3;
+  }
+
+  /* Over everything in the stack. */
+  .phone-notices {
+    position: absolute;
+    z-index: 40;
+    top: calc(var(--_safe-top) + var(--bar-h));
+    right: calc(var(--spacing) * 2);
+    left: calc(var(--spacing) * 2);
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+    pointer-events: none;
+  }
+
+  .phone-notices > * {
+    pointer-events: auto;
+  }
+
+  .phone-stack > .ui-toaster {
+    z-index: 41;
+  }
+
+  .phone-entrance {
+    position: absolute;
+    z-index: 45;
+    inset: 0;
+    display: grid;
+    background-color: var(--color-void);
+  }
+
+  .phone-banner {
+    position: absolute;
+    z-index: 42;
+    top: calc(var(--_safe-top) + var(--spacing) * 1.5);
+    right: calc(var(--spacing) * 2);
+    left: calc(var(--spacing) * 2);
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    gap: calc(var(--spacing) * 2);
+    align-items: center;
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 2)
+      calc(var(--spacing) * 2);
+    border-radius: var(--radius-island);
+    background-color: var(--color-glass-solid);
+    -webkit-backdrop-filter: blur(var(--blur-glass));
+    backdrop-filter: blur(var(--blur-glass));
+    box-shadow: var(--shadow-glass);
+    will-change: transform;
+    touch-action: none;
+  }
+
+  .phone-banner-avatar {
+    position: relative;
+    display: block;
+    width: 40px;
+    height: 40px;
+  }
+
+  .phone-banner-avatar > .dot-avatar {
+    margin: calc(var(--spacing) * -1.5);
+  }
+
+  .phone-banner-avatar[data-attention]::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: calc(var(--spacing) * 2.5);
+    height: calc(var(--spacing) * 2.5);
+    border-radius: var(--radius-full);
+    background-color: var(--color-attention);
+    box-shadow: 0 0 0 2px var(--color-popover);
+  }
+
+  .phone-banner-words {
+    display: grid;
+    min-width: 0;
+  }
+
+  .phone-banner-words > strong {
+    overflow: hidden;
+    font: var(--font-weight-semibold) var(--text-row) / var(--text-row--line-height) var(--font-ui);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .phone-banner-words > span {
+    overflow: hidden;
+    color: var(--color-fg-2);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .phone-banner > small {
+    align-self: start;
+    color: var(--color-fg-3);
+    font:
+      var(--text-footnote--font-weight) var(--text-footnote) / var(--text-row--line-height)
+      var(--font-ui);
+  }
+
+  .phone-banner-open.ui-button {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    padding: 0;
+    border-radius: inherit;
+    background: none;
+    box-shadow: none;
+    pointer-events: none;
+  }
+
+  /* The tip that says where dot went. */
+  .phone-coach {
+    position: absolute;
+    z-index: 43;
+    width: 236px;
+    padding: calc(var(--spacing) * 2.75) calc(var(--spacing) * 3) calc(var(--spacing) * 3);
+    border-radius: var(--radius-group);
+    background-color: var(--color-popover);
+    box-shadow: var(--shadow-overlay);
+    transform-origin: var(--_arrow) 0;
+    animation: phone-coach-in var(--dur-default) var(--ease-spring) both;
+  }
+
+  .phone-coach[data-leaving] {
+    animation: phone-coach-out var(--dur-exit) var(--ease-exit) both;
+    pointer-events: none;
+  }
+
+  .phone-coach::before {
+    content: "";
+    position: absolute;
+    top: calc(var(--spacing) * -1.25);
+    left: calc(var(--_arrow) - var(--spacing) * 1.5);
+    width: calc(var(--spacing) * 3);
+    height: calc(var(--spacing) * 3);
+    border-radius: var(--radius-xs) 0 0 0;
+    background-color: var(--color-popover);
+    rotate: 45deg;
+    box-shadow: -1px -1px 0 var(--color-hairline);
+  }
+
+  .phone-coach > strong {
+    display: block;
+    font: var(--font-weight-semibold) var(--text-row) / var(--text-row--line-height) var(--font-ui);
+    letter-spacing: var(--text-row--letter-spacing);
+  }
+
+  .phone-coach > span {
+    display: block;
+    margin-top: 1px;
+    color: var(--color-fg-2);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    letter-spacing: var(--text-body--letter-spacing);
+  }
+
+  @keyframes phone-coach-in {
+    from {
+      opacity: 0;
+      transform: translateY(calc(var(--spacing) * -1.5)) scale(0.8);
+    }
+  }
+
+  @keyframes phone-coach-out {
+    to {
+      opacity: 0;
+      transform: translateY(calc(var(--spacing) * -1)) scale(0.92);
+    }
+  }
+
+  /* A hold: the bubble lifts, the rest of the app sinks behind glass. */
+  .bubble-hold-back {
+    position: absolute;
+    inset: 0;
+    background-color: color-mix(in srgb, var(--color-void) 62%, transparent);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    backdrop-filter: blur(18px) saturate(140%);
+    transition: opacity var(--dur-snappy) var(--ease-standard);
+  }
+
+  @starting-style {
+    .bubble-hold-back {
+      opacity: 0;
+    }
+  }
+
+  .ui-layer[data-closing] > .bubble-hold-back {
+    opacity: 0;
+    transition-duration: var(--dur-exit);
+  }
+
+  /* The copy keeps the look it has in the thread, and the shadow it lifts with fades with the lift. */
+  .bubble-hold-plate {
+    position: absolute;
+    top: 0;
+    left: 0;
+    box-shadow: var(--shadow-overlay);
+    transform-origin: 0 0;
+    pointer-events: none;
+    will-change: transform;
+  }
+
+  .bubble-hold-copy {
+    position: relative;
+  }
+
+  .bubble-hold-preview[data-clip] {
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(black calc(100% - var(--_fade)), transparent);
+    mask-image: linear-gradient(black calc(100% - var(--_fade)), transparent);
+  }
+
+  .bubble-hold-note {
+    margin: 0;
+    padding: calc(var(--spacing) * 1.75) calc(var(--spacing) * 2.5) calc(var(--spacing) * 2);
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  }
+
+  .ui-menu-item[data-hot] {
+    background-color: var(--color-control-pressed);
+  }
+
+  .bubble-select {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  .bubble-select * {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  .phone-menu-dot {
+    display: block;
+    flex: none;
+    width: calc(var(--spacing) * 6);
+    height: calc(var(--spacing) * 6);
+  }
+
+  /* A conversation's details. */
+  .phone-details {
+    display: grid;
+    gap: 0;
+  }
+
+  .phone-details-hero {
+    display: grid;
+    justify-items: center;
+    gap: calc(var(--spacing) * 1.5);
+    padding: var(--spacing) 0 calc(var(--spacing) * 3.5);
+    text-align: center;
+  }
+
+  .phone-details-hero > strong {
+    font:
+      var(--text-title-2--font-weight) var(--text-title-2) / var(--text-title-2--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-2--letter-spacing);
+  }
+
+  .phone-details-hero > small {
+    color: var(--color-fg-2);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  }
+
+  .phone-details-row.ui-button {
+    justify-content: flex-start;
+    width: 100%;
+    min-height: 48px;
+    border-radius: 0;
+    box-shadow: inset 0 -1px 0 var(--color-hairline);
+    background: none;
+    font:
+      var(--font-weight-normal) var(--text-title-3) / var(--text-title-3--line-height)
+      var(--font-ui);
+  }
+
+  .phone-details-row > .ui-button-content {
+    width: 100%;
+    gap: calc(var(--spacing) * 3);
+  }
+
+  .phone-details-row small {
+    margin-inline-start: auto;
+    color: var(--color-fg-2);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  }
+
+  /* A tablet: the list beside the conversation. */
+  .phone-stack[data-split] {
+    --_split: clamp(300px, 38%, 368px);
+    --_reading: 760px;
+  }
+
+  /* However wide the screen, a thread stays a comfortable measure, its foot under it. */
+  .phone-stack[data-split] :is(.thread-content, .thread-dock) {
+    width: 100%;
+    max-width: var(--_reading);
+    margin-inline: auto;
+  }
+
+  .phone-stack[data-split] > .phone-list {
+    right: auto;
+    width: var(--_split);
+    border-right: 1px solid var(--color-hairline);
+    transition: translate var(--dur-default) var(--ease-spring);
+  }
+
+  .phone-stack[data-split] > .phone-chat {
+    left: var(--_split);
+    transition: left var(--dur-default) var(--ease-spring);
+  }
+
+  .phone-stack[data-split][data-list-hidden] > .phone-list {
+    translate: calc(var(--_split) * -1) 0;
+  }
+
+  .phone-stack[data-split][data-list-hidden] > .phone-chat {
+    left: 0;
+  }
+
+  /* On a wide screen what is under the picture lines up with it. */
+  .phone-stack[data-split]
+    .phone-computer-ui
+    > :is(.phone-computer-line, .phone-steps, .phone-computer-bottom) {
+    width: 100%;
+    max-width: var(--_picture-w);
+    margin-inline: auto;
+  }
+
+  .phone-stack[data-split] .phone-dim,
+  .phone-stack[data-split] .phone-edge {
+    display: none;
+  }
+
+  .phone-stack[data-split] .phone-thread :is(.thread-message[data-role="dot"], .thread-bubble) {
+    max-width: min(76%, 560px);
+  }
+
+  /* A phone held sideways: the picture fills the height, its controls in the margin beside it. */
+  @media (pointer: coarse) and (orientation: landscape) and (height < 500px) {
+    /* Its sides are the picture's bounds: past the back button, and short of Take control, the
+       widest of the controls. */
+    .phone-computer-ui {
+      display: block;
+      padding: var(--_safe-top)
+        calc(max(calc(var(--spacing) * 2), var(--_safe-right)) + var(--spacing) * 29.5) 0
+        calc(var(--_safe-left) + var(--spacing) * 15);
+    }
+
+    .phone-computer-ui > :is(.phone-picture-room, .phone-computer-line, .phone-steps),
+    .phone-computer-dock {
+      display: none;
+    }
+
+    .phone-computer-curtain {
+      position: absolute;
+      inset: 0;
+    }
+
+    .phone-computer-controls {
+      position: absolute;
+      right: max(calc(var(--spacing) * 2), var(--_safe-right));
+      bottom: calc(var(--spacing) * 2);
+      flex-direction: column;
+      align-items: flex-end;
+      width: auto;
+      padding: 0;
+    }
+
+    .phone-computer-controls .control-tools {
+      flex: none;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+
+    /* Its margin is narrow: the words button keeps within it, clear of the picture. */
+    .phone-computer-controls .ui-button {
+      --_pad: calc(var(--spacing) * 2.5);
+      height: 40px;
+      min-height: 40px;
+      font:
+        var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+        var(--font-ui);
+    }
+
+    /* The keyboard leaves room for little more than the field. */
+    .app[data-keyboard-up] .phone-chat-bar {
+      display: none;
+    }
+
+    .phone-computer-bar .phone-title {
+      display: none;
+    }
+
+    .phone-computer-bar {
+      right: auto;
+    }
+
+    .phone-computer-bar .phone-bar-row {
+      padding-inline-end: 0;
+    }
+
+    .phone-computer-bar .phone-bar-row {
+      flex-direction: column;
+      height: auto;
+      gap: calc(var(--spacing) * 2);
+      padding-top: calc(var(--spacing) * 2);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .phone-thread .thread-message[data-holding][data-role="dot"],
+    .phone-thread .thread-message[data-holding] .thread-bubble {
+      scale: 1;
+    }
+
+    .phone-coach,
+    .phone-coach[data-leaving] {
+      animation-name: none;
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .phone-bar-glass,
+    .phone-banner,
+    .bubble-hold-back {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      background-color: var(--color-void);
+    }
+
+    .phone-bar-glass {
+      background-image: none;
+    }
+  }
+}

@@ -88,6 +88,69 @@
   width: 100%;
 }
 
+/* A view style's tile: the layout in small. */
+.ui-radio-card-preview:has(> .view-preview) {
+  align-self: stretch;
+}
+
+.view-preview {
+  display: flex;
+  width: 100%;
+  height: calc(var(--spacing) * 20);
+  gap: calc(var(--spacing) * 1);
+  padding: calc(var(--spacing) * 2);
+  overflow: hidden;
+  border-radius: var(--radius-row);
+  background: var(--color-void);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+
+.view-preview > i {
+  display: block;
+  border-radius: var(--radius-xs);
+  background: var(--color-raised);
+}
+
+.view-preview[data-view="chat"] {
+  flex-direction: column;
+}
+
+.view-preview[data-view="chat"] > i {
+  flex: none;
+  height: calc(var(--spacing) * 3);
+  width: 60%;
+}
+
+.view-preview[data-view="chat"] > [data-short] {
+  width: 40%;
+}
+
+.view-preview[data-view="chat"] > [data-part="mine"] {
+  align-self: flex-end;
+  width: 44%;
+  background: var(--color-bubble-you);
+}
+
+.view-preview[data-view="chat"] > [data-part="field"] {
+  width: 100%;
+  margin-top: auto;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+
+.view-preview[data-view="studio"] > [data-part="rail"] {
+  flex: 1;
+}
+
+.view-preview[data-view="studio"] > [data-part="stage"] {
+  flex: 3;
+  background: linear-gradient(135deg, var(--color-glyph-light), var(--color-glyph-mid));
+}
+
+.view-preview[data-view="studio"] > [data-part="panel"] {
+  flex: 1.4;
+}
+
 /* A theme's tile: its house with the lit stage in it, as the app itself looks in that theme. */
 .ui-radio-card-preview:has(> .appearance-swatch) {
   align-self: stretch;
@@ -301,6 +364,13 @@
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
+.onboarding-note a {
+  color: var(--color-fg-1);
+  text-decoration: underline;
+  text-decoration-color: var(--color-fg-3);
+  text-underline-offset: calc(var(--spacing) * 0.5);
+}
+
 .onboarding-problem {
   display: flex;
   align-items: center;
@@ -424,16 +494,27 @@
 }
 
 .onboarding-head-spacer {
+  flex: none;
   width: 44px;
 }
 
+/* The bars take what Back and Later leave, however many steps there are. */
 .onboarding-head .onboarding-progress {
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
-  margin: 0;
+  margin: 0 calc(var(--spacing) * 2);
+}
+
+.onboarding-head .onboarding-bars {
+  justify-content: center;
+  width: 100%;
 }
 
 .onboarding-head .onboarding-bar-step {
-  width: 36px;
+  flex: 0 1 36px;
+  width: auto;
+  min-width: 0;
 }
 
 .onboarding[data-layout="phone"] .onboarding-page {
@@ -468,7 +549,7 @@
   flex-direction: column;
   gap: calc(var(--spacing) * 2);
   padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4)
-    calc(var(--spacing) * 6 + env(safe-area-inset-bottom));
+    max(calc(var(--spacing) * 6), var(--home-foot));
 }
 
 .onboarding-foot .onboarding-primary {

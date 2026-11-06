@@ -3,9 +3,10 @@
 Status: superseded on 2026-10-30 by true concurrency with a per-action computer lease
 (`gateway/computer-lease.ts`, `agent/computer-turn.ts`, `gateway/window-owners.ts`): every task runs
 at once, each screen action takes a short turn on the computer that first brings the task's own
-window forward, other tasks' windows are refused as targets and covered in its screenshots, and the
-web browser works for one task at a time. The queue below was not built; the analysis of where the
-code assumed one task per computer still applies.
+window forward, and other tasks' windows are refused as targets and covered in its screenshots. The
+web browser, which at first worked for one task at a time, gives each task its own window since
+[2026-11-04](2026-11-04-parallel-browser-windows.md). The queue below was not built; the analysis of
+where the code assumed one task per computer still applies.
 
 ## Request
 

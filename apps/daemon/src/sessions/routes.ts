@@ -6,6 +6,7 @@ import {
   DeleteSessionsRequest,
   type DeleteSessionsResult,
   emptyManifest,
+  LookConversation,
   PinConversation,
   RenameConversation,
   recordingDirectory,
@@ -44,6 +45,11 @@ function requestedScreen(request: Request): ScreenName | null {
     ? values[0]
     : null;
 }
+// The HTTP adapter cancels a response in the same turn the client's leaving aborts it, and logs one
+// that errors first as a server failure. The error follows, so only a reader still there sees it.
+function failAborted(controller: ReadableStreamDefaultController<Uint8Array> | undefined): void {
+  queueMicrotask(() => controller?.error(new Error("request aborted")));
+}
 export function eventStreamResponse(
   file: string,
   fromSeq: number,
@@ -61,7 +67,7 @@ export function eventStreamResponse(
     await lines.return(undefined);
   }
   function abort() {
-    controller?.error(new Error("request aborted"));
+    failAborted(controller);
     void close();
   }
   const body = new ReadableStream<Uint8Array>({
@@ -144,7 +150,7 @@ function videoResponse(view: RecordingView, request: Request): Response {
     view.close();
   }
   function abort() {
-    controller?.error(new Error("request aborted"));
+    failAborted(controller);
     close();
   }
   const body = new ReadableStream<Uint8Array>({
@@ -298,6 +304,15 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
       },
     });
   });
+  // Where a notification about this task leads: a routine's run opens in its conversation.
+  app.get("/api/conversations/:id/latest", (c) => {
+    if (c.get("remoteGrant")) return c.text("Only the owner opens conversations", 403);
+    const id = c.req.param("id");
+    const conversations = new Conversations(deps.home, deps.eventLog);
+    if (!ULID_PATTERN.test(id) || !conversations.has(id))
+      return c.text("conversation not found", 404);
+    return c.json({ sessionId: conversations.latest(id), routine: conversations.fromRoutine(id) });
+  });
   app.delete("/api/conversations/:id", (c) => {
     const id = c.req.param("id");
     const conversations = new Conversations(deps.home, deps.eventLog);
@@ -366,6 +381,7 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
   organize("tag", TagConversation, ({ tag }) => ({ tag }));
   organize("pin", PinConversation, ({ pinned }) => ({ pinned }));
   organize("archive", ArchiveConversation, ({ archived }) => ({ archived }));
+  organize("look", LookConversation, ({ look }) => ({ look }));
   // No await separates the live check from the deletion, so a run cannot start between them.
   const remove = (id: string): "deleted" | "live" => {
     if (isLive(id)) return "live";

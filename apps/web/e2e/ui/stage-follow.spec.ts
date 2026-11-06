@@ -31,14 +31,18 @@ async function shots(page: Page, ui: Harness, name: string) {
   }
 }
 
-// Notes every toast the page shows from here on, however briefly it stays.
+// Notes every toast the page shows from here on, and everything it reads out politely, however
+// briefly either stays.
 async function watchToasts(page: Page) {
   await page.evaluate(() => {
     const seen = new Set<string>();
-    Object.assign(window, { toastsSeen: seen });
+    const heard = new Set<string>();
+    Object.assign(window, { toastsSeen: seen, heard });
     new MutationObserver(() => {
       for (const title of document.querySelectorAll(".ui-toast-title"))
         seen.add(title.textContent ?? "");
+      for (const region of document.querySelectorAll('[role="status"][aria-live="polite"]'))
+        heard.add((region.textContent ?? "").trim());
     }).observe(document.body, { subtree: true, childList: true, characterData: true });
   });
 }
@@ -49,15 +53,16 @@ const toastsSeen = (page: Page, forget = false) =>
     if (forget) seen.clear();
     return titles;
   }, forget);
+const heard = (page: Page) =>
+  page.evaluate(() => [...(window as unknown as { heard: Set<string> }).heard]);
 
 async function newConversation(page: Page) {
+  const rail = await chatRail(page);
   if (isPhone(page)) {
-    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("button", { name: "More", exact: true }).click();
     await page.getByRole("menuitem", { name: "New conversation" }).click();
-  } else await page.getByRole("button", { name: "New conversation" }).click();
-  await expect(
-    (await chatRail(page)).getByRole("heading", { name: "What should we do?" }),
-  ).toBeVisible();
+  } else await rail.getByRole("button", { name: "New conversation" }).click();
+  await expect(rail.getByRole("heading", { name: "What should we do?" })).toBeVisible();
 }
 
 test("a new conversation shows the computer as it is, and only dot's own move is announced", async ({
@@ -77,9 +82,8 @@ test("a new conversation shows the computer as it is, and only dot's own move is
   await watchToasts(page);
   await newConversation(page);
   await expect.poll(() => look(page)).toBe("home");
-  // The page went back to the desktop by itself: dot did not move, and the word that it moved to
-  // the web browser no longer holds.
-  await expect(page.locator(".ui-toast-title", { hasText: "dot moved" })).toHaveCount(0);
+  // The page went back to the desktop by itself: dot did not move, and nothing says it did.
+  expect(await heard(page)).not.toContain("dot is back on the desktop");
   expect(await toastsSeen(page, true)).not.toContain("dot is back on the desktop");
   await shots(page, ui, "new-conversation");
 
@@ -97,10 +101,12 @@ test("a new conversation shows the computer as it is, and only dot's own move is
     await page.waitForTimeout(250);
   }
 
-  // dot goes back to the web browser, which still shows what the last task left there, live.
+  // dot goes back to the web browser, which still shows what the last task left there, live. Its
+  // window coming forward is the news on the screen; the move is read out, with no toast over it.
   await qa("screen?to=browser");
   await expect.poll(() => look(page)).toBe("browser");
-  await expect.poll(() => toastsSeen(page)).toContain("dot moved to the web browser");
+  await expect.poll(() => heard(page)).toContain("dot is working in the web browser");
+  expect(await toastsSeen(page)).not.toContain("dot is working in the web browser");
   await shots(page, ui, "dot-moved");
 });
 

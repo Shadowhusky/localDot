@@ -5,7 +5,10 @@ import { PreviewError, type Previews } from "./previews.ts";
 
 // The owner's previews of the servers in a task's computer. Shared links never reach these: they
 // are not on a link's list of routes, and a link's grant is refused here as well.
-export function previewRoutes(app: Hono, previews: Pick<Previews, "status" | "open" | "stop">) {
+export function previewRoutes(
+  app: Hono,
+  previews: Pick<Previews, "status" | "open" | "stop" | "stopServer">,
+) {
   app.get("/api/sessions/:id/previews", (c) =>
     owned(c, async (id) => {
       c.header("cache-control", "no-store");
@@ -18,6 +21,16 @@ export function previewRoutes(app: Hono, previews: Pick<Previews, "status" | "op
       if (!request.success) return c.json({ message: "That isn't a preview request." }, 400);
       c.header("cache-control", "no-store");
       return c.json(await previews.open(id, request.data, c.req.header("host")));
+    }),
+  );
+  // Ends the server itself, in the computer, not just the way to it.
+  app.delete("/api/sessions/:id/previews/servers/:port", (c) =>
+    owned(c, async (id) => {
+      const port = Number(c.req.param("port"));
+      if (!Number.isInteger(port) || port < 1 || port > 65535)
+        return c.json({ message: "That isn't a port." }, 400);
+      await previews.stopServer(id, port);
+      return c.body(null, 204);
     }),
   );
   app.delete("/api/sessions/:id/previews/:preview", (c) =>

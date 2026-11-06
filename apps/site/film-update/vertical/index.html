@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="zh-Hans" data-format="tall" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>What's new — localDot</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      /* Chinese, from the Mac that renders the film. */
+      @font-face {
+        font-family: "PingFang SC";
+        src: local("PingFang SC Regular"), local("PingFangSC-Regular");
+        font-weight: 400;
+      }
+
+      @font-face {
+        font-family: "PingFang SC";
+        src: local("PingFang SC Medium"), local("PingFangSC-Medium");
+        font-weight: 500;
+      }
+
+      @font-face {
+        font-family: "PingFang SC";
+        src: local("PingFang SC Semibold"), local("PingFangSC-Semibold");
+        font-weight: 600 900;
+      }
+
+      @font-face {
+        font-family: "Inter";
+        src: url("assets/fonts/inter.woff2") format("woff2");
+        font-weight: 100 900;
+        font-display: block;
+      }
+
+      :root {
+        --void: #0a0b0d;
+        --raised: #18191c;
+        --fg-1: #eeeff1;
+        --fg-2: #a8abb0;
+        --fg-3: #83868b;
+        --xenon: #3fb5de;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: var(--void);
+      }
+
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        color: var(--fg-1);
+        font-family: "Inter", sans-serif;
+        font-optical-sizing: auto;
+      }
+
+      #studio {
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(120% 70% at 50% 108%, rgb(38 46 58 / 0.6), transparent 62%),
+          radial-gradient(90% 60% at 50% 0%, rgb(26 30 38 / 0.7), transparent 70%),
+          var(--void);
+      }
+
+      #stage {
+        position: absolute;
+        inset: 0;
+        width: 1080px;
+        height: 1920px;
+        pointer-events: none;
+      }
+
+      video {
+        position: absolute;
+        top: 0;
+        left: 0;
+        display: block;
+        height: auto;
+        object-fit: cover;
+      }
+
+      /* The phone, drawn around the app: the safe areas of its take leave the status bar clear. */
+      .handset {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 402px;
+        height: 874px;
+        transform-origin: 50% 50%;
+        visibility: hidden;
+      }
+
+      .phone-rim {
+        position: absolute;
+        inset: -14px;
+        border-radius: 75px;
+        background: linear-gradient(145deg, #70757d 0%, #34373d 18%, #1c1e22 46%, #24262b 72%, #5c6068 100%);
+        box-shadow:
+          0 0 0 0.5px rgb(255 255 255 / 0.22),
+          0 50px 130px rgb(0 0 0 / 0.65),
+          0 12px 36px rgb(0 0 0 / 0.5);
+      }
+
+      .phone-rim::after {
+        content: "";
+        position: absolute;
+        inset: 3px;
+        border-radius: 72px;
+        background: #050507;
+        box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.1);
+      }
+
+      .phone-key {
+        position: absolute;
+        width: 3px;
+        border-radius: 2px;
+        background: linear-gradient(180deg, #5f636b, #2c2e33 40%, #4c5057);
+      }
+
+      .phone-screen {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        border-radius: 61px;
+        background: #070b12;
+      }
+
+      .phone-screen video {
+        width: 402px;
+        aspect-ratio: 402 / 874;
+      }
+
+      .screen {
+        position: absolute;
+        inset: 0;
+      }
+
+      /* The picture on its way from the thumbnail to the computer's view. */
+      #grow,
+      #shrink {
+        position: absolute;
+        overflow: hidden;
+        visibility: hidden;
+      }
+
+      #grow video,
+      #shrink video {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .phone-status {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 62px;
+        color: #fff;
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .phone-time {
+        position: absolute;
+        top: 21px;
+        left: 0;
+        width: 138px;
+        text-align: center;
+      }
+
+      .phone-glyphs {
+        position: absolute;
+        top: 24px;
+        right: 30px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .phone-island {
+        position: absolute;
+        top: 11px;
+        left: 139px;
+        width: 124px;
+        height: 37px;
+        border-radius: 19px;
+        background: #000;
+      }
+
+      .phone-island::after {
+        content: "";
+        position: absolute;
+        top: 12px;
+        right: 13px;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 40% 38%, #27304a, #0a0c14 62%, #04050a);
+      }
+
+      .phone-home {
+        position: absolute;
+        bottom: 8px;
+        left: 131px;
+        width: 140px;
+        height: 5px;
+        border-radius: 3px;
+        background: rgb(255 255 255 / 0.85);
+      }
+
+      #touch {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, rgb(255 255 255 / 0.42), rgb(255 255 255 / 0.2) 72%, rgb(255 255 255 / 0.04));
+        box-shadow: 0 0 0 1px rgb(255 255 255 / 0.3);
+        visibility: hidden;
+      }
+
+      /* The window the view changes in. */
+      #room {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 1280px;
+        height: 720px;
+        overflow: hidden;
+        border-radius: 14px;
+        background: #070b12;
+        box-shadow:
+          0 12px 32px rgb(0 0 0 / 0.45),
+          0 40px 120px rgb(0 0 0 / 0.6);
+        visibility: hidden;
+      }
+
+      #room video {
+        width: 1280px;
+        aspect-ratio: 16 / 9;
+      }
+
+      .win {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 1600px;
+        height: 900px;
+        overflow: hidden;
+        border-radius: 20px;
+        background: #070b12;
+        box-shadow:
+          0 12px 32px rgb(0 0 0 / 0.45),
+          0 30px 90px rgb(0 0 0 / 0.55);
+        visibility: hidden;
+      }
+
+      .win video {
+        top: 0;
+        left: 0;
+        width: 1600px;
+        aspect-ratio: 16 / 9;
+      }
+
+      .words {
+        position: absolute;
+        visibility: hidden;
+      }
+
+      .words h2,
+      .words h1 {
+        font-size: 100px;
+        font-weight: 650;
+        line-height: 1;
+        letter-spacing: -0.04em;
+      }
+
+      .words [data-word] {
+        display: inline-block;
+        margin-right: 0.24em;
+        white-space: nowrap;
+      }
+
+      .words [data-word].joined {
+        margin-right: 0;
+      }
+
+      .side [data-word] {
+        display: block;
+        margin-right: 0;
+      }
+
+      /* Chinese sets at its own spacing, phrase against phrase, its commas closed up. */
+      :lang(zh) #root {
+        font-family: "Inter", "PingFang SC", sans-serif;
+      }
+
+      :lang(zh) :is(.words h1, .words h2) {
+        font-feature-settings: "palt";
+        letter-spacing: 0;
+        line-height: 1.14;
+      }
+
+      :lang(zh) .side h2 {
+        font-size: 84px;
+      }
+
+      .side {
+        top: 300px;
+        left: 112px;
+        width: 880px;
+      }
+
+      .side h2 {
+        font-size: 92px;
+      }
+
+      .top {
+        top: 48px;
+        left: 0;
+        right: 0;
+        text-align: center;
+      }
+
+      .top h2 {
+        font-size: 84px;
+      }
+
+      #world {
+        position: absolute;
+        inset: 0;
+      }
+
+      /* The spotlight on what proves a feature: the rest dims, a ring marks it. */
+      #spot {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+        visibility: hidden;
+      }
+
+      #spot .ring {
+        fill: none;
+        stroke: var(--xenon);
+        stroke-width: 2.5;
+        filter: drop-shadow(0 0 10px rgb(63 181 222 / 0.75));
+      }
+
+      #sparks {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .spark {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 32px;
+        height: 32px;
+        filter: drop-shadow(0 0 8px rgb(255 255 255 / 0.85));
+        visibility: hidden;
+      }
+
+      .spark svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        fill: #fff;
+      }
+
+      #end-name {
+        position: absolute;
+        top: 400px;
+        left: 820px;
+        font-size: 176px;
+        font-weight: 650;
+        letter-spacing: -0.045em;
+        visibility: hidden;
+      }
+
+      #end-url {
+        position: absolute;
+        top: 610px;
+        left: 830px;
+        font-size: 44px;
+        font-weight: 600;
+        visibility: hidden;
+      }
+
+      #end-line {
+        position: absolute;
+        top: 676px;
+        left: 830px;
+        width: 860px;
+        color: var(--fg-2);
+        font-size: 30px;
+        line-height: 1.35;
+        text-wrap: balance;
+        visibility: hidden;
+      }
+
+      #fade {
+        position: absolute;
+        inset: 0;
+        background: #000;
+        visibility: hidden;
+      }
+          /* 9:16, re-blocked. Everything meant to be read keeps out of the apps' own UI: the top 200 px,
+         the bottom 420 px, and the right 170 px below y 900. */
+      .side,
+      .top {
+        top: 210px;
+        right: auto;
+        left: 60px;
+        width: 960px;
+        text-align: left;
+      }
+
+      .side [data-word] {
+        display: inline-block;
+      }
+
+      .words h2,
+      .top h2,
+      .side h2,
+      :lang(zh) .side h2 {
+        font-size: 84px;
+        line-height: 1.14;
+      }
+
+      /* The preview's two lines, one below the other, each set to fit its line. */
+      #w-preview h2,
+      #w-open h2 {
+        font-size: 76px;
+      }
+
+      #w-open {
+        top: 310px;
+      }
+
+      .card .phone-screen {
+        border-radius: 24px;
+        box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.16);
+      }
+
+      .card {
+        height: 500px;
+      }
+
+      .card video {
+        aspect-ratio: 402 / 500 !important;
+      }
+
+
+      #end-name {
+        top: 740px;
+        left: 0;
+        width: 1080px;
+        font-size: 150px;
+        text-align: center;
+      }
+
+      #end-url {
+        top: 930px;
+        left: 0;
+        width: 1080px;
+        font-size: 56px;
+        text-align: center;
+      }
+
+      #end-line {
+        top: 1015px;
+        left: 170px;
+        width: 740px;
+        font-size: 44px;
+        line-height: 1.3;
+        text-align: center;
+        word-break: keep-all;
+      }
+
+      /* Studio stacked as on a tablet, and the other windows as square tiles cut from their middles. */
+      #room {
+        width: 760px;
+        height: 760px;
+      }
+
+      #room video {
+        width: 760px;
+        aspect-ratio: 1;
+      }
+
+      .win {
+        width: 900px;
+        height: 900px;
+      }
+
+      .win video {
+        left: -350px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-composition-variables='[{"id":"lang","type":"string","label":"Language (en or zh)","default":"en"}]' data-start="0" data-duration="23" data-width="1080" data-height="1920">
+      <div id="studio"></div>
+
+      <canvas id="stage"></canvas>
+
+      <div id="world">
+        <div id="room" data-layout-allow-overflow>
+          <video id="v-room" class="clip" data-start="13" data-duration="7.1" data-media-start="0.1" data-track-index="1" src="assets/capture/studio-view-tall.mp4" muted playsinline></video>
+        </div>
+        <div id="win-landlord" class="win" data-layout-allow-overflow>
+          <video id="v-win-landlord" class="clip" data-start="16" data-duration="4.1" data-media-start="0.1" data-track-index="10" src="assets/capture/studio-landlord.mp4" muted playsinline></video>
+        </div>
+        <div id="win-invoice" class="win" data-layout-allow-overflow>
+          <video id="v-win-invoice" class="clip" data-start="17" data-duration="3.1" data-media-start="0.1" data-track-index="11" src="assets/capture/studio-invoice.mp4" muted playsinline></video>
+        </div>
+        <div id="win-flights" class="win" data-layout-allow-overflow>
+          <video id="v-win-flights" class="clip" data-start="17" data-duration="3.1" data-media-start="0.1" data-track-index="12" src="assets/capture/studio-flights.mp4" muted playsinline></video>
+        </div>
+        <div id="win-photos" class="win" data-layout-allow-overflow>
+          <video id="v-win-photos" class="clip" data-start="17.5" data-duration="2.6" data-media-start="0.1" data-track-index="13" src="assets/capture/studio-photos.mp4" muted playsinline></video>
+        </div>
+        <div id="win-sheet" class="win" data-layout-allow-overflow>
+          <video id="v-win-sheet" class="clip" data-start="17.5" data-duration="2.6" data-media-start="0.1" data-track-index="14" src="assets/capture/studio-sheet.mp4" muted playsinline></video>
+        </div>
+        <div id="win-dinner" class="win" data-layout-allow-overflow>
+          <video id="v-win-dinner" class="clip" data-start="18" data-duration="2.1" data-media-start="0.1" data-track-index="15" src="assets/capture/studio-dinner.mp4" muted playsinline></video>
+        </div>
+        <div id="win-plumber" class="win" data-layout-allow-overflow>
+          <video id="v-win-plumber" class="clip" data-start="18" data-duration="2.1" data-media-start="0.1" data-track-index="16" src="assets/capture/studio-plumber.mp4" muted playsinline></video>
+        </div>
+        <div id="win-downloads" class="win" data-layout-allow-overflow>
+          <video id="v-win-downloads" class="clip" data-start="18" data-duration="2.1" data-media-start="0.1" data-track-index="17" src="assets/capture/studio-downloads.mp4" muted playsinline></video>
+        </div>
+        <div id="chat" class="handset card" data-layout-allow-overflow>
+          
+          <div class="phone-screen">
+            <div class="screen" id="s-ask"><video id="v-ask" class="clip" data-start="1.45" data-duration="8.05" data-media-start="0.05" data-track-index="3" src="assets/capture/phone-ask-tall.mp4" muted playsinline></video></div>
+            <div class="screen" id="s-card"><video id="v-card" class="clip" data-start="9.5" data-duration="2" data-media-start="0.1" data-track-index="4" src="assets/capture/phone-card-tall.mp4" muted playsinline></video></div>
+            <div class="screen" id="s-tab"><video id="v-tab" class="clip" data-start="11" data-duration="2.6" data-media-start="0.1" data-track-index="3" src="assets/capture/phone-tab-tall.mp4" muted playsinline></video></div>
+            <div class="screen" id="s-held"><video id="v-held" class="clip" data-start="7.5" data-duration="0.5" data-media-start="0" data-track-index="8" src="assets/capture/phone-hold-tall.mp4" muted playsinline></video></div>
+            <div class="screen" id="s-held-stage"><video id="v-held-stage" class="clip" data-start="9.5" data-duration="0.5" data-media-start="0" data-track-index="18" src="assets/capture/phone-hold-stage-tall.mp4" muted playsinline></video></div>
+            <div id="shrink"><video id="v-shrink" class="clip" data-start="9.5" data-duration="0.6" data-media-start="0" data-track-index="19" src="assets/capture/phone-shrink.mp4" muted playsinline></video></div>
+            <div id="grow"><video id="v-grow" class="clip" data-start="7.5" data-duration="0.6" data-media-start="0" data-track-index="7" src="assets/capture/phone-grow.mp4" muted playsinline></video></div>
+            <div id="touch"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="sparks" data-layout-allow-overlap></div>
+
+      <svg id="spot" width="1080" height="1920" viewBox="0 0 1080 1920" aria-hidden="true">
+        <rect class="ring" rx="18" />
+        <rect class="ring" rx="18" />
+      </svg>
+
+      <div id="w-hello" class="words top"><h2></h2></div>
+      <div id="w-chat" class="words top"><h2></h2></div>
+      <div id="w-auto" class="words top"><h2></h2></div>
+      <div id="w-watch" class="words top"><h2></h2></div>
+      <div id="w-preview" class="words top"><h2></h2></div>
+      <div id="w-open" class="words top"><h2></h2></div>
+      <div id="w-studio" class="words top"><h2></h2></div>
+      <div id="w-several" class="words top"><h2></h2></div>
+
+      <div id="end-name">localDot</div>
+      <div id="end-url">localdot.dev</div>
+      <div id="end-line"></div>
+      <div id="fade"></div>
+
+      <audio id="music" data-start="0" data-duration="23" data-track-index="9" src="assets/music.wav"></audio>
+    </div>
+    <script type="module">
+      import { film } from "./assets/stage.js";
+
+      window.__hf = window.__hf || {};
+      window.__hf.buildReady = window.__hf.buildReady || {};
+      window.__hf.buildReady.film = film().then(({ timeline }) => {
+        window.__timelines["main"] = timeline;
+        window.__hfForceTimelineRebind?.();
+      });
+    </script>
+  </body>
+</html>

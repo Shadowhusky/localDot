@@ -10,8 +10,10 @@ import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { BrowserEngineSettings } from "./BrowserEngineSettings.tsx";
 import type { ReportControl } from "./reports-api.ts";
 import type { AccountsView } from "./useAccounts.ts";
+import type { BrowserEngineView } from "./useBrowserEngine.ts";
 import type { BrowserStatusView } from "./useBrowserStatus.ts";
 import type { SignInView } from "./useSignIn.ts";
 
@@ -131,11 +133,13 @@ export function AccountsSection({
   accounts,
   signIn,
   browser,
+  engine,
   report,
 }: {
   accounts: AccountsView;
   signIn?: SignInView;
   browser?: BrowserStatusView;
+  engine?: BrowserEngineView;
   report?: Pick<ReportControl, "start">;
 }) {
   const clearTrigger = useRef<HTMLButtonElement>(null);
@@ -146,9 +150,10 @@ export function AccountsSection({
     <div className="settings-accounts">
       <p className="settings-lede">
         dot's web browser keeps your sign-ins between tasks. A site listed here has saved data,
-        though its sign-in may have expired. Passwords you give in a private sign-in form are kept
-        separately, and apps in Connectors work without signing in to the website.
+        though its sign-in may have expired. Saved logins are kept separately, in Keys, and apps in
+        Connectors work without signing in to the website.
       </p>
+      {engine && <BrowserEngineSettings view={engine} />}
       {signIn && <SignInToSite signIn={signIn} off={phase === "off"} />}
       {phase === "off" ? (
         <Group>

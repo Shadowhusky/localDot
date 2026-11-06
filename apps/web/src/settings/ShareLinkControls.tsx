@@ -4,6 +4,7 @@ import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote } from "../ui/Group.tsx";
+import { useRevealInvalid } from "../ui/reveal-field.ts";
 import { Select } from "../ui/Select.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
@@ -36,6 +37,8 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [problems, setProblems] = useState<{ label?: string; limit?: string; budget?: string }>({});
+  const { scope, reveal } = useRevealInvalid<HTMLElement>();
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     const abort = new AbortController();
@@ -58,16 +61,19 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
   const create = async () => {
     if (busy) return;
     const maxTasks = limit.trim() ? Number(limit) : null;
-    if (
-      !label.trim() ||
-      (maxTasks !== null && (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > 10000)) ||
-      !Number.isFinite(Number(budget)) ||
-      Number(budget) < 0.01 ||
-      Number(budget) > 10000
-    ) {
-      setError(
-        "Enter a link name, a task limit from 1 to 10,000 (or leave it empty), and a budget from $0.01 to $10,000.",
-      );
+    const found = {
+      ...(label.trim() ? {} : { label: "Give the link a name." }),
+      ...(maxTasks !== null && (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > 10000)
+        ? { limit: "Enter a task limit from 1 to 10,000, or leave it empty." }
+        : {}),
+      ...(!Number.isFinite(Number(budget)) || Number(budget) < 0.01 || Number(budget) > 10000
+        ? { budget: "Enter a budget from $0.01 to $10,000." }
+        : {}),
+    };
+    setProblems(found);
+    if (Object.keys(found).length) {
+      setError("");
+      reveal();
       return;
     }
     setBusy(true);
@@ -107,7 +113,7 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
     }
   };
   return (
-    <section className="share-links" aria-label="Shared links">
+    <section ref={scope} className="share-links" aria-label="Shared links">
       <header className="settings-group-intro">
         <GroupHead title="Links for other people" />
         <GroupNote>
@@ -116,7 +122,11 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
         </GroupNote>
       </header>
       <Group>
-        <Field label="Link name" className="ui-group-row">
+        <Field
+          label="Link name"
+          className="ui-group-row"
+          {...(problems.label ? { error: problems.label } : {})}
+        >
           <TextField
             value={label}
             maxLength={80}
@@ -172,6 +182,7 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
           label="Task limit"
           className="ui-group-row"
           description="Leave empty for unlimited tasks."
+          {...(problems.limit ? { error: problems.limit } : {})}
         >
           <TextField
             type="number"
@@ -185,6 +196,7 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
           label="API budget per task ($)"
           className="ui-group-row"
           description="The lower of this and your own limit applies. Subscription plans use their own allowance."
+          {...(problems.budget ? { error: problems.budget } : {})}
         >
           <TextField
             type="number"

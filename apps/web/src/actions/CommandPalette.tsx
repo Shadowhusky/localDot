@@ -296,34 +296,35 @@ function PaletteLayer({
             <span aria-hidden="true">{title}</span>
           </div>
         )}
-        <TextField
-          ref={field}
-          size="sm"
-          filled
-          className="command-palette-search"
-          prefix={<Icon name="search" size={16} />}
-          placeholder={
-            page === "shortcuts"
-              ? "Search shortcuts"
-              : (live?.placeholder ??
-                (live ? `Search ${live.title.toLowerCase()}` : "Search actions"))
-          }
-          aria-label={title}
-          role={page === "shortcuts" ? undefined : "combobox"}
-          aria-expanded={page === "shortcuts" ? undefined : rows.rows.length > 0}
-          aria-controls={page === "shortcuts" || !rows.rows.length ? undefined : listId}
-          aria-activedescendant={at >= 0 ? rowId(listId, at) : undefined}
-          aria-autocomplete={page === "shortcuts" ? undefined : "list"}
-          autoComplete="off"
-          spellCheck={false}
-          value={query}
-          onChange={(event) => {
-            setQuery(event.currentTarget.value);
-            setActive(0);
-            setProblem(null);
-          }}
-          onKeyDown={key}
-        />
+        <div className="command-palette-search">
+          <TextField
+            ref={field}
+            size="sm"
+            filled
+            prefix={<Icon name="search" size={16} />}
+            placeholder={
+              page === "shortcuts"
+                ? "Search shortcuts"
+                : (live?.placeholder ??
+                  (live ? `Search ${live.title.toLowerCase()}` : "Search actions"))
+            }
+            aria-label={title}
+            role={page === "shortcuts" ? undefined : "combobox"}
+            aria-expanded={page === "shortcuts" ? undefined : rows.rows.length > 0}
+            aria-controls={page === "shortcuts" || !rows.rows.length ? undefined : listId}
+            aria-activedescendant={at >= 0 ? rowId(listId, at) : undefined}
+            aria-autocomplete={page === "shortcuts" ? undefined : "list"}
+            autoComplete="off"
+            spellCheck={false}
+            value={query}
+            onChange={(event) => {
+              setQuery(event.currentTarget.value);
+              setActive(0);
+              setProblem(null);
+            }}
+            onKeyDown={key}
+          />
+        </div>
         {page === "shortcuts" ? (
           <div className="shortcut-list">
             {shortcuts.map((group) => (

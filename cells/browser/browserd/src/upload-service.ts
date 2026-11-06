@@ -49,7 +49,7 @@ export class BrowserUploadService {
 
   async #chooser(raw: unknown, signal: AbortSignal): Promise<BrowserUploadOffer | undefined> {
     const access = BrowserUploadAccess.parse(raw);
-    const lease = this.#admit(access.permit);
+    const lease = this.#admit(access.permit, access.tabId);
     const current = AbortSignal.any([signal, lease.signal, this.#lifetime.signal]);
     try {
       current.throwIfAborted();
@@ -92,7 +92,7 @@ export class BrowserUploadService {
     try {
       const request = BrowserUploadRequest.parse(raw);
       signal.throwIfAborted();
-      lease = this.#admit(request.permit);
+      lease = this.#admit(request.permit, request.tabId);
       const admitted = lease;
       chooser = this.deps.targets.claimFileChooser(request.tabId, request.chooserId);
       if (chooser.mode === "single" && request.files.length !== 1)
@@ -151,7 +151,7 @@ export class BrowserUploadService {
           // Never clear a new chooser which replaced this request's claim.
           try {
             this.deps.targets.checkFileChooser(chooser);
-            this.deps.targets.clearFileChooser();
+            this.deps.targets.clearFileChooser(chooser.document.tabId);
           } catch {
             /* already retired */
           }
@@ -192,11 +192,14 @@ export class BrowserUploadService {
     return this.#opening;
   }
 
-  #admit(permit: {
-    browserCellId: string;
-    parentCellId: string;
-    instance: string;
-  }): BrowserActionLease {
+  #admit(
+    permit: {
+      browserCellId: string;
+      parentCellId: string;
+      instance: string;
+    },
+    tabId: string,
+  ): BrowserActionLease {
     if (
       this.#closed ||
       permit.browserCellId !== this.deps.config.browserCellId ||
@@ -204,6 +207,6 @@ export class BrowserUploadService {
       permit.instance !== this.deps.instance
     )
       throw new Error("upload owner refused");
-    return this.deps.control.admit(permit);
+    return this.deps.control.admit(permit, tabId);
   }
 }

@@ -967,14 +967,14 @@ class Commands:
     def press_combo(self, codes, taps=()):
         """Presses the keycodes in order and releases them in reverse, including when the server
         fails between them: a key that went down always comes up, and a lock it turned is turned
-        back."""
+        back. Both go out in one write: if this process stalled between them on a busy machine,
+        X's key repeat would type the key again."""
         self.tap(taps)
         down = []
         try:
             for kc in codes:
                 self.d.xtest_fake_input(X.KeyPress, kc)
                 down.append(kc)
-                self.d.sync()
         finally:
             self.release_keys(down)
             self.tap(taps)

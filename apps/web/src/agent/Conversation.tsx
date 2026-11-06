@@ -1,4 +1,10 @@
-import { keyLikePresent } from "@localdot/protocol";
+import {
+  keyLikePresent,
+  microsToMs,
+  type PersonaId,
+  type ResultPreview,
+  type Wearable,
+} from "@localdot/protocol";
 import {
   memo,
   type ReactNode,
@@ -14,6 +20,7 @@ import { createPortal } from "react-dom";
 import { count } from "../copy/format.ts";
 import { VOICES } from "../dot/voices.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { newestOffers, sameOffers } from "../previews/PreviewCard.tsx";
 import { RoutineCard } from "../routines/RoutineCard.tsx";
 import { originLine } from "../routines/routine-copy.ts";
 import { useRoutineSeen } from "../routines/seen.ts";
@@ -21,26 +28,31 @@ import type { ModelNames } from "../settings/model-names.ts";
 import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
+import { attachLongPress } from "../ui/long-press.ts";
 import { fadeIn } from "../ui/motion.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
+import { Sheet } from "../ui/Sheet.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
+import { showToast } from "../ui/Toast.tsx";
 import { answerSummary } from "./ask-form.ts";
 import { splitAttachments } from "./attachments.ts";
+import { type BubbleItem, BubbleMenu, type HeldBubble } from "./BubbleMenu.tsx";
 import { CopyButton } from "./CopyButton.tsx";
 import { cancelQueuedMessage, steerQueuedMessage } from "./control-api.ts";
 import { DotChoice } from "./DotChoice.tsx";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
 import { HistoryPages } from "./HistoryPages.tsx";
-import { type LiveWork, LiveWorkLine, sameLive, sameSteps } from "./LiveWorkLine.tsx";
+import { type LiveWork, LiveWorkLine, StepsCaption, sameLive, sameSteps } from "./LiveWorkLine.tsx";
 import type { AgentMessage, AgentResult, AgentWords } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
+import { QueueHandle, type QueueMoves, useQueueMoves } from "./QueueHandle.tsx";
 import { editQueued } from "./queued-draft.ts";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { StepPreviewScope } from "./StepPreview.tsx";
 import { ThreadSkeleton } from "./ThreadSkeleton.tsx";
-import { TurnMeta } from "./TurnMeta.tsx";
+import { metaLine, TurnMeta } from "./TurnMeta.tsx";
 import {
   controlLine,
   type ThreadItem,
@@ -50,12 +62,17 @@ import {
   timeLabel,
 } from "./thread.ts";
 import { UserBubble } from "./UserBubble.tsx";
+import { copyBlocked } from "./useCopy.ts";
 import { useFollowScroll } from "./useFollowScroll.ts";
-import { usePagedRows } from "./usePagedRows.ts";
+import { type KeptRows, usePagedRows } from "./usePagedRows.ts";
 
-// The thread mounts at most this many items, the newest on opening; scrolling to either end moves it
-// by half.
+// The thread mounts about this many items, the newest on opening; scrolling near either end moves it
+// by half, keeping every row within reach of the view.
 const WINDOW = OPENING_ROWS;
+// Rows come in this far ahead of the view, so a flick rarely lands on the page's edge...
+const EDGE_PX = 600;
+// ...and go only past this, further than the edge, so a page never moves back and forth.
+const KEEP_PX = 1200;
 // The foot (the live work line and the composer) sits under the thread and stays put while it
 // scrolls. Only on a very short column (a phone on its side) does it join the end of the thread
 // instead, which keeps one scroller and room to read. Only the column's height decides, so typing or
@@ -67,6 +84,33 @@ const END_BELOW = 400;
 const REVEAL_MARGIN = 16;
 const NONE: readonly string[] = [];
 const itemKey = (item: ThreadItem) => item.key;
+const rowKey = (row: ThreadRow) => row.item.key;
+
+const pageRows = (view: HTMLElement) =>
+  view.querySelectorAll<HTMLElement>(".thread > .thread-row[data-row]:not([data-waiting])");
+
+// The first and last rows within reach of the view.
+function rowsInReach(view: HTMLElement | null): KeptRows {
+  const reach: KeptRows = {};
+  if (!view) return reach;
+  const box = view.getBoundingClientRect();
+  for (const row of pageRows(view)) {
+    const at = row.getBoundingClientRect();
+    if (at.bottom < box.top - KEEP_PX || at.top > box.bottom + KEEP_PX) continue;
+    reach.first ??= row.dataset.row;
+    reach.last = row.dataset.row;
+  }
+  return reach;
+}
+
+// The first of the rows that fill the view at the thread's end.
+function rowsAtEnd(view: HTMLElement | null): KeptRows {
+  if (!view) return {};
+  const rows = [...pageRows(view)];
+  const bottom = rows.at(-1)?.getBoundingClientRect().bottom ?? 0;
+  const first = rows.find((row) => bottom - row.getBoundingClientRect().top < view.clientHeight);
+  return { first: (first?.previousElementSibling as HTMLElement | null)?.dataset.row };
+}
 
 // What the jump button says has arrived: one kind by its name, a mix as updates. Your answers are
 // messages too.
@@ -84,12 +128,15 @@ function unreadLabel(kinds: readonly ThreadKind[]): string {
   return count(kinds.length, one, many);
 }
 
+const SWITCH_ARMED_MS = 5000;
+
 interface QueueActions {
   api: ApiClient;
   sessionId: string;
 }
 interface ThreadContext {
   queue?: QueueActions;
+  moves: QueueMoves;
   // Puts a message Stop left unsent back into the composer.
   takeBack(message: AgentMessage): Promise<boolean> | null;
   announce(text: string): void;
@@ -97,6 +144,8 @@ interface ThreadContext {
   downloads: ResultDownloads;
   // How many results the thread holds: another one changes the versions of files already shown.
   results: number;
+  // The previews each reply comes with.
+  offers: ReadonlyMap<string, readonly ResultPreview[]>;
   ended?: "done" | "stopped" | "interrupted" | "error";
   pendingAsk: string | null;
   // The fields of the question dot is waiting on, drawn under it.
@@ -104,11 +153,18 @@ interface ThreadContext {
   latestWork: string | undefined;
   // The conversation's latest dot choice, which the task at work can change.
   latestDot: string | undefined;
+  dotLook(persona: PersonaId): readonly Wearable[];
   // What dot is doing now, for the latest run of steps while its task has not ended.
   live: LiveWork | null;
   onReplay?: () => void;
-  replayTask?: (sessionId: string) => void;
+  replayTask?: (sessionId: string, atMs?: number) => void;
   names?: ModelNames;
+  // A chat's bubbles: a finger held on one opens its menu, and each turn's steps fold under a caption.
+  chat?: {
+    hold(message: AgentMessage, from: HTMLElement): void;
+    opened: ReadonlySet<string>;
+    toggle(key: string, open: boolean): void;
+  };
 }
 type ItemOf<K extends ThreadKind> = Extract<ThreadItem, { kind: K }>;
 type WorkItem = ItemOf<"work">;
@@ -136,10 +192,13 @@ const MessageCard = memo(function MessageCard({
   words,
   announce,
   queue,
+  moves,
   takeBack,
   sessionId,
+  onHold,
 }: {
   queue?: QueueActions;
+  moves?: QueueMoves;
   takeBack(message: AgentMessage): Promise<boolean> | null;
   message: AgentMessage;
   // dot's words before more of its work, which read quieter than its answer.
@@ -148,9 +207,26 @@ const MessageCard = memo(function MessageCard({
   announce(text: string): void;
   // The task the message went to, whose computer holds the files it carried.
   sessionId?: string;
+  onHold?(message: AgentMessage, from: HTMLElement): void;
 }) {
   const message = useArriving(words, shown);
   const user = message.role === "user";
+  const card = useRef<HTMLElement>(null);
+  const latest = useRef({ message, onHold });
+  latest.current = { message, onHold };
+  const holds = !!onHold;
+  const [holding, setHolding] = useState(false);
+  useEffect(() => {
+    const element = card.current;
+    if (!element || !holds) return;
+    return attachLongPress(element, {
+      pressing: setHolding,
+      hold: () => {
+        const from = element.querySelector<HTMLElement>(".thread-bubble") ?? element;
+        latest.current.onHold?.(latest.current.message, from);
+      },
+    });
+  }, [holds]);
   const { body, files } = user ? splitAttachments(message.text) : { body: message.text, files: [] };
   const copy = (
     <span className="thread-copy-slot" inert={!message.final}>
@@ -164,17 +240,25 @@ const MessageCard = memo(function MessageCard({
   );
   const tag = message.stopped
     ? "Not sent"
-    : message.kind === "steer"
-      ? "Sent while working"
-      : message.queued
-        ? "After this task"
-        : undefined;
+    : message.interrupted === "wait"
+      ? "dot stopped waiting to read this"
+      : message.interrupted === "command"
+        ? "dot left its command running to read this"
+        : message.kind === "steer"
+          ? "Sent while working"
+          : message.queued
+            ? message.waitsFor
+              ? "After this task, on another model"
+              : "After this task"
+            : undefined;
   return (
     <article
+      ref={card}
       className="thread-message"
       data-role={user ? "user" : "dot"}
       data-narration={narration || undefined}
       data-streaming={!message.final || undefined}
+      data-holding={holding || undefined}
       aria-label={user ? "You" : "dot"}
     >
       {user ? (
@@ -182,14 +266,22 @@ const MessageCard = memo(function MessageCard({
           <UserBubble
             text={body}
             files={files}
-            lead={copy}
+            lead={body.trim() ? copy : null}
             sessionId={message.sessionId ?? sessionId}
           />
           {tag && (
             <div className="thread-queue">
+              {moves && moves.order.length > 1 && moves.order.includes(message.id) && (
+                <QueueHandle id={message.id} moves={moves} announce={announce} />
+              )}
               <p className="thread-tag">{tag}</p>
               {message.queued && queue && message.sessionId === queue.sessionId && (
-                <SteerMessage messageId={message.id} queue={queue} announce={announce} />
+                <SteerMessage
+                  messageId={message.id}
+                  waitsFor={message.waitsFor}
+                  queue={queue}
+                  announce={announce}
+                />
               )}
               {message.stopped && <TakeBack onTakeBack={() => takeBack(message)} />}
             </div>
@@ -213,14 +305,23 @@ const liveOf = (item: WorkItem, thread: ThreadContext) =>
 
 function SteerMessage({
   messageId,
+  waitsFor,
   queue,
   announce,
 }: {
   messageId: string;
+  waitsFor?: AgentMessage["waitsFor"];
   queue: QueueActions;
   announce(text: string): void;
 }) {
   const [busy, setBusy] = useState(false);
+  // Switching model restarts dot, which ends what it has running, so it takes a second press.
+  const [arming, setArming] = useState(false);
+  useEffect(() => {
+    if (!arming) return;
+    const timer = setTimeout(() => setArming(false), SWITCH_ARMED_MS);
+    return () => clearTimeout(timer);
+  }, [arming]);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
@@ -253,32 +354,44 @@ function SteerMessage({
       >
         Edit
       </Button>
-      <Button
-        variant="quiet"
-        size="sm"
-        busy={busy}
-        onClick={() => {
-          if (pending.current) return;
-          pending.current = true;
-          setBusy(true);
-          setError(null);
-          const abort = new AbortController();
-          lifetime.current = abort;
-          void steerQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
-            .then(() => {
-              if (!abort.signal.aborted) announce("Message sent to steer dot.");
-            })
-            .catch(() => {
-              if (!abort.signal.aborted) setError("Couldn't confirm steering. Try again.");
-            })
-            .finally(() => {
-              pending.current = false;
-              if (!abort.signal.aborted) setBusy(false);
-            });
-        }}
-      >
-        Steer now
-      </Button>
+      {waitsFor !== "handover" && (
+        <Button
+          variant="quiet"
+          size="sm"
+          busy={busy}
+          onClick={() => {
+            if (pending.current) return;
+            if (waitsFor === "switch" && !arming) {
+              setArming(true);
+              announce("Switching now ends what dot is running. Press again to switch.");
+              return;
+            }
+            setArming(false);
+            pending.current = true;
+            setBusy(true);
+            setError(null);
+            const abort = new AbortController();
+            lifetime.current = abort;
+            void steerQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
+              .then(() => {
+                if (!abort.signal.aborted) announce("Message sent to steer dot.");
+              })
+              .catch(() => {
+                if (!abort.signal.aborted) setError("Couldn't confirm steering. Try again.");
+              })
+              .finally(() => {
+                pending.current = false;
+                if (!abort.signal.aborted) setBusy(false);
+              });
+          }}
+        >
+          {waitsFor !== "switch"
+            ? "Steer now"
+            : arming
+              ? "End what's running and switch"
+              : "Switch now"}
+        </Button>
+      )}
       <Button
         variant="quiet"
         size="sm"
@@ -339,6 +452,18 @@ function TakeBack({ onTakeBack }: { onTakeBack(): Promise<boolean> | null }) {
   );
 }
 
+function sameMeta(was: ItemOf<"meta"> | undefined, now: ItemOf<"meta"> | undefined): boolean {
+  if (!was || !now) return was === now;
+  return (
+    was.work === now.work &&
+    was.durationMs === now.durationMs &&
+    was.usd === now.usd &&
+    was.main?.route === now.main?.route &&
+    was.main?.model === now.main?.model &&
+    JSON.stringify(was.models) === JSON.stringify(now.models)
+  );
+}
+
 const CARDS: { [K in ThreadKind]: CardKind<K> } = {
   message: {
     draw: ({ item, thread }) => (
@@ -348,16 +473,20 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
         words={thread.words}
         announce={thread.announce}
         queue={thread.queue}
+        moves={thread.moves}
         takeBack={thread.takeBack}
         sessionId={thread.downloads.sessionId ?? undefined}
+        onHold={thread.chat?.hold}
       />
     ),
     same: (was, now, then, thread) =>
       was.message === now.message &&
       was.narration === now.narration &&
+      then.chat?.hold === thread.chat?.hold &&
       then.announce === thread.announce &&
       then.words === thread.words &&
       then.queue === thread.queue &&
+      then.moves === thread.moves &&
       then.takeBack === thread.takeBack &&
       then.downloads.sessionId === thread.downloads.sessionId,
   },
@@ -392,6 +521,7 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
           downloads={thread.downloads}
           refresh={thread.results}
           onReplay={earlier ? replay && (() => replay(earlier)) : thread.onReplay}
+          previews={thread.offers.get(item.result.id)}
         />
       );
     },
@@ -399,6 +529,7 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       was.result === now.result &&
       then.downloads === thread.downloads &&
       then.results === thread.results &&
+      sameOffers(then.offers.get(was.result.id), thread.offers.get(now.result.id)) &&
       then.onReplay === thread.onReplay &&
       then.replayTask === thread.replayTask,
   },
@@ -410,11 +541,13 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
     draw: ({ item, thread }) => (
       <DotChoice
         choice={item.choice}
+        wearables={thread.dotLook(item.choice.persona)}
         task={item.key === thread.latestDot ? thread.queue : undefined}
       />
     ),
     same: (was, now, then, thread) =>
       was.choice === now.choice &&
+      then.dotLook(was.choice.persona).join(" ") === thread.dotLook(now.choice.persona).join(" ") &&
       (was.key === then.latestDot ? then.queue : undefined) ===
         (now.key === thread.latestDot ? thread.queue : undefined),
   },
@@ -442,17 +575,39 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       was.declined === now.declined,
   },
   work: {
-    draw: ({ item, thread }) => (
-      <LiveWorkLine
-        steps={item.steps}
-        startMs={item.startMs}
-        live={liveOf(item, thread)}
-        ended={endedOf(item, thread)}
-        spend={item.spend}
-        sessionId={item.sessionId}
-      />
-    ),
+    draw: ({ item, thread }) =>
+      thread.chat ? (
+        <StepsCaption
+          steps={item.steps}
+          startMs={item.startMs}
+          at={item.at === undefined ? undefined : timeLabel(item.at)}
+          ended={endedOf(item, thread)}
+          sessionId={item.sessionId}
+          names={thread.names}
+          open={thread.chat.opened.has(item.key)}
+          onOpenChange={(open) => thread.chat?.toggle(item.key, open)}
+        >
+          {item.meta && <TurnMeta item={item.meta} names={thread.names} />}
+        </StepsCaption>
+      ) : (
+        <LiveWorkLine
+          steps={item.steps}
+          startMs={item.startMs}
+          live={liveOf(item, thread)}
+          ended={endedOf(item, thread)}
+          spend={item.spend}
+          sessionId={item.sessionId}
+          changedTo={item.changedTo}
+          names={thread.names}
+        />
+      ),
     same: (was, now, then, thread) =>
+      then.names === thread.names &&
+      was.at === now.at &&
+      then.chat?.opened.has(was.key) === thread.chat?.opened.has(now.key) &&
+      sameMeta(was.meta, now.meta) &&
+      was.changedTo?.route === now.changedTo?.route &&
+      was.changedTo?.model === now.changedTo?.model &&
       was.startMs === now.startMs &&
       was.sessionId === now.sessionId &&
       was.spend?.usd === now.spend?.usd &&
@@ -463,14 +618,7 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
   },
   meta: {
     draw: ({ item, thread }) => <TurnMeta item={item} names={thread.names} />,
-    same: (was, now, then, thread) =>
-      then.names === thread.names &&
-      was.work === now.work &&
-      was.durationMs === now.durationMs &&
-      was.usd === now.usd &&
-      was.main?.route === now.main?.route &&
-      was.main?.model === now.main?.model &&
-      JSON.stringify(was.models) === JSON.stringify(now.models),
+    same: (was, now, then, thread) => then.names === thread.names && sameMeta(was, now),
   },
 };
 
@@ -483,6 +631,8 @@ interface RowProps {
   row: ThreadRow;
   fresh: boolean;
   thread: ThreadContext;
+  // Held at the end of the thread until dot receives it, outside the page of rows.
+  waiting?: boolean;
 }
 
 // Items are rebuilt on every event and the thread redraws each second while a task runs, so a row
@@ -499,16 +649,18 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   );
 }
 
-const Row = memo(function Row({ row, fresh, thread }: RowProps) {
+const Row = memo(function Row({ row, fresh, thread, waiting }: RowProps) {
   const { item } = row;
   return (
     <div
       className="thread-row"
       data-anchor=""
+      data-row={item.key}
       data-kind={item.kind}
       data-speaker={item.speaker}
       data-group-start={row.groupStart || undefined}
       data-new={fresh || undefined}
+      data-waiting={waiting || undefined}
     >
       {row.separator && (
         <p className="thread-time">
@@ -519,6 +671,109 @@ const Row = memo(function Row({ row, fresh, thread }: RowProps) {
     </div>
   );
 }, sameRow);
+
+// What a held bubble offers. iOS's long press fights text selection, so Select text opens a sheet
+// the text can be selected in.
+function heldBubble(
+  message: AgentMessage,
+  from: HTMLElement,
+  {
+    shown,
+    opened,
+    sessionId,
+    ended,
+    names,
+  }: {
+    shown: readonly ThreadItem[];
+    opened: ReadonlySet<string>;
+    sessionId: string | null;
+    ended?: string;
+    names?: ModelNames;
+  },
+  act: {
+    select(text: string): void;
+    toggleSteps(key: string, open: boolean): void;
+    again(text: string): void;
+    replay(sessionId: string, atMs?: number): void;
+    canReplay: boolean;
+  },
+): HeldBubble {
+  const user = message.role === "user";
+  const text = user ? splitAttachments(message.text).body : message.text;
+  const copy: BubbleItem = {
+    label: "Copy",
+    icon: "copy",
+    run: () => {
+      const blocked = copyBlocked(text);
+      if (blocked) {
+        showToast({ title: blocked, tone: "danger" });
+        return;
+      }
+      navigator.clipboard.writeText(text).then(
+        () => showToast({ title: "Copied" }),
+        () => showToast({ title: "Couldn't copy", tone: "danger" }),
+      );
+    },
+  };
+  if (user)
+    return {
+      from,
+      mine: true,
+      items: [copy, { label: "Edit and send again", icon: "compose", run: () => act.again(text) }],
+    };
+  const at = shown.findIndex((item) => item.kind === "message" && item.message.id === message.id);
+  const own = at >= 0 ? (shown[at] as Extract<ThreadItem, { kind: "message" }>) : undefined;
+  const rest = at >= 0 ? shown.slice(at + 1) : [];
+  const nextTurn = rest.findIndex((item) => item.speaker === "user" && item.kind === "message");
+  const steps = (nextTurn >= 0 ? rest.slice(0, nextTurn) : rest).find(
+    (item): item is Extract<ThreadItem, { kind: "work" }> => item.kind === "work",
+  );
+  const line = steps?.meta ?? own?.turnLine;
+  const when = own?.time === undefined ? undefined : timeLabel(own.time);
+  const note = [when, line && metaLine(line, names)].filter(Boolean).join(" · ");
+  const task = steps?.sessionId ?? message.sessionId ?? sessionId;
+  const finished = !!ended || act.canReplay || (!!task && task !== sessionId);
+  const open = !!steps && opened.has(steps.key);
+  return {
+    from,
+    mine: false,
+    ...(note ? { note } : {}),
+    items: [
+      copy,
+      { label: "Select text", icon: "type", run: () => act.select(text) },
+      ...(steps?.steps.length
+        ? [
+            {
+              label: open ? "Hide steps" : "Show steps",
+              icon: "list" as const,
+              run: () => act.toggleSteps(steps.key, !open),
+            },
+          ]
+        : []),
+      ...(steps?.steps.length && task && finished
+        ? [
+            {
+              label: "Watch this part",
+              icon: "history" as const,
+              run: () =>
+                act.replay(
+                  task,
+                  steps.startMs ?? (message.at === undefined ? undefined : microsToMs(message.at)),
+                ),
+            },
+          ]
+        : []),
+      {
+        label: "Share",
+        icon: "share" as const,
+        run: () => {
+          if (typeof navigator.share === "function") void navigator.share({ text }).catch(() => {});
+          else copy.run();
+        },
+      },
+    ],
+  };
+}
 
 export interface ConversationProps {
   items: readonly ThreadItem[];
@@ -538,6 +793,8 @@ export interface ConversationProps {
   live?: LiveWork | null;
   ended?: "done" | "stopped" | "interrupted" | "error";
   pendingAsk?: string | null;
+  // The order of the messages waiting for the task to finish, once one has moved.
+  queueOrder?: readonly string[];
   api?: ApiClient | null;
   sessionId?: string | null;
   // The computer's display scale, for the screenshots a step unfolds.
@@ -545,6 +802,8 @@ export interface ConversationProps {
   recovery?: ReactNode;
   // Under the thread: the composer, always in its place, so a draft survives and nothing moves.
   composer?: ReactNode;
+  // Above the composer: what waits for the user's choice while dot goes on, so it can't scroll away.
+  decisions?: ReactNode;
   // The fields of the question dot is waiting on, drawn under the question in the thread.
   ask?: ReactNode;
   // Beside the composer, as a phone's toolbar holds it: before it and after it.
@@ -552,6 +811,12 @@ export interface ConversationProps {
   trail?: ReactNode;
   // In the toolbar's place, the composer and what is beside it hidden but kept, so a draft survives.
   tools?: ReactNode;
+  // A phone's chat: replies are bubbles, held for their menu, and each turn's steps fold under them.
+  chat?: boolean;
+  // The foot of the thread, under its last row: dot and what it is doing.
+  foot?: ReactNode;
+  // Elsewhere the composer and the decisions go for now, keeping what is written.
+  dockTo?: HTMLElement | null;
   // The composer stays at the foot however short the column gets, as a phone's toolbar does.
   pinned?: boolean;
   // Another view of the task (Activity) laid over the thread, above the foot, so the composer
@@ -559,8 +824,8 @@ export interface ConversationProps {
   cover?: ReactNode;
   covered?: boolean;
   onReplay?: () => void;
-  // Opens an earlier task of the conversation in Replay.
-  onReplayTask?: (sessionId: string) => void;
+  // Opens an earlier task of the conversation in Replay, at a moment when given.
+  onReplayTask?: (sessionId: string, atMs?: number) => void;
   computerReady?: boolean;
   // The computer is moving onto a new version and is back in about a minute.
   computerUpdating?: boolean;
@@ -573,7 +838,11 @@ export interface ConversationProps {
   words?: AgentWords;
   // Names the models the turns' lines report.
   names?: ModelNames;
+  // The conversation's look as each dot, which its lines naming a dot wear.
+  dotLook?: (persona: PersonaId) => readonly Wearable[];
 }
+
+const PLAIN_DOT = () => [];
 
 export function Conversation({
   items,
@@ -587,15 +856,20 @@ export function Conversation({
   live = null,
   ended,
   pendingAsk = null,
+  queueOrder,
   api = null,
   sessionId = null,
   scale,
   recovery,
   composer,
+  decisions,
   ask,
   lead,
   trail,
   tools,
+  chat = false,
+  foot: threadFoot,
+  dockTo = null,
   pinned = false,
   cover,
   covered = false,
@@ -608,6 +882,7 @@ export function Conversation({
   reveal = 0,
   words,
   names,
+  dotLook = PLAIN_DOT,
 }: ConversationProps) {
   // The latest run of steps, which shows what dot is doing while its task is live.
   const latestWork = items.findLast((item) => item.kind === "work") as WorkItem | undefined;
@@ -624,7 +899,7 @@ export function Conversation({
   );
   // A message that waits for the task to finish stays at the end of the thread, under whatever dot
   // does meanwhile, until dot receives it and it takes its place in the thread.
-  const [shown, queued] = useMemo(() => {
+  const [shown, waiting] = useMemo(() => {
     const waits = (item: ThreadItem) =>
       item.kind === "message" &&
       !!item.message.queued &&
@@ -634,10 +909,36 @@ export function Conversation({
     const kept = items.filter((item) => !(item.kind === "message" && gone(item.message.id)));
     return [kept.filter((item) => !waits(item)), kept.filter(waits)];
   }, [items, ended, sessionId, taken, withdrawn]);
-  const page = usePagedRows(shown, itemKey, ownerKey, { size: WINDOW, step: WINDOW / 2 });
+  const moves = useQueueMoves(
+    api,
+    sessionId,
+    queueOrder,
+    useMemo(
+      () => waiting.flatMap((item) => (item.kind === "message" ? item.message.id : [])),
+      [waiting],
+    ),
+  );
+  const queued = useMemo(
+    () =>
+      [...waiting].sort(
+        (a, b) =>
+          moves.order.indexOf(a.kind === "message" ? a.message.id : "") -
+          moves.order.indexOf(b.kind === "message" ? b.message.id : ""),
+      ),
+    [waiting, moves.order],
+  );
+  // A row draws the same wherever the page starts: its time and its group come from the whole thread.
+  const allRows = useMemo(() => threadRows(shown), [shown]);
+  const page = usePagedRows(allRows, rowKey, ownerKey, { size: WINDOW, step: WINDOW / 2 });
   // Following the end, the end is held in the same frame as anything arrives, so nothing at the
   // end moves; a new row eases in where it lands instead.
-  const follow = useFollowScroll(ownerKey, true);
+  const pageEnds = useRef(true);
+  pageEnds.current = !page.hasNewer;
+  const follow = useFollowScroll(
+    ownerKey,
+    true,
+    useCallback(() => pageEnds.current, []),
+  );
   // The thread speaks through the page's one polite region, only while it is on show; a task left
   // behind takes back what it had not said yet.
   const heard = useRef(visible);
@@ -652,6 +953,7 @@ export function Conversation({
     [items],
   );
   const downloads = useResultDownloads(api, sessionId, results, announce);
+  const offers = useMemo(() => newestOffers(results), [results]);
   const origin = items.find((item): item is ItemOf<"origin"> => item.kind === "origin")?.origin;
   useRoutineSeen(api, origin?.kind === "routine" ? origin.routineId : undefined, visible);
   const replayNow = useRef(onReplay);
@@ -659,8 +961,11 @@ export function Conversation({
   const replay = useCallback(() => replayNow.current?.(), []);
   const replayTaskNow = useRef(onReplayTask);
   replayTaskNow.current = onReplayTask;
-  const replayTask = useCallback((id: string) => replayTaskNow.current?.(id), []);
-  const rows = useMemo(() => threadRows(page.rows), [page.rows]);
+  const replayTask = useCallback(
+    (id: string, atMs?: number) => replayTaskNow.current?.(id, atMs),
+    [],
+  );
+  const rows = page.rows;
 
   const announced = useRef({ owner: ownerKey, id: "" });
   const completed = items.findLast(
@@ -684,11 +989,13 @@ export function Conversation({
     known.current = { owner: ownerKey, keys: new Set(), drawn: false };
   const settled = known.current.drawn;
   const lastKnown = rows.findLastIndex((row) => known.current.keys.has(row.item.key));
+  // Rows that came while the reader was away, and those a page brings in, are history by then.
+  const arriving = page.following && !page.retained;
   useLayoutEffect(() => {
     if (loading) return;
-    for (const row of rows) known.current.keys.add(row.item.key);
+    for (const row of arriving ? rows : allRows) known.current.keys.add(row.item.key);
     known.current.drawn = true;
-  }, [rows, loading]);
+  }, [rows, allRows, arriving, loading]);
 
   // A card brought into view holds the reader there; until they move on their own, what still
   // arrives (history loading in batches) counts as read.
@@ -708,6 +1015,7 @@ export function Conversation({
         .map((item) => item.kind)
     : [];
 
+  const olderTasksOpen = !!earlier?.more;
   const paging = useRef({ page, following: follow.following, jump: follow.jump, earlier });
   paging.current = { page, following: follow.following, jump: follow.jump, earlier };
   const observer = useRef<IntersectionObserver | null>(null);
@@ -718,11 +1026,18 @@ export function Conversation({
   const reached = useRef({ older: false, newer: false });
   const moveAt = useCallback((edge: "older" | "newer") => {
     const { page: now, following, earlier: tasks } = paging.current;
-    if (held.current) return;
-    if (edge === "older" && !following()) {
-      if (now.hasOlder) now.older();
-      else if (tasks?.more && !tasks.reading) tasks.older();
-    } else if (edge === "newer" && now.hasNewer) now.newer();
+    const view = scroller.current;
+    if (held.current || !view) return;
+    if (edge === "newer") {
+      if (now.hasNewer) now.newer(rowsInReach(view));
+      return;
+    }
+    // Following the end, only a thread too short to scroll back through reads further back.
+    if (following() && view.scrollHeight - view.clientHeight > EDGE_PX) return;
+    if (now.hasOlder) {
+      if (following() && now.following) now.fill();
+      else now.older(rowsInReach(view));
+    } else if (tasks?.more && !tasks.reading) tasks.older();
   }, []);
   const edgeNodes = useRef<{ older: HTMLElement | null; newer: HTMLElement | null }>({
     older: null,
@@ -754,7 +1069,7 @@ export function Conversation({
           if (entry.isIntersecting) moveAt(edge);
         }
       },
-      { root: scroller.current, rootMargin: "240px 0px" },
+      { root: scroller.current, rootMargin: `${EDGE_PX}px 0px` },
     );
     observer.current = watching;
     for (const node of Object.values(edgeNodes.current)) if (node) watching.observe(node);
@@ -764,17 +1079,18 @@ export function Conversation({
       reached.current = { older: false, newer: false };
     };
   }, [moveAt]);
-  // At the bottom, replacing a page can leave the later marker intersecting throughout.
-  // IntersectionObserver does not notify again for that. Re-measure after page progress;
-  // continue only if the marker is STILL near the viewport after scroll anchoring settles.
+  // Replacing a page can leave an edge's marker within reach throughout, and IntersectionObserver
+  // does not notify again for that. Re-measure both after page progress; a page goes on only if
+  // its marker is STILL near the view once the reader's place has been kept.
   const lastPageKey = rows.at(-1)?.item.key;
   // biome-ignore lint/correctness/useExhaustiveDependencies: page boundaries trigger a fresh geometry observation.
   useEffect(() => {
-    const node = edgeNodes.current.newer;
-    if (!node) return;
-    observer.current?.unobserve(node);
-    observer.current?.observe(node);
-  }, [page.start, lastPageKey]);
+    for (const node of Object.values(edgeNodes.current)) {
+      if (!node) continue;
+      observer.current?.unobserve(node);
+      observer.current?.observe(node);
+    }
+  }, [page.start, lastPageKey, olderTasksOpen]);
   const reading = () => {
     setHolding(null);
     if (!held.current) return;
@@ -809,6 +1125,15 @@ export function Conversation({
     now.latest();
     jump();
   }, []);
+  const readingBack = useCallback(() => {
+    if (reached.current.older) moveAt("older");
+  }, [moveAt]);
+  // Back at the true end, the reader follows it: the page takes the newest rows from now on.
+  const backAtEnd = follow.pinned && !page.following && !page.hasNewer;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the moment the reader is back is the trigger.
+  useLayoutEffect(() => {
+    if (backAtEnd) page.latest(rowsAtEnd(scroller.current));
+  }, [backAtEnd]);
   // A message at the end that waits on your choice turns the jump button into the way to it.
   const reachChoice = useRef<(() => void) | null>(null);
   const [choiceWaits, setChoiceWaits] = useState(false);
@@ -824,6 +1149,19 @@ export function Conversation({
     host.className = "thread-dock";
     return host;
   });
+  // The computer handed over mid-sentence: its controls take the field's place once the user
+  // leaves it.
+  const [writing, setWriting] = useState(false);
+  useEffect(() => {
+    const changed = () => setWriting(document.activeElement === dockHost.querySelector("textarea"));
+    dockHost.addEventListener("focusin", changed);
+    dockHost.addEventListener("focusout", changed);
+    return () => {
+      dockHost.removeEventListener("focusin", changed);
+      dockHost.removeEventListener("focusout", changed);
+    };
+  }, [dockHost]);
+  const controls = writing ? null : tools;
   // A sent message gives back the lines the composer grew by. While the reader follows the end, the
   // foot keeps that room until the thread grows again, so the message just sent never drops.
   const following = useRef(follow.pinned);
@@ -847,15 +1185,18 @@ export function Conversation({
   }, [dockHost]);
   const footHeld = useRef(covered || pinned);
   footHeld.current = covered || pinned;
+  const dockAway = useRef(dockTo);
+  dockAway.current = dockTo;
   const placeDock = useCallback(() => {
     const column = body.current;
     if (!column || !foot.current || !end.current) return;
     const height = column.clientHeight;
     const under = dockHost.parentElement === foot.current;
     const target =
-      footHeld.current || height >= FOOT_FROM || (under && height >= END_BELOW)
+      dockAway.current ??
+      (footHeld.current || height >= FOOT_FROM || (under && height >= END_BELOW)
         ? foot.current
-        : end.current;
+        : end.current);
     // Moving an element takes the focus out of it, so the foot moves once the focus has left it.
     if (dockHost.parentElement !== target && !dockHost.contains(document.activeElement))
       target.append(dockHost);
@@ -889,7 +1230,7 @@ export function Conversation({
   // A cover or a pinned toolbar keeps the foot under it, so the foot is placed again as one comes
   // or goes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: both are read through their ref
-  useLayoutEffect(placeDock, [covered, pinned, placeDock]);
+  useLayoutEffect(placeDock, [covered, pinned, dockTo, placeDock]);
 
   // Whether the thread's last row is in view; below it there may only be the foot.
   const history = useRef<HTMLElement>(null);
@@ -961,29 +1302,67 @@ export function Conversation({
     if (history.current && (was.reveal !== reveal || (was.loading && !loading)))
       fadeIn(history.current);
   }, [reveal, loading]);
-  // Scrolled back only as far as the foot, the reader has nothing newer to jump to.
-  const jumpShown = !follow.pinned && (unread.length > 0 || !endSeen);
+  // Scrolled back only as far as the foot, the reader has nothing newer to jump to, unless the
+  // thread's page ends before the thread does.
+  const jumpShown = !follow.pinned && (unread.length > 0 || !endSeen || page.hasNewer);
 
   const queue = useMemo(
     () => (api && sessionId && !ended ? { api, sessionId } : undefined),
     [api, sessionId, ended],
   );
+  // A chat: the bubble a finger holds, whose menu is open, the text being selected and the steps
+  // unfolded.
+  const [bubble, setBubble] = useState<HeldBubble | null>(null);
+  const [selecting, setSelecting] = useState<string | null>(null);
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleSteps = useCallback((key: string, open: boolean) => {
+    setOpened((was) => {
+      const next = new Set(was);
+      if (open) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+  const chatNow = useRef({ shown, opened, sessionId, ended, names });
+  chatNow.current = { shown, opened, sessionId, ended, names };
+  const hold = useCallback(
+    (message: AgentMessage, from: HTMLElement) => {
+      setBubble(
+        heldBubble(message, from, chatNow.current, {
+          select: setSelecting,
+          toggleSteps,
+          again: (text) => suggestNow.current(text),
+          replay: (id, atMs) => replayTaskNow.current?.(id, atMs),
+          canReplay: !!replayNow.current,
+        }),
+      );
+    },
+    [toggleSteps],
+  );
+  const chatMode = useMemo(
+    () => (chat ? { hold, opened, toggle: toggleSteps } : undefined),
+    [chat, hold, opened, toggleSteps],
+  );
   const thread: ThreadContext = {
     queue,
+    moves,
     takeBack,
     announce,
     words,
     downloads,
     results: results.length,
+    offers,
     ended,
     pendingAsk,
     ask,
     latestWork: latestWork?.key,
     latestDot: items.findLast((item) => item.kind === "dot")?.key,
+    dotLook,
     live,
     onReplay: onReplay && replay,
     replayTask: onReplayTask && replayTask,
     names,
+    chat: chatMode,
   };
   const empty = !shown.length && !queued.length;
   const olderTasks = !!earlier?.more;
@@ -1006,6 +1385,8 @@ export function Conversation({
     field.setRangeText(text, 0, field.value.length, "end");
     field.dispatchEvent(new Event("input", { bubbles: true }));
   };
+  const suggestNow = useRef(suggest);
+  suggestNow.current = suggest;
   // How far the jump button reaches up into the thread from its bottom edge, shown or not.
   const jumpReach = () => {
     const view = scroller.current,
@@ -1027,17 +1408,17 @@ export function Conversation({
           const target =
             event.target instanceof Element
               ? event.target.closest<HTMLButtonElement>(
-                  ".thread-work-steps > .ui-disclosure-trigger, .thread-work > .activity-row > .activity-row-head",
+                  ".thread-work-steps > .ui-disclosure-trigger, .thread-work > .activity-row > .activity-row-head, .deliverable button.ui-file-main",
                 )
               : null;
           if (!target) return;
           follow.anchorTo(target, REVEAL_MARGIN);
-          // A run of steps the reader unfolds comes into view down to its end, clear of the jump
-          // button that leaving the end brings, its head kept in view.
-          const run = target.parentElement;
-          if (run?.matches(".thread-work-steps:not([data-open])"))
+          // A run of steps or a file the reader unfolds comes into view down to its end, clear of
+          // the jump button that leaving the end brings, its head kept in view.
+          const unfolding = target.closest(".thread-work-steps, .deliverable");
+          if (unfolding && target.getAttribute("aria-expanded") === "false")
             follow.show(
-              run,
+              unfolding as HTMLElement,
               REVEAL_MARGIN,
               Math.max(REVEAL_MARGIN, jumpReach() + REVEAL_MARGIN / 2),
             );
@@ -1046,8 +1427,10 @@ export function Conversation({
           seeEnd();
           if (dockHost.parentElement === end.current) footShown();
           if (!visible) return;
-          if (!follow.onScroll()) page.freeze();
-          else if (!page.following && !page.hasNewer) page.latest();
+          if (!follow.onScroll()) {
+            page.freeze();
+            readingBack();
+          }
         }}
         {...follow.gestures(reading)}
       >
@@ -1136,13 +1519,20 @@ export function Conversation({
                   }}
                   fresh={false}
                   thread={thread}
+                  waiting
                 />
               ))}
+            {moves.problem && (
+              <p className="thread-note" role="alert">
+                {moves.problem}
+              </p>
+            )}
             <div className="thread-outbox" ref={setOutboxSlot} />
             <div className="thread-recovery-slot" ref={recoverySlot}>
               {recovery}
             </div>
           </section>
+          {threadFoot}
           <div className="thread-end" ref={end} />
         </div>
       </ScrollArea>
@@ -1183,16 +1573,33 @@ export function Conversation({
       <div className="thread-foot" ref={foot} />
       {createPortal(
         <Outbox.Provider value={outbox}>
+          {!tools && decisions}
           <div className="thread-toolbar">
-            {!tools && lead}
-            <div className="thread-composer" hidden={!!tools}>
+            {!controls && lead}
+            <div className="thread-composer" hidden={!!controls}>
               {composer}
             </div>
-            {tools}
+            {controls}
             {trail}
           </div>
         </Outbox.Provider>,
         dockHost,
+      )}
+      {chat && (
+        <>
+          <BubbleMenu held={bubble} onClose={() => setBubble(null)} />
+          <Sheet
+            open={selecting !== null}
+            onClose={() => setSelecting(null)}
+            title="Select text"
+            side="bottom"
+            doneLabel="Done"
+          >
+            <div className="bubble-select">
+              <SafeMarkdown text={selecting ?? ""} streaming={false} announce={announce} />
+            </div>
+          </Sheet>
+        </>
       )}
     </div>
   );

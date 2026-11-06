@@ -38,6 +38,7 @@ export type RecordingState = z.infer<typeof RecordingState>;
 
 export const RecordingGapReason = z.enum([
   "user-control",
+  "other-task",
   "stream-lost",
   "disk-full",
   "size-cap",

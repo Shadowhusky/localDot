@@ -14,6 +14,7 @@ import type { OtherLocalDot } from "../shell/localdot-handoff.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote, GroupRow } from "../ui/Group.tsx";
+import { useRevealInvalid } from "../ui/reveal-field.ts";
 import { TextField } from "../ui/TextField.tsx";
 
 // This browser signs in there in a new tab; the switcher later opens the same origin.
@@ -71,6 +72,7 @@ export function OtherLocalDots({
   }, [returnTo]);
   const problem = localDotProblem(address, links, window.location.origin);
   const nameProblem = localDotNameProblem(name);
+  const { scope, reveal } = useRevealInvalid<HTMLDivElement>();
   const add = () => {
     setTried(true);
     const link = localDotLink(name, address);
@@ -79,7 +81,10 @@ export function OtherLocalDots({
     if (pasted && links.some((other) => other.url === localDotOrigin(address))) {
       signIn(pasted);
     } else {
-      if (problem || nameProblem || !link) return;
+      if (problem || nameProblem || !link) {
+        reveal();
+        return;
+      }
       onChange([...links, link]);
       signIn(pasted);
     }
@@ -92,7 +97,7 @@ export function OtherLocalDots({
     setReturnTo(url);
   };
   return (
-    <div>
+    <div ref={scope}>
       <GroupHead title="Your other localDots" />
       <Group>
         {links.map((link) =>
@@ -101,6 +106,7 @@ export function OtherLocalDots({
               key={link.url}
               link={link}
               links={links}
+              reveal={reveal}
               onCancel={() => close(link.url)}
               onSave={(next) => {
                 onChange(links.map((other) => (other.url === link.url ? next : other)));
@@ -199,7 +205,7 @@ export function OtherLocalDots({
               label="Address"
               inline
               className="ui-group-row"
-              error={tried && address ? (problem ?? undefined) : undefined}
+              error={tried ? (problem ?? undefined) : undefined}
             >
               <TextField
                 size="sm"
@@ -217,11 +223,7 @@ export function OtherLocalDots({
             <GroupRow
               label="Add this localDot"
               trailing={
-                <Button
-                  size="sm"
-                  disabledReason={address ? undefined : "Enter its address"}
-                  onClick={add}
-                >
+                <Button size="sm" onClick={add}>
                   Add
                 </Button>
               }
@@ -242,11 +244,13 @@ export function OtherLocalDots({
 function LocalDotEditor({
   link,
   links,
+  reveal,
   onSave,
   onCancel,
 }: {
   link: LocalDotLink;
   links: readonly LocalDotLink[];
+  reveal(): void;
   onSave(link: LocalDotLink): void;
   onCancel(): void;
 }) {
@@ -258,7 +262,10 @@ function LocalDotEditor({
   const save = () => {
     setTried(true);
     const next = localDotLink(name, address);
-    if (problem || nameProblem || !next) return;
+    if (problem || nameProblem || !next) {
+      reveal();
+      return;
+    }
     onSave(next);
     signIn(signInLink(address));
   };

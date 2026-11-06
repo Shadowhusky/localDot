@@ -1,3 +1,4 @@
+import type { PanelKey } from "../scene/panel.ts";
 import type { ChapterName } from "./director.ts";
 
 // Where the camera is and where dot shows, at moments of the story. Between two shots everything
@@ -45,6 +46,57 @@ export const WIDE: readonly Shot[] = [
     target: [-1.2, 0, 0],
     dot: { x: 0.36, y: 0.82, r: 0.065, depth: 0.5 },
     screen: 1,
+  },
+  // Chat: the phone in front, the screen dimmed behind it and dot beside it.
+  {
+    chapter: "views",
+    at: 0.16,
+    camera: [-0.85, 0, D * 2.25],
+    target: [-1.2, 0, 0],
+    dot: { x: 0.45, y: 0.8, r: 0.06, depth: 0.5 },
+    screen: 0.32,
+  },
+  {
+    chapter: "views",
+    at: 0.34,
+    camera: [-0.85, 0, D * 2.25],
+    target: [-1.2, 0, 0],
+    dot: { x: 0.45, y: 0.8, r: 0.06, depth: 0.5 },
+    screen: 0.32,
+  },
+  // Studio: the whole window, with the phone come down to its corner.
+  {
+    chapter: "views",
+    at: 0.5,
+    camera: [-1.03, -0.15, D * 2.4],
+    target: [-1.39, -0.18, 0],
+    dot: { x: 0.45, y: 0.82, r: 0.055, depth: 0.5 },
+    screen: 1,
+  },
+  {
+    chapter: "views",
+    at: 0.64,
+    camera: [-1.03, -0.15, D * 2.4],
+    target: [-1.39, -0.18, 0],
+    dot: { x: 0.45, y: 0.82, r: 0.055, depth: 0.5 },
+    screen: 1,
+  },
+  // Several at once: the app with several tasks under way comes up in front, the window dimmed.
+  {
+    chapter: "views",
+    at: 0.78,
+    camera: [-1.03, -0.2, D * 2.4],
+    target: [-1.39, -0.23, 0],
+    dot: { x: 0.36, y: 0.84, r: 0.05, depth: 0.5 },
+    screen: 0.3,
+  },
+  {
+    chapter: "views",
+    at: 0.93,
+    camera: [-1.03, -0.2, D * 2.4],
+    target: [-1.39, -0.23, 0],
+    dot: { x: 0.36, y: 0.84, r: 0.05, depth: 0.5 },
+    screen: 0.3,
   },
   // Models: the screen goes far back; dot in the middle of its ring.
   {
@@ -158,6 +210,54 @@ export const TALL: readonly Shot[] = [
     screen: 1,
   },
   {
+    chapter: "views",
+    at: 0.16,
+    camera: [0, -0.25, D * 2.2],
+    target: [0, -0.75, 0],
+    dot: { x: 0.14, y: 0.6, r: 0.09, depth: 0.5 },
+    screen: 0.28,
+  },
+  {
+    chapter: "views",
+    at: 0.34,
+    camera: [0, -0.25, D * 2.2],
+    target: [0, -0.75, 0],
+    dot: { x: 0.14, y: 0.6, r: 0.09, depth: 0.5 },
+    screen: 0.28,
+  },
+  {
+    chapter: "views",
+    at: 0.5,
+    camera: [0.15, -0.25, D * 2.2],
+    target: [0.37, -0.72, 0],
+    dot: { x: 0.14, y: 0.66, r: 0.075, depth: 0.5 },
+    screen: 1,
+  },
+  {
+    chapter: "views",
+    at: 0.64,
+    camera: [0.15, -0.25, D * 2.2],
+    target: [0.37, -0.72, 0],
+    dot: { x: 0.14, y: 0.66, r: 0.075, depth: 0.5 },
+    screen: 1,
+  },
+  {
+    chapter: "views",
+    at: 0.78,
+    camera: [0, -0.25, D * 2.3],
+    target: [0, -0.86, 0],
+    dot: { x: 0.14, y: 0.67, r: 0.075, depth: 0.5 },
+    screen: 0.28,
+  },
+  {
+    chapter: "views",
+    at: 0.93,
+    camera: [0, -0.25, D * 2.3],
+    target: [0, -0.86, 0],
+    dot: { x: 0.14, y: 0.67, r: 0.075, depth: 0.5 },
+    screen: 0.28,
+  },
+  {
     chapter: "models",
     at: 0.25,
     camera: [0, 0.6, D * 5],
@@ -238,3 +338,51 @@ export const TALL: readonly Shot[] = [
     screen: 0,
   },
 ];
+
+// The phone that shows Chat, through its chapter: up into the frame on Chat's list, then down to the
+// window's corner as the window comes forward and the task opens on it, and away for Several at once.
+export const PHONE_WIDE: readonly PanelKey[] = [
+  { at: 0.02, x: 0.68, y: 1.3, h: 0.8, yaw: 0.42, o: 0 },
+  { at: 0.16, x: 0.68, y: 0.55, h: 0.8, yaw: 0.14, o: 1 },
+  { at: 0.34, x: 0.68, y: 0.55, h: 0.8, yaw: 0.08, o: 1 },
+  { at: 0.5, x: 0.92, y: 0.73, h: 0.48, yaw: -0.14, o: 1 },
+  { at: 0.64, x: 0.92, y: 0.73, h: 0.48, yaw: -0.18, o: 1 },
+  { at: 0.74, x: 1.12, y: 0.78, h: 0.44, yaw: -0.34, o: 0 },
+];
+
+export const PHONE_TALL: readonly PanelKey[] = [
+  { at: 0.02, x: 0.56, y: 1.1, h: 0.52, yaw: 0.34, o: 0 },
+  { at: 0.16, x: 0.56, y: 0.36, h: 0.52, yaw: 0.1, o: 1 },
+  { at: 0.34, x: 0.56, y: 0.36, h: 0.52, yaw: 0.06, o: 1 },
+  { at: 0.5, x: 0.78, y: 0.4, h: 0.38, yaw: -0.1, o: 1 },
+  { at: 0.64, x: 0.78, y: 0.4, h: 0.38, yaw: -0.14, o: 1 },
+  { at: 0.74, x: 1.1, y: 0.44, h: 0.34, yaw: -0.3, o: 0 },
+];
+
+// With reduced motion the chapter is one still: the window, and the phone at its corner.
+export const PHONE_STILL_AT = 0.6;
+
+// How far through the chapter the task opens on the phone, over Chat's list, as a tap on a row does.
+export const PHONE_OPENS: readonly [number, number] = [0.36, 0.46];
+
+// The app with several tasks under way, in Several at once: up in front of the dimmed window, held
+// while its words show, and gone as the models come.
+export const SEVERAL_WIDE: readonly PanelKey[] = [
+  { at: 0.68, x: 0.69, y: 1.3, h: 0.52, yaw: 0.3, o: 0 },
+  { at: 0.8, x: 0.69, y: 0.5, h: 0.52, yaw: 0.08, o: 1 },
+  { at: 0.93, x: 0.69, y: 0.5, h: 0.52, yaw: 0.04, o: 1 },
+  { at: 1, x: 0.69, y: 0.44, h: 0.46, yaw: 0, o: 0 },
+];
+
+export const SEVERAL_TALL: readonly PanelKey[] = [
+  { at: 0.68, x: 0.56, y: 1.15, h: 0.5, yaw: 0.25, o: 0 },
+  { at: 0.8, x: 0.56, y: 0.37, h: 0.5, yaw: 0.06, o: 1 },
+  { at: 0.93, x: 0.56, y: 0.37, h: 0.5, yaw: 0.03, o: 1 },
+  { at: 1, x: 0.56, y: 0.31, h: 0.44, yaw: 0, o: 0 },
+];
+
+// With reduced motion it shows still, where it rests, while its words do.
+export const SEVERAL_STILL_AT = 0.86;
+
+// The most of the stage's width it takes: on a squarer screen it keeps to the room beside its words.
+export const SEVERAL_WIDEST = { wide: 0.54, tall: 0.86 } as const;

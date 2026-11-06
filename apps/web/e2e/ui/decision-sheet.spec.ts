@@ -43,12 +43,10 @@ test("long key requests scroll to every control and expand by drag or button", a
         });
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     }
-    // Swiping up on a collapsed question raises the sheet before its content scrolls, as an iOS
-    // sheet does; at full height this request fits whole. Collapsed again for the drag below.
-    await expect(sheet).toHaveAttribute("data-expanded", "");
-    await cdp.detach();
-    await sheet.getByRole("button", { name: "Collapse question" }).click();
+    // A swipe up on what can scroll scrolls it: the sheet moves by its grips and its button.
+    await expect.poll(() => scroller.evaluate((e) => e.scrollTop)).toBeGreaterThan(0);
     await expect(sheet).not.toHaveAttribute("data-expanded");
+    await cdp.detach();
   }
   await scroller.evaluate((e) => {
     e.scrollTop = e.scrollHeight;

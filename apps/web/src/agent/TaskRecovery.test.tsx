@@ -185,6 +185,21 @@ describe("never silent: a line from dot and the one action that fixes it", () =>
     fireEvent.click(screen.getByRole("button", { name: "Retry now" }));
     expect(resume).toHaveBeenCalledOnce();
   });
+  it.each([
+    ["404: Not Found", /address or model it doesn't have/],
+    ["401: Unauthorized", /doesn't accept this key/],
+    ["403: Forbidden", /key isn't allowed/],
+  ])("says what to fix when the provider answers %s", (detail, advice) => {
+    render(
+      <TaskRecovery
+        agent={stalled("paused", "model refused", detail)}
+        controls={{ ...controls, canResumeTask: true, resume: vi.fn(async () => true) }}
+        onSettings={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(advice)).toBeTruthy();
+    expect(screen.getByText(`The provider said: ${detail}`)).toBeTruthy();
+  });
   it("says what the model said when it turned dot down, with Retry now and Change model", () => {
     const onSettings = vi.fn();
     render(
@@ -194,7 +209,7 @@ describe("never silent: a line from dot and the one action that fixes it", () =>
         onSettings={onSettings}
       />,
     );
-    expect(screen.getByText("The model said: 400: image input is not supported")).toBeTruthy();
+    expect(screen.getByText("The provider said: 400: image input is not supported")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Change model" }));
     expect(onSettings).toHaveBeenCalledWith(expect.any(HTMLButtonElement), "models");
     expect(screen.getByRole("button", { name: "Retry now" })).toBeTruthy();

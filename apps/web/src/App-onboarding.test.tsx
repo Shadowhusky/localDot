@@ -55,7 +55,7 @@ it("opens setup on first run, and Finish later leaves what is left in the chat t
   render(<App fetchImpl={fetchImpl} />);
   fireEvent.click(await screen.findByRole("button", { name: "Get started" }));
   expect(await screen.findByRole("heading", { name: "How should dot think?" })).toBeTruthy();
-  expect(screen.getByRole("list", { name: "Step 1 of 6 · How dot thinks" })).toBeTruthy();
+  expect(screen.getByRole("list", { name: "Step 1 of 8 · How dot thinks" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Finish later" }));
   await waitFor(() =>
     expect(screen.queryByRole("heading", { name: "How should dot think?" })).toBeNull(),
@@ -126,6 +126,9 @@ it("sets up an API key's models and permissions, then turns the computer on", as
   // Balanced is saved too, so setup knows it was chosen.
   expect(puts()[1]).toMatchObject({ autonomy: { computer: "act", purchase: "ask" } });
   fireEvent.click(screen.getByRole("radio", { name: /Coder/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByRole("heading", { name: "How would you like to see dot?" });
+  expect(screen.getByRole("radiogroup", { name: "View" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   await screen.findByRole("heading", { name: "You're all set." });
   expect(puts()[2]).toMatchObject({ persona: "coder" });

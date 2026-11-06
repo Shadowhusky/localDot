@@ -614,7 +614,7 @@ describe("routine tools", () => {
       op: "propose",
       name: "Bills",
       instruction: "Check bills",
-      when: { kind: "daily", time: "08:30" },
+      schedules: [{ every: 1, unit: "day", times: ["08:30"] }],
       active: true,
       budget_usd: 50,
       approval_window: 240,

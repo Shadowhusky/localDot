@@ -50,6 +50,12 @@ describe("the direct control stream", () => {
     ])
       expect(ManualStreamInput.parse(input)).toEqual(input);
   });
+  it("names the screen an input is for only on the stream", () => {
+    const input = { kind: "key", combo: ["a"], screen: "browser" };
+    expect(ManualStreamInput.parse(input)).toEqual(input);
+    expect(ManualStreamInput.safeParse({ ...input, screen: "phone" }).success).toBe(false);
+    expect(TakeoverInputRequest.safeParse({ requestId: ulid(), input }).success).toBe(false);
+  });
   it("refuses held keys, unmasked text, timings and points off any screen", () => {
     for (const input of [
       { kind: "key", combo: ["shift"], holdMs: 500 },

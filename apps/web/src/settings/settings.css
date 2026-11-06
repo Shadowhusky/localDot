@@ -99,6 +99,33 @@
   margin-inline-start: calc(var(--spacing) * 2);
 }
 
+.settings-model-group {
+  display: grid;
+  min-width: 0;
+  margin-block-end: calc(var(--spacing) * 3);
+}
+
+.settings-model-group-label {
+  margin: 0 calc(var(--spacing) * 3.5) calc(var(--spacing) * 1);
+  color: var(--color-fg-3);
+  font-size: var(--text-footnote);
+  overflow-wrap: anywhere;
+}
+
+/* A model's switch fills its row, with its actions at the end. */
+.settings-model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: calc(var(--spacing) * 1);
+  padding-inline-end: calc(var(--spacing) * 2);
+}
+
+.settings-model-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
 /* Typed values sit at a row's end at one width, so a row never grows with what is typed. */
 .settings-body .ui-group-row .ui-text-field {
   flex: none;
@@ -412,6 +439,27 @@
   white-space: nowrap;
 }
 
+.settings-engine-body {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
+  margin-block-start: calc(var(--spacing) * 2);
+}
+
+.settings-chrome-terms a {
+  color: var(--color-fg-1);
+  text-decoration: underline;
+  text-decoration-color: var(--color-fg-3);
+  text-underline-offset: calc(var(--spacing) * 0.5);
+}
+
+.settings-engine-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--spacing) * 2);
+  align-items: center;
+}
+
 .settings-accounts-hosts {
   display: block;
   overflow: hidden;
@@ -586,11 +634,12 @@
   }
 
   .settings-accounts-footer > .settings-lede:empty {
-    flex-basis: 0;
+    flex: none;
+    width: 0;
   }
 
   .settings-accounts-footer > .ui-button {
-    flex: 1;
+    flex: 1 0 auto;
   }
 
   .settings-footer-status {
@@ -936,6 +985,20 @@
   color: var(--color-fg-2);
 }
 
+.connectors-connection {
+  display: flex;
+  justify-content: flex-end;
+  gap: calc(var(--spacing) * 1.5);
+  margin-top: var(--spacing);
+}
+
+.connectors-page {
+  color: var(--color-fg-1);
+  text-decoration: underline;
+  text-decoration-color: var(--color-fg-3);
+  text-underline-offset: calc(var(--spacing) * 0.5);
+}
+
 .connectors-pulse {
   flex: none;
   width: 6px;
@@ -1049,18 +1112,6 @@
   align-items: center;
   justify-content: flex-end;
   gap: calc(var(--spacing) * 2);
-}
-
-.connectors-choice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: calc(var(--spacing) * 3);
-}
-
-.connectors-or {
-  color: var(--color-fg-3);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .connectors-failure {

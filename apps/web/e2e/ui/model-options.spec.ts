@@ -1,4 +1,4 @@
-import { composer, expect, runAt, test } from "./harness.ts";
+import { composer, expect, openComposer, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
 
@@ -7,7 +7,7 @@ test("model thinking can be changed, saved and reset inside the composer", async
   ui,
 }, testInfo) => {
   await ui.open("ready");
-  const card = await composer(page);
+  const card = await openComposer(page);
   const trigger = card.getByRole("button", { name: /^Model:/ });
   await trigger.click();
   const panel = page.getByRole("dialog", { name: "Model and thinking" });
@@ -39,7 +39,7 @@ test("model thinking can be changed, saved and reset inside the composer", async
   await panel.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(trigger).toContainText("Maximum");
   await page.reload();
-  const again = (await composer(page)).getByRole("button", { name: /^Model:/ });
+  const again = (await openComposer(page)).getByRole("button", { name: /^Model:/ });
   await expect(again).toContainText("Maximum");
   await again.click();
   await expect(speed).toContainText("Fast");

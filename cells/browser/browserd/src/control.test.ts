@@ -343,3 +343,206 @@ describe("browser control authority", () => {
     expect(control.close()).toBe(closing);
   });
 });
+
+describe("tasks side by side", () => {
+  const other = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0A";
+  const identity = { browserCellId, parentCellId, instance };
+  const id = (n: number) => `01J9ZQ3V8Y7X6W5T4S3R2Q1P${String(n).padStart(2, "0")}`;
+  const grant = (revision: number, session = sessionId) => ({
+    ...identity,
+    revision,
+    requestId: id(revision),
+    holder: "agent" as const,
+    owner: { sessionId: session, generation: 1 },
+  });
+  const permitOf = ({ holder: _, ...rest }: ReturnType<typeof grant>): BrowserActionPermit => rest;
+  const release = (revision: number, session = sessionId, keep = false) => ({
+    ...identity,
+    revision,
+    requestId: id(revision),
+    holder: "release" as const,
+    owner: { sessionId: session, generation: 1 },
+    ...(keep ? { keep: true as const } : {}),
+  });
+
+  it("adds a second task without touching the first's grant or its running action", async () => {
+    const { control, secretPages, clearSelections } = setup();
+    const first = grant(1);
+    await control.set(first);
+    const action = control.admit(permitOf(first));
+    secretPages.mockClear();
+    const second = grant(2, other);
+    await control.set(second);
+    action.check();
+    expect(action.signal.aborted).toBe(false);
+    control.admit(permitOf(first)).finish();
+    control.admit(permitOf(second)).finish();
+    expect(secretPages).not.toHaveBeenCalled();
+    expect(clearSelections).toHaveBeenCalledTimes(2);
+    action.finish();
+  });
+
+  it("scrubs secrets only on the way out of the user's control", async () => {
+    const { control, secretPages } = setup();
+    await control.set(grant(1));
+    expect(secretPages).toHaveBeenCalledTimes(2);
+    await control.set(grant(2, other));
+    expect(secretPages).toHaveBeenCalledTimes(2);
+    await control.set(release(3));
+    await control.set(release(4, other));
+    expect(control.holder).toBe("user");
+    await control.set(grant(5));
+    expect(secretPages).toHaveBeenCalledTimes(4);
+  });
+
+  it("releases one task's grant and actions, and nobody else's", async () => {
+    const released = vi.fn();
+    const { control } = setup({ released });
+    const first = grant(1);
+    const second = grant(2, other);
+    await control.set(first);
+    await control.set(second);
+    const mine = control.admit(permitOf(first));
+    const theirs = control.admit(permitOf(second));
+    const going = control.set(release(3));
+    expect(mine.signal.aborted).toBe(true);
+    expect(theirs.signal.aborted).toBe(false);
+    expect(() => control.admit(permitOf(first))).toThrow("locked");
+    mine.finish();
+    await going;
+    expect(released).toHaveBeenCalledExactlyOnceWith(sessionId, false);
+    expect(control.holder).toBe("agent");
+    theirs.check();
+    theirs.finish();
+  });
+
+  it("keeps the holder the user's once the last task is gone", async () => {
+    const released = vi.fn();
+    const { control } = setup({ released });
+    await control.set(grant(1));
+    const reply = await control.set(release(2, sessionId, true));
+    expect(reply.holder).toBe("user");
+    expect(released).toHaveBeenCalledWith(sessionId, true);
+  });
+
+  it("takes every grant for the user, and raises the window they take it in", async () => {
+    const front = vi.fn(async () => {});
+    const { control } = setup({ front });
+    const first = grant(1);
+    const second = grant(2, other);
+    await control.set(first);
+    await control.set(second);
+    const running = control.admit(permitOf(second));
+    const taking = control.set({
+      ...identity,
+      revision: 3,
+      requestId: id(3),
+      holder: "user",
+      front: sessionId,
+    });
+    expect(running.signal.aborted).toBe(true);
+    expect(() => control.admit(permitOf(first))).toThrow("locked");
+    expect(() => control.admit(permitOf(second))).toThrow("locked");
+    expect(front).not.toHaveBeenCalled();
+    running.finish();
+    await taking;
+    expect(front).toHaveBeenCalledWith(sessionId, expect.any(AbortSignal));
+    control.admitManual({ ...identity, revision: 3, requestId: id(3) }).finish();
+  });
+
+  it("refuses a grant from before the user's control, but not a late release", async () => {
+    const { control } = setup();
+    await control.set(grant(1));
+    await control.set({ ...identity, revision: 5, requestId: id(5), holder: "user" });
+    expect(() => control.set(grant(3, other))).toThrow("stale");
+    const late = await control.set(release(4));
+    expect(late.holder).toBe("user");
+  });
+
+  it("does not let one task's late request undo its own newer one", async () => {
+    const { control } = setup();
+    const newer = grant(4);
+    await control.set(newer);
+    expect(() => control.set(release(3))).toThrow("stale");
+    control.admit(permitOf(newer)).finish();
+  });
+
+  it("orders requests from different tasks by arrival, whatever their numbers", async () => {
+    const { control } = setup();
+    const later = grant(5, other);
+    const earlier = grant(4);
+    await control.set(later);
+    await control.set(earlier);
+    control.admit(permitOf(later)).finish();
+    control.admit(permitOf(earlier)).finish();
+  });
+
+  it("lets a task coming to rest beside others go without taking theirs", async () => {
+    const released = vi.fn();
+    const { control } = setup({ released });
+    const first = grant(1);
+    const second = grant(2, other);
+    await control.set(first);
+    await control.set(second);
+    const running = control.admit(permitOf(second));
+    const reply = await control.set({
+      ...identity,
+      revision: 3,
+      requestId: id(3),
+      holder: "user",
+      front: sessionId,
+      alone: true,
+    });
+    expect(reply.holder).toBe("agent");
+    expect(released).toHaveBeenCalledExactlyOnceWith(sessionId, true);
+    expect(running.signal.aborted).toBe(false);
+    running.check();
+    running.finish();
+    expect(() => control.admit(permitOf(first))).toThrow("locked");
+    expect(() => control.admitManual({ ...identity, revision: 3, requestId: id(3) })).toThrow();
+  });
+
+  it("gives a task at rest the browser when no other task is at work", async () => {
+    const { control } = setup();
+    await control.set(grant(1));
+    const reply = await control.set({
+      ...identity,
+      revision: 2,
+      requestId: id(2),
+      holder: "user",
+      front: sessionId,
+      alone: true,
+    });
+    expect(reply.holder).toBe("user");
+    control.admitManual({ ...identity, revision: 2, requestId: id(2) }).finish();
+  });
+
+  it("lets the user's control overtake another task's newer request", async () => {
+    const { control } = setup();
+    const first = grant(1);
+    await control.set(first);
+    const late = grant(5, other);
+    await control.set(late);
+    const reply = await control.set({
+      ...identity,
+      revision: 4,
+      requestId: id(4),
+      holder: "user",
+      front: sessionId,
+    });
+    expect(reply.holder).toBe("user");
+    expect(() => control.admit(permitOf(late))).toThrow("locked");
+  });
+
+  it("binds a permit to its task's tabs", async () => {
+    const ownsTab = vi.fn(
+      (session: string, tab: string) => session === sessionId && tab === "mine",
+    );
+    const { control } = setup({ ownsTab });
+    const first = grant(1);
+    await control.set(first);
+    control.admit(permitOf(first), "mine").finish();
+    control.admit(permitOf(first)).finish();
+    expect(() => control.admit(permitOf(first), "theirs")).toThrow("locked");
+  });
+});

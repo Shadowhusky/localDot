@@ -21,7 +21,11 @@ function fixture() {
   const published: RoutineAppEvent[] = [];
   const guard = new AbsenceGuard({ store, publish: (e) => published.push(e), now: () => now });
   const routine = store.create(
-    { name: "Morning bills", instruction: "x", when: { kind: "daily", time: "08:30" } },
+    {
+      name: "Morning bills",
+      instruction: "x",
+      schedules: [{ every: 1, unit: "day", times: ["08:30"] }],
+    },
     { state: "active" },
   );
   const current = () => {

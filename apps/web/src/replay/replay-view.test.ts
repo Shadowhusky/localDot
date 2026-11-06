@@ -101,6 +101,11 @@ describe("replay controls and timeline presentation", () => {
     expect(speedLabel(0.5, false)).toBe("Playing at ½×");
   });
   it.each([
+    [
+      "other-task",
+      "Another task was on screen here",
+      "This task kept going; its own window comes back when it next acts.",
+    ],
     ["user-control", "You had control here", "Nothing was recorded while you were in control."],
     [
       "stream-lost",

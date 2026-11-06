@@ -168,4 +168,103 @@ describe("the shared sign-in profile", () => {
     await f.profile().ensure([LEGACY_A]);
     expect(f.accounts()?.syntheticCookie).toBeUndefined();
   });
+
+  describe("the backup taken before Chrome first opens the sign-ins", () => {
+    const signedIn = async (f: ReturnType<typeof fixture>) => {
+      await f.profile().ensure();
+      Object.assign(f.accounts() ?? {}, {
+        syntheticCookie: "before",
+        syntheticLastVersion: "154.0.8037.57",
+      });
+      return f.profile();
+    };
+
+    it("reads which browser last opened the profile, without writing to it", async () => {
+      const f = fixture();
+      const profile = await signedIn(f);
+      expect(await profile.lastVersion()).toBe("154.0.8037.57");
+      const made = f.docker.requests.find(
+        (request) =>
+          request.path === "/containers/create" && request.query?.name === `${f.volume}-version`,
+      );
+      expect(made?.body).toMatchObject({
+        HostConfig: {
+          Mounts: [{ Type: "volume", Source: f.volume, Target: "/legacy", ReadOnly: true }],
+        },
+      });
+      expect(f.docker.containers.size).toBe(0);
+    });
+
+    it("has no version for a profile no browser has opened, or no profile at all", async () => {
+      const f = fixture();
+      expect(await f.profile().lastVersion()).toBeUndefined();
+      await f.profile().ensure();
+      expect(await f.profile().lastVersion()).toBeUndefined();
+    });
+
+    it("copies the profile to a volume of its own, in a contained helper", async () => {
+      const f = fixture();
+      const profile = await signedIn(f);
+      await profile.backup();
+      expect(f.docker.volumes.get(profile.backupVolume)?.syntheticCookie).toBe("before");
+      expect(await profile.hasBackup()).toBe(true);
+      const made = f.docker.requests.find(
+        (request) => request.query?.name === `${f.volume}-backup`,
+      );
+      const body = made?.body as {
+        User: string;
+        NetworkDisabled: boolean;
+        HostConfig: Record<string, unknown>;
+      };
+      expect(body.User).toBe("1000:1000");
+      expect(body.NetworkDisabled).toBe(true);
+      expect(body.HostConfig).toMatchObject({
+        NetworkMode: "none",
+        ReadonlyRootfs: true,
+        CapDrop: ["ALL"],
+        Mounts: [
+          { Source: f.volume, Target: "/legacy", ReadOnly: true },
+          { Source: profile.backupVolume, Target: "/profile" },
+        ],
+      });
+    });
+
+    it("says so when there's no room for the copy", async () => {
+      const f = fixture();
+      const profile = await signedIn(f);
+      f.docker.copyStatus = 28;
+      await expect(profile.backup()).rejects.toThrow(/enough free disk space/u);
+    });
+
+    it("restores it over the profile, only with no browser holding it", async () => {
+      const f = fixture();
+      const profile = await signedIn(f);
+      await profile.backup();
+      Object.assign(f.accounts() ?? {}, {
+        syntheticCookie: "after",
+        syntheticLastVersion: "157.0.1.1",
+      });
+      f.docker.containers.set("holder", { Id: "a".repeat(64), Mounts: [{ Name: f.volume }] });
+      await expect(profile.restoreBackup()).rejects.toThrow(/in use/u);
+      f.docker.containers.clear();
+      await profile.restoreBackup();
+      expect(f.accounts()?.syntheticCookie).toBe("before");
+      expect(await profile.lastVersion()).toBe("154.0.8037.57");
+    });
+
+    it("won't restore a backup that isn't there", async () => {
+      const f = fixture();
+      const profile = await signedIn(f);
+      await expect(profile.restoreBackup()).rejects.toThrow(/no backup/u);
+    });
+
+    it("goes with the sign-ins when the user signs out of every site", async () => {
+      const f = fixture();
+      const profile = await signedIn(f);
+      await profile.backup();
+      await profile.wipe();
+      expect(await profile.hasBackup()).toBe(false);
+      expect(f.docker.volumes.has(profile.backupVolume)).toBe(false);
+    });
+  });
 });

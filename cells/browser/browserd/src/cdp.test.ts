@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CDP_REQUEST_TIMEOUT_MS, GuardedCdp, MAX_CDP_PENDING } from "./cdp.ts";
 
-function setup() {
+function setup(ownsNode = false) {
   let receive = (_message: string) => {};
   let disconnected = () => {};
   const write = vi.fn();
@@ -26,7 +26,7 @@ function setup() {
       ownsTarget: () => false,
       ownsSession: (session) => session === "owned",
       ownsWindow: () => false,
-      ownsNode: () => false,
+      ownsNode: () => ownsNode,
       ownsDownload: () => false,
       allowsUpload: () => false,
     },
@@ -138,6 +138,32 @@ describe("guarded Chromium request broker", () => {
     await expect(broker.send("Browser.getVersion")).rejects.toThrow("closed");
   });
 
+  it("names the command that went unanswered, for the log", async () => {
+    vi.useFakeTimers();
+    const { broker, fatal } = setup();
+    const pending = expect(broker.send("Page.enable", {}, { sessionId: "owned" })).rejects.toThrow(
+      "timeout",
+    );
+    await vi.advanceTimersByTimeAsync(CDP_REQUEST_TIMEOUT_MS);
+    await pending;
+    expect(fatal.mock.calls[0]?.[0]).toMatchObject({ reason: "timeout", method: "Page.enable" });
+  });
+
+  // The Mac slept or the computer's VM stalled: on waking, a timer fires before the reply that
+  // arrived meanwhile is read. Only time browserd ran counts.
+  it("doesn't count a stall against a command's deadline", async () => {
+    vi.useFakeTimers();
+    const { broker, receive, fatal } = setup();
+    const pending = broker.send("Page.enable", {}, { sessionId: "owned" });
+    const now = Date.now();
+    const stalled = vi.spyOn(Date, "now").mockImplementation(() => now + 60_000);
+    await vi.advanceTimersToNextTimerAsync();
+    stalled.mockRestore();
+    expect(fatal).not.toHaveBeenCalled();
+    receive({ id: 1, sessionId: "owned", result: {} });
+    await expect(pending).resolves.toEqual({});
+  });
+
   it("a cancelled written command fences the connection, while pre-cancelled work writes nothing", async () => {
     const { broker, write, close } = setup();
     const aborted = new AbortController();
@@ -160,11 +186,13 @@ describe("guarded Chromium request broker", () => {
     ["cancelled", "DOMSnapshot.captureSnapshot", { computedStyles: [] }],
     ["timeout", "DOMSnapshot.captureSnapshot", { computedStyles: [] }],
     ["cancelled", "DOM.getNodeForLocation", { x: 10, y: 20 }],
+    ["timeout", "DOM.describeNode", { backendNodeId: 1, depth: 0, pierce: false }],
+    ["timeout", "DOM.getBoxModel", { backendNodeId: 1 }],
   ] as const)(
     "drops a %s page read (%s) and its late reply without fencing the connection",
     async (outcome, method, params) => {
       vi.useFakeTimers();
-      const { broker, receive, fatal, close } = setup();
+      const { broker, receive, fatal, close } = setup(true);
       const live = new AbortController();
       const read = broker.send(method, params, { sessionId: "owned", signal: live.signal });
       const refused = expect(read).rejects.toThrow(outcome);

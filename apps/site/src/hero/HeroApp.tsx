@@ -16,16 +16,18 @@ import { RailPanel } from "@app/shell/RailPanel.tsx";
 import { StageFrame } from "@app/shell/StageFrame.tsx";
 import { useMediaQuery } from "@app/ui/media.ts";
 import { showToast, Toaster } from "@app/ui/Toast.tsx";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Wearable } from "@localdot/protocol";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { heroDot } from "../signals.ts";
 import { setSite, useSite } from "../state.ts";
-import { DEMOS, type DemoEntry, loadDemo } from "./catalog.ts";
+import { DEMOS, type DemoEntry, loadDemo, lookOf } from "./catalog.ts";
 import { DemoStart } from "./DemoStart.tsx";
 import type { DemoTimeline } from "./demo.ts";
 import { ReplayNote } from "./ReplayNote.tsx";
 import { type BarMode, SiteBar } from "./SiteBar.tsx";
 import { SiteIsland } from "./SiteIsland.tsx";
+import { SiteRail } from "./SiteRail.tsx";
 import { siteApi } from "./site-api.ts";
 import { TryNext } from "./TryNext.tsx";
 import { usePlayer } from "./usePlayer.ts";
@@ -35,6 +37,8 @@ import { t } from "../i18n.ts";
 
 let showing: DemoTimeline | null = null;
 const api = siteApi(() => showing);
+// Chat on its phone comes well down the story, so the first view doesn't carry it.
+const ChatPhone = lazy(() => import("./ChatPhone.tsx").then((m) => ({ default: m.ChatPhone })));
 // The task whose recording has a game the visitor can take over.
 const GAME = DEMOS.find((entry) => entry.play);
 
@@ -53,7 +57,7 @@ function uncover(canvas: HTMLCanvasElement | null): void {
 
 const VIEWS = [
   { value: "chat", label: t("Chat") },
-  { value: "activity", label: t("Activity") },
+  { value: "activity", label: t("Workspace") },
 ];
 
 // What only localDot itself can do says so in one line, rather than doing nothing. One tip at a time:
@@ -249,6 +253,9 @@ export function HeroApp({ onGo }: { onGo(place: string): void }) {
   heroDot.control = !!presence?.feed.control && working && !yours;
   heroDot.focus = working ? (presence?.feed.focus ?? null) : null;
   heroDot.line = line;
+  const shown = DEMOS.find((entry) => entry.id === demo?.id);
+  const look = shown && lookOf(shown);
+  heroDot.look = look ?? null;
   const start = (
     <DemoStart
       current={demo?.id}
@@ -260,6 +267,9 @@ export function HeroApp({ onGo }: { onGo(place: string): void }) {
   );
   // The picker stays until the task's request is in, so the chat changes once.
   const showStart = !demo || mode === "replay" || rows.length === 0;
+  const live =
+    working && !showStart ? ({ phase: "running", label: line, nowMs: sessionMs } as const) : null;
+  const phoneSlot = chosen.phone ? document.querySelector("[data-phone]") : null;
 
   return (
     // Activity is a view of the one rail here, so wide screens give the app's Activity column back.
@@ -269,7 +279,18 @@ export function HeroApp({ onGo }: { onGo(place: string): void }) {
       data-phase={phase}
       data-chosen={chose && !showStart ? "" : undefined}
       data-activity-hidden=""
+      data-sessions={phone ? undefined : "collapsed"}
     >
+      {!phone && (
+        <SiteRail
+          current={demo?.id}
+          playing={working}
+          onPick={(entry) => {
+            setMode("watch");
+            choose(entry);
+          }}
+        />
+      )}
       <SiteBar title={demo ? t(demo.title) : undefined} mode={mode} onMode={setMode} />
       <div className="watch">
         <main className="stage-col" aria-label={t("dot's computer")}>
@@ -370,9 +391,7 @@ export function HeroApp({ onGo }: { onGo(place: string): void }) {
               agent={showStart ? undefined : agent}
               api={api}
               rows={showStart ? undefined : rows}
-              live={
-                working && !showStart ? { phase: "running", label: line, nowMs: sessionMs } : null
-              }
+              live={live}
               start={showStart ? start : undefined}
               pinned={phone}
               composer={
@@ -385,18 +404,47 @@ export function HeroApp({ onGo }: { onGo(place: string): void }) {
           )}
         </RailPanel>
       </div>
-      <DockedDot state={dotState} control={!!presence?.feed.control && working} />
+      <DockedDot state={dotState} control={!!presence?.feed.control && working} look={look} />
+      {phoneSlot &&
+        createPortal(
+          <Suspense fallback={null}>
+            <ChatPhone
+              title={demo ? t(demo.title) : "localDot"}
+              agent={showStart ? undefined : agent}
+              rows={showStart ? undefined : rows}
+              live={live}
+              api={api}
+              line={line}
+              idle={!working}
+              look={look}
+              video={videoEl}
+              elapsedMs={Math.max(0, sessionMs)}
+              working={working}
+              start={showStart ? start : undefined}
+              composer={<ReplayNote model={demo?.model.label} />}
+            />
+          </Suspense>,
+          phoneSlot,
+        )}
     </div>
   );
 }
 
 // Until the 3D dot takes its place, the app's own dot sits in the band's dock.
-function DockedDot({ state, control }: { state: DotState; control: boolean }) {
+function DockedDot({
+  state,
+  control,
+  look,
+}: {
+  state: DotState;
+  control: boolean;
+  look?: readonly Wearable[];
+}) {
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setSlot(document.querySelector<HTMLElement>(".site-app .narrator-dock"));
   }, []);
   if (!slot) return null;
   const size = Math.round(slot.getBoundingClientRect().width) || 88;
-  return createPortal(<Dot size={size} state={state} control={control} />, slot);
+  return createPortal(<Dot size={size} state={state} control={control} wearables={look} />, slot);
 }
