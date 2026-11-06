@@ -449,6 +449,7 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 
 // How long a sent message shows dot thinking with no word from the task before the real status returns.
 const SENDING_HOLD_MS = 20_000;
+const THINKING_LINE = "Thinking…";
 
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
@@ -1307,11 +1308,15 @@ function Theatre({ api }: { api: ApiClient }) {
   // thinking.
   const [sent, setSent] = useState<SentTo | null>(null);
   const sendTarget = useRef<SentTo | null>(null);
-  sendTarget.current = sentToRest(session.sessionId, task);
+  sendTarget.current = sentToRest(session.sessionId, readingTask ? null : task);
   const onSending = useCallback((on: boolean) => setSent(on ? sendTarget.current : null), []);
-  // A message sent in the conversation left behind is not this one's.
-  if (stageSwitch.active && sent !== null) setSent(null);
-  const sentThinking = sent !== null && awaitingWord(sent, session.sessionId, task);
+  // A message sent in the conversation left behind is not this one's. A new conversation's first
+  // message is: taking it up is where that message goes.
+  if (stageSwitch.active && sent !== null && sent.session !== null) setSent(null);
+  // A conversation still reading its history, as a new one is when its first message takes it up,
+  // has said nothing yet: the finished task held up meanwhile is the one left behind.
+  const sentThinking =
+    sent !== null && awaitingWord(sent, session.sessionId, readingTask ? null : task);
   useEffect(() => {
     if (!sent) return;
     if (!sentThinking) {
@@ -2430,12 +2435,15 @@ function Theatre({ api }: { api: ApiClient }) {
     appStatus.timer || appStatus.elapsedS !== null ? (
       <TaskTime timer={appStatus.timer} elapsedS={appStatus.elapsedS} />
     ) : undefined;
+  // The conversation's foot has no island to say how dot stands, so while it thinks with nothing
+  // to say yet it says that, and a message just sent takes the greeting away at once.
+  const footLine = appStatus.row === "thinking" && !bandLine ? THINKING_LINE : bandLine;
   const phoneBand = (
     <NarratorBand
       // dot's question is on show in the thread, nothing in it hidden; the foot says whose move it is.
-      line={askDraft && narration === asked ? "Your call." : bandLine}
+      line={askDraft && narration === asked ? "Your call." : footLine}
       speaker={bandSpeaker}
-      forUser={hearing || !atWork(appStatus.row)}
+      forUser={hearing || sentThinking || !atWork(appStatus.row)}
       showDot={showDot.value}
       idle={!hearing && !!idle}
       action={

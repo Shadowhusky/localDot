@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { TOKEN, type UiFixture } from "../fixtures/start-ui-fixture.ts";
-import { expect, type Harness, runAt, test } from "./harness.ts";
+import { expect, type Harness, isPhone, runAt, test } from "./harness.ts";
 
 // From the press of Send, dot is seen thinking however long its brain takes to say so, and its own
 // thinking takes over with nothing in between. A send that fails leaves dot as it was.
@@ -14,6 +14,7 @@ interface Frame {
   t: number;
   dot: string;
   island: string;
+  foot: string;
   lines: number;
   stray: number;
   yours: number;
@@ -57,6 +58,7 @@ async function sendWatched(page: Page, text: string) {
           t: performance.now() - seen.sentAt,
           dot: dot?.dataset.shown === undefined ? "" : (dot.dataset.state ?? ""),
           island: document.querySelector(".island [data-testid='hud-status']")?.textContent ?? "",
+          foot: document.querySelector(".dot-strip .narration-line")?.textContent ?? "",
           lines: after,
           stray: lines.length - after,
           yours: yours.length,
@@ -99,9 +101,16 @@ async function sendMeasured(page: Page, studio: boolean, text: string) {
   });
   expect(shown).toBeLessThan(400);
   const thinking = frames.slice(first);
-  expect(new Set(thinking.map((frame) => frame.dot))).toEqual(new Set(["thinking"]));
+  // Wherever dot shows; a new conversation's dot is between places for a moment as it docks.
+  expect(new Set(thinking.map((frame) => frame.dot).filter(Boolean))).toEqual(
+    new Set(["thinking"]),
+  );
   if (studio)
     expect(new Set(thinking.map((frame) => frame.island))).toEqual(new Set(["Thinking…"]));
+  // Chat has no island, so dot's line at the foot says it, the greeting gone by then.
+  else
+    for (const frame of thinking.filter((frame) => frame.t > 500))
+      expect(frame.foot).toContain("Thinking…");
   for (const frame of frames) {
     expect(frame.lines).toBeLessThanOrEqual(1);
     expect(frame.stray).toBe(0);
@@ -132,6 +141,22 @@ for (const style of ["studio", "chat"] as const)
         await page.request.post(`${fixture.origin}/__qa/reply?ms=${REPLY_MS}&wake=${WAKE_MS}`);
         await sendMeasured(page, studio, "Start the report again");
         await expect(page.getByText("Sample reply: I received the task.").last()).toBeVisible();
+      });
+
+      test("a new conversation's first message shows dot thinking at Send", async ({
+        page,
+        ui,
+      }) => {
+        const fixture = await ui.open("done");
+        if (isPhone(page)) {
+          await page.getByRole("button", { name: "More", exact: true }).click();
+          await page.getByRole("menuitem", { name: "New conversation" }).click();
+        } else await page.getByRole("button", { name: "New conversation" }).first().click();
+        await expect(page.getByRole("heading", { name: "What should we do?" })).toBeVisible();
+        await ui.picture();
+        await ui.settle();
+        await page.request.post(`${fixture.origin}/__qa/reply?ms=${REPLY_MS}&wake=${WAKE_MS}`);
+        await sendMeasured(page, studio, "Tidy the sample sheet");
       });
 
       test("a follow-up to a task at rest shows dot thinking at Send", async ({ page, ui }) => {
