@@ -397,3 +397,111 @@ describe("authenticated session-bound browser downloads", () => {
     expect(f.targets.downloadBehavior.mock.calls.some(([enabled]) => enabled)).toBe(false);
   });
 });
+
+describe("downloads of tasks side by side", () => {
+  const taskA = "01J00000000000000000000010";
+  const taskB = "01J00000000000000000000020";
+  const permit = (sessionId: string, n: number) => ({
+    ...identity,
+    revision: n,
+    requestId: `01J0000000000000000000003${n}`,
+    owner: { sessionId, generation: 1 },
+  });
+  async function pair() {
+    const control = new BrowserControl({
+      ...identity,
+      clearSelections: async () => {},
+      secretPages: async () => [],
+      reload: async () => {},
+    });
+    const permitA = permit(taskA, 1);
+    const permitB = permit(taskB, 2);
+    await control.set({ ...permitA, holder: "agent" });
+    await control.set({ ...permitB, holder: "agent" });
+    const bindingA = { holder: "agent" as const, sessionId: taskA, permit: permitA };
+    const bindingB = { holder: "agent" as const, sessionId: taskB, permit: permitB };
+    const spool = {
+      reserve: vi.fn(),
+      rejected: vi.fn(),
+      completed: vi.fn(async (id: string, count: number) =>
+        Object.freeze({ guid: id, bytes: count, sha256: digest }),
+      ),
+      cancelled: vi.fn(),
+      remove: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+      read: vi.fn(async function* () {
+        yield bytes;
+      }),
+    };
+    const openSpool = vi.fn(async () => spool as never);
+    const targets = {
+      downloadBehavior: vi.fn(async (_enabled: boolean, _signal?: AbortSignal) => {}),
+      cancelDownload: vi.fn(async (_guid: string) => {}),
+    };
+    const fence = vi.fn();
+    const service = new BrowserDownloadService({
+      config,
+      instance,
+      control,
+      targets,
+      openSpool,
+      fence,
+      attribute: (frameId) => ({ "frame-a": taskA, "frame-b": taskB })[frameId],
+    });
+    cleanups.push(async () => {
+      const closing = service.close();
+      service.writersExited();
+      await closing;
+      await control.close();
+    });
+    return { service, control, openSpool, targets, spool, bindingA, bindingB, fence };
+  }
+  const event = (id: string, frameId: string) => ({
+    guid: id,
+    frameId,
+    url: "https://files.example.test/a",
+    suggestedFilename: "a.txt",
+  });
+  const done = (id: string) => ({
+    guid: id,
+    state: "completed",
+    receivedBytes: bytes.length,
+    totalBytes: bytes.length,
+  });
+  const guidB = "99a2f22b-686d-43f5-aa33-078a16a368f2";
+
+  it("arms once and goes on collecting for the task that joins", async () => {
+    const f = await pair();
+    await f.service.arm(f.bindingA, signal());
+    await f.service.arm(f.bindingB, signal());
+    expect(f.openSpool).toHaveBeenCalledOnce();
+    expect(f.targets.downloadBehavior.mock.calls.filter(([on]) => on)).toHaveLength(1);
+    expect(f.service.bindings).toHaveLength(2);
+  });
+
+  it("gives a download to the task whose window started it, and to it alone", async () => {
+    const f = await pair();
+    await f.service.arm(f.bindingA, signal());
+    await f.service.arm(f.bindingB, signal());
+    f.service.begin(event(guid, "frame-b"));
+    expect(f.spool.reserve).toHaveBeenCalledWith(guid);
+    f.service.progress(done(guid));
+    await flush();
+    expect(f.service.list(f.bindingA, signal())).toEqual([]);
+    const offers = f.service.list(f.bindingB, signal());
+    expect(offers.map((offer) => offer.origin.sessionId)).toEqual([taskB]);
+    await expect(
+      f.service.acknowledge(f.bindingA, guid, { bytes: bytes.length, sha256: digest }, signal()),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a download nobody at work started rather than guess whose it is", async () => {
+    const f = await pair();
+    await f.service.arm(f.bindingA, signal());
+    await f.service.arm(f.bindingB, signal());
+    f.service.begin(event(guidB, "frame-of-a-free-window"));
+    expect(f.spool.reserve).not.toHaveBeenCalled();
+    expect(f.spool.rejected).toHaveBeenCalledWith(guidB);
+    expect(f.fence).not.toHaveBeenCalled();
+  });
+});

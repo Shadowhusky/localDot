@@ -31,9 +31,14 @@ export class ShellTerminationError extends Error {
 const PRIVATE_ENV = /^(LOCALDOT_DESKTOPD_|PASSWORD$|CUSTOM_USER$|LOCALDOT_SCALE$)/;
 const PIPE_DRAIN_MS = 250;
 
-export function shellEnv(env: NodeJS.ProcessEnv, home: string): NodeJS.ProcessEnv {
+// What a server dot starts keeps from its shell, setsid and nohup included: the task it was for.
+export const TASK_ENV = "LOCALDOT_TASK";
+
+export function shellEnv(env: NodeJS.ProcessEnv, home: string, task?: string): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(env)) if (!PRIVATE_ENV.test(key)) out[key] = value;
+  if (task) out[TASK_ENV] = task;
+  else delete out[TASK_ENV];
   out.HOME = home;
   out.TERM = "dumb";
   out.PAGER = "cat";

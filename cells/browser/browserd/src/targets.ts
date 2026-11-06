@@ -5,7 +5,7 @@ import {
   type BrowserUploadChooser,
   BrowserUploadOffer,
 } from "../../../../packages/protocol/src/browser-uploads.ts";
-import { GuardedCdp } from "./cdp.ts";
+import { CdpRequestError, GuardedCdp } from "./cdp.ts";
 import { cookiePartitionKey } from "./cdp-guard.ts";
 import { navigateOwnedDocument } from "./navigation.ts";
 import type { CdpTransport } from "./pipe.ts";
@@ -24,6 +24,8 @@ export const BROWSER_CRASH_WINDOW_MS = 60_000;
 // is read for each action's page geometry, and a background page still loads frames and memory.
 export const BROWSER_KEPT_TABS = 4;
 export const BROWSER_TAB_OPEN_TIMEOUT_MS = 5000;
+const BROWSER_WINDOW_PLACE_ATTEMPTS = 20;
+const BROWSER_WINDOW_PLACE_RETRY_MS = 50;
 
 const identifier = schema.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
 const nodeNumber = schema.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -33,6 +35,8 @@ const targetInfo = schema.object({
   title: schema.string().max(8192),
   url: schema.string().max(32768),
   attached: schema.boolean(),
+  openerId: identifier.optional(),
+  parentId: identifier.optional(),
 });
 const filter = Object.freeze([
   Object.freeze({ type: "page", exclude: false }),
@@ -104,6 +108,7 @@ export interface BrowserFileChooser extends BrowserUploadChooser {
 
 interface FileChooserRecord {
   readonly target: TargetRecord;
+  timer?: ReturnType<typeof setTimeout>;
   readonly revision: number;
   readonly backendNodeId: number;
   readonly frameId: string;
@@ -123,6 +128,12 @@ interface TargetRecord {
   revision: number;
   nodes: Set<number>;
   windowId?: number;
+  // The tab whose page opened this one.
+  openerId?: string;
+  // The target a frame was discovered in, before it attaches.
+  parentId?: string;
+  // Every frame of the target, to tell which tab a download came from.
+  frames: Set<string>;
   crashes?: number[];
 }
 
@@ -131,12 +142,22 @@ interface DocumentRecord {
   revision: number;
 }
 
+export interface BrowserPage {
+  readonly id: string;
+  readonly ready: boolean;
+  readonly windowId?: number;
+  readonly opener?: string;
+}
+
 export interface BrowserTargetsOptions {
   readonly downloadDir: string;
   readonly uploadDir: string;
   onFatal(reason: BrowserTargetError): void;
   onInvalidated?(): void;
   onCrash?(crash: { readonly status: string; readonly reloaded: boolean }): void;
+  // Another task is at work in the browser beside this tab: a navigation in doubt closes the tab
+  // instead of ending the connection every task uses.
+  shared?(tabId: string): boolean;
   readonly downloads?: {
     owns(guid: string): boolean;
     begin(params: Readonly<Record<string, unknown>>): void;
@@ -156,8 +177,8 @@ export class BrowserTargets {
   readonly #reloads = new Map<TargetRecord, () => void>();
   readonly #recovering = new Map<TargetRecord, { status?: string; reloaded: boolean }>();
   readonly #fileChoosers = new WeakMap<BrowserFileChooser, FileChooserRecord>();
-  #fileChooser?: FileChooserRecord;
-  #chooserTimer?: ReturnType<typeof setTimeout>;
+  // A tab's open chooser, by the tab: a task's chooser outlasts another task's.
+  readonly #openChoosers = new Map<TargetRecord, FileChooserRecord>();
   #uploadReceipt?: { chooser: FileChooserRecord; files: readonly string[] };
   #workers = 0;
   #closed = false;
@@ -180,15 +201,17 @@ export class BrowserTargets {
         ownsNode: (sessionId, backendNodeId) =>
           !this.#closed &&
           (this.#sessions.get(sessionId)?.nodes.has(backendNodeId) === true ||
-            (this.#fileChooser?.target.sessionId === sessionId &&
-              this.#fileChooser.backendNodeId === backendNodeId)),
+            [...this.#openChoosers.values()].some(
+              (chooser) =>
+                chooser.target.sessionId === sessionId && chooser.backendNodeId === backendNodeId,
+            )),
         ownsDownload: (guid) => !this.#closed && this.options.downloads?.owns(guid) === true,
         allowsUpload: (sessionId, backendNodeId, files) => {
           const receipt = this.#uploadReceipt;
           if (
             !receipt ||
             !receipt.chooser.filling ||
-            receipt.chooser !== this.#fileChooser ||
+            !this.#chooserOpen(receipt.chooser) ||
             receipt.chooser.abort.signal.aborted ||
             receipt.chooser.target.sessionId !== sessionId ||
             receipt.chooser.backendNodeId !== backendNodeId ||
@@ -201,7 +224,12 @@ export class BrowserTargets {
           return true;
         },
       },
-      (error) => this.#fail("closed", false, `control ${error.reason}`),
+      (error) =>
+        this.#fail(
+          "closed",
+          false,
+          `control ${error.reason}${error.method ? ` (${error.method})` : ""}`,
+        ),
     );
     for (const event of ["Target.targetCreated", "Target.targetInfoChanged"]) {
       this.#broker.on(event, (params, sessionId) => {
@@ -265,7 +293,7 @@ export class BrowserTargets {
           backendNodeId: nodeNumber.optional(),
         })
         .parse(params);
-      this.clearFileChooser();
+      this.#clearChooser(this.#openChoosers.get(this.#tabOf(target)));
       // Non-DOM pickers do not name an owned input and cannot authorize a file.
       if (!target.ready || opened.backendNodeId === undefined) return;
       const chooser: FileChooserRecord = {
@@ -281,22 +309,26 @@ export class BrowserTargets {
         claimed: false,
         filling: false,
       };
-      this.#fileChooser = chooser;
-      this.#chooserTimer = setTimeout(() => {
-        if (this.#fileChooser === chooser) this.clearFileChooser();
-      }, BROWSER_CHOOSER_TIMEOUT_MS);
-      this.#chooserTimer.unref();
+      this.#openChoosers.set(this.#tabOf(target), chooser);
+      chooser.timer = setTimeout(() => this.#clearChooser(chooser), BROWSER_CHOOSER_TIMEOUT_MS);
+      chooser.timer.unref();
     });
     this.#broker.on("DOM.documentUpdated", (_params, sessionId) => {
       this.#invalidate(this.#ownedSession(sessionId));
     });
     this.#broker.on("Page.frameNavigated", (params, sessionId) => {
-      schema.object({ frame: schema.object({ id: identifier }) }).parse(params);
-      this.#invalidate(this.#ownedSession(sessionId));
+      const { frame } = schema.object({ frame: schema.object({ id: identifier }) }).parse(params);
+      const target = this.#ownedSession(sessionId);
+      this.#noteFrame(target, frame.id);
+      this.#invalidate(target);
     });
     this.#broker.on("Page.frameAttached", (params, sessionId) => {
-      schema.object({ frameId: identifier, parentFrameId: identifier }).parse(params);
-      this.#invalidate(this.#ownedSession(sessionId));
+      const { frameId } = schema
+        .object({ frameId: identifier, parentFrameId: identifier })
+        .parse(params);
+      const target = this.#ownedSession(sessionId);
+      this.#noteFrame(target, frameId);
+      this.#invalidate(target);
     });
     this.#broker.on("Page.frameDetached", (params, sessionId) => {
       schema.object({ frameId: identifier, reason: schema.enum(["remove", "swap"]) }).parse(params);
@@ -338,6 +370,46 @@ export class BrowserTargets {
     );
   }
 
+  // The tabs with the window each is in and the tab that opened it.
+  pages(): readonly BrowserPage[] {
+    this.#checkOpen();
+    return Object.freeze(
+      [...this.#targets.values()]
+        .filter((target) => target.type === "page")
+        .map((target) => {
+          const opener = target.openerId ? this.#targets.get(target.openerId) : undefined;
+          return Object.freeze({
+            id: target.tabId,
+            ready: target.ready,
+            ...(target.windowId === undefined ? {} : { windowId: target.windowId }),
+            ...(opener ? { opener: opener.tabId } : {}),
+          });
+        }),
+    );
+  }
+
+  // The tabs in the same window as this one, itself included.
+  tabsBeside(tabId: string): readonly { readonly id: string; readonly ready: boolean }[] {
+    const tab = this.#tab(tabId);
+    return Object.freeze(
+      [...this.#targets.values()]
+        .filter((target) => target.type === "page" && target.windowId === tab.windowId)
+        .map((target) => Object.freeze({ id: target.tabId, ready: target.ready })),
+    );
+  }
+
+  windowOf(tabId: string): number | undefined {
+    return this.#tab(tabId).windowId;
+  }
+
+  // The tab a download's frame is in.
+  tabOfFrame(frameId: string): string | undefined {
+    for (const target of this.#targets.values())
+      if (target.targetId === frameId || target.frames.has(frameId))
+        return this.#tabOf(target).tabId;
+    return undefined;
+  }
+
   documents(tabId: string): readonly BrowserDocument[] {
     const root = this.#tab(tabId);
     const family = this.#readyFamily(root);
@@ -359,8 +431,9 @@ export class BrowserTargets {
   }
 
   fileChooser(tabId: string): Readonly<BrowserUploadChooser> | undefined {
-    const family = this.#readyFamily(this.#tab(tabId));
-    const chooser = this.#fileChooser;
+    const tab = this.#tab(tabId);
+    const family = this.#readyFamily(tab);
+    const chooser = this.#openChoosers.get(tab);
     if (!chooser || chooser.claimed || !family.includes(chooser.target)) return undefined;
     if (chooser.target.revision !== chooser.revision || chooser.abort.signal.aborted)
       return undefined;
@@ -369,7 +442,7 @@ export class BrowserTargets {
 
   claimFileChooser(tabId: string, id: string): BrowserFileChooser {
     const info = this.fileChooser(tabId),
-      chooser = this.#fileChooser;
+      chooser = this.#openChoosers.get(this.#tab(tabId));
     if (!info || info.id !== id || !chooser) throw new BrowserTargetError("stale");
     const document = this.documents(tabId).find(
       (handle) => this.#documents.get(handle)?.target === chooser.target,
@@ -387,7 +460,7 @@ export class BrowserTargets {
   ): Promise<Readonly<BrowserUploadOffer> | undefined> {
     signal.throwIfAborted();
     const info = this.fileChooser(tabId),
-      chooser = this.#fileChooser;
+      chooser = this.#openChoosers.get(this.#tab(tabId));
     if (!info || !chooser) return undefined;
     return this.#chooserOffer(chooser, signal, () => {
       if (this.fileChooser(tabId) !== info) throw new BrowserTargetError("stale");
@@ -453,12 +526,7 @@ export class BrowserTargets {
 
   checkFileChooser(handle: BrowserFileChooser): void {
     const chooser = this.#fileChoosers.get(handle);
-    if (
-      !chooser ||
-      chooser !== this.#fileChooser ||
-      !chooser.claimed ||
-      chooser.abort.signal.aborted
-    )
+    if (!chooser || !this.#chooserOpen(chooser) || !chooser.claimed || chooser.abort.signal.aborted)
       throw new BrowserTargetError("stale");
     this.#document(handle.document);
     if (chooser.target.revision !== chooser.revision) throw new BrowserTargetError("stale");
@@ -507,23 +575,36 @@ export class BrowserTargets {
       completed = true;
     } finally {
       this.#uploadReceipt = undefined;
-      if (this.#fileChooser === chooser) {
+      if (this.#chooserOpen(chooser)) {
         if (completed) {
-          clearTimeout(this.#chooserTimer);
-          this.#chooserTimer = undefined;
-          this.#fileChooser = undefined;
-        } else this.clearFileChooser();
+          clearTimeout(chooser.timer);
+          this.#openChoosers.delete(this.#tabOf(chooser.target));
+        } else this.#clearChooser(chooser);
       }
     }
   }
 
-  clearFileChooser(): void {
-    clearTimeout(this.#chooserTimer);
-    this.#chooserTimer = undefined;
-    const chooser = this.#fileChooser;
-    this.#fileChooser = undefined;
-    this.#uploadReceipt = undefined;
-    chooser?.abort.abort(new BrowserTargetError("stale"));
+  // The tab's open chooser; every tab's without one.
+  clearFileChooser(tabId?: string): void {
+    const choosers =
+      tabId === undefined
+        ? [...this.#openChoosers.values()]
+        : [this.#openChoosers.get(this.#tab(tabId))];
+    for (const chooser of choosers) this.#clearChooser(chooser);
+    if (tabId === undefined) this.#uploadReceipt = undefined;
+  }
+
+  #clearChooser(chooser: FileChooserRecord | undefined): void {
+    if (!chooser) return;
+    clearTimeout(chooser.timer);
+    for (const [tab, open] of this.#openChoosers)
+      if (open === chooser) this.#openChoosers.delete(tab);
+    if (this.#uploadReceipt?.chooser === chooser) this.#uploadReceipt = undefined;
+    chooser.abort.abort(new BrowserTargetError("stale"));
+  }
+
+  #chooserOpen(chooser: FileChooserRecord): boolean {
+    return [...this.#openChoosers.values()].includes(chooser);
   }
 
   rememberNodes(document: BrowserDocument, nodes: readonly number[]): void {
@@ -564,13 +645,46 @@ export class BrowserTargets {
     this.#sameTab(target);
   }
 
-  // A blank tab in front of the others: the blank tab already open, else a new one. Page geometry
-  // tells tabs apart by address, so the other blank tabs close, as do the oldest of the tabs opened
-  // here past BROWSER_KEPT_TABS; tabs the user or a page opened stay. Cancelling stops between
-  // Chromium commands: abandoning one fences them all.
-  async openTab(signal: AbortSignal): Promise<string> {
+  // A task's own window, blank, in front and maximized as the first window is.
+  async openWindow(signal: AbortSignal): Promise<string> {
     signal.throwIfAborted();
     this.#checkOpen();
+    const created = schema
+      .object({ targetId: identifier })
+      .safeParse(
+        await this.#broker.send("Target.createTarget", { url: "about:blank", newWindow: true }),
+      );
+    if (!created.success) throw new BrowserTargetError("protocol");
+    this.#ours.add(created.data.targetId);
+    const opened = await this.#opened(created.data.targetId, signal);
+    await this.maximize(opened.tabId);
+    return opened.tabId;
+  }
+
+  // A new window's keyboard focus is in its address bar, and its blank page is one Chromium's
+  // accessibility has not seen: both are put right as for the first window and a new tab.
+  async settleNewWindow(tabId: string): Promise<void> {
+    const target = this.#tab(tabId);
+    await this.activate(tabId);
+    await this.#broker.send("Page.bringToFront", {}, { sessionId: target.sessionId });
+    await this.#layOut(target);
+  }
+
+  async closeTab(tabId: string): Promise<void> {
+    const target = this.#tab(tabId);
+    await this.#broker.send("Target.closeTarget", { targetId: target.targetId });
+  }
+
+  // A blank tab in front of the others in its window: the blank tab already open there, else a new
+  // one. Page geometry tells a window's tabs apart by address, so its other blank tabs close, as do
+  // the oldest of the tabs opened here past BROWSER_KEPT_TABS; tabs the user or a page opened stay.
+  // A new tab lands in the window in front, which is the caller's. Cancelling stops between
+  // Chromium commands: abandoning one fences them all.
+  async openTab(signal: AbortSignal, near?: string): Promise<string> {
+    signal.throwIfAborted();
+    this.#checkOpen();
+    const windowId = near === undefined ? undefined : this.#tab(near).windowId;
+    const here = (target: TargetRecord) => near === undefined || target.windowId === windowId;
     const listed = schema
       .object({ targetInfos: schema.array(targetInfo).max(MAX_BROWSER_TARGETS) })
       .safeParse(await this.#broker.send("Target.getTargets", { filter }));
@@ -580,7 +694,8 @@ export class BrowserTargets {
         .filter((info) => info.type === "page" && info.url === "about:blank")
         .map((info) => info.targetId),
     );
-    const tabs = () => [...this.#targets.values()].filter((target) => target.type === "page");
+    const tabs = () =>
+      [...this.#targets.values()].filter((target) => target.type === "page" && here(target));
     let front = tabs().findLast(
       (target) => blank.has(target.targetId) && target.ready && this.#current(target),
     );
@@ -592,6 +707,10 @@ export class BrowserTargets {
       if (!created.success) throw new BrowserTargetError("protocol");
       this.#ours.add(created.data.targetId);
       front = await this.#opened(created.data.targetId, signal);
+      if (!here(front)) {
+        await this.#broker.send("Target.closeTarget", { targetId: created.data.targetId });
+        throw new BrowserTargetError("stale");
+      }
     }
     for (const id of this.#ours) if (!this.#targets.has(id)) this.#ours.delete(id);
     const others = tabs().filter((target) => target !== front);
@@ -737,7 +856,14 @@ export class BrowserTargets {
           this.#readyFamily(target);
           if (target.revision !== revision) throw new BrowserTargetError("stale");
         },
-        ambiguous: () => this.#fail("unready", false, "navigation outcome unknown"),
+        ambiguous: () => {
+          if (!this.options.shared?.(target.tabId) || !this.#current(target))
+            this.#fail("unready", false, "navigation outcome unknown");
+          else
+            void this.#broker
+              .send("Target.closeTarget", { targetId: target.targetId })
+              .catch(() => {});
+        },
       });
     } finally {
       this.#reloads.delete(target);
@@ -866,10 +992,15 @@ export class BrowserTargets {
       ready: false,
       revision: 0,
       nodes: new Set(),
+      frames: new Set(),
+      ...(info.openerId ? { openerId: info.openerId } : {}),
+      ...(info.parentId ? { parentId: info.parentId } : {}),
     };
     this.#targets.set(info.targetId, target);
     if (target.type === "iframe") {
-      this.#revoke(this.#targets.values());
+      // A new frame changes the page it is in; only a frame that names no page changes them all.
+      const parent = info.parentId ? this.#targets.get(info.parentId) : undefined;
+      this.#revoke(parent ? this.#affected(parent) : [...this.#targets.values()]);
       this.options.onInvalidated?.();
     }
     return target;
@@ -941,7 +1072,42 @@ export class BrowserTargets {
       if (!this.#current(target)) return;
       await this.#broker.send(method, params, { sessionId: target.sessionId });
     }
+    if (target.type === "page") await this.#placeInWindow(target);
     if (this.#current(target) && !this.#closed) target.ready = true;
+  }
+
+  // A popup's window may come a moment after its page: Chromium refuses until then. One that never
+  // gets a window counts as in none.
+  async #placeInWindow(target: TargetRecord): Promise<void> {
+    for (let attempt = 0; attempt < BROWSER_WINDOW_PLACE_ATTEMPTS; attempt++) {
+      if (attempt) await sleep(BROWSER_WINDOW_PLACE_RETRY_MS);
+      if (!this.#current(target)) return;
+      try {
+        const reply = await this.#broker.send("Browser.getWindowForTarget", {
+          targetId: target.targetId,
+        });
+        const placed = schema.object({ windowId: nodeNumber }).safeParse(reply);
+        if (placed.success) target.windowId = placed.data.windowId;
+        return;
+      } catch (error) {
+        if (!(error instanceof CdpRequestError) || error.reason !== "failed") throw error;
+      }
+    }
+  }
+
+  #noteFrame(target: TargetRecord, frameId: string): void {
+    if (target.frames.size < MAX_BROWSER_TARGETS * 4) target.frames.add(frameId);
+  }
+
+  // The page a target is in.
+  #tabOf(target: TargetRecord): TargetRecord {
+    let tab = target;
+    while (tab.type === "iframe" && tab.parentSessionId) {
+      const parent = this.#sessions.get(tab.parentSessionId);
+      if (!parent) break;
+      tab = parent;
+    }
+    return tab;
   }
 
   #waitIdle(): Promise<void> {
@@ -967,10 +1133,18 @@ export class BrowserTargets {
     const family = this.#family(root);
     if (
       family.some((target) => !target.ready || !this.#current(target)) ||
-      [...this.#targets.values()].some((target) => target.type === "iframe" && !target.sessionId)
+      [...this.#targets.values()].some(
+        (target) => target.type === "iframe" && !target.sessionId && this.#mayBeIn(target, family),
+      )
     )
       throw new BrowserTargetError("unready");
     return family;
+  }
+
+  // A frame still attaching holds up the page it names; one that names none, every page.
+  #mayBeIn(frame: TargetRecord, family: readonly TargetRecord[]): boolean {
+    const parent = frame.parentId ? this.#targets.get(frame.parentId) : undefined;
+    return !parent || family.includes(parent);
   }
 
   #affected(target: TargetRecord): Set<TargetRecord> {
@@ -985,7 +1159,8 @@ export class BrowserTargets {
 
   #revoke(affected: Iterable<TargetRecord>): void {
     for (const member of affected) {
-      if (this.#fileChooser?.target === member) this.clearFileChooser();
+      for (const chooser of this.#openChoosers.values())
+        if (chooser.target === member) this.#clearChooser(chooser);
       if (!Number.isSafeInteger(member.revision + 1)) throw new BrowserTargetError("protocol");
       member.revision += 1;
       member.nodes.clear();
@@ -1116,7 +1291,8 @@ export class BrowserTargets {
     this.#closed = true;
     // Retire the broker before cancelling pending reloads can hard-close its pipe.
     const retiring = retire && this.#broker.retire();
-    this.clearFileChooser();
+    this.#uploadReceipt = undefined;
+    for (const chooser of [...this.#openChoosers.values()]) this.#clearChooser(chooser);
     for (const cancel of this.#reloads.values()) cancel();
     this.#reloads.clear();
     this.#recovering.clear();

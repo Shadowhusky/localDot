@@ -252,19 +252,49 @@ describe("browser private native protocol", () => {
     expect(peer.fatal).not.toHaveBeenCalled();
   });
 
-  it("abort after dispatch fences synchronously and prevents a late reply or next command", async () => {
+  it("gives up on a dispatched command without retiring the helper, and waits out its reply", async () => {
     const peer = setup();
     const abort = new AbortController();
     const pending = peer.native.command("char", { ch: "x" }, abort.signal);
     const rejected = expect(pending).rejects.toThrow("aborted");
     abort.abort("secret reason");
+    await rejected;
+    expect(peer.fatal).not.toHaveBeenCalled();
+    expect(peer.native.alive).toBe(true);
+    const next = peer.native.command("ping", {});
+    await Promise.resolve();
+    expect(peer.requests).toHaveLength(1);
+    peer.reply({ keycode: 53, mods: [] });
+    await vi.waitFor(() => expect(peer.requests).toHaveLength(2));
+    peer.reply({ mono: 2 });
+    await expect(next).resolves.toMatchObject({ mono: 2 });
+    expect(peer.native.alive).toBe(true);
+  });
+
+  it("still retires the helper when a press would be left down", () => {
+    const peer = setup();
+    const abort = new AbortController();
+    void peer.native
+      .command("down", { x: 1, y: 1, button: 1, mods: [] }, abort.signal)
+      .catch(() => {});
+    abort.abort();
     expect(peer.fatal).toHaveBeenCalledTimes(1);
     expect(peer.native.alive).toBe(false);
     expect(peer.input.destroyed).toBe(true);
-    peer.reply({ keycode: 53, mods: [] });
+  });
+
+  it("retires a command given up on that never answers, on its own deadline", async () => {
+    vi.useFakeTimers();
+    const peer = setup();
+    const abort = new AbortController();
+    const rejected = expect(peer.native.command("ping", {}, abort.signal)).rejects.toThrow(
+      "aborted",
+    );
+    abort.abort();
     await rejected;
-    await expect(peer.native.command("ping", {})).rejects.toThrow("closed");
-    expect(peer.requests).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(NATIVE_COMMAND_MS);
+    expect(peer.fatal).toHaveBeenCalledTimes(1);
+    expect(peer.native.alive).toBe(false);
   });
 
   it.each(["ready", "command"])("%s deadline retires the connection", async (phase) => {

@@ -37,7 +37,13 @@ interface Pending {
   resolve(value: NativeReplies[NativeCommand]): void;
   reject(error: BrowserNativeError): void;
   cleanup(): void;
+  // Its caller gave up. The helper still answers, and the next command waits for that.
+  drained?: PromiseWithResolvers<void>;
 }
+
+// A press left down has nobody to let it go; every other command ends by itself in the helper, so a
+// task stopped in the middle of one costs no other task the browser.
+const HOLDS_A_BUTTON = "down";
 
 export interface BrowserNativeOptions {
   input: Writable;
@@ -100,6 +106,8 @@ export class BrowserNative {
   ): Promise<NativeReplies[Name]> {
     if (signal?.aborted) return Promise.reject(new BrowserNativeError("aborted"));
     if (!this.alive) return Promise.reject(new BrowserNativeError("closed"));
+    if (this.#pending?.drained)
+      return this.#pending.drained.promise.then(() => this.command(name, raw, signal));
     if (this.#pending) return Promise.reject(new BrowserNativeError("busy"));
     let args: ReturnType<typeof nativeRequest>;
     try {
@@ -122,7 +130,12 @@ export class BrowserNative {
       return Promise.reject(new BrowserNativeError("closed"));
     }
     const completion = Promise.withResolvers<NativeReplies[Name]>();
-    const cancel = () => this.#fail("aborted");
+    const cancel = () => {
+      if (name === HOLDS_A_BUTTON) return this.#fail("aborted");
+      if (this.#pending?.id !== id) return;
+      this.#pending.drained = Promise.withResolvers<void>();
+      completion.reject(new BrowserNativeError("aborted"));
+    };
     const timeout = setTimeout(
       () => this.#fail("timeout"),
       name === "settle" && "timeoutMs" in args ? args.timeoutMs + 1000 : NATIVE_COMMAND_MS,
@@ -151,6 +164,11 @@ export class BrowserNative {
     return completion.promise;
   }
 
+  // A command given up on has landed, or the helper is gone.
+  settled(): Promise<void> {
+    return this.#pending?.drained?.promise ?? Promise.resolve();
+  }
+
   close(): void {
     this.#fail("closed");
   }
@@ -171,6 +189,7 @@ export class BrowserNative {
     } catch {}
     this.#completion.reject(error);
     pending?.reject(error);
+    pending?.drained?.resolve();
     try {
       this.#options.input.destroy();
     } catch {}
@@ -266,5 +285,6 @@ export class BrowserNative {
     this.#pending = undefined;
     pending.cleanup();
     pending.resolve(parsed);
+    pending.drained?.resolve();
   }
 }

@@ -16,6 +16,8 @@ import { type HelperWindow, listWindows, windowUnder } from "./perception/hit-te
 import type { XEvent, XHelper } from "./x/helper.ts";
 
 export const PRESS_TIMEOUT_MS = 150;
+// A typed key that comes up late on a busy machine still landed; only a press never seen is a failure.
+const TYPING_PRESS_MS = 1000;
 const PROGRESS_EVERY = 8;
 const BUTTONS = { left: 1, middle: 2, right: 3 } as const;
 // The gap between the presses of a repeated combo.
@@ -26,8 +28,8 @@ export const DRAG_PRESS_MS = 50;
 export const DRAG_DROP_MS = 120;
 
 export class NoPressError extends Error {
-  constructor(what: string) {
-    super(`no raw press observed for ${what} within ${PRESS_TIMEOUT_MS} ms`);
+  constructor(what: string, timeoutMs = PRESS_TIMEOUT_MS) {
+    super(`no raw press observed for ${what} within ${timeoutMs} ms`);
     this.name = "NoPressError";
   }
 }
@@ -141,7 +143,7 @@ async function withEvents<R>(
       const arrived = complete.then(() => true);
       const ok = await Promise.race([arrived, timeout]);
       ac.abort();
-      if (!ok) throw new NoPressError(`${count} ${ev}(es)`);
+      if (!ok) throw new NoPressError(`${count} ${ev}(es)`, timeoutMs);
     }
     return hits.slice(0, count);
   } finally {
@@ -481,6 +483,7 @@ export async function typeText(
       (e) => e.kind === "key",
       1,
       () => x.call("char", { ch }),
+      TYPING_PRESS_MS,
     );
     count += 1;
     chunk += ch;

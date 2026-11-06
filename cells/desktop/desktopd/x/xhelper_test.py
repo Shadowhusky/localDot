@@ -610,6 +610,25 @@ def presses(kb):
     return [(("down" if k == X.KeyPress else "up"), d) for k, d in kb.events]
 
 
+class KeyDelivery(unittest.TestCase):
+    def test_a_key_goes_down_and_up_in_one_write(self):
+        # Between two writes a stall of this process on a busy machine lets X's key repeat type the
+        # character again: "brownnnnnn" at a load of 90.
+        cmds, kb = keyboard()
+        writes = []
+        kb.sync = lambda: writes.append(len(kb.events))
+        reply = cmds.cmd_char({"ch": "?"})
+        self.assertEqual(reply["mods"], ["Shift_L"])
+        self.assertEqual(writes, [4])
+        self.assertFalse(kb.down)
+
+    def test_a_key_that_went_down_still_comes_up_when_the_next_fails(self):
+        cmds, kb = keyboard(fail_on=38)
+        with self.assertRaises(RuntimeError):
+            cmds.press_combo([50, 38])
+        self.assertFalse(kb.down)
+
+
 class UnicodeMappings(unittest.TestCase):
     def helper(self):
         cmds, kb = keyboard()

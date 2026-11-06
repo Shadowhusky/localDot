@@ -10,7 +10,13 @@ import {
   prepareBrowserRuntime,
 } from "./prepare.ts";
 import { prepareProfilePreferences, releaseProfileLocks } from "./profile-preferences.ts";
+import { BrowserProfileTooNewError, refuseNewerProfile } from "./profile-version.ts";
 import { browserRuntimeConfig } from "./runtime-config.ts";
+
+vi.mock("./profile-version.ts", () => ({
+  BrowserProfileTooNewError: class extends Error {},
+  refuseNewerProfile: vi.fn(),
+}));
 
 vi.mock("./profile-preferences.ts", () => ({
   prepareProfilePreferences: vi.fn(),
@@ -206,6 +212,16 @@ describe("private browser runtime preparation", () => {
       ],
     ]);
     expect(mkdir).not.toHaveBeenCalledWith(PROFILE, expect.objectContaining({ recursive: true }));
+  });
+
+  it("touches nothing in a profile a newer browser opened, and says why", async () => {
+    fixture();
+    const refusal = new BrowserProfileTooNewError("Chromium 154", "157");
+    vi.mocked(refuseNewerProfile).mockRejectedValueOnce(refusal);
+    await expect(prepareBrowserRuntime(config, new AbortController().signal)).rejects.toBe(refusal);
+    expect(releaseProfileLocks).not.toHaveBeenCalled();
+    expect(prepareProfilePreferences).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it("creates a missing private profile without a recursive path traversal", async () => {

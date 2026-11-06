@@ -78,6 +78,12 @@ async function run(
 }
 
 describe("shellEnv", () => {
+  it("names the task a command runs for, and no other's", () => {
+    const task = "01JXYZ0000000000000000TASK";
+    expect(shellEnv({ PATH: "/bin" }, "/config", task).LOCALDOT_TASK).toBe(task);
+    expect(shellEnv({ LOCALDOT_TASK: task }, "/config").LOCALDOT_TASK).toBeUndefined();
+  });
+
   it("strips desktopd/stream credentials and settings while preserving surrogates and proxy setup", () => {
     const input = {
       PATH: "/usr/bin:/bin",

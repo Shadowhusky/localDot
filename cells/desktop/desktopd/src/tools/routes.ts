@@ -245,7 +245,7 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
               cwd,
               timeoutMs: req.timeoutMs,
               maxOutputBytes: req.maxOutputBytes,
-              env: shellEnv(deps.env, deps.home),
+              env: shellEnv(deps.env, deps.home, req.task),
               signal: execution,
               ...(id && deps.shells ? { onSpawn: (pid: number) => deps.shells?.add(pid, id) } : {}),
             },

@@ -46,6 +46,27 @@ async function started() {
 afterEach(() => vi.useRealTimers());
 
 describe("bounded private browser capture", () => {
+  it("gives up on a picture without retiring the helper, and waits for it before the next", async () => {
+    const peer = await started();
+    const abort = new AbortController();
+    try {
+      const rejected = expect(peer.capture.capture(abort.signal)).rejects.toThrow("aborted");
+      abort.abort();
+      await rejected;
+      expect(peer.fatal).not.toHaveBeenCalled();
+      expect(peer.capture.alive).toBe(true);
+      const next = peer.capture.capture();
+      await Promise.resolve();
+      expect(peer.written).toHaveLength(1);
+      peer.output.write(reply(1));
+      await vi.waitFor(() => expect(peer.written).toHaveLength(2));
+      peer.output.write(reply(2));
+      await expect(next).resolves.toBeInstanceOf(Buffer);
+    } finally {
+      peer.capture.close();
+    }
+  });
+
   it.each(["frame", "retirement"] as const)(
     "settles and fences despite abort listener cleanup throwing during %s",
     async (phase) => {
@@ -142,20 +163,26 @@ describe("bounded private browser capture", () => {
     peer.capture.close();
   });
 
-  it("fences an active cancellation before settling and discards its late pixels", async () => {
+  it("never hands over the pixels of a picture given up on halfway through", async () => {
     const peer = await started();
     const cancel = new AbortController();
-    const result = peer.capture.capture(cancel.signal);
-    const rejected = expect(result).rejects.toThrow("aborted");
-    peer.output.write(reply(1).subarray(0, 15));
-    cancel.abort();
-    expect(peer.fatal).toHaveBeenCalledTimes(1);
-    expect(peer.capture.alive).toBe(false);
-    expect(peer.input.destroyed).toBe(true);
-    expect(peer.output.destroyed).toBe(true);
-    peer.output.emit("data", reply(1));
-    await rejected;
-    await expect(peer.capture.capture()).rejects.toThrow("closed");
+    try {
+      const rejected = expect(peer.capture.capture(cancel.signal)).rejects.toThrow("aborted");
+      const packet = reply(1);
+      peer.output.write(packet.subarray(0, 15));
+      cancel.abort();
+      await rejected;
+      expect(peer.capture.alive).toBe(true);
+      peer.output.write(packet.subarray(15));
+      await vi.waitFor(() => expect(peer.capture.alive).toBe(true));
+      const next = peer.capture.capture();
+      await vi.waitFor(() => expect(peer.written).toHaveLength(2));
+      peer.output.write(reply(2));
+      await expect(next).resolves.toBeInstanceOf(Buffer);
+      expect(peer.fatal).not.toHaveBeenCalled();
+    } finally {
+      peer.capture.close();
+    }
   });
 
   it.each(["startup", "frame"] as const)("bounds a stalled %s", async (phase) => {

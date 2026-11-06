@@ -17,11 +17,16 @@ import {
 } from "../../../../packages/protocol/src/browser-secret.ts";
 import { segmentedCodeForm, segmentedCodeText } from "./code-fields.ts";
 import type { BrowserActionLease, BrowserControl } from "./control.ts";
-import type { BrowserGeometry, BrowserGeometrySnapshot, BrowserPoint } from "./geometry.ts";
+import {
+  type BrowserGeometry,
+  BrowserGeometryError,
+  type BrowserGeometrySnapshot,
+  type BrowserPoint,
+} from "./geometry.ts";
 import { loginForm } from "./login-form.ts";
 import type { BrowserNative } from "./native.ts";
 import { type NativeEvent, nativeRequest } from "./native-schema.ts";
-import type { BrowserSecrets } from "./secrets.ts";
+import type { BrowserFocus, BrowserSecrets } from "./secrets.ts";
 import { deviceCodeField, privateCodeField } from "./secrets.ts";
 import type { BrowserDocument, BrowserTargets } from "./targets.ts";
 
@@ -34,6 +39,19 @@ const KEYBOARD_RETRY_MS = 150;
 const DRAG_PRESS_MS = 50;
 const DRAG_DROP_MS = 120;
 const BUTTON = { left: 1, middle: 2, right: 3 } as const;
+// A full focus read takes a page's size in time, about a third of a second on an ordinary one, and
+// can miss its budget on a busy machine. Typing makes one this often and asks in between only whether
+// the field it found still has focus.
+const FOCUS_RECHECK_MS = 2000;
+// Focus the accessibility tree can't name (an app that draws its own field) can't be asked after:
+// typing makes a full read every this many keys instead.
+const UNNAMED_FOCUS_KEYS = 8;
+// Past a field's worth of text, such as a code or a name, nothing moves focus from key to key:
+// typing asks only every this many keys, and long text takes seconds rather than half a minute.
+const PER_KEY_FOCUS_CHARS = 60;
+const LONG_TEXT_FOCUS_KEYS = 8;
+// A key that comes up late on a busy machine still landed; only a press never seen is a failure.
+const TYPING_PRESS_MS = 1000;
 
 const screenPoint = schema.strictObject({
   x: schema.number().finite().min(0).lt(1280),
@@ -105,6 +123,7 @@ export class BrowserInputError extends Error {
       | "closed"
       | "aborted"
       | "focus"
+      | "chrome-focus"
       | "secret"
       | "login-form"
       | "target"
@@ -120,8 +139,9 @@ export interface BrowserInputOptions {
   readonly targets: Pick<BrowserTargets, "check" | "command"> &
     Partial<Pick<BrowserTargets, "rememberNodes">>;
   readonly geometry: Pick<BrowserGeometry, "read" | "point">;
-  readonly secrets: Pick<BrowserSecrets, "inspect" | "secretFocused">;
-  readonly native: Pick<BrowserNative, "command" | "onEvent">;
+  readonly secrets: Pick<BrowserSecrets, "inspect" | "focus" | "focusHolds">;
+  readonly native: Pick<BrowserNative, "command" | "onEvent"> &
+    Partial<Pick<BrowserNative, "settled">>;
   readonly scale: 1 | 2;
   onFatal(reason: BrowserInputError): void;
 }
@@ -129,6 +149,16 @@ export interface BrowserInputOptions {
 interface Scope {
   readonly signal: AbortSignal;
   check(document?: BrowserDocument): void;
+}
+
+interface FocusedPage {
+  readonly document: BrowserDocument;
+  readonly focus: BrowserFocus;
+}
+
+interface TypingFocus extends FocusedPage {
+  readonly at: number;
+  readonly keys: number;
 }
 
 // A drag's path is the largest request: 64 points.
@@ -257,6 +287,7 @@ export class BrowserInput {
     prepare: (value: unknown) => Request,
     perform: (request: Request, scope: Scope) => Promise<Result>,
     manual = false,
+    limitMs = manual ? 30_000 : BROWSER_INPUT_TIMEOUT_MS,
   ): Promise<Result> {
     if (this.#lifetime.signal.aborted) throw new BrowserInputError("closed");
     if (this.#active) throw new BrowserInputError("busy");
@@ -274,10 +305,10 @@ export class BrowserInput {
       if (signal.aborted || this.#lifetime.signal.aborted) throw new BrowserInputError("aborted");
       lease = manual
         ? this.#options.control.admitManual?.(capturedPermit)
-        : this.#options.control.admit(capturedPermit);
+        : this.#options.control.admit(capturedPermit, tabId);
       if (!lease) throw new BrowserInputError("unavailable");
       const expiry = new AbortController();
-      deadline = setTimeout(() => expiry.abort(), manual ? 30_000 : BROWSER_INPUT_TIMEOUT_MS);
+      deadline = setTimeout(() => expiry.abort(), limitMs);
       combined = AbortSignal.any([signal, lease.signal, this.#lifetime.signal, expiry.signal]);
       const current = lease;
       const operationSignal = combined;
@@ -303,6 +334,8 @@ export class BrowserInput {
       throw new BrowserInputError("unavailable");
     } finally {
       clearTimeout(deadline);
+      // Input given up on lands before the next holder is told it may act.
+      await this.#options.native.settled?.();
       lease?.finish();
       this.#active = undefined;
       completion.resolve();
@@ -463,36 +496,67 @@ export class BrowserInput {
     return snapshot;
   }
 
-  // A busy page can report its focus or layout mid-change for a moment: both are read again a few
-  // times before the keys count as having nowhere to go.
-  async #keyboard(tabId: string, scope: Scope): Promise<BrowserDocument> {
+  // A busy page can report its focus or layout mid-change for a moment, and a busy machine can miss
+  // the read's budget: it is made again a few times before the keys count as having nowhere to go.
+  async #keyboard(tabId: string, scope: Scope): Promise<FocusedPage> {
     for (let attempt = 1; ; attempt++) {
       try {
         return await this.#focusedPage(tabId, scope);
       } catch (error) {
-        if (
-          !(error instanceof BrowserInputError) ||
-          error.reason !== "focus" ||
-          attempt >= KEYBOARD_ATTEMPTS
-        )
-          throw error;
+        const again =
+          (error instanceof BrowserInputError &&
+            ["focus", "chrome-focus"].includes(error.reason)) ||
+          (error instanceof BrowserGeometryError && error.reason === "unavailable");
+        if (!again || attempt >= KEYBOARD_ATTEMPTS) throw error;
       }
       await sleep(KEYBOARD_RETRY_MS, undefined, { signal: scope.signal }).catch(() => {});
       scope.check();
     }
   }
 
-  async #focusedPage(tabId: string, scope: Scope): Promise<BrowserDocument> {
+  async #focusedPage(tabId: string, scope: Scope): Promise<FocusedPage> {
     const first = await this.#geometry(tabId, scope);
-    if (first.focus !== "page") throw new BrowserInputError("focus");
-    const secret = await this.#options.secrets.secretFocused(tabId, scope.signal);
+    if (first.focus !== "page") throw new BrowserInputError("chrome-focus");
+    const focus = await this.#options.secrets.focus(tabId, scope.signal);
     scope.check(first.document);
-    if (secret) throw new BrowserInputError("secret");
+    if (focus.secret) throw new BrowserInputError("secret");
     const second = await this.#geometry(tabId, scope);
     if (second.focus !== "page" || !sameGeometry(first, second))
       throw new BrowserInputError("focus");
     scope.check(first.document);
-    return second.document;
+    return { document: second.document, focus };
+  }
+
+  #current(document: BrowserDocument): boolean {
+    try {
+      this.#options.targets.check(document);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // The page the next typed key goes to, read in full once `last` has grown old or lost its focus.
+  // A read that fails while the field still has focus says nothing about where keys go, and the keys
+  // keep going: only a read that finds them going elsewhere, or a field that lost focus, stops them.
+  async #typingFocus(tabId: string, scope: Scope, last: TypingFocus | null): Promise<TypingFocus> {
+    const holds =
+      !!last &&
+      (last.focus.nodes.length
+        ? await this.#options.secrets.focusHolds(last.focus, scope.signal)
+        : last.keys < UNNAMED_FOCUS_KEYS);
+    scope.check();
+    if (last && holds && performance.now() - last.at < FOCUS_RECHECK_MS)
+      return { ...last, keys: last.keys + 1 };
+    try {
+      return { ...(await this.#keyboard(tabId, scope)), at: performance.now(), keys: 1 };
+    } catch (error) {
+      const refused =
+        error instanceof BrowserInputError &&
+        ["secret", "chrome-focus", "aborted", "closed"].includes(error.reason);
+      if (!last || !holds || refused || scope.signal.aborted) throw error;
+      return { ...last, at: performance.now(), keys: last.keys + 1 };
+    }
   }
 
   async #pointer(
@@ -576,6 +640,7 @@ export class BrowserInput {
     act: () => Promise<Reply>,
     match: (event: Readonly<NativeEvent>, reply: Reply) => boolean,
     count: number,
+    pressMs = BROWSER_INPUT_PRESS_MS,
   ): Promise<{ presses: readonly number[]; releaseMono?: number }> {
     const events: Readonly<NativeEvent>[] = [];
     let changed = Promise.withResolvers<void>();
@@ -591,8 +656,8 @@ export class BrowserInput {
       scope.check();
       const reply = await act();
       scope.check();
-      timer = setTimeout(() => waiting.abort(), BROWSER_INPUT_PRESS_MS);
-      const deadline = Date.now() + BROWSER_INPUT_PRESS_MS;
+      timer = setTimeout(() => waiting.abort(), pressMs);
+      const deadline = Date.now() + pressMs;
       while (true) {
         scope.check();
         if (overflow) this.#fatal();
@@ -611,7 +676,7 @@ export class BrowserInput {
         if (Date.now() >= deadline || waiting.signal.aborted) this.#fatal();
         changed = Promise.withResolvers<void>();
         const wake = AbortSignal.any([scope.signal, waiting.signal]);
-        const expired = sleep(BROWSER_INPUT_PRESS_MS, undefined, { signal: wake }).catch(() => {});
+        const expired = sleep(pressMs, undefined, { signal: wake }).catch(() => {});
         await Promise.race([changed.promise, expired]);
       }
     } finally {
@@ -674,7 +739,7 @@ export class BrowserInput {
         scope.check();
         const input = request.input;
         if (input.kind === "key") {
-          const document = await this.#keyboard(tabId, scope);
+          const { document } = await this.#keyboard(tabId, scope);
           scope.check(document);
           const receipt = await this.#press(
             scope,
@@ -851,11 +916,13 @@ export class BrowserInput {
 
   // A user-provided or saved secret has its own narrow input path. Ordinary agent typing
   // still refuses secrets. Every character is bound to the same protected DOM node and origin.
+  // `manual`: the user's own tap on a saved login, under their permit while they hold the browser.
   secret(
     permit: unknown,
     tabId: string,
     raw: unknown,
     signal: AbortSignal,
+    manual = false,
   ): Promise<BrowserSecretReply> {
     return this.#run(
       permit,
@@ -1304,6 +1371,8 @@ export class BrowserInput {
         }
         return { filled: true, rememberable, submitted: false };
       },
+      manual,
+      BROWSER_INPUT_TIMEOUT_MS,
     );
   }
 
@@ -1345,24 +1414,38 @@ export class BrowserInput {
         const characters = [...request.text];
         let firstPressMono: number | null = null;
         let count = 0;
+        let focused: TypingFocus | null = null;
+        let unasked = 0;
         for (const character of characters) {
           const delay =
             count < request.pace.firstCount ? request.pace.firstMs : request.pace.restMs;
           if (count > 0 && delay > 0) await sleep(delay, undefined, { signal: scope.signal });
           scope.check();
-          const document = await this.#keyboard(tabId, scope);
-          scope.check(document);
+          if (
+            !focused?.focus.nodes.length ||
+            count < PER_KEY_FOCUS_CHARS ||
+            unasked >= LONG_TEXT_FOCUS_KEYS ||
+            !this.#current(focused.document)
+          ) {
+            focused = await this.#typingFocus(tabId, scope, focused);
+            unasked = 0;
+          }
+          unasked += 1;
+          scope.check(focused.document);
           const receipt = await this.#press(
             scope,
             armedMono,
             () => this.#options.native.command("char", { ch: character }, scope.signal),
             (event, reply) => event.kind === "key" && event.detail === reply.keycode,
             1,
+            TYPING_PRESS_MS,
           );
           const pressMono = receipt.presses[0] as number;
           firstPressMono ??= pressMono;
           count += 1;
           scope.check();
+          // Return and Tab can move focus or open another page.
+          if (character === "\n" || character === "\t") focused = null;
           if (
             count <= request.pace.firstCount ||
             (count - request.pace.firstCount) % 8 === 0 ||

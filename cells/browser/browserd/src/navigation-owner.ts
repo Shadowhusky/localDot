@@ -41,23 +41,28 @@ function permitData(raw: unknown, depth = 0): Record<string, unknown> {
   return result;
 }
 
+// One navigation at a time in each tab; tabs of different tasks load side by side, on no one's turn.
 export class BrowserNavigation {
   readonly #control: Pick<BrowserControl, "admit">;
   readonly #targets: Pick<BrowserTargets, "navigate" | "openTab">;
+  // A tab of the task's own window, where its new tabs open.
+  readonly #anchor: (sessionId: string) => string | undefined;
   readonly #lifetime = new AbortController();
-  #active?: Promise<void>;
+  readonly #active = new Map<string, Promise<void>>();
 
   constructor(
     control: Pick<BrowserControl, "admit">,
     targets: Pick<BrowserTargets, "navigate" | "openTab">,
+    anchor: (sessionId: string) => string | undefined = () => undefined,
   ) {
     this.#control = control;
     this.#targets = targets;
+    this.#anchor = anchor;
   }
 
-  close(): Promise<void> {
+  async close(): Promise<void> {
     this.#lifetime.abort();
-    return this.#active ?? Promise.resolve();
+    await Promise.all(this.#active.values());
   }
 
   async navigate(
@@ -67,10 +72,10 @@ export class BrowserNavigation {
     signal: AbortSignal,
   ): Promise<{ done: true; download?: true }> {
     if (this.#lifetime.signal.aborted) throw new BrowserNavigationError("closed");
-    if (this.#active) throw new BrowserNavigationError("busy");
+    if (this.#active.has(tabId)) throw new BrowserNavigationError("busy");
     if (typeof tabId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/u.test(tabId) || !navigable(url))
       throw new BrowserNavigationError("request");
-    const outcome = await this.#admitted(permit, signal, (combined) =>
+    const outcome = await this.#admitted(tabId, permit, signal, tabId, (combined) =>
       this.#targets.navigate(tabId, url, combined),
     );
     return { done: true, ...(outcome === "download" ? { download: true as const } : {}) };
@@ -78,27 +83,34 @@ export class BrowserNavigation {
 
   async openTab(permit: unknown, signal: AbortSignal): Promise<{ tabId: string }> {
     if (this.#lifetime.signal.aborted) throw new BrowserNavigationError("closed");
-    if (this.#active) throw new BrowserNavigationError("busy");
+    const slot = "new tab";
+    if (this.#active.has(slot)) throw new BrowserNavigationError("busy");
     return {
-      tabId: await this.#admitted(permit, signal, (combined) => this.#targets.openTab(combined)),
+      tabId: await this.#admitted(slot, permit, signal, undefined, (combined, sessionId) =>
+        this.#targets.openTab(combined, this.#anchor(sessionId)),
+      ),
     };
   }
 
   async #admitted<T>(
+    slot: string,
     permit: unknown,
     signal: AbortSignal,
-    work: (signal: AbortSignal) => Promise<T>,
+    tabId: string | undefined,
+    work: (signal: AbortSignal, sessionId: string) => Promise<T>,
   ): Promise<T> {
     const completion = Promise.withResolvers<void>();
-    this.#active = completion.promise;
+    this.#active.set(slot, completion.promise);
     let lease: BrowserActionLease | undefined;
     try {
       signal.throwIfAborted();
-      lease = this.#control.admit(permitData(permit));
+      const data = permitData(permit);
+      lease = this.#control.admit(data, tabId);
       const combined = AbortSignal.any([signal, lease.signal, this.#lifetime.signal]);
       combined.throwIfAborted();
       lease.check();
-      const result = await work(combined);
+      const owner = data.owner as { sessionId: string };
+      const result = await work(combined, owner.sessionId);
       combined.throwIfAborted();
       lease.check();
       return result;
@@ -108,7 +120,7 @@ export class BrowserNavigation {
       try {
         lease?.finish();
       } finally {
-        this.#active = undefined;
+        this.#active.delete(slot);
         completion.resolve();
       }
     }

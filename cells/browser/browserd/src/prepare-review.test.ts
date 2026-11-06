@@ -7,6 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BROWSER_PREPARATION_DRAIN_MS, prepareBrowserRuntime } from "./prepare.ts";
 import { browserRuntimeConfig } from "./runtime-config.ts";
 
+vi.mock("./profile-version.ts", () => ({
+  BrowserProfileTooNewError: class extends Error {},
+  refuseNewerProfile: vi.fn(),
+}));
+
 vi.mock("./profile-preferences.ts", () => ({
   prepareProfilePreferences: vi.fn(),
   releaseProfileLocks: vi.fn(),

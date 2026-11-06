@@ -127,7 +127,12 @@ export async function navigateOwnedDocument(
     await options.broker.send(
       "Page.setLifecycleEventsEnabled",
       { enabled: true },
-      { sessionId: options.sessionId, signal: lifetime.signal },
+      {
+        sessionId: options.sessionId,
+        signal: lifetime.signal,
+        // Turning events on changes nothing to answer for if it is given up on.
+        patience: BROWSER_NAVIGATION_TIMEOUT_MS,
+      },
     );
     check();
     initial = await readFrame();
@@ -174,7 +179,12 @@ export async function navigateOwnedDocument(
     const reply = await options.broker.send(
       "Page.navigate",
       { url: options.url },
-      { sessionId: options.sessionId, signal: lifetime.signal },
+      {
+        sessionId: options.sessionId,
+        signal: lifetime.signal,
+        // Chromium answers once the document commits: a slow site is not a stuck browser.
+        patience: BROWSER_NAVIGATION_TIMEOUT_MS,
+      },
     );
     check();
     acknowledgement = acknowledgementSchema.parse(reply);

@@ -275,7 +275,7 @@ describe("independent observation capture ownership", () => {
     expect(f.fatal).not.toHaveBeenCalled();
   });
   it.each(["takeover", "abort", "close"])(
-    "O2 %s retires pending masked capture without late output or a lease cycle",
+    "O2 %s gives up on a pending masked capture without late output or a lease cycle",
     async (reason) => {
       const f = await ownerFixture();
       const abort = new AbortController();
@@ -299,10 +299,10 @@ describe("independent observation capture ownership", () => {
       f.output.emit("data", imagePacket(1));
       expect(await pending).toBe("refused");
       await transition;
-      expect(f.fatal).toHaveBeenCalledOnce();
-      expect(f.control.holder).toBe("user");
+      expect(f.fatal).not.toHaveBeenCalled();
+      expect(f.control.holder).toBe(reason === "takeover" ? "user" : "agent");
       expect(f.state.afterCapture).toBe(false);
-      expect(f.capture.alive).toBe(false);
+      expect(f.capture.alive).toBe(true);
     },
   );
   it.each(["geometry", "mask"])(

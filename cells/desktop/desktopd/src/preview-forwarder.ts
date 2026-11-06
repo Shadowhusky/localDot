@@ -15,7 +15,12 @@ import {
   parsePreviewPreface,
 } from "@localdot/protocol";
 import { tokenMatches } from "./auth.ts";
-import { listeningSockets } from "./connection-owner.ts";
+import {
+  type ListeningSocket,
+  listeningSockets,
+  type SocketOwner,
+  stopListening,
+} from "./connection-owner.ts";
 
 // localDot's own services in the computer, which are never previews: the stream (nginx on 3000 and
 // 3001, Selkies on 8082), desktopd (7700) and this forwarder (7701), the proxy forwarder that adds
@@ -29,7 +34,8 @@ export interface PreviewForwarderOptions {
   token: string;
   ownPorts?: ReadonlySet<number>;
   addresses?(): string[];
-  listening?(): Promise<{ address: string; port: number; name?: string }[]>;
+  listening?(): Promise<ListeningSocket[]>;
+  stopListening?(port: number): Promise<boolean>;
   prefaceMs?: number;
   connectMs?: number;
 }
@@ -40,10 +46,10 @@ export interface PreviewForwarderOptions {
 export function createPreviewForwarder(opts: PreviewForwarderOptions): Server {
   const own = opts.ownPorts ?? OWN_PORTS;
   const addresses = opts.addresses ?? ownAddresses;
-  const names = new Map<string, string>();
+  const owners = new Map<string, SocketOwner>();
   const listening =
     opts.listening ??
-    (() => listeningSockets(undefined, undefined, (port) => !own.has(port), names));
+    (() => listeningSockets(undefined, undefined, (port) => !own.has(port), owners));
   return createServer((client) => {
     client.on("error", () => client.destroy());
     client.setNoDelay(true);
@@ -65,6 +71,18 @@ export function createPreviewForwarder(opts: PreviewForwarderOptions): Server {
       if (!tokenMatches(opts.token, preface.token)) return refuse(client, "unauthorized");
       if ("list" in preface.command) {
         void list(client, listening, own, addresses);
+        return;
+      }
+      if ("stop" in preface.command) {
+        const port = preface.command.stop;
+        if (own.has(port)) return refuse(client, "refused-port");
+        void (opts.stopListening ?? stopListening)(port).then(
+          (stopped) => {
+            if (!stopped) refuse(client, "unreachable");
+            else if (!client.destroyed) client.end("OK\n");
+          },
+          () => refuse(client, "unreachable"),
+        );
         return;
       }
       open(client, preface.command.open, buffered.subarray(end + 1), own, addresses(), opts);

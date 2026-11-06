@@ -699,6 +699,15 @@ describe("inject", () => {
 
 describe("typeText", () => {
   const pace = { firstMs: 0, firstCount: 60, restMs: 0 };
+  it("counts a key whose raw press comes up late on a busy machine", async () => {
+    const s = scripted((_cmd, _args, emit) => {
+      setTimeout(() => emit(press("key", 30, 500)), 200);
+      return { keycode: 30, mods: [] };
+    });
+    await expect(
+      typeText(s.helper, { text: "a", masked: false, pace, injector: "xtest" }, () => {}),
+    ).resolves.toMatchObject({ done: true, count: 1 });
+  });
   it("does not inject the next character if cancelled during its pacing delay", async () => {
     const ac = new AbortController();
     const s = scripted((_cmd, _args, emit) => {

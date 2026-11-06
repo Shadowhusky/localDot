@@ -9,6 +9,11 @@ import { browserRuntimeConfig } from "./runtime-config.ts";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn(), execFile: vi.fn() }));
 vi.mock("node:fs/promises", () => ({ lstat: vi.fn(), mkdir: vi.fn(), open: vi.fn() }));
+vi.mock("./profile-version.ts", () => ({
+  BrowserProfileTooNewError: class extends Error {},
+  refuseNewerProfile: vi.fn(),
+}));
+
 vi.mock("./profile-preferences.ts", () => ({
   prepareProfilePreferences: vi.fn(),
   releaseProfileLocks: vi.fn(),

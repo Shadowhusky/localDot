@@ -12,12 +12,11 @@ export const BROWSER_DISPLAY = ":1";
 // The always-present sandboxed Chromium from the base image.
 export const CHROMIUM_EXECUTABLE = "/usr/lib/chromium/chromium";
 // Google Chrome's real binary (the google-chrome-stable package; /usr/bin/google-chrome is only a
-// wrapper, and /proc/<pid>/exe resolves to this). Opt-in: present only when the image was built with
-// INSTALL_CHROME. Chrome carries the proprietary codecs and Widevine that bare Chromium lacks, which
-// some sign-in walls treat as a human-browser signal.
+// wrapper, and /proc/<pid>/exe resolves to this). Never in a released image: present only in a local
+// image the user chose to add it to, or one an operator built with INSTALL_CHROME.
 export const CHROME_EXECUTABLE = "/opt/google/chrome/chrome";
 
-// Prefer Google Chrome when the image was built with it; otherwise the always-present Chromium.
+// Prefer Google Chrome when the image has it; otherwise the always-present Chromium.
 export function resolveBrowserExecutable(exists: (path: string) => boolean = existsSync): string {
   return exists(CHROME_EXECUTABLE) ? CHROME_EXECUTABLE : CHROMIUM_EXECUTABLE;
 }
@@ -249,6 +248,9 @@ export function browserProcessSpecs(
         "--start-maximized",
         "--remote-debugging-pipe",
         "--force-renderer-accessibility",
+        // A task's window keeps working behind another task's: left to itself Chromium treats a
+        // covered window as a background tab (hidden, timers once a second, no animation frames).
+        "--disable-backgrounding-occluded-windows",
         `--user-data-dir=${BROWSER_PROFILE_DIR}`,
         "--profile-directory=Default",
         "--no-first-run",

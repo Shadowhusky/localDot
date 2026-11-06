@@ -10,6 +10,7 @@ import {
   PAGE_READ_RETRY_MS,
   pageChanged,
 } from "./targets.ts";
+import type { BrowserWindows } from "./windows.ts";
 
 const documentCoordinate = schema.number().finite().min(0).max(0x7ffffffe);
 const viewportDimension = schema.number().finite().positive().max(32768);
@@ -35,7 +36,8 @@ const frameSchema = schema.object({
   }),
 });
 
-type GeometryTargets = Pick<BrowserTargets, "tabs" | "documents" | "check" | "command" | "window">;
+type GeometryTargets = Pick<BrowserTargets, "tabs" | "documents" | "check" | "command" | "window"> &
+  Partial<Pick<BrowserTargets, "tabsBeside" | "windowOf">>;
 type Rect = readonly [number, number, number, number];
 
 export class BrowserGeometryError extends Error {
@@ -94,6 +96,7 @@ export class BrowserGeometry {
     private readonly targets: GeometryTargets,
     private readonly native: Pick<BrowserNative, "command">,
     private readonly scale: 1 | 2,
+    private readonly windows?: Pick<BrowserWindows, "bound">,
   ) {
     if (scale !== 1 && scale !== 2) throw new BrowserGeometryError("unavailable");
   }
@@ -101,6 +104,31 @@ export class BrowserGeometry {
   #check(signal: AbortSignal, documents: readonly BrowserDocument[] = []): void {
     if (signal.aborted) throw new BrowserGeometryError("aborted");
     for (const document of documents) this.targets.check(document);
+  }
+
+  // The tab the active window shows and its address, read as the surface reports it. It measures
+  // nothing and, unlike a read of each tab, needs no failure to rule out one behind it.
+  async front(signal: AbortSignal): Promise<{ tabId: string; url: string } | undefined> {
+    this.#check(signal);
+    const { windows } = await this.native.command("windows", {}, signal);
+    this.#check(signal);
+    const window = windows.find((candidate) => candidate.active);
+    if (!window) return undefined;
+    const { page } = await this.native.command("surface", { window: window.id }, signal);
+    this.#check(signal);
+    if (!page) return undefined;
+    for (const tab of this.targets.tabs()) {
+      if (!tab.ready) continue;
+      const root = this.targets.documents(tab.id).find((document) => !document.frame);
+      if (!root) continue;
+      const raw = await this.targets.command(root, "Page.getFrameTree", {}, signal);
+      this.#check(signal, [root]);
+      if (hashUrl(raw) === page.urlHash) {
+        const parsed = frameSchema.parse(raw);
+        return { tabId: tab.id, url: parsed.frameTree.frame.url };
+      }
+    }
+    return undefined;
   }
 
   async read(tabId: string, signal: AbortSignal): Promise<BrowserGeometrySnapshot> {
@@ -119,7 +147,9 @@ export class BrowserGeometry {
 
   async #measure(tabId: string, signal: AbortSignal): Promise<BrowserGeometrySnapshot> {
     this.#check(signal);
-    const tabs = [...this.targets.tabs()];
+    // Only the tabs of this window: it is what the display can show, and addresses tell them apart.
+    const beside = () => this.targets.tabsBeside?.(tabId) ?? this.targets.tabs();
+    const tabs = [...beside()];
     if (tabs.length > 256 || tabs.some((tab) => !tab.ready))
       throw new BrowserGeometryError("unavailable");
     const documents = tabs.map((tab) => {
@@ -147,6 +177,10 @@ export class BrowserGeometry {
     const active = windows.filter((window) => window.active);
     const window = active[0];
     if (active.length !== 1 || !window) throw new BrowserGeometryError("unavailable");
+    // The active window must be this tab's, not another task's that shows the same address.
+    const windowId = this.targets.windowOf?.(tabId);
+    if (windowId !== undefined && this.windows && !this.windows.bound(windowId, window.id))
+      throw new BrowserGeometryError("unavailable");
     const expected: Rect = [
       bounds.left * this.scale,
       bounds.top * this.scale,
@@ -200,7 +234,7 @@ export class BrowserGeometry {
       page.frame[3] - viewport.clientHeight * factor > 40 * this.scale
     )
       throw new BrowserGeometryError("unavailable");
-    const current = this.targets.tabs();
+    const current = beside();
     if (
       current.length !== tabs.length ||
       current.some((tab, position) => !tab.ready || tab.id !== tabs[position]?.id)

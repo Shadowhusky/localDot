@@ -452,27 +452,29 @@ describe("authenticated browser HTTP transport", () => {
     expect(unavailable.navigate).not.toHaveBeenCalled();
   });
 
-  it("shares navigation arbitration with input, type and observation while allowing takeover", async () => {
+  it("lets a page load beside other work, one load a tab at a time, while allowing takeover", async () => {
     const peer = await setup();
     const complete = Promise.withResolvers<void>();
     let operationSignal: AbortSignal | undefined;
-    peer.setWork(async (signal) => {
+    const held = vi.fn(async (signal: AbortSignal) => {
       operationSignal = signal;
       await complete.promise;
     });
+    peer.setWork(held);
     const pending = peer.send("POST", "/navigate", { permit, tabId, url: "https://example.test/" });
     await until(() => peer.navigate.mock.calls.length === 1);
-    for (const path of ["/input", "/type", "/observe", "/navigate"]) {
-      const body =
-        path === "/observe"
-          ? { permit, tabId }
-          : path === "/navigate"
-            ? { permit, tabId, url: "https://example.test/" }
-            : { permit, tabId, request: {} };
-      const reply = await peer.send("POST", path, body);
-      expect(reply.status).toBe(409);
-      expect(JSON.parse(reply.text)).toEqual({ error: "busy" });
+    peer.setWork(async () => {});
+    for (const path of ["/input", "/observe"]) {
+      const body = path === "/observe" ? { permit, tabId } : { permit, tabId, request: {} };
+      expect((await peer.send("POST", path, body)).status).toBe(200);
     }
+    const again = await peer.send("POST", "/navigate", {
+      permit,
+      tabId,
+      url: "https://example.test/",
+    });
+    expect(again.status).toBe(409);
+    expect(peer.navigate).toHaveBeenCalledTimes(1);
     const takeover = peer.send("PUT", "/control", {
       ...identity,
       revision: 2,
@@ -483,10 +485,6 @@ describe("authenticated browser HTTP transport", () => {
     complete.resolve();
     expect((await pending).status).toBe(409);
     expect((await takeover).status).toBe(200);
-    expect(peer.navigate).toHaveBeenCalledTimes(1);
-    expect(peer.inject).not.toHaveBeenCalled();
-    expect(peer.type).not.toHaveBeenCalled();
-    expect(peer.observe).not.toHaveBeenCalled();
   });
 
   it("opens a blank tab for the holder and names it", async () => {
@@ -494,7 +492,7 @@ describe("authenticated browser HTTP transport", () => {
     const reply = await peer.send("POST", "/tabs", { permit });
     expect(reply.status).toBe(200);
     expect(JSON.parse(reply.text)).toEqual({ tabId });
-    expect(peer.openTab).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal));
+    expect(peer.openTab).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal), undefined);
     expect(peer.workWindow.hide).toHaveBeenCalled();
   });
 
@@ -535,17 +533,13 @@ describe("authenticated browser HTTP transport", () => {
     const peer = await setup();
     const complete = Promise.withResolvers<void>();
     peer.setWork(() => complete.promise);
-    const navigating = peer.send("POST", "/navigate", {
-      permit,
-      tabId,
-      url: "https://example.test/",
-    });
-    await until(() => peer.navigate.mock.calls.length === 1);
+    const looking = peer.send("POST", "/observe", { permit, tabId });
+    await until(() => peer.observe.mock.calls.length === 1);
     const reply = await peer.send("POST", "/tabs", { permit });
     expect(reply.status).toBe(409);
     expect(JSON.parse(reply.text)).toEqual({ error: "busy" });
     complete.resolve();
-    expect((await navigating).status).toBe(200);
+    expect((await looking).status).toBe(200);
     expect(peer.openTab).not.toHaveBeenCalled();
   });
 

@@ -29,6 +29,7 @@ import {
   BrowserProcesses,
 } from "./processes.ts";
 import { releaseProfileLocks } from "./profile-preferences.ts";
+import { BrowserProfileTooNewError } from "./profile-version.ts";
 import {
   type BrowserReadinessProbe,
   BrowserReadinessRetirementError,
@@ -44,8 +45,10 @@ import {
   browserSignInSpec,
 } from "./runtime-config.ts";
 import { BrowserSecrets } from "./secrets.ts";
+import { BrowserSignInPage } from "./sign-in-page.ts";
 import { BrowserTargetError, BrowserTargets } from "./targets.ts";
 import { BrowserUploadService } from "./upload-service.ts";
+import { BrowserWindows } from "./windows.ts";
 
 export const BROWSER_RUNTIME_START_MS = 60_000;
 export const BROWSER_READINESS_MS = 15_000;
@@ -83,6 +86,25 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
 function exitDetail(exit: BrowserProcessExit | undefined): string | undefined {
   if (!exit) return undefined;
   return exit.signal ? `exited on ${exit.signal}` : `exited with code ${exit.code ?? "unknown"}`;
+}
+
+// What failed, in plain names and numbers. A browser that stopped responding is ended by its restart,
+// so how it exited says nothing about what went wrong.
+export function failureDetail(
+  kind: BrowserFailureKind,
+  cause: string | undefined,
+  exit: BrowserProcessExit | undefined,
+  outOfMemory: boolean,
+): string {
+  return (
+    [
+      cause,
+      kind === "unresponsive" ? undefined : exitDetail(exit),
+      outOfMemory ? "out of memory" : undefined,
+    ]
+      .filter(Boolean)
+      .join(", ") || kind
+  );
 }
 
 export class BrowserRuntimeError extends Error {
@@ -149,10 +171,12 @@ export class BrowserRuntime {
   #capture?: BrowserCapture;
   #targets?: BrowserTargets;
   #secrets?: BrowserSecrets;
+  #windows?: BrowserWindows;
   #browserGeneration = 0;
   #signInMode: BrowserSignInMode = "standard";
   #signInChanging = false;
   #accounts?: BrowserAccounts;
+  #signInPage?: BrowserSignInPage;
   #control?: BrowserControl;
   #downloads?: BrowserDownloadService;
   #uploads?: BrowserUploadService;
@@ -279,7 +303,8 @@ export class BrowserRuntime {
     const deadline = setTimeout(() => {
       void this.stop().catch(() => {});
     }, BROWSER_RUNTIME_START_MS);
-    const fatal = () => {
+    const fatal = (what: string) => (error: { reason: string }) => {
+      if (!this.#processes.closed) this.#log(`${what} failed (${error.reason}); stopping`);
       void this.stop().catch(() => {});
     };
     let stage = "preparation";
@@ -306,7 +331,7 @@ export class BrowserRuntime {
         input: nativeChannels.input,
         output: nativeChannels.output,
         scale: this.#config.scale,
-        onFatal: fatal,
+        onFatal: fatal("native input"),
       });
       const native = this.#native;
       await this.#step(() => native.ready);
@@ -318,7 +343,7 @@ export class BrowserRuntime {
       this.#capture = new BrowserCapture({
         input: captureChannels.input,
         output: captureChannels.output,
-        onFatal: fatal,
+        onFatal: fatal("screen capture"),
       });
       const capture = this.#capture;
       await this.#step(() => capture.ready);
@@ -347,6 +372,9 @@ export class BrowserRuntime {
         get targets() {
           return required(runtime.#targets);
         },
+        get windows() {
+          return required(runtime.#windows);
+        },
         get input() {
           return required(runtime.#input);
         },
@@ -365,6 +393,9 @@ export class BrowserRuntime {
         get accounts() {
           return runtime.#accounts;
         },
+        get signInPage() {
+          return runtime.#signInPage;
+        },
         signIn: {
           state: () => ({ mode: this.#signInMode, changing: this.#signInChanging }),
           set: (permit, mode, signal) => this.#signIn(permit, mode, signal),
@@ -378,7 +409,7 @@ export class BrowserRuntime {
         retirement: () => this.retirement(),
       });
       const service = this.#http;
-      service.server.on("error", fatal);
+      service.server.on("error", () => fatal("the control service")({ reason: "listen" }));
       await this.#step(() =>
         (this.#dependencies.listen ?? listen)(service.server, this.#lifetime.signal),
       );
@@ -387,8 +418,10 @@ export class BrowserRuntime {
       this.#supervisor = { ...this.#supervisor, state: "running" };
       this.#watch();
       return service;
-    } catch {
-      this.#log(`could not start ${stage}`);
+    } catch (error) {
+      this.#log(
+        error instanceof BrowserProfileTooNewError ? error.message : `could not start ${stage}`,
+      );
       try {
         await this.stop();
       } finally {
@@ -405,7 +438,10 @@ export class BrowserRuntime {
     const fatal = (error?: unknown) => {
       if (generation !== this.#browserGeneration) return;
       const cause = error instanceof BrowserTargetError ? error.cause : undefined;
-      this.#browserFailed(cause === "control timeout" ? "unresponsive" : "control_lost", cause);
+      this.#browserFailed(
+        cause?.startsWith("control timeout") ? "unresponsive" : "control_lost",
+        cause,
+      );
     };
     const native = required(this.#native);
     const capture = required(this.#capture);
@@ -414,6 +450,7 @@ export class BrowserRuntime {
       downloadDir: BROWSER_DOWNLOAD_DIR,
       uploadDir: BROWSER_UPLOAD_DIR,
       onFatal: fatal,
+      shared: (tabId) => this.#windows?.othersAtWork(tabId) ?? false,
       onCrash: (crash) => {
         if (generation !== this.#browserGeneration) return;
         void this.#failure("tab_crashed", `renderer ${crash.status}`, crash.reloaded).then(
@@ -467,17 +504,26 @@ export class BrowserRuntime {
       clearSelections: (signal) => {
         if (this.#signInMode !== "standard" || this.#signInChanging)
           throw new BrowserRuntimeError("closed");
-        required(this.#targets).clearFileChooser();
         return required(this.#secrets).clearSelections(signal);
       },
+      clearChoosers: () => required(this.#targets).clearFileChooser(),
       secretPages: (signal) => required(this.#secrets).secretPages(signal),
       reload: (page, signal) => required(this.#secrets).reload(page, signal),
+      ownsTab: (sessionId, tabId) => required(this.#windows).owns(sessionId, tabId),
+      released: (sessionId, keep) => required(this.#windows).release(sessionId, keep),
+      front: (sessionId, signal) => required(this.#windows).front(sessionId, signal),
     });
+    const windows = new BrowserWindows({ control: this.#control, targets, native, secrets });
+    this.#windows = windows;
     this.#downloads = new BrowserDownloadService({
       config: this.#config,
       instance: this.instance,
       control: this.#control,
       targets,
+      attribute: (frameId) => {
+        const tab = targets.tabOfFrame(frameId);
+        return tab ? windows.ownerOf(tab) : undefined;
+      },
       fence: fatal,
     });
     this.#uploads = new BrowserUploadService({
@@ -486,7 +532,7 @@ export class BrowserRuntime {
       control: this.#control,
       targets,
     });
-    const geometry = new BrowserGeometry(targets, native, this.#config.scale);
+    const geometry = new BrowserGeometry(targets, native, this.#config.scale, windows);
     this.#input = new BrowserInput({
       control: this.#control,
       targets,
@@ -494,7 +540,8 @@ export class BrowserRuntime {
       secrets,
       native,
       scale: this.#config.scale,
-      onFatal: () => {
+      onFatal: (error) => {
+        this.#log(`an input could not be confirmed (${error.reason}); stopping`);
         void this.stop().catch(() => {});
       },
     });
@@ -507,8 +554,16 @@ export class BrowserRuntime {
       capture,
       scale: this.#config.scale,
     });
-    this.#navigation = new BrowserNavigation(this.#control, targets);
+    this.#navigation = new BrowserNavigation(this.#control, targets, (sessionId) =>
+      windows.anchor(sessionId),
+    );
     this.#accounts = new BrowserAccounts(required(this.#targets));
+    this.#signInPage = new BrowserSignInPage({
+      control: this.#control,
+      targets,
+      geometry,
+      scale: this.#config.scale,
+    });
   }
 
   // The supervisor's one decision about a failed Chromium: restart it in place, or retire the
@@ -548,7 +603,7 @@ export class BrowserRuntime {
     this.#supervisor = { ...this.#supervisor, state: "restarting" };
     const downloads = this.#downloads;
     const uploads = this.#uploads;
-    const armed = downloads?.binding;
+    const armed = downloads?.bindings ?? [];
     try {
       this.#targets?.close();
     } catch {}
@@ -594,8 +649,11 @@ export class BrowserRuntime {
         restarts: this.#supervisor.restarts + 1,
       };
       this.#watch();
-      // The same grant collects downloads from the new browser; a refused grant leaves them off.
-      if (armed) void this.#downloads?.arm(armed, this.#lifetime.signal).catch(() => {});
+      // The same grants collect downloads from the new browser; a refused grant leaves them off.
+      void (async () => {
+        for (const binding of armed)
+          await this.#downloads?.arm(binding, this.#lifetime.signal).catch(() => {});
+      })();
     } catch {
       if (this.#lifetime.signal.aborted) return;
       this.#log("the browser could not be restarted in place; stopping");
@@ -642,10 +700,8 @@ export class BrowserRuntime {
     const oomKills = await this.#countOomKills();
     const oom = oomKills > this.#oomKills;
     this.#oomKills = Math.max(this.#oomKills, oomKills);
-    const exit =
-      kind === "tab_crashed" ? undefined : exitDetail(this.#processes.takeChromiumExit());
-    const detail =
-      [cause, exit, oom ? "out of memory" : undefined].filter(Boolean).join(", ") || kind;
+    const exit = kind === "tab_crashed" ? undefined : this.#processes.takeChromiumExit();
+    const detail = failureDetail(kind, cause, exit, oom);
     const failure = { kind, detail, recovered, at: new Date().toISOString() };
     this.#supervisor = { ...this.#supervisor, lastFailure: failure };
     return failure;
@@ -675,6 +731,8 @@ export class BrowserRuntime {
       signal.throwIfAborted();
       lease.check();
       if (mode === this.#signInMode) return { mode, changing: false };
+      if (mode === "signin") await this.#windows?.closeOthers().catch(() => {});
+      lease.check();
       this.#signInChanging = true;
       // From this point finish the physical transition even if the HTTP caller leaves.
       // A new control request still cannot grant agent access while changing/signing in.
