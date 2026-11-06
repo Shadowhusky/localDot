@@ -71,6 +71,13 @@ export class Flight {
     this.size.set(to.size, t, this.sizing);
   }
 
+  // The place moved under dot without changing size: dot goes with it, on the same curve.
+  carry(to: Box, t: number): void {
+    this.x.shift(to.x - this.target.x, t);
+    this.y.shift(to.y - this.target.y, t);
+    this.target = to;
+  }
+
   jump(to: Box, t: number): void {
     this.target = to;
     this.path = STILL;

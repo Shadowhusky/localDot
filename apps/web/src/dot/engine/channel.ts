@@ -36,6 +36,12 @@ export class Channel {
     this.restart(value, 0, t);
   }
 
+  // Displaces the value and its target together, so the spring goes on as it was, moved.
+  shift(dx: number, t: number): void {
+    this.restart(this.value(t) + dx, this.velocity(t), t);
+    this.to += dx;
+  }
+
   // Displaces the value without moving the target, so the spring rings back to it.
   kick(dx: number, t: number, p?: SpringParams): void {
     this.restart(this.value(t) + dx, this.velocity(t), t, p);

@@ -72,6 +72,9 @@ export class Presence {
   private readonly sizes =
     typeof ResizeObserver === "function" ? new ResizeObserver(() => this.follow(false)) : null;
   private watched: Element | null = null;
+  // While dot flies, its place can move with nothing to say so, as the thread's foot does under a
+  // growing composer: it looks each frame and is carried along.
+  private looking = 0;
 
   constructor(frame: HTMLElement, host: HTMLElement, o: PresenceOptions) {
     this.frame = frame;
@@ -139,7 +142,8 @@ export class Presence {
   }
 
   // The place changed under dot. Resting in it, dot has already moved with it and only takes on its
-  // size; flying, or given a new box for the same place, it turns toward where the place is now. A
+  // size; flying to a place that only moved, as the thread's foot does under an opening composer, it
+  // is carried with it on the same curve; given a new box, it turns toward where the place is now. A
   // window resize lands it there, and a dot put away while its place had no box comes back at once.
   follow(resized: boolean): void {
     const element = this.place && placeElement(this.place);
@@ -166,6 +170,11 @@ export class Presence {
       return;
     }
     const t = frameTime();
+    if (!this.home && box.size === this.flight.target.size) {
+      this.flight.carry(box, t);
+      this.animate(t);
+      return;
+    }
     this.leave(t);
     this.draw(Math.max(this.drawn, box.size));
     this.flight.follow(box, t);
@@ -185,6 +194,7 @@ export class Presence {
   }
 
   destroy(): void {
+    cancelAnimationFrame(this.looking);
     this.motion?.cancel();
     clearTimeout(this.fade);
     this.sizes?.disconnect();
@@ -284,6 +294,7 @@ export class Presence {
     });
     motion.startTime = t;
     this.motion = motion;
+    this.look();
     motion.finished.then(
       () => {
         if (this.motion !== motion) return;
@@ -294,6 +305,17 @@ export class Presence {
       },
       () => {},
     );
+  }
+
+  private look(): void {
+    cancelAnimationFrame(this.looking);
+    this.looking = requestAnimationFrame(() => {
+      this.looking = 0;
+      if (!this.motion || !this.flight) return;
+      const box = this.place && boxOf(placeElement(this.place));
+      if (box && !sameBox(box, this.flight.target)) this.follow(false);
+      else this.look();
+    });
   }
 
   private centre(): Point | null {

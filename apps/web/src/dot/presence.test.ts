@@ -206,16 +206,24 @@ describe("dot's presence", () => {
     expect(parse(runs[0]?.frames[0]?.transform)).toMatchObject({ x: 320, y: 267, k: 1 });
   });
 
-  it("turns to where its place has moved while it flew, then lands in it", async () => {
+  it("is carried by its place when the place moves while it flies, then lands in it", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
     const { p, frame, layer } = presence();
     p.goTo("hero");
     p.goTo("dock");
+    clock += 200;
+    const drawn = drawnAt(runs[0] as Run, clock);
     move("dock", 0, -100);
-    await finish(runs[0] as Run);
+    for (const callback of frames.splice(0)) callback(clock);
     expect(runs).toHaveLength(2);
     expect(frame.parentElement).toBe(layer);
     const from = parse(runs[1]?.frames[0]?.transform);
-    expect(Math.hypot(from.x - 8, from.y - 716)).toBeLessThan(0.5);
+    expect(Math.hypot(from.x - drawn.x, from.y - (drawn.y - 100))).toBeLessThan(0.5);
     expect(parse(runs[1]?.frames.at(-1)?.transform)).toMatchObject({ x: 8, y: 616 });
     await finish(runs[1] as Run);
     expect(frame.parentElement).toBe(placeElement("dock"));
