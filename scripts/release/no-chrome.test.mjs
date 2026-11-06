@@ -94,6 +94,20 @@ describe("the check that released images contain no Chrome", () => {
     expect(result.found).toEqual(expect.arrayContaining(["./opt/google/chrome/chrome"]));
   });
 
+  it("passes an empty layer, which a step that changes no files leaves", async () => {
+    const directory = await saved([["usr/bin/chromium"], ["placeholder"]]);
+    await writeFile(join(directory, "layer-1.tar"), Buffer.alloc(1024));
+    const result = await scanSavedImage(save(directory, "manifest.json", ...layers(2)));
+    expect(result.found).toEqual([]);
+    expect(result.layers).toBe(2);
+    const torn = Buffer.alloc(2048);
+    torn[1500] = 1;
+    await writeFile(join(directory, "layer-1.tar"), torn);
+    await expect(scanSavedImage(save(directory, "manifest.json", ...layers(2)))).rejects.toThrow(
+      /format/,
+    );
+  });
+
   it("refuses what it can't read rather than calling it clean", async () => {
     const directory = await saved([["a"]]);
     await writeFile(join(directory, "layer-0.tar"), "not a layer of any kind".repeat(100));
