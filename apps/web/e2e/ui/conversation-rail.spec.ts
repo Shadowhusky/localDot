@@ -142,7 +142,25 @@ test("collapses to its marks and expands with Mod+\\, keeps the choice and never
       bar: Math.round((await box(".app > .bar")).x),
     };
   };
+  // Every row's leading mark, glyph or dot, and the search field's glyph sit under the toggle.
+  const offColumn = () =>
+    page.locator(".sessions").evaluate((nav) => {
+      const middle = (element: Element) => {
+        const box = element.getBoundingClientRect();
+        return box.x + box.width / 2;
+      };
+      const toggle = nav.querySelector(".sessions-head .ui-icon");
+      if (!toggle) throw new Error("Missing the rail's toggle");
+      return [
+        ...nav.querySelectorAll(
+          ".sessions-row > .ui-button-content > :first-child, .sessions-search-field .ui-icon",
+        ),
+      ]
+        .filter((mark) => Math.abs(middle(mark) - middle(toggle)) > 1)
+        .map((mark) => mark.closest("[aria-label]")?.getAttribute("aria-label") ?? "a mark");
+    });
   const collapsed = await edges();
+  expect(await offColumn()).toEqual([]);
   expect(collapsed.rail).toBe(56);
   expect(collapsed.bar).toBeGreaterThanOrEqual(collapsed.rail);
   expect(collapsed.stage).toBeGreaterThanOrEqual(collapsed.rail);
@@ -154,6 +172,7 @@ test("collapses to its marks and expands with Mod+\\, keeps the choice and never
   await expect(app).toHaveAttribute("data-sessions", "expanded");
   await expect(rail(page).getByRole("button", { name: "Collapse conversations" })).toBeVisible();
   const expanded = await edges();
+  expect(await offColumn()).toEqual([]);
   expect(expanded.rail).toBe(256);
   expect(expanded.bar).toBeGreaterThanOrEqual(expanded.rail);
   expect(expanded.stage).toBeGreaterThanOrEqual(expanded.rail);

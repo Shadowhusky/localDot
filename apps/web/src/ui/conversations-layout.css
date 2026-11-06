@@ -138,6 +138,11 @@
     margin-inline-start: calc(var(--spacing) * -2);
   }
 
+  /* A glyph (New conversation, Search) is narrower than a dot, so it keeps to the column's middle. */
+  .sessions-row > .ui-button-content > .ui-icon {
+    justify-self: center;
+  }
+
   .sessions-row:focus-visible {
     outline-offset: calc(var(--focus-width) * -1);
   }
