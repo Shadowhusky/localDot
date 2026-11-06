@@ -248,6 +248,8 @@
   border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
   background-color: var(--color-overlay);
   box-shadow: var(--shadow-overlay);
+  /* It stands on the message toolbar, which its shadow would dim. */
+  clip-path: inset(-100vh -100vw 0);
   animation: decision-sheet-in var(--dur-gentle) var(--ease-spring) backwards;
 }
 .decision-sheet[data-expanded] {
@@ -386,6 +388,16 @@
   align-items: stretch;
   gap: calc(var(--spacing) * 1);
   padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 5) 0;
+}
+
+/* However short the sheet stands over the message field, its answers stay in view at its foot and
+   the question scrolls above them. */
+.decision-sheet-content .decision[data-layout="sheet"] .decision-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding-bottom: calc(var(--spacing) * 3);
+  background-color: var(--color-overlay);
 }
 
 .decision[data-layout="sheet"] .decision-scope {

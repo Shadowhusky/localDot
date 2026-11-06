@@ -1,4 +1,4 @@
-import { useLayoutEffect, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
 import { useMediaQuery } from "../ui/media.ts";
 
 // Wide: the stage beside both rails. Laptop: the stage beside one rail that switches between Chat
@@ -257,6 +257,30 @@ function keyboardInset(): number {
   if (!view || pinched(view)) return 0;
   const inset = Math.round(pageHeight() - view.height - view.offsetTop);
   return inset >= KEYBOARD_PX ? inset : 0;
+}
+
+// How far the message toolbar's top stands above the page's foot, keyboard and all: what a sheet
+// rising from the bottom keeps clear of, so the toolbar never covers its answers.
+export function useToolbarInset(): number {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const read = () => {
+      const toolbar = [...document.querySelectorAll<HTMLElement>(".thread-toolbar")].find(
+        (element) => element.getClientRects().length > 0,
+      );
+      const top = toolbar?.getBoundingClientRect().top;
+      setInset(top === undefined ? 0 : Math.max(0, Math.round(pageHeight() - top)));
+    };
+    read();
+    const sizes = new ResizeObserver(read);
+    for (const element of document.querySelectorAll(".thread-toolbar")) sizes.observe(element);
+    const stop = onViewport(read);
+    return () => {
+      sizes.disconnect();
+      stop();
+    };
+  }, []);
+  return inset;
 }
 
 export function useKeyboardInset(): number {

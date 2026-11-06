@@ -1,4 +1,4 @@
-import { expect, runAt, test } from "./harness.ts";
+import { expect, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
 for (const kind of ["send", "delete"]) {
@@ -42,3 +42,31 @@ for (const kind of ["send", "delete"]) {
     await expect(action).toBeHidden();
   });
 }
+
+// A phone's decision is a sheet over the stage. As the message field grows with what the user types,
+// the sheet rises with it, so its answers are never under the field.
+test("a phone's decision keeps its answers above the message field as it grows", async ({
+  page,
+  ui,
+}) => {
+  test.skip(!isPhone(page), "On a wide screen the decision sits in the conversation");
+  const fixture = await ui.open("running");
+  await page.request.post(`${fixture.origin}/__qa/approval?kind=send`);
+  const action = page.getByRole("button", { name: "Send", exact: true });
+  await expect(action).toBeVisible();
+  await page
+    .getByRole("form", { name: "Message dot" })
+    .last()
+    .getByRole("textbox")
+    .first()
+    .fill("Wait, check the totals first\nthen the subject line\nand the attachment too");
+  await expect
+    .poll(async () => {
+      const [answer, field] = await Promise.all([
+        action.boundingBox(),
+        page.locator(".thread-toolbar").boundingBox(),
+      ]);
+      return (answer?.y ?? 0) + (answer?.height ?? 0) - (field?.y ?? 0);
+    })
+    .toBeLessThanOrEqual(0);
+});
