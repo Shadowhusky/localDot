@@ -12,11 +12,13 @@ import {
   PauseSnapshot,
   ShellInput,
   type SubagentBrief,
+  TOOL_REQUEST_HEADER,
   ToolCallRequest,
   ToolResult,
   TranscriptAppend,
   TranscriptMessage,
   ULID_PATTERN,
+  ulid,
 } from "@localdot/protocol";
 import { Agent, fetch as undiciFetch } from "undici";
 import { z } from "zod";
@@ -29,6 +31,13 @@ export const MAX_REPLY_BYTES = 16 * 1024 * 1024;
 export const MAX_TRANSCRIPT_REPLY_BYTES = 128 * 1024 * 1024 + 64 * 1024;
 const BASE_TIMEOUT_MS = 30_000;
 const TOOL_WORK_MS = 120_000;
+// A busy Mac can stall the path to the daemon for seconds and then drop a connection. A request
+// whose connection drops is sent again, with the same request id, for this long; only then is the
+// tool API lost. An answer, even a refusal, is never retried.
+export const RECONNECT_MS = 30_000;
+const RECONNECT_WAITS_MS = [250, 500, 1000, 2000, 4000];
+// Below the daemon's keep-alive (tool-api.ts), so the brain always lets an idle connection go first.
+const IDLE_CONNECTION_MS = 10_000;
 // An approval card or a hand-off can hold these calls; the daemon bounds their own work.
 const WAITS_ON_USER = new Set([
   "computer",
@@ -62,6 +71,21 @@ export class ToolApiError extends Error {
   ) {
     super(`tool API ${status || "unreachable"}: ${message}`);
     this.name = "ToolApiError";
+  }
+}
+
+// The connection dropped before any answer came.
+class Dropped extends ToolApiError {
+  constructor(readonly refused: boolean) {
+    super(0, "connection failed");
+  }
+}
+
+// The tool API stayed out of reach for the whole reconnect window.
+export class ToolApiLost extends ToolApiError {
+  constructor() {
+    super(0, "connection failed");
+    this.name = "ToolApiLost";
   }
 }
 
@@ -114,9 +138,21 @@ async function bytes(res: Response, signal: AbortSignal, limit: number): Promise
   }
 }
 
+interface Exchange {
+  method: string;
+  url: string;
+  body: string | undefined;
+  id?: string;
+}
+
 // One dispatcher per brain, only for its authenticated daemon gate. The LLM transport is separate.
 export class ToolClient {
-  readonly #dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+  readonly #dispatcher = new Agent({
+    headersTimeout: 0,
+    bodyTimeout: 0,
+    keepAliveTimeout: IDLE_CONNECTION_MS,
+    keepAliveMaxTimeout: IDLE_CONNECTION_MS,
+  });
   readonly #closed = new AbortController();
   readonly #baseUrl: string;
   readonly #fetch: typeof fetch;
@@ -149,7 +185,7 @@ export class ToolClient {
         }) as unknown as Promise<Response>);
   }
 
-  // Only boot may retry: the relay can still be binding immediately after container start.
+  // The relay can still be binding immediately after container start: boot retries a refusal soon.
   boot(signal?: AbortSignal): Promise<BootConfig> {
     return this.#request(
       "GET",
@@ -337,63 +373,97 @@ export class ToolClient {
     retryBoot = false,
     maxReplyBytes = MAX_REPLY_BYTES,
   ): Promise<T> {
+    const exchange: Exchange = {
+      method,
+      url: `${this.#baseUrl}${path}`,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      ...(method === "POST" ? { id: ulid() } : {}),
+    };
+    let droppedAt: number | undefined;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.#attempt(exchange, parse, timeoutMs, signal, accept, maxReplyBytes);
+      } catch (error) {
+        if (!(error instanceof Dropped)) throw error;
+        droppedAt ??= Date.now();
+        if (Date.now() - droppedAt >= RECONNECT_MS) throw new ToolApiLost();
+        await this.#wait(
+          retryBoot && error.refused
+            ? 100
+            : (RECONNECT_WAITS_MS[Math.min(attempt, RECONNECT_WAITS_MS.length - 1)] ?? 4000),
+          signal,
+        );
+      }
+    }
+  }
+
+  #wait(ms: number, signal?: AbortSignal): Promise<void> {
+    const active = AbortSignal.any([this.#closed.signal, ...(signal ? [signal] : [])]);
+    cancelled(active);
+    return new Promise<void>((resolve, reject) => {
+      const abort = () => {
+        clearTimeout(delay);
+        reject(new ToolApiError(0, "request cancelled"));
+      };
+      const delay = setTimeout(() => {
+        active.removeEventListener("abort", abort);
+        resolve();
+      }, ms);
+      active.addEventListener("abort", abort, { once: true });
+    });
+  }
+
+  // One exchange, with its own deadline.
+  async #attempt<T>(
+    exchange: Exchange,
+    parse: (text: string, data: Uint8Array) => T,
+    timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
+    accept: number[],
+    maxReplyBytes: number,
+  ): Promise<T> {
     const deadline = new AbortController();
     const active = AbortSignal.any([
       deadline.signal,
       this.#closed.signal,
       ...(signal ? [signal] : []),
     ]);
-    const serialized = body === undefined ? undefined : JSON.stringify(body);
     const timer =
       timeoutMs === undefined ? undefined : setTimeout(() => deadline.abort(), timeoutMs);
     try {
       cancelled(active);
       let res: Response;
-      for (;;) {
-        try {
-          const pending = this.#fetch(`${this.#baseUrl}${path}`, {
-            method,
-            redirect: "error",
-            headers: {
-              authorization: `Bearer ${this.token}`,
-              ...(body === undefined ? {} : { "content-type": "application/json" }),
-            },
-            body: serialized,
-            signal: active,
-          });
-          // A custom transport may return after cancellation; never leak that late response body.
-          void pending.then(
-            (late) => {
-              if (active.aborted) void late.body?.cancel().catch(() => {});
-            },
-            () => {},
-          );
-          res = await untilAbort(pending, active);
-          cancelled(active);
-          break;
-        } catch (error) {
-          cancelled(active);
-          const code =
-            error instanceof Error &&
-            error.cause &&
-            typeof error.cause === "object" &&
-            "code" in error.cause
-              ? error.cause.code
-              : undefined;
-          if (!retryBoot || code !== "ECONNREFUSED") throw new ToolApiError(0, "connection failed");
-          // Cancel the delay as well as the fetch; the whole retry window shares one deadline.
-          await new Promise<void>((resolve, reject) => {
-            const abort = () => {
-              clearTimeout(delay);
-              reject(new ToolApiError(0, "request cancelled"));
-            };
-            const delay = setTimeout(() => {
-              active.removeEventListener("abort", abort);
-              resolve();
-            }, 100);
-            active.addEventListener("abort", abort, { once: true });
-          });
-        }
+      try {
+        const pending = this.#fetch(exchange.url, {
+          method: exchange.method,
+          redirect: "error",
+          headers: {
+            authorization: `Bearer ${this.token}`,
+            ...(exchange.body === undefined ? {} : { "content-type": "application/json" }),
+            ...(exchange.id ? { [TOOL_REQUEST_HEADER]: exchange.id } : {}),
+          },
+          body: exchange.body,
+          signal: active,
+        });
+        // A custom transport may return after cancellation; never leak that late response body.
+        void pending.then(
+          (late) => {
+            if (active.aborted) void late.body?.cancel().catch(() => {});
+          },
+          () => {},
+        );
+        res = await untilAbort(pending, active);
+        cancelled(active);
+      } catch (error) {
+        cancelled(active);
+        const code =
+          error instanceof Error &&
+          error.cause &&
+          typeof error.cause === "object" &&
+          "code" in error.cause
+            ? error.cause.code
+            : undefined;
+        throw new Dropped(code === "ECONNREFUSED");
       }
       if (!res.ok && !accept.includes(res.status)) {
         // Never reflect peer error text: it may contain a token or a provider credential.

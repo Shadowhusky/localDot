@@ -1,10 +1,16 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { APPROVAL_TIMEOUT_MS } from "@localdot/protocol";
+import { APPROVAL_TIMEOUT_MS, TOOL_REQUEST_HEADER, ULID_PATTERN } from "@localdot/protocol";
 import { Agent, fetch as undiciFetch } from "undici";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bootConfig, PROXY_TOKEN } from "./testing/scripted.ts";
-import { MAX_REPLY_BYTES, ToolApiError, ToolClient } from "./tool-client.ts";
+import {
+  MAX_REPLY_BYTES,
+  RECONNECT_MS,
+  ToolApiError,
+  ToolApiLost,
+  ToolClient,
+} from "./tool-client.ts";
 
 const RESULT = { ok: true, content: [{ type: "text", text: "finished" }] };
 const clients: ToolClient[] = [];
@@ -317,7 +323,7 @@ describe("authenticated gate transport", () => {
     });
     await expect(c.boot()).rejects.not.toThrow("credential-from-peer");
   });
-  it("parses daemon 400/404 tool refusals but never replays a mutation after an uncertain send", async () => {
+  it("parses daemon 400/404 tool refusals and never retries an answer", async () => {
     for (const status of [400, 404])
       expect(
         await client(async () => Response.json({ ok: false, content: [] }, { status })).tool(
@@ -326,15 +332,49 @@ describe("authenticated gate transport", () => {
           {},
         ),
       ).toEqual({ ok: false, content: [] });
-    const fake = vi.fn(async () => {
-      throw new TypeError("lost", { cause: { code: "ECONNREFUSED" } });
-    });
-    await expect(client(fake).appendTranscript([{ role: "user", content: "x" }])).rejects.toThrow(
-      "connection failed",
-    );
-    expect(fake).toHaveBeenCalledTimes(1);
+    const refused = vi.fn(async () => new Response(null, { status: 409 }));
+    await expect(
+      client(refused).appendTranscript([{ role: "user", content: "x" }]),
+    ).rejects.toThrow("409");
+    expect(refused).toHaveBeenCalledTimes(1);
   });
-  it("retries only refused boot connections within the same deadline", async () => {
+  it("sends a dropped mutation again under the same request id, and a read without one", async () => {
+    vi.useFakeTimers();
+    const ids: (string | undefined)[] = [];
+    let drops = 2;
+    const fake = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      ids.push((init?.headers as Record<string, string> | undefined)?.[TOOL_REQUEST_HEADER]);
+      if (drops-- > 0) throw new TypeError("lost", { cause: { code: "ECONNRESET" } });
+      return init?.method === "POST"
+        ? new Response(null, { status: 204 })
+        : Response.json({ items: [], stopped: false });
+    });
+    const c = client(fake as unknown as typeof fetch);
+    const append = observe(c.appendTranscript([{ role: "user", content: "x" }]));
+    await vi.advanceTimersByTimeAsync(750);
+    await append.settled;
+    expect(append.state.error).toBeUndefined();
+    expect(ids).toHaveLength(3);
+    expect(ids[0]).toMatch(ULID_PATTERN);
+    expect(new Set(ids).size).toBe(1);
+    ids.length = 0;
+    await c.inbox(0, 0);
+    expect(ids).toEqual([undefined]);
+  });
+  it("gives up as lost once the tool API stays out of reach for the reconnect window", async () => {
+    vi.useFakeTimers();
+    const fake = vi.fn(async () => {
+      throw new TypeError("lost", { cause: { code: "ECONNRESET" } });
+    });
+    const call = observe(client(fake).tool("update_plan", "c", {}));
+    await vi.advanceTimersByTimeAsync(RECONNECT_MS - 1);
+    expect(call.state.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(4000);
+    await call.settled;
+    expect(call.state.error).toBeInstanceOf(ToolApiLost);
+    expect(String(call.state.error)).toContain("tool API unreachable: connection failed");
+  });
+  it("retries a refused boot connection soon, while the relay binds", async () => {
     vi.useFakeTimers();
     const fake = vi
       .fn()
@@ -345,6 +385,31 @@ describe("authenticated gate transport", () => {
     expect((await promise).task).toBe("Find the weather in Lyon");
     expect(fake).toHaveBeenCalledTimes(2);
   });
+  it("rides out a tool API that drops every connection for a few seconds", async () => {
+    const downUntil = Date.now() + 3000;
+    const seen: { id: string | undefined; served: boolean }[] = [];
+    const server = createServer((req, res) => {
+      const id = req.headers[TOOL_REQUEST_HEADER] as string | undefined;
+      if (Date.now() < downUntil) {
+        seen.push({ id, served: false });
+        req.socket.destroy();
+        return;
+      }
+      req.resume();
+      req.on("end", () => {
+        seen.push({ id, served: true });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(RESULT));
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const c = client(undefined, `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+    expect(await c.tool("update_plan", "c", { items: [] })).toEqual(RESULT);
+    expect(seen.filter((s) => s.served)).toHaveLength(1);
+    expect(seen.length).toBeGreaterThan(2);
+    expect(new Set(seen.map((s) => s.id)).size).toBe(1);
+  }, 15_000);
   it("preserves durable inbox metadata, sends acknowledgement-only retries and refuses invalid cursors", async () => {
     const item = {
       role: "user" as const,
