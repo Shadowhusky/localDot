@@ -65,6 +65,23 @@ func (o *Opener) OpenPassphrase(s Sealed) ([]byte, error) {
 
 const passphraseAAD = sealInfo + ":vault-passphrase"
 
+// A saved login and a password manager's export each seal under an AAD of their own, which no
+// binding has (a binding's JSON starts with "["), so neither opens as a secret or a passphrase.
+const (
+	loginAAD       = sealInfo + ":saved-login"
+	loginImportAAD = sealInfo + ":login-import"
+)
+
+// OpenLogin decrypts a saved login as the UI sealed it, its site with it.
+func (o *Opener) OpenLogin(s Sealed) ([]byte, error) {
+	return o.open(s, []byte(loginAAD))
+}
+
+// OpenLoginImport decrypts a password manager's export.
+func (o *Opener) OpenLoginImport(s Sealed) ([]byte, error) {
+	return o.open(s, []byte(loginImportAAD))
+}
+
 func (o *Opener) open(s Sealed, aad []byte) ([]byte, error) {
 	if s.V != 1 {
 		return nil, fmt.Errorf("vault: sealed version %d, want 1", s.V)
@@ -98,6 +115,16 @@ func Seal(publicKey string, rec Record, plaintext []byte) (Sealed, error) {
 // SealPassphrase encrypts a key vault passphrase to the holder of publicKey, as the CLI does.
 func SealPassphrase(publicKey string, passphrase []byte) (Sealed, error) {
 	return seal(publicKey, []byte(passphraseAAD), passphrase)
+}
+
+// SealLogin encrypts a saved login to the holder of publicKey, as the UI does.
+func SealLogin(publicKey string, plaintext []byte) (Sealed, error) {
+	return seal(publicKey, []byte(loginAAD), plaintext)
+}
+
+// SealLoginImport encrypts a password manager's export to the holder of publicKey, as the UI does.
+func SealLoginImport(publicKey string, plaintext []byte) (Sealed, error) {
+	return seal(publicKey, []byte(loginImportAAD), plaintext)
 }
 
 func seal(publicKey string, aad, plaintext []byte) (Sealed, error) {

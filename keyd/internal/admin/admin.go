@@ -21,6 +21,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/keys"
 	"github.com/shadowhusky/localdot/keyd/internal/llm"
 	"github.com/shadowhusky/localdot/keyd/internal/netguard"
+	"github.com/shadowhusky/localdot/keyd/internal/oauth"
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
 )
 
@@ -29,9 +30,11 @@ const maxBody = 1 << 20
 var routeName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 type Server struct {
-	Manager  *egress.Manager
-	Vault    *vault.Vault
-	Logins   *vault.Logins
+	Manager *egress.Manager
+	Vault   *vault.Vault
+	Logins  *vault.Logins
+	// Tokens keeps signed-in apps connected; nil means this keyd redeems no sign-ins.
+	Tokens   *oauth.Broker
 	Registry *keys.Registry
 	Opener   *vault.Opener
 	Settings *llm.Settings
@@ -59,6 +62,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/logins", s.login)
 	mux.HandleFunc("PUT /v1/logins", s.login)
 	mux.HandleFunc("DELETE /v1/logins", s.login)
+	mux.HandleFunc("GET /v1/logins", s.listLogins)
+	mux.HandleFunc("POST /v1/logins/find", s.findLogin)
+	mux.HandleFunc("POST /v1/logins/sealed", s.putSealedLogin)
+	mux.HandleFunc("POST /v1/logins/import", s.importLogins)
 	mux.HandleFunc("GET /v1/secrets", s.listSecrets)
 	mux.HandleFunc("PUT /v1/secrets/{id}", s.putSecret)
 	mux.HandleFunc("DELETE /v1/secrets/{id}", s.deleteSecret)
@@ -69,6 +76,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/cells/{id}/revoke", s.revoke)
 	mux.HandleFunc("POST /v1/cells/{id}/surrogates", s.mint)
 	mux.HandleFunc("PUT /v1/secrets/{id}/metadata", s.putMetadata)
+	mux.HandleFunc("POST /v1/secrets/{id}/oauth", s.connectOAuth)
+	mux.HandleFunc("POST /v1/secrets/{id}/oauth/refresh", s.renewOAuth)
 	mux.HandleFunc("GET /v1/cells/{id}/asks", s.listAsks)
 	mux.HandleFunc("POST /v1/cells/{id}/asks/{ask}", s.answerAsk)
 	mux.HandleFunc("PUT /v1/cells/{id}/task", s.beginTask)
@@ -138,9 +147,13 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		// A desktop cell takes its gate's capture token on open; an older keyd refuses that field.
 		"capture":        true,
 		"generalSecrets": true,
+		// Saved logins are listed, entered sealed and imported from a password manager's export.
+		"savedLogins": s.Logins != nil,
 		// A dot on the same machine can be given this keyd's keys, and a removed one cleared.
 		"keyCopy":     true,
 		"vaultForget": true,
+		// keyd redeems a sign-in's code itself and keeps the app connected behind its surrogate.
+		"oauth": s.Tokens != nil,
 	})
 }
 
@@ -268,6 +281,9 @@ func (s *Server) putSecret(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad-value", err.Error())
 		return
 	}
+	if s.Tokens != nil {
+		s.Tokens.Forget(id)
+	}
 	revoked, err := s.Manager.PutSecret(rec, value)
 	if errors.Is(err, vault.ErrLocked) {
 		failLocked(w)
@@ -285,6 +301,9 @@ func (s *Server) putSecret(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if s.Tokens != nil {
+		s.Tokens.Forget(id)
+	}
 	revoked, err := s.Manager.DeleteSecret(id)
 	if err != nil {
 		if errors.Is(err, vault.ErrNotFound) {
@@ -511,9 +530,13 @@ func (s *Server) admin(reason, secretID, detail string) {
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	return decodeUpTo(w, r, v, maxBody)
+}
+
+func decodeUpTo(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil || len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '{' {
-		fail(w, http.StatusBadRequest, "bad-request", "expected one JSON object of at most 1 MiB")
+		fail(w, http.StatusBadRequest, "bad-request", fmt.Sprintf("expected one JSON object of at most %d MiB", limit>>20))
 		return false
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))

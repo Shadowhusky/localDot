@@ -13,6 +13,44 @@ browser's protected input channel; values do not enter model input, conversation
 payloads. One login is stored per origin. Browser sign-out clears cookies separately from these
 saved passwords. See [browser sign-ins](../docs/browser-workspace.md#sign-in-once).
 
+Settings manages them without the daemon reading a password: `GET /v1/logins` lists origins and
+accounts, `POST /v1/logins/find` looks one up, and `POST /v1/logins/sealed` and
+`POST /v1/logins/import` take a login, or a whole password manager's export, sealed in the page to
+keyd's boot key under an AAD of their own. keyd parses the export itself, keeps each login's site,
+account and password, answers in counts and line numbers, and writes nothing else. Those logins are
+marked `confirm`, which the daemon honours by asking for the user's tap; saving one again never clears
+the mark. The list lives in protected items of its own (`login-list-<n>`), so it outgrows no item.
+
+## Signed-in apps
+
+An app with a hosted MCP server connects by signing in with OAuth, and keyd keeps it connected
+(`internal/oauth`). The daemon finds the app's sign-in service and opens its page in the Mac's
+browser; when the app sends the user back, it hands keyd the code (`POST /v1/secrets/<id>/oauth`).
+keyd redeems the code itself, over its guarded dialer with verified TLS and no redirects, so neither
+token passes through the daemon, the computer, the agent or the web app.
+
+- The access token is a web key like any other: stored as `connector-<id>`, bound to the app's
+  host, swapped in for a surrogate at the edge and scrubbed from what comes back.
+- The refresh token, and the one token endpoint it may go to, stay in a store item of their own
+  (`oauth-<digest>`). The index holds only how the token stands (`oauth` on the record: when it
+  ends, who signed in, whether it has ended), so rewriting the index can't send a token anywhere.
+- As a request's token nears its end, keyd refreshes it before swapping. The surrogate stays the same
+  and nothing in flight is cut. However many requests ask, there is one refresh, and it belongs to
+  keyd rather than to any request: a caller going away can't lose a rotated refresh token. A rotated
+  refresh token is stored before the new access token.
+- If the app refuses a token early, the daemon says so (`POST /v1/secrets/<id>/oauth/refresh`) and
+  retries once with the same surrogate. A refresh that has only just happened counts.
+- `invalid_grant` and its like end the sign-in: the record says `reconnect`, requests get `401` with
+  `X-Keyd-Reason: oauth-reconnect` without reaching the app, and the user reconnects in Settings. A
+  sign-in service that is down is not an ended sign-in: a token with time left is still used, and past
+  its end requests get `503` with `oauth-unavailable` until the service answers.
+- Replacing or removing the secret ends the sign-in, revoking at the app as far as it can, and a
+  refresh it overtakes drops what it gets. A key copy takes the access token only, because a refresh
+  token shared by two keyds would rotate one of them out.
+
+A connection from before keyd kept sign-ins has no `oauth` on its record. It is used as it was until
+its app refuses it, and then it asks to reconnect.
+
 ## Two binaries
 
 | Binary | Signing identifier | What it does |

@@ -19,6 +19,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/audit"
 	"github.com/shadowhusky/localdot/keyd/internal/keys"
 	"github.com/shadowhusky/localdot/keyd/internal/netguard"
+	"github.com/shadowhusky/localdot/keyd/internal/oauth"
 	"github.com/shadowhusky/localdot/keyd/internal/policy"
 	"github.com/shadowhusky/localdot/keyd/internal/scrub"
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
@@ -85,6 +86,10 @@ func (c *Cell) forward(w http.ResponseWriter, r *http.Request, rt route) {
 		c.deny(w, line, http.StatusForbidden, v.Reason)
 		return
 	}
+	if err := c.freshen(r.Context(), v.Swaps); err != nil {
+		c.refuseSecret(w, line, err)
+		return
+	}
 	if err := c.swap(r.Header, v.Swaps); err != nil {
 		c.refuseSecret(w, line, err)
 		return
@@ -101,6 +106,20 @@ func (c *Cell) forward(w http.ResponseWriter, r *http.Request, rt route) {
 // errNoAudit refuses a swap while the audit log cannot be written: the use of a secret is never
 // left unrecorded.
 var errNoAudit = errors.New("the audit log cannot be written")
+
+// freshen makes sure the sign-ins behind these surrogates are good to send before they are swapped,
+// so that a value refreshed here is the one swap reads.
+func (c *Cell) freshen(ctx context.Context, swaps []keys.Entry) error {
+	if c.deps.Tokens == nil {
+		return nil
+	}
+	for _, e := range swaps {
+		if err := c.deps.Tokens.Fresh(ctx, e.Binding.SecretID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // swap puts the real values in.
 func (c *Cell) swap(h http.Header, swaps []keys.Entry) error {
@@ -119,6 +138,15 @@ func (c *Cell) refuseSecret(w http.ResponseWriter, l audit.Line, err error) {
 	var reentry *vault.ReentryError
 	var rebound *vault.ReboundError
 	switch {
+	case errors.Is(err, context.Canceled):
+		c.deny(w, l, http.StatusBadGateway, ReasonClientGone)
+	case errors.Is(err, oauth.ErrReconnect):
+		// As the app itself would answer a token it no longer takes, so that whoever asked treats it
+		// the same way, without the app being asked.
+		w.Header().Set("X-Keyd-Secret", l.SecretID)
+		c.deny(w, l, http.StatusUnauthorized, ReasonReconnect)
+	case errors.Is(err, oauth.ErrUnavailable):
+		c.deny(w, l, http.StatusServiceUnavailable, ReasonOAuthDown)
 	case errors.Is(err, errNoAudit):
 		c.deny(w, l, http.StatusServiceUnavailable, ReasonNoAudit)
 	case errors.Is(err, vault.ErrLocked):
@@ -311,6 +339,9 @@ func (c *Cell) scrubberFor(bound []vault.Record) (*scrub.Scrubber, error) {
 			repl = redacted
 		}
 		pairs = append(pairs, scrub.Pair{Secret: value, Replacement: []byte(repl)})
+		if former := c.deps.Vault.Former(rec.ID); former != nil {
+			pairs = append(pairs, scrub.Pair{Secret: former, Replacement: []byte(repl)})
+		}
 	}
 	return scrub.New(pairs...)
 }
