@@ -152,6 +152,85 @@ it.each(["old_retirement", "new_creation"] as const)(
   },
 );
 
+function slowReplacement(read: (request: string, reads: number) => Response) {
+  let request = "",
+    reads = 0;
+  return vi.fn<typeof fetch>(async (url, init) => {
+    if (String(url).endsWith("/fence")) return Response.json({ revision: 4 });
+    if (init?.method === "POST") {
+      request = JSON.parse(String(init.body)).requestId;
+      return new Promise((_, reject) =>
+        init.signal?.addEventListener("abort", () => reject(new DOMException("", "AbortError"))),
+      );
+    }
+    return read(request, ++reads);
+  });
+}
+
+async function startReplacement(fetchImpl: typeof fetch, wait: number) {
+  const f = fixture(fetchImpl, null);
+  f.update({
+    cell: { ...f.props.cell!, state: "failed", fenced: { revision: 4 } },
+    agent: { ...f.props.agent, fresh: false },
+  });
+  let work: Promise<boolean>;
+  act(() => {
+    work = f.result.current.replace();
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(wait);
+    await work;
+  });
+  return f;
+}
+
+it("a replacement that outlasts its request keeps its progress and opens the fresh computer", async () => {
+  vi.useFakeTimers();
+  const f = await startReplacement(
+    slowReplacement((requestId, reads) =>
+      Response.json({
+        requestId,
+        oldCellId: CELL,
+        revision: 4,
+        newCellId: OTHER,
+        phase: reads < 40 ? "allocating" : "ready",
+      }),
+    ),
+    36_000,
+  );
+  expect(f.result.current.error).toBeNull();
+  expect(f.result.current.replacing).toBe(true);
+  expect(f.result.current.replacement?.phase).toBe("allocating");
+  expect(f.result.current.canReplace).toBe(false);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(6_000);
+  });
+  expect(f.props.selectReady).toHaveBeenCalledWith(OTHER);
+  expect(f.result.current.error).toBeNull();
+  expect(f.result.current.replacing).toBe(false);
+});
+
+it("a running replacement's status may go briefly unanswered without an alarm", async () => {
+  vi.useFakeTimers();
+  const f = await startReplacement(
+    slowReplacement((requestId, reads) =>
+      reads > 3
+        ? new Response("busy", { status: 502 })
+        : Response.json({ requestId, oldCellId: CELL, revision: 4, phase: "retiring" }),
+    ),
+    60_000,
+  );
+  expect(f.result.current.error).toBeNull();
+  expect(f.result.current.replacing).toBe(true);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(120_000);
+  });
+  expect(f.result.current.error).toBe(
+    "Couldn't check the replacement. You can retry the same request.",
+  );
+  expect(f.result.current.canReplace).toBe(true);
+});
+
 it.each(["current", "hidden", "owner changed"] as const)(
   "replacement preflight %s checks the owner immediately before POST",
   async (mode) => {
