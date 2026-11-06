@@ -63,6 +63,8 @@ interface Tracking {
   top: number;
   // How tall the content was then: shorter now, the browser clamped the view, which is no reader's.
   height: number;
+  // How tall the view was then: taller now, the browser clamped the view up to as much.
+  view: number;
   jump: { frame: number; from: number; start: number } | null;
   gesture: Gesture | null;
   // A finger or a button is down on the list, or a flick it let go of still coasts: the end is not
@@ -105,6 +107,14 @@ function hiddenBelow(box: DOMRect, view: HTMLElement, top: number, bottom: numbe
   return Math.min(box.bottom + bottom - edge - view.clientHeight, box.top - top - edge);
 }
 
+// How much the view has grown since the hook last looked, which the browser takes off the top of a
+// view at the end before the hook hears; what arrived in the meantime leaves it short of the new end.
+// While the reader scrolls, the move is theirs.
+const grown = (element: HTMLElement, t: Tracking) =>
+  t.view && !t.pressed && !(t.gesture && performance.now() <= t.gesture.until)
+    ? Math.max(0, element.clientHeight - t.view)
+    : 0;
+
 // Within reach of the end; what arrived since the gesture began moved the end, not the reader.
 const near = (element: HTMLElement, gesture: Gesture) =>
   below(element) <=
@@ -137,6 +147,7 @@ export function useFollowScroll(owner: string, follow: boolean, whole: () => boo
     frame: 0,
     top: 0,
     height: 0,
+    view: 0,
     jump: null,
     gesture: null,
     pressed: false,
@@ -206,12 +217,20 @@ export function useFollowScroll(owner: string, follow: boolean, whole: () => boo
       // Moved up before its scroll event (a control brought into view as it takes the focus): not the
       // hook, so the end is no longer held, or the move would be undone under the reader's press. A
       // view only clamped by shorter content is still at the end, however the content has grown back
-      // since: rows leaving and rows arriving can be drawn a commit apart.
+      // since: rows leaving and rows arriving can be drawn a commit apart. So is a view the browser
+      // clamped as it grew taller.
       if (t.pinned && element.scrollTop < t.top - 1) {
-        if (!rowsLeft && below(element) > 1 && element.scrollHeight >= t.height) leave();
+        if (
+          !rowsLeft &&
+          below(element) > 1 &&
+          element.scrollHeight >= t.height &&
+          element.scrollTop < t.top - grown(element, t) - 1
+        )
+          leave();
         else t.top = element.scrollTop;
       }
       t.height = element.scrollHeight;
+      t.view = element.clientHeight;
       if (t.jump) return;
       if (t.pinned && !t.pressed) {
         const end = element.scrollHeight - element.clientHeight;
@@ -355,9 +374,11 @@ export function useFollowScroll(owner: string, follow: boolean, whole: () => boo
       if (Math.abs(moved) > 0.5) gesture.down = moved > 0;
     }
     if (t.coast) coast();
-    // Back up, and neither the hook's own scroll nor a view clamped by shorter content: reading.
-    const clamped = element.scrollHeight < t.height;
+    // Back up, and neither the hook's own scroll nor a view clamped by shorter content or a taller
+    // view: reading.
+    const clamped = element.scrollHeight < t.height || moved >= -grown(element, t) - 1;
     t.height = element.scrollHeight;
+    t.view = element.clientHeight;
     if (moved < -1 && below(element) > 1 && !clamped) leave();
     else if (gesture?.down && !t.pinned && near(element, gesture)) stick();
     if (gesture && Math.abs(moved) > 0.5) gesture.height = element.scrollHeight;

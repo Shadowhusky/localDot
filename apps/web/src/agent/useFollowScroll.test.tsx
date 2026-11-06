@@ -664,3 +664,43 @@ it("still follows when content that shortened under the end has grown back by th
   });
   expect(element.scrollTop).toBe(end());
 });
+
+it("still follows when the view grew taller and rows came before it heard", async () => {
+  render(<List />);
+  const { element, add, end } = view();
+  element.scrollTop = end();
+  await add();
+  // The window opens up: the browser clamps the view to the old content's end, and a row comes
+  // before the list hears of either.
+  Object.defineProperty(element, "clientHeight", { configurable: true, value: 260 });
+  element.scrollTop = end();
+  await add();
+  expect(element.scrollTop).toBe(end());
+});
+
+it("still follows when the view grew taller and rows came before its scroll event", async () => {
+  render(<Reader />);
+  const { element, add, end, scroll } = view();
+  scroll(end());
+  await add();
+  Object.defineProperty(element, "clientHeight", { configurable: true, value: 260 });
+  element.scrollTop = end();
+  await act(async () => {
+    element.querySelector("ul")?.append(document.createElement("li"));
+    fireEvent.scroll(element);
+  });
+  expect(following()).toBe(true);
+  expect(element.scrollTop).toBe(end());
+});
+
+it("leaves the end for a scroll back further than the view grew", async () => {
+  render(<Reader />);
+  const { element, add, end, scroll } = view();
+  scroll(end());
+  await add();
+  Object.defineProperty(element, "clientHeight", { configurable: true, value: 260 });
+  fireEvent.wheel(element, { deltaY: -120 });
+  scroll(end() - 200);
+  await add();
+  expect(following()).toBe(false);
+});
