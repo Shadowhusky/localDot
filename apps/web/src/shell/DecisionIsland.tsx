@@ -25,7 +25,7 @@ import { Presence } from "../ui/Presence.tsx";
 import { Select } from "../ui/Select.tsx";
 import { attachSheetDrag } from "../ui/sheet-drag.ts";
 import "./decision.css";
-import { useKeyboardInset } from "./layout.ts";
+import { useKeyboardInset, useToolbarInset } from "./layout.ts";
 import { TaskTime } from "./TaskTime.tsx";
 
 class Mismatch extends Error {}
@@ -332,6 +332,8 @@ export function DecisionSheetPresence({ show, ...sheet }: DecisionSheetProps & {
 
 export function DecisionSheet({ label, elapsedS, timer, children }: DecisionSheetProps) {
   const keyboard = useKeyboardInset();
+  // The sheet rests on the message toolbar, which grows as the user types, so its answers stay clear.
+  const lift = Math.max(keyboard, useToolbarInset());
   // Read as a drag lets go: the keyboard coming or going never drops a drag under way.
   const typing = useRef(keyboard);
   typing.current = keyboard;
@@ -367,7 +369,7 @@ export function DecisionSheet({ label, elapsedS, timer, children }: DecisionShee
       className="decision-sheet"
       data-expanded={full ? "" : undefined}
       data-keyboard={keyboard ? "" : undefined}
-      style={keyboard ? ({ "--_keyboard": `${keyboard}px` } as CSSProperties) : undefined}
+      style={lift ? ({ "--_keyboard": `${lift}px` } as CSSProperties) : undefined}
     >
       <div className="decision-sheet-handle" data-sheet-grip="">
         <span className="decision-grabber" aria-hidden="true" />

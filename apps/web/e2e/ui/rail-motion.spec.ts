@@ -368,6 +368,28 @@ test("a click takes up a magnified mark and the lens stays until the mouse leave
   await expect.poll(async () => Object.values(await names(page))).toEqual(rest.map(() => 0));
 });
 
+// A list shorter than the rail clips at its own end, so the lens keeps the last mark within it.
+test("magnifies the last mark of a short list whole", { tag: "@webkit" }, async ({ page, ui }) => {
+  await ui.open("conversations");
+  await ui.settle();
+  const rows = page.locator(".sessions-scroll .sessions-item");
+  const last = rows.nth((await rows.count()) - 1);
+  const box = await last.boundingBox();
+  if (!box) throw new Error("Missing the last mark");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expect
+    .poll(() => last.evaluate((element) => Number((element as HTMLElement).style.scale || 1)))
+    .toBeGreaterThan(1.6);
+  const [mark, end] = await page.evaluate(() => [
+    document
+      .querySelectorAll(".sessions-scroll .conversation-avatar")
+      .item(document.querySelectorAll(".sessions-scroll .conversation-avatar").length - 1)
+      .getBoundingClientRect().bottom,
+    document.querySelector(".sessions-lists")?.getBoundingClientRect().bottom ?? 0,
+  ]);
+  expect(mark).toBeLessThanOrEqual(end + 0.5);
+});
+
 test("keeps the grown marks in view where the list scrolls", async ({ page, ui }) => {
   await page.setViewportSize({ width: 1440, height: 320 });
   await ui.open("conversations");

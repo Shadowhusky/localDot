@@ -632,10 +632,12 @@
   transform-origin: 0 50%;
 }
 
-/* The marks grow and part within the list's own height: what the lens pushes past either end is
-   clipped there, so magnifying never gives the list more to scroll. */
+/* The marks grow and part within the list, which reaches the rail's foot while magnifying, so a
+   short list's last mark grows into the room the lens counts on. What the lens pushes past either
+   end is clipped there, so magnifying never gives the list more to scroll. */
 .sessions:has(> .sessions-dock[data-magnify]) .sessions-lists {
   overflow-y: clip;
+  min-height: 100%;
 }
 
 .sessions-dock {
