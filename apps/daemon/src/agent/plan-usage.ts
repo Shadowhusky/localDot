@@ -62,7 +62,8 @@ export class PlanUsageStore {
   reply(): PlanUsageReply {
     return { plans: this.list(), checking: [...this.#flights.keys()] };
   }
-  record(value: unknown, observedAt: number): void {
+  // `whole`: the reading lists every window the plan has now, as the plan's own app does.
+  record(value: unknown, observedAt: number, whole = false): void {
     const parsed = SubscriptionUsageData.safeParse(value);
     if (!parsed.success || !Number.isFinite(observedAt) || observedAt < 0) return;
     const usage = parsed.data;
@@ -74,6 +75,16 @@ export class PlanUsageStore {
     const windows = new Map<string, PlanUsageWindow>(
       samePlan ? before?.windows.map((window) => [window.window, window]) : [],
     );
+    // A window whose time is up and that the plan no longer lists has ended: Claude has no
+    // 5-hour window until the next message starts one.
+    if (whole && newer)
+      for (const [name, held] of windows)
+        if (
+          !usage.windows.some((window) => window.window === name) &&
+          held.resetsAt !== undefined &&
+          held.resetsAt * 1000 <= at
+        )
+          windows.delete(name);
     for (const window of usage.windows) {
       const held = windows.get(window.window);
       if (!held || held.observedAt <= at) windows.set(window.window, { ...window, observedAt: at });
@@ -116,7 +127,7 @@ export class PlanUsageStore {
           (reading) => {
             if (this.#closing.signal.aborted) return;
             if (reading === "signed_out") this.forget(provider);
-            else if (reading) this.record(reading.usage, reading.observedAt);
+            else if (reading) this.record(reading.usage, reading.observedAt, true);
           },
           () => {},
         )
