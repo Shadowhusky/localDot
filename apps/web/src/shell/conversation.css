@@ -1326,6 +1326,17 @@
   gap: calc(var(--spacing) * 2);
 }
 
+/* In the composer's place, a conversation opened to read keeps its way back on the line of the
+   buttons beside it. */
+.thread-toolbar:has(> .thread-composer > .thread-recovery-actions) {
+  align-items: center;
+}
+
+.thread-toolbar:has(> .thread-composer > .thread-recovery-actions)
+  > :is(.toolbar-button, .phone-plus) {
+  margin-block-end: 0;
+}
+
 .thread-recovery-options {
   margin: calc(var(--spacing) * -1) calc(var(--spacing) * -2) calc(var(--spacing) * -2)
     calc(var(--spacing) * -3);

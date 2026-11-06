@@ -2844,20 +2844,19 @@ function Theatre({ api }: { api: ApiClient }) {
       pinned={sheets}
       chat={stack}
       lead={
-        stack ? (
-          <PhoneAdd researchReason={researchWait(agent)} />
-        ) : (
-          phone && (
-            <IconButton
-              className="toolbar-button"
-              size={36}
-              round
-              icon="list"
-              label={PANEL_NAME}
-              onClick={() => setActivityOpen(true)}
-            />
-          )
-        )
+        stack
+          ? // Adding goes into the message field, which a conversation opened to read hasn't got.
+            !viewedConversation && <PhoneAdd researchReason={researchWait(agent)} />
+          : phone && (
+              <IconButton
+                className="toolbar-button"
+                size={36}
+                round
+                icon="list"
+                label={PANEL_NAME}
+                onClick={() => setActivityOpen(true)}
+              />
+            )
       }
       trail={
         phone && (

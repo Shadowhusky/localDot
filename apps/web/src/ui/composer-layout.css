@@ -108,6 +108,18 @@
     inset: 0;
   }
 
+  /* Send is the one filled face in the corner: 38 px in its 44 px place, so it keeps the room the
+     card's other controls have and its corner stays concentric with the card's (26 - 7 = 19). */
+  .composer-card[data-layout="pill"] .composer-bar > .composer-send {
+    width: 38px;
+    height: 38px;
+    margin: calc(var(--spacing) * 0.75);
+  }
+
+  .composer-card[data-layout="pill"] .composer-bar > .composer-send::after {
+    inset: -3px;
+  }
+
   .voice-mic {
     position: relative;
     display: inline-flex;
@@ -346,6 +358,10 @@
 
   .composer-card[data-layout="pill"][data-compact] {
     padding-block-start: var(--spacing);
+  }
+
+  .composer-card[data-layout="pill"][data-compact] .composer-bar > .composer-send {
+    margin-inline-start: calc(var(--spacing) * 1.75);
   }
 
   .composer-card[data-layout="pill"][data-compact] > .composer-field {

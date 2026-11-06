@@ -45,10 +45,9 @@ test("one row at rest, the rest on focus, and Attach, Voice and Send stay put", 
   await page.screenshot({ path: test.info().outputPath("rest.png") });
   // All on one line.
   const box = await field.boundingBox();
+  const send = await card.locator(".composer-send").boundingBox();
   expect(
-    Math.abs(
-      (box?.y ?? 0) + (box?.height ?? 0) / 2 - ((before.send?.y ?? 0) + (isPhone(page) ? 22 : 16)),
-    ),
+    Math.abs((box?.y ?? 0) + (box?.height ?? 0) / 2 - ((send?.y ?? 0) + (send?.height ?? 0) / 2)),
   ).toBeLessThanOrEqual(2);
 
   await field.click();
