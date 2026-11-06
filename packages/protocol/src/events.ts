@@ -6,7 +6,9 @@ import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
 import { CredentialRequest } from "./keyd.ts";
+import { ModelOptions } from "./model-options.ts";
 import { PersonaId } from "./personas.ts";
+import { ResultPreview } from "./previews.ts";
 import { TaintSource } from "./purpose.ts";
 import { ResearchBudget, ResearchBudgetData, ResearchSourceData } from "./research.ts";
 import {
@@ -68,11 +70,17 @@ export const SessionStart = event(
     revises: ReviseLink.optional(),
     // The task is research with this budget.
     research: ResearchBudget.optional(),
+    // The dot it starts as; Auto may choose another just after (persona.choice).
+    persona: PersonaId.optional(),
   }),
 );
 export const SessionEnd = event(
   "session.end",
-  z.object({ reason: z.enum(["done", "stopped", "error"]) }),
+  z.object({
+    reason: z.enum(["done", "stopped", "error"]),
+    // The dot it ended as, so its conversation's look needs no read of its whole log.
+    persona: PersonaId.optional(),
+  }),
 );
 // A name for the task's conversation: dot's (`auto`) or the user's, which wins until the user
 // clears it with null.
@@ -113,6 +121,17 @@ export const AgentState = event(
     next: z.string().max(200).optional(),
   }),
 );
+// What to fix when a provider refuses a request, read from the status that leads the refusal's
+// detail ("404: Not Found"). Its other refusals have no one cause.
+export function refusalAdvice(detail: string | undefined): string {
+  const status = /^(\d{3}):/.exec(detail ?? "")?.[1];
+  if (status === "404")
+    return "The provider says the request went to an address or model it doesn't have. Check the API address and model ID in Settings";
+  if (status === "401") return "The provider doesn't accept this key. Check the key in Settings";
+  if (status === "403")
+    return "The provider says this key isn't allowed to do this. Check the key's access to this model in Settings";
+  return "Check the error details, API address, API type and model ID in Settings";
+}
 // Why a task waits on something other than its own Pause, question or approval. The app gives
 // each one a status, a line from dot and the one action that fixes it.
 export const STALL = {
@@ -142,6 +161,12 @@ export const PlanSet = event(
   }),
 );
 export const PlanUpdate = event("plan.update", z.object({ id: z.string(), status: PlanStatus }));
+export const MessageModel = z.strictObject({
+  provider: z.string().max(64),
+  model: z.string().max(128),
+  options: ModelOptions.optional(),
+});
+export type MessageModel = z.infer<typeof MessageModel>;
 export const StepStart = event(
   "step.start",
   z.object({
@@ -149,6 +174,8 @@ export const StepStart = event(
     planItem: z.string().optional(),
     // The model's own line for the user about the call this step starts, as plain text.
     intent: boundedText(INTENT_CHARS).optional(),
+    // The model that was running when the step started.
+    model: z.strictObject({ route: z.string().max(64), model: z.string().max(128) }).optional(),
   }),
 );
 export const StepEnd = event(
@@ -369,6 +396,11 @@ export const MessageUser = event(
     queued: z.boolean().optional(),
     sessionId: z.string().regex(ULID_PATTERN).optional(),
     files: z.array(z.string().max(255)).max(16).optional(),
+    // The model chosen when the message was sent, which its turn runs on.
+    model: MessageModel.optional(),
+    // What delivering it early would cost: a switch ends what dot has running, and a hand-over can
+    // only happen once the task has finished.
+    waitsFor: z.enum(["switch", "handover"]).optional(),
   }),
 );
 // A message its task's Stop left unanswered says so: cancelled, it waits unsent for its writer to
@@ -377,9 +409,16 @@ export const MessageDelivery = event(
   "message.delivery",
   z.object({
     messageId: MessageId,
-    state: z.enum(["sent", "steering", "cancelled", "withdrawn"]),
+    // woke: it ended a wait of dot's. left_running: dot left a command running to read it.
+    state: z.enum(["sent", "steering", "cancelled", "withdrawn", "woke", "left_running"]),
     reason: z.enum(["stopped"]).optional(),
   }),
+);
+// The messages waiting for the task to finish, in the order dot will receive them, after the user
+// moved one. One sent later joins the end.
+export const MessageQueue = event(
+  "message.queue",
+  z.object({ order: z.array(MessageId).max(1000) }),
 );
 export const MessageDelta = event(
   "message.delta",
@@ -391,6 +430,15 @@ export const MessageAssistant = event(
 );
 export const AskRequestField = z.object({
   credential: CredentialRequest.optional(),
+  // connect_app: the app the user is offered to connect, by its connector id.
+  connect: z
+    .object({
+      connector: z.string().max(16),
+      name: z.string().max(40),
+      host: z.string().max(253),
+      reconnect: z.boolean().optional(),
+    })
+    .optional(),
   id: AskFieldId,
   kind: AskFieldKind,
   label: z.string().min(1).max(200),
@@ -495,6 +543,8 @@ export const TaskResult = event(
         }),
       )
       .max(32),
+    // Web apps its turn started or changed, running as it ended.
+    previews: z.array(ResultPreview).max(4).optional(),
   }),
 );
 // Why a delegated agent stopped before it finished. After a usage limit, an error, a restart or the
@@ -634,6 +684,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   CameraHint,
   MessageUser,
   MessageDelivery,
+  MessageQueue,
   MessageDelta,
   MessageAssistant,
   AskRequest,

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ULID_PATTERN } from "./ids.ts";
 import { MouseButton } from "./input.ts";
+import { ScreenName } from "./screens.ts";
 import { boundedText } from "./text.ts";
 
 const Point = z.strictObject({
@@ -52,15 +53,24 @@ export type TakeoverInputRequest = z.infer<typeof TakeoverInputRequest>;
 
 // The user's direct control, one input per message in the order they made it. A button that a
 // `down` pressed stays down only while the stream lasts: the daemon lets go of it when it ends. A
-// key is pressed and released in one message; there is no key down or up to hold one.
+// key is pressed and released in one message; there is no key down or up to hold one. `screen` says
+// which screen an input is for, and without it the one dot is on: the stage shows both as one, and
+// the user's input goes to whichever is under their pointer or in front.
+const screen = { screen: ScreenName.optional() };
 export const ManualStreamInput = z.discriminatedUnion("kind", [
-  Click,
-  Key,
-  z.strictObject({ ...scroll, mods: Mods }).refine(scrolls),
-  Text,
-  z.strictObject({ kind: z.literal("move"), at: Point }),
-  z.strictObject({ kind: z.literal("down"), at: Point, button: MouseButton, mods: Mods }),
-  z.strictObject({ kind: z.literal("up"), at: Point, button: MouseButton }),
+  Click.extend(screen),
+  Key.extend(screen),
+  z.strictObject({ ...scroll, ...screen, mods: Mods }).refine(scrolls),
+  Text.extend(screen),
+  z.strictObject({ kind: z.literal("move"), at: Point, ...screen }),
+  z.strictObject({
+    kind: z.literal("down"),
+    at: Point,
+    button: MouseButton,
+    mods: Mods,
+    ...screen,
+  }),
+  z.strictObject({ kind: z.literal("up"), at: Point, button: MouseButton, ...screen }),
 ]);
 export type ManualStreamInput = z.infer<typeof ManualStreamInput>;
 // The daemon's reply on the stream: how many of the inputs sent so far it has finished with.

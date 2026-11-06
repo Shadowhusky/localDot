@@ -3,6 +3,7 @@ import {
   type Input,
   type LocalDotEvent,
   microsToMs,
+  type PersonaId,
   type Point,
   type PointerPlan,
   type ScreenName,
@@ -136,6 +137,8 @@ export interface SessionModel {
   steps: StepState[];
   plans: PlanSnapshot[];
   subagents: SubagentRun[];
+  // The dot the task works as from each moment: what it started as, then each choice since.
+  dots: { t: number; persona: PersonaId }[];
   said: SaidState[];
   // When the user gave dot a task or a follow-up: each starts a turn of work.
   turns: number[];
@@ -146,6 +149,11 @@ export interface SessionModel {
 
 const OUTPUT_GAP_MS = 120;
 const OUTPUT_CAP = 400;
+
+// The dot the task works as at a moment; none when its record does not say.
+export function personaAt(model: SessionModel, t: number): PersonaId | undefined {
+  return model.dots.findLast((dot) => dot.t <= t)?.persona;
+}
 
 export function emptyModel(): SessionModel {
   return {
@@ -164,6 +172,7 @@ export function emptyModel(): SessionModel {
     steps: [],
     plans: [],
     subagents: [],
+    dots: [],
     said: [],
     turns: [],
     marks: [],
@@ -339,6 +348,10 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
         model.names = { ...model.names, start: e.data.title ?? null };
         model.title = model.names.user ?? model.names.auto ?? model.names.start;
         model.startT = t;
+        if (e.data.persona) model.dots.push({ t, persona: e.data.persona });
+        break;
+      case "persona.choice":
+        model.dots.push({ t, persona: e.data.persona });
         break;
       case "session.title":
         model.names = { ...model.names, [e.data.by]: e.data.title };

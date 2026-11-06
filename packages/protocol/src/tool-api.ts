@@ -21,6 +21,9 @@ import { SessionRun } from "./routines.ts";
 // The brain's tool API (spec "Ports": 4751). The brain calls only these, through its gate, with
 // its own bearer token; everything it may do to the computer or the user goes through them.
 export const TOOL_API_PORT = 4751;
+// A ULID the brain gives each POST and sends again with every retry of it, so the daemon answers
+// a request it has already taken with that request's own answer instead of doing it twice.
+export const TOOL_REQUEST_HEADER = "x-localdot-request";
 
 // How the brain drives the screen with a given model (spec "Catalog"):
 // - anthropic-toolset: Anthropic's computer_toolset_20260801 (Claude 5.x);
@@ -201,6 +204,10 @@ export const TranscriptAppend = z
     message: "append messages or acknowledge the inbox",
   });
 export type TranscriptAppend = z.infer<typeof TranscriptAppend>;
+
+// A record in the transcript where the task's main model changed: what came before was written for
+// another model, so it is sent on without what only that model can read.
+export const MODEL_SWITCH_ENTRY = { type: "localdot-model-switch" } as const;
 
 export const InboxItem = z.object({
   seq: z.number().int().positive(),

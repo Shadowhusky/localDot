@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { ULID_PATTERN } from "./ids.ts";
+import { PersonaId } from "./personas.ts";
+import { LookWearables } from "./task-look.ts";
 
 // The tasks of a conversation the app shows and reads back, newest first.
 export const CONVERSATION_TASKS = 24;
@@ -26,6 +28,9 @@ export type ConversationSnapshot = z.infer<typeof ConversationSnapshot>;
 
 export const ContinueConversation = z.strictObject({ sessionId: SessionId });
 export type ContinueConversation = z.infer<typeof ContinueConversation>;
+// The conversation a task belongs to, by its latest task, and whether a routine runs in it.
+export const ConversationOf = z.strictObject({ sessionId: SessionId, routine: z.boolean() });
+export type ConversationOf = z.infer<typeof ConversationOf>;
 
 export const CONVERSATION_NAME_CHARS = 80;
 // What a conversation is called: one line of plain text.
@@ -53,6 +58,9 @@ export type PinConversation = z.infer<typeof PinConversation>;
 // archived.
 export const ArchiveConversation = z.strictObject({ archived: z.boolean() });
 export type ArchiveConversation = z.infer<typeof ArchiveConversation>;
+// What the user dressed its dot in; null gives it back the look it started with.
+export const LookConversation = z.strictObject({ look: LookWearables.nullable() });
+export type LookConversation = z.infer<typeof LookConversation>;
 
 export const LIVE_ACTIVITY_CHARS = 120;
 // A conversation whose latest task is live: working, waiting for its turn on the computer it shares,
@@ -63,6 +71,8 @@ export const ConversationLive = z.strictObject({
   onScreen: z.boolean(),
   // Its current step, in a line.
   activity: z.string().max(LIVE_ACTIVITY_CHARS).optional(),
+  // The dot it works as now, which its look follows.
+  persona: PersonaId.optional(),
 });
 export type ConversationLive = z.infer<typeof ConversationLive>;
 
@@ -84,6 +94,8 @@ export const ConversationEntry = z.strictObject({
   title: z.string().max(200).nullable(),
   // The first thing the user asked in it.
   said: z.string().max(200).nullable(),
+  // The first line of what dot last said in it.
+  line: z.string().max(200).optional(),
   // When its latest task started.
   startedAt: z.iso.datetime(),
   // How its latest task ended; null while it runs, or when it was cut short.
@@ -92,6 +104,12 @@ export const ConversationEntry = z.strictObject({
   tag: ConversationTag.optional(),
   pinned: z.boolean().optional(),
   archived: z.boolean().optional(),
+  // Its first task, which seeds its look however long it goes on, and the dot its latest task
+  // works as or ended as; while that task is live, `live` says so first.
+  firstTask: SessionId.optional(),
+  persona: PersonaId.optional(),
+  // The look the user chose for it.
+  look: LookWearables.optional(),
 });
 export type ConversationEntry = z.infer<typeof ConversationEntry>;
 
@@ -110,6 +128,7 @@ export const ConversationOrganizedEvent = z.strictObject({
   tag: ConversationTag.nullable(),
   pinned: z.boolean(),
   archived: z.boolean(),
+  look: LookWearables.nullable().optional(),
 });
 export type ConversationOrganizedEvent = z.infer<typeof ConversationOrganizedEvent>;
 

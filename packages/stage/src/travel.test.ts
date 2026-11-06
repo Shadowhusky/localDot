@@ -37,10 +37,10 @@ describe("timing guards and pace", () => {
     expect(
       ["watch", "fast", "instant"].map((s) => intentLeadMs(s as "watch" | "fast" | "instant")),
     ).toEqual([120, 60, 0]);
-    expect(typingPaceMs("watch", 0)).toBe(35);
-    expect(typingPaceMs("watch", 59)).toBe(35);
-    expect(typingPaceMs("watch", 60)).toBe(6);
-    expect(typingPaceMs("fast", 0)).toBe(8);
+    expect(typingPaceMs("watch", 0)).toBe(12);
+    expect(typingPaceMs("watch", 59)).toBe(12);
+    expect(typingPaceMs("watch", 60)).toBe(0);
+    expect(typingPaceMs("fast", 0)).toBe(0);
     expect(typingPaceMs("instant", 0)).toBe(0);
   });
 });

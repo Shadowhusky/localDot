@@ -249,6 +249,28 @@ export const FileVersionsReply = z.strictObject({
 });
 export type FileVersionsReply = z.infer<typeof FileVersionsReply>;
 
+// A file handed over in a conversation, by the task and result that last did. A later task revising
+// it takes over its row, as its versions then list this one. Newest first.
+export const ConversationFile = z.strictObject({
+  sessionId: Ulid,
+  resultId: Ulid,
+  name: z.string().min(1).max(255),
+  path: z.string().max(1024),
+  bytes: z.number().int().nonnegative(),
+  version: z.number().int().min(1).optional(),
+  tMs: z.number().nonnegative(),
+  // Its bytes are still kept. A record outlives its file, which is then listed as gone.
+  available: z.boolean(),
+});
+export type ConversationFile = z.infer<typeof ConversationFile>;
+export const CONVERSATION_FILES = 512;
+export const ConversationFilesReply = z.strictObject({
+  files: z.array(ConversationFile).max(CONVERSATION_FILES),
+  // Older tasks of the conversation aren't in it, or it holds more than these.
+  more: z.boolean(),
+});
+export type ConversationFilesReply = z.infer<typeof ConversationFilesReply>;
+
 export const CompareReply = z.strictObject({
   from: z.number().int().min(1),
   to: z.number().int().min(1),

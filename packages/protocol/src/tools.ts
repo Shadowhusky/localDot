@@ -292,7 +292,7 @@ const recommended = z
 // The id's pattern is checked below, not declared: some providers refuse `pattern` in a schema.
 export const AskField = z.object({
   id: z.string().min(1).max(32),
-  kind: AskFieldKind.exclude(["api_key"]),
+  kind: AskFieldKind.exclude(["api_key", "connect_app"]),
   label: z.string().min(1).max(200),
   hint: z.string().min(1).max(300).optional(),
   // choice and multichoice.

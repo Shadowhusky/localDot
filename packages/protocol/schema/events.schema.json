@@ -201,6 +201,17 @@
                 "minutes"
               ],
               "additionalProperties": false
+            },
+            "persona": {
+              "type": "string",
+              "enum": [
+                "everyday",
+                "coder",
+                "video",
+                "finance",
+                "research",
+                "design"
+              ]
             }
           },
           "required": [
@@ -263,6 +274,17 @@
                 "done",
                 "stopped",
                 "error"
+              ]
+            },
+            "persona": {
+              "type": "string",
+              "enum": [
+                "everyday",
+                "coder",
+                "video",
+                "finance",
+                "research",
+                "design"
               ]
             }
           },
@@ -954,6 +976,24 @@
             "intent": {
               "type": "string",
               "maxLength": 240
+            },
+            "model": {
+              "type": "object",
+              "properties": {
+                "route": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "model": {
+                  "type": "string",
+                  "maxLength": 128
+                }
+              },
+              "required": [
+                "route",
+                "model"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -3852,6 +3892,72 @@
                 "type": "string",
                 "maxLength": 255
               }
+            },
+            "model": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "model": {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                "options": {
+                  "type": "object",
+                  "properties": {
+                    "reasoningEffort": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "ultra",
+                        "enabled"
+                      ]
+                    },
+                    "thinkingBudget": {
+                      "type": "integer",
+                      "minimum": 1024,
+                      "maximum": 15000
+                    },
+                    "verbosity": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high"
+                      ]
+                    },
+                    "speed": {
+                      "type": "string",
+                      "enum": [
+                        "standard",
+                        "fast",
+                        "ultrafast"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "provider",
+                "model"
+              ],
+              "additionalProperties": false
+            },
+            "waitsFor": {
+              "type": "string",
+              "enum": [
+                "switch",
+                "handover"
+              ]
             }
           },
           "required": [
@@ -3919,7 +4025,9 @@
                 "sent",
                 "steering",
                 "cancelled",
-                "withdrawn"
+                "withdrawn",
+                "woke",
+                "left_running"
               ]
             },
             "reason": {
@@ -3932,6 +4040,68 @@
           "required": [
             "messageId",
             "state"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "message.queue"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "order": {
+              "maxItems": 1000,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            }
+          },
+          "required": [
+            "order"
           ],
           "additionalProperties": false
         }
@@ -4308,6 +4478,32 @@
                     ],
                     "additionalProperties": false
                   },
+                  "connect": {
+                    "type": "object",
+                    "properties": {
+                      "connector": {
+                        "type": "string",
+                        "maxLength": 16
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 40
+                      },
+                      "host": {
+                        "type": "string",
+                        "maxLength": 253
+                      },
+                      "reconnect": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "connector",
+                      "name",
+                      "host"
+                    ],
+                    "additionalProperties": false
+                  },
                   "id": {
                     "type": "string",
                     "pattern": "^[a-z][a-z0-9_]{0,31}$"
@@ -4319,6 +4515,7 @@
                       "longtext",
                       "secret",
                       "api_key",
+                      "connect_app",
                       "code",
                       "choice",
                       "multichoice",
@@ -5043,6 +5240,41 @@
                   "name",
                   "path",
                   "bytes"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "previews": {
+              "maxItems": 4,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "port": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "project": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "port",
+                  "url"
                 ],
                 "additionalProperties": false
               }

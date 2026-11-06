@@ -15,6 +15,8 @@ export const PreviewItem = z.strictObject({
   // Where the preview opens, without the one-use secret that signs a device in to it.
   origin: z.string().max(256),
   openedAt: z.string(),
+  // A *.localhost site answers for itself: the port it shares may still be running without it.
+  state: z.enum(["answering", "not-answering"]).optional(),
 });
 export type PreviewItem = z.infer<typeof PreviewItem>;
 
@@ -34,6 +36,12 @@ export const PreviewServer = z.strictObject({
   state: PreviewServerState,
   // When it last answered.
   seenAt: z.string(),
+  // The folder it runs in, when the computer can tell.
+  project: z.string().max(128).optional(),
+  // A task of this conversation started it. Absent when the computer can't tell who did.
+  here: z.boolean().optional(),
+  // The same app has been started again since, and this copy is still running.
+  older: z.literal(true).optional(),
 });
 export type PreviewServer = z.infer<typeof PreviewServer>;
 
@@ -48,6 +56,17 @@ export const PreviewsStatus = z.strictObject({
   servers: z.array(PreviewServer).max(256),
 });
 export type PreviewsStatus = z.infer<typeof PreviewsStatus>;
+
+// A preview a reply comes with: a web app its turn started or changed, running as the turn ended.
+export const ResultPreview = z.strictObject({
+  port: z.number().int().min(1).max(65535),
+  url: z.string().max(256),
+  title: z.string().max(120).optional(),
+  project: z.string().max(128).optional(),
+  // Its program: another program on the port later is another server.
+  name: z.string().max(64).optional(),
+});
+export type ResultPreview = z.infer<typeof ResultPreview>;
 
 // POST /api/sessions/:id/previews: an address dot printed, or a listening server by its port.
 export const PreviewRequest = z.union([
@@ -117,10 +136,16 @@ export const PREVIEW_PREFACE = "LOCALDOT-PREVIEW/1";
 export const PREVIEW_PREFACE_BYTES = 512;
 export const PreviewNo = z.enum(["unauthorized", "bad-request", "refused-port", "unreachable"]);
 export type PreviewNo = z.infer<typeof PreviewNo>;
-export type PreviewCommand = { open: string } | { list: true };
+export type PreviewCommand = { open: string } | { list: true } | { stop: number };
 
 export function previewPreface(token: string, command: PreviewCommand): string {
-  return `${PREVIEW_PREFACE} ${token} ${"open" in command ? `OPEN ${command.open}` : "LIST"}\n`;
+  const verb =
+    "open" in command
+      ? `OPEN ${command.open}`
+      : "stop" in command
+        ? `STOP ${command.stop}`
+        : "LIST";
+  return `${PREVIEW_PREFACE} ${token} ${verb}\n`;
 }
 
 const DIAL = /^(\[::1\]|[a-z0-9.-]{1,253}):(\d{1,5})$/;
@@ -131,6 +156,10 @@ export function parsePreviewPreface(
   const [version, token, verb, dial, ...rest] = line.split(" ");
   if (version !== PREVIEW_PREFACE || !token || rest.length) return undefined;
   if (verb === "LIST" && dial === undefined) return { token, command: { list: true } };
+  if (verb === "STOP") {
+    const stop = /^\d{1,5}$/.test(dial ?? "") ? Number(dial) : 0;
+    return stop >= 1 && stop <= 65535 ? { token, command: { stop } } : undefined;
+  }
   const m = verb === "OPEN" && dial ? DIAL.exec(dial) : null;
   const port = Number(m?.[2]);
   if (!m || !Number.isInteger(port) || port < 1 || port > 65535) return undefined;
@@ -143,6 +172,16 @@ export const PreviewListener = z.strictObject({
   // The address it listens on: 0.0.0.0, ::, a loopback address or the computer's own.
   address: z.string().max(64),
   name: z.string().max(64).optional(),
+  // The task whose shell command started it, inherited through its environment. A program the user
+  // started has none.
+  task: z.string().max(64).optional(),
+  // The folder it runs in, ~/ under the computer's home.
+  project: z.string().max(256).optional(),
+  // Its start and the processor time it has used so far, in the computer's clock ticks.
+  started: z.number().int().nonnegative().optional(),
+  cpu: z.number().int().nonnegative().optional(),
+  // Connections open to it now, from a browser in the computer or a device's preview.
+  clients: z.number().int().nonnegative().optional(),
 });
 export type PreviewListener = z.infer<typeof PreviewListener>;
 export const PreviewListing = z.strictObject({

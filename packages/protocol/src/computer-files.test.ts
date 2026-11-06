@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computerFileName, isComputerPath } from "./computer-files.ts";
-import { splitAttachments, withAttachments } from "./user-uploads.ts";
+import { messageName, splitAttachments, withAttachments } from "./user-uploads.ts";
 
 describe("paths of files on dot's computer", () => {
   it("takes a path under the home folder as dot's tools name it", () => {
@@ -37,5 +37,9 @@ describe("paths of files on dot's computer", () => {
       body: "Look",
       files: paths,
     });
+    expect(splitAttachments(withAttachments("", paths))).toEqual({ body: "", files: paths });
+    expect(messageName(withAttachments("Look", paths))).toBe("Look");
+    expect(messageName(withAttachments("", paths))).toBe(paths[0]?.split("/").at(-1));
+    expect(messageName("Just words")).toBe("Just words");
   });
 });

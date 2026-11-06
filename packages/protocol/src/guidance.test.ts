@@ -263,6 +263,15 @@ it("tells every harness the app adds Other, what required means and how a skip c
     expect(ASK_FORM_GUIDANCE, rule).toContain(rule);
 });
 
+// Evidence: dot asked for a phone number with its country code, was given a UK number written
+// the UK way, and then asked "Is that a UK number (+44)?".
+it("tells every harness to ask once and take an answer as given", () => {
+  expect(ASK_FORM_GUIDANCE).toContain("Ask once, with every field you need.");
+  expect(ASK_FORM_GUIDANCE).toContain(
+    "Take an answer as given: never ask to confirm what it states or plainly implies",
+  );
+});
+
 it("distinguishes routine visible verification from evidence-based manual handoff", () => {
   for (const mode of ["none", "batch", "calls"] as const) {
     const rules = workingRules(mode);

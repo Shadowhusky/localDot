@@ -123,6 +123,35 @@ export function signInUrl(host: string): string {
   return knownSignIn(host)?.url ?? `https://${host}/`;
 }
 
+// Sign-in pages that turn away a browser under software control, before any password: only the
+// browser without agent control gets through them.
+const OWN_BROWSER_SIGN_INS: ReadonlySet<string> = new Set(["accounts.google.com"]);
+
+export function signInNeedsOwnBrowser(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "https:" && OWN_BROWSER_SIGN_INS.has(hostname);
+  } catch {
+    return false;
+  }
+}
+
+// The origins whose saved login may be offered on this page, nearest first: the page's own, its
+// www twin, and for a site listed above the other hosts we know serve its sign-in. Any other
+// subdomain is another site: a login never follows a page there.
+export function loginOrigins(origin: string): readonly string[] {
+  const { hostname, port } = new URL(origin);
+  const found = new Set([origin]);
+  if (port) return [...found];
+  const bare = hostname.replace(/^www\./u, "");
+  const add = (host: string) => found.add(`https://${host}`);
+  add(bare);
+  add(`www.${bare}`);
+  const known = KNOWN_SIGN_INS.find((entry) => entry.site === bare || entry.hosts.includes(bare));
+  if (known) for (const host of [known.site, `www.${known.site}`, ...known.hosts]) add(host);
+  return [...found];
+}
+
 const SIGN_IN_PATH =
   /\/(?:log-?in|sign-?in|sign_in|signon|auth|authorize|sso|session|accounts\/login)(?:[/?#.]|$)/iu;
 const SIGN_IN_HOST = /^(?:login|signin|auth|accounts?|sso|id)\./u;

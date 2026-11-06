@@ -20,15 +20,28 @@ const controlIdentity = {
   requestId: schema.string().regex(ULID_PATTERN),
 };
 
+// Tasks hold the browser side by side, each with its own window; the user's control revokes them
+// all. `front` is the task whose window the user takes the browser in. A task at rest asks for the
+// user's control only `alone`: with other tasks at work it just lets go of its own grant, and the
+// reply says it still is the agents'. A release ends one task's grant: with `keep` its window waits
+// for the task to come back to the browser, without it the task is over and its window is free.
 export const BrowserControlRequest = schema.discriminatedUnion("holder", [
   schema.strictObject({
     ...controlIdentity,
     holder: schema.literal("user"),
+    front: schema.string().regex(ULID_PATTERN).optional(),
+    alone: schema.literal(true).optional(),
   }),
   schema.strictObject({
     ...controlIdentity,
     holder: schema.literal("agent"),
     owner: BrowserAgentOwner,
+  }),
+  schema.strictObject({
+    ...controlIdentity,
+    holder: schema.literal("release"),
+    owner: BrowserAgentOwner,
+    keep: schema.literal(true).optional(),
   }),
 ]);
 export type BrowserControlRequest = schema.infer<typeof BrowserControlRequest>;
@@ -38,6 +51,22 @@ export const BrowserActionPermit = schema.strictObject({
   owner: BrowserAgentOwner,
 });
 export type BrowserActionPermit = schema.infer<typeof BrowserActionPermit>;
+
+// A task's window in front, for its turn on the browser's one display. `continues` names the task
+// whose window it takes up when it has none of its own, and `fresh` that it is a new conversation's
+// and may take a finished task's window; `opened` says it got a new, blank one.
+export const BrowserWindowEntry = schema.strictObject({
+  permit: BrowserActionPermit,
+  continues: schema.string().regex(ULID_PATTERN).optional(),
+  fresh: schema.literal(true).optional(),
+});
+export type BrowserWindowEntry = schema.infer<typeof BrowserWindowEntry>;
+export const BrowserWindowTab = schema.strictObject({ id: schema.uuid(), ready: schema.boolean() });
+export const BrowserWindowReply = schema.strictObject({
+  tabs: schema.array(BrowserWindowTab).max(256),
+  opened: schema.boolean(),
+});
+export type BrowserWindowReply = schema.infer<typeof BrowserWindowReply>;
 
 // Only the daemon retains this receipt from a completed user-control transition.
 // It carries no model owner and cannot be used by agent action endpoints.

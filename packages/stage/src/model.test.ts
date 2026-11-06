@@ -4,6 +4,7 @@ import {
   emptyModel,
   foldEvents,
   observeAt,
+  personaAt,
   planAt,
   startedCount,
   stepAt,
@@ -272,6 +273,29 @@ describe("tool steps", () => {
     ]);
     expect(m.steps[0]).toMatchObject({ tool: "shell", title: "npm test", outputs: [20, 200, 400] });
     expect(m.marks.map((mark) => mark.label)).toContain("npm test");
+  });
+});
+
+describe("the dot a task works as", () => {
+  it("starts as its session.start says, and follows each choice from when it was made", () => {
+    const start = ev("session.start", 0, {
+      screen: { w: 1280, h: 800, scale: 2 },
+      os: "linux",
+      persona: "everyday",
+    });
+    const m = foldEvents(emptyModel(), [
+      start,
+      ev("persona.choice", 1500, { persona: "design", by: "auto", reason: "A poster" }),
+      ev("persona.choice", 9000, { persona: "coder", by: "user" }),
+    ]);
+    expect(personaAt(m, 100)).toBe("everyday");
+    expect(personaAt(m, 1500)).toBe("design");
+    expect(personaAt(m, 20_000)).toBe("coder");
+  });
+
+  it("does not say when the task's record does not", () => {
+    const start = ev("session.start", 0, { screen: { w: 1280, h: 800, scale: 2 }, os: "linux" });
+    expect(personaAt(foldEvents(emptyModel(), [start]), 100)).toBeUndefined();
   });
 });
 

@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   AlwaysOption,
   BootConfig,
+  CLIENT_METADATA_URL,
+  CONNECTOR_CALLBACK_PATH,
   CONNECTOR_CATALOG,
   ConnectorConfig,
   ConnectorDraft,
@@ -18,6 +21,37 @@ import {
   TOOL_NAMES,
   toolAccess,
 } from "./index.ts";
+
+describe("who localDot is to an app's sign-in service", () => {
+  const document = JSON.parse(
+    readFileSync(
+      new URL("../../../apps/site/public/oauth/client-metadata.json", import.meta.url),
+      "utf8",
+    ),
+  ) as Record<string, unknown> & { redirect_uris: string[] };
+
+  it("is a document at the address it names, as the specification requires", () => {
+    expect(document.client_id).toBe(CLIENT_METADATA_URL);
+    const { protocol, pathname } = new URL(CLIENT_METADATA_URL);
+    expect(protocol).toBe("https:");
+    expect(pathname).not.toBe("/");
+    expect(document.client_name).toBe("localDot");
+  });
+
+  it("asks to refresh, as a public client, and comes back only to this computer", () => {
+    expect(document.grant_types).toEqual(["authorization_code", "refresh_token"]);
+    expect(document.response_types).toEqual(["code"]);
+    expect(document.token_endpoint_auth_method).toBe("none");
+    expect(document.redirect_uris.map((uri) => new URL(uri).hostname).sort()).toEqual([
+      "127.0.0.1",
+      "localhost",
+    ]);
+    for (const uri of document.redirect_uris) {
+      const { protocol, pathname, port } = new URL(uri);
+      expect([protocol, pathname, port]).toEqual(["http:", CONNECTOR_CALLBACK_PATH, ""]);
+    }
+  });
+});
 
 const remote = (url: string) => ({
   kind: "remote" as const,
