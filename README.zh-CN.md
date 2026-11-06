@@ -14,11 +14,9 @@
 
 <p align="center"><a href="https://localdot.dev/film/localdot-film-zh.mp4">▶ 看看这段 37 秒的短片</a></p>
 
-<!-- update-video: once docs/readme/update.jpg and the video are live, delete this line and the matching one below.
-<a href="https://localdot.dev/film/localdot-update.mp4"><img width="100%" src="docs/readme/update.jpg" alt="localDot 这次更新了什么"></a>
+<a href="https://localdot.dev/film/localdot-update-zh.mp4"><img width="100%" src="docs/readme/update-zh.jpg" alt="localDot 这次更新了什么"></a>
 
-<p align="center"><a href="https://localdot.dev/film/localdot-update.mp4">▶ 看看这次更新了什么</a></p>
-update-video -->
+<p align="center"><a href="https://localdot.dev/film/localdot-update-zh.mp4">▶ 看看这次更新了什么</a></p>
 
 dot 在你的电脑里有一台自己的小电脑：一个跑在 Docker 里的 Linux 桌面，浏览器、终端和常用软件都有。你交代的事，它来帮你做。你可以在电脑或手机的浏览器里看着它干活，随时接管，每个任务都会完整录下来。
 

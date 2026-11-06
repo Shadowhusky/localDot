@@ -14,11 +14,9 @@
 
 <p align="center"><a href="https://localdot.dev/film/localdot-film.mp4">▶ Watch the 37-second film</a></p>
 
-<!-- update-video: once docs/readme/update.jpg and the video are live, delete this line and the matching one below.
 <a href="https://localdot.dev/film/localdot-update.mp4"><img width="100%" src="docs/readme/update.jpg" alt="What's new in localDot"></a>
 
 <p align="center"><a href="https://localdot.dev/film/localdot-update.mp4">▶ See what's new</a></p>
-update-video -->
 
 dot does real work on a computer of its own, right on yours: a Linux desktop with a browser, a
 terminal and everyday apps, running in Docker. You watch from your browser or your phone, step in
