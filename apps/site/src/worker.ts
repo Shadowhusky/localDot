@@ -1,7 +1,7 @@
 import { countInBackground } from "../../../packages/analytics/src/edge.ts";
 
 export const OWNED_VIDEO =
-  /^\/(demos\/[a-z0-9-]+\/(theatre(-sm)?|card-[a-z]+)|film\/localdot-film(-zh)?(-720)?)\.mp4$/;
+  /^\/(demos\/[a-z0-9-]+\/(theatre(-sm)?|card-[a-z]+)|film\/localdot-(film|update)(-zh)?(-720)?)\.mp4$/;
 // The most read into memory for a range when no length is known.
 const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
 // The build's record of each owned video's length (scripts/media-lengths.mjs).

@@ -4,6 +4,7 @@ export type ChapterName =
   | "app"
   | "out"
   | "watch"
+  | "views"
   | "models"
   | "replay"
   | "dots"

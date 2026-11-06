@@ -4,7 +4,7 @@ const root = new URL("../", import.meta.url);
 const output = new URL("dist-holding/", root);
 
 await rm(output, { recursive: true, force: true });
-await mkdir(output, { recursive: true });
+await mkdir(new URL("oauth/", output), { recursive: true });
 
 // Explicitly allow only holding-page files. The full website stays in the local Vite build.
 const files = [
@@ -15,6 +15,8 @@ const files = [
   ["holding/robots.txt", "robots.txt"],
   ["public/chamber.webp", "chamber.webp"],
   ["public/favicon.svg", "favicon.svg"],
+  // Who localDot is to the apps it connects: their sign-in services fetch it, whatever the site shows.
+  ["public/oauth/client-metadata.json", "oauth/client-metadata.json"],
 ];
 
 await Promise.all(

@@ -1,4 +1,4 @@
-import { Wearable } from "@localdot/protocol";
+import type { Wearable } from "@localdot/protocol";
 import {
   type Camera,
   type Group,
@@ -72,11 +72,25 @@ function clearGlass(scene: Group): Group {
   return scene;
 }
 
-// Every wearable's model and shade, loaded once.
+// The wearables with a model (tools/dot-plates/export_glb.py); the app's plates go further.
+const MODELLED: readonly Wearable[] = [
+  "hoodie",
+  "cap",
+  "sunglasses",
+  "bow",
+  "star-pin",
+  "headphones",
+  "mustache",
+  "suit",
+  "mortarboard",
+  "round-glasses",
+  "beret",
+  "scarf",
+];
+
+// Every model and shade, loaded once.
 export function loadWardrobe(): Promise<[Object3D | null, Texture | null][]> {
-  return Promise.all(
-    Wearable.options.map((name) => Promise.all([wearable(name), wearableShadow(name)])),
-  );
+  return Promise.all(MODELLED.map((name) => Promise.all([wearable(name), wearableShadow(name)])));
 }
 
 // Loads every wearable and readies its textures and shaders for `target`'s lights, so a dot putting

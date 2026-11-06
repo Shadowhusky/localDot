@@ -27,9 +27,20 @@ import { ROLE_ORDER, ROLES_FROM, ROLES_TO, WASH } from "../story/content.ts";
 import type { ChapterName, Director } from "../story/director.ts";
 import { pinned, roleAt } from "../story/roles.ts";
 import { shotAt } from "../story/shot-at.ts";
-import { type Shot, TALL, WIDE } from "../story/shots.ts";
+import {
+  CREW_LOOKS,
+  CREW_TALL,
+  CREW_WIDE,
+  PHONE_STILL_AT,
+  PHONE_TALL,
+  PHONE_WIDE,
+  type Shot,
+  TALL,
+  WIDE,
+} from "../story/shots.ts";
 import { ease, mix, span } from "../story/tracks.ts";
 import { Cards } from "./cards.ts";
+import { Phone, type PhonePose, phonePose } from "./phone.ts";
 import { Poke } from "./poke.ts";
 import { type Point2, quadCss } from "./quad.ts";
 import { Ring } from "./ring.ts";
@@ -87,6 +98,8 @@ export class World {
   private readonly beats: Beats;
   private readonly ring: Ring | null;
   private readonly cards: Cards | null;
+  private readonly phone: Phone | null;
+  private phonePose: PhonePose | null = null;
   private running = true;
   private firstFrame: (() => void) | null = null;
   private introShown = "";
@@ -132,6 +145,8 @@ export class World {
       video.src = video.dataset.src ?? "";
     const cards = stage.querySelector<HTMLElement>(".cards");
     this.cards = cards ? new Cards(cards) : null;
+    const phone = stage.querySelector<HTMLElement>(".site-phone");
+    this.phone = phone ? new Phone(phone) : null;
     this.beats.onShow = (text) => {
       if (text) this.dot.say(talkMs(text));
     };
@@ -179,6 +194,7 @@ export class World {
     this.camera.aspect = this.w / this.h;
     this.camera.updateProjectionMatrix();
     this.cards?.resize();
+    this.phone?.resize();
     this.measureWindow();
   }
 
@@ -273,7 +289,7 @@ export class World {
     this.dot.group.scale.setScalar(placed.radius);
     this.dot.group.lookAt(this.camera.position);
     this.dot.tip = perspectiveTip(placed.radius, this.camera.position.distanceTo(placed.dotAt));
-    const { lift, squash } = this.dress();
+    const { lift, squash } = this.dress(placed.out);
     if (lift || squash) {
       const r = placed.radius;
       this.dot.group.position.y += (lift - squash) * r;
@@ -283,13 +299,14 @@ export class World {
     const radiusPx = placed.radius / this.worldPerPx(this.camera.position.distanceTo(placed.dotAt));
     this.dot.update(radiusPx * this.renderer.getPixelRatio());
     // Once the visitor is into the story, every outfit is readied before the dots need one.
-    if (!this.warmed && this.director.local("watch") > 0) {
+    if (!this.warmed && (this.director.local("watch") > 0 || heroDot.look)) {
       this.warmed = true;
       void warmWardrobe(this.renderer, this.camera, this.scene);
     }
     const [x, y] = this.toStage(placed.dotAt);
     this.poke?.place(x, y, radiusPx, this.w, placed.out > 0.9);
     this.lineUp(portrait, placed);
+    this.crew(portrait, placed);
     this.beats.update();
     this.extras(portrait);
     this.chrome(placed);
@@ -412,10 +429,11 @@ export class World {
     }
   }
 
-  // What dot wears: nothing until the Dots chapter, each dot in turn there, a star pin after it while
-  // it talks about open source, and the visitor's accessory whenever one is chosen. On the turntable each dot arrives with a spin-jump, changing outfit facing away;
-  // returns how high that has dot and how squashed.
-  private dress(): { lift: number; squash: number } {
+  // What dot wears: the look of the task on show while it is docked, then nothing until the Dots
+  // chapter, each dot in turn there, a star pin after it while it talks about open source, and the
+  // visitor's accessory whenever one is chosen. On the turntable each dot arrives with a spin-jump,
+  // changing outfit facing away; returns how high that has dot and how squashed.
+  private dress(out: number): { lift: number; squash: number } {
     const dots = this.director.local("dots");
     const turntable = dots > 0 && dots < 1;
     let persona: PersonaId = "everyday";
@@ -443,7 +461,7 @@ export class World {
     if (pin && !this.pinWas) this.dot.hop();
     this.pinWas = pin;
     const worn = outfit(this.dressed, site.accessory);
-    this.dot.wear(pin ? pinned(worn) : worn);
+    this.dot.wear(out < 0.05 && heroDot.look ? heroDot.look : pin ? pinned(worn) : worn);
     return { lift, squash };
   }
 
@@ -472,7 +490,17 @@ export class World {
       this.dot.setFocus(this.heroGaze());
     } else {
       const centre = this.toStage(this.dot.group.position);
-      if ((this.active("watch") || this.active("replay")) && site.control !== "you") {
+      const watching =
+        this.active("watch") ||
+        this.active("replay") ||
+        (this.active("views") && this.director.local("views") > 0.42);
+      if (this.active("views") && !watching && this.phonePose) {
+        // It looks up at the phone beside it.
+        this.dot.setState("watching");
+        this.dot.setFocus(
+          gazeTo(this.phonePose.x * this.w - centre[0], this.phonePose.y * this.h - centre[1]),
+        );
+      } else if (watching && site.control !== "you") {
         // It watches its own computer work.
         const monitor = this.toStage(this.onPlane(this.win.w * 0.36, this.win.h * 0.42));
         this.dot.setState("watching");
@@ -530,8 +558,45 @@ export class World {
     });
   }
 
-  // The ring of models, the export clips, and the rewind.
+  // Several at once: a row of dots at the foot of the window, each dressed as its own task, watching.
+  // The line-up's dots, which the Dots chapter has to itself.
+  private crew(portrait: boolean, placed: Placed): void {
+    const views = this.director.local("views");
+    const shown = span(views, 0.7, 0.8) * (1 - span(views, 0.96, 1));
+    if (shown <= 0) return;
+    const slots = portrait ? CREW_TALL : CREW_WIDE;
+    const distance = this.camera.position.distanceTo(placed.dotAt);
+    const short = Math.min(this.w, this.h);
+    const monitor = this.toStage(this.onPlane(this.win.w * 0.36, this.win.h * 0.42));
+    for (const [i, slot] of slots.entries()) {
+      const dot = this.lineup[i] as Dot3D;
+      const pop = this.reduced ? 1 : ease.out(span(shown, i * 0.14, i * 0.14 + 0.5));
+      dot.group.visible = pop > 0.001;
+      dot.group.position.copy(
+        this.atScreen(placed.pose, this.w * slot.x, this.h * slot.y, distance),
+      );
+      const radius = (portrait ? 0.075 : 0.045) * short * this.worldPerPx(distance);
+      dot.group.scale.setScalar(radius * pop);
+      dot.group.lookAt(this.camera.position);
+      dot.tip = perspectiveTip(radius, distance);
+      dot.wear(CREW_LOOKS[i] ?? []);
+      dot.setState("watching");
+      const centre = this.toStage(dot.group.position);
+      dot.setFocus(gazeTo(monitor[0] - centre[0], monitor[1] - centre[1]));
+      dot.update((dot.group.scale.x / this.worldPerPx(distance)) * this.renderer.getPixelRatio());
+    }
+  }
+
+  // The phone that shows Chat, the ring of models, the export clips, and the rewind.
   private extras(portrait: boolean): void {
+    const views = this.director.local("views");
+    const nearViews = views > -0.25 && views < 1.02;
+    if (nearViews !== site.phone) setSite({ phone: nearViews });
+    this.phonePose =
+      views > 0 && views < 1
+        ? phonePose(portrait ? PHONE_TALL : PHONE_WIDE, this.reduced ? PHONE_STILL_AT : views)
+        : null;
+    this.phone?.update(this.phonePose, { w: this.w, h: this.h });
     const models = this.director.local("models");
     this.ring?.update(
       Math.min(span(models, 0.02, 0.16), 1 - span(models, 0.86, 0.98)),

@@ -416,12 +416,14 @@ body {
 }
 
 :is(.no-js, .no-gl) .cards,
-:is(.no-js, .no-gl) .ring {
+:is(.no-js, .no-gl) .ring,
+:is(.no-js, .no-gl) .site-phone {
   display: none;
 }
 
 /* Words beside dot's monitor on the left; centred under dot when it is centre stage. */
 [data-chapter="watch"] .beat,
+[data-chapter="views"] .beat,
 [data-chapter="replay"] .beat,
 [data-chapter="yours"] .beat {
   left: 6vw;
@@ -465,8 +467,21 @@ body {
   bottom: 4vh;
 }
 
-[data-chapter="out"] .site-button {
+.film-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
   margin-top: 18px;
+}
+
+.film-links .site-button {
+  margin-top: 0;
+}
+
+.film-links .site-button-quiet {
+  background: rgb(255 255 255 / 0.12);
+  color: var(--color-fg-1);
 }
 
 .roles,
@@ -684,6 +699,10 @@ body {
     font-size: 18px;
   }
 
+  .film-links {
+    justify-content: flex-start;
+  }
+
   .site-segments span {
     min-width: 0;
     padding: 0 12px;
@@ -734,6 +753,7 @@ body {
 
 @media (height < 500px) and (width >= 700px) {
   [data-chapter="watch"] .beat,
+  [data-chapter="views"] .beat,
   [data-chapter="replay"] .beat,
   [data-chapter="yours"] .beat,
   [data-chapter="install"] .beat {
@@ -747,6 +767,7 @@ body {
 
   /* Clear of dot's monitor and of dot beside it. */
   [data-chapter="watch"] .beat,
+  [data-chapter="views"] .beat,
   [data-chapter="replay"] .beat {
     width: 27vw;
   }

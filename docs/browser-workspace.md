@@ -6,17 +6,40 @@ of these controls.
 For implementation contracts and the comparison with other agents, see
 [Agent capability discovery and recovery](agent-runtime.md).
 
-## Two screens for one task
+## One screen for one task
 
-The isolated computer has a **Desktop** and a separate **Web browser**. dot uses the web browser
-for anything online: opening a public web page switches the screen to it. The desktop's own
-Chromium is for local files and pages served on the desktop itself, such as a site dot is
-building on localhost. The label above the live stage identifies the screen receiving the
-current actions. Watch follows the latest confirmed screen selection, whichever arrives first
-from the task events or live status. Renewing control on the same browser keeps its picture
-visible while input waits for fresh status. A browser connection error does not redirect its input to the desktop or open a temporary
-browser. Retrying uses the same saved browser profile, so a connection failure does not ask
+The isolated computer shows one screen. Underneath it has a **desktop** and a separate **web
+browser**, each in its own container with its own stream, and the stage draws the browser as a
+window on the desktop: under the desktop's menu bar, as large as its shape allows, with a slim margin
+of desktop each side. dot uses the web browser for anything online: opening a public web page brings
+that window forward. The desktop's own Chromium is for local files and pages served on the desktop
+itself, such as a site dot is building on localhost.
+
+The window follows dot: it comes forward when dot works in the web browser and goes back when dot
+works on the desktop, by the latest confirmed screen selection, whichever arrives first from the task
+events or live status. There is no switch between the two. The desktop's menu bar has a **Web
+browser** entry, as a taskbar does, that minimises the window or shows it again; what you choose
+holds until dot next moves or you hand the computer back. Behind the desktop the window is wholly
+covered, so the entry is how to bring it back. Renewing control on the same browser keeps its picture
+visible while input waits for fresh status. A browser connection error does not redirect its input to the desktop or open a
+temporary browser. Retrying uses the same saved browser profile, so a connection failure does not ask
 you to sign in again.
+
+While you hold the computer, input goes to what is under your pointer: the window to the browser and
+the menu bar above it to the desktop. A click on the menu bar brings the desktop forward once it lets
+go, and so does a click on the desktop in a margin beside the window, which goes no further, as a
+click on a window behind does. Keys go to whichever is in front. On a phone the menu bar and margins
+are too thin to aim at, so they take no taps, and the entry is a round button hanging from the bar.
+dot's own screen doesn't change with what you bring forward: its screenshots and coordinates stay that screen's own. Reaching the browser
+while dot is on the desktop takes it for you at your first input there, as a takeover on the browser
+does, and the next task to use it starts by clearing your selections and reloading pages holding
+secrets.
+
+Some things stay apart, because the browser's sign-ins depend on it: nothing can be dragged between
+the browser and a desktop app (a drag stops at the edge of its own side), the two don't stack with
+each other (one or the other is in front), and text copied on one side can't be pasted on the other.
+The app says so the first time you cross over or drag past the edge. [The design](superpowers/specs/2026-11-04-parallel-browser-windows.md#phase-3-one-screen)
+says why, and what it costs.
 
 The web browser starts with the computer and stays running between tasks, so switching to it is
 immediate. If it is still starting, dot's switch waits for it rather than failing. A local address
@@ -25,7 +48,17 @@ such as localhost opens on the desktop, and the screen switches back to it.
 A new conversation's task first sees the web browser on a blank tab; the page the task before it
 left stays open, as it was, in a tab behind. A task that continues a conversation carries on from
 the page in front. Opening the blank tab reuses one already open, closes any other blank tab, and
-keeps at most four tabs, closing the oldest.
+keeps at most four tabs in its window, closing the oldest.
+
+Several tasks can use the web browser at once, in the same signed-in sites. It stays one browser
+with one profile, and each task has its own window, so signing out in one task signs out both. A
+task can only see and act in its own window. Tasks act in turns, a moment each, and the stage shows
+whichever task acted last; a task's window keeps working behind the others, and a page loading holds
+nobody up. What a task copied does not survive another task's turn, and a menu that closes when its
+window loses focus closes then too. **Sign in without agent control** and restarting the browser
+relaunch it for everyone: the other tasks wait, then hear that their window was closed and open their
+page again. Replay shows each task only its own window, with the time another task was on screen
+marked.
 
 The web browser recovers by itself and always keeps its saved sign-ins. A tab whose page crashes
 (for example, out of memory) is reloaded, up to three times a minute. If Chromium itself exits,
@@ -57,7 +90,7 @@ An agent page read brings the identified desktop browser window forward if anoth
 it, and checks focus before returning its content. Passive account/page inventory does not
 move windows. Stop and user control cancel the reveal along with the read.
 
-The status above the stage follows the selected screen's stream. A hidden desktop stream does
+The status above the stage follows the stream of what is in front. A hidden desktop stream does
 not make a live web browser say **Reconnecting**. Computer lifecycle problems and Stop still
 have priority, and their controls continue to operate on the computer.
 
@@ -129,7 +162,34 @@ Two-factor authentication, security challenges and forms the protected
 path cannot verify may require your input or a clearly explained takeover.
 
 Saved passwords and browser cookies are separate. **Sign out** clears browser sign-in state;
-it does not delete the saved password in keyd. There is not yet a saved-password management UI.
+it does not delete the saved password in keyd.
+
+### Saved logins
+
+**Settings → Keys → Saved logins** lists each saved login by site and account, with Add, Edit and
+Remove. A password is never shown again: Edit changes the account, or replaces the password if you
+type a new one. What you enter is sealed in the page to keyd, so the daemon relays ciphertext.
+
+**Import** takes a CSV export from Chrome, 1Password, Bitwarden or Apple Passwords (other managers
+with the usual column names work too), up to 4 MiB and 3,000 logins. The whole file is sealed in the
+page and only keyd reads it. It keeps each login's site, account and password and drops the rest,
+keeps a login already saved for a site, and answers in counts and line numbers, never a cell. Nothing
+stores the file, so delete your copy: the app says so before and after. One login is kept per site, so
+a second account for a site is left out and counted. HTTP sites and app addresses are left out too.
+
+A login added here or imported is filled only after your tap, once a task: dot's `ask_user` for a
+password shows **Sign in**, naming the site and nothing about the account. While you hold the web
+browser, the panel under the screen offers **Sign in as …** on a site with a saved login, covering a
+page that asks for the account first. A password you gave dot in a private form on that very site
+is still reused without a tap, as before; saved again in Settings or imported over, it starts to ask.
+Only the owner's tap counts: a shared link's guest is refused.
+
+A login fills on its own exact origin, on that origin's `www` twin, and for a site in
+`KNOWN_SIGN_INS` on the sign-in hosts listed there. The twin and listed hosts always take a tap. Any
+other subdomain or lookalike is another site: nothing is offered and no password leaves keyd. browserd
+checks the page's real origin before every character, so a page that navigates away mid-fill gets
+no more of it. Saved logins can't be filled in sign-in mode, because nothing is connected to the page
+to check which site it is; type or paste there.
 
 **Settings → Accounts** lists the sites with stored sign-ins, grouped by site, with **Sign out**
 for one site (its cookies, including partitioned ones, and the saved data of the hosts they were
@@ -157,6 +217,14 @@ When the task requests manual control, wait until the controls are available, th
 click straight into the live computer. Complete sign-in or verification, then choose **Return
 control to dot**. The sign-in stays for later tasks. The optional hand-back
 note is part of the task, so put instructions there rather than passwords or verification codes.
+
+Google's sign-in page goes straight to **Sign in without agent control** when you hold the browser
+there, and dot is told to hand over rather than type into it, so the "This browser or app may not be
+secure" error doesn't come first. See [Browser environment](browser-environment.md).
+
+Passkeys and security keys can't finish in this browser: its container has no Bluetooth, USB or device
+authenticator. Choose the site's password or code option; if it has none, you can say so to dot. See
+[Browser environment](browser-environment.md) for what was measured.
 
 Takeover intervals are excluded from task recording. The browser also protects private form
 fields from agent observations. These protections do not prevent a website from displaying
@@ -197,13 +265,17 @@ on yet go back into your composer and leave the conversation. It does not leave 
 task holding the computer, shut down the desktop, or discard its browser. The next conversation reuses that computer. Sending a message during user control hands control back and steers the task immediately. The CLI emergency Stop and Stop computer remain separate controls. Do not treat an
 interrupted upload or release as proof that the receiving side saw no bytes.
 
-Replay records both screens while the agent is working, including when you are not watching.
-Choose a screen in Replay to inspect or export that track. Manual-control gaps stay private.
+Replay records the desktop and the web browser each on its own track while the agent is working,
+including when you are not watching. Choose one in Replay to inspect or export that track; the window
+on the live screen is drawn by the page and isn't recorded as such. Manual-control gaps stay private.
 See [the Replay guide](replay.md) for retention, export and recovery details.
 
 ## Account reuse and verification
 
 Connected apps and saved browser accounts are used before requesting another sign-in. A connector's authentication does not log a separate command-line client in: dot should use the connected tools for supported work and the existing browser account for website work, and explain any missing capability before asking for additional access.
+
+On a phone, the code's field offers the text message's code, **Paste code** reads what you copied, and
+a code of known length that is the whole question goes as soon as it is whole.
 
 An empty, focused password or verification field no longer hides the page from dot. Filled secrets remain excluded from page reads and screenshots. One-time codes use the private answer channel, are submitted to the identified verification field once, and are never saved as passwords or included in the conversation. Dot keeps the verification page open and explains whether the code comes from an authenticator, email or SMS.
 

@@ -14,6 +14,12 @@
 
 <p align="center"><a href="https://localdot.dev/film/localdot-film.mp4">▶ Watch the 37-second film</a></p>
 
+<!-- update-video: once docs/readme/update.jpg and the video are live, delete this line and the matching one below.
+<a href="https://localdot.dev/film/localdot-update.mp4"><img width="100%" src="docs/readme/update.jpg" alt="What's new in localDot"></a>
+
+<p align="center"><a href="https://localdot.dev/film/localdot-update.mp4">▶ See what's new</a></p>
+update-video -->
+
 dot does real work on a computer of its own, right on yours: a Linux desktop with a browser, a
 terminal and everyday apps, running in Docker. You watch from your browser or your phone, step in
 whenever you like, and every task is recorded.
@@ -36,21 +42,30 @@ The installer checks Docker and walks you through anything missing, then prints 
 pick a model, and give dot something to do.
 
 `localdot open` prints a fresh sign-in link, `localdot update` installs the latest release and
-keeps your data, and `localdot doctor` diagnoses a problem.
+keeps your data, and `localdot doctor` diagnoses a problem. dot's browser is Chromium, or
+[Google Chrome](docs/install.md#google-chrome) if you choose it in setup.
 [Install guide](docs/install.md) · [Use it from your phone or a server](docs/install.md#servers-without-a-screen)
 
 ## What dot does
 
-<img width="100%" src="docs/readme/app.png" alt="localDot at work: dot's computer shows Kiyomizu-dera's website in Chromium, dot says what it is doing under the screen, and the chat lists what it found while planning three days in Kyoto">
+<img width="76%" src="docs/readme/studio.png" alt="Studio on a desktop: a row of dots down the left, one for each task and each dressed differently, dot's computer in the middle with last year's sales report open as dot checks January's net figure, and the chat and its steps on the right"> <img width="22%" src="docs/readme/chat.png" alt="Chat on a phone: the same conversation as message bubbles. Auto chose the Finance dot, dot found last year's sales report and is now checking its net figures; at the foot are dot, what it is doing and a small live picture of its computer">
 
-- **Watch it work.** Live, from your laptop or your phone. You see every click and keystroke as it
-  happens.
-- **Step in any time.** Take control and the mouse is yours. Hand it back and dot picks up where
-  you left off.
+- **Watch it work.** Live and sharp, from your laptop or your phone. You see every click and
+  keystroke as it happens.
+- **Chat or Studio.** Chat works like texting dot, with its computer a tap away, and is where a
+  phone starts. Studio keeps the computer, the chat and every step on one screen. Choose in setup
+  and switch any time, on each device.
+- **Step in any time.** Send a message and dot reads it at its next step. It can be long, or just
+  files, and messages waiting their turn can be reordered. Or take control: the mouse is yours, and
+  dot picks up where you left off.
 - **You decide how often it asks.** Custom, Auto or Full access. Even with full access, dot asks
   before buying anything or deleting things online.
+- **Several tasks at once.** Each gets its own dot, dressed so you can tell them apart, and its own
+  window in one browser. They share your sign-ins, so two can work in the same site.
 - **Use any model.** An API key from 25 providers, your ChatGPT or Claude plan, or a model on
-  your own machine. Switch any time.
+  your own machine. Choose per task or per message, and the steps show which model did them.
+- **Routines.** Start and end dates and as many schedules as the job needs: weekdays at 8:30, every
+  15 minutes during work hours, the last day of the month. All its runs stay in one conversation.
 - **Rewind anything.** Every task is recorded step by step. Scrub back to see exactly what dot
   did.
 - **Share the good part.** Trim to the moment, speed it up as much as 16 times, add captions and
@@ -69,8 +84,8 @@ keeps your data, and `localdot doctor` diagnoses a problem.
 
 ## Models
 
-dot needs a model that can read screenshots and use tools. Add one in **Settings → Models**, then
-pick it from the message box.
+dot needs a model that can read screenshots and use tools. Add one in **Settings → Models**, turn
+on as many of a key's models as you like, then pick from the message box.
 
 - **API keys:** Anthropic, OpenAI, Google Gemini, Azure OpenAI, xAI, Mistral, DeepSeek, Groq,
   OpenRouter, Together, Fireworks, Cerebras, Perplexity, Cohere, DeepInfra, Moonshot, Alibaba,
@@ -106,6 +121,11 @@ local service: dot only ever holds stand-ins, and the real key is added on the w
 key's own hosts. Passwords go through a private form straight into the site, so dot never sees
 them.
 
+Tasks aren't walled off from each other. They share the computer's files and the browser's
+sign-ins, so signing out in one signs out the rest, though a task can only see and act in its own
+browser window. Google Chrome is there only if you accept Google's terms: localDot downloads it
+from Google and never ships it.
+
 Pages, search results and app responses reach the model marked as untrusted. An optional purpose
 check flags private data heading somewhere unrelated to the task. This is alpha software, so
 review what dot does with your accounts. [How the agent runs](docs/agent-runtime.md) ·
@@ -116,7 +136,8 @@ review what dot does with your accounts. [How the agent runs](docs/agent-runtime
 Your browser talks to the localDot daemon on your machine, which serves the app, runs tasks,
 streams dot's desktop and records every step. dot's computer is a set of containers: the desktop
 you watch, a web browser that keeps your sign-ins, the agent's loop, and a gate that is its only
-way out to the network.
+way out to the network. The browser shows on the main screen but stays in its own protected
+container, so programs on the desktop can't read your sign-ins.
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/readme/system-mobile.svg" type="image/svg+xml">

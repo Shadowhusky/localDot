@@ -130,6 +130,15 @@ in Chromium and WebKit. A real cross-network desktop-stream check remains part o
 local tests do not prove production DNS, certificates, latency, or the estimated bill.
 
 
+## Adding localDot to an iPhone's Home Screen
+
+Add it from an address with a certificate the phone trusts: the Tailscale link or the relay. At a
+bare tailnet address such as `https://100.91.187.75:4744` Safari lets you past the warning but iOS
+fetches the icon on its own, fails and draws the name's first letter, and the app shows the warning
+again at each cold start. Settings › Your computer › App links says which link to use; the phone
+needs MagicDNS for the Tailscale name. A Home Screen app keeps its address and the status bar style
+it was added with, so taking up either change means removing the old icon and adding it again.
+
 ## Previews
 
 Servers dot starts in its computer open as previews on the owner's tailnet only, never on this
@@ -168,3 +177,10 @@ The guest page supports chat, progress, the current computer/browser screen and 
 `localdot chat` connects to the local daemon and displays replies, tool progress and task status. Commands: `/new`, `/status`, `/stop`, `/help`, `/quit`. Quitting the terminal leaves the task running; `/stop` stops it. Approval and private-input requests stay in the app.
 
 For a directly reachable remote daemon, set `LOCALDOT_SERVER=https://your-server` and `LOCALDOT_TOKEN_FILE=/absolute/private/credential-file` (mode 0600). Remote credentials must be explicitly supplied; the client never sends the local owner credential to a different server automatically. The terminal client accepts a server origin, not a browser pairing URL, and does not perform relay cookie pairing. It polls only while open, bounds responses, strips terminal escape sequences, and never stores typed history. It is a lightweight terminal chat view, not a desktop screen renderer.
+
+## Connecting an app from a phone
+
+Settings → Connectors works from a phone, but an app's sign-in opens in the browser on the Mac, where
+the user's accounts are, and comes back to the daemon on loopback, so its code never crosses the relay.
+The phone says to finish on the Mac and that it can't be finished there, and it follows along: the app
+shows as connected once the sign-in is approved. A sign-in nobody approves ends after ten minutes.

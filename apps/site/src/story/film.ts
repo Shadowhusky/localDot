@@ -5,15 +5,27 @@ import { setSite } from "../state.ts";
 // loads it, and goes when the sheet closes; the page rests and stays put behind it.
 // The film in the page's language.
 const CUT = LANG === "zh" ? "-zh" : "";
-const SOURCES = [
-  { src: `/film/localdot-film${CUT}-720.mp4`, media: "(max-width: 900px)" },
-  { src: `/film/localdot-film${CUT}.mp4`, media: "" },
-];
+const FILM = {
+  href: `/film/localdot-film${CUT}.mp4`,
+  poster: `/film/poster${CUT}.webp`,
+  sources: [
+    { src: `/film/localdot-film${CUT}-720.mp4`, media: "(max-width: 900px)" },
+    { src: `/film/localdot-film${CUT}.mp4`, media: "" },
+  ],
+};
+// What's new, one cut for every language and screen. The link to it is in the page only when the file
+// is in the build (updateFilm in content.ts).
+const UPDATE = {
+  href: "/film/localdot-update.mp4",
+  poster: "",
+  sources: [{ src: "/film/localdot-update.mp4", media: "" }],
+};
 
 export function wireFilm(sheet: HTMLDialogElement): void {
   const frame = sheet.querySelector<HTMLElement>(".film-frame");
   for (const link of document.querySelectorAll<HTMLAnchorElement>("[data-film]")) {
-    link.href = `/film/localdot-film${CUT}.mp4`;
+    const film = link.dataset.film === "update" ? UPDATE : FILM;
+    link.href = film.href;
     link.addEventListener("click", (event) => {
       // A click meant for a new tab or a download opens the file itself.
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
@@ -23,8 +35,8 @@ export function wireFilm(sheet: HTMLDialogElement): void {
       video.controls = true;
       video.autoplay = true;
       video.playsInline = true;
-      video.poster = `/film/poster${CUT}.webp`;
-      for (const { src, media } of SOURCES) {
+      if (film.poster) video.poster = film.poster;
+      for (const { src, media } of film.sources) {
         const source = document.createElement("source");
         source.src = src;
         source.type = "video/mp4";

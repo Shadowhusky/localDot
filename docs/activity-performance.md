@@ -24,6 +24,13 @@ mechanism. Conversation history already uses bounded pages; conversation and tas
 already use virtualization. Browser downloads paginate. This is an audit of the task surfaces,
 not a claim that every small settings menu or list in the product has been profiled.
 
+The thread's page moves by rows but keeps by distance: it adds rows 600 px ahead of the view and lets
+go only of rows past 1,200 px, so what is in view is never taken out and the two ends cannot take turns.
+While the reader is above the end nothing moves their view: rows that change above it are corrected
+for in the frame they change, and following resumes only at the true end of the thread (not the end
+of a page) or on sending. A row's time and group come from the whole thread, so it draws the same
+wherever the page starts. `e2e/ui/chat-scroll.spec.ts` measures this frame by frame.
+
 Windowing discovers the actual scrollport and seeds its initial offset from the reader's current
 position. This matters when a live list grows past the threshold while a group is open. Opening
 and closing rows still use lazy details, and rows reentering the window do not animate again.

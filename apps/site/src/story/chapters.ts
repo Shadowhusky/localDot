@@ -5,6 +5,7 @@ export const CHAPTERS = layout([
   ["app", 0.35],
   ["out", 1.8],
   ["watch", 3],
+  ["views", 2.7],
   ["models", 1.8],
   ["replay", 2.6],
   ["dots", 4.2],

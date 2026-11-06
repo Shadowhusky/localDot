@@ -62,6 +62,17 @@
   }
 }
 
+/* The rail of tasks sits in the window, not at the edge of the screen. */
+.hero .site-app {
+  position: relative;
+}
+
+.site-app .site-rail {
+  position: absolute;
+  z-index: 1;
+  padding: var(--bar-h) calc(var(--spacing) * 2) 0;
+}
+
 .site-bar-wordmark {
   padding-inline: calc(var(--spacing) * 2);
   color: var(--color-fg-1);
@@ -87,11 +98,16 @@
 
 /* In place of the composer: what the visitor is watching, in one line. */
 .site-replay {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
   margin: calc(var(--spacing) * 2);
-  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3.5);
+  padding-inline: calc(var(--spacing) * 3.5);
   border-radius: var(--radius-lg);
   background-color: var(--color-raised);
-  box-shadow: inset 0 0 0 1px var(--color-line);
+  box-shadow:
+    0 0 0 1px var(--color-card-field-line),
+    var(--shadow-raised);
 }
 
 .site-replay p {
@@ -326,4 +342,56 @@
     opacity: 0;
     scale: 1.4;
   }
+}
+
+/* Chat, on the phone beside the window: the app's own foot and bubbles, at a phone's size. It is laid
+   out once, like a clip, and the scene places it (phone.ts). */
+.site-phone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 390px;
+  height: 800px;
+  overflow: hidden;
+  border-radius: 54px;
+  background-color: var(--color-void);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.16),
+    0 0 0 9px rgb(18 20 24),
+    0 0 0 10px rgb(255 255 255 / 0.1),
+    0 40px 120px rgb(0 0 0 / 0.65);
+  transform-origin: 0 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.site-chat {
+  --_safe-top: 10px;
+  --_safe-bottom: 0px;
+  --_safe-left: 0px;
+  --_safe-right: 0px;
+  --_foot: calc(var(--spacing) * 2);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--color-fg-1);
+  font-family: var(--font-ui);
+}
+
+.site-chat .phone-thread {
+  flex: 1;
+}
+
+/* The bar's glass is the app's to show as the thread runs under it; here the thread always may. */
+.site-chat .phone-bar-glass {
+  background-image: linear-gradient(var(--color-void) 72%, transparent);
+  opacity: 1;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.site-chat .site-replay {
+  margin-bottom: calc(var(--spacing) * 5);
+  border-radius: 999px;
 }

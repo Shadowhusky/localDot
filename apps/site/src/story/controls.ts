@@ -3,7 +3,7 @@ import { t } from "../i18n.ts";
 import { onSite, type Permission, setSite, site } from "../state.ts";
 
 const PERMISSION_COPY: Record<Permission, string> = {
-  ask: t("I check with you before anything that changes something."),
+  ask: t("I check with you before I send, post, pay, upload your files or change things online."),
   auto: t("Routine steps just happen. Anything risky waits for you."),
   full: t("I get on with it, and still ask before buying anything or deleting things online."),
 };
