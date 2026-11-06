@@ -149,6 +149,14 @@ for (const scheme of ["light", "dark"] as const)
         panel.getByRole("button", { name: "Sign in as henry@example.com" }),
       ).toBeVisible();
       await expect(panel).toContainText("Passkeys and security keys can't work");
+      // A card of its own, lined up with the hand-off card above it.
+      const card = await page.locator(".thread-handoff").boundingBox();
+      const own = await panel.boundingBox();
+      expect(own?.x).toBeCloseTo(card?.x ?? -1, 0);
+      expect(own?.width).toBeCloseTo(card?.width ?? -1, 0);
+      expect(await panel.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
+        "rgba(0, 0, 0, 0)",
+      );
       await panel.scrollIntoViewIfNeeded();
       await shot(page, "hold-saved");
       reply = { available: true, mode: "signin", changing: false };

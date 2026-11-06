@@ -220,6 +220,34 @@ test.describe("a conversation", () => {
     expect(strays).toEqual([]);
   });
 
+  test("the thumbnail's rim and picture round with its corners", async ({ page, ui }) => {
+    await ui.open("running");
+    const thumb = page.locator(".phone-thumb");
+    await expect(thumb).toBeVisible();
+    const corners = await thumb.evaluate((element) => {
+      const radius = (selector: string) =>
+        getComputedStyle(element.querySelector(selector) ?? element).borderTopLeftRadius;
+      return {
+        thumb: getComputedStyle(element).borderTopLeftRadius,
+        rim: radius(".phone-thumb-rim"),
+        slot: radius(".phone-thumb-slot"),
+        clip: getComputedStyle(element.querySelector(".phone-thumb-slot") ?? element).clipPath,
+      };
+    });
+    expect(corners.thumb).not.toBe("0px");
+    expect(corners.rim).toBe(corners.thumb);
+    expect(corners.slot).toBe(corners.thumb);
+    expect(corners.clip).toContain("round");
+    await ui.settle();
+    const box = await thumb.boundingBox();
+    if (box)
+      await page.screenshot({
+        path: test.info().outputPath("thumb.png"),
+        clip: { x: box.x - 6, y: box.y - 6, width: box.width + 12, height: box.height + 12 },
+        scale: "device",
+      });
+  });
+
   test("the way to the latest keeps clear of dot's line", async ({ page, ui }) => {
     const fixture = await ui.open("running");
     await page.request.post(`${fixture.origin}/__qa/talk?turns=6`);

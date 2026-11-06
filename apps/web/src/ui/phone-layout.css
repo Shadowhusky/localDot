@@ -1125,18 +1125,22 @@
     transition: none;
   }
 
+  /* The slot and the rim take the thumbnail's corners from here, so the rim's glow rounds with it. */
   .phone-thumb > .ui-button-content {
     display: block;
     width: 100%;
     height: 100%;
+    border-radius: inherit;
   }
 
+  /* The picture is its own layer, which WebKit leaves unclipped by a rounded overflow alone. */
   .phone-thumb-slot {
     position: absolute;
     inset: 0;
     display: block;
     overflow: hidden;
     border-radius: inherit;
+    clip-path: inset(0 round var(--radius-row));
     pointer-events: none;
   }
 
@@ -1307,7 +1311,7 @@
     padding-inline: calc(var(--spacing) * 3);
   }
 
-  :is(.phone-thread, .phone-computer-dock) .thread-handoff {
+  :is(.phone-thread, .phone-computer-dock) :is(.thread-handoff, .thread-browser-signin) {
     margin: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3) 0;
   }
 
