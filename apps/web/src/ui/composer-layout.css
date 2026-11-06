@@ -64,10 +64,13 @@
     max-height: 144px;
   }
 
+  /* As tall as its 44 px controls, also while the card folds shorter than what it holds: a shorter
+     row would move the field with the card's height. */
   .composer-card[data-layout="pill"] > .composer-bar {
     display: flex;
     align-items: center;
     gap: var(--spacing);
+    min-height: auto;
     margin: 0;
   }
 
