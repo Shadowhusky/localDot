@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>localDot update cover</title>
+<style>
+  @font-face {
+    font-family: "Inter";
+    src: url("../assets/fonts/inter.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: block;
+  }
+  @font-face {
+    font-family: "PingFang SC";
+    src: local("PingFang SC Semibold"), local("PingFangSC-Semibold");
+    font-weight: 600 900;
+  }
+  @font-face {
+    font-family: "PingFang SC";
+    src: local("PingFang SC Medium"), local("PingFangSC-Medium");
+    font-weight: 500;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #000; overflow: hidden; }
+  #canvas {
+    position: relative;
+    overflow: hidden;
+    background: #0a0a0b;
+    font-family: "Inter", "PingFang SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .layer { position: absolute; inset: 0; pointer-events: none; }
+
+  /* The studio: a warm key from the upper left over near-black, a floor that catches it. */
+  #light {
+    background:
+      radial-gradient(ellipse 62% 38% at 4% -4%, rgb(255 236 214 / 0.20), rgb(255 236 214 / 0.06) 45%, transparent 75%),
+      linear-gradient(118deg, rgb(255 244 230 / 0.07) 0%, transparent 34%),
+      radial-gradient(ellipse var(--glow-w) var(--glow-h) at var(--glow-x) var(--glow-y), rgb(255 200 150 / 0.13), rgb(120 100 90 / 0.06) 50%, transparent 80%);
+  }
+  #floor {
+    top: var(--horizon);
+    background:
+      radial-gradient(ellipse var(--pool-w) var(--pool-h) at var(--pool-x) var(--pool-y), rgb(255 212 172 / 0.36), rgb(255 196 140 / 0.14) 42%, transparent 78%),
+      radial-gradient(ellipse calc(var(--pool-w) * 1.5) calc(var(--pool-h) * 1.2) at var(--pool-x) calc(var(--pool-y) * 0.8), rgb(70 64 58 / 0.55), transparent 80%),
+      linear-gradient(to bottom, rgb(44 41 38 / 0) 0%, rgb(44 41 38 / 0.65) 14%, rgb(26 24 23 / 0.85) 55%, rgb(10 10 10 / 0.96) 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--floor-fade, 120px));
+  }
+  #grain {
+    top: var(--horizon);
+    opacity: 0.3;
+    mix-blend-mode: overlay;
+    -webkit-mask-image: radial-gradient(ellipse calc(var(--pool-w) * 1.3) calc(var(--pool-h) * 1.6) at var(--pool-x) var(--pool-y), #000 0%, rgb(0 0 0 / 0.55) 50%, transparent 90%);
+  }
+  #vignette {
+    background: radial-gradient(ellipse 88% 78% at 50% 46%, transparent 58%, rgb(0 0 0 / 0.5) 100%);
+  }
+  .reflection {
+    position: absolute;
+    opacity: var(--o, 0.16);
+    filter: blur(var(--b, 3px));
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent var(--fade, 40%));
+  }
+  .reflection > * { position: relative !important; left: 0 !important; top: 0 !important; transform: scaleY(-1); box-shadow: none !important; }
+
+  .shadow {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0.45) 55%, transparent);
+    filter: blur(var(--blur, 8px));
+  }
+  .glow {
+    position: absolute;
+    border-radius: 50%;
+    mix-blend-mode: screen;
+    filter: blur(30px);
+  }
+
+  /* Phone: a titanium band, a thin black border, the real screen, its island and status bar. */
+  .phone {
+    position: absolute;
+    --u: calc(var(--w) / 402);
+    width: calc(var(--w) + var(--u) * 2 * 17);
+    height: calc(var(--u) * 874 + var(--u) * 2 * 17);
+    border-radius: calc(var(--u) * 79);
+    padding: calc(var(--u) * 4.5);
+    background:
+      linear-gradient(115deg, #d8d4cf 0%, #6c6a68 9%, #2c2c2e 22%, #3b3a3a 55%, #1d1d1f 78%, #8a8580 96%, #cfc8bf 100%);
+    box-shadow:
+      0 calc(var(--u) * 50) calc(var(--u) * 90) rgb(0 0 0 / 0.75),
+      0 calc(var(--u) * 14) calc(var(--u) * 26) rgb(0 0 0 / 0.55),
+      inset 0 0 0 calc(var(--u) * 0.8) rgb(255 255 255 / 0.18);
+  }
+  .phone::before, .phone::after {
+    content: "";
+    position: absolute;
+    width: calc(var(--u) * 3.5);
+    border-radius: calc(var(--u) * 2);
+    background: linear-gradient(90deg, #9b958e, #3a3937 60%, #1a1a1b);
+  }
+  .phone::before { left: calc(var(--u) * -2.6); top: calc(var(--u) * 170); height: calc(var(--u) * 34); box-shadow: 0 calc(var(--u) * 60) 0 0 #4a4744, 0 calc(var(--u) * 132) 0 0 #4a4744; }
+  .phone::after { right: calc(var(--u) * -2.6); top: calc(var(--u) * 238); height: calc(var(--u) * 96); background: linear-gradient(270deg, #7c7671, #2c2b2a 60%, #151516); }
+  .phone .glass {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: calc(var(--u) * 74.5);
+    background: #000;
+    padding: calc(var(--u) * 12.5);
+    box-shadow: inset 0 0 0 calc(var(--u) * 1) rgb(255 255 255 / 0.06);
+  }
+  .phone .screen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: calc(var(--u) * 62);
+    overflow: hidden;
+    background: #05080f;
+  }
+  .phone .screen > img.ui { display: block; width: 100%; height: 100%; }
+  .island {
+    position: absolute;
+    left: 50%;
+    top: calc(var(--u) * 11);
+    width: calc(var(--u) * 125);
+    height: calc(var(--u) * 37);
+    transform: translateX(-50%);
+    border-radius: calc(var(--u) * 19);
+    background: #000;
+  }
+  .island::after {
+    content: "";
+    position: absolute;
+    right: calc(var(--u) * 12);
+    top: 50%;
+    width: calc(var(--u) * 12);
+    height: calc(var(--u) * 12);
+    transform: translateY(-50%);
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #2b3550, #0a0c14 60%);
+  }
+  .status {
+    position: absolute;
+    top: calc(var(--u) * 17);
+    height: calc(var(--u) * 24);
+    display: flex;
+    align-items: center;
+    color: #fff;
+    font: 600 calc(var(--u) * 17) / 1 -apple-system, "SF Pro Text", "Inter", sans-serif;
+    letter-spacing: -0.01em;
+  }
+  .status.time { left: calc(var(--u) * 42); width: calc(var(--u) * 54); justify-content: center; }
+  .status.icons { right: calc(var(--u) * 30); gap: calc(var(--u) * 6.5); }
+  .status svg { display: block; }
+  .home {
+    position: absolute;
+    left: 50%;
+    bottom: calc(var(--u) * 8);
+    width: calc(var(--u) * 140);
+    height: calc(var(--u) * 5);
+    transform: translateX(-50%);
+    border-radius: 99px;
+    background: rgb(255 255 255 / 0.92);
+  }
+  .sheen {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      linear-gradient(122deg, rgb(255 255 255 / 0.10) 0%, rgb(255 255 255 / 0.03) 26%, transparent 27%, transparent 100%);
+    pointer-events: none;
+  }
+
+  /* Laptop: a lid of black glass in a dark aluminium shell, a hinge, and the deck seen from just above. */
+  .laptop {
+    position: absolute;
+    --u: calc(var(--w) / 1280);
+    width: calc(var(--w) + var(--u) * 2 * 30);
+  }
+  .laptop .lid {
+    position: relative;
+    border-radius: calc(var(--u) * 34) calc(var(--u) * 34) calc(var(--u) * 10) calc(var(--u) * 10);
+    padding: calc(var(--u) * 3);
+    background: linear-gradient(120deg, #b9b4ad 0%, #4a4947 6%, #2a2a2c 30%, #232325 70%, #5d5a56 100%);
+    box-shadow:
+      0 calc(var(--u) * 50) calc(var(--u) * 110) rgb(0 0 0 / 0.7),
+      0 calc(var(--u) * 10) calc(var(--u) * 30) rgb(0 0 0 / 0.5);
+  }
+  .laptop .bezel {
+    position: relative;
+    border-radius: calc(var(--u) * 31) calc(var(--u) * 31) calc(var(--u) * 7) calc(var(--u) * 7);
+    background: #050505;
+    padding: calc(var(--u) * 27) calc(var(--u) * 27) calc(var(--u) * 40);
+    box-shadow: inset 0 0 0 calc(var(--u) * 1.5) rgb(255 255 255 / 0.05);
+  }
+  .laptop .bezel::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: calc(var(--u) * 10);
+    width: calc(var(--u) * 7);
+    height: calc(var(--u) * 7);
+    transform: translateX(-50%);
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #26304a, #07080c 70%);
+  }
+  .laptop .screen {
+    position: relative;
+    width: var(--w);
+    height: calc(var(--w) * 800 / 1280);
+    border-radius: calc(var(--u) * 12) calc(var(--u) * 12) 0 0;
+    overflow: hidden;
+    background: #05080f;
+  }
+  .laptop .screen > img.ui { display: block; width: 100%; height: 100%; }
+  .laptop .hinge {
+    position: relative;
+    margin: 0 auto;
+    width: 94%;
+    height: calc(var(--u) * 9);
+    background: linear-gradient(to bottom, #020202, #1a1a1c 55%, #0b0b0c);
+  }
+  .laptop svg.deck { position: absolute; display: block; overflow: visible; }
+
+  /* The six, cut out; warm rim light and a soft bloom like the October covers. */
+  .dot {
+    position: absolute;
+    transform-origin: 50% 100%;
+  }
+  .dot img {
+    display: block;
+    width: 100%;
+    filter: drop-shadow(0 0 calc(var(--s) * 0.05) rgb(255 214 170 / 0.45)) drop-shadow(0 0 calc(var(--s) * 0.14) rgb(255 196 140 / 0.18));
+  }
+
+  /* Type */
+  #type { position: absolute; color: #f6f2ea; }
+  #type .mark {
+    font-family: "Inter", sans-serif;
+    font-weight: 620;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: #efe9df;
+  }
+  #type h1 { font-weight: 650; line-height: 1.12; letter-spacing: -0.01em; }
+  #type h1 span { display: block; white-space: nowrap; }
+  #type[lang="zh"] h1 { font-family: "Inter", "PingFang SC", sans-serif; font-weight: 600; letter-spacing: 0.01em; }
+  #type[lang="en"] h1 { letter-spacing: -0.035em; line-height: 1.04; }
+  #guides { display: none; }
+  body.guides #guides { display: block; }
+  #guides div { position: absolute; border: 2px dashed rgb(255 0 120 / 0.8); }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <div id="light" class="layer"></div>
+  <div id="floor" class="layer"></div>
+  <svg id="grain" class="layer" width="100%" height="100%" aria-hidden="true">
+    <filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" /><feColorMatrix type="saturate" values="0" /></filter>
+    <rect width="100%" height="100%" filter="url(#noise)" />
+  </svg>
+  <div id="stage" class="layer"></div>
+  <div id="vignette" class="layer"></div>
+  <div id="type"></div>
+  <div id="guides" class="layer"></div>
+</div>
+<script type="module">
+import { FORMATS } from "./formats.js";
+
+const q = new URLSearchParams(location.search);
+const f = FORMATS[q.get("f") ?? "douyin"];
+const lang = q.get("lang") ?? "zh";
+if (q.has("guides")) document.body.classList.add("guides");
+const canvas = document.getElementById("canvas");
+canvas.style.width = `${f.w}px`;
+canvas.style.height = `${f.h}px`;
+for (const [k, v] of Object.entries(f.vars ?? {})) canvas.style.setProperty(k, v);
+
+const stage = document.getElementById("stage");
+const el = (html) => {
+  const t = document.createElement("template");
+  t.innerHTML = html.trim();
+  return t.content.firstElementChild;
+};
+
+const SIGNAL = `<svg width="19" height="12" viewBox="0 0 19 12"><rect x="0" y="8" width="3.2" height="4" rx="1" fill="#fff"/><rect x="5" y="5.5" width="3.2" height="6.5" rx="1" fill="#fff"/><rect x="10" y="3" width="3.2" height="9" rx="1" fill="#fff"/><rect x="15" y="0" width="3.2" height="12" rx="1" fill="#fff"/></svg>`;
+const WIFI = `<svg width="17" height="12" viewBox="0 0 17 12"><path d="M8.5 2.3c2.5 0 4.8 1 6.5 2.6l1.2-1.2C14.2 1.7 11.5.5 8.5.5S2.8 1.7.8 3.7L2 4.9c1.7-1.6 4-2.6 6.5-2.6Z" fill="#fff"/><path d="M8.5 5.6c1.6 0 3 .6 4.1 1.6l1.2-1.2C12.4 4.7 10.5 3.9 8.5 3.9S4.6 4.7 3.2 6l1.2 1.2c1.1-1 2.5-1.6 4.1-1.6Z" fill="#fff"/><path d="M8.5 8.8c.8 0 1.4.3 1.9.7L8.5 11.5 6.6 9.5c.5-.4 1.1-.7 1.9-.7Z" fill="#fff"/></svg>`;
+const BATTERY = `<svg width="28" height="13" viewBox="0 0 28 13"><rect x="0.6" y="0.6" width="23.8" height="11.8" rx="3.6" fill="none" stroke="#fff" stroke-opacity="0.4" stroke-width="1.1"/><rect x="2.3" y="2.3" width="17.4" height="8.4" rx="2.1" fill="#fff"/><path d="M26 4.4v4.2c.9-.3 1.5-1.1 1.5-2.1s-.6-1.8-1.5-2.1Z" fill="#fff" fill-opacity="0.45"/></svg>`;
+
+const place = (node, { x, y, z = 1 }) => {
+  node.style.left = `${x}px`;
+  node.style.top = `${y}px`;
+  node.style.zIndex = z;
+  stage.append(node);
+  return node;
+};
+
+function shadow({ x, y, w, h, o = 1, blur = 10, z = 0, r = 0 }) {
+  const s = place(el(`<div class="shadow"></div>`), { x: x - w / 2, y: y - h / 2, z });
+  s.style.width = `${w}px`;
+  s.style.height = `${h}px`;
+  s.style.opacity = o;
+  s.style.setProperty("--blur", `${blur}px`);
+  if (r) s.style.transform = `rotate(${r}deg)`;
+}
+function glow({ x, y, w, h, color, z = 0 }) {
+  const g = place(el(`<div class="glow"></div>`), { x: x - w / 2, y: y - h / 2, z });
+  g.style.width = `${w}px`;
+  g.style.height = `${h}px`;
+  g.style.background = `radial-gradient(closest-side, ${color}, transparent)`;
+}
+
+function reflect(node, { x, y, w, h, z, o, b, fade }) {
+  const r = document.createElement("div");
+  r.className = "reflection";
+  const copy = node.cloneNode(true);
+  r.append(copy);
+  r.style.width = `${w}px`;
+  r.style.height = `${h}px`;
+  if (o) r.style.setProperty("--o", o);
+  if (b) r.style.setProperty("--b", `${b}px`);
+  if (fade) r.style.setProperty("--fade", fade);
+  return place(r, { x, y, z });
+}
+
+function phone({ x, y, w, z, src, mirror }) {
+  const p = el(`<div class="phone"><div class="glass"><div class="screen">
+    <img class="ui" src="${src}">
+    <div class="island"></div>
+    <div class="status time">9:41</div>
+    <div class="status icons">${SIGNAL}${WIFI}${BATTERY}</div>
+    <div class="home"></div>
+    <div class="sheen"></div>
+  </div></div></div>`);
+  p.style.setProperty("--w", `${w}px`);
+  const u = w / 402;
+  for (const svg of p.querySelectorAll(".status svg")) {
+    svg.setAttribute("width", Number(svg.getAttribute("width")) * u);
+    svg.setAttribute("height", Number(svg.getAttribute("height")) * u);
+  }
+  place(p, { x, y, z });
+  if (mirror) {
+    const W = w + 34 * u;
+    const H = (874 + 34) * u;
+    reflect(p, { x, y: y + H + 2, w: W, h: H, z: z - 1, ...mirror });
+  }
+  return p;
+}
+
+// The deck seen from just above, drawn in perspective: v runs from the hinge (0) to the front (1).
+function deckSvg(W, u) {
+  const H = W * 0.072;
+  const lip = W * 0.017;
+  const widen = 0.07;
+  const SW = W * (1 + widen);
+  const P = (a, v) => {
+    const t = (v * 1.4) / (1 + 0.4 * v);
+    const half = (W / 2) * (1 + widen * t);
+    return [SW / 2 + (a - 0.5) * 2 * half, H * t];
+  };
+  const quad = (a0, a1, v0, v1) =>
+    [P(a0, v0), P(a1, v0), P(a1, v1), P(a0, v1)].map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+  let keys = "";
+  const rows = [14, 14, 14, 13, 12, 10];
+  rows.forEach((n, r) => {
+    const v0 = 0.07 + r * 0.07;
+    const v1 = v0 + 0.058;
+    const span = 0.82;
+    const gap = 0.004;
+    for (let i = 0; i < n; i++) {
+      let a0 = 0.09 + (i * span) / n;
+      let a1 = 0.09 + ((i + 1) * span) / n - gap;
+      if (r === 5 && i >= 3 && i <= 5) continue;
+      if (r === 5 && i === 2) a1 = 0.09 + (6 * span) / n - gap;
+      keys += `<polygon points="${quad(a0, a1, v0, v1)}" fill="#0b0b0d"/>`;
+    }
+  });
+  const [lx] = P(0, 1);
+  const [rx] = P(1, 1);
+  return `<svg class="deck" width="${SW}" height="${H + lip}" viewBox="0 0 ${SW} ${H + lip}" style="left:${-(SW - W) / 2}px">
+    <defs>
+      <linearGradient id="deckFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#101012"/><stop offset="1" stop-color="#2c2c2f"/></linearGradient>
+      <linearGradient id="deckLight" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffe8d0" stop-opacity="0.16"/><stop offset="0.45" stop-color="#ffe8d0" stop-opacity="0"/></linearGradient>
+      <linearGradient id="lipFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8a867f"/><stop offset="0.14" stop-color="#3c3c3e"/><stop offset="0.7" stop-color="#18181a"/><stop offset="1" stop-color="#09090a"/></linearGradient>
+      <linearGradient id="lipLight" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffe2c4" stop-opacity="0.22"/><stop offset="0.35" stop-color="#ffe2c4" stop-opacity="0"/><stop offset="0.9" stop-color="#ffe2c4" stop-opacity="0"/><stop offset="1" stop-color="#ffe2c4" stop-opacity="0.12"/></linearGradient>
+    </defs>
+    <polygon points="${quad(0, 1, 0, 1)}" fill="url(#deckFill)"/>
+    <polygon points="${quad(0, 1, 0, 1)}" fill="url(#deckLight)"/>
+    ${keys}
+    <polygon points="${quad(0.335, 0.665, 0.53, 0.93)}" fill="#232326" stroke="#ffffff" stroke-opacity="0.05" stroke-width="${u}"/>
+    <path d="M${lx},${H} H${rx} V${H + lip * 0.55} Q${rx},${H + lip} ${rx - lip},${H + lip} H${lx + lip} Q${lx},${H + lip} ${lx},${H + lip * 0.55} Z" fill="url(#lipFill)"/>
+    <path d="M${lx},${H} H${rx} V${H + lip * 0.55} Q${rx},${H + lip} ${rx - lip},${H + lip} H${lx + lip} Q${lx},${H + lip} ${lx},${H + lip * 0.55} Z" fill="url(#lipLight)"/>
+    <rect x="${SW / 2 - W * 0.055}" y="${H}" width="${W * 0.11}" height="${lip * 0.4}" rx="${lip * 0.2}" fill="#0c0c0d"/>
+  </svg>`;
+}
+
+function laptop({ x, y, w, z, src }) {
+  const u = w / 1280;
+  const W = w + 60 * u;
+  const l = el(`<div class="laptop">
+    <div class="lid"><div class="bezel"><div class="screen"><img class="ui" src="${src}"><div class="sheen"></div></div></div></div>
+    <div class="hinge"></div>
+    <div style="position:relative;height:0">${deckSvg(W, u)}</div>
+  </div>`);
+  l.style.setProperty("--w", `${w}px`);
+  return place(l, { x, y, z });
+}
+
+const DOTS = await (await fetch("art/dots.json")).json();
+// A dot by the middle of its foot: k is its scale from the source render.
+function dot({ name, x, y, k, r = 0, z, flip = false, cut, mirror }) {
+  const { w, h } = DOTS[name];
+  const d = el(`<div class="dot"><img src="art/dot-${name}.png"></div>`);
+  d.style.width = `${w * k}px`;
+  d.style.setProperty("--s", `${w * k}px`);
+  d.style.transform = `rotate(${r}deg)${flip ? " scaleX(-1)" : ""}`;
+  if (cut) d.style.clipPath = `inset(0 -50% ${cut}px -50%)`;
+  place(d, { x: x - (w * k) / 2, y: y - h * k, z });
+  if (mirror) {
+    reflect(d, { x: x - (w * k) / 2, y: y - 4 * k * 4, w: w * k, h: h * k, z: z - 1, ...mirror });
+  }
+  return d;
+}
+
+for (const item of f.items) {
+  if (item.kind === "phone") phone(item);
+  else if (item.kind === "laptop") laptop(item);
+  else if (item.kind === "dot") dot(item);
+  else if (item.kind === "shadow") shadow(item);
+  else if (item.kind === "glow") glow(item);
+}
+
+const type = document.getElementById("type");
+type.lang = lang;
+const t = f.type[lang];
+type.style.left = `${t.x}px`;
+type.style.top = `${t.y}px`;
+const words = {
+  zh: ["你的 AI 搭档", "升级了"],
+  en: ["Your AI teammates", "got an upgrade"],
+}[lang];
+type.innerHTML = `<div class="mark" style="font-size:${t.mark}px;margin-bottom:${t.gap}px">localDot</div><h1 style="font-size:${t.size}px">${words.map((w) => `<span>${w}</span>`).join("")}</h1>`;
+
+const guides = document.getElementById("guides");
+for (const g of f.guides ?? []) {
+  const d = document.createElement("div");
+  Object.assign(d.style, { left: `${g[0]}px`, top: `${g[1]}px`, width: `${g[2] - g[0]}px`, height: `${g[3] - g[1]}px` });
+  guides.append(d);
+}
+
+await document.fonts.ready;
+await Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => (i.onload = i.onerror = r)))));
+document.body.dataset.ready = "";
+</script>
+</body>
+</html>

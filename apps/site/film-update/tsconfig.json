@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "paths": { "@app/*": ["../../web/src/*"] }
+  },
+  "include": ["src", "../../web/src/stage/webcodecs.d.ts"],
+  "exclude": []
+}

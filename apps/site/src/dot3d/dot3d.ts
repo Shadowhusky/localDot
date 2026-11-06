@@ -98,6 +98,8 @@ export class Dot3D {
       reducedMotion?: boolean;
       control?: boolean;
       now?: () => number;
+      // Off where there is no floor under dot: seen edge-on, the disc shows as a line on a light surface.
+      contactShadow?: boolean;
     } = {},
   ) {
     const { material, uniforms } = bodyMaterial();
@@ -115,6 +117,7 @@ export class Dot3D {
     this.shadow.rotation.x = -Math.PI / 2;
     this.shadow.position.y = -1.02;
     this.shadow.renderOrder = -1;
+    this.shadow.visible = options.contactShadow !== false;
     this.xenon = (options.control === false ? [] : XENON_LIGHTS).map(({ at }) => {
       const light = new DirectionalLight(XENON_COLOUR, 0);
       light.position.set(at[0], at[1], at[2]);

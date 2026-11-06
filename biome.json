@@ -9,7 +9,9 @@
       "!apps/web/vendor",
       "!apps/web/dist",
       "!apps/daemon/src/agent/web/fixtures",
-      "!apps/site/film/index.html"
+      "!apps/site/film/index.html",
+      "!apps/site/film-update/index.html",
+      "!apps/site/film-update/vertical/index.html"
     ]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },

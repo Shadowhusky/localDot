@@ -1,0 +1,112 @@
+{
+  "bpm": 120,
+  "length": 23,
+  "marks": {
+    "land": 0.5,
+    "hop": 1,
+    "perch": 1.5,
+    "ask": 1.5,
+    "chat": 2.5,
+    "compose": 3,
+    "send": 4,
+    "choice": 5,
+    "named": 5.5,
+    "reply": 6,
+    "caption": 6.5,
+    "watch": 7,
+    "thumb": 7.5,
+    "preview": 9.5,
+    "card": 10,
+    "open": 11,
+    "desk": 13,
+    "studio": 13.5,
+    "several": 16,
+    "w4": 17,
+    "w6": 17.5,
+    "w9": 18,
+    "away": 19.5,
+    "hit": 20
+  },
+  "sounds": [
+    {
+      "at": 0.5,
+      "sound": "pop",
+      "db": -11
+    },
+    {
+      "at": 3,
+      "sound": "click",
+      "db": -15
+    },
+    {
+      "at": 4,
+      "sound": "click",
+      "db": -14
+    },
+    {
+      "at": 5,
+      "sound": "shimmer",
+      "db": -21
+    },
+    {
+      "at": 6,
+      "sound": "pop",
+      "db": -17
+    },
+    {
+      "at": 7.5,
+      "sound": "click",
+      "db": -14
+    },
+    {
+      "at": 9.5,
+      "sound": "whoosh",
+      "db": -26
+    },
+    {
+      "at": 10,
+      "sound": "shimmer",
+      "db": -23
+    },
+    {
+      "at": 11,
+      "sound": "click",
+      "db": -14
+    },
+    {
+      "at": 13,
+      "sound": "whoosh",
+      "db": -24
+    },
+    {
+      "at": 16,
+      "sound": "pop",
+      "db": -15
+    },
+    {
+      "at": 17,
+      "sound": "pop",
+      "db": -14
+    },
+    {
+      "at": 17.5,
+      "sound": "pop",
+      "db": -13
+    },
+    {
+      "at": 18,
+      "sound": "pop",
+      "db": -12
+    },
+    {
+      "at": 19.5,
+      "sound": "whoosh",
+      "db": -22
+    },
+    {
+      "at": 20,
+      "sound": "bell",
+      "db": -16
+    }
+  ]
+}

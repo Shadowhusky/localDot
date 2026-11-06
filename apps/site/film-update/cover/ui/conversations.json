@@ -1,0 +1,105 @@
+{
+  "archivedCount": 0,
+  "conversations": [
+    {
+      "sessionId": "01M6NH569B1YZ5RT3KRKHERYAX",
+      "sessions": ["01M6NH569B1YZ5RT3KRKHERYAX"],
+      "title": "Reply to the landlord",
+      "said": "Reply to the landlord about the boiler. Say Tuesday works, and thank him.",
+      "line": "Writing back to Tom about Tuesday",
+      "startedAt": "2026-11-05T09:38:05.227Z",
+      "ended": null,
+      "firstTask": "01M6NH569B1YZ5RT3KRKHERYAX",
+      "look": ["beanie", "scarf"],
+      "live": {
+        "state": "working",
+        "onScreen": true,
+        "activity": "Writing back to Tom about Tuesday",
+        "since": "2026-11-05T09:36:30.000Z"
+      }
+    },
+    {
+      "sessionId": "01M6NAVRTXJ8PFK21GJBW53QX4",
+      "sessions": ["01M6NAVRTXJ8PFK21GJBW53QX4", "01M6NA9EWBQZVDYRHJS5MBD0N8"],
+      "title": "Flights to Lisbon in May",
+      "said": "Flights to Lisbon in May",
+      "line": "The 9:40 on Friday is the cheapest with a bag.",
+      "startedAt": "2026-11-05T07:48:05.086Z",
+      "ended": "done",
+      "firstTask": "01M6NA9EWBQZVDYRHJS5MBD0N8",
+      "look": ["cowboy-hat", "lei"]
+    },
+    {
+      "sessionId": "01M6MZZW1EAVR9VRX2HNSP25GH",
+      "sessions": ["01M6MZZW1EAVR9VRX2HNSP25GH"],
+      "title": "Holiday photos",
+      "said": "Holiday photos",
+      "line": "Done. Here is what I found.",
+      "startedAt": "2026-11-05T04:38:05.103Z",
+      "ended": null,
+      "firstTask": "01M6MZZW1EAVR9VRX2HNSP25GH",
+      "look": ["sunglasses", "bow-tie"],
+      "live": {
+        "state": "working",
+        "onScreen": false,
+        "activity": "Renaming 214 photos by date",
+        "since": "2026-11-05T09:35:00.000Z"
+      }
+    },
+    {
+      "sessionId": "01M6JQWQY1ZR8J08W75T6WB82E",
+      "sessions": ["01M6JQWQY1ZR8J08W75T6WB82E"],
+      "title": "Mum's 60th dinner",
+      "said": "Mum's 60th dinner",
+      "line": "Friday or Saturday?",
+      "startedAt": "2026-11-04T07:38:05.121Z",
+      "ended": null,
+      "firstTask": "01M6JQWQY1ZR8J08W75T6WB82E",
+      "look": ["party-hat", "pearls"],
+      "live": {
+        "state": "needs-you",
+        "onScreen": false,
+        "since": "2026-11-05T09:35:00.000Z"
+      }
+    },
+    {
+      "sessionId": "01M6JA59EHA5VJ2SDMSMZHDKC5",
+      "sessions": ["01M6JA59EHA5VJ2SDMSMZHDKC5"],
+      "title": "Find a plumber near me",
+      "said": "Find a plumber near me",
+      "line": "Three nearby, all with good reviews.",
+      "startedAt": "2026-11-05T06:28:00.000Z",
+      "ended": "done",
+      "firstTask": "01M6JA59EHA5VJ2SDMSMZHDKC5",
+      "look": ["hard-hat", "overalls"]
+    },
+    {
+      "sessionId": "01M6CZ2E5P7TGKKZM5SR8YABBF",
+      "sessions": ["01M6CZ2E5P7TGKKZM5SR8YABBF", "01M6CYG470SFR6TAG4DK1XBXME"],
+      "title": "Tidy my Downloads",
+      "said": "Tidy my Downloads",
+      "line": "Moved 86 files. Nothing deleted.",
+      "startedAt": "2026-11-02T01:48:05.176Z",
+      "ended": "done",
+      "firstTask": "01M6CYG470SFR6TAG4DK1XBXME",
+      "look": ["wizard-hat"]
+    },
+    {
+      "sessionId": "01M5XXV8RS0F6QE6S3RNFQ8PE3",
+      "sessions": ["01M5XXV8RS0F6QE6S3RNFQ8PE3"],
+      "title": "Find the boiler invoice",
+      "said": "Find the boiler invoice",
+      "line": "Searching your inbox",
+      "startedAt": "2026-10-27T05:38:05.209Z",
+      "ended": null,
+      "firstTask": "01M5XXV8RS0F6QE6S3RNFQ8PE3",
+      "look": ["mortarboard", "round-glasses"],
+      "live": {
+        "state": "working",
+        "onScreen": false,
+        "activity": "Searching your inbox",
+        "since": "2026-11-05T09:35:00.000Z"
+      }
+    }
+  ]
+}
