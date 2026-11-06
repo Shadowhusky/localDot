@@ -1,3 +1,4 @@
+import type { Conversations } from "../agent/conversation.ts";
 import type { AgentRunner } from "../agent/runner.ts";
 import type { EventLog } from "../event-log.ts";
 import type { LiveSessions } from "../gateway/live.ts";
@@ -7,6 +8,7 @@ export function agentRunnerPort(
   runner: Pick<AgentRunner, "start" | "end" | "get">,
   live: Pick<LiveSessions, "sessionsOn" | "settled" | "lease">,
   log: Pick<EventLog, "listSessions">,
+  conversations: () => Pick<Conversations, "has" | "latest"> | undefined,
 ): RoutineRunnerPort {
   return {
     start: (cellId, task, options) => runner.start(cellId, task, undefined, options),
@@ -31,5 +33,9 @@ export function agentRunnerPort(
     },
     settled: (id) => live.settled(id),
     title: (id) => log.listSessions().find((row) => row.id === id)?.title ?? undefined,
+    latest: (id) => {
+      const known = conversations();
+      return known?.has(id) ? known.latest(id) : undefined;
+    },
   };
 }

@@ -8,6 +8,7 @@ export class BrowserDocker {
   readonly containers = new Map<string, ObjectValue>();
   readonly networks = new Map<string, ObjectValue>();
   readonly volumes = new Map<string, ObjectValue>();
+  readonly images = new Map<string, ObjectValue>();
   before?: (request: DockerRequest) => void | Promise<void>;
   // The exit status the sign-in copy container reports; it copies the volume's fields on 0.
   copyStatus = 0;
@@ -19,7 +20,7 @@ export class BrowserDocker {
     await this.before?.(request);
     const result = this.#request(request);
     await this.after?.(request, result);
-    return structuredClone(result) as T;
+    return (Buffer.isBuffer(result) ? result : structuredClone(result)) as T;
   }
 
   #request({ method, path, body, query }: DockerRequest): unknown {
@@ -30,6 +31,11 @@ export class BrowserDocker {
     const missing = () => {
       throw new DockerError(404, "missing", path);
     };
+    if (kind === "images") {
+      const image = this.images.get(key ?? "");
+      if (!image) return missing();
+      return method === "DELETE" ? void this.images.delete(key ?? "") : image;
+    }
     if (kind === "volumes" && key === undefined && method === "GET") {
       const labels: string[] = JSON.parse(query?.filters ?? "{}").label ?? [];
       return {
@@ -110,6 +116,16 @@ export class BrowserDocker {
       table.get(key ?? "") ??
       [...table.values()].find((entry) => entry.Name === key || entry.Name === `/${key}`);
     if (!value) return missing();
+    if (kind === "containers" && action === "logs") {
+      // A profile's "Last Version", framed as Docker's non-TTY log stream frames it.
+      const mounts = value.Mounts as ObjectValue[];
+      const read = this.volumes.get(mounts.find((mount) => mount.Destination === "/legacy")?.Name);
+      const text = Buffer.from(`${read?.syntheticLastVersion ?? ""}\n`);
+      const header = Buffer.alloc(8);
+      header[0] = 1;
+      header.writeUInt32BE(text.length, 4);
+      return Buffer.concat([header, text]);
+    }
     if (method === "GET") return value;
     if (method === "DELETE") {
       table.delete(kind === "volumes" ? value.Name : value.Id);
@@ -136,6 +152,9 @@ export class BrowserDocker {
       if (this.copyStatus === 0 && from && to)
         for (const [field, data] of Object.entries(from))
           if (!["Name", "Labels", "CreatedAt"].includes(field)) to[field] = data;
+      const entry = value.Config.Cmd?.[0];
+      if (entry === "/legacy/chromium/Last Version")
+        return { StatusCode: from?.syntheticLastVersion ? 0 : 1 };
       return { StatusCode: this.copyStatus };
     }
     if (kind === "networks" && action === "connect") {

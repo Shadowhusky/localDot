@@ -1,6 +1,7 @@
 import type { KeydOpened, TaskPricing } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockerError, type DockerRequest } from "../cells/docker.ts";
+import { KeydUnavailableError } from "../keyd/client.ts";
 import {
   BrainCells,
   BrainCleanupError,
@@ -339,6 +340,82 @@ describe("BrainCells", () => {
     expect(f.objects.size).toBe(0);
     expect(f.cells.reservedPorts()).toEqual([]);
     await expect(f.cells.start(cell)).rejects.toThrow();
+  });
+  it("keeps asking a Docker and keyd too busy to answer before calling cleanup unconfirmed", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const cell = await f.cells.open(options());
+    let busy = 6;
+    f.hooks.before = (req) => {
+      if (req.method === "DELETE" && busy-- > 0)
+        throw new DockerError(0, "no reply within 30000 ms", req.path, true);
+    };
+    let keydBusy = 1;
+    f.hooks.close = () => {
+      if (keydBusy-- > 0) throw new KeydUnavailableError("no complete answer", "/v1/cells");
+    };
+    const closing = f.cells.close(cell);
+    let failed: unknown;
+    closing.catch((error) => {
+      failed = error;
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await closing;
+    expect(failed).toBeUndefined();
+    expect(f.objects.size).toBe(0);
+    expect(f.keydCells.size).toBe(0);
+  });
+  it("calls cleanup unconfirmed once Docker answers a refusal, or after the long wait", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const refused = await f.cells.open(options());
+    f.hooks.before = (req) => {
+      if (req.method === "DELETE") throw new DockerError(400, "refused", req.path);
+    };
+    await expect(f.cells.close(refused)).rejects.toBeInstanceOf(BrainCleanupError);
+    f.hooks.before = undefined;
+    await f.cells.close(refused);
+    const silent = await f.cells.open({ ...options(), sessionId: OTHER });
+    f.hooks.before = (req) => {
+      if (req.method === "DELETE") throw new DockerError(0, "ECONNREFUSED", req.path);
+    };
+    const closing = f.cells.close(silent);
+    let failed: unknown;
+    closing.catch((error) => {
+      failed = error;
+    });
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(failed).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(failed).toBeInstanceOf(BrainCleanupError);
+  });
+  it("keeps waiting for the brain's exit while Docker is too busy to answer", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const cell = await f.cells.open(options());
+    await f.cells.start(cell);
+    let busy = 3;
+    f.hooks.before = (req) => {
+      if (req.path.endsWith("/json") && busy-- > 0)
+        throw new DockerError(0, "no reply within 5000 ms", req.path, true);
+    };
+    const exit = f.cells.exited(cell, new AbortController().signal);
+    let code: number | undefined | "error";
+    exit.then(
+      (value) => {
+        code = value;
+      },
+      () => {
+        code = "error";
+      },
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(code).toBeUndefined();
+    for (const object of f.objects.values()) object.running = false;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(code).toBe(0);
+    f.hooks.before = undefined;
+    await f.cells.close(cell);
   });
   it("never removes a replaced foreign object while rolling back", async () => {
     const f = fixture();

@@ -143,13 +143,23 @@ function fixture(
       scope.check();
       if (request.revision <= revision) throw new Error("stale grant");
       revision = request.revision;
-      if (request.holder === "user") holder = "user";
+      if (request.holder !== "agent") holder = "user";
       await grant(request);
       scope.check();
       if (revision !== request.revision) throw new Error("superseded grant");
-      holder = request.holder;
-      const { owner: _owner, ...receipt } = { owner: undefined, ...request };
-      return { ...receipt, reloaded: 0, selectionsCleared: true };
+      const held: "user" | "agent" = request.holder === "agent" ? "agent" : "user";
+      holder = held;
+      const { browserCellId, parentCellId, instance, requestId } = request;
+      return {
+        browserCellId,
+        parentCellId,
+        instance,
+        requestId,
+        revision: request.revision,
+        holder: held,
+        reloaded: 0,
+        selectionsCleared: true,
+      };
     }),
     close: vi.fn(),
     observe: vi.fn(async () => {
@@ -203,6 +213,12 @@ function fixture(
     vi.spyOn(BrowserClient.prototype, "tabs").mockImplementation(client.tabs);
     vi.spyOn(BrowserClient.prototype, "control").mockImplementation(client.control);
     vi.spyOn(BrowserClient.prototype, "clock").mockImplementation(client.clock);
+    vi.spyOn(BrowserClient.prototype, "enterWindow").mockImplementation(
+      async (_permit, _place, scope) => ({ ...(await client.tabs(scope)), opened: false }),
+    );
+    vi.spyOn(BrowserClient.prototype, "ownTabs").mockImplementation((_permit, scope) =>
+      client.tabs(scope),
+    );
     vi.spyOn(BrowserClient.prototype, "armDownloads").mockImplementation(async (_binding, scope) =>
       scope.check(),
     );
@@ -384,6 +400,204 @@ describe("session-owned screen authority", () => {
     },
   );
 
+  describe("a saved login that waits for the user's tap", () => {
+    const passwordBox = (url: string) =>
+      (async () => ({
+        target: {
+          point: { x: 400, y: 300 },
+          source: "dom",
+          role: "textbox",
+          name: "Password",
+          url,
+          secret: true,
+        },
+        window: 0,
+        ms: 1,
+      })) as never;
+    const signIn = {
+      question: "Sign in",
+      fields: [
+        { id: "username", kind: "text", label: "Account" },
+        { id: "password", kind: "secret", label: "Password", target: [400, 300] },
+      ],
+    };
+    const typed = (f: ReturnType<typeof fixture>) =>
+      f.client.secret.mock.calls
+        .map((call: unknown[]) => call[2] as { text?: string; origin: string })
+        .filter((request: { text?: string }) => request.text !== undefined);
+
+    it("fills only after the tap, once a task, naming no account until then", async () => {
+      const f = fixture();
+      await f.browser();
+      const h = tools(f);
+      f.client.lookup.mockImplementation(passwordBox("https://identity.example.org/signin"));
+      h.tools.logins = {
+        login: vi.fn(async () => ({
+          username: "imported-account",
+          password: "imported-password-canary",
+          confirm: true,
+        })),
+        saveLogin: vi.fn(async () => {}),
+      };
+      const pending = h.callTool("ask_user", signIn);
+      await until(() => !!f.session.pendingAsk);
+      expect(typed(f)).toHaveLength(0);
+      expect(f.session.asksSavedLogin(f.session.pendingAsk ?? "")).toBe(true);
+      const ask = f.log.read(f.id).findLast((e) => e.type === "ask.request");
+      expect(JSON.stringify(ask)).toContain("identity.example.org");
+      expect(JSON.stringify(ask)).not.toMatch(/imported-account|imported-password-canary/);
+      expect(ask?.type === "ask.request" && ask.data.fields?.map((field) => field.kind)).toEqual([
+        "confirm",
+      ]);
+      f.session.answerFields(f.session.pendingAsk ?? "", { sign_in: true }, (text) => text);
+      const reply = await pending;
+      expect(reply.result.ok).toBe(true);
+      expect(typed(f)).toHaveLength(1);
+      expect(typed(f)[0]).toMatchObject({ origin: "https://identity.example.org" });
+      // The raw recording is fenced before a character lands.
+      expect(f.deps.fenceRecording).toHaveBeenCalled();
+      expect(JSON.stringify([reply, f.log.read(f.id)])).not.toContain("imported-password-canary");
+      expect(redactor([], f.session)("imported-password-canary")).toBe("[redacted]");
+    });
+
+    it("types nothing and tells dot when they say not now", async () => {
+      const f = fixture();
+      await f.browser();
+      const h = tools(f);
+      f.client.lookup.mockImplementation(passwordBox("https://identity.example.org/signin"));
+      h.tools.logins = {
+        login: vi.fn(async () => ({
+          username: "imported-account",
+          password: "imported-password-canary",
+          confirm: true,
+        })),
+        saveLogin: vi.fn(async () => {}),
+      };
+      const pending = h.callTool("ask_user", signIn);
+      await until(() => !!f.session.pendingAsk);
+      f.session.decline(f.session.pendingAsk ?? "");
+      const reply = await pending;
+      expect(JSON.stringify(reply)).toContain("declined");
+      expect(typed(f)).toHaveLength(0);
+    });
+
+    it("keeps filling without a tap a login the user gave dot on this very site", async () => {
+      const f = fixture();
+      await f.browser();
+      const h = tools(f);
+      f.client.lookup.mockImplementation(passwordBox("https://identity.example.org/signin"));
+      h.tools.logins = {
+        login: vi.fn(async () => ({ username: "given-account", password: "given-password" })),
+        saveLogin: vi.fn(async () => {}),
+      };
+      const reply = await h.callTool("ask_user", signIn);
+      expect(reply.result.ok).toBe(true);
+      expect(typed(f)).toHaveLength(1);
+      expect(f.log.read(f.id).filter((e) => e.type === "ask.request")).toHaveLength(0);
+    });
+
+    it("asks before using a login saved for the page's www twin", async () => {
+      const f = fixture();
+      await f.browser();
+      const h = tools(f);
+      f.client.lookup.mockImplementation(passwordBox("https://identity.example.org/signin"));
+      h.tools.logins = {
+        login: vi.fn(async (origin: string) =>
+          origin === "https://www.identity.example.org"
+            ? { username: "twin-account", password: "twin-password-canary" }
+            : undefined,
+        ),
+        saveLogin: vi.fn(async () => {}),
+      };
+      const pending = h.callTool("ask_user", signIn);
+      await until(() => !!f.session.pendingAsk);
+      expect(typed(f)).toHaveLength(0);
+      f.session.answerFields(f.session.pendingAsk ?? "", { sign_in: true }, (text) => text);
+      expect((await pending).result.ok).toBe(true);
+      expect(typed(f)[0]).toMatchObject({ origin: "https://identity.example.org" });
+    });
+
+    it("never offers another subdomain's login, or a lookalike's", async () => {
+      for (const page of [
+        "https://evil.identity.example.org/signin",
+        "https://identity.example.org.evil.test/signin",
+      ]) {
+        const f = fixture();
+        await f.browser();
+        const h = tools(f);
+        f.client.lookup.mockImplementation(passwordBox(page));
+        const asked: string[] = [];
+        h.tools.logins = {
+          login: vi.fn(async (origin: string) => {
+            asked.push(origin);
+            return origin === "https://identity.example.org"
+              ? { username: "a", password: "wrong-site-canary", confirm: true }
+              : undefined;
+          }),
+          saveLogin: vi.fn(async () => {}),
+        };
+        const pending = h.callTool("ask_user", signIn);
+        await until(() => !!f.session.pendingAsk);
+        const ask = f.log.read(f.id).findLast((e) => e.type === "ask.request");
+        expect(ask?.type === "ask.request" && ask.data.fields?.map((field) => field.kind)).toEqual([
+          "text",
+          "secret",
+        ]);
+        expect(asked).not.toContain("https://identity.example.org");
+        f.session.decline(f.session.pendingAsk ?? "");
+        await pending;
+        expect(typed(f)).toHaveLength(0);
+      }
+    });
+  });
+
+  it("sends dot to the user's own sign-in on Google, before any account or password", async () => {
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    f.client.lookup.mockImplementation((async () => ({
+      target: {
+        point: { x: 400, y: 300 },
+        source: "dom",
+        role: "textbox",
+        name: "Email or phone",
+        url: "https://accounts.google.com/v3/signin/identifier",
+        editable: true,
+      },
+      window: 0,
+      ms: 1,
+    })) as never);
+    h.tools.logins = { login: vi.fn(), saveLogin: vi.fn() };
+    const account = await h.callTool("ask_user", {
+      purpose: "sign_in",
+      question: "Account?",
+      fields: [{ id: "account", kind: "email", label: "Email" }],
+    });
+    expect(account.result.ok).toBe(false);
+    expect(JSON.stringify(account)).toContain("request a login takeover");
+    expect(h.tools.logins.login).not.toHaveBeenCalled();
+    f.client.lookup.mockImplementation((async () => ({
+      target: {
+        point: { x: 400, y: 300 },
+        source: "dom",
+        role: "textbox",
+        name: "Password",
+        url: "https://accounts.google.com/v3/signin/challenge/pwd",
+        secret: true,
+      },
+      window: 0,
+      ms: 1,
+    })) as never);
+    const password = await h.callTool("ask_user", {
+      question: "Sign in",
+      fields: [{ id: "password", kind: "secret", label: "Password", target: [400, 300] }],
+    });
+    expect(password.result.ok).toBe(false);
+    expect(JSON.stringify(password)).toContain("request a login takeover");
+    expect(f.session.pendingAsk).toBeUndefined();
+    expect(f.client.secret).not.toHaveBeenCalled();
+  });
+
   it("points dot at the Unlock card when saved sign-ins are locked, asking for nothing", async () => {
     const f = fixture();
     await f.browser();
@@ -473,7 +687,7 @@ describe("session-owned screen authority", () => {
       return result;
     });
     await until(() => f.grant.mock.calls.length === controls + 1);
-    expect(f.grant.mock.calls.at(-1)?.[0].holder).toBe("user");
+    expect(f.grant.mock.calls.at(-1)?.[0].holder).toBe("release");
     expect(settled).toBe(false);
     expect(f.session.stopped).toBe(true);
     expect(f.deps.contain).not.toHaveBeenCalled();

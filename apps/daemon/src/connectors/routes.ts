@@ -11,7 +11,6 @@ import {
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { requestOrigin } from "../guard.ts";
 import type { KeydClient } from "../keyd/client.ts";
 import type { ConnectorHub } from "./hub.ts";
 import { CALLBACK_PATH, type ConnectorSignIn, callbackPage } from "./oauth.ts";
@@ -24,6 +23,8 @@ export interface ConnectorRoutesDeps {
   signIn?: ConnectorSignIn;
   // The daemon's port, to name the origin the app sends the user back to.
   port: number;
+  // Whether a request came from another device, by its Host; by default, any host but loopback.
+  remote?(host: string | undefined): boolean;
 }
 
 const MAX_BODY = 64 * 1024;
@@ -82,7 +83,12 @@ async function guarded(c: Context, fn: () => Promise<Response>): Promise<Respons
 }
 
 // Settings > Connectors: the user's apps, the catalogue, and each app's tools and choices.
-export function connectorRoutes(app: Hono, { hub, keyd, signIn, port }: ConnectorRoutesDeps): void {
+export function connectorRoutes(
+  app: Hono,
+  { hub, keyd, signIn, port, remote: isRemoteHost }: ConnectorRoutesDeps,
+): void {
+  const isRemote =
+    isRemoteHost ?? ((host) => host !== `127.0.0.1:${port}` && host !== `localhost:${port}`);
   const limit = bodyLimit({
     maxSize: MAX_BODY,
     onError: (c) => refuse(c, 400, "too-large", "the request is too large"),
@@ -148,20 +154,50 @@ export function connectorRoutes(app: Hono, { hub, keyd, signIn, port }: Connecto
     }),
   );
 
-  // The app's sign-in page; it sends the user back to this daemon at the address they use.
+  // Opens the app's sign-in page in this computer's browser, whichever device asked: that browser
+  // is where the user's accounts are, and only it can reach the loopback address the app sends the
+  // user back to. A phone can start this but not finish it, and is told so.
   app.post("/api/connectors/:id/sign-in", (c) =>
     guarded(c, async () => {
-      const origin = requestOrigin(c.req.header("host"), port);
-      if (!signIn || !origin) return refuse(c, 503, "unavailable", "Signing in isn't available.");
+      if (!signIn) return refuse(c, 503, "unavailable", "Signing in isn't available.");
       const id = c.req.param("id");
       if (!hub.config(id)) return refuse(c, 404, "not-found", "no such app");
-      return c.json({ url: await signIn.start(id, origin) });
+      const remote = isRemote(c.req.header("host"));
+      const started = await signIn.start(id, `http://127.0.0.1:${port}`, remote);
+      return c.json({ ...started, remote });
+    }),
+  );
+
+  app.delete("/api/connectors/:id/sign-in", (c) =>
+    guarded(c, async () => {
+      const id = c.req.param("id");
+      if (!signIn || !hub.config(id)) return refuse(c, 404, "not-found", "no such app");
+      signIn.cancel(id);
+      return viewOf(c, id);
+    }),
+  );
+
+  // Ends the connection and keeps the app and the user's tool choices, ready to connect again. keyd
+  // revokes the sign-in at the app as well as it can.
+  app.post("/api/connectors/:id/disconnect", (c) =>
+    guarded(c, async () => {
+      const id = c.req.param("id");
+      const config = hub.config(id);
+      if (!config) return refuse(c, 404, "not-found", "no such app");
+      if (config.server.kind !== "remote" || config.server.auth.kind !== "oauth")
+        return refuse(c, 400, "failed", "This app doesn't sign in that way.");
+      const { secret } = config.server.auth;
+      if (secret) await keyd.deleteSecret(secret).catch(() => false);
+      await hub.update(id, { server: { ...config.server, auth: { kind: "oauth" } } });
+      return viewOf(c, id);
     }),
   );
 
   app.delete("/api/connectors/:id", (c) =>
     guarded(c, async () => {
-      const config = await hub.remove(c.req.param("id"));
+      const id = c.req.param("id");
+      if (hub.config(id)) signIn?.cancel(id);
+      const config = await hub.remove(id);
       if (!config) return refuse(c, 404, "not-found", "no such app");
       for (const id of ownKeys(config)) await keyd.deleteSecret(id).catch(() => false);
       return c.body(null, 204);
@@ -178,20 +214,23 @@ export function connectorCallbackRoute(app: Hono, signIn: ConnectorSignIn): void
     c.header("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'");
     const state = c.req.query("state") ?? "";
     const code = c.req.query("code") ?? "";
-    if (!state || !code || c.req.query("error"))
+    const iss = c.req.query("iss");
+    if (!state || !code || c.req.query("error")) {
+      signIn.declined(state, iss);
       return c.html(
-        callbackPage("Not signed in", "The app didn't finish signing in. Try again from localDot."),
+        callbackPage("Not connected", "The app didn't finish signing in. Try again from localDot."),
         400,
       );
+    }
     try {
-      const name = await signIn.finish(state, code);
+      const name = await signIn.finish(state, code, iss);
       return c.html(
-        callbackPage(`Signed in to ${name}`, "You can close this tab and go back to localDot."),
+        callbackPage(`Connected to ${name}`, "You can close this tab and go back to localDot."),
       );
     } catch (error) {
       const line =
         error instanceof ConnectorProblem ? error.message : "Something went wrong. Try again.";
-      return c.html(callbackPage("Not signed in", line), 400);
+      return c.html(callbackPage("Not connected", line), 400);
     }
   });
 }

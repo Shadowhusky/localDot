@@ -1,5 +1,10 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { MANUAL_STREAM_CLOSE, ManualStreamInput, ULID_PATTERN } from "@localdot/protocol";
+import {
+  MANUAL_STREAM_CLOSE,
+  ManualStreamInput,
+  type ScreenName,
+  ULID_PATTERN,
+} from "@localdot/protocol";
 import { refuse, tokenSocketServer, type UpgradeRoute } from "../upgrade-router.ts";
 import {
   deliverManualInput,
@@ -19,6 +24,10 @@ const BUSY_WAIT_MS = 2000;
 const MESSAGE_BYTES = 64 * 1024;
 
 type Down = Extract<ManualStreamInput, { kind: "down" }>;
+interface Queued {
+  screen: ScreenName | undefined;
+  input: ManualStreamInput;
+}
 interface Work {
   input?: ManualStreamInput;
   count: number;
@@ -37,7 +46,7 @@ export class ManualStream {
   readonly #requestId: string;
   readonly #desktop: ManualDesktopSource | undefined;
   readonly #peer: ManualStreamPeer;
-  readonly #queue: ManualStreamInput[] = [];
+  readonly #queue: Queued[] = [];
   // Buttons down on the computer that nothing let go of yet.
   readonly #held = new Set<string>();
   // On a screen that takes clicks only, the press its release turns into a click.
@@ -69,7 +78,8 @@ export class ManualStream {
       this.end(MANUAL_STREAM_CLOSE.invalid, "invalid input");
       return;
     }
-    this.#queue.push(parsed.data);
+    const { screen, ...input } = parsed.data;
+    this.#queue.push({ screen, input: input as ManualStreamInput });
     this.#wake?.();
     if (!this.#pumping) void this.#pump();
   }
@@ -91,8 +101,21 @@ export class ManualStream {
     let uncertain = false;
     try {
       lease = await this.#admit();
-      access = openManualDesktop(this.#session, lease, this.#desktop);
+      let screen = this.#queue[0]?.screen;
+      access = openManualDesktop(this.#session, lease, this.#desktop, screen);
       for (;;) {
+        const next = this.#queue[0];
+        if (next && next.screen !== screen) {
+          // A button down on one screen lets go there before the other takes any input.
+          const leaving = access;
+          access = undefined;
+          if (this.#held.size) await leaving.letGo?.();
+          this.#held.clear();
+          this.#pressed = undefined;
+          leaving.release();
+          screen = next.screen;
+          access = openManualDesktop(this.#session, lease, this.#desktop, screen);
+        }
         const work = this.#take(!!access.letGo);
         if (!work) {
           if (!this.#held.size || this.#ended) break;
@@ -187,15 +210,20 @@ export class ManualStream {
   }
 
   // The next input to deliver, or none: queued text joins into one typing call, and pointer moves
-  // with no button down shrink to the last one.
+  // with no button down shrink to the last one, on the one screen.
   #take(holds: boolean): Work | undefined {
     if (this.#ended) return undefined;
-    const input = this.#queue.shift();
-    if (!input) return undefined;
+    const first = this.#queue.shift();
+    if (!first) return undefined;
+    const { screen, input } = first;
+    const following = () => {
+      const next = this.#queue[0];
+      return next && next.screen === screen ? next.input : undefined;
+    };
     if (input.kind === "text") {
       let text = input.text,
         count = 1;
-      for (let next = this.#queue[0]; next?.kind === "text"; next = this.#queue[0]) {
+      for (let next = following(); next?.kind === "text"; next = following()) {
         if ([...text].length + [...next.text].length > TEXT_LIMIT) break;
         text += next.text;
         count++;
@@ -210,7 +238,7 @@ export class ManualStream {
     if (input.kind === "move" && !this.#held.size) {
       let last = input,
         count = 1;
-      for (let next = this.#queue[0]; next?.kind === "move"; next = this.#queue[0]) {
+      for (let next = following(); next?.kind === "move"; next = following()) {
         last = next;
         count++;
         this.#queue.shift();

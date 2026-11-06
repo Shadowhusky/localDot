@@ -15,7 +15,7 @@ import { EventLog } from "../event-log.ts";
 import { RoutineLauncher } from "./launch.ts";
 import { askFirst, ExpiredRuns } from "./policy.ts";
 import { stopAll } from "./stop-all.ts";
-import { RoutineStore } from "./store.ts";
+import { RoutineStore, type StoredRoutine } from "./store.ts";
 import { FakeClock } from "./testing/fake-clock.ts";
 
 const cleanup: (() => void)[] = [];
@@ -26,7 +26,7 @@ const DUE = Date.parse("2026-10-12T07:30:00Z");
 const draft: RoutineDraft = {
   name: "Morning bills",
   instruction: "Check statements and save PDFs to Bills.",
-  when: { kind: "weekdays", time: "08:30" },
+  schedules: [{ every: 1, unit: "week" as const, weekdays: [1, 2, 3, 4, 5], times: ["08:30"] }],
 };
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("missing fixture value");
@@ -94,6 +94,7 @@ function fixture(cell: Partial<CellSummary> | null = {}) {
     post: vi.fn((id: string, _text: string) => idle.has(id)),
     settled: async () => {},
     title: () => "Find flights",
+    latest: vi.fn((id: string): string | undefined => id),
   };
   const published: RoutineAppEvent[] = [];
   const expired = new ExpiredRuns();
@@ -141,6 +142,80 @@ const outcomes = (published: RoutineAppEvent[]) =>
   published.map((e) => (e.type === "routine.run" ? e.outcome : e.type));
 
 describe("routine launcher", () => {
+  describe("one conversation per routine", () => {
+    const optionsOf = (f: ReturnType<typeof fixture>) =>
+      f.runner.start.mock.calls.at(-1)?.[2] as TaskStartOptions;
+    const runOnce = async (f: ReturnType<typeof fixture>, routine: StoredRoutine) => {
+      await f.launcher.launch(routine, DUE);
+      await f.clock.flush();
+      const { id } = await f.session();
+      f.finish(id, "done");
+      await f.clock.flush();
+      return id;
+    };
+    it("starts afresh the first time, then goes on from the routine's latest task", async () => {
+      const f = fixture();
+      const routine = f.routine();
+      const first = await runOnce(f, routine);
+      expect(optionsOf(f).continues).toBeUndefined();
+      const second = await runOnce(f, routine);
+      expect(optionsOf(f).continues).toBe(first);
+      expect(second).not.toBe(first);
+      await runOnce(f, routine);
+      expect(optionsOf(f).continues).toBe(second);
+    });
+    it("follows a message the user sent in the conversation since", async () => {
+      const f = fixture();
+      const routine = f.routine();
+      const first = await runOnce(f, routine);
+      f.runner.latest.mockImplementation((id) => (id === first ? "01KUSERFOLLOWUP0000000000" : id));
+      await runOnce(f, routine);
+      expect(optionsOf(f).continues).toBe("01KUSERFOLLOWUP0000000000");
+    });
+    it("starts a new conversation once the user has deleted the old one", async () => {
+      const f = fixture();
+      const routine = f.routine();
+      await runOnce(f, routine);
+      f.runner.latest.mockReturnValue(undefined);
+      await runOnce(f, routine);
+      expect(optionsOf(f).continues).toBeUndefined();
+    });
+    it("goes on from the run before when Stop left no record of the last one", async () => {
+      const f = fixture();
+      const routine = f.routine();
+      const first = await runOnce(f, routine);
+      const second = await runOnce(f, routine);
+      f.runner.latest.mockImplementation((id) => (id === second ? undefined : id));
+      await runOnce(f, routine);
+      expect(optionsOf(f).continues).toBe(first);
+    });
+    it("leaves a follow-up out of it", async () => {
+      const f = fixture();
+      const sessionId = ulid();
+      const followUp = f.store.create(
+        { ...draft, name: "Follow-up", schedules: [{ every: 1, unit: "day", times: ["23:30"] }] },
+        { state: "active", kind: "follow_up", followUp: { sessionId, note: "Check" } },
+      );
+      await f.launcher.launch(followUp, DUE);
+      await f.clock.flush();
+      expect(optionsOf(f).continues).toBeUndefined();
+      expect(f.runner.latest).not.toHaveBeenCalled();
+    });
+    it("records nothing new while the previous run is still going", async () => {
+      const f = fixture();
+      const routine = f.routine();
+      await f.launcher.launch(routine, DUE);
+      await f.clock.flush();
+      const skipped = await f.launcher.launch(routine, DUE + 3_600_000);
+      expect(skipped).toMatchObject({
+        outcome: "skipped",
+        note: "The previous run was still going.",
+        sessionId: null,
+      });
+      expect(f.runner.start).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("starts a stopped computer, runs with the routine's options, records done, then shuts the computer down", async () => {
     const f = fixture({ state: "stopped" });
     const routine = f.routine({ budgetUSD: 0.5 });
@@ -390,7 +465,9 @@ describe("routine launcher", () => {
       {
         name: "Follow-up",
         instruction: "Check the parcel",
-        when: { kind: "once", date: "2026-10-12", time: "09:30" },
+        schedules: [{ every: 1, unit: "day", times: ["09:30"] }],
+        start: "2026-10-12",
+        until: "2026-10-12",
       },
       {
         state: "active",
@@ -428,7 +505,9 @@ describe("routine launcher", () => {
       {
         name: "Follow-up",
         instruction: "Check the parcel",
-        when: { kind: "once", date: "2026-10-12", time: "09:30" },
+        schedules: [{ every: 1, unit: "day", times: ["09:30"] }],
+        start: "2026-10-12",
+        until: "2026-10-12",
       },
       {
         state: "active",
@@ -451,7 +530,9 @@ describe("routine launcher", () => {
       {
         name: "Follow-up",
         instruction: "Check the parcel",
-        when: { kind: "once", date: "2026-10-12", time: "09:30" },
+        schedules: [{ every: 1, unit: "day", times: ["09:30"] }],
+        start: "2026-10-12",
+        until: "2026-10-12",
       },
       {
         state: "active",

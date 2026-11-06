@@ -2,11 +2,13 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CONVERSATION_TASKS,
   ConversationList,
   type ConversationLive,
   ConversationSnapshot,
   EARLIER_CHARS,
   EARLIER_LEFT_OUT,
+  EarlierTurns,
   earlierRecord,
   TaskStopReply,
   ulid,
@@ -63,6 +65,32 @@ function setup() {
   };
   return { home, log, start, say, reply, end, task, open: () => new Conversations(home, log) };
 }
+
+describe("a conversation's last line", () => {
+  it("is what dot last said, from its newest task that says anything", async () => {
+    const f = setup();
+    const first = await f.task("Find a plumber");
+    f.reply(first, "Looking now.\nFirst I'll check the reviews.");
+    f.reply(first, "Three plumbers are free on Tuesday.\nThe cheapest is Sample Pipes.");
+    expect(f.open().list().conversations[0]).toMatchObject({
+      line: "Three plumbers are free on Tuesday.",
+    });
+    f.end(first, "done");
+    await f.task("And Wednesday?", first);
+    expect(f.open().list().conversations[0]).toMatchObject({
+      line: "Three plumbers are free on Tuesday.",
+    });
+  });
+
+  it("reads again once the task says more", async () => {
+    const f = setup();
+    const id = await f.task("Find a plumber");
+    const conversations = f.open();
+    expect(conversations.list().conversations[0]).not.toHaveProperty("line");
+    f.reply(id, "Found one.");
+    expect(conversations.list().conversations[0]).toMatchObject({ line: "Found one." });
+  });
+});
 
 describe("the current conversation", () => {
   it("reopens the latest task after a restart, passing over a scripted recording", async () => {
@@ -206,6 +234,7 @@ describe("organizing conversations", () => {
     const second = await f.task("Book the hotel", first);
     const other = await f.task("Draw a dog");
     expect(f.open().organize(first, { tag: "blue" })).toEqual({
+      look: null,
       sessionId: second,
       tag: "blue",
       pinned: false,
@@ -303,6 +332,92 @@ describe("a conversation's dot", () => {
     expect(f.open().persona(next)).toBe("design");
     const other = await f.task("Something else");
     expect(f.open().persona(other)).toBeUndefined();
+  });
+});
+
+describe("a conversation's look", () => {
+  it("is named by its first task and the dot it started as, however it goes on", async () => {
+    const f = setup();
+    const entry = (id: string) =>
+      f
+        .open()
+        .list()
+        .conversations.find((each) => each.sessionId === id);
+    const first = await f.task("Build a landing page");
+    expect(entry(first)).toMatchObject({ firstTask: first });
+    expect(entry(first)?.persona).toBeUndefined();
+    f.log.append(first, {
+      type: "persona.choice",
+      agent: "main",
+      data: { persona: "coder", by: "auto" },
+    });
+    expect(entry(first)).toMatchObject({ persona: "coder" });
+    const next = await f.task("Make it prettier", first);
+    expect(entry(next)).toMatchObject({ firstTask: first, persona: "coder" });
+  });
+
+  it("follows the dot its latest task ended as, however late the switch came", async () => {
+    const f = setup();
+    const entry = () => f.open().list().conversations[0];
+    const first = await f.task("Build a landing page");
+    f.log.append(first, {
+      type: "persona.choice",
+      agent: "main",
+      data: { persona: "coder", by: "auto" },
+    });
+    for (let i = 0; i < 40; i++)
+      f.log.append(first, {
+        type: "heartbeat",
+        agent: "main",
+        data: { ongoing: true, everyMs: 1000 },
+      });
+    f.log.append(first, {
+      type: "persona.choice",
+      agent: "main",
+      data: { persona: "design", by: "user" },
+    });
+    f.log.append(first, {
+      type: "session.end",
+      agent: "main",
+      data: { reason: "done", persona: "design" },
+    });
+    expect(entry()).toMatchObject({ firstTask: first, persona: "design" });
+    const next = await f.task("Make it prettier", first);
+    expect(entry()).toMatchObject({ sessionId: next, firstTask: first, persona: "design" });
+    f.log.append(next, {
+      type: "persona.choice",
+      agent: "main",
+      data: { persona: "research", by: "user" },
+    });
+    expect(entry()).toMatchObject({ sessionId: next, persona: "research" });
+  });
+
+  it("takes the dot a task's session.start names when nothing was chosen", async () => {
+    const f = setup();
+    const id = f.log.createSession("Fix the build");
+    f.log.append(id, {
+      type: "session.start",
+      agent: "main",
+      data: { screen: { w: 1280, h: 800, scale: 1 }, os: "linux", persona: "design" },
+    });
+    f.say(id, "Fix the build");
+    expect(f.open().list().conversations[0]).toMatchObject({ persona: "design" });
+  });
+
+  it("keeps the user's look beside its tag as it goes on, until it is given back", async () => {
+    const f = setup();
+    const first = await f.task("Plan a trip");
+    expect(f.open().organize(first, { look: ["crown", "monocle"] })).toMatchObject({
+      look: ["crown", "monocle"],
+    });
+    const next = await f.task("And a hotel", first);
+    const listed = () => f.open().list().conversations[0];
+    expect(listed()).toMatchObject({ sessionId: next, look: ["crown", "monocle"] });
+    f.open().organize(next, { pinned: true });
+    expect(listed()?.look).toEqual(["crown", "monocle"]);
+    expect(f.open().organize(next, { look: null })).toMatchObject({ look: null });
+    expect(listed()?.look).toBeUndefined();
+    expect(ConversationList.safeParse(f.open().list()).success).toBe(true);
   });
 });
 
@@ -420,6 +535,56 @@ describe("what was said earlier", () => {
       "The user: Make it bigger",
       "(That task was interrupted.)",
     ]);
+  });
+
+  it("carries an interrupted task's progress in what a new task can be given", async () => {
+    const f = setup();
+    const first = await f.task("Explain the PR");
+    f.log.append(first, {
+      type: "plan.set",
+      agent: "main",
+      data: {
+        items: Array.from({ length: 6 }, (_, n) => ({
+          id: `p${n}`,
+          text: `${n} ${"plan ".repeat(39)}`,
+          status: "todo" as const,
+        })),
+      },
+    });
+    for (let n = 0; n < 6; n++) {
+      const step = ulid();
+      f.log.append(first, {
+        type: "tool.start",
+        agent: "main",
+        step,
+        data: { tool: "files", title: `${n} ${"read ".repeat(38)}` },
+      });
+      f.log.append(first, { type: "step.end", agent: "main", step, data: { status: "ok" } });
+    }
+    const second = await f.task("Continue where you left off.", first);
+    const earlier = f.open().earlier(second);
+    // The brain's boot refuses a turn past this limit, and the new task would not start.
+    expect(EarlierTurns.safeParse(earlier).success).toBe(true);
+    expect(earlier.join("\n")).toContain("Recorded task progress");
+
+    const short = await f.task("Explain the other PR");
+    const step = ulid();
+    f.log.append(short, {
+      type: "step.start",
+      agent: "main",
+      step,
+      data: { kind: "shell", intent: "Reading the diff" },
+    });
+    f.log.append(short, {
+      type: "tool.start",
+      agent: "main",
+      step,
+      data: { tool: "shell", title: "cat secret" },
+    });
+    const third = await f.task("Continue where you left off.", short);
+    const said = f.open().earlier(third).join("\n");
+    expect(said).toContain("Reading the diff");
+    expect(said).not.toContain("cat secret");
   });
 
   it("stops reading older tasks once the record is full", async () => {
@@ -564,6 +729,48 @@ describe("conversation routes", () => {
       });
     return { ...f, conversations, releases, live, statuses, send };
   }
+
+  it("keeps what a task hears bounded however many runs a routine has had", async () => {
+    const f = setup();
+    let last: string | undefined;
+    for (let run = 0; run < 60; run++) {
+      const id = f.start("Bills", last);
+      f.say(id, "Check my bills");
+      f.reply(id, "r".repeat(5000));
+      f.end(id, "done");
+      last = id;
+    }
+    const earlier = f.open().earlier(last as string);
+    expect(earlier[0]).toBe(EARLIER_LEFT_OUT);
+    expect(earlier.join("\n").length).toBeLessThanOrEqual(
+      EARLIER_CHARS + EARLIER_LEFT_OUT.length + 1,
+    );
+    expect(f.open().chain(last as string).sessions).toHaveLength(CONVERSATION_TASKS);
+  });
+
+  it("says where a notification about a task leads", async () => {
+    const f = setup();
+    const conversations = f.open();
+    const plain = await f.task("Plan the trip");
+    const origin = {
+      kind: "routine",
+      routineId: ulid(),
+      runId: ulid(),
+      name: "Bills",
+      dueAt: "2026-10-12T07:30:00.000Z",
+    };
+    const run = f.log.createSession("Bills");
+    f.log.append(run, {
+      type: "session.start",
+      agent: "main",
+      data: { screen: { w: 1280, h: 800, scale: 1 }, os: "linux", title: "Bills", origin },
+    } as never);
+    f.say(run, "Check my bills");
+    const next = await f.task("Thanks", run);
+    expect(conversations.fromRoutine(plain)).toBe(false);
+    expect(conversations.fromRoutine(run)).toBe(true);
+    expect(conversations.latest(run)).toBe(next);
+  });
 
   it("shows the current conversation, starts a new one and continues an older one", async () => {
     const f = routes();

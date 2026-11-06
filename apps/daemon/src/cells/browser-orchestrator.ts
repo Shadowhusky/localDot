@@ -4,6 +4,10 @@ import {
   type BrowserStatus,
   BrowserSupervisorState,
 } from "../../../../packages/protocol/src/browser-control.ts";
+import type {
+  BrowserEngineRequest,
+  BrowserEngineStatus,
+} from "../../../../packages/protocol/src/browser-engine.ts";
 import type { ComputerResetSource } from "../../../../packages/protocol/src/computer-reset.ts";
 import {
   type BrowserKeydClient,
@@ -12,6 +16,7 @@ import {
 } from "../keyd/browser-wiring.ts";
 import { KeydError } from "../keyd/client.ts";
 import { AccountsProfile } from "./accounts-profile.ts";
+import { BrowserEngine } from "./browser-engine.ts";
 import {
   answersReady,
   describeBrowserFailure,
@@ -33,9 +38,9 @@ import {
   requireFreshBrowserNames,
   retireBrowserResources,
 } from "./browser-resources.ts";
-import { browserNames, browserNetworkSpec, browserSpec } from "./browser-spec.ts";
+import { BROWSER_SECCOMP, browserNames, browserNetworkSpec, browserSpec } from "./browser-spec.ts";
 import { browserLimits } from "./computer-size.ts";
-import { type DockerClient, DockerError } from "./docker.ts";
+import { type DockerClient, DockerError, dockerLogLines } from "./docker.ts";
 import type { BrowserImages } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
 import { allocateKeydPort } from "./ports.ts";
@@ -101,6 +106,8 @@ export interface BrowserOrchestratorDeps {
   docker: Docker;
   keyd: BrowserKeydClient;
   images: BrowserImages;
+  // Where a local Chrome image is tagged; only tests choose another.
+  chromeRepository?: string;
   // How gates reach keyd and the daemon (cells/relay.ts); Docker Desktop's host name by default.
   relay?: () => Promise<GateRelay>;
   streamFullcolor?: boolean;
@@ -143,18 +150,6 @@ function startCause(error: unknown): string | undefined {
   return undefined;
 }
 
-// Docker's non-TTY log stream: eight-byte frame headers, then the text. A malformed frame ends it.
-function containerLog(buffer: Buffer): string[] {
-  const text: string[] = [];
-  for (let offset = 0; offset + 8 <= buffer.length; ) {
-    const length = buffer.readUInt32BE(offset + 4);
-    if (offset + 8 + length > buffer.length) break;
-    text.push(buffer.subarray(offset + 8, offset + 8 + length).toString("utf8"));
-    offset += 8 + length;
-  }
-  return text.join("").split("\n").filter(Boolean);
-}
-
 export class BrowserOrchestrator {
   readonly #ledger: BrowserLedgerStore;
   readonly #queues = new Map<string, Promise<unknown>>();
@@ -173,6 +168,9 @@ export class BrowserOrchestrator {
   readonly #outages = new Set<string>();
   readonly #startedAt = new Map<string, number>();
   readonly #accounts: AccountsProfile;
+  readonly #engine: BrowserEngine;
+  // The image each running browser was created from, to tell when one is behind.
+  readonly #images = new Map<string, string>();
   #attaching: Promise<void> = Promise.resolve();
 
   subscribe(listener: (parentCellId: string) => void): () => void {
@@ -200,6 +198,54 @@ export class BrowserOrchestrator {
       prefix: deps.namePrefix ?? NAME_PREFIX,
       image: () => deps.images.browser,
     });
+    this.#engine = new BrowserEngine({
+      home: deps.home,
+      docker: deps.docker,
+      prefix: deps.namePrefix ?? NAME_PREFIX,
+      seccomp: BROWSER_SECCOMP,
+      base: () => deps.images.browser,
+      accounts: this.#accounts,
+      restart: (reason) => this.#restartRunning(reason),
+      report: (message) => console.error(message),
+      ...(deps.chromeRepository ? { repository: deps.chromeRepository } : {}),
+    });
+  }
+
+  async engineStatus(): Promise<BrowserEngineStatus> {
+    const image = await this.#engine.image();
+    return this.#engine.status(
+      [...this.#ready.keys()].some((parent) => {
+        const running = this.#images.get(parent);
+        return running !== undefined && running !== image;
+      }),
+    );
+  }
+
+  chooseEngine(request: BrowserEngineRequest): Promise<void> {
+    return this.#engine.choose(request);
+  }
+
+  // Back to Chromium and the sign-ins as they were before Chrome: every browser lets go of the
+  // profile first, and the warmer starts them again.
+  restoreEngineBackup(): Promise<void> {
+    const parents = this.#ledger.list().map((record) => record.parentCellId);
+    return this.#exclusive(new AbortController().signal, async () => {
+      await Promise.all(parents.map((parent) => this.#stop(parent, false)));
+      await this.#engine.restore();
+    });
+  }
+
+  dropEngineBackup(): Promise<void> {
+    return this.#engine.dropBackup();
+  }
+
+  // Keeps Chrome up to date while the daemon runs.
+  watchEngine(): () => void {
+    return this.#engine.watch();
+  }
+
+  #restartRunning(reason: string): void {
+    for (const parent of this.#ready.keys()) void this.restart(parent, reason).catch(() => {});
   }
 
   // The computer whose browser has the saved sign-ins open, is opening them, or still has a
@@ -221,6 +267,7 @@ export class BrowserOrchestrator {
     return this.#exclusive(new AbortController().signal, async () => {
       await Promise.all(parents.map((parent) => this.#stop(parent, true)));
       await this.#accounts.wipe();
+      this.#engine.signedOut();
     });
   }
 
@@ -669,8 +716,30 @@ export class BrowserOrchestrator {
       throw new BrowserLifecycleError("Browser record ownership changed");
   }
 
+  // Before the readiness clock, since neither depends on the browser: Chrome's install if one is
+  // under way, and the one-way hand-over of the sign-ins to it, with no browser holding them.
+  async #imageForStart(parent: string, epoch: number, signal: AbortSignal): Promise<string> {
+    if (this.#engine.pinned) return this.deps.images.browser;
+    await this.#engine.settled(signal);
+    this.#check(parent, epoch, signal);
+    if (await this.#engine.handOverPending())
+      await this.#exclusive(signal, async () => {
+        this.#check(parent, epoch, signal);
+        const own = this.#ledger.forParent(parent);
+        if (own) {
+          this.#association(own);
+          await this.#contain(own);
+        }
+        await this.#attachProfile(parent, () => this.#check(parent, epoch, signal));
+        await this.#engine.handOver();
+      });
+    this.#check(parent, epoch, signal);
+    return this.#engine.image();
+  }
+
   async #contain(record: BrowserLedger, purge = false): Promise<void> {
     this.#ready.delete(record.parentCellId);
+    this.#images.delete(record.parentCellId);
     this.#changed(record.parentCellId);
     const [keyd, docker] = await Promise.allSettled([
       closeBrowserKeyd(this.deps.keyd, record),
@@ -699,6 +768,22 @@ export class BrowserOrchestrator {
     if (current) return current;
     const cancel = new AbortController();
     this.#starting.set(parent, cancel);
+    this.#state.set(parent, "starting");
+    let image: string;
+    try {
+      image = await this.#imageForStart(parent, epoch, AbortSignal.any([caller, cancel.signal]));
+    } catch (error) {
+      const cancelled =
+        caller.aborted || cancel.signal.aborted || error instanceof BrowserStartCancelled;
+      if (this.#starting.get(parent) === cancel) this.#starting.delete(parent);
+      if (this.#state.get(parent) === "starting")
+        this.#state.set(parent, cancelled ? "stopped" : "failed");
+      this.#changed(parent);
+      if (cancelled) throw new BrowserStartCancelled();
+      throw new BrowserLifecycleError(
+        "Browser start failed while preparing Chrome; its profile has been retained",
+      );
+    }
     this.#startedAt.set(parent, Date.now());
     const readyTimeoutMs = this.deps.readyTimeoutMs ?? READY_TIMEOUT_MS;
     const timeout = AbortSignal.timeout(readyTimeoutMs);
@@ -707,7 +792,6 @@ export class BrowserOrchestrator {
     let record: BrowserLedger | undefined;
     let material: Buffer | undefined;
     let stage = "ownership recovery";
-    this.#state.set(parent, "starting");
     try {
       record = this.#ledger.forParent(parent);
       if (record) {
@@ -807,7 +891,7 @@ export class BrowserOrchestrator {
           "browser",
           browserSpec(
             cell,
-            this.deps.images.browser,
+            image,
             { fullcolor: this.deps.streamFullcolor ?? false },
             this.#accounts.volume,
             browserLimits(this.deps.size?.() ?? DEFAULT_COMPUTER_SIZE),
@@ -925,6 +1009,7 @@ export class BrowserOrchestrator {
         },
       };
       this.#ready.set(parent, ready);
+      this.#images.set(parent, image);
       this.#state.set(parent, "ready");
       this.#retries.delete(parent);
       this.#changed(parent);
@@ -1009,7 +1094,7 @@ export class BrowserOrchestrator {
       response: "buffer",
       timeoutMs: 5000,
     });
-    const lines = Buffer.isBuffer(logs) ? containerLog(logs) : [];
+    const lines = Buffer.isBuffer(logs) ? dockerLogLines(logs) : [];
     facts.push(...lines.filter((line) => BROWSERD_LOG.test(line)).slice(-3));
     return facts.length ? facts.join("; ") : undefined;
   }

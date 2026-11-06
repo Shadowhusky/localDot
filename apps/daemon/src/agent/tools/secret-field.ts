@@ -1,4 +1,6 @@
 import { MODEL_SCREEN, type Point, type ScreenName, webUrl } from "@localdot/protocol";
+import { signInNeedsOwnBrowser } from "../../../../../packages/protocol/src/accounts.ts";
+import { OWN_BROWSER_SIGN_IN_NOTE } from "../../../../../packages/protocol/src/guidance.ts";
 import type { NativeDevice } from "../../desktopd/registry.ts";
 import {
   type NativeActionIdentity,
@@ -46,31 +48,38 @@ async function onScreen<T>(
   ctx.check();
   const session = ctx.session;
   if (session.screens) {
-    const lease = session.screenLease(ctx.lease);
+    // The question's lookups and its delivery reach the screen outside any step's turn.
+    const turn = ctx.turn
+      ? undefined
+      : await deps.computer?.take(session.id, session.cellId, ctx.signal);
+    let lease: ReturnType<typeof session.screenLease> | undefined;
     try {
+      lease = session.screenLease(ctx.lease);
+      const screen = lease;
       if (!deps.bindScreen) throw new Error("The selected screen is unavailable.");
-      const binding = deps.bindScreen(session, lease);
+      const binding = deps.bindScreen(session, screen);
       if (
-        binding.cellId !== lease.selection.cellId ||
+        binding.cellId !== screen.selection.cellId ||
         binding.parentCellId !== session.cellId ||
-        binding.scale !== lease.selection.geometry.scale
+        binding.scale !== screen.selection.geometry.scale
       )
         throw new Error("The selected screen does not match this question.");
       return await work({
         device: binding.device,
         scale: binding.scale,
-        name: lease.selection.screen,
-        cellId: lease.selection.cellId,
-        revision: lease.selection.revision,
-        signal: AbortSignal.any([ctx.signal, lease.signal]),
-        privateInput: (work) => session.screens!.privateInput(lease, work),
+        name: screen.selection.screen,
+        cellId: screen.selection.cellId,
+        revision: screen.selection.revision,
+        signal: AbortSignal.any([ctx.signal, screen.signal]),
+        privateInput: (work) => session.screens!.privateInput(screen, work),
         check: () => {
           ctx.check();
-          lease.check();
+          screen.check();
         },
       });
     } finally {
-      lease.finish();
+      lease?.finish();
+      await turn?.release().catch(() => {});
     }
   }
   const device = deps.device?.(session.cellId);
@@ -157,6 +166,8 @@ export function findSecretField(
       const page = found.target.url ? webUrl(found.target.url) : undefined;
       if (page?.protocol === "https:" && opensInWebBrowser(page)) return WEBSITE_ON_DESKTOP;
     }
+    if (screen.name === "browser" && signInNeedsOwnBrowser(found.target.url ?? ""))
+      return OWN_BROWSER_SIGN_IN_NOTE;
     let loginOrigin: string | undefined;
     if (screen.name === "browser" && screen.device.secret && found.target.url) {
       const url = new URL(found.target.url);

@@ -3,12 +3,14 @@ import type { LocalDotEvent } from "@localdot/protocol";
 import { parseLine } from "../event-file.ts";
 import { taskCheckpoint } from "./task-checkpoint.ts";
 
-export type SideQuestionProblem = "no-fast-model" | "fast-model-not-running" | "no-answer";
+export type SideQuestionProblem = "no-model" | "no-spare-model" | "no-answer";
 
 export class SideQuestionError extends Error {
   constructor(
     readonly status: 409 | 502,
     readonly problem: SideQuestionProblem,
+    // Why, in the provider's or the plan's own words.
+    readonly reason?: string,
   ) {
     super(problem);
     this.name = "SideQuestionError";
@@ -82,8 +84,4 @@ export function sideQuestionPrompt(
   };
 }
 
-export function sideAnswerText(text: string): string {
-  const answer = clip(text, ANSWER_CHARS);
-  if (!answer) throw new SideQuestionError(502, "no-answer");
-  return answer;
-}
+export const sideAnswerText = (text: string) => clip(text, ANSWER_CHARS);

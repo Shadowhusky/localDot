@@ -38,6 +38,10 @@ function app(guest = false) {
       calls.push(["stop", ...args]);
       return args[1] === "p";
     },
+    stopServer: async (...args) => {
+      calls.push(["stopServer", ...args]);
+      if (args[1] === 5174) throw new PreviewError(409, { message: "couldn't stop it" });
+    },
   });
   return { hono, calls };
 }
@@ -98,5 +102,16 @@ describe("preview routes", () => {
       (await hono.request(`/api/sessions/${TASK}/previews/p`, { method: "DELETE" })).status,
     ).toBe(403);
     expect(calls).toEqual([]);
+  });
+
+  it("stops a server for its owner, and no one else", async () => {
+    const { hono, calls } = app();
+    const path = `/api/sessions/${TASK}/previews/servers`;
+    expect((await hono.request(`${path}/5173`, { method: "DELETE" })).status).toBe(204);
+    expect(calls).toEqual([["stopServer", TASK, 5173]]);
+    expect((await hono.request(`${path}/5174`, { method: "DELETE" })).status).toBe(409);
+    expect((await hono.request(`${path}/0`, { method: "DELETE" })).status).toBe(400);
+    const guest = app(true).hono;
+    expect((await guest.request(`${path}/5173`, { method: "DELETE" })).status).toBe(403);
   });
 });

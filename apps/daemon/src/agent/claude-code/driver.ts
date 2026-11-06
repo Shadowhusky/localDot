@@ -20,6 +20,7 @@ import {
 } from "@localdot/protocol";
 import { connectorDescriptors, type McpCallResult, toCallToolResult } from "../codex/mcp-tools.ts";
 import type { NativePauseReceipt } from "../codex/native-pause.ts";
+import { nativeRecap } from "../native-recap.ts";
 import { NativeRetirement } from "../native-retirement.ts";
 import { InputRefused, loggedCause, type StartupStep, startupFailure } from "../native-startup.ts";
 import { RETRY_NEXT, toolList, UNNAMED_TOOL } from "../native-tools.ts";
@@ -77,6 +78,8 @@ export interface ClaudeCodeDriverDeps {
     signal: AbortSignal,
   ) => Promise<{ frameId: string; full: true; png: Buffer }>;
   readonly transcripts: TranscriptStore;
+  // The task's steps so far, for a new run to carry on from.
+  readonly work?: (sessionId: string) => string;
   readonly instructions: (session: AgentSession) => string;
   readonly redactorFor?: (session: AgentSession) => Redactor;
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -455,17 +458,19 @@ export class ClaudeCodeDriver {
     await session.waitForControl();
   }
   #recap(session: AgentSession, redact: Redactor, suffix: string): string {
-    const messages = this.#deps.transcripts.read(session.id),
-      user = messages.filter((m) => m.sourceInbox && typeof m.content === "string"),
-      last = messages
-        .filter((m) => m.role === "assistant" && typeof m.content === "string")
-        .at(-1)?.content;
-    const marks = { done: "x", doing: ">", skipped: "-", todo: " " };
-    const earlier = earlierRecord(session.earlier);
     const note = this.#resumeNotes.get(session);
     this.#resumeNotes.delete(session);
     const text = redact(
-      `localDot restarted you, so the earlier conversation is gone.${earlier ? `\n${earlier}` : ""}\nThe task: ${session.task}\nThe plan so far:\n${session.plan.length ? session.plan.map((item) => `[${marks[item.status]}] ${item.text}`).join("\n") : "(no plan yet)"}${user.length ? `\nWhat the user said since the task:\n${user.map((m) => m.content).join("\n")}` : ""}${last ? `\nYour last message to the user: ${last}` : ""}\nUse the full screenshot in this turn to see where things stand, then continue.${suffix ? `\n${suffix}` : ""}${note ? `\n${note}` : ""}`,
+      nativeRecap({
+        task: session.task,
+        plan: session.plan,
+        earlier: session.earlier,
+        messages: this.#deps.transcripts.read(session.id),
+        work: this.#deps.work?.(session.id),
+        maxBytes: MAX_PROMPT_BYTES,
+        suffix,
+        note,
+      }),
     );
     if (Buffer.byteLength(text) > MAX_PROMPT_BYTES) throw new InputRefused("size");
     return text;

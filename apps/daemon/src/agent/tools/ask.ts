@@ -7,14 +7,21 @@ import {
   type RequestTakeoverInput,
   type ToolResult,
 } from "@localdot/protocol";
+import {
+  loginOrigins,
+  signInNeedsOwnBrowser,
+} from "../../../../../packages/protocol/src/accounts.ts";
+import { OWN_BROWSER_SIGN_IN_NOTE } from "../../../../../packages/protocol/src/guidance.ts";
 import { VaultLockedError } from "../../keyd/client.ts";
 import { addTaskSecret } from "../redact.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
-import type { AgentSession, AskAnswer, AskForm } from "../session.ts";
+import { type AgentSession, type AskAnswer, type AskForm, SAVED_LOGIN_TAP } from "../session.ts";
 import { fail, frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { accountOrigin, findSecretField, type SecretField, typeSecret } from "./secret-field.ts";
 
 const reusedLogins = new WeakMap<AgentSession, Set<string>>();
+// The sites whose saved login the user tapped to use in this task.
+const tappedLogins = new WeakMap<AgentSession, Set<string>>();
 
 const ASK_TIMEOUT_MS = 30 * 60_000;
 const DECLINED =
@@ -64,6 +71,57 @@ function unanswered(answer: AskAnswer, timeoutMs: number): ToolResult | undefine
   if (answer.by === "control")
     return { ok: false, content: [text("The user took the computer instead of answering.")] };
   if (answer.declined) return { ok: true, content: [text(DECLINED)] };
+  return undefined;
+}
+
+type SavedLogin = NonNullable<Awaited<ReturnType<NonNullable<ToolDeps["logins"]>["login"]>>> & {
+  origin: string;
+};
+
+// The login that may be offered on this page: its own site's first, then a near one's.
+async function savedLoginFor(
+  logins: NonNullable<ToolDeps["logins"]>,
+  page: string,
+): Promise<SavedLogin | undefined> {
+  for (const origin of loginOrigins(page)) {
+    const login = await logins.login(origin);
+    if (login) return { ...login, origin };
+  }
+  return undefined;
+}
+
+// A login added in Settings or imported, or one saved for a near site rather than this one, waits
+// for the user's tap, once a task: a page or a mistake must not be able to walk dot through every
+// account they keep. It names only the site, so nothing about the account is on record if they
+// say no. Undefined once tapped; otherwise what to tell dot.
+async function tapToFill(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+  page: string,
+  saved: SavedLogin,
+): Promise<ToolResult | undefined> {
+  const tapped = tappedLogins.get(ctx.session) ?? new Set<string>();
+  tappedLogins.set(ctx.session, tapped);
+  if (tapped.has(page) || (!saved.confirm && saved.origin === page)) return undefined;
+  saved.password = "";
+  const host = new URL(page).host;
+  const timeoutMs = askTimeoutMs(deps, ctx);
+  const answer = await ctx.session.askFields(
+    {
+      question: `Sign in to ${host} with your saved login? localDot enters it there, and dot never sees it.`,
+      fields: [{ id: SAVED_LOGIN_TAP, kind: "confirm", label: "Sign in", required: true }],
+      submit: "Sign in",
+      decline: "Not now",
+    },
+    timeoutMs,
+    ctx.step,
+    ctx.generation,
+    ctx.signal,
+  );
+  ctx.check();
+  const early = unanswered(answer, timeoutMs);
+  if (early) return early;
+  tapped.add(page);
   return undefined;
 }
 
@@ -139,9 +197,10 @@ async function askFields(
   ) {
     const origin = await accountOrigin(deps, ctx);
     if (origin) {
-      let saved: Awaited<ReturnType<NonNullable<ToolDeps["logins"]>["login"]>>;
+      if (signInNeedsOwnBrowser(origin)) return fail(OWN_BROWSER_SIGN_IN_NOTE);
+      let saved: SavedLogin | undefined;
       try {
-        saved = await deps.logins.login(origin);
+        saved = await savedLoginFor(deps.logins, origin);
       } catch (error) {
         ctx.check();
         if (error instanceof VaultLockedError) return keysLocked(ctx);
@@ -151,6 +210,8 @@ async function askFields(
       }
       ctx.check();
       if (saved) {
+        const refused = await tapToFill(deps, ctx, origin, saved);
+        if (refused) return refused;
         saved.password = "";
         if (saved.username)
           return {
@@ -195,21 +256,36 @@ async function askFields(
     const [id, field] = secretEntry;
     const origin = secretEntry[1].loginOrigin;
     if (!used.has(origin)) {
-      let saved: Awaited<ReturnType<NonNullable<ToolDeps["logins"]>["login"]>>;
-      try {
-        saved = await deps.logins.login(origin);
-      } catch (error) {
+      const unavailable = (error: unknown) => {
         ctx.check();
         if (error instanceof VaultLockedError) return keysLocked(ctx);
         return fail(
           "The saved sign-in store is temporarily unavailable. Do not ask the user to enter credentials again or treat this as a rejected password. Explain that saved credentials could not be checked and retry after access is restored.",
         );
+      };
+      let saved: SavedLogin | undefined;
+      try {
+        saved = await savedLoginFor(deps.logins, origin);
+      } catch (error) {
+        return unavailable(error);
       }
       ctx.check();
-      if (saved && loginFields.every((field) => !field.value || field.value === saved.username)) {
+      if (saved && loginFields.every((field) => !field.value || field.value === saved?.username)) {
+        const refused = await tapToFill(deps, ctx, origin, saved);
+        if (refused) return refused;
+        // Read again: nothing of the password waits in memory on the user's answer.
+        try {
+          saved = await savedLoginFor(deps.logins, origin);
+        } catch (error) {
+          return unavailable(error);
+        }
+        ctx.check();
+      }
+      if (saved && loginFields.every((field) => !field.value || field.value === saved?.username)) {
+        const reused = saved;
         let delivering = false;
         try {
-          if (!saved.username && loginFields.length) {
+          if (!reused.username && loginFields.length) {
             const missing = await ctx.session.askFields(
               {
                 question: `A password is saved for ${new URL(origin).host}. Which account should it use?`,
@@ -232,12 +308,12 @@ async function askFields(
             if (early) return early;
             const account = loginFields[0] && missing.fields?.[loginFields[0].id];
             if (typeof account !== "string") return fail("The account name was not provided.");
-            saved.username = account;
-            await deps.logins.saveLogin(origin, saved.username, saved.password);
+            reused.username = account;
+            await deps.logins.saveLogin(reused.origin, reused.username, reused.password);
           }
           delivering = true;
-          addTaskSecret(ctx.session, saved.password);
-          const landed = await typeSecret(deps, ctx, field, saved.password, saved.username);
+          addTaskSecret(ctx.session, reused.password);
+          const landed = await typeSecret(deps, ctx, field, reused.password, reused.username);
           ctx.check();
           if (!landed.filled)
             return fail(
@@ -246,7 +322,7 @@ async function askFields(
           used.add(origin);
           ctx.session.taskAutonomy.signIn(field.screen.name);
           const answers = Object.fromEntries(
-            loginFields.map((field) => [field.id, ctx.redact(saved.username)]),
+            loginFields.map((field) => [field.id, ctx.redact(reused.username)]),
           );
           return {
             ok: true,
@@ -263,7 +339,7 @@ async function askFields(
             "Secure delivery of the saved sign-in could not be confirmed. Inspect the page before retrying; do not claim the field moved.",
           );
         } finally {
-          saved.password = "";
+          reused.password = "";
         }
       }
     }

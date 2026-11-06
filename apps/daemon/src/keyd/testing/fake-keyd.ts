@@ -51,6 +51,9 @@ export class FakeKeyd {
   readonly records = new Map<string, KeydRecord>();
   readonly cells = new Map<string, FakeCell>();
   bootId = randomBytes(8).toString("hex");
+  // What POST /v1/secrets/<id>/oauth/refresh answers, and who asked.
+  renewal: "fresh" | "reconnect" | "unavailable" | "none" = "fresh";
+  readonly renewals: string[] = [];
   auditOk = true;
   hairpin: HairpinGuard = { state: "active", source: "nat-pmp", addresses: 1 };
   // false: a keyd from before capture, which neither says it takes a capture token nor accepts one.
@@ -221,6 +224,7 @@ export class FakeKeyd {
         sealKey: FAKE_SEAL_KEY,
         cells: this.cells.size,
         secrets: this.records.size,
+        oauth: true,
         limits: { perTaskUSD: 5, perDayUSD: 20 },
         day: { date: "2026-10-01", spentUSD: 0 },
         audit: this.auditOk ? { ok: true } : { ok: false, error: "disk full" },
@@ -253,6 +257,13 @@ export class FakeKeyd {
       this.#streams.add(res);
       res.on("close", () => this.#streams.delete(res));
       return true;
+    }
+    const refresh = /^\/v1\/secrets\/([^/]+)\/oauth\/refresh$/.exec(path);
+    if (method === "POST" && refresh) {
+      this.renewals.push(decodeURIComponent(refresh[1] as string));
+      return this.renewal === "none"
+        ? reply(res, 404, { error: { code: "not-found", message: "no sign-in" } })
+        : reply(res, 200, { state: this.renewal });
     }
     const secret = /^\/v1\/secrets\/([^/]+)$/.exec(path);
     if (secret) {

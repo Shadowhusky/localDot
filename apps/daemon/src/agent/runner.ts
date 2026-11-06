@@ -17,8 +17,11 @@ import {
   isJevKey,
   type KeydRecord,
   LIVE_ACTIVITY_CHARS,
+  type MessageModel,
+  MODEL_SWITCH_ENTRY,
   type ModelBinding,
   type ModelOptions,
+  messageName,
   type PersonaId,
   type PremiumSpeed,
   personaOf,
@@ -32,12 +35,18 @@ import {
   STALL,
   type SubagentResume,
   type TakeComputerReply,
+  type TaskModelRef,
   type TaskModelSelection,
   type TaskPricing,
   ULID_PATTERN,
   ulid,
 } from "@localdot/protocol";
-import { type Catalog, modelControls, modelOptionsProblem } from "@localdot/providers";
+import {
+  type Catalog,
+  modelControls,
+  modelOptionsProblem,
+  sameModelOptions,
+} from "@localdot/providers";
 import type { CellSummary } from "../cells/types.ts";
 import { NO_CONNECTORS, type TaskConnectors } from "../connectors/hub.ts";
 import type { EventLog } from "../event-log.ts";
@@ -52,6 +61,7 @@ import {
   CHATGPT,
   CLAUDE_CODE,
   checkPlanChoices,
+  librarySpelling,
   planOnly,
   pricingOf,
   type ResolvedRole,
@@ -80,7 +90,7 @@ import type { RecentActivity } from "./recent-activity.ts";
 import { ResearchLog } from "./research.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
-import { gatewayCompletion } from "./safety/judge-model.ts";
+import { gatewayCompletion, ModelAnswerError } from "./safety/judge-model.ts";
 import {
   jevApprovalRequest,
   jevFits,
@@ -94,8 +104,8 @@ import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
 import { taintMemory } from "./safety/taint.ts";
 import { visualNavigation } from "./safety/visual-target.ts";
-import { AgentSession, abortable, SessionStoppedError } from "./session.ts";
-import { AgentSettings } from "./settings.ts";
+import { AgentSession, abortable, type MessageTurn, SessionStoppedError } from "./session.ts";
+import { AgentSettings, RoleChoice } from "./settings.ts";
 import {
   SideQuestionError,
   sideAnswerText,
@@ -108,6 +118,9 @@ import type { TranscriptStore } from "./transcript.ts";
 
 export const BRAIN_DONE = 0;
 export const BRAIN_GAVE_UP = 3;
+// The brain booted, then could not reach the tool API for its whole reconnect window. Restarting
+// it is no crash of its own: a brain that then cannot boot counts as one.
+export const BRAIN_LOST = 4;
 const RESTART_BACKOFF_MS = [2000, 4000, 8000];
 const IDLE_MS = 30 * 60 * 1000;
 const TERMINAL_SNAPSHOTS = 256;
@@ -148,6 +161,8 @@ export interface TerminalTaskSnapshot {
 export interface TaskStartOptions {
   // Server-selected shared-link model, never arbitrary client request fields.
   readonly main?: import("@localdot/protocol").AgentRoleChoice;
+  // The user's own choice, sent with the message; left out, the conversation's model or the default.
+  readonly model?: TaskModelRef;
   readonly origin?: SessionOrigin;
   // Replaces the user's autonomy for this task.
   readonly autonomy?: AutonomyPolicy;
@@ -193,7 +208,6 @@ export interface AgentRunnerDeps {
     | "busy"
     | "cellOf"
     | "lease"
-    | "browserHolder"
   >;
   // A task's live status changed; undefined once it has ended.
   liveChanged?(sessionId: string, live: ConversationLive | undefined): void;
@@ -201,7 +215,12 @@ export interface AgentRunnerDeps {
   computer?: Pick<ComputerTurns, "take" | "owners">;
   cell(cellId: string): CellSummary | undefined;
   cellBusy?(cellId: string): boolean;
-  installSession?(session: AgentSession, cell: CellSummary, freshTab?: boolean): void;
+  installSession?(
+    session: AgentSession,
+    cell: CellSummary,
+    freshTab?: boolean,
+    continues?: string,
+  ): void;
   // Starts the computer's web browser, or finds it running.
   startBrowser?(cellId: string): Promise<void>;
   brains: Pick<BrainCells, "open" | "start" | "exited" | "close"> &
@@ -217,7 +236,7 @@ export interface AgentRunnerDeps {
   recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
-    Partial<Pick<Conversations, "names" | "persona">>;
+    Partial<Pick<Conversations, "names" | "persona" | "model" | "chooseModel" | "latest">>;
   installSkills(cellId: string, signal: AbortSignal, persona?: PersonaId): Promise<SkillSummary[]>;
   prepareDesktop?(session: AgentSession): Promise<void>;
   waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
@@ -270,8 +289,8 @@ type ModelSelection =
       model: string;
       options?: ModelOptions;
       fast?: { model: string; options?: ModelOptions };
-      // A new conversation's first look: the fast model, else the main one, at its least thinking.
-      quick: { model: string; options?: ModelOptions };
+      // Short questions with no tools: the fast model, then the main one, at their least thinking.
+      quick: readonly { model: string; options?: ModelOptions }[];
     }
   | { kind: "none" };
 // A plan's account says what each of its models takes: its efforts and speeds replace the bundled
@@ -306,6 +325,14 @@ function planOptionsProblem(
 interface Runtime {
   session: AgentSession;
   selection: ModelSelection;
+  // The model a message that reached dot asks for, from the agent's next start.
+  wanted?: ModelSelection;
+  // keyd's name for the task's spending on its current prices, the limit set for the whole task,
+  // and what it had spent when each new account began.
+  account: string;
+  budgetUSD?: number;
+  spentUSD: number;
+  spentBefore: number;
   // The dot chosen when the task started, or the user's switch; its skills and instructions hold
   // from the agent's next start.
   persona?: PersonaId;
@@ -341,10 +368,42 @@ interface Runtime {
 interface FastModel {
   readonly provider: string;
   readonly model: string;
-  // Whether it can answer now: a fast model on an API key answers only through a running brain.
-  ready(): boolean;
-  ask(system: string, prompt: string, signal: AbortSignal): Promise<string>;
+  // The user's fast model, whose failures Settings tells of.
+  readonly fast?: boolean;
+  ask: Ask;
 }
+const reasonOf = (error: unknown) =>
+  error instanceof ModelAnswerError ? error.message : "it could not be reached";
+// What a log may keep of a reason: its status, not what the provider said.
+const loggedReason = (reason: string | undefined) => reason?.split(":")[0] ?? "no answer";
+// What a task's main model is, however it runs: who it is for the user, and what runs it.
+const runningOf = (selection: ModelSelection) => {
+  if (selection.kind === "none") return undefined;
+  if (selection.kind !== "api") return { route: selection.kind, model: selection.model };
+  const main = selection.roles.find((role) => role.role === "main");
+  return main && { route: main.route, model: main.model.id };
+};
+const sameRun = (a: ModelSelection, b: ModelSelection) => {
+  const main = (selection: ModelSelection) =>
+    selection.kind === "api" ? selection.roles.find((role) => role.role === "main") : undefined;
+  const options = (selection: ModelSelection) =>
+    selection.kind === "api"
+      ? main(selection)?.options
+      : selection.kind === "none"
+        ? undefined
+        : selection.options;
+  return (
+    a.kind === b.kind &&
+    main(a)?.providerId === main(b)?.providerId &&
+    JSON.stringify(runningOf(a)) === JSON.stringify(runningOf(b)) &&
+    sameModelOptions(options(a), options(b))
+  );
+};
+const messageModel = (choice: AgentRoleChoice): MessageModel => ({
+  provider: choice.provider,
+  model: choice.model,
+  ...(choice.options ? { options: choice.options } : {}),
+});
 class CleanupUncertain extends Error {}
 function uncertain(error: unknown): boolean {
   return (
@@ -379,6 +438,7 @@ export class AgentRunner {
   #health: KeydHealth;
   #lastBoot: string | undefined;
   #closing = false;
+  #fastFailure: { provider: string; model: string; reason: string } | undefined;
   constructor(private readonly deps: AgentRunnerDeps) {
     this.#health = deps.keydHealth?.() ?? { online: true };
     this.#lastBoot = this.#health.bootId;
@@ -395,6 +455,7 @@ export class AgentRunner {
               : undefined;
       if (doing) rt.activity = clipText(doing, LIVE_ACTIVITY_CHARS);
       queueMicrotask(() => this.#told(rt));
+      if (event.type === "model.spend") rt.spentUSD = event.data.taskSpentUSD;
       if (event.type === "budget.exceeded") {
         rt.pause = "budget";
         rt.budgetScope = event.data.scope;
@@ -450,7 +511,9 @@ export class AgentRunner {
       const choice = active[role];
       if (!choice) continue;
       try {
-        roles.push(resolveRole(role, choice, catalog, keys));
+        roles.push(
+          resolveRole(role, librarySpelling(choice, snapshot.models ?? []), catalog, keys),
+        );
       } catch (error) {
         if (error instanceof BindingError) throw new AgentError(400, error.message);
         throw error;
@@ -537,10 +600,10 @@ export class AgentRunner {
         ...this.deps.settings(),
         ...(options.main ? { main: options.main, fast: undefined, local: undefined } : {}),
       });
-      // A routine's run is its own thread: it neither continues nor takes over the user's
-      // conversation. A conversation record that can't be read never keeps a task from starting.
+      // A routine's run goes on in the routine's own conversation, never the one the user has open.
+      // A conversation record that can't be read never keeps a task from starting.
       let continues: string | undefined;
-      if (!origin)
+      if (!origin || options.continues)
         try {
           continues =
             options.continues === undefined
@@ -549,6 +612,10 @@ export class AgentRunner {
         } catch {
           console.error("the earlier conversation could not be read");
         }
+      // Settings holds the default: a task runs on what was chosen for it, and goes on with it.
+      if (options.model) settings.main = this.#choiceOf(options.model, continues);
+      else if (!options.main && continues)
+        settings.main = this.#conversationModel(continues) ?? settings.main;
       // The conversation's own task makes way for the new one; the computer's other tasks go on.
       const previous = continues ? this.sessions.get(continues) : undefined;
       if (previous && !previous.stopped) {
@@ -572,92 +639,8 @@ export class AgentRunner {
           ? abortable(this.deps.live.settled(previous.id), signal)
           : this.deps.live.settled(previous.id));
       }
-      let selection: ModelSelection;
-      // Undefined when the saved keys couldn't be read.
-      let keys: KeydRecord[] | undefined = [];
-      try {
-        checkPlanChoices(settings);
-      } catch (error) {
-        if (error instanceof BindingError) throw new AgentError(400, error.message);
-        throw error;
-      }
-      if (settings.main?.provider === CLAUDE_CODE) {
-        const claude = this.deps.claudeCode;
-        if (!claude) throw new AgentError(400, CLAUDE_CODE_OFF);
-        const status = await claude.status();
-        signal?.throwIfAborted();
-        if (status.state !== "signed_in")
-          throw new AgentError(400, status.reason ?? "Claude Code isn't ready.");
-        const account = (choice: AgentRoleChoice) => {
-          const model = status.models?.find((row) => row.id === choice.model);
-          return (
-            model && {
-              ...(model.efforts ? { efforts: model.efforts } : {}),
-              ...(model.fast !== undefined ? { speeds: model.fast ? ["fast" as const] : [] } : {}),
-            }
-          );
-        };
-        const problem = planOptionsProblem(CLAUDE_CODE, settings.main, account(settings.main));
-        if (problem) throw new AgentError(400, problem);
-        // Claude Code keeps its own history, so a fast model on the plan answers the purpose check.
-        const fast = activeRoles(settings).fast;
-        const fastProblem = fast && planOptionsProblem(CLAUDE_CODE, fast, account(fast));
-        if (fastProblem) throw new AgentError(400, `fast model: ${fastProblem}`);
-        const quick = fast ?? settings.main;
-        const least = leastEffort(
-          account(quick)?.efforts ?? modelControls(CLAUDE_CODE, quick.model).efforts,
-        );
-        selection = {
-          kind: "claude-code",
-          model: settings.main.model,
-          options: settings.main.options,
-          ...(fast ? { fast: { model: fast.model, options: fast.options } } : {}),
-          quick: { model: quick.model, ...(least ? { options: { reasoningEffort: least } } : {}) },
-        };
-      } else if (settings.main?.provider === CHATGPT) {
-        const codex = this.deps.codex;
-        if (!codex) throw new AgentError(400, CHATGPT_SWITCHED_OFF);
-        if (!this.#health.online) throw new AgentError(503, "The desktop key layer is offline.");
-        const status = await codex.account.status();
-        signal?.throwIfAborted();
-        if (!status.available)
-          throw new AgentError(400, status.reason ?? "The ChatGPT plan is unavailable.");
-        if (status.state !== "signed_in")
-          throw new AgentError(400, "ChatGPT plan: sign in under Settings first.");
-        const capability = status.models?.find((model) => model.id === settings.main?.model);
-        const tiers = capability?.tiers ?? {};
-        const problem = planOptionsProblem(CHATGPT, settings.main, {
-          ...(capability?.efforts ? { efforts: capability.efforts } : {}),
-          speeds: (["fast", "ultrafast"] as const).filter((speed) => tiers[speed]),
-        });
-        if (problem) throw new AgentError(400, problem);
-        const speed = settings.main.options?.speed;
-        const serviceTier = speed === "fast" || speed === "ultrafast" ? tiers[speed] : undefined;
-        selection = {
-          kind: "chatgpt",
-          model: settings.main.model,
-          options: settings.main.options,
-          ...(serviceTier ? { serviceTier } : {}),
-          denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
-        };
-      } else {
-        keys = await this.deps.keyd.secrets();
-        signal?.throwIfAborted();
-        const roles = this.resolveRoles(keys, settings);
-        // Settings saved while keyd was away reach it here, before the task's first model call.
-        await syncDayLimit(this.deps.keyd, settings.dayBudgetUSD).catch(() =>
-          console.error("keyd's daily spending limit could not be updated"),
-        );
-        signal?.throwIfAborted();
-        selection = {
-          kind: "api",
-          roles,
-          pricing: pricingOf(roles),
-          ...((budget ?? settings.taskBudgetUSD) === undefined
-            ? {}
-            : { initialBudget: budget ?? settings.taskBudgetUSD }),
-        };
-      }
+      const { selection, keys: read } = await this.#selection(settings, budget, signal);
+      let keys: KeydRecord[] | undefined = read;
       // A plan's own models need no key; only a Jev key can check where data goes. Keys that
       // can't be read leave the check unable to answer, never off.
       if (native(selection) && settings.purposeCheck !== "off")
@@ -702,7 +685,7 @@ export class AgentRunner {
       const title = (
         origin?.success && origin.data.kind === "routine"
           ? origin.data.name
-          : (named?.automatic ?? task)
+          : (named?.automatic ?? messageName(task))
       ).slice(0, 200);
       const id = this.deps.eventLog.createSession(title);
       const session = new AgentSession(
@@ -785,6 +768,12 @@ export class AgentRunner {
       const rt: Runtime = {
         session,
         selection,
+        account: id,
+        ...(selection.kind === "api" && selection.initialBudget !== undefined
+          ? { budgetUSD: selection.initialBudget }
+          : {}),
+        spentUSD: 0,
+        spentBefore: 0,
         ...(persona ? { persona } : {}),
         limits: agentLimits(settings.checkIns),
         skills: [],
@@ -806,7 +795,7 @@ export class AgentRunner {
       // The desktop's browser starts afresh only for a computer no other task is using.
       const alone = !this.deps.live.busy(cellId);
       try {
-        this.deps.installSession?.(session, cell, !continues);
+        this.deps.installSession?.(session, cell, !continues, continues);
         session.append("session.start", {
           screen: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
           os: "linux",
@@ -815,8 +804,15 @@ export class AgentRunner {
           ...(origin?.success ? { origin: origin.data } : {}),
           ...(revises?.success ? { revises: revises.data } : {}),
           ...(session.research ? { research: session.research.budget } : {}),
+          persona: persona ?? DEFAULT_PERSONA,
         });
-        session.askTask(options.sender);
+        session.askTask(options.sender, settings.main && messageModel(settings.main));
+        if (settings.main)
+          try {
+            this.deps.conversations?.chooseModel?.(id, settings.main);
+          } catch {
+            console.error("the task's model could not be saved");
+          }
         if (named?.user) session.append("session.title", { title: named.user, by: "user" });
         if (!origin && !continues) this.#lookFirst(rt, task, !!settings.autoPersona);
         if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));
@@ -836,7 +832,8 @@ export class AgentRunner {
         this.#runtime.delete(id);
         throw error;
       }
-      if (!origin)
+      // The user looking at a routine's conversation stays with it as a new run starts.
+      if (!origin || continues)
         try {
           this.deps.conversations?.adopt(id, continues ?? null);
         } catch {
@@ -846,6 +843,274 @@ export class AgentRunner {
     } finally {
       admittedNext();
     }
+  }
+  // What a task on these settings runs with, checked against what its plan or key offers now.
+  async #selection(
+    settings: AgentSettings,
+    budget: number | undefined,
+    signal?: AbortSignal,
+  ): Promise<{ selection: ModelSelection; keys: KeydRecord[] }> {
+    let selection: ModelSelection;
+    let keys: KeydRecord[] = [];
+    try {
+      checkPlanChoices(settings);
+    } catch (error) {
+      if (error instanceof BindingError) throw new AgentError(400, error.message);
+      throw error;
+    }
+    if (settings.main?.provider === CLAUDE_CODE) {
+      const claude = this.deps.claudeCode;
+      if (!claude) throw new AgentError(400, CLAUDE_CODE_OFF);
+      const status = await claude.status();
+      signal?.throwIfAborted();
+      if (status.state !== "signed_in")
+        throw new AgentError(400, status.reason ?? "Claude Code isn't ready.");
+      const account = (choice: AgentRoleChoice) => {
+        const model = status.models?.find((row) => row.id === choice.model);
+        return (
+          model && {
+            ...(model.efforts ? { efforts: model.efforts } : {}),
+            ...(model.fast !== undefined ? { speeds: model.fast ? ["fast" as const] : [] } : {}),
+          }
+        );
+      };
+      const problem = planOptionsProblem(CLAUDE_CODE, settings.main, account(settings.main));
+      if (problem) throw new AgentError(400, problem);
+      // Claude Code keeps its own history, so a fast model on the plan answers the purpose check.
+      const fast = activeRoles(settings).fast;
+      const fastProblem = fast && planOptionsProblem(CLAUDE_CODE, fast, account(fast));
+      if (fastProblem) throw new AgentError(400, `fast model: ${fastProblem}`);
+      const quick = (choice: AgentRoleChoice) => {
+        const least = leastEffort(
+          account(choice)?.efforts ?? modelControls(CLAUDE_CODE, choice.model).efforts,
+        );
+        return { model: choice.model, ...(least ? { options: { reasoningEffort: least } } : {}) };
+      };
+      selection = {
+        kind: "claude-code",
+        model: settings.main.model,
+        options: settings.main.options,
+        ...(fast ? { fast: { model: fast.model, options: fast.options } } : {}),
+        quick: [...(fast ? [quick(fast)] : []), quick(settings.main)],
+      };
+    } else if (settings.main?.provider === CHATGPT) {
+      const codex = this.deps.codex;
+      if (!codex) throw new AgentError(400, CHATGPT_SWITCHED_OFF);
+      if (!this.#health.online) throw new AgentError(503, "The desktop key layer is offline.");
+      const status = await codex.account.status();
+      signal?.throwIfAborted();
+      if (!status.available)
+        throw new AgentError(400, status.reason ?? "The ChatGPT plan is unavailable.");
+      if (status.state !== "signed_in")
+        throw new AgentError(400, "ChatGPT plan: sign in under Settings first.");
+      const capability = status.models?.find((model) => model.id === settings.main?.model);
+      const tiers = capability?.tiers ?? {};
+      const problem = planOptionsProblem(CHATGPT, settings.main, {
+        ...(capability?.efforts ? { efforts: capability.efforts } : {}),
+        speeds: (["fast", "ultrafast"] as const).filter((speed) => tiers[speed]),
+      });
+      if (problem) throw new AgentError(400, problem);
+      const speed = settings.main.options?.speed;
+      const serviceTier = speed === "fast" || speed === "ultrafast" ? tiers[speed] : undefined;
+      selection = {
+        kind: "chatgpt",
+        model: settings.main.model,
+        options: settings.main.options,
+        ...(serviceTier ? { serviceTier } : {}),
+        denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
+      };
+    } else {
+      keys = await this.deps.keyd.secrets();
+      signal?.throwIfAborted();
+      const roles = this.resolveRoles(keys, settings);
+      // Settings saved while keyd was away reach it here, before the task's first model call.
+      await syncDayLimit(this.deps.keyd, settings.dayBudgetUSD).catch(() =>
+        console.error("keyd's daily spending limit could not be updated"),
+      );
+      signal?.throwIfAborted();
+      selection = {
+        kind: "api",
+        roles,
+        pricing: pricingOf(roles),
+        ...((budget ?? settings.taskBudgetUSD) === undefined
+          ? {}
+          : { initialBudget: budget ?? settings.taskBudgetUSD }),
+      };
+    }
+    return { selection, keys };
+  }
+  #conversationModel(sessionId: string): AgentRoleChoice | undefined {
+    try {
+      return this.deps.conversations?.model?.(sessionId);
+    } catch {
+      console.error("the conversation's model could not be read");
+      return undefined;
+    }
+  }
+  // One of the user's models as they chose it now: what else is known of it comes from Settings, or
+  // from the conversation that went on using it after it left Settings. A plan's models are its own.
+  #choiceOf(ref: TaskModelRef, sessionId?: string): AgentRoleChoice {
+    const saved = this.deps.settings();
+    const known = [
+      saved.main,
+      saved.fast,
+      saved.local,
+      ...(saved.models ?? []),
+      ...(sessionId ? [this.#conversationModel(sessionId)] : []),
+    ].find(
+      (choice) =>
+        choice?.provider === ref.provider && choice.model === ref.model && choice.key === ref.key,
+    );
+    if (!known && ref.provider !== CHATGPT && ref.provider !== CLAUDE_CODE)
+      throw new AgentError(400, "Add this model under Settings first.");
+    const {
+      options: _options,
+      off: _off,
+      ...rest
+    } = known ?? {
+      provider: ref.provider,
+      model: ref.model,
+    };
+    const parsed = RoleChoice.safeParse({
+      ...rest,
+      ...(ref.options ? { options: ref.options } : {}),
+    });
+    if (!parsed.success) throw new AgentError(400, "invalid model selection");
+    return parsed.data;
+  }
+  // Choosing a model in a task changes that task alone, from its next message.
+  chooseTaskModel(sessionId: string, ref: TaskModelRef): AgentRoleChoice {
+    const latest = this.deps.conversations?.latest?.(sessionId) ?? sessionId;
+    const choice = this.#choiceOf(ref, latest);
+    this.deps.conversations?.chooseModel?.(latest, choice);
+    return choice;
+  }
+  taskModel(sessionId: string): AgentRoleChoice | undefined {
+    return this.#conversationModel(this.deps.conversations?.latest?.(sessionId) ?? sessionId);
+  }
+  // What a message sent now asks of its turn. A model the task's own runtime runs takes over in
+  // place from saved history. Claude Code, the ChatGPT plan and API models each keep their own
+  // history, so moving between them is a new task of the conversation, told what was said in it.
+  async messageTurn(
+    sessionId: string,
+    ref: TaskModelRef,
+    signal?: AbortSignal,
+  ): Promise<MessageTurn | undefined> {
+    const rt = this.#runtime.get(sessionId);
+    if (!rt || rt.session.stopped || rt.selection.kind === "none") return undefined;
+    const choice = this.#choiceOf(ref, sessionId);
+    const saved = AgentSettings.parse({ ...this.deps.settings(), main: choice });
+    const model = messageModel(choice);
+    const kindOf = (provider: string) =>
+      provider === CHATGPT || provider === CLAUDE_CODE ? provider : "api";
+    let selection: ModelSelection;
+    if (kindOf(choice.provider) === "api" && rt.selection.kind === "api") {
+      // The helpers keep the routing the task started with.
+      const helpers = rt.selection.roles.filter((role) => role.role !== "main");
+      const main = rt.selection.roles.find((role) => role.role === "main");
+      const keys = await this.deps.keyd.secrets().catch((error: unknown) => {
+        // A key layer that's away doesn't stop a message to the model the task is already on.
+        if (
+          main?.providerId === choice.provider &&
+          main.model.id === choice.model &&
+          main.keyId === choice.key &&
+          sameModelOptions(main.options, choice.options)
+        )
+          return undefined;
+        throw error;
+      });
+      if (!keys) return { model, ref, moves: () => false, reached: () => {} };
+      signal?.throwIfAborted();
+      try {
+        const roles = [resolveRole("main", choice, this.deps.catalog(), keys), ...helpers];
+        selection = { kind: "api", roles, pricing: pricingOf(roles) };
+      } catch (error) {
+        if (error instanceof BindingError) throw new AgentError(400, error.message);
+        throw error;
+      }
+    } else ({ selection } = await this.#selection(saved, undefined, signal));
+    if (rt.session.stopped) return undefined;
+    try {
+      this.deps.conversations?.chooseModel?.(sessionId, choice);
+    } catch {
+      console.error("the task's model could not be saved");
+    }
+    if (selection.kind !== rt.selection.kind)
+      return {
+        model,
+        ref,
+        moves: () => true,
+        reached: () => {},
+        handOver: () => this.#handOver(rt),
+      };
+    const moves = () => !sameRun(selection, rt.wanted ?? rt.selection);
+    return {
+      model,
+      ref,
+      moves,
+      reached: () => {
+        if (!moves()) return;
+        rt.wanted = selection;
+        const { session } = rt;
+        if (!session.generation) return;
+        rt.epoch += 1;
+        session.retireBrain(session.generation, "restarted");
+        rt.backoff?.abort();
+      },
+    };
+  }
+  // The agent's next start runs on what a message asked for. keyd never reprices an account, so a
+  // change of API model opens another for the same task, with what the task's limit has left.
+  #startOnWanted(rt: Runtime): void {
+    const { wanted } = rt;
+    if (!wanted) return;
+    rt.wanted = undefined;
+    rt.selection = wanted;
+    if (wanted.kind === "api") {
+      rt.account = ulid();
+      rt.spentBefore = rt.spentUSD;
+      if (rt.budgetUSD !== undefined)
+        rt.selection = {
+          ...wanted,
+          initialBudget: Math.max(rt.budgetUSD - rt.spentBefore, 0.000001),
+        };
+      this.deps.transcripts.append(rt.session.id, [
+        { role: "user", content: { ...MODEL_SWITCH_ENTRY } },
+      ]);
+    }
+  }
+  // A queued message whose model this task's runtime doesn't run: a new task of the conversation
+  // takes it, and any behind it. One that can't start leaves them with this task, as dot says.
+  #handOver(rt: Runtime): void {
+    const { session } = rt;
+    const [first, ...rest] = session.takeQueued();
+    if (!first) return;
+    void (async () => {
+      const next = await this.start(session.cellId, first.text, undefined, {
+        continues: session.id,
+        ...(first.turn ? { model: first.turn.ref } : {}),
+        ...(first.sender ? { sender: first.sender } : {}),
+      });
+      for (const message of rest) {
+        const turn = message.turn && (await this.messageTurn(next.id, message.turn.ref));
+        next.enqueue(message.text, message.sender, turn);
+      }
+    })().catch((error: unknown) => {
+      console.warn(`task ${session.id} could not move to another model`);
+      if (session.stopped) return;
+      const why = error instanceof AgentError ? ` ${error.message}` : "";
+      session.append("message.assistant", {
+        messageId: ulid(),
+        text: `I couldn't move to the model you chose, so I'm staying on this one.${why}`,
+      });
+      for (const message of [first, ...rest])
+        session.post("followup", message.text, message.sender);
+    });
+  }
+  // A viewer's spending line and keyd's reports name a task's current account.
+  accountOf(sessionId: string): { id: string; spentBefore: number } | undefined {
+    const rt = this.#runtime.get(sessionId);
+    return rt && { id: rt.account, spentBefore: rt.spentBefore };
   }
   #named(sessionId: string): ConversationNames | undefined {
     try {
@@ -861,7 +1126,11 @@ export class AgentRunner {
     const ask = this.#quick(rt);
     if (!ask) return;
     const looked = firstLook(ask, task, auto, AbortSignal.timeout(LOOK_MS)).catch(
-      (): FirstLook => ({}),
+      (error: unknown): FirstLook => {
+        const reason = error instanceof SideQuestionError ? error.reason : undefined;
+        console.warn(`task ${rt.session.id}: no first look: ${loggedReason(reason)}`);
+        return {};
+      },
     );
     void looked.then(({ title }) => {
       if (!title) return;
@@ -916,34 +1185,100 @@ export class AgentRunner {
       rt.backoff?.abort();
     }
   }
-  // The fast model, else the main one at its least thinking. A ChatGPT plan has none to spare: its
-  // one Codex process is the task's.
-  #quick(rt: Runtime): Ask | undefined {
-    const { selection, session } = rt;
+  // The app the user just connected joins this task: a harness's tool list is fixed when it starts,
+  // so it starts again, as for a change of model, and picks the task up where it was. The call that
+  // connected the app is answered in the journal, and asking again only finds it connected.
+  refreshApps(session: AgentSession): void {
+    const rt = this.#runtime.get(session.id);
+    if (!rt || !session.generation) return;
+    rt.epoch += 1;
+    session.retireBrain(session.generation, "restarted");
+    rt.backoff?.abort();
+  }
+  // Who answers one short question with no tools: the fast model, then the main one, each at its
+  // least thinking. A ChatGPT plan has none to spare: its one Codex process is the task's.
+  #helpers(selection: ModelSelection, session?: AgentSession): FastModel[] {
     if (selection.kind === "claude-code") {
-      const { quick } = selection;
-      const answer = this.deps.claudeCode?.answer?.(quick);
-      if (!answer) return undefined;
-      return async (system, prompt, signal) => {
-        const reply = await answer(system, prompt, signal);
-        if (!session.stopped)
-          session.append("model.usage", {
-            role: selection.fast ? "fast" : "main",
-            route: CLAUDE_CODE,
-            model: quick.model,
-            inputTokens: reply.inputTokens,
-            outputTokens: reply.outputTokens,
-            ...(reply.speed ? { speed: reply.speed } : {}),
-          });
-        return reply.text;
-      };
+      const answer = this.deps.claudeCode?.answer;
+      if (!answer) return [];
+      return selection.quick.map((quick, at) => ({
+        provider: CLAUDE_CODE,
+        model: quick.model,
+        fast: !!selection.fast && at === 0,
+        ask: async (system, prompt, signal) => {
+          const reply = await answer(quick)(system, prompt, signal);
+          if (session && !session.stopped)
+            session.append("model.usage", {
+              role: selection.fast && at === 0 ? "fast" : "main",
+              route: CLAUDE_CODE,
+              model: quick.model,
+              inputTokens: reply.inputTokens,
+              outputTokens: reply.outputTokens,
+              ...(reply.speed ? { speed: reply.speed } : {}),
+            });
+          return reply.text;
+        },
+      }));
     }
     const ask = this.deps.quickModel;
-    if (selection.kind !== "api" || !ask) return undefined;
-    const role =
-      selection.roles.find((r) => r.role === "fast") ??
-      selection.roles.find((r) => r.role === "main");
-    return role && ((system, prompt, signal) => ask(role, system, prompt, signal));
+    if (selection.kind !== "api" || !ask) return [];
+    return ["fast", "main"].flatMap((name) => {
+      const role = selection.roles.find((r) => r.role === name);
+      return role
+        ? [
+            {
+              provider: role.providerId,
+              model: role.model.id,
+              fast: name === "fast",
+              ask: (system: string, prompt: string, signal: AbortSignal) =>
+                ask(role, system, prompt, signal),
+            },
+          ]
+        : [];
+    });
+  }
+  // The first of them to answer. A model that fails leaves the question to the next, and its reason
+  // to whoever asked; each failure is told as it happens.
+  async #answerFrom(
+    helpers: readonly FastModel[],
+    system: string,
+    prompt: string,
+    signal: AbortSignal,
+    onFailed?: (model: string, reason: string) => void,
+  ): Promise<{ text: string; helper: FastModel; failed?: { model: string; reason: string } }> {
+    let failed: { model: string; reason: string } | undefined;
+    for (const helper of helpers) {
+      let reason = "it gave no answer";
+      try {
+        const text = await helper.ask(system, prompt, signal);
+        if (text.trim()) {
+          if (helper.fast) this.#fastFailure = undefined;
+          return { text, helper, ...(failed ? { failed } : {}) };
+        }
+      } catch (error) {
+        signal.throwIfAborted();
+        reason = reasonOf(error);
+      }
+      if (helper.fast)
+        this.#fastFailure = { provider: helper.provider, model: helper.model, reason };
+      onFailed?.(helper.model, reason);
+      failed ??= { model: helper.model, reason };
+    }
+    throw new SideQuestionError(502, "no-answer", failed?.reason);
+  }
+  #quick(rt: Runtime): Ask | undefined {
+    const helpers = this.#helpers(rt.selection, rt.session);
+    if (!helpers.length) return undefined;
+    return async (system, prompt, signal) =>
+      (
+        await this.#answerFrom(helpers, system, prompt, signal, (model, reason) =>
+          console.warn(`task ${rt.session.id}: ${model} ${loggedReason(reason)}`),
+        )
+      ).text;
+  }
+  // Why the fast model last failed to answer a quick request, until it next answers one.
+  fastFailure(): { provider: string; model: string; reason: string } | undefined {
+    return this.#fastFailure;
   }
   // The user's own dot for a task while Auto is on. Its skills and role take over when the agent
   // next starts, which is at once for an agent at work: it carries on from its saved history.
@@ -1015,7 +1350,6 @@ export class AgentRunner {
       return {
         provider: CLAUDE_CODE,
         model: planFast.model,
-        ready: () => true,
         ask: async (system, prompt, signal) => {
           const reply = await answer(system, prompt, signal);
           if (!rt.session.stopped)
@@ -1038,22 +1372,25 @@ export class AgentRunner {
     return {
       provider: fast.providerId,
       model: fast.model.id,
-      ready: () => !!rt.brain,
       ask: gatewayCompletion(
         () => (rt.brain ? bindingOf(fast, rt.brain.surrogates) : undefined),
         () => (rt.brain ? { port: rt.brain.keydPort, token: rt.brain.proxyToken } : undefined),
       ),
     };
   }
-  // A side question about a task, answered by the fast model with no tools. The task never hears
-  // of it: nothing of the question or the answer reaches its transcript or its log. With no task
-  // at work, a fast model on the Claude Code plan answers from the saved settings; one on an API
-  // key needs the task's key layer, which only a running task has.
+  // A side question about a task, answered with no tools by its fast model, or by its main model at
+  // its least thinking. The task never hears of it: nothing of the question or the answer reaches
+  // its transcript or its log. A task that has ended answers as its next one would.
   async sideAnswer(
     sessionId: string,
     question: string,
     signal: AbortSignal,
-  ): Promise<{ answer: string; provider: string; model: string }> {
+  ): Promise<{
+    answer: string;
+    provider: string;
+    model: string;
+    failed?: { model: string; reason: string };
+  }> {
     let file: string;
     try {
       file = this.deps.eventLog.logFile(sessionId);
@@ -1061,35 +1398,33 @@ export class AgentRunner {
       throw new AgentError(404, "no such task");
     }
     if (!existsSync(file)) throw new AgentError(404, "no such task");
-    const rt = this.#runtime.get(sessionId);
-    const fast = (rt && !rt.session.stopped ? this.#fast(rt) : undefined) ?? this.#savedFast();
-    if (!fast.ready()) throw new SideQuestionError(409, "fast-model-not-running");
+    const live = this.#runtime.get(sessionId);
+    const rt = live && !live.session.stopped && live.selection.kind !== "none" ? live : undefined;
+    const helpers = this.#helpers(
+      rt?.selection ?? (await this.#restingSelection(sessionId, signal)),
+      rt?.session,
+    );
+    if (!helpers.length) throw new SideQuestionError(409, "no-spare-model");
     const { system, prompt } = sideQuestionPrompt(sideQuestionEvents(file), question);
-    let text: string;
-    try {
-      text = await fast.ask(system, prompt, signal);
-    } catch {
-      signal.throwIfAborted();
-      throw new SideQuestionError(502, "no-answer");
-    }
-    return { answer: sideAnswerText(text), provider: fast.provider, model: fast.model };
-  }
-  #savedFast(): FastModel {
-    const fast = activeRoles(this.deps.settings()).fast;
-    if (!fast || fast.provider === CHATGPT) throw new SideQuestionError(409, "no-fast-model");
-    const saved = { provider: fast.provider, model: fast.model };
-    if (fast.provider !== CLAUDE_CODE)
-      return { ...saved, ready: () => false, ask: () => Promise.reject(new Error("no brain")) };
-    const answer = this.deps.claudeCode?.answer?.({
-      model: fast.model,
-      ...(fast.options ? { options: fast.options } : {}),
-    });
-    if (!answer) throw new SideQuestionError(409, "no-fast-model");
+    const { text, helper, failed } = await this.#answerFrom(helpers, system, prompt, signal);
     return {
-      ...saved,
-      ready: () => true,
-      ask: async (system, prompt, signal) => (await answer(system, prompt, signal)).text,
+      answer: sideAnswerText(text),
+      provider: helper.provider,
+      model: helper.model,
+      ...(failed ? { failed } : {}),
     };
+  }
+  async #restingSelection(sessionId: string, signal: AbortSignal): Promise<ModelSelection> {
+    const saved = this.deps.settings();
+    const main = this.taskModel(sessionId) ?? saved.main;
+    if (!main) throw new SideQuestionError(409, "no-model");
+    try {
+      return (await this.#selection(AgentSettings.parse({ ...saved, main }), undefined, signal))
+        .selection;
+    } catch (error) {
+      if (error instanceof AgentError) throw new SideQuestionError(409, "no-model", error.message);
+      throw error;
+    }
   }
   // A parked (approval, question, takeover, budget) or idle task ends here without the kill
   // switch: no revoke and no freeze. The runner's own finally block appends session.end.
@@ -1153,20 +1488,9 @@ export class AgentRunner {
     const settled = Promise.all(waiting.map((rt) => this.deps.live.settled(rt.session.id)));
     await (signal ? abortable(settled, signal) : settled);
   }
-  // Another task's switch to the web browser ends the finished task still holding it, as a sign-in
-  // does; false when that task is at work or waiting for the user.
-  async makeWay(sessionId: string, signal: AbortSignal): Promise<boolean> {
-    try {
-      await this.release(signal, sessionId);
-      return true;
-    } catch (error) {
-      if (error instanceof AgentError) return false;
-      throw error;
-    }
-  }
   // Settings > Accounts: the web browser opens the site's sign-in page and the user takes it there,
-  // where the sign-in is kept. Their own hold of the computer gives way to this one, and a finished
-  // task waiting for a follow-up ends; a task at work is left alone.
+  // in a window of its own, where the sign-in is kept. Their own hold of the computer gives way to
+  // this one; tasks wait for their next turn meanwhile, in their own windows.
   async signIn(
     cellId: string,
     site: string,
@@ -1182,9 +1506,6 @@ export class AgentRunner {
       if (requestId && !(await live.handback(requestId, undefined, signal)))
         throw new AgentError(409, "Hand back the computer, then sign in.");
     }
-    // A finished task still showing the web browser makes way; one at work there is left alone.
-    const browsing = this.deps.live.browserHolder(cellId);
-    if (browsing && browsing !== live?.id) await this.release(signal, browsing);
     return this.hold(cellId, signal, { url, title: `Sign in to ${site}` });
   }
   // The web browser starts before the user's own hold gives way, so one that can't start leaves
@@ -1248,6 +1569,9 @@ export class AgentRunner {
     const rt: Runtime = {
       session,
       selection: { kind: "none" },
+      account: id,
+      spentUSD: 0,
+      spentBefore: 0,
       limits: agentLimits(undefined),
       skills: [],
       epoch: 0,
@@ -1329,6 +1653,11 @@ export class AgentRunner {
     if (!rt || rt.session.stopped || rt.selection.kind === "none") return undefined;
     return this.#told(rt);
   }
+  // The dot a live task works as now, however late it was switched.
+  dotOf(id: string): PersonaId | undefined {
+    const rt = this.#runtime.get(id);
+    return rt && !rt.session.stopped ? rt.persona : undefined;
+  }
   #told(rt: Runtime): ConversationLive | undefined {
     const { session } = rt;
     if (session.stopped || rt.selection.kind === "none") return undefined;
@@ -1349,14 +1678,21 @@ export class AgentRunner {
               : "working";
     const onScreen = lease.holder === session.id;
     const activity = state === "idle" ? undefined : rt.activity;
+    const { persona } = rt;
     const before = rt.live;
-    if (before?.state === state && before.onScreen === onScreen && before.activity === activity)
+    if (
+      before?.state === state &&
+      before.onScreen === onScreen &&
+      before.activity === activity &&
+      before.persona === persona
+    )
       return before;
     rt.live = {
       state,
       since: before?.state === state ? before.since : new Date().toISOString(),
       onScreen,
       ...(activity ? { activity } : {}),
+      ...(persona ? { persona } : {}),
     };
     try {
       this.deps.liveChanged?.(session.id, rt.live);
@@ -1364,6 +1700,14 @@ export class AgentRunner {
       console.error("a live status could not be told");
     }
     return rt.live;
+  }
+  // A task is under way on this computer, or the user holds it.
+  workingOn(cellId: string): boolean {
+    for (const rt of this.#runtime.values()) {
+      if (rt.session.cellId !== cellId || rt.session.stopped) continue;
+      if (rt.selection.kind === "none" || this.#told(rt)?.state !== "idle") return true;
+    }
+    return false;
   }
   // The session is the user's own hold on the computer, with no task.
   holds(id: string): boolean {
@@ -1406,7 +1750,7 @@ export class AgentRunner {
   #safety(rt: Runtime): SafetyController {
     if (rt.safety) return rt.safety;
     rt.safety = new SafetyController(rt.session, {
-      owner: () => (rt.brain ? { cellId: rt.brain.id, taskId: rt.session.id } : undefined),
+      owner: () => (rt.brain ? { cellId: rt.brain.id, taskId: rt.account } : undefined),
       ownerBoundary: () => rt.brainOpening ?? Promise.resolve(),
       ready: () => {
         const cell = this.deps.cell(rt.session.cellId);
@@ -1560,7 +1904,12 @@ export class AgentRunner {
         !ready()
       )
         throw new AgentError(409, "the task is not ready to change its budget");
-      await this.deps.keyd.beginTask(brain.id, id, budgetUSD);
+      await this.deps.keyd.beginTask(
+        brain.id,
+        rt.account,
+        Math.max(budgetUSD - rt.spentBefore, 0.000001),
+      );
+      rt.budgetUSD = budgetUSD;
       // An in-flight raise can finish after Stop/recovery; it must never resume obsolete work.
       if (!session.isCurrent(generation) || session.controlHeld || session.pendingAsk || !ready())
         throw new AgentError(409, "the task changed while updating its budget");
@@ -1854,6 +2203,8 @@ export class AgentRunner {
         await session.waitForTools();
         await this.deps.waitForUploads(session.cellId, session.abort.signal);
         await this.#online(session);
+        this.#startOnWanted(rt);
+        session.runningModel = runningOf(rt.selection);
         if (rt.persona !== dressed) {
           dressed = rt.persona;
           skills = await this.deps.installSkills(session.cellId, session.abort.signal, dressed);
@@ -1947,7 +2298,8 @@ export class AgentRunner {
             if (rt.idleWait === idleWait) rt.idleWait = undefined;
           }
         } else {
-          const backoff = RESTART_BACKOFF_MS[crashes++];
+          const lost = code === BRAIN_LOST && rt.selection.kind === "api";
+          const backoff = RESTART_BACKOFF_MS[lost ? 0 : crashes++];
           if (backoff === undefined) {
             reason = "error";
             session.append("agent.state", {
@@ -1968,7 +2320,9 @@ export class AgentRunner {
                 ? `Codex stopped (exit ${code ?? "unknown"}); restarting`
                 : rt.selection.kind === "claude-code"
                   ? "Claude Code stopped; restarting from saved history"
-                  : "the brain stopped; restarting from saved history",
+                  : lost
+                    ? "the brain lost its connection; restarting from saved history"
+                    : "the brain stopped; restarting from saved history",
           });
           const interrupted = new AbortController();
           rt.backoff = interrupted;
@@ -2039,7 +2393,7 @@ export class AgentRunner {
         console.error("agent safety intent could not be cleared");
       }
       try {
-        session.append("session.end", { reason });
+        session.append("session.end", { reason, ...(rt.persona ? { persona: rt.persona } : {}) });
         const models = this.selectionOf(session.id);
         // Only a successfully recorded terminal event permits history authority. The public
         // selection has no key/pricing/credential fields and is copied away from the runtime.
@@ -2102,6 +2456,7 @@ export class AgentRunner {
             ...new Set(selection.roles.flatMap((role) => (role.keyId ? [role.keyId] : []))),
           ],
           pricing: selection.pricing,
+          account: rt.account,
           initialModelAdmission: "paused",
           ...(selection.initialBudget === undefined ? {} : { budgetUSD: selection.initialBudget }),
           signal: generation.signal,
@@ -2154,19 +2509,19 @@ export class AgentRunner {
         // any concurrent Pause closes this exact owner and the process cannot sample early.
         const gate = await this.deps.keyd.modelAdmission(brain.id);
         session.check(generation);
-        if (gate.taskId !== session.id || gate.retired || !gate.paused || gate.active !== 0)
+        if (gate.taskId !== rt.account || gate.retired || !gate.paused || gate.active !== 0)
           throw new Error("brain model admission unavailable");
         if (!session.safetyPause) {
           try {
             const opened = await this.deps.keyd.setModelAdmission(brain.id, {
-              taskId: session.id,
+              taskId: rt.account,
               generationId: gate.generationId,
               state: "open",
               expectedEpoch: gate.epoch,
             });
             session.check(generation);
             if (
-              opened.taskId !== session.id ||
+              opened.taskId !== rt.account ||
               opened.generationId !== gate.generationId ||
               opened.paused ||
               opened.retired
@@ -2178,7 +2533,7 @@ export class AgentRunner {
         }
         if (session.safetyPause) {
           const closed = await this.deps.keyd.setModelAdmission(brain.id, {
-            taskId: session.id,
+            taskId: rt.account,
             generationId: gate.generationId,
             state: "paused",
           });

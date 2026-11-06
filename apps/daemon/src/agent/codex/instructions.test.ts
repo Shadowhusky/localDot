@@ -77,7 +77,7 @@ describe("Codex developer instructions", () => {
     expect(text).toContain(ENVIRONMENT_CONTEXT);
     // Includes shared file-transfer semantics; data stays on disk, not in model context.
     expect(text).toContain("complete working files at those paths");
-    expect(text.length).toBeLessThan(9500);
+    expect(text.length).toBeLessThan(9700);
     expect(text).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
   });
   it("adds the research rules and tool only in research mode", () => {

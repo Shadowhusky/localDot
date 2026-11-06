@@ -6,6 +6,7 @@ import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BrainCell, OpenBrain } from "../agent/brain-cell.ts";
+import { Conversations } from "../agent/conversation.ts";
 import { MemoryStore } from "../agent/memory.ts";
 import { AgentRunner } from "../agent/runner.ts";
 import { fixtureModelAdmission } from "../agent/testing/model-admission.ts";
@@ -100,7 +101,9 @@ function acceptance(cellState: CellState) {
   const keys: KeydRecord[] = [
     { id: "anthropic", kind: "llm", provider: "anthropic", createdAt: at, updatedAt: at },
   ];
+  const conversations = new Conversations(home, log);
   const runner = new AgentRunner({
+    conversations,
     home,
     eventLog: log,
     live,
@@ -128,7 +131,7 @@ function acceptance(cellState: CellState) {
   const launcher = new RoutineLauncher({
     store,
     cells,
-    runner: agentRunnerPort(runner, live, log),
+    runner: agentRunnerPort(runner, live, log, () => conversations),
     events: log,
     dockerAvailable: async () => true,
     userAutonomy: () => DEFAULT_AUTONOMY,
@@ -149,7 +152,7 @@ function acceptance(cellState: CellState) {
       {
         name: "Daily log",
         instruction: "Append today's date to ~/Documents/log.txt",
-        when: { kind: "daily", time: "08:30" },
+        schedules: [{ every: 1, unit: "day", times: ["08:30"] }],
         budgetUSD,
       },
       { state: "active" },
@@ -165,6 +168,7 @@ function acceptance(cellState: CellState) {
     clock,
     store,
     log,
+    conversations,
     cells,
     cell,
     startCalls,
@@ -177,6 +181,35 @@ function acceptance(cellState: CellState) {
 }
 
 describe("routines end to end", () => {
+  it("runs every run of a routine in its one conversation", async () => {
+    const f = acceptance("ready");
+    const routine = f.routine();
+    f.scheduler.start();
+    f.clock.advance(2_000);
+    const ran = async (count: number) => {
+      await until(() => f.store.runs(routine.id).filter((r) => r.outcome === "running").length > 0);
+      await f.finishBrain();
+      await until(
+        () => f.store.runs(routine.id).filter((r) => r.outcome === "done").length === count,
+      );
+      return f.store.lastRun(routine.id)?.sessionId as string;
+    };
+    const first = await ran(1);
+    f.clock.advance(86_400_000);
+    const second = await ran(2);
+    f.clock.advance(86_400_000);
+    const third = await ran(3);
+    expect(new Set([first, second, third]).size).toBe(3);
+    const startOf = (id: string) => f.log.read(id).find((e) => e.type === "session.start");
+    expect(startOf(first)?.data).not.toHaveProperty("continues");
+    expect(startOf(second)?.data).toMatchObject({ continues: first });
+    expect(startOf(third)?.data).toMatchObject({ continues: second });
+    expect(f.conversations.chain(third).sessions).toEqual([first, second, third]);
+    const listed = f.conversations.list().conversations;
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ sessionId: third, title: "Daily log" });
+  });
+
   it("a routine due in 2 s starts the stopped computer, runs with its origin, ends done and shuts the computer down", async () => {
     const f = acceptance("stopped");
     const routine = f.routine();

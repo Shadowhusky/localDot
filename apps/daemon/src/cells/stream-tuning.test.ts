@@ -64,6 +64,13 @@ describe("sharedQuality", () => {
     ).toEqual({ framerate: 30, crf: 34 });
   });
 
+  it("gives a Sharp viewer its detail unless another viewer can't take it", () => {
+    const sharp = { paused: false, report: { visible: true as const, framerate: 60, crf: 20 } };
+    const auto = { paused: false, report: { visible: true as const, framerate: 60, crf: 25 } };
+    expect(sharedQuality([sharp]).crf).toBe(20);
+    expect(sharedQuality([sharp, auto]).crf).toBe(25);
+  });
+
   it("asks nothing of a hidden page, a paused client or one that never said", () => {
     expect(
       sharedQuality([

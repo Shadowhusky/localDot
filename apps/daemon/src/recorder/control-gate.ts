@@ -1,4 +1,4 @@
-import type { LocalDotEvent, RecordingGap } from "@localdot/protocol";
+import type { LocalDotEvent, RecordingGap, RecordingGapReason } from "@localdot/protocol";
 
 interface UserSpan {
   from: number;
@@ -14,6 +14,8 @@ interface UserSpan {
 // may be observed before frames older than them.
 export class ControlGate {
   readonly #spans: UserSpan[] = [];
+
+  constructor(private readonly reason: RecordingGapReason = "user-control") {}
 
   // Every event of the session, in log order: the backlog at start, then live appends.
   // Returns "returned" when control came back, so the caller asks for a key frame.
@@ -66,7 +68,7 @@ export class ControlGate {
     for (const s of this.#spans) {
       const last = out.at(-1);
       if (last && (last.to === null || s.from <= last.to)) last.to = s.resumedAt;
-      else out.push({ from: s.from, to: s.resumedAt, reason: "user-control" });
+      else out.push({ from: s.from, to: s.resumedAt, reason: this.reason });
     }
     return out;
   }

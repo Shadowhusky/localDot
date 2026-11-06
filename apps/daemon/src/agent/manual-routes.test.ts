@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ulid } from "@localdot/protocol";
+import { Hono } from "hono";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
 import { DesktopdClient } from "../desktopd/client.ts";
@@ -42,6 +43,19 @@ async function setup() {
   const unused = () => {
     throw new Error("unexpected dependency access");
   };
+  const keys = {
+    saved: undefined as { origin: string; username: string; password: string } | undefined,
+    findLogin: vi.fn(async (origin: string) =>
+      keys.saved?.origin === origin
+        ? { origin, username: keys.saved.username, confirm: true }
+        : undefined,
+    ),
+    login: vi.fn(async (origin: string) =>
+      keys.saved?.origin === origin
+        ? { username: keys.saved.username, password: keys.saved.password }
+        : undefined,
+    ),
+  };
   const deps: AgentRoutesDeps = {
     runner: {
       start: unused,
@@ -58,6 +72,7 @@ async function setup() {
       refresh: unused,
     },
     keyd: { secrets: unused },
+    savedLogins: keys,
     memory: {
       readBoth: unused,
       undo: unused,
@@ -94,7 +109,7 @@ async function setup() {
     log.close();
     rmSync(home, { force: true, recursive: true });
   });
-  return { app, home, log, session, id, requestId, fake, factory, send, deps };
+  return { app, home, log, session, id, requestId, fake, factory, send, deps, keys };
 }
 it("mounts manual text under actual app auth and sends Unicode/password text masked without journal, inbox or transcript leakage", async () => {
   const f = await setup(),
@@ -212,4 +227,110 @@ it("sign-in mode requires the current manual takeover and never accepts a stale 
   expect(result.status).toBe(200);
   expect(signIn).toHaveBeenCalledWith(true);
   expect(finish).toHaveBeenCalledOnce();
+});
+
+it("only a current hold reads the page or fills a saved login, and the reply carries no password", async () => {
+  const f = await setup();
+  const finish = vi.fn();
+  const fillSecret = vi.fn(async () => ({ filled: true, rememberable: true, submitted: true }));
+  const page = {
+    tabId: "tab",
+    origin: "https://github.com",
+    field: { kind: "password", at: { x: 10, y: 20 } },
+  };
+  const access = {
+    signIn: vi.fn(async () => ({ available: true, mode: "standard", changing: false })),
+    signInPage: vi.fn(async () => page),
+    fillSecret,
+    input: vi.fn(),
+    check: vi.fn(),
+    selection: { geometry: { scale: 2 } },
+    finish,
+  };
+  const manualAccess = vi.fn(() => access);
+  vi.spyOn(f.session, "screens", "get").mockReturnValue({ manualAccess } as unknown as NonNullable<
+    typeof f.session.screens
+  >);
+  const stale = await f.send({ requestId: ulid(), action: "fill" }, {}, "takeover/sign-in");
+  expect(stale.status).toBe(409);
+  expect(manualAccess).not.toHaveBeenCalled();
+  f.keys.saved = { origin: "https://github.com", username: "octo", password: "route-canary" };
+  const status = await f.send({ requestId: f.requestId, action: "status" }, {}, "takeover/sign-in");
+  expect(await status.json()).toEqual({
+    available: true,
+    mode: "standard",
+    changing: false,
+    page: { saved: { site: "github.com", username: "octo" } },
+  });
+  expect(f.keys.login).not.toHaveBeenCalled();
+  const filled = await f.send({ requestId: f.requestId, action: "fill" }, {}, "takeover/sign-in");
+  const body = await filled.text();
+  expect(JSON.parse(body)).toMatchObject({ fill: "submitted" });
+  expect(body).not.toContain("route-canary");
+  expect(fillSecret).toHaveBeenCalledWith("tab", {
+    origin: "https://github.com",
+    at: { x: 10, y: 20 },
+    username: "octo",
+    text: "route-canary",
+  });
+  expect(JSON.stringify(f.log.read(f.id))).not.toContain("route-canary");
+});
+
+it("reports only the mode while signing in, with no page to read and nothing to fill", async () => {
+  const f = await setup();
+  const signInPage = vi.fn();
+  const access = {
+    signIn: vi.fn(async () => ({ available: true, mode: "signin", changing: false })),
+    signInPage,
+    finish: vi.fn(),
+  };
+  vi.spyOn(f.session, "screens", "get").mockReturnValue({
+    manualAccess: () => access,
+  } as unknown as NonNullable<typeof f.session.screens>);
+  const reply = await f.send({ requestId: f.requestId, action: "fill" }, {}, "takeover/sign-in");
+  expect(await reply.json()).toEqual({ available: true, mode: "signin", changing: false });
+  expect(signInPage).not.toHaveBeenCalled();
+});
+
+it("a look at the page takes no turn from the user's own input", async () => {
+  const f = await setup();
+  const access = {
+    signIn: vi.fn(async () => ({ available: true, mode: "standard", changing: false })),
+    signInPage: vi.fn(async () => ({ tabId: "tab", origin: "https://github.com" })),
+    check: vi.fn(),
+    finish: vi.fn(),
+  };
+  vi.spyOn(f.session, "screens", "get").mockReturnValue({
+    manualAccess: () => access,
+  } as unknown as NonNullable<typeof f.session.screens>);
+  const typing = f.session.admitManual(f.requestId, new AbortController().signal);
+  try {
+    const look = await f.send({ requestId: f.requestId, action: "status" }, {}, "takeover/sign-in");
+    expect(look.status).toBe(200);
+    const stale = await f.send({ requestId: ulid(), action: "status" }, {}, "takeover/sign-in");
+    expect(stale.status).toBe(409);
+    const fill = await f.send({ requestId: f.requestId, action: "fill" }, {}, "takeover/sign-in");
+    expect(fill.status).toBe(409);
+  } finally {
+    typing.finish();
+  }
+});
+
+it("only the owner taps a saved login: a shared link's guest is refused", async () => {
+  const f = await setup();
+  const guest = new Hono();
+  guest.use("*", async (c, next) => {
+    c.set("remoteGrant", { id: "guest" } as never);
+    await next();
+  });
+  agentRoutes(guest, f.deps);
+  vi.spyOn(f.session, "asksSavedLogin").mockReturnValue(true);
+  const answer = vi.spyOn(f.session, "answerFields");
+  const reply = await guest.request(`http://127.0.0.1:4747/api/agent/sessions/${f.id}/answer`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ askId: ulid(), fields: { sign_in: true } }),
+  });
+  expect(reply.status).toBe(403);
+  expect(answer).not.toHaveBeenCalled();
 });

@@ -6,7 +6,8 @@ import { createServer as createHttpsServer } from "node:https";
 import { type AddressInfo, createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import type { PreviewListener } from "@localdot/protocol";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import { createPreviewForwarder } from "../../../../cells/desktop/desktopd/src/preview-forwarder.ts";
 import { type CellEndpoints, type CellSummary, NO_STREAM } from "../cells/types.ts";
@@ -20,7 +21,7 @@ const FRONT = "100.91.187.75";
 const ASKED = `${FRONT}:4744`;
 const cleanup: (() => unknown)[] = [];
 // What the computer lists as listening: the servers each test starts.
-const running: { address: string; port: number; name?: string }[] = [];
+const running: PreviewListener[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
   running.length = 0;
@@ -84,6 +85,7 @@ function fakeCells() {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    list: () => [summary],
     change(next: Partial<CellSummary>) {
       summary = { ...summary, ...next };
       for (const listener of listeners) listener(summary);
@@ -97,7 +99,10 @@ function fakeCells() {
 async function dot(
   options: {
     fronts?: PreviewFronts;
-    listening?: () => Promise<{ address: string; port: number; name?: string }[]>;
+    listening?: () => Promise<PreviewListener[]>;
+    stopListening?: (port: number) => Promise<boolean>;
+    working?: boolean;
+    conversation?: readonly string[];
     now?: () => number;
     idleMs?: number;
     sweepEveryMs?: number;
@@ -111,6 +116,7 @@ async function dot(
     addresses: () => ["172.20.0.11"],
     ownPorts: new Set([7700]),
     listening: options.listening ?? (async () => running),
+    stopListening: options.stopListening,
   });
   cells.forwarder(await listening(forwarder));
   const served: string[] = [];
@@ -119,6 +125,8 @@ async function dot(
     range,
     cells,
     cellOf: (id) => (id === SESSION ? CELL : undefined),
+    conversation: () => options.conversation ?? [SESSION],
+    working: () => options.working ?? false,
     fronts: async () => options.fronts ?? previewFronts([`https://${ASKED}`]),
     serve: {
       add: async (port) => void served.push(`add ${port}`),
@@ -721,5 +729,338 @@ describe("when a preview ends", () => {
     expect((await previews.status(SESSION, ASKED)).previews).toHaveLength(1);
     now += 31 * 60_000;
     await expect.poll(async () => (await previews.status(SESSION, ASKED)).previews).toEqual([]);
+  });
+});
+
+// Servers dot left running, as a computer that can say who started each lists them.
+describe("what is running in the computer", () => {
+  const OTHER = "01JXYZ0000000000000000OTHR";
+  const HOUR = 60 * 60_000;
+
+  async function webApp(title: string) {
+    const server = createServer((_req, res) => {
+      res.setHeader("content-type", "text/html");
+      res.end(`<title>${title}</title>`);
+    });
+    return listening(server);
+  }
+
+  function reaper(start = 1_000_000) {
+    const clock = { now: start };
+    return { clock, now: () => clock.now };
+  }
+  const titles = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const stopInto = (stopped: number[]) => async (port: number) => {
+    stopped.push(port);
+    return true;
+  };
+
+  it("says which servers this conversation started, and each one's folder", async () => {
+    const ours = await webApp("Shop");
+    const theirs = await webApp("Blog");
+    const nobodys = await webApp("Mine");
+    running.push(
+      { address: "127.0.0.1", port: ours, name: "node", task: SESSION, project: "~/code/shop" },
+      { address: "127.0.0.1", port: theirs, name: "node", task: OTHER, project: "~/code/blog" },
+      { address: "127.0.0.1", port: nobodys, name: "python3" },
+    );
+    const { previews } = await dot({ conversation: [SESSION] });
+    const { servers } = await previews.status(SESSION, ASKED);
+    expect(servers.map(({ port, here, project }) => [port, here, project])).toEqual(
+      [
+        [ours, true, "shop"],
+        [theirs, false, "blog"],
+        [nobodys, undefined, undefined],
+      ].sort((a, b) => Number(a[0]) - Number(b[0])),
+    );
+  });
+
+  it("marks the older copy when the same app starts again on another port", async () => {
+    const first = await webApp("Shop");
+    const second = await webApp("Shop");
+    const base = { address: "127.0.0.1", name: "node", task: SESSION, project: "~/code/shop" };
+    running.push({ ...base, port: first, started: 100 }, { ...base, port: second, started: 200 });
+    const { previews } = await dot();
+    await previews.status(SESSION, ASKED);
+    await titles();
+    const { servers } = await previews.status(SESSION, ASKED);
+    expect(servers.find((server) => server.port === first)?.older).toBe(true);
+    expect(servers.find((server) => server.port === second)?.older).toBeUndefined();
+  });
+
+  it("never takes an API beside its web app for an older copy of it", async () => {
+    const web = await webApp("Shop");
+    const api = await listening(createServer((_req, res) => res.end("{}")));
+    const base = { address: "127.0.0.1", name: "node", task: SESSION, project: "~/code/shop" };
+    running.push({ ...base, port: api, started: 100 }, { ...base, port: web, started: 200 });
+    const { previews } = await dot();
+    await previews.status(SESSION, ASKED);
+    await titles();
+    const { servers } = await previews.status(SESSION, ASKED);
+    expect(servers.every((server) => !server.older)).toBe(true);
+  });
+
+  it("stops a server dot started once it has gone unused for the idle time", async () => {
+    const port = await webApp("Shop");
+    running.push({ address: "127.0.0.1", port, task: SESSION, started: 100, cpu: 10 });
+    const stopped: number[] = [];
+    const { clock, now } = reaper();
+    const { previews } = await dot({
+      now,
+      idleMs: HOUR,
+      stopListening: stopInto(stopped),
+    });
+    await previews.sweep();
+    clock.now += HOUR - 1;
+    await previews.sweep();
+    expect(stopped).toEqual([]);
+    clock.now += 1;
+    await previews.sweep();
+    expect(stopped).toEqual([port]);
+  });
+
+  it("leaves running what it can't say dot started", async () => {
+    const port = await webApp("Mine");
+    running.push({ address: "127.0.0.1", port, started: 100 });
+    const stopped: number[] = [];
+    const { clock, now } = reaper();
+    const { previews } = await dot({
+      now,
+      idleMs: HOUR,
+      stopListening: stopInto(stopped),
+    });
+    await previews.sweep();
+    clock.now += 10 * HOUR;
+    await previews.sweep();
+    expect(stopped).toEqual([]);
+  });
+
+  it("doesn't count time while a task is at work or anything is connected", async () => {
+    const port = await webApp("Shop");
+    const server: PreviewListener = {
+      address: "127.0.0.1",
+      port,
+      task: SESSION,
+      started: 100,
+      clients: 1,
+    };
+    running.push(server);
+    const stopped: number[] = [];
+    const { clock, now } = reaper();
+    const { previews } = await dot({
+      now,
+      idleMs: HOUR,
+      stopListening: stopInto(stopped),
+    });
+    await previews.sweep();
+    clock.now += 3 * HOUR;
+    await previews.sweep();
+    expect(stopped).toEqual([]);
+    // A device closed its tab: its hour starts now, not when the server started.
+    server.clients = 0;
+    await previews.sweep();
+    clock.now += HOUR - 1;
+    await previews.sweep();
+    expect(stopped).toEqual([]);
+    clock.now += 1;
+    await previews.sweep();
+    expect(stopped).toEqual([port]);
+  });
+
+  it("waits for a task at work, however long the server has gone unused", async () => {
+    const port = await webApp("Shop");
+    running.push({ address: "127.0.0.1", port, task: SESSION, started: 100 });
+    const stopped: number[] = [];
+    const { clock, now } = reaper();
+    const { previews } = await dot({
+      now,
+      idleMs: HOUR,
+      working: true,
+      stopListening: stopInto(stopped),
+    });
+    await previews.sweep();
+    clock.now += 5 * HOUR;
+    await previews.sweep();
+    expect(stopped).toEqual([]);
+  });
+
+  it("treats a task's servers as one app: a used web app keeps its API", async () => {
+    const web = await webApp("Shop");
+    const api = await listening(createServer((_req, res) => res.end("{}")));
+    running.push(
+      { address: "127.0.0.1", port: web, task: SESSION, started: 200, clients: 1 },
+      { address: "127.0.0.1", port: api, task: SESSION, started: 100 },
+    );
+    const stopped: number[] = [];
+    const { clock, now } = reaper();
+    const { previews } = await dot({
+      now,
+      idleMs: HOUR,
+      stopListening: stopInto(stopped),
+    });
+    await previews.sweep();
+    clock.now += 3 * HOUR;
+    await previews.sweep();
+    expect(stopped).toEqual([]);
+  });
+
+  it("keeps a server that is hard at work with nobody connected", async () => {
+    const port = await webApp("Render");
+    const server: PreviewListener = {
+      address: "127.0.0.1",
+      port,
+      task: SESSION,
+      started: 100,
+      cpu: 0,
+    };
+    running.push(server);
+    const stopped: number[] = [];
+    const { clock, now } = reaper();
+    const { previews } = await dot({
+      now,
+      idleMs: HOUR,
+      stopListening: stopInto(stopped),
+    });
+    await previews.sweep();
+    clock.now += 2 * HOUR;
+    // 100 ticks a second: half a processor for two hours.
+    server.cpu = 2 * 3600 * 50;
+    await previews.sweep();
+    expect(stopped).toEqual([]);
+  });
+
+  it("stops the older copy at once when nothing uses it, and keeps one in use", async () => {
+    const first = await webApp("Shop");
+    const second = await webApp("Shop");
+    const base = { address: "127.0.0.1", name: "node", task: SESSION, project: "~/code/shop" };
+    const older: PreviewListener = { ...base, port: first, started: 100, clients: 1 };
+    running.push(older, { ...base, port: second, started: 200 });
+    const stopped: number[] = [];
+    const { previews } = await dot({
+      stopListening: stopInto(stopped),
+    });
+    await previews.status(SESSION, ASKED);
+    await titles();
+    await previews.sweep();
+    expect(stopped).toEqual([]);
+    older.clients = 0;
+    await previews.sweep();
+    expect(stopped).toEqual([first]);
+  });
+
+  it("stops a server on request, ends its preview, and refuses a port not listed", async () => {
+    const port = await webApp("Shop");
+    running.push({ address: "127.0.0.1", port, name: "node" });
+    const stopped: number[] = [];
+    const { previews } = await dot({
+      stopListening: stopInto(stopped),
+    });
+    const { preview } = await previews.open(SESSION, { port }, ASKED);
+    await expect(previews.stopServer(SESSION, port + 1)).rejects.toBeInstanceOf(PreviewError);
+    await previews.stopServer(SESSION, port);
+    expect(stopped).toEqual([port]);
+    running.length = 0;
+    expect((await previews.status(SESSION, ASKED)).previews).toEqual([]);
+    expect(previews.stop(SESSION, preview.id)).toBe(false);
+  });
+
+  it("tells a computer too old to stop a server apart from one that couldn't", async () => {
+    const port = await webApp("Shop");
+    running.push({ address: "127.0.0.1", port });
+    const { previews } = await dot({ stopListening: async () => false });
+    await expect(previews.stopServer(SESSION, port)).rejects.toMatchObject({
+      status: 409,
+      refusal: { message: expect.stringContaining("couldn't stop") },
+    });
+  });
+
+  it("marks a *.localhost site gone when its proxy no longer routes it", async () => {
+    const routes = new Map([
+      ["shop.localhost", 200],
+      ["old.localhost", 404],
+    ]);
+    const proxy = await listening(
+      createServer((req, res) => {
+        const name = (req.headers.host ?? "").split(":")[0] ?? "";
+        res.statusCode = routes.get(name) ?? 404;
+        res.end();
+      }),
+    );
+    running.push({ address: "127.0.0.1", port: proxy, name: "portless" });
+    const { previews } = await dot();
+    await previews.open(SESSION, { url: `http://shop.localhost:${proxy}/` }, ASKED);
+    await previews.open(SESSION, { url: `http://old.localhost:${proxy}/` }, ASKED);
+    const { previews: items } = await previews.status(SESSION, ASKED);
+    const state = (name: string) => items.find((item) => item.target.includes(name))?.state;
+    expect(state("shop.localhost")).toBe("answering");
+    expect(state("old.localhost")).toBe("not-answering");
+  });
+
+  it("drops a *.localhost site ten minutes after it last answered, once nobody uses it", async () => {
+    const proxy = await listening(createServer((_req, res) => void res.writeHead(502).end()));
+    running.push({ address: "127.0.0.1", port: proxy, name: "portless" });
+    const { clock, now } = reaper();
+    const { previews } = await dot({ now });
+    await previews.open(SESSION, { url: `http://gone.localhost:${proxy}/` }, ASKED);
+    await previews.status(SESSION, ASKED);
+    clock.now += 11 * 60_000;
+    await previews.sweep();
+    expect((await previews.status(SESSION, ASKED)).previews).toEqual([]);
+  });
+
+  it("offers what the turn started, changed or named, once it answers", async () => {
+    const started = await webApp("New app");
+    const looked = await webApp("Looked at");
+    const edited = await webApp("Edited");
+    const named = await listening(createServer((_req, res) => res.end("{}")));
+    const untouched = await webApp("Untouched");
+    const theirs = await webApp("Another conversation's");
+    const earlier: PreviewListener[] = [
+      { address: "127.0.0.1", port: looked, task: SESSION, name: "node" },
+      { address: "127.0.0.1", port: edited, task: SESSION, name: "node", project: "~/code/shop" },
+      { address: "127.0.0.1", port: named, task: SESSION, name: "node" },
+      { address: "127.0.0.1", port: untouched, task: SESSION, name: "node" },
+      { address: "127.0.0.1", port: theirs, task: OTHER, name: "node" },
+    ];
+    running.push(...earlier);
+    const { clock, now } = reaper();
+    const { previews } = await dot({ now });
+    await previews.sweep();
+    await titles();
+    clock.now += 60_000;
+    running.push({ address: "127.0.0.1", port: started, task: SESSION, name: "vite" });
+    const offers = await previews.offers(SESSION, {
+      startedAt: clock.now - 1000,
+      reply: `Your API is at http://localhost:${named}/health`,
+      navigated: [`127.0.0.1:${looked}`, `127.0.0.1:${theirs}`, "example.com"],
+      changed: ["~/code/shop/src/App.tsx"],
+    });
+    expect(offers.map((offer) => offer.port).sort()).toEqual(
+      [started, looked, edited, named].sort(),
+    );
+    expect(offers.find((offer) => offer.port === looked)).toMatchObject({
+      title: "Looked at",
+      url: `http://localhost:${looked}/`,
+      name: "node",
+    });
+  });
+
+  it("offers nothing that has stopped, nor on a computer that is off", async () => {
+    const hung = await listening(createTcpServer(() => {}));
+    running.push({ address: "127.0.0.1", port: hung, task: SESSION });
+    const { previews, cells } = await dot({ checkMs: 20 });
+    const turn = { startedAt: 0, reply: `http://localhost:${hung}/`, navigated: [], changed: [] };
+    expect(await previews.offers(SESSION, turn)).toEqual([]);
+    cells.change({ state: "stopped" });
+    expect(await previews.offers(SESSION, turn)).toEqual([]);
+  });
+
+  it("sweeps on its own timer without a failure reaching the daemon", async () => {
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { previews, cells } = await dot({ sweepEveryMs: 5 });
+    cells.forwarder(1);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await previews.close();
+    spy.mockRestore();
   });
 });

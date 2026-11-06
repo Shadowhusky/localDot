@@ -182,6 +182,47 @@ describe("ConnectorHub", () => {
     });
   });
 
+  it("offers dot the apps it could connect, and adds a listed one only when it asks", async () => {
+    const { hub } = setup();
+    const offered = hub.connectable().map((app) => app.id);
+    expect(offered).toEqual(expect.arrayContaining(["linear", "notion", "vercel", "stripe"]));
+    expect(offered).not.toContain("github");
+    expect(offered).not.toContain("brave");
+    expect(hub.configs()).toEqual([]);
+
+    expect(hub.connectTarget("github")).toBeUndefined();
+    expect(hub.connectTarget("nothing")).toBeUndefined();
+    const target = hub.connectTarget("Notion");
+    expect(target).toMatchObject({ added: true, host: "mcp.notion.com", ended: false });
+    expect(target?.config.server).toMatchObject({ auth: { kind: "oauth" } });
+    expect(hub.isConnected("notion")).toBe(false);
+    expect(hub.connectTarget("notion")?.added).toBe(false);
+    expect(hub.connectable().map((app) => app.id)).toContain("notion");
+    expect(hub.connectable().filter((app) => app.id === "notion")).toHaveLength(1);
+  });
+
+  it("shows dot a disconnected app's tools no more, but a sign-in that ended still", async () => {
+    const { hub } = setup(TOOLS, [http("connector-notion", ["mcp.notion.com"])]);
+    const auth = { kind: "oauth", secret: "connector-notion" } as const;
+    const app = hub.add({
+      name: "Notion",
+      server: { kind: "remote", url: "https://mcp.notion.com/mcp", transport: "http", auth },
+    });
+    await hub.refresh(app.id);
+    expect(hub.forTask().specs.length).toBeGreaterThan(0);
+    expect(hub.isConnected(app.id)).toBe(true);
+    await hub.update(app.id, {
+      server: {
+        kind: "remote",
+        url: "https://mcp.notion.com/mcp",
+        transport: "http",
+        auth: { kind: "oauth" },
+      },
+    });
+    expect(hub.forTask().specs).toEqual([]);
+    expect(hub.isConnected(app.id)).toBe(false);
+  });
+
   it("gives each new app its own id and removes it with its tools", async () => {
     const { hub, store } = setup();
     const a = hub.add(linear);

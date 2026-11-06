@@ -10,6 +10,10 @@ export class ScreenRecordingError extends Error {
     this.name = "ScreenRecordingError";
   }
 }
+// How long frames already on their way still show the window before: a capture, its encoding and
+// its trip through the stream.
+export const STREAM_CATCHES_UP_MS = 300;
+
 interface Owner {
   epoch: number;
   closed: boolean;
@@ -23,6 +27,8 @@ export class ScreenRecordings {
   readonly desktop: Recorder;
   readonly browser: Recorder;
   readonly #owners = new Map<string, Owner>();
+  // The task each computer's screen last changed to.
+  readonly #onScreen = new Map<string, string>();
   constructor(
     private readonly deps: Omit<RecorderDeps, "screen" | "usageFor">,
     browser: Pick<RecorderDeps, "cells" | "feedFor">,
@@ -88,6 +94,28 @@ export class ScreenRecordings {
       await this.fence(sessionId);
       throw new ScreenRecordingError();
     }
+  }
+  // One display, one stream: a task's recording takes in only what its own window shows. Before a
+  // task's window comes to a screen, every other task's recording of it stops taking frames, and
+  // goes on once its own window is back.
+  coming(
+    cellId: string,
+    sessionId: string,
+    screen: "desktop" | "browser",
+    on: readonly string[],
+  ): void {
+    const key = `${cellId}\0${screen}`;
+    if (this.#onScreen.get(key) === sessionId) return;
+    this.#onScreen.set(key, sessionId);
+    for (const other of on) if (other !== sessionId) this[screen].away(other);
+  }
+  up(sessionId: string, screen: "desktop" | "browser"): void {
+    this[screen].back(sessionId, STREAM_CATCHES_UP_MS);
+  }
+  // The user's control may reach either screen, and no other task's recording sees it.
+  forUser(cellId: string, sessionId: string, on: readonly string[]): void {
+    this.coming(cellId, sessionId, "desktop", on);
+    this.coming(cellId, sessionId, "browser", on);
   }
   fence(sessionId: string): Promise<void> {
     const owner = this.#owner(sessionId);

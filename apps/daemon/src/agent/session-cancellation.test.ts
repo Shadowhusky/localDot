@@ -109,6 +109,48 @@ describe("what Stop gives back", () => {
     expect(acted.session.emptied).toBe(false);
   });
 
+  it("gives back a steer dot has not acted on, whatever it was already running", () => {
+    const running = task();
+    const generation = running.session.beginBrain();
+    running.session.askTask();
+    const command = running.session.admitCall(generation);
+    running.session.post("steer", "Use yarn instead");
+    expect(running.session.giveBack(null)).toEqual([
+      { messageId: running.said("Use yarn instead"), text: "Use yarn instead" },
+    ]);
+    expect(running.delivery(running.said("Use yarn instead"))).toMatchObject({
+      state: "withdrawn",
+      reason: "stopped",
+    });
+    expect(running.session.emptied).toBe(false);
+    command.finish();
+
+    const left = task();
+    const brain = left.session.beginBrain();
+    left.session.askTask();
+    left.session.admitCall(brain).finish();
+    const said = left.session.post("steer", "Use yarn instead");
+    left.session.leaveRunning(brain, said);
+    expect(left.session.giveBack(null).map((message) => message.text)).toEqual([
+      "Use yarn instead",
+    ]);
+  });
+
+  it("keeps a steer dot went on to act on or answer", () => {
+    const acted = task();
+    const generation = acted.session.beginBrain();
+    acted.session.askTask();
+    acted.session.post("steer", "Use yarn instead");
+    acted.session.admitCall(generation).finish();
+    expect(acted.session.giveBack(null)).toEqual([]);
+    expect(acted.delivery(acted.said("Use yarn instead"))).toBeUndefined();
+
+    const words = task();
+    words.session.post("steer", "Use yarn instead");
+    words.session.append("message.delta", { messageId: ulid(), text: "Sure, " });
+    expect(words.session.giveBack(null)).toEqual([]);
+  });
+
   it("decides against a tool call starting at the same moment: one admitted first keeps the message, none starts after", () => {
     const first = task();
     const early = first.session.beginBrain();

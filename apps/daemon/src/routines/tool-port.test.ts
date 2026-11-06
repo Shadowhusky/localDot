@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RoutineStore } from "./store.ts";
-import { routineToolPort, whenFromTool } from "./tool-port.ts";
+import { routineToolPort, scheduleFromTool } from "./tool-port.ts";
 
 const cleanup: (() => void)[] = [];
 afterEach(() => {
@@ -28,29 +28,62 @@ function fixture() {
 
 describe("tool port", () => {
   it.each([
-    [{ kind: "weekdays", time: "08:30" }, { when: { kind: "weekdays", time: "08:30" } }],
     [
-      { kind: "weekly", days: ["mon", "thu"], time: "09:00" },
-      { when: { kind: "weekly", days: [1, 4], time: "09:00" } },
+      { unit: "week", days: ["mon", "thu"], times: ["09:00", "17:00"] },
+      { every: 1, unit: "week", weekdays: [1, 4], times: ["09:00", "17:00"] },
     ],
     [
-      { kind: "hours", every: 4, time: "09:00" },
-      { when: { kind: "hours", every: 4, from: "09:00" } },
+      { every: 4, unit: "hour", from: "09:00", to: "21:00" },
+      { every: 4, unit: "hour", from: "09:00", to: "21:00" },
     ],
     [
-      { kind: "daily", time: "08:30", until: "2026-12-31" },
-      { when: { kind: "daily", time: "08:30" }, until: "2026-12-31" },
+      { every: 2, unit: "month", month_days: [1, -1], times: ["08:00"] },
+      { every: 2, unit: "month", monthDays: [1, -1], times: ["08:00"] },
     ],
   ])("maps %j", (input, expected) => {
-    expect(whenFromTool(input as never)).toEqual(expected);
+    expect(scheduleFromTool(input as never)).toEqual(expected);
   });
+  const propose = (f: ReturnType<typeof fixture>, extra: object) =>
+    f.port.propose(ulid(), { name: "Bills", instruction: "Check bills", schedules: [], ...extra });
   it.each([
-    [{ kind: "daily" }],
-    [{ kind: "weekly", time: "09:00" }],
-    [{ kind: "hours", every: 5 }],
-    [{ kind: "once", time: "09:00" }],
-  ])("explains a schedule it cannot use: %j", (input) => {
-    expect(() => whenFromTool(input as never)).toThrow(expect.objectContaining({ status: 400 }));
+    [[{ unit: "day" }], "Say what time it runs."],
+    [[{ unit: "minute" }], "A step in minutes must be from 5 to 720."],
+    [[{ every: 30, unit: "hour" }], "A step in hours must be from 1 to 23."],
+    [[{ unit: "week", month_days: [1], times: ["09:00"] }], "Days of the month work with months."],
+  ])("explains a schedule it cannot use: %j", (schedules, message) => {
+    expect(() => propose(fixture(), { schedules })).toThrow(
+      expect.objectContaining({ status: 400, message }),
+    );
+  });
+  it("takes the same model the app does, and sums it up for the card", () => {
+    const f = fixture();
+    const proposal = propose(f, {
+      schedules: [
+        { unit: "week", days: ["mon", "tue", "wed", "thu", "fri"], times: ["09:00", "17:00"] },
+        { every: 2, unit: "month", month_days: [-1], times: ["08:00"] },
+      ],
+      start: "2026-11-10",
+      until: "2027-03-01",
+    });
+    expect(proposal.summary).toBe(
+      "Weekdays at 9:00 and 17:00; Every 2 months on the last day at 8:00, from 10 Nov until 1 Mar 2027 · London time",
+    );
+    expect(f.store.get(proposal.routineId)).toMatchObject({
+      start: "2026-11-10",
+      until: "2027-03-01",
+      schedules: [
+        { every: 1, unit: "week", weekdays: [1, 2, 3, 4, 5], times: ["09:00", "17:00"] },
+        { every: 2, unit: "month", monthDays: [-1], times: ["08:00"] },
+      ],
+    });
+  });
+  it("proposes a one-off as a single day", () => {
+    const proposal = propose(fixture(), {
+      schedules: [{ unit: "day", times: ["15:00"] }],
+      start: "2026-10-20",
+      until: "2026-10-20",
+    });
+    expect(proposal.summary).toBe("Once on 20 Oct at 15:00 · London time");
   });
   it("propose stores an inactive proposal tied to the session", () => {
     const f = fixture();
@@ -58,7 +91,7 @@ describe("tool port", () => {
     const proposal = f.port.propose(session, {
       name: "Bills",
       instruction: "Check bills",
-      when: { kind: "daily", time: "08:30" },
+      schedules: [{ unit: "day", times: ["08:30"] }],
     });
     expect(f.store.get(proposal.routineId)).toMatchObject({
       state: "proposed",
@@ -80,7 +113,9 @@ describe("tool port", () => {
       kind: "follow_up",
       state: "active",
       followUp: { sessionId: session, note: "Check the parcel" },
-      when: { kind: "once", date: "2026-10-12", time: "15:00" },
+      schedules: [{ every: 1, unit: "day", times: ["15:00"] }],
+      start: "2026-10-12",
+      until: "2026-10-12",
     });
   });
   it("answers an impossible date or a two-line name in plain words", () => {
@@ -92,14 +127,15 @@ describe("tool port", () => {
       f.port.propose(session, {
         name: "Bills",
         instruction: "Check bills",
-        when: { kind: "daily", time: "08:30", until: "2026-02-30" },
+        schedules: [{ unit: "day", times: ["08:30"] }],
+        until: "2026-02-30",
       }),
     ).toThrow(plain("The end date isn't a real date."));
     expect(() =>
       f.port.propose(session, {
         name: "Bills\nand more",
         instruction: "Check bills",
-        when: { kind: "daily", time: "08:30" },
+        schedules: [{ unit: "day", times: ["08:30"] }],
       }),
     ).toThrow(plain("A routine's name is one line of up to 80 characters."));
     expect(() => f.port.followUp(session, "2026-10-32T10:00", "x")).toThrow(
@@ -109,7 +145,11 @@ describe("tool port", () => {
   it("names the routine it would pause", () => {
     const f = fixture();
     const routine = f.store.create(
-      { name: "Morning bills", instruction: "a", when: { kind: "daily", time: "08:30" } },
+      {
+        name: "Morning bills",
+        instruction: "a",
+        schedules: [{ every: 1, unit: "day", times: ["08:30"] }],
+      },
       { state: "active" },
     );
     expect(f.port.name(routine.id)).toBe("Morning bills");
@@ -118,11 +158,11 @@ describe("tool port", () => {
   it("pause only pauses an active routine", () => {
     const f = fixture();
     const active = f.store.create(
-      { name: "A", instruction: "a", when: { kind: "daily", time: "08:30" } },
+      { name: "A", instruction: "a", schedules: [{ every: 1, unit: "day", times: ["08:30"] }] },
       { state: "active" },
     );
     const proposed = f.store.create(
-      { name: "P", instruction: "p", when: { kind: "daily", time: "08:30" } },
+      { name: "P", instruction: "p", schedules: [{ every: 1, unit: "day", times: ["08:30"] }] },
       { state: "proposed" },
     );
     expect(f.port.pause(proposed.id)).toBe(false);

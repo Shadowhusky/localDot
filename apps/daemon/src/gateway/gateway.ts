@@ -548,6 +548,8 @@ export class ActionGateway {
   async run(ctx: ActionContext, action: GuiAction): Promise<ActionOutcome> {
     const owner = this.#owner(ctx);
     const input = frozenSnapshot(action);
+    // A wait touches nothing, so it takes no place in the screen's queue ahead of another task.
+    if (input.verb === "wait") return this.#run(owner, input);
     const before = this.#queues.get(ctx.cellId) ?? Promise.resolve();
     const task = before.catch(() => {}).then(() => this.#run(owner, input));
     this.#queues.set(ctx.cellId, task);

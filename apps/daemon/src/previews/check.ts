@@ -2,6 +2,7 @@ import type { Duplex } from "node:stream";
 import type { PreviewTarget } from "@localdot/protocol";
 
 const TITLE_BYTES = 64 * 1024;
+const GONE = new Set(["404", "502", "503", "504"]);
 
 // What a listening port said when asked: the scheme it answered HTTP in, or none when it stayed
 // silent or, `other`, spoke something else (a database, a debugger) or closed at once.
@@ -49,6 +50,20 @@ export async function titleOf(
   const raw = /<title[^>]*>([^<]{1,400})<\/title>/i.exec(head)?.[1];
   const title = raw && decodeEntities(raw).replace(/\s+/g, " ").trim().slice(0, 120);
   return title || undefined;
+}
+
+// Whether a *.localhost site is still there. It shares its port with its proxy, which answers for
+// names it no longer knows (404) and for apps that have gone (502), so this asks by name, as the
+// proxy routes it, and reads only the status.
+export async function siteAnswers(
+  connect: Connect,
+  target: PreviewTarget,
+  ms: number,
+): Promise<boolean> {
+  const ask = `HEAD / HTTP/1.1\r\nHost: ${target.host}\r\nAccept: text/html\r\nConnection: close\r\n\r\n`;
+  const { head } = await exchange(connect, target, ask, ms, (text) => text.includes("\r\n"));
+  const status = /^HTTP\/1\.[01] (\d{3})/.exec(head)?.[1];
+  return !!status && !GONE.has(status);
 }
 
 function decodeEntities(text: string): string {

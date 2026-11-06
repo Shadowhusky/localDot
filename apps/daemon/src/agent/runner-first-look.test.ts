@@ -18,6 +18,7 @@ import type { BrainCell, OpenBrain } from "./brain-cell.ts";
 import { Conversations } from "./conversation.ts";
 import { MemoryStore } from "./memory.ts";
 import { AgentRunner } from "./runner.ts";
+import { ModelAnswerError } from "./safety/judge-model.ts";
 import type { AgentSession } from "./session.ts";
 import type { AgentSettings } from "./settings.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
@@ -61,6 +62,14 @@ function setup(initial: AgentSettings = CLAUDE) {
   let settings = initial;
   const keys: KeydRecord[] = [
     { id: "anthropic", kind: "llm", provider: "anthropic", createdAt: AT, updatedAt: AT },
+    {
+      id: "cdx",
+      kind: "llm",
+      provider: "openai-compatible",
+      baseURL: "https://relay.example/v1",
+      createdAt: AT,
+      updatedAt: AT,
+    },
   ];
   // What the quick model says next, and each question it was asked.
   let answer: (prompt: string) => Promise<string> = async () => reply({ title: "Named" });
@@ -202,6 +211,10 @@ function setup(initial: AgentSettings = CLAUDE) {
     events,
     titles: (id: string) => events(id, "session.title").map((event) => event.data),
     choices: (id: string) => events(id, "persona.choice").map((event) => event.data),
+    startsAs: (id: string) =>
+      events(id, "session.start").flatMap((event) =>
+        event.type === "session.start" ? [event.data.persona] : [],
+      ),
     answer(next: (prompt: string) => Promise<string>) {
       answer = next;
     },
@@ -355,6 +368,7 @@ describe("Auto's dot", () => {
     expect(f.order).toEqual(["skills:coder", "agent"]);
     expect(f.runs[0]?.role).toBe(PERSONAS.coder.guidance);
     expect(f.choices(session.id)).toEqual([{ persona: "coder", by: "auto", reason: "Code work" }]);
+    expect(f.startsAs(session.id)).toEqual(["finance"]);
     expect(f.asked[0]?.system).toContain("- coder: Builds, fixes and ships software");
     expect(f.titles(session.id)).toEqual([{ title: "Failing test fix", by: "auto" }]);
     session.stop();
@@ -499,6 +513,73 @@ describe("Auto's dot", () => {
     session.stop();
     await f.live.settled(session.id);
     expect(() => f.runner.switchPersona(session.id, "coder")).toThrow("This task has ended.");
+  });
+
+  it("is what the task's live status and its ending name, as the user switched it", async () => {
+    const f = setup(auto);
+    f.answer(async () => reply({ title: "Logo", dot: "coder", reason: "Code" }));
+    f.hold(true);
+    const session = await f.runner.start(f.cellId, "Draw a logo");
+    await until(() => f.runs.length === 1);
+    await until(() => f.runner.liveStatus(session.id)?.persona === "coder");
+    f.hold(false);
+    f.runner.switchPersona(session.id, "design");
+    await until(() => f.runner.liveStatus(session.id)?.persona === "design");
+    session.stop();
+    await f.live.settled(session.id);
+    expect(f.events(session.id, "session.end").map((event) => event.data)).toEqual([
+      { reason: "stopped", persona: "design" },
+    ]);
+    expect(f.conversations.list().conversations[0]?.persona).toBe("design");
+  });
+
+  describe("on a custom endpoint", () => {
+    const price = { inputUSDPerMTok: 1, outputUSDPerMTok: 5 };
+    const relay = (model: string) => ({
+      provider: "openai-responses-compatible",
+      model,
+      key: "cdx",
+      price,
+    });
+    const settings: AgentSettings = {
+      main: relay("gpt-6.1-sol"),
+      fast: relay("gpt-6.1-Terra"),
+      models: [relay("gpt-6.1-terra")],
+      persona: "coder",
+      autoPersona: true,
+    };
+
+    it("asks the fast model by the spelling the library holds for that endpoint", async () => {
+      const f = setup(settings);
+      f.answer(async () => reply({ title: "Latest email", dot: "everyday", reason: "Email" }));
+      const session = await f.runner.start(f.cellId, "Look at my latest gmail");
+      await until(() => f.choices(session.id).length === 1);
+      expect(f.asked.map((ask) => ask.model)).toEqual(["gpt-6.1-terra"]);
+      expect(f.choices(session.id)).toEqual([{ persona: "everyday", by: "auto", reason: "Email" }]);
+      session.stop();
+      await f.live.settled(session.id);
+    });
+
+    it("falls through to the main model when the fast one fails, and Settings hears why", async () => {
+      const f = setup({ ...settings, models: [] });
+      f.quickModel.mockImplementation(async (role: ResolvedRole, system, prompt) => {
+        f.asked.push({ model: role.model.id, system, prompt });
+        if (role.role === "fast")
+          throw new ModelAnswerError(400, "The 'gpt-6.1-Terra' model is not supported");
+        return reply({ title: "Latest email", dot: "everyday" });
+      });
+      const session = await f.runner.start(f.cellId, "Look at my latest gmail");
+      await until(() => f.choices(session.id).length === 1);
+      expect(f.asked.map((ask) => ask.model)).toEqual(["gpt-6.1-Terra", "gpt-6.1-sol"]);
+      expect(f.choices(session.id)).toEqual([{ persona: "everyday", by: "auto" }]);
+      expect(f.runner.fastFailure()).toEqual({
+        provider: "openai-responses-compatible",
+        model: "gpt-6.1-Terra",
+        reason: "answered 400: The 'gpt-6.1-Terra' model is not supported",
+      });
+      session.stop();
+      await f.live.settled(session.id);
+    });
   });
 
   it("is not asked for when Auto is off: the chosen dot works the task", async () => {

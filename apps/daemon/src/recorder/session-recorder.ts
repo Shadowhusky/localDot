@@ -62,6 +62,8 @@ export class SessionRecorder {
   readonly #deps: SessionRecorderDeps;
   readonly #gate: FrameGate;
   readonly #authority = new ControlGate();
+  // Frames from while another task's window was on the screen are not this task's.
+  readonly #elsewhere = new ControlGate("other-task");
   readonly #seen = new Set<number>();
   readonly #ready: Promise<boolean>;
   #resolveReady!: (ready: boolean) => void;
@@ -119,10 +121,20 @@ export class SessionRecorder {
       });
   }
   get #gapCount(): number {
-    return this.#ownGaps.length + this.#gate.gaps.length + this.#authority.gaps.length;
+    return (
+      this.#ownGaps.length +
+      this.#gate.gaps.length +
+      this.#authority.gaps.length +
+      this.#elsewhere.gaps.length
+    );
   }
   get manifest(): RecordingManifest {
-    const gaps = [...this.#ownGaps, ...this.#gate.gaps, ...this.#authority.gaps]
+    const gaps = [
+      ...this.#ownGaps,
+      ...this.#gate.gaps,
+      ...this.#authority.gaps,
+      ...this.#elsewhere.gaps,
+    ]
       .map((gap) => ({ ...gap }))
       .sort((a, b) => a.from - b.from);
     return {
@@ -147,6 +159,17 @@ export class SessionRecorder {
   release(nowDaemonMicros: number): void {
     const t = this.#deps.toSessionT(nowDaemonMicros);
     if (this.#authority.release(t)) {
+      this.#dropUntilKey = true;
+      this.#request(t, 0);
+    }
+  }
+  // Another task's window is coming to the screen: nothing from now on is this task's.
+  away(nowDaemonMicros: number): void {
+    this.#elsewhere.hold(this.#deps.toSessionT(nowDaemonMicros));
+  }
+  back(nowDaemonMicros: number): void {
+    const t = this.#deps.toSessionT(nowDaemonMicros);
+    if (this.#elsewhere.release(t)) {
       this.#dropUntilKey = true;
       this.#request(t, 0);
     }
@@ -244,7 +267,12 @@ export class SessionRecorder {
       return;
     }
     // Control changes are observed synchronously; evaluate each queued frame's own time before any disk write.
-    if (!this.#gate.admit(t, frame.key) || !this.#authority.admit(t, frame.key)) return;
+    if (
+      !this.#gate.admit(t, frame.key) ||
+      !this.#authority.admit(t, frame.key) ||
+      !this.#elsewhere.admit(t, frame.key)
+    )
+      return;
     if (this.#gapCount > MAX_GAPS) {
       await this.#end("recorder-error", t, "the stream dropped too often");
       return;
@@ -361,7 +389,12 @@ export class SessionRecorder {
       }
       // A request can be throttled or lost. The privacy gates must keep dropping deltas,
       // so retry independently of frame admission, including when the screen is idle.
-      if (this.#dropUntilKey && !this.#gate.userHasControl && !this.#authority.userHasControl)
+      if (
+        this.#dropUntilKey &&
+        !this.#gate.userHasControl &&
+        !this.#authority.userHasControl &&
+        !this.#elsewhere.userHasControl
+      )
         this.#request(now);
       if (
         this.#writer &&

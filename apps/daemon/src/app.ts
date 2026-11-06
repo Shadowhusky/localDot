@@ -6,6 +6,7 @@ import { ServiceReadinessReply } from "../../../packages/protocol/src/install-se
 import type { AccessLinks } from "./access-links.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./agent/routes.ts";
 import { type AccountsDeps, accountsRoutes } from "./browser/accounts.ts";
+import { type BrowserEngineDeps, browserEngineRoutes } from "./browser/engine-routes.ts";
 import { type BrowserStatusDeps, browserStatusRoutes } from "./browser/status-routes.ts";
 import { type BrowserViewerDeps, browserViewerApi } from "./browser/viewer.ts";
 import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
@@ -55,6 +56,7 @@ export interface AppOptions {
   browser?: BrowserViewerDeps;
   accounts?: AccountsDeps;
   browserStatus?: BrowserStatusDeps;
+  browserEngine?: BrowserEngineDeps;
   ui?: { dir: string };
   gateway?: GatewayRoutesDeps;
   keys?: KeyRoutesDeps;
@@ -72,7 +74,7 @@ export interface AppOptions {
   routines?: RoutineRoutesDeps;
   connectors?: Omit<ConnectorRoutesDeps, "port">;
   voice?: VoiceRoutesDeps;
-  previews?: Pick<Previews, "status" | "open" | "stop">;
+  previews?: Pick<Previews, "status" | "open" | "stop" | "stopServer">;
   appUpdater?: AppUpdater;
   remoteAccess?: RemoteAccess;
   appInstalling?(): boolean;
@@ -89,6 +91,7 @@ export function createApp({
   browser,
   accounts,
   browserStatus,
+  browserEngine,
   ui,
   gateway,
   keys,
@@ -234,6 +237,7 @@ export function createApp({
   if (browser) browserViewerApi(app, browser);
   if (accounts) accountsRoutes(app, accounts);
   if (browserStatus) browserStatusRoutes(app, browserStatus);
+  if (browserEngine) browserEngineRoutes(app, browserEngine);
 
   app.get("/api/sessions", (c) => c.json(eventLog.listSessions()));
 

@@ -11,6 +11,7 @@ import {
 } from "./cells/docker.ts";
 import type { Images } from "./cells/images.ts";
 import { gateRelay } from "./cells/relay.ts";
+import { browserInUseCheck } from "./doctor-browser.ts";
 import { computerContainerCheck } from "./doctor-computers.ts";
 import { egressCheck } from "./doctor-egress.ts";
 import { imageVerdict } from "./doctor-image.ts";
@@ -43,6 +44,8 @@ export interface DoctorReport {
 export interface DoctorDeps {
   docker: DockerClient;
   images: Images;
+  // The release's browser image, to say which browser is in use.
+  browserImage?: string;
   port: number;
   // How docker.socketPath was found, for the docker-socket check.
   socket?: DockerSocket;
@@ -85,6 +88,9 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
           await computerContainerCheck(deps.docker, deps.home),
           ...recoveryChecks(deps.home),
           await egressCheck(deps.egressProbe, deps.signal),
+          ...(deps.browserImage
+            ? [await browserInUseCheck(deps.docker, deps.home, deps.browserImage)]
+            : []),
         ]
       : []),
     await portCheck(deps.port, deps.home),

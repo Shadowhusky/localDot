@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { KeydCellInfo } from "@localdot/protocol";
@@ -913,5 +913,161 @@ describe("what the browser's status tells the app, the CLI and dot", () => {
     await expect(f.controller.reconcile()).rejects.toThrow(
       "Browser recovery needs attention (Browser shutdown could not be confirmed (the key service did not confirm its connection closed); retry Stop)",
     );
+  });
+});
+
+describe("the browser a start opens", () => {
+  const BASE = "test/browser:dev";
+  const BASE_ID = `sha256:${"b".repeat(64)}`;
+  const CHROME_ID = `sha256:${"c".repeat(64)}`;
+  const CHROME = {
+    image: CHROME_ID,
+    base: BASE,
+    baseId: BASE_ID,
+    version: "157.0.8103.38",
+    installedAt: "2026-11-05T00:00:00.000Z",
+  };
+  const withImages = (f: ReturnType<typeof fixture>) => {
+    const base = {
+      Id: BASE_ID,
+      Os: "linux",
+      Architecture: "arm64",
+      RootFS: { Layers: ["sha256:l"] },
+      Config: { Labels: { "localdot.chrome-install": "1" } },
+    };
+    f.docker.images.set(BASE, base);
+    f.docker.images.set(BASE_ID, base);
+    f.docker.images.set(CHROME_ID, {
+      ...base,
+      Id: CHROME_ID,
+      RootFS: { Layers: ["sha256:l", "sha256:chrome"] },
+      Config: {
+        Labels: { "localdot.chrome-base": BASE, "localdot.chrome-version": CHROME.version },
+      },
+    });
+    return f;
+  };
+  const choose = (f: ReturnType<typeof fixture>, record: object) =>
+    writeFileSync(join(f.home, "browser-engine.json"), JSON.stringify({ v: 1, ...record }));
+  const browserImage = (f: ReturnType<typeof fixture>) =>
+    [...f.docker.containers.values()].find(
+      (entry) => entry.Config.Labels["localdot.role"] === "browser",
+    )?.Config.Image;
+
+  it("is the pinned image for someone who hasn't chosen, without asking Docker about images", async () => {
+    const f = fixture();
+    await f.controller.start(f.parent.id);
+    expect(browserImage(f)).toBe(BASE);
+    expect(f.docker.requests.some((request) => request.path.startsWith("/images/"))).toBe(false);
+  });
+
+  it("is Chrome's local image once chosen, in the same hardened cell", async () => {
+    const f = withImages(fixture());
+    choose(f, { choice: "chrome", chrome: CHROME, handOver: "done" });
+    await f.controller.start(f.parent.id);
+    expect(browserImage(f)).toBe(CHROME_ID);
+    const browser = [...f.docker.containers.values()].find(
+      (entry) => entry.Config.Labels["localdot.role"] === "browser",
+    );
+    expect(browser?.HostConfig).toMatchObject({
+      ReadonlyRootfs: true,
+      CapDrop: ["ALL"],
+      Mounts: [{ Type: "volume", Source: f.accounts, Target: "/profile" }],
+    });
+    expect(browser?.HostConfig.SecurityOpt[0]).toBe("no-new-privileges");
+    expect(browser?.HostConfig.SecurityOpt[1]).toMatch(/^seccomp=/u);
+    expect(browser?.HostConfig.Privileged).toBeUndefined();
+    expect(browser?.HostConfig.PortBindings).toBeUndefined();
+  });
+
+  it("backs up the sign-ins on Chrome's first start, before the browser exists", async () => {
+    const f = withImages(fixture());
+    await f.controller.start(f.parent.id);
+    await f.controller.stop(f.parent.id);
+    f.nextInstance();
+    Object.assign(f.docker.volumes.get(f.accounts) ?? {}, {
+      syntheticCookie: "signed-in",
+      syntheticLastVersion: "154.0.8037.57",
+    });
+    choose(f, { choice: "chrome", chrome: CHROME, handOver: "pending" });
+    f.docker.requests.length = 0;
+    await f.controller.start(f.parent.id);
+    const created = f.docker.requests
+      .filter((request) => request.path === "/containers/create")
+      .map((request) => request.query?.name ?? "");
+    const backup = created.findIndex((name) => name.endsWith("-backup"));
+    const browser = created.findIndex((name) => name.includes("-browser-"));
+    expect(backup).toBeGreaterThanOrEqual(0);
+    expect(backup).toBeLessThan(browser);
+    expect(f.docker.volumes.get(`${f.accounts}-backup`)?.syntheticCookie).toBe("signed-in");
+    expect(browserImage(f)).toBe(CHROME_ID);
+    expect(
+      JSON.parse(readFileSync(join(f.home, "browser-engine.json"), "utf8")).backup.version,
+    ).toBe("154.0.8037.57");
+  });
+
+  it("stays on the pinned image if the backup fails, saying why", async () => {
+    const f = withImages(fixture());
+    await f.controller.start(f.parent.id);
+    await f.controller.stop(f.parent.id);
+    f.nextInstance();
+    Object.assign(f.docker.volumes.get(f.accounts) ?? {}, {
+      syntheticLastVersion: "154.0.8037.57",
+    });
+    choose(f, { choice: "chrome", chrome: CHROME, handOver: "pending" });
+    f.docker.copyStatus = 28;
+    await f.controller.start(f.parent.id);
+    expect(browserImage(f)).toBe(BASE);
+    expect((await f.controller.engineStatus()).problem).toMatch(/enough free disk space/u);
+  });
+
+  it("says a running browser is behind when a new Chrome is ready", async () => {
+    const f = withImages(fixture());
+    choose(f, { choice: "chrome", chrome: CHROME, handOver: "done" });
+    await f.controller.start(f.parent.id);
+    expect((await f.controller.engineStatus()).restartNeeded).toBe(false);
+    choose(f, { choice: "chromium" });
+    expect((await f.controller.engineStatus()).restartNeeded).toBe(true);
+  });
+
+  it("restores the backup only after every browser has let go, then opens Chromium", async () => {
+    const f = withImages(fixture());
+    await f.controller.start(f.parent.id);
+    await f.controller.stop(f.parent.id);
+    f.nextInstance();
+    Object.assign(f.docker.volumes.get(f.accounts) ?? {}, {
+      syntheticCookie: "before",
+      syntheticLastVersion: "154.0.8037.57",
+    });
+    choose(f, { choice: "chrome", chrome: CHROME, handOver: "pending" });
+    await f.controller.start(f.parent.id);
+    Object.assign(f.docker.volumes.get(f.accounts) ?? {}, {
+      syntheticCookie: "in-chrome",
+      syntheticLastVersion: CHROME.version,
+    });
+    await f.controller.restoreEngineBackup();
+    expect(f.docker.volumes.get(f.accounts)?.syntheticCookie).toBe("before");
+    expect(f.docker.volumes.has(`${f.accounts}-backup`)).toBe(false);
+    f.nextInstance();
+    await f.controller.start(f.parent.id);
+    expect(browserImage(f)).toBe(BASE);
+  });
+
+  it("takes the backup away with the sign-ins on Sign out of all sites", async () => {
+    const f = withImages(fixture());
+    await f.controller.start(f.parent.id);
+    await f.controller.stop(f.parent.id);
+    f.nextInstance();
+    Object.assign(f.docker.volumes.get(f.accounts) ?? {}, {
+      syntheticLastVersion: "154.0.8037.57",
+    });
+    choose(f, { choice: "chrome", chrome: CHROME, handOver: "pending" });
+    await f.controller.start(f.parent.id);
+    expect(f.docker.volumes.has(`${f.accounts}-backup`)).toBe(true);
+    await f.controller.clearAccounts();
+    expect(f.docker.volumes.has(`${f.accounts}-backup`)).toBe(false);
+    expect(
+      JSON.parse(readFileSync(join(f.home, "browser-engine.json"), "utf8")).backup,
+    ).toBeUndefined();
   });
 });

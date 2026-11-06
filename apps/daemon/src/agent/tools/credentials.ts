@@ -10,6 +10,8 @@ import { SERVICE_BYTES } from "../../keyd/service-keys.ts";
 import { untrusted } from "../untrusted.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
+const TOOL_LISTING_MS = 20_000;
+
 export async function credentialsTool(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -17,6 +19,7 @@ export async function credentialsTool(
 ): Promise<ToolResult> {
   ctx.check();
   if (!ctx.permit?.consume(input, null)) return fail("Credential discovery is not authorized.");
+  if (input.action === "connect") return connectApp(deps, ctx, input.app);
   if (!deps.credentials) return fail("Saved service keys are unavailable.");
   if (input.action === "list") {
     const keys = await deps.credentials.list(input.query);
@@ -119,6 +122,84 @@ export async function credentialsTool(
         ],
       }
     : fail("The saved key could not be verified. Check credentials/list before continuing.");
+}
+
+// Offers the user a card to connect an app, listed or already theirs: the card opens the sign-in and
+// answers once the app is connected, so this never sees more than that it happened. What the app
+// lets dot do is the user's choice, as for any connected app.
+async function connectApp(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+  app: string | undefined,
+): Promise<ToolResult> {
+  const hub = deps.connectors;
+  if (!hub) return fail("Connected apps aren't available.");
+  let target: ReturnType<typeof hub.connectTarget>;
+  try {
+    target = app ? hub.connectTarget(app) : undefined;
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : "That app can't be added right now.");
+  }
+  if (!target)
+    return fail("That app can't be connected this way. Check work_context.connectableApps.");
+  if (hub.isConnected(target.config.id) && !target.ended)
+    return {
+      ok: true,
+      content: [text(`${target.config.name} is already connected. Use its tools.`)],
+    };
+  const answer = await ctx.session.askFields(
+    {
+      question: `Connect ${target.config.name}?`,
+      fields: [
+        {
+          id: "app",
+          kind: "connect_app",
+          label: target.config.name,
+          connect: {
+            connector: target.config.id,
+            name: target.config.name,
+            host: target.host,
+            ...(target.ended ? { reconnect: true } : {}),
+          },
+        },
+      ],
+      submit: "Continue",
+      decline: "Not now",
+    },
+    deps.askTimeoutMs ?? ctx.session.approvalWindowMs ?? 30 * 60_000,
+    ctx.step,
+    ctx.generation,
+    ctx.signal,
+  );
+  ctx.check();
+  if (answer.by === "pause")
+    return { ok: false, pause: true, content: [text("Paused while waiting for the app.")] };
+  if (answer.by !== "user" || answer.declined) {
+    if (target.added) await hub.remove(target.config.id).catch(() => undefined);
+    return {
+      ok: false,
+      content: [
+        text(
+          `${target.config.name} was not connected. Respect this choice; do not ask again unless the user requests it. Explain what remains blocked.`,
+        ),
+      ],
+    };
+  }
+  if (!hub.isConnected(target.config.id))
+    return fail(`${target.config.name} did not connect. Check work_context before continuing.`);
+  // Its tools are listed before dot starts again with them; a slow app arrives on a later start.
+  await Promise.race([
+    hub.refresh(target.config.id),
+    deps.sleep(TOOL_LISTING_MS, ctx.signal).catch(() => undefined),
+  ]);
+  ctx.check();
+  deps.appsChanged?.(ctx.session);
+  return {
+    ok: true,
+    content: [
+      text(`${target.config.name} is connected. Its tools are on your list from your next step.`),
+    ],
+  };
 }
 
 export async function apiRequestTool(

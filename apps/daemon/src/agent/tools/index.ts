@@ -16,7 +16,7 @@ import {
   webUrl,
 } from "@localdot/protocol";
 import { BrowserClientError } from "../../browser/client.ts";
-import { BrowserInUseError, ScreenUnavailableError } from "../../browser/screen-controller.ts";
+import { ScreenUnavailableError } from "../../browser/screen-controller.ts";
 import type { TaskConnectorTool } from "../../connectors/hub.ts";
 import { splitIntent } from "../../connectors/intent.ts";
 import type { ToolPolicy } from "../policy.ts";
@@ -400,27 +400,23 @@ async function dispatchAdmitted(
     // only resolve on the desktop.
     const page = name === "browser_navigate" && webUrl((frozen as BrowserNavigateInput).url);
     const shown = session.screens?.selection.screen;
-    let shared = false;
     if (page && opensInWebBrowser(page) && shown === "desktop") {
       try {
         await session.switchScreen("browser", lease);
       } catch (error) {
         ctx.check();
-        // Another task has the web browser: the page opens in the desktop's Chromium.
-        if (error instanceof BrowserInUseError) shared = true;
-        else if (!(error instanceof ScreenUnavailableError)) throw error;
-        else
-          return {
-            status: 200,
-            result: {
-              recovery: { kind: "unavailable", surface: "browser", retry: "after_change" },
-              ...fail(
-                error.status
-                  ? `${error.message} Then open the page again with browser_navigate; don't ask for credentials again.`
-                  : `The browser is temporarily unavailable${error.problem ? ` (${error.problem.replace(/\.$/u, "")})` : ""}. Saved sign-ins are still kept. Retry browser_navigate once it is ready; do not open a second browser or ask for credentials again.`,
-              ),
-            },
-          };
+        if (!(error instanceof ScreenUnavailableError)) throw error;
+        return {
+          status: 200,
+          result: {
+            recovery: { kind: "unavailable", surface: "browser", retry: "after_change" },
+            ...fail(
+              error.status
+                ? `${error.message} Then open the page again with browser_navigate; don't ask for credentials again.`
+                : `The browser is temporarily unavailable${error.problem ? ` (${error.problem.replace(/\.$/u, "")})` : ""}. Saved sign-ins are still kept. Retry browser_navigate once it is ready; do not open a second browser or ask for credentials again.`,
+            ),
+          },
+        };
       }
       ctx.check();
     } else if (page && !opensInWebBrowser(page) && shown === "browser") {
@@ -604,16 +600,6 @@ async function dispatchAdmitted(
         break;
     }
     result = withResearchNote(session, name, frozen, result);
-    if (shared)
-      result = {
-        ...result,
-        content: [
-          text(
-            "Another task is using the web browser, so this opened in the desktop's Chromium, which keeps no sign-ins.",
-          ),
-          ...result.content,
-        ],
-      };
     // Containment intentionally stopped the session; its terminal refusal has no image/event.
     if (session.stopped)
       return {

@@ -561,6 +561,69 @@ describe("agent user routes", () => {
     ).toBe(204);
     expect(await plain).toEqual({ declined: true, by: "user" });
   });
+  it("keeps a task's own model, and sends a message's model on to its turn", async () => {
+    const f = await setup();
+    const reached = vi.fn();
+    const choice = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
+    const messageTurn = vi.fn(async () => ({
+      model: { provider: choice.provider, model: choice.model },
+      ref: choice,
+      moves: () => false,
+      reached,
+    }));
+    const stored = vi.fn((_id: string): typeof choice | undefined => undefined);
+    const chooseTaskModel = vi.fn((_id: string, ref: typeof choice) => {
+      stored.mockReturnValue(ref);
+      return ref;
+    });
+    Object.assign(f.deps.runner, { messageTurn, taskModel: stored, chooseTaskModel });
+    Object.assign(f.deps.conversations ?? {}, { has: () => true });
+    f.deps.conversations ??= { has: () => true } as never;
+    const none = await f.send("GET", endpoint("model"));
+    expect(await none.json()).toEqual({ choice: null });
+    const put = await f.send("PUT", endpoint("model"), choice);
+    expect(await put.json()).toEqual({ choice });
+    expect(await (await f.send("GET", endpoint("model"))).json()).toEqual({ choice });
+    expect((await f.send("PUT", endpoint("model"), { provider: "bad provider" })).status).toBe(400);
+    const sent = await f.send("POST", endpoint("messages"), {
+      text: "Now this",
+      kind: "steer",
+      model: choice,
+    });
+    expect(sent.status).toBe(202);
+    expect(messageTurn).toHaveBeenCalledWith(SESSION, choice, expect.any(AbortSignal));
+    expect(reached).toHaveBeenCalledOnce();
+    expect(
+      (await f.send("POST", endpoint("messages"), { text: "Old client", kind: "steer" })).status,
+    ).toBe(202);
+    expect(messageTurn).toHaveBeenCalledOnce();
+  });
+  it("holds a steer for another model until the task finishes, leaving dot's work alone", async () => {
+    const f = await setup();
+    const reached = vi.fn();
+    const choice = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
+    Object.assign(f.deps.runner, {
+      messageTurn: async () => ({
+        model: { provider: choice.provider, model: choice.model },
+        ref: choice,
+        moves: () => true,
+        reached,
+      }),
+    });
+    const sent = await f.send("POST", endpoint("messages"), {
+      text: "On Opus",
+      kind: "steer",
+      model: choice,
+    });
+    expect(sent.status).toBe(202);
+    expect(reached).not.toHaveBeenCalled();
+    expect((await f.session.inbox(0, 0)).items).toEqual([]);
+    expect(f.events.find((event) => event.type === "message.user")?.data).toMatchObject({
+      text: "On Opus",
+      kind: "followup",
+      queued: true,
+    });
+  });
   it("answers a side question for the user alone, redacted, one at a time, saying why it can't", async () => {
     const f = await setup();
     const gate = deferred();
@@ -591,11 +654,17 @@ describe("agent user routes", () => {
     expect(
       (await f.send("POST", "/api/agent/sessions/nope/side-question", { question: "Hi" })).status,
     ).toBe(400);
-    sideAnswer.mockRejectedValueOnce(new SideQuestionError(409, "no-fast-model"));
+    sideAnswer.mockRejectedValueOnce(new SideQuestionError(409, "no-spare-model"));
     const none = await f.send("POST", endpoint("side-question"), { question: "Hi" });
-    expect([none.status, await none.text()]).toEqual([409, "no-fast-model"]);
-    sideAnswer.mockRejectedValueOnce(new SideQuestionError(502, "no-answer"));
-    expect((await f.send("POST", endpoint("side-question"), { question: "Hi" })).status).toBe(502);
+    expect([none.status, await none.text()]).toEqual([409, "no-spare-model"]);
+    sideAnswer.mockRejectedValueOnce(
+      new SideQuestionError(502, "no-answer", "answered 400: Input must be a list"),
+    );
+    const refused = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+    expect([refused.status, await refused.text()]).toEqual([
+      502,
+      "no-answer\nanswered 400: Input must be a list",
+    ]);
     sideAnswer.mockRejectedValueOnce(new AgentError(404, "no such task"));
     expect((await f.send("POST", endpoint("side-question"), { question: "Hi" })).status).toBe(404);
     expect(sideAnswer).toHaveBeenCalledTimes(4);
@@ -1594,6 +1663,66 @@ it("cancels queued messages once, without drafting or delivering them", async ()
   expect(f.events.filter((e) => e.type === "message.delivery").map((e) => e.data)).toEqual([
     { messageId: message.messageId, state: "cancelled" },
   ]);
+});
+describe("moving queued messages", () => {
+  const queue = async (f: Awaited<ReturnType<typeof setup>>, ...texts: string[]) => {
+    for (const text of texts)
+      await f.send("POST", `/api/agent/sessions/${SESSION}/messages`, { kind: "followup", text });
+    return f.events.flatMap((e) =>
+      e.type === "message.user" ? [(e.data as { messageId: string }).messageId] : [],
+    );
+  };
+  const move = (f: Awaited<ReturnType<typeof setup>>, id: string | undefined, before: unknown) =>
+    f.send("POST", `/api/agent/sessions/${SESSION}/messages/${id}/move`, { before });
+  const told = (f: Awaited<ReturnType<typeof setup>>) =>
+    f.events.flatMap((e) =>
+      e.type === "message.queue" ? [(e.data as { order: string[] }).order] : [],
+    );
+
+  it("delivers them in the order the user left them, and tells every viewer", async () => {
+    const f = await setup();
+    const [a, b, c] = await queue(f, "First", "Second", "Third");
+    expect((await move(f, c, a)).status).toBe(204);
+    expect((await move(f, a, null)).status).toBe(204);
+    expect(told(f)).toEqual([
+      [c, a, b],
+      [c, b, a],
+    ]);
+    f.session.setStatus("idle");
+    expect((await f.session.inbox(0, 0)).items.map((item) => item.text)).toEqual([
+      "Third",
+      "Second",
+      "First",
+    ]);
+    expect(f.events.filter((e) => e.type === "message.delivery").map((e) => e.data)).toEqual(
+      [c, b, a].map((messageId) => ({ messageId, state: "sent" })),
+    );
+    expect((await move(f, a, b)).status).toBe(409);
+  });
+
+  it("refuses a message or a place no longer in the queue, changing nothing", async () => {
+    const f = await setup();
+    const [a, b] = await queue(f, "First", "Second");
+    const path = `/api/agent/sessions/${SESSION}/messages/${b}`;
+    expect((await f.send("POST", `${path}/cancel`)).status).toBe(204);
+    expect((await move(f, a, b)).status).toBe(409);
+    expect((await move(f, b, a)).status).toBe(409);
+    expect((await move(f, a, a)).status).toBe(409);
+    expect((await move(f, a, "not-an-id")).status).toBe(400);
+    expect(told(f)).toEqual([]);
+  });
+
+  it("gives them back on Stop in the order the user left them", async () => {
+    const f = await setup();
+    const [a, b] = await queue(f, "First", "Second");
+    expect((await move(f, b, a)).status).toBe(204);
+    f.session.stop();
+    expect(
+      f.events.flatMap((e) =>
+        e.type === "message.delivery" ? [(e.data as { messageId: string }).messageId] : [],
+      ),
+    ).toEqual([b, a]);
+  });
 });
 it("cannot cancel a message after steering has delivered it", async () => {
   const f = await setup();

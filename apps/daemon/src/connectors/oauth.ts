@@ -1,39 +1,52 @@
 import { randomBytes } from "node:crypto";
 import {
-  type ConnectorConfig,
+  CLIENT_METADATA_URL,
+  CONNECTOR_CALLBACK_PATH,
   connectorHost,
   connectorSecretId,
   type HttpBinding,
+  KEYD_VAULT_LOCKED,
+  type KeydOAuthGrant,
   type RemoteServer,
-  type Sealed,
-  sealSecret,
 } from "@localdot/protocol";
-import { auth, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import {
+  discoverOAuthServerInfo,
+  extractWWWAuthenticateParams,
+  registerClient,
+  selectClientAuthMethod,
+  selectResourceURL,
+  startAuthorization,
+} from "@modelcontextprotocol/sdk/client/auth.js";
 import type {
+  AuthorizationServerMetadata,
   OAuthClientInformationMixed,
   OAuthClientMetadata,
-  OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { z } from "zod";
-import type { KeydClient } from "../keyd/client.ts";
+import { type KeydClient, KeydError } from "../keyd/client.ts";
 import type { ConnectorHub } from "./hub.ts";
 import { ConnectorProblem } from "./problem.ts";
 
-export const CALLBACK_PATH = "/connectors/callback";
+export const CALLBACK_PATH = CONNECTOR_CALLBACK_PATH;
 const PENDING_MS = 10 * 60_000;
 const MAX_PENDING = 8;
+const PROBE_MS = 10_000;
 
 export interface SignInDeps {
-  hub: Pick<ConnectorHub, "config" | "update" | "setClient" | "afterKeyChange" | "refresh">;
-  keyd: Pick<KeydClient, "status" | "putSecret">;
-  // keyd's way out for the sign-in's own requests (discovery, registration, the token exchange).
-  fetchFor(connectorId: string): Promise<{ fetch: FetchLike; close(): Promise<void> }>;
-  seal?: (
-    publicKey: string,
-    binding: z.infer<typeof HttpBinding>,
-    value: string,
-  ) => Promise<Sealed>;
+  hub: Pick<
+    ConnectorHub,
+    "config" | "update" | "setClient" | "afterKeyChange" | "refresh" | "setSignIn" | "signInEnded"
+  >;
+  keyd: Pick<KeydClient, "status" | "connectOAuth">;
+  // keyd's way out for the sign-in's own requests (discovery and registration). It holds the app's
+  // key if it has one, because keyd lets nothing else reach a host a key is bound to.
+  fetchFor(
+    connectorId: string,
+    secret?: string,
+  ): Promise<{ fetch: FetchLike; close(): Promise<void> }>;
+  // Opens a page in this computer's own browser; false if it has none.
+  open(url: string): Promise<boolean>;
   now?(): number;
 }
 
@@ -42,14 +55,81 @@ interface Pending {
   readonly server: RemoteServer;
   readonly redirectUrl: string;
   readonly at: number;
-  verifier?: string;
-  client?: OAuthClientInformationMixed;
+  readonly verifier: string;
+  readonly issuer: string;
+  readonly issuerSaid: boolean;
+  readonly client: OAuthClientInformationMixed;
+  readonly authMethod: string;
+  readonly tokenEndpoint: string;
+  readonly revocationEndpoint?: string;
+  readonly resource?: string;
 }
 
-// Sign-in with an app (OAuth 2.1 with PKCE and, where the app offers it, registration of localDot
-// as a client): the user signs in in their own browser; the access token goes straight into keyd,
-// bound to the app's host, and the daemon keeps only its name. There is no refresh: when the app
-// stops taking the token, the user signs in again.
+export interface SignInStart {
+  // The page opened in this computer's browser; if it couldn't be, its address, for a browser on
+  // this computer only.
+  readonly opened: boolean;
+  readonly url?: string;
+  readonly expiresAt: number;
+}
+
+// What a sign-in's opening exchange leaves behind: the app's own say on what to ask for.
+interface Challenge {
+  readonly resourceMetadataUrl?: URL;
+  readonly scope?: string;
+}
+
+// An unsigned request to the app, whose refusal says where its sign-in is and what to ask for. An
+// app that says nothing is found at its usual address.
+async function challengeOf(url: string, fetchFn: FetchLike): Promise<Challenge> {
+  try {
+    const reply = await fetchFn(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 0,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "localdot", version: "1.0.0" },
+        },
+      }),
+      signal: AbortSignal.timeout(PROBE_MS),
+    });
+    await reply.body?.cancel().catch(() => {});
+    if (reply.status !== 401) return {};
+    const { resourceMetadataUrl, scope } = extractWWWAuthenticateParams(reply);
+    return {
+      ...(resourceMetadataUrl ? { resourceMetadataUrl } : {}),
+      ...(scope ? { scope } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+// The app's scope for this sign-in, with offline access where the service names it: a refresh token
+// depends on it there, and a service that doesn't name it refuses it.
+function scopeOf(
+  challenge: Challenge,
+  scopes: readonly string[] | undefined,
+  metadata: AuthorizationServerMetadata,
+): string | undefined {
+  const asked = (challenge.scope ?? scopes?.join(" ") ?? "").split(/\s+/).filter(Boolean);
+  if (metadata.scopes_supported?.includes("offline_access") && !asked.includes("offline_access"))
+    asked.push("offline_access");
+  return asked.length ? asked.join(" ") : undefined;
+}
+
+// One-click sign-in with an app: OAuth with PKCE, with no client registered in advance. The page
+// opens in this computer's browser and comes back to this daemon on loopback, so the code never
+// crosses another device. keyd redeems the code itself and keeps both tokens; the daemon only ever
+// names the secret. See keyd/internal/oauth for how the connection then stays up.
 export class ConnectorSignIn {
   readonly #pending = new Map<string, Pending>();
   constructor(private readonly deps: SignInDeps) {}
@@ -61,133 +141,238 @@ export class ConnectorSignIn {
     for (const [state, pending] of this.#pending)
       if (this.#now() - pending.at > PENDING_MS) this.#pending.delete(state);
   }
-
-  #provider(state: string, pending: Pending, onUrl: (url: URL) => void): OAuthClientProvider {
-    const metadata: OAuthClientMetadata = {
-      client_name: "localDot",
-      redirect_uris: [pending.redirectUrl],
-      grant_types: ["authorization_code"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-    };
-    const saved = this.deps.hub.config(pending.connectorId)?.client;
-    return {
-      get redirectUrl() {
-        return pending.redirectUrl;
-      },
-      get clientMetadata() {
-        return metadata;
-      },
-      state: () => state,
-      clientInformation: () =>
-        pending.client ??
-        (saved && saved.redirectUri === pending.redirectUrl
-          ? { client_id: saved.clientId }
-          : undefined),
-      saveClientInformation: (info) => {
-        pending.client = info;
-        // A public client's id is no secret; a client with a secret registers again next time.
-        if (!("client_secret" in info) || !info.client_secret)
-          this.deps.hub.setClient(pending.connectorId, {
-            clientId: info.client_id,
-            redirectUri: pending.redirectUrl,
-          });
-      },
-      tokens: () => undefined,
-      saveTokens: (tokens) => this.#keep(pending, tokens),
-      redirectToAuthorization: (url) => onUrl(url),
-      saveCodeVerifier: (verifier) => {
-        pending.verifier = verifier;
-      },
-      codeVerifier: () => {
-        if (!pending.verifier) throw new Error("the sign-in was not started here");
-        return pending.verifier;
-      },
-    };
+  #drop(connectorId: string): void {
+    for (const [state, pending] of this.#pending)
+      if (pending.connectorId === connectorId) this.#pending.delete(state);
   }
 
-  // The app's sign-in page for this connector, to open in the user's browser.
-  async start(connectorId: string, origin: string): Promise<string> {
+  // Who localDot is to this service: its public document where the service reads one, else a
+  // registration of its own, kept for next time unless it came with a secret.
+  async #client(
+    connectorId: string,
+    authorizationServerUrl: string | URL,
+    metadata: AuthorizationServerMetadata,
+    redirectUrl: string,
+    scope: string | undefined,
+    fetchFn: FetchLike,
+  ): Promise<OAuthClientInformationMixed> {
+    if (metadata.client_id_metadata_document_supported === true)
+      return { client_id: CLIENT_METADATA_URL };
+    const saved = this.deps.hub.config(connectorId)?.client;
+    if (saved && saved.redirectUri === redirectUrl && saved.issuer === metadata.issuer)
+      return { client_id: saved.clientId };
+    if (!metadata.registration_endpoint)
+      throw new ConnectorProblem(
+        "failed",
+        "This app only signs in with apps registered with it, so localDot can't connect to it yet.",
+      );
+    const clientMetadata = {
+      client_name: "localDot",
+      client_uri: "https://localdot.dev",
+      application_type: "native",
+      redirect_uris: [redirectUrl],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    } as OAuthClientMetadata;
+    const client = await registerClient(authorizationServerUrl, {
+      metadata,
+      clientMetadata,
+      ...(scope ? { scope } : {}),
+      fetchFn,
+    }).catch(() => {
+      throw new ConnectorProblem(
+        "failed",
+        "This app didn't let localDot register with it, so localDot can't connect to it yet.",
+      );
+    });
+    if (!client.client_secret)
+      this.deps.hub.setClient(connectorId, {
+        clientId: client.client_id,
+        redirectUri: redirectUrl,
+        issuer: metadata.issuer,
+      });
+    return client;
+  }
+
+  // Opens the app's sign-in page in this computer's browser. A sign-in already open for the app is
+  // replaced. `remote` says it was started from another device, which can only wait for it.
+  async start(connectorId: string, origin: string, remote: boolean): Promise<SignInStart> {
     this.#sweep();
     const config = this.deps.hub.config(connectorId);
     if (config?.server.kind !== "remote" || config.server.auth.kind !== "oauth")
       throw new ConnectorProblem("failed", "This app doesn't sign in that way.");
+    const keydDown = () => {
+      throw new ConnectorProblem("failed", "localDot's key service didn't answer. Try again.");
+    };
+    if (!(await this.deps.keyd.status().catch(keydDown)).oauth)
+      throw new ConnectorProblem(
+        "failed",
+        "localDot's key service needs an update before it can connect apps. Update localDot and try again.",
+      );
+    this.#drop(connectorId);
+    this.deps.hub.signInEnded(connectorId);
     if (this.#pending.size >= MAX_PENDING)
       throw new ConnectorProblem("failed", "Finish the sign-ins already open first.");
+    const { server } = config;
     const state = randomBytes(24).toString("base64url");
-    const pending: Pending = {
-      connectorId,
-      server: config.server,
-      redirectUrl: `${origin}${CALLBACK_PATH}`,
-      at: this.#now(),
-    };
-    let url: URL | undefined;
-    const link = await this.deps.fetchFor(connectorId);
+    const redirectUrl = `${origin}${CALLBACK_PATH}`;
+    const link = await this.deps
+      .fetchFor(connectorId, server.auth.kind === "oauth" ? server.auth.secret : undefined)
+      .catch(keydDown);
+    let page: URL;
+    let pending: Pending;
     try {
-      const result = await auth(
-        this.#provider(state, pending, (at) => {
-          url = at;
-        }),
-        { serverUrl: config.server.url, fetchFn: link.fetch },
+      const challenge = await challengeOf(server.url, link.fetch);
+      const info = await discoverOAuthServerInfo(server.url, {
+        ...(challenge.resourceMetadataUrl
+          ? { resourceMetadataUrl: challenge.resourceMetadataUrl }
+          : {}),
+        fetchFn: link.fetch,
+      });
+      const metadata = info.authorizationServerMetadata;
+      if (!metadata?.code_challenge_methods_supported?.includes("S256"))
+        throw new ConnectorProblem("failed", "This app's sign-in isn't one localDot can use.");
+      // Fields the SDK passes through without naming on every kind of metadata.
+      const loose = metadata as {
+        revocation_endpoint?: string;
+        authorization_response_iss_parameter_supported?: boolean;
+      };
+      const scope = scopeOf(challenge, info.resourceMetadata?.scopes_supported, metadata);
+      const client = await this.#client(
+        connectorId,
+        info.authorizationServerUrl,
+        metadata,
+        redirectUrl,
+        scope,
+        link.fetch,
       );
-      if (result !== "REDIRECT" || !url)
-        throw new ConnectorProblem("failed", "The app didn't offer a sign-in page.");
-      if (url.protocol !== "https:")
+      // The resource goes out as the app wrote it: a parsed URL would add a slash some services
+      // refuse (as the SDK's own flow does).
+      const allowed = await selectResourceURL(server.url, {} as never, info.resourceMetadata);
+      const resource = allowed && info.resourceMetadata?.resource;
+      const started = await startAuthorization(info.authorizationServerUrl, {
+        metadata,
+        clientInformation: client,
+        redirectUrl,
+        state,
+        ...(scope ? { scope } : {}),
+        ...(resource ? { resource } : {}),
+      });
+      page = started.authorizationUrl;
+      if (page.protocol !== "https:")
         throw new ConnectorProblem("failed", "The app's sign-in page isn't secure.");
+      pending = {
+        connectorId,
+        server,
+        redirectUrl,
+        at: this.#now(),
+        verifier: started.codeVerifier,
+        issuer: metadata.issuer,
+        issuerSaid: loose.authorization_response_iss_parameter_supported === true,
+        client,
+        authMethod: selectClientAuthMethod(
+          client,
+          metadata.token_endpoint_auth_methods_supported ?? [],
+        ),
+        tokenEndpoint: metadata.token_endpoint,
+        ...(loose.revocation_endpoint ? { revocationEndpoint: loose.revocation_endpoint } : {}),
+        ...(resource ? { resource } : {}),
+      };
     } catch (error) {
       if (error instanceof ConnectorProblem) throw error;
       throw new ConnectorProblem("failed", "Couldn't start signing in to the app.");
     } finally {
       await link.close();
     }
+    const opened = await this.deps.open(page.href);
+    if (!opened && remote)
+      throw new ConnectorProblem(
+        "failed",
+        "Couldn't open a browser on your computer, so this can't be finished from here.",
+      );
     this.#pending.set(state, pending);
-    return url.href;
+    const expiresAt = pending.at + PENDING_MS;
+    this.deps.hub.setSignIn(connectorId, { expiresAt, remote });
+    return { opened, expiresAt, ...(opened ? {} : { url: page.href }) };
   }
 
-  // The app sent the user back: the code becomes a token in keyd. Returns the app's name.
-  async finish(state: string, code: string): Promise<string> {
+  cancel(connectorId: string): void {
+    this.#drop(connectorId);
+    this.deps.hub.signInEnded(connectorId);
+  }
+
+  // The answer came from the service this sign-in went to, if it can say: an answer another service
+  // sent is not read at all, not even its error.
+  #fromIssuer(pending: Pending, iss: string | undefined): boolean {
+    return iss === undefined ? !pending.issuerSaid : iss === pending.issuer;
+  }
+
+  // The app sent the user back with a refusal, or without a code.
+  declined(state: string, iss: string | undefined): void {
     this.#sweep();
     const pending = this.#pending.get(state);
-    if (!pending) throw new ConnectorProblem("failed", "This sign-in has expired. Start again.");
+    if (!pending || !this.#fromIssuer(pending, iss)) return;
     this.#pending.delete(state);
-    const link = await this.deps.fetchFor(pending.connectorId);
-    try {
-      await auth(
-        this.#provider(state, pending, () => {}),
-        { serverUrl: pending.server.url, authorizationCode: code, fetchFn: link.fetch },
-      );
-    } catch (error) {
-      if (error instanceof ConnectorProblem) throw error;
-      throw new ConnectorProblem("failed", "The app didn't accept the sign-in. Try again.");
-    } finally {
-      await link.close();
-    }
-    void this.deps.hub.refresh(pending.connectorId);
-    return this.deps.hub.config(pending.connectorId)?.name ?? "the app";
+    this.deps.hub.signInEnded(pending.connectorId, "The sign-in wasn't approved. Try again.");
   }
 
-  async #keep(pending: Pending, tokens: OAuthTokens): Promise<void> {
-    const token = tokens.access_token;
-    if (!/^[\x21-\x7e]{8,8192}$/.test(token))
-      throw new ConnectorProblem("failed", "The app sent a token localDot can't use.");
-    const id = connectorSecretId(pending.connectorId);
-    const binding = {
+  // The app sent the user back: keyd redeems the code and keeps the tokens. Returns the app's name.
+  async finish(state: string, code: string, iss?: string): Promise<string> {
+    this.#sweep();
+    const pending = this.#pending.get(state);
+    if (!pending || !this.deps.hub.config(pending.connectorId))
+      throw new ConnectorProblem("failed", "This sign-in has expired. Start again.");
+    if (!this.#fromIssuer(pending, iss))
+      throw new ConnectorProblem(
+        "failed",
+        "This sign-in came back from the wrong place. Start again.",
+      );
+    this.#pending.delete(state);
+    const { connectorId, server } = pending;
+    const id = connectorSecretId(connectorId);
+    const binding: z.infer<typeof HttpBinding> = {
       id,
-      kind: "http" as const,
-      hosts: [connectorHost(pending.server.url)],
+      kind: "http",
+      hosts: [connectorHost(server.url)],
       header: "authorization",
-      format: "bearer" as const,
+      format: "bearer",
     };
-    const { sealKey } = await this.deps.keyd.status();
-    const sealed = await (this.deps.seal ?? sealSecret)(sealKey, binding, token);
-    await this.deps.keyd.putSecret(binding, sealed);
-    const config = this.deps.hub.config(pending.connectorId) as ConnectorConfig | undefined;
-    if (config?.server.kind === "remote")
-      await this.deps.hub.update(pending.connectorId, {
-        server: { ...config.server, auth: { kind: "oauth", secret: id } },
-      });
+    const secret = pending.client.client_secret;
+    const grant: KeydOAuthGrant = {
+      tokenEndpoint: pending.tokenEndpoint,
+      clientId: pending.client.client_id,
+      authMethod: pending.authMethod,
+      code,
+      codeVerifier: pending.verifier,
+      redirectUri: pending.redirectUrl,
+      ...(pending.revocationEndpoint ? { revocationEndpoint: pending.revocationEndpoint } : {}),
+      ...(secret ? { clientSecret: secret } : {}),
+      ...(pending.resource ? { resource: pending.resource } : {}),
+    };
+    try {
+      await this.deps.keyd.connectOAuth(binding, grant);
+    } catch (error) {
+      const line = signInFailure(error);
+      this.deps.hub.signInEnded(connectorId, line);
+      throw new ConnectorProblem("failed", line);
+    }
+    this.deps.hub.signInEnded(connectorId);
+    await this.deps.hub.update(connectorId, {
+      server: { ...server, auth: { kind: "oauth", secret: id } },
+    });
     await this.deps.hub.afterKeyChange(id);
+    void this.deps.hub.refresh(connectorId);
+    return this.deps.hub.config(connectorId)?.name ?? "the app";
   }
+}
+
+function signInFailure(error: unknown): string {
+  if (error instanceof KeydError && error.code === KEYD_VAULT_LOCKED)
+    return "Saved keys are locked. Unlock them, then connect again.";
+  if (error instanceof KeydError && error.code === "oauth-unavailable")
+    return "The app's sign-in service didn't answer. Try again.";
+  return "The app didn't accept the sign-in. Try again.";
 }
 
 const html = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

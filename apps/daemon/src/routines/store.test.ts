@@ -21,7 +21,7 @@ function open(home = mkdtempSync(join(tmpdir(), "ld-routines-"))) {
 const draft = {
   name: "Morning bills",
   instruction: "Check statements.",
-  when: { kind: "weekdays" as const, time: "08:30" },
+  schedules: [{ every: 1, unit: "week" as const, weekdays: [1, 2, 3, 4, 5], times: ["08:30"] }],
 };
 
 describe("routine store", () => {
@@ -38,11 +38,11 @@ describe("routine store", () => {
       missedPolicy: "run_once",
       state: "active",
       revision: 1,
-      anchor: "2026-10-08",
+      start: "2026-10-08",
       nextDueAt: null,
     });
     expect(statSync(join(home, "routines.sqlite")).mode & 0o777).toBe(0o600);
-    expect(toRoutine(routine, undefined).summary).toBe("Weekdays at 08:30 · London time");
+    expect(toRoutine(routine, undefined, clock).summary).toBe("Weekdays at 8:30 · London time");
   });
 
   it("keeps a spending limit only when the user sets one", () => {
@@ -61,12 +61,12 @@ describe("routine store", () => {
     );
     const updated = store.update(routine.id, {
       revision: 1,
-      when: { kind: "daily", time: "09:00" },
+      schedules: [{ every: 1, unit: "day", times: ["09:00"] }],
     });
     expect(updated).toMatchObject({
       revision: 2,
       nextDueAt: null,
-      when: { kind: "daily", time: "09:00" },
+      schedules: [{ every: 1, unit: "day", times: ["09:00"] }],
     });
   });
 
@@ -158,9 +158,18 @@ describe("routine store", () => {
     for (const [input, message] of [
       [{ ...draft, name: "Two\nlines" }, "A routine's name is one line of up to 80 characters."],
       [{ ...draft, until: "2026-02-30" }, "The end date isn't a real date."],
+      [{ ...draft, start: "2026-02-30" }, "The start date isn't a real date."],
       [
-        { ...draft, when: { kind: "once", date: "2026-02-30", time: "09:00" } },
-        "That date isn't a real date.",
+        { ...draft, start: "2026-11-02", until: "2026-11-01" },
+        "The last day comes before the first.",
+      ],
+      [
+        { ...draft, schedules: [{ every: 1, unit: "minute" }] },
+        "A step in minutes must be from 5 to 720.",
+      ],
+      [
+        { ...draft, start: "2026-10-01", until: "2026-10-02" },
+        "No runs are left on those dates. Pick a later last day.",
       ],
     ] as const)
       expect(() => store.create(input as never, { state: "active" })).toThrow(
@@ -170,24 +179,47 @@ describe("routine store", () => {
 
   it("refuses a one-off whose time has passed, but not a rename of one", () => {
     const { store } = open();
-    const passed = { kind: "once" as const, date: "2026-10-08", time: "10:59" };
-    expect(() => store.create({ ...draft, when: passed }, { state: "active" })).toThrow(
+    const passed = {
+      schedules: [{ every: 1, unit: "day" as const, times: ["10:59"] }],
+      start: "2026-10-08",
+      until: "2026-10-08",
+    };
+    expect(() => store.create({ ...draft, ...passed }, { state: "active" })).toThrow(
       expect.objectContaining({ status: 400, message: "That time has passed. Pick a later one." }),
     );
     const later = store.create(
-      { ...draft, when: { kind: "once", date: "2026-10-08", time: "11:01" } },
+      {
+        ...draft,
+        schedules: [{ every: 1, unit: "day", times: ["11:01"] }],
+        start: "2026-10-08",
+        until: "2026-10-08",
+      },
       { state: "active" },
     );
-    expect(() => store.update(later.id, { revision: 1, when: passed })).toThrow(
+    expect(() => store.update(later.id, { revision: 1, ...passed })).toThrow(
       expect.objectContaining({ status: 400 }),
     );
     const proposal = store.create(
-      { ...draft, when: { kind: "once", date: "2026-10-08", time: "11:01" } },
+      {
+        ...draft,
+        schedules: [{ every: 1, unit: "day", times: ["11:01"] }],
+        start: "2026-10-08",
+        until: "2026-10-08",
+      },
       { state: "proposed", createdFromSession: ulid() },
     );
-    expect(() => store.confirm(proposal.id, 1, { when: passed })).toThrow(
+    expect(() => store.confirm(proposal.id, 1, passed)).toThrow(
       expect.objectContaining({ status: 400 }),
     );
+  });
+
+  it("lets the user take away the last day dot drafted", () => {
+    const { store } = open();
+    const proposal = store.create(
+      { ...draft, until: "2026-12-31" },
+      { state: "proposed", createdFromSession: ulid() },
+    );
+    expect(store.confirm(proposal.id, 1, { until: null }).until).toBeNull();
   });
 
   it("keeps a pending due time through a rename that resends the same schedule", () => {
@@ -197,7 +229,7 @@ describe("routine store", () => {
     const renamed = store.update(routine.id, {
       revision: 1,
       name: "Bills",
-      when: { kind: "weekdays", time: "08:30" },
+      schedules: [{ every: 1, unit: "week" as const, weekdays: [1, 2, 3, 4, 5], times: ["08:30"] }],
       until: null,
     });
     expect(renamed).toMatchObject({ name: "Bills", nextDueAt: 123 });
@@ -210,7 +242,9 @@ describe("routine store", () => {
       {
         name: "Follow-up",
         instruction: "check the parcel",
-        when: { kind: "once", date: "2026-10-08", time: "15:00" },
+        schedules: [{ every: 1, unit: "day", times: ["15:00"] }],
+        start: "2026-10-08",
+        until: "2026-10-08",
       },
       {
         state: "active",
@@ -238,13 +272,20 @@ describe("routine store", () => {
   it("brings a finished one-off back when its schedule changes", () => {
     const { store } = open();
     const once = store.create(
-      { ...draft, when: { kind: "once", date: "2026-10-08", time: "15:00" } },
+      {
+        ...draft,
+        schedules: [{ every: 1, unit: "day", times: ["15:00"] }],
+        start: "2026-10-08",
+        until: "2026-10-08",
+      },
       { state: "active" },
     );
     store.setState(once.id, "finished", null);
     const again = store.update(once.id, {
       revision: 2,
-      when: { kind: "once", date: "2026-10-09", time: "15:00" },
+      schedules: [{ every: 1, unit: "day", times: ["15:00"] }],
+      start: "2026-10-09",
+      until: "2026-10-09",
     });
     expect(again).toMatchObject({ state: "active", revision: 3 });
   });

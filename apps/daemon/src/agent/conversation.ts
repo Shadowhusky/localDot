@@ -6,8 +6,10 @@ import {
   openSync,
   readFileSync,
   readSync,
+  statSync,
 } from "node:fs";
 import {
+  AgentRoleChoice,
   type AskFieldRecord,
   CONVERSATION_LIST,
   CONVERSATION_TASKS,
@@ -23,6 +25,8 @@ import {
   EARLIER_TURNS,
   isOwnWords,
   type LocalDotEvent,
+  LookWearables,
+  messageName,
   type PersonaId,
   ULID_PATTERN,
   ulidTime,
@@ -41,6 +45,10 @@ const Stored = z.strictObject({
 // Beside a task's log: the messages Stop left unsent that the user took back to edit.
 const withdrawnFile = (sessionId: string) => `sessions/${sessionId}/withdrawn.json`;
 const WITHDRAWN_BYTES = 64 * 1024;
+// Beside a task's log, as an ended task's record never grows: the model chosen for its conversation.
+const modelFile = (sessionId: string) => `sessions/${sessionId}/model.json`;
+const MODEL_BYTES = 4 * 1024;
+const TaskModel = z.strictObject({ v: z.literal(1), choice: AgentRoleChoice });
 const Withdrawn = z.strictObject({
   v: z.literal(1),
   messages: z.array(z.string().regex(ULID_PATTERN)),
@@ -53,6 +61,7 @@ const Organized = z.strictObject({
   pinned: z.literal(true).optional(),
   // Its latest task when it was archived: a task that goes on with it brings it back.
   archived: z.string().regex(ULID_PATTERN).optional(),
+  look: LookWearables.optional(),
 });
 type Organized = z.infer<typeof Organized>;
 const OrganizedFile = z.strictObject({
@@ -64,22 +73,28 @@ export interface OrganizeConversation {
   tag?: ConversationTag | null;
   pinned?: boolean;
   archived?: boolean;
+  look?: LookWearables | null;
 }
 // A session.start and the task's first message sit in the first lines of a task's log.
 const HEAD_BYTES = 16 * 1024;
 const HEAD_EVENTS = 8;
+// The dot a task starts as, and Auto's pick, sit in these first lines however late the pick came.
+const DOT_EVENTS = 24;
 // Without a saved choice, the latest of this many recent sessions that is a task is current.
 const LOOK_BACK = 20;
 // What an ended task said never changes, so the tasks read back most often are kept.
 const KEPT_TASKS = 64;
 const TURN_TYPES =
-  /"type":"(?:message\.user|message\.delivery|message\.assistant|ask\.request|ask\.answer|task\.result|session\.end|plan\.set|tool\.start|step\.end|action\.intent|action\.target)"/;
+  /"type":"(?:message\.user|message\.delivery|message\.assistant|ask\.request|ask\.answer|task\.result|session\.end|plan\.set|step\.start|tool\.start|step\.end|action\.intent|action\.target)"/;
 const PERSONA_CHOICE = /"type":"persona\.choice"/;
 // The list of conversations reads through this many of the newest sessions.
 const LIST_SCAN = 200;
 // A task's session.end is among the last lines of its log.
 const TAIL_BYTES = 4 * 1024;
 const SESSION_END = /"type":"session\.end"/;
+// A message is at most 20,000 characters, so the last one is whole in this much of a log's end.
+const SAID_BYTES = 128 * 1024;
+const DOT_SAID = /"type":"message\.assistant"/;
 // What a task's first lines say never changes once its first message is in, so they are kept.
 const KEPT_HEADS = 512;
 const ENDINGS: Record<string, string> = {
@@ -94,6 +109,7 @@ const NOTHING_DONE = new Set<LocalDotEvent["type"]>([
   "persona.choice",
   "message.user",
   "message.delivery",
+  "message.queue",
   "agent.state",
   "heartbeat",
   "thought.delta",
@@ -127,7 +143,7 @@ export interface ConversationNames {
 }
 
 const firstLine = (text: string) => {
-  const line = text.trim().split("\n")[0]?.trim() ?? "";
+  const line = messageName(text).trim().split("\n")[0]?.trim() ?? "";
   return line ? (line.length > 200 ? `${line.slice(0, 199)}…` : line) : null;
 };
 
@@ -153,6 +169,8 @@ export class Conversations {
   readonly #said = new Map<string, string[]>();
   readonly #heads = new Map<string, TaskHead>();
   readonly #links = new Map<string, string | undefined>();
+  readonly #dots = new Map<string, PersonaId | undefined>();
+  readonly #saidLines = new Map<string, { size: number; line?: string }>();
   constructor(
     home: string,
     private readonly log: ConversationLog,
@@ -408,8 +426,10 @@ export class Conversations {
     if (!completed) {
       const checkpoint = taskCheckpoint(events);
       if (checkpoint)
-        turns.push(`Recorded task progress; verify live state before acting:
-${checkpoint}`);
+        turns.push(
+          clip(`Recorded task progress; verify live state before acting:
+${checkpoint}`),
+        );
     }
     if (ended) {
       this.#said.set(sessionId, turns);
@@ -432,6 +452,22 @@ ${checkpoint}`);
     return undefined;
   }
 
+  // The model chosen for the conversation that ends with this task, as its newest choice says.
+  model(sessionId: string): AgentRoleChoice | undefined {
+    for (const id of this.chain(sessionId).sessions.reverse())
+      try {
+        const text = this.#files.text(modelFile(id), MODEL_BYTES);
+        if (text !== undefined) return TaskModel.parse(JSON.parse(text)).choice;
+      } catch {
+        /* A choice that can't be read leaves the older one, or the default. */
+      }
+    return undefined;
+  }
+
+  chooseModel(sessionId: string, choice: AgentRoleChoice): void {
+    this.#files.write(modelFile(sessionId), `${JSON.stringify({ v: 1, choice })}\n`);
+  }
+
   // Only the lines of the types asked for are parsed; a task's log is mostly its steps.
   #events(sessionId: string, types = TURN_TYPES): LocalDotEvent[] {
     const file = this.log.logFile(sessionId);
@@ -443,7 +479,7 @@ ${checkpoint}`);
       .flatMap((line) => (types.test(line) ? (parseLine(line) ?? []) : []));
   }
 
-  #head(sessionId: string): LocalDotEvent[] {
+  #head(sessionId: string, events = HEAD_EVENTS): LocalDotEvent[] {
     let fd: number | undefined;
     try {
       fd = openSync(
@@ -456,7 +492,7 @@ ${checkpoint}`);
       return text
         .slice(0, text.lastIndexOf("\n") + 1)
         .split("\n")
-        .slice(0, HEAD_EVENTS)
+        .slice(0, events)
         .flatMap((line) => parseLine(line) ?? []);
     } catch {
       return [];
@@ -518,6 +554,14 @@ ${checkpoint}`);
     };
   }
 
+  // A routine started this task.
+  fromRoutine(sessionId: string): boolean {
+    return (
+      this.#head(sessionId).find((event) => event.type === "session.start")?.data.origin?.kind ===
+      "routine"
+    );
+  }
+
   // The latest task of the conversation this task is part of.
   latest(sessionId: string): string {
     return (
@@ -534,10 +578,12 @@ ${checkpoint}`);
     const tag = change.tag === undefined ? was?.tag : (change.tag ?? undefined);
     const pinned = change.pinned ?? !!was?.pinned;
     const archived = change.archived ?? was?.archived === latest;
+    const look = change.look === undefined ? was?.look : (change.look ?? undefined);
     const next: Organized = {
       ...(tag ? { tag } : {}),
       ...(pinned ? { pinned: true } : {}),
       ...(archived ? { archived: latest } : {}),
+      ...(look ? { look } : {}),
     };
     if (Object.keys(next).length) records.set(root, next);
     else records.delete(root);
@@ -546,7 +592,7 @@ ${checkpoint}`);
       ORGANIZED_FILE,
       `${JSON.stringify({ v: 1, conversations: Object.fromEntries(records) })}\n`,
     );
-    return { sessionId: latest, tag: tag ?? null, pinned, archived };
+    return { sessionId: latest, tag: tag ?? null, pinned, archived, look: look ?? null };
   }
 
   // The conversations among the newest sessions, newest first: each task joins the conversation of
@@ -574,7 +620,7 @@ ${checkpoint}`);
   #entry(
     conversation: { sessions: string[]; startedAt: string } & ConversationOrganization,
   ): ConversationEntry {
-    const { sessionId, sessions, tag, pinned, archived } = conversation;
+    const { sessionId, sessions, tag, pinned, archived, look } = conversation;
     let title: string | null = null;
     let said: string | null = null;
     for (const id of sessions) {
@@ -586,17 +632,52 @@ ${checkpoint}`);
       said = head?.said ?? said;
     }
     const started = Date.parse(conversation.startedAt);
+    const firstTask = this.#root(sessionId);
+    const end = this.#end(sessionId);
+    let persona = end?.persona ?? this.#startingDot(sessionId);
+    for (const id of [...sessions, firstTask]) persona ??= this.#dotOf(id);
+    const line = this.#lastSaid(sessions);
     return {
       sessionId,
       sessions: sessions.slice(0, CONVERSATION_TASKS),
       title,
       said,
+      ...(line ? { line } : {}),
       startedAt: new Date(Number.isFinite(started) ? started : ulidTime(sessionId)).toISOString(),
-      ended: this.#ending(sessionId),
+      ended: end?.reason ?? null,
       ...(tag ? { tag } : {}),
       ...(pinned ? { pinned } : {}),
       ...(archived ? { archived } : {}),
+      firstTask,
+      ...(persona ? { persona } : {}),
+      ...(look ? { look } : {}),
     };
+  }
+
+  // The dot a task works as, which its conversation's look follows: what its session.end says it
+  // ended as, else what it took up in its first lines.
+  #dotOf(sessionId: string): PersonaId | undefined {
+    return this.#end(sessionId)?.persona ?? this.#startingDot(sessionId);
+  }
+
+  // Auto's pick or the user's switch among a task's first lines, else what its session.start says.
+  // Kept once those lines are all written, as they then never change.
+  #startingDot(sessionId: string): PersonaId | undefined {
+    if (this.#dots.has(sessionId)) return this.#dots.get(sessionId);
+    const head = this.#head(sessionId, DOT_EVENTS);
+    let dot: PersonaId | undefined;
+    for (const event of head) {
+      if (event.type === "session.start") dot ??= event.data.persona;
+      else if (event.type === "persona.choice") dot = event.data.persona;
+    }
+    if (head.length >= DOT_EVENTS || this.#ending(sessionId)) {
+      this.#dots.set(sessionId, dot);
+      for (const old of this.#dots.keys()) {
+        if (this.#dots.size <= KEPT_HEADS) break;
+        this.#dots.delete(old);
+      }
+    }
+    return dot;
   }
 
   #organization(latest: string, records: Map<string, Organized>): ConversationOrganization {
@@ -606,6 +687,7 @@ ${checkpoint}`);
       tag: record?.tag ?? null,
       pinned: !!record?.pinned,
       archived: record?.archived === latest,
+      look: record?.look ?? null,
     };
   }
 
@@ -649,6 +731,56 @@ ${checkpoint}`);
   }
 
   #ending(sessionId: string): ConversationEntry["ended"] {
+    return this.#end(sessionId)?.reason ?? null;
+  }
+
+  #end(sessionId: string): Extract<LocalDotEvent, { type: "session.end" }>["data"] | null {
+    const lines = this.#tail(sessionId, TAIL_BYTES)?.lines ?? [];
+    for (let at = lines.length - 1; at >= 0; at--) {
+      const line = lines[at] ?? "";
+      if (!SESSION_END.test(line)) continue;
+      const event = parseLine(line);
+      if (event?.type === "session.end") return event.data;
+    }
+    return null;
+  }
+
+  // What dot last said in a conversation's newest task that says anything, kept until its log grows.
+  #lastSaid(sessions: readonly string[]): string | undefined {
+    for (const sessionId of sessions) {
+      const size = this.#size(sessionId);
+      const kept = this.#saidLines.get(sessionId);
+      if (kept && kept.size === size) {
+        if (kept.line) return kept.line;
+        continue;
+      }
+      const lines = this.#tail(sessionId, SAID_BYTES)?.lines ?? [];
+      let line: string | undefined;
+      for (let at = lines.length - 1; at >= 0 && !line; at--) {
+        const text = lines[at] ?? "";
+        if (!DOT_SAID.test(text)) continue;
+        const event = parseLine(text);
+        if (event?.type === "message.assistant") line = firstLine(event.data.text) ?? undefined;
+      }
+      this.#saidLines.set(sessionId, { size, ...(line ? { line } : {}) });
+      for (const old of this.#saidLines.keys()) {
+        if (this.#saidLines.size <= KEPT_HEADS) break;
+        this.#saidLines.delete(old);
+      }
+      if (line) return line;
+    }
+    return undefined;
+  }
+
+  #size(sessionId: string): number {
+    try {
+      return statSync(this.log.logFile(sessionId)).size;
+    } catch {
+      return 0;
+    }
+  }
+
+  #tail(sessionId: string, length: number): { lines: string[] } | null {
     let fd: number | undefined;
     try {
       fd = openSync(
@@ -656,17 +788,10 @@ ${checkpoint}`);
         constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
       );
       const size = fstatSync(fd).size;
-      const from = Math.max(0, size - TAIL_BYTES);
+      const from = Math.max(0, size - length);
       const bytes = Buffer.alloc(size - from);
       const read = readSync(fd, bytes, 0, bytes.length, from);
-      const lines = bytes.subarray(0, read).toString("utf8").split("\n");
-      for (let at = lines.length - 1; at >= 0; at--) {
-        const line = lines[at] ?? "";
-        if (!SESSION_END.test(line)) continue;
-        const event = parseLine(line);
-        if (event?.type === "session.end") return event.data.reason;
-      }
-      return null;
+      return { lines: bytes.subarray(0, read).toString("utf8").split("\n") };
     } catch {
       return null;
     } finally {

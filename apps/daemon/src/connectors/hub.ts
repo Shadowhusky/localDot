@@ -1,14 +1,18 @@
 import {
+  CONNECTOR_CATALOG,
   type ConnectorConfig,
   type ConnectorDraft,
   type ConnectorPatch,
+  type ConnectorSignInWait,
   type ConnectorStatus,
   type ConnectorToolSpec,
   type ConnectorView,
+  catalogEntry,
   connectorHost,
   connectorIdFor,
   connectorToolDescription,
   connectorToolName,
+  KEYD_OAUTH_UNAVAILABLE,
   type KeydRecord,
   MAX_CONNECTOR_TOOLS,
   MAX_CONNECTORS,
@@ -82,7 +86,13 @@ interface Live {
   link?: Promise<{ client: Client; open: OpenLink }>;
   calls: number;
   idle?: ReturnType<typeof setTimeout>;
+  signIn?: ConnectorSignInWait;
+  // Why the last sign-in didn't finish.
+  signInProblem?: string;
 }
+
+const SIGN_IN_ENDED = "Its sign-in has ended. Reconnect to keep using it.";
+const SIGN_IN_RAN_OUT = "That sign-in ran out of time. Try again.";
 
 export function plainProblem(
   error: unknown,
@@ -101,9 +111,15 @@ export function plainProblem(
   if (code === 401 || /\b401\b|unauthori[sz]ed/i.test(message)) {
     const oauth = config.server.kind === "remote" && config.server.auth.kind === "oauth";
     return oauth
-      ? new ConnectorProblem("needs_sign_in", "Sign in again to use this app.")
+      ? new ConnectorProblem("needs_sign_in", SIGN_IN_ENDED)
       : new ConnectorProblem("needs_key", "The app didn't accept the key. Add a new one.");
   }
+  if (message.includes(KEYD_OAUTH_UNAVAILABLE))
+    return new ConnectorProblem(
+      "failed",
+      "The app's sign-in service didn't answer. localDot will try again the next time it's needed.",
+      "timeout",
+    );
   if (/^no free keyd listener port in \d+-\d+$/.test(message))
     return new ConnectorProblem(
       "failed",
@@ -212,8 +228,13 @@ export class ConnectorHub {
     const has = (id: string) => keys.some((key) => key.id === id && !key.reenter && !key.rebound);
     const { server } = config;
     if (server.kind === "remote") {
-      if (server.auth.kind === "oauth" && (!server.auth.secret || !has(server.auth.secret)))
-        return new ConnectorProblem("needs_sign_in", "Sign in to use this app.");
+      if (server.auth.kind === "oauth") {
+        const { secret } = server.auth;
+        if (!secret || !has(secret))
+          return new ConnectorProblem("needs_sign_in", "Sign in to use this app.");
+        if (keys.some((key) => key.id === secret && key.oauth?.reconnect))
+          return new ConnectorProblem("needs_sign_in", SIGN_IN_ENDED);
+      }
       if (server.auth.kind === "key" && !has(server.auth.secret))
         return new ConnectorProblem("needs_key", "Add the app's key.");
       return undefined;
@@ -229,7 +250,21 @@ export class ConnectorHub {
     const status: ConnectorStatus = !config.enabled
       ? "off"
       : (missing?.status ?? live?.status ?? (listed ? "ready" : "connecting"));
-    const problem = missing?.message ?? (status === live?.status ? live?.problem : undefined);
+    const waiting = live?.signIn && live.signIn.expiresAt > this.#now() ? live.signIn : undefined;
+    const signInProblem = live?.signIn && !waiting ? SIGN_IN_RAN_OUT : live?.signInProblem;
+    const oauth =
+      config.server.kind === "remote" && config.server.auth.kind === "oauth"
+        ? config.server.auth
+        : undefined;
+    const secret = oauth?.secret;
+    // An app not connected yet has nothing wrong with it, only a way to go.
+    const notYet = oauth && !secret && status === "needs_sign_in";
+    const problem =
+      signInProblem ??
+      (notYet
+        ? undefined
+        : (missing?.message ?? (status === live?.status ? live?.problem : undefined)));
+    const account = secret ? keys?.find((key) => key.id === secret)?.oauth?.account : undefined;
     return {
       id: config.id,
       name: config.name,
@@ -238,6 +273,8 @@ export class ConnectorHub {
       server: config.server,
       status,
       ...(problem ? { problem } : {}),
+      ...(account ? { account: sanitizeToolText(account, 80) } : {}),
+      ...(waiting ? { signIn: waiting } : {}),
       tools: (listed?.tools ?? []).map((tool) => {
         const choice = config.tools[tool.name];
         const access = toolAccess(tool, choice?.access);
@@ -310,6 +347,88 @@ export class ConnectorHub {
     if (!config) return;
     configs[at] = { ...config, ...(client ? { client } : {}) };
     this.deps.store.save(configs);
+  }
+
+  // Apps the user could connect in one click, for dot to offer: those not connected yet.
+  connectable(): { id: string; name: string; description?: string }[] {
+    let configs: ConnectorConfig[];
+    try {
+      configs = this.configs();
+    } catch {
+      return [];
+    }
+    const own = configs.flatMap((config) => {
+      const { server } = config;
+      if (server.kind !== "remote" || server.auth.kind !== "oauth") return [];
+      if (this.isConnected(config.id)) return [];
+      return [{ id: config.id, name: config.name }];
+    });
+    const listed = CONNECTOR_CATALOG.flatMap((entry) => {
+      if (configs.some((config) => config.catalog === entry.id)) return [];
+      if (entry.server.kind !== "remote") return [];
+      if (entry.server.auth !== "oauth" && entry.server.auth !== "oauth-or-key") return [];
+      return [{ id: entry.id, name: entry.name, description: entry.description }];
+    });
+    return [...own, ...listed];
+  }
+
+  // The app dot means by this id, added from the list if the user doesn't have it yet (and then taken
+  // away again if they turn it down).
+  connectTarget(
+    app: string,
+  ): { config: ConnectorConfig; host: string; added: boolean; ended: boolean } | undefined {
+    const wanted = app.trim().toLowerCase();
+    const configs = this.configs();
+    const known = configs.find(
+      (config) =>
+        config.id === wanted || config.catalog === wanted || config.name.toLowerCase() === wanted,
+    );
+    const entry =
+      catalogEntry(wanted) ?? CONNECTOR_CATALOG.find((e) => e.name.toLowerCase() === wanted);
+    let config = known;
+    if (!config) {
+      if (entry?.server.kind !== "remote") return undefined;
+      if (entry.server.auth !== "oauth" && entry.server.auth !== "oauth-or-key") return undefined;
+      config = this.add({
+        name: entry.name,
+        catalog: entry.id,
+        server: {
+          kind: "remote",
+          url: entry.server.url,
+          transport: entry.server.transport,
+          auth: { kind: "oauth" },
+        },
+      });
+    }
+    const { server } = config;
+    if (server.kind !== "remote" || server.auth.kind !== "oauth") return undefined;
+    return {
+      config,
+      host: connectorHost(server.url),
+      added: !known,
+      ended: this.#live.get(config.id)?.status === "needs_sign_in" && Boolean(server.auth.secret),
+    };
+  }
+
+  // Whether the app has a sign-in that hasn't been seen to end.
+  isConnected(id: string): boolean {
+    const config = this.config(id);
+    if (config?.server.kind !== "remote" || config.server.auth.kind !== "oauth") return false;
+    return Boolean(config.server.auth.secret) && this.#live.get(id)?.status !== "needs_sign_in";
+  }
+
+  // A sign-in now open in the browser, waiting for the user.
+  setSignIn(id: string, wait: ConnectorSignInWait): void {
+    const live = this.#state(id);
+    live.signIn = wait;
+    live.signInProblem = undefined;
+  }
+
+  // The sign-in is over: it finished, or didn't, for the reason given.
+  signInEnded(id: string, problem?: string): void {
+    const live = this.#state(id);
+    live.signIn = undefined;
+    live.signInProblem = problem;
   }
 
   async remove(id: string): Promise<ConnectorConfig | undefined> {
@@ -448,6 +567,13 @@ export class ConnectorHub {
     const specs: ConnectorToolSpec[] = [];
     for (const config of configs) {
       if (!config.enabled) continue;
+      // Disconnected, or never connected: dot is offered the app to connect, not tools that can't run.
+      if (
+        config.server.kind === "remote" &&
+        config.server.auth.kind === "oauth" &&
+        !config.server.auth.secret
+      )
+        continue;
       let shown = 0;
       for (const tool of this.#tools[config.id]?.tools ?? []) {
         if (shown >= MAX_CONNECTOR_TOOLS || specs.length >= MAX_TASK_CONNECTOR_TOOLS) break;

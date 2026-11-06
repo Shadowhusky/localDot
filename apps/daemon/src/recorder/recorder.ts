@@ -113,6 +113,9 @@ function requireIndex(dir: string): Buffer {
 export class Recorder {
   readonly #deps: RecorderDeps;
   readonly #held = new Map<string, number>();
+  // Tasks whose window is not on this screen, since when, and the wait before one's is again.
+  readonly #away = new Map<string, number>();
+  readonly #returning = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #live = new Map<
     string,
     {
@@ -174,6 +177,8 @@ export class Recorder {
       });
       const heldAt = this.#held.get(sessionId);
       if (heldAt !== undefined) void recorder.hold(heldAt);
+      const awayAt = this.#away.get(sessionId);
+      if (awayAt !== undefined) recorder.away(awayAt);
       const timer = setInterval(() => {
         void recorder.tick(this.#deps.clock.nowMicros());
       }, TICK_MS);
@@ -216,7 +221,32 @@ export class Recorder {
     this.#held.delete(sessionId);
     this.#live.get(sessionId)?.recorder.release(this.#deps.clock.nowMicros());
   }
+  // Another task's window comes to this screen.
+  away(sessionId: string): void {
+    if (!ULID_PATTERN.test(sessionId)) return;
+    clearTimeout(this.#returning.get(sessionId));
+    this.#returning.delete(sessionId);
+    if (this.#away.has(sessionId)) return;
+    const at = this.#deps.clock.nowMicros();
+    this.#away.set(sessionId, at);
+    this.#live.get(sessionId)?.recorder.away(at);
+  }
+  // The task's window is on the screen again; what the stream still carries from before takes
+  // `afterMs` to clear.
+  back(sessionId: string, afterMs: number): void {
+    if (!this.#away.has(sessionId) || this.#returning.has(sessionId)) return;
+    const timer = setTimeout(() => {
+      this.#returning.delete(sessionId);
+      this.#away.delete(sessionId);
+      this.#live.get(sessionId)?.recorder.back(this.#deps.clock.nowMicros());
+    }, afterMs);
+    timer.unref();
+    this.#returning.set(sessionId, timer);
+  }
   async stop(sessionId: string): Promise<void> {
+    clearTimeout(this.#returning.get(sessionId));
+    this.#returning.delete(sessionId);
+    this.#away.delete(sessionId);
     const entry = this.#live.get(sessionId);
     if (!entry) return;
     if (entry.stopping) return entry.stopping;

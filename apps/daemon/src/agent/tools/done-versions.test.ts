@@ -17,6 +17,35 @@ function setup() {
   );
   return h;
 }
+describe("done offers the previews its turn left running", () => {
+  it("carries them on the result, with a page's words redacted", async () => {
+    const h = setup();
+    const offers = vi.fn(async () => [
+      { port: 5173, url: "http://localhost:5173/", title: "Shop", project: "shop", name: "node" },
+    ]);
+    h.tools.previewOffers = offers;
+    await h.call("done", { summary: "See localhost:5173." });
+    expect(offers).toHaveBeenCalledWith(h.session.id, "See localhost:5173.");
+    const result = h.events().find((e) => e.type === "task.result");
+    expect(result?.type === "task.result" && result.data.previews).toEqual([
+      { port: 5173, url: "http://localhost:5173/", title: "Shop", project: "shop", name: "node" },
+    ]);
+  });
+
+  it("finishes the turn when they can't be read, and adds nothing when there are none", async () => {
+    const h = setup();
+    h.tools.previewOffers = async () => {
+      throw new Error("the computer stopped");
+    };
+    await h.call("done", { summary: "Done." });
+    h.tools.previewOffers = async () => [];
+    await h.call("done", { summary: "Done again." });
+    const results = h.events().filter((e) => e.type === "task.result");
+    expect(results).toHaveLength(2);
+    expect(results.every((e) => e.type === "task.result" && !e.data.previews)).toBe(true);
+  });
+});
+
 describe("done hands over versioned files", () => {
   it("numbers a file returned twice in one task as v1 and v2 and keeps both", async () => {
     const h = setup();

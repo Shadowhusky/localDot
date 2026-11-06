@@ -10,6 +10,7 @@ import {
   type ToolCallContext,
   type ToolDeps,
   text,
+  woken,
 } from "./deps.ts";
 export async function doneTool(
   deps: ToolDeps,
@@ -32,10 +33,16 @@ export async function doneTool(
     append(ctx, "step.start", { kind: "think", intent: cut(ctx.redact(completion.evidence), 120) });
     append(ctx, "tool.start", { tool: "done", title: "Waiting for progress" });
     const requests = ctx.session.requests.length;
-    const listening = listenForUser(ctx);
+    const listening = listenForUser(ctx, ctx.signal, ms);
+    const running = ctx.session.leftRunning;
     let waited = 0;
     try {
-      while (waited < ms && ctx.session.requests.length === requests && !listening.spoke) {
+      while (
+        waited < ms &&
+        ctx.session.requests.length === requests &&
+        !listening.spoke &&
+        ctx.session.leftRunning >= running
+      ) {
         if (ctx.session.safetyPause) throw new PausedStepError();
         const interval = Math.min(1000, ms - waited);
         try {
@@ -56,13 +63,19 @@ export async function doneTool(
       ok: true,
       content: [
         text(
-          listening.spoke || ctx.session.requests.length !== requests
-            ? "A new user instruction arrived. The task remains active; apply that instruction before continuing."
-            : `Waited ${waited / 1000} seconds. The task remains active and unfinished. Inspect the current state, act when the next step is available, and keep waiting when needed until the user's requested outcome is verified. Another actor's turn or a pending process is not task completion.`,
+          listening.queued
+            ? woken(listening)
+            : listening.spoke || ctx.session.requests.length !== requests
+              ? "A new user instruction arrived. The task remains active; apply that instruction before continuing."
+              : `Waited ${waited / 1000} seconds. The task remains active and unfinished. Inspect the current state, act when the next step is available, and keep waiting when needed until the user's requested outcome is verified. Another actor's turn or a pending process is not task completion.`,
         ),
       ],
     };
   }
+  if (ctx.session.leftRunning)
+    return fail(
+      "A command you left running hasn't ended, so this task isn't finished. localDot tells you when it ends. Wait with done, completion status waiting, or end the command yourself with shell, then finish.",
+    );
   const desktop = deps.desktop(ctx.session.cellId);
   const files: { name: string; path: string; bytes: number; version?: number }[] = [];
   const problems: string[] = [];
@@ -125,10 +138,24 @@ export async function doneTool(
       ...(experience.cues ? { cues: experience.cues.map((cue) => ctx.redact(cue)) } : {}),
     });
   }
+  // A reply never waits on a preview that can't say, and what a page calls itself is its words.
+  const previews =
+    (await deps.previewOffers?.(ctx.session.id, input.summary).catch(() => [])) ?? [];
+  ctx.check();
   append(ctx, "task.result", {
     summary: cut(ctx.redact(input.summary), 8000),
     files,
     ...(completion ? { outcome: completion.status } : {}),
+    ...(previews.length
+      ? {
+          previews: previews.map((preview) => ({
+            ...preview,
+            url: ctx.redact(preview.url),
+            ...(preview.title ? { title: ctx.redact(preview.title).slice(0, 120) } : {}),
+            ...(preview.project ? { project: ctx.redact(preview.project).slice(0, 128) } : {}),
+          })),
+        }
+      : {}),
   });
   return {
     ok: true,

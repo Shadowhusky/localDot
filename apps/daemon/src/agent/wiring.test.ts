@@ -669,6 +669,8 @@ describe("ChatGPT production integration", () => {
       s.attachScreens({
         activate: async () => ({}),
         refreshBrowser: async () => {},
+        selection: { screen, cellId: f.cellId, geometry: null, revision: 1 },
+        enterTurn: async () => {},
         lease: (scope: ScreenScope) => ({
           selection: { screen, cellId: f.cellId, geometry: null, revision: 1 },
           signal: scope.signal,
@@ -777,6 +779,8 @@ describe("Claude Code production integration", () => {
     s.attachScreens({
       activate: async () => ({}),
       refreshBrowser: async () => {},
+      selection: { screen: "browser", cellId: f.cellId, geometry: null, revision: 1 },
+      enterTurn: async () => {},
       lease: (scope: ScreenScope) => ({
         selection: { screen: "browser", cellId: f.cellId, geometry: null, revision: 1 },
         signal: scope.signal,

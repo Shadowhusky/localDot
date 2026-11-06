@@ -25,9 +25,18 @@ export interface ComputerTurn {
 }
 
 export interface ComputerTurnsDeps {
-  live: Pick<LiveSessions, "lease" | "cellOf">;
+  live: Pick<LiveSessions, "lease" | "cellOf" | "sessionsOn">;
   // The computer's window list; undefined when it has none to give (an older desktop).
   windows(cellId: string): ReadWindows | undefined;
+  // A task on the web browser has its window brought forward there instead.
+  browser?(sessionId: string): { enter(signal: AbortSignal): Promise<void> } | undefined;
+  // Whose work the screens show, for the recordings: a turn on the desktop, or the user's control,
+  // which may reach either screen.
+  screens?: {
+    coming(cellId: string, sessionId: string): void;
+    up(sessionId: string): void;
+    forUser(cellId: string, sessionId: string): void;
+  };
 }
 
 // Every task acts on the computer in turns. A turn brings the task's own window forward and checks
@@ -52,6 +61,12 @@ export class ComputerTurns {
     return holder !== undefined && holder !== sessionId;
   }
 
+  // Other tasks are live on the computer: looking at the screen again and again would take the
+  // screen from them.
+  shared(cellId: string): boolean {
+    return this.deps.live.sessionsOn(cellId).length > 1;
+  }
+
   // `waiting` ends only the wait for the turn, never the turn once it is taken.
   async take(
     sessionId: string,
@@ -66,8 +81,9 @@ export class ComputerTurns {
       signal: waiting,
       user,
     });
+    if (user) this.deps.screens?.forUser(cellId, sessionId);
     try {
-      await this.#raise(sessionId, cellId, signal);
+      await this.#raise(sessionId, cellId, signal, user);
     } catch (error) {
       grant.release();
       throw error;
@@ -98,13 +114,15 @@ export class ComputerTurns {
         );
       },
       yielding: async (work) => {
+        // A step that already gave way has nothing more to give, or to take back here.
+        if (!grant) return work(async () => {});
         await end();
         let back: Promise<void> | undefined;
         const resume = () => {
           back ??= (async () => {
             grant = await lease.acquire(sessionId, { signal, user });
             try {
-              await this.#raise(sessionId, cellId, signal);
+              await this.#raise(sessionId, cellId, signal, user);
             } catch (error) {
               grant?.release();
               grant = undefined;
@@ -121,18 +139,34 @@ export class ComputerTurns {
     };
   }
 
-  async #raise(sessionId: string, cellId: string, signal: AbortSignal): Promise<void> {
+  async #raise(
+    sessionId: string,
+    cellId: string,
+    signal: AbortSignal,
+    user: boolean,
+  ): Promise<void> {
     const owners = this.owners(cellId);
+    const browser = user ? undefined : this.deps.browser?.(sessionId);
+    if (!browser && !user) this.deps.screens?.coming(cellId, sessionId);
     let snapshot = await this.#read(cellId, {}, signal);
-    if (!snapshot) return;
-    owners.begin(sessionId, snapshot);
-    const target = owners.target(sessionId, snapshot);
-    for (let tries = 0; target && tries < RAISES; tries++) {
-      if (snapshot?.windows.find((w) => w.active)?.id === target) return;
-      snapshot = await this.#read(cellId, { activate: target }, signal);
-      if (!snapshot) return;
-      owners.learn(snapshot);
+    if (snapshot) {
+      owners.begin(sessionId, snapshot);
+      if (browser) {
+        await browser.enter(signal);
+        return;
+      }
+      const target = owners.target(sessionId, snapshot);
+      for (let tries = 0; target && tries < RAISES; tries++) {
+        if (snapshot?.windows.find((w) => w.active)?.id === target) break;
+        snapshot = await this.#read(cellId, { activate: target }, signal);
+        if (!snapshot) break;
+        owners.learn(snapshot);
+      }
+    } else if (browser) {
+      await browser.enter(signal);
+      return;
     }
+    if (!user) this.deps.screens?.up(sessionId);
   }
 
   async #read(

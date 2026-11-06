@@ -1,4 +1,4 @@
-import { STALL } from "@localdot/protocol";
+import { refusalAdvice, STALL } from "@localdot/protocol";
 
 // Service-authored replies are persisted even when the model cannot produce its first token.
 export function providerNotice(reason: string | undefined, detail?: string): string | undefined {
@@ -13,8 +13,7 @@ export function providerNotice(reason: string | undefined, detail?: string): str
       "Your ChatGPT sign-in has expired. Sign in again in Settings, then continue.",
     "claude code sign-in expired":
       "Claude Code needs you to sign in again. Check its connection in Settings, then continue.",
-    [STALL.modelRefused]:
-      "The provider could not process my request. Check the error details, API address, API type and model ID, then continue.",
+    [STALL.modelRefused]: `The provider could not process my request. ${refusalAdvice(detail)}, then continue.`,
     [STALL.modelUnavailable]:
       "The model is not responding after several attempts. Check its connection, or choose another model and continue.",
   };

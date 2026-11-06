@@ -1,5 +1,3 @@
-import type { LocalDate } from "./schedule.ts";
-
 /** The message is shown to the user as is. */
 export class RecurrenceError extends Error {
   constructor(message: string) {
@@ -28,7 +26,7 @@ const ints = (value: string, min: number, max: number, name: string) => {
   return out;
 };
 
-/** A small subset of RFC 5545 rules; anything else is refused with a plain sentence. */
+/** The small subset of RFC 5545 rules routines used to be written in; only migration still reads them. */
 export function parseRule(text: string): Rule {
   const body = text.trim().replace(/^RRULE:/i, "");
   if (!body || body.length > 256)
@@ -83,32 +81,4 @@ export function parseRule(text: string): Rule {
   }
   if (monthDays) rule.byMonthDay = ints(monthDays, 1, 31, "BYMONTHDAY");
   return rule;
-}
-
-const utcDay = (date: LocalDate) => Date.UTC(date.y, date.m - 1, date.d) / 86_400_000;
-const weekday = (date: LocalDate) => new Date(Date.UTC(date.y, date.m - 1, date.d)).getUTCDay();
-const mondayIndex = (date: LocalDate) => Math.floor((utcDay(date) - ((weekday(date) + 6) % 7)) / 7);
-
-/** INTERVAL counts from the anchor; weeks start on Monday; a missing month day is skipped. */
-export function ruleTimes(rule: Rule, date: LocalDate, anchor: LocalDate): [number, number][] {
-  if (utcDay(date) < utcDay(anchor)) return [];
-  let matches: boolean;
-  switch (rule.freq) {
-    case "DAILY":
-      matches =
-        (utcDay(date) - utcDay(anchor)) % rule.interval === 0 &&
-        (!rule.byDay || rule.byDay.includes(weekday(date)));
-      break;
-    case "WEEKLY":
-      matches =
-        (mondayIndex(date) - mondayIndex(anchor)) % rule.interval === 0 &&
-        (rule.byDay ?? [weekday(anchor)]).includes(weekday(date));
-      break;
-    case "MONTHLY":
-      matches =
-        ((date.y - anchor.y) * 12 + (date.m - anchor.m)) % rule.interval === 0 &&
-        (rule.byMonthDay ?? [anchor.d]).includes(date.d);
-      break;
-  }
-  return matches ? rule.byHour.map((h) => [h, rule.byMinute] as [number, number]) : [];
 }

@@ -26,6 +26,8 @@ export function taskCheckpoint(events: readonly LocalDotEvent[]): string {
     }
     if (!event.step) continue;
     let label: string | undefined;
+    // What a command was for, in the model's own words; the command itself may carry typed values.
+    if (event.type === "step.start" && event.data.kind === "shell") label = event.data.intent;
     if (event.type === "action.intent" && !["type", "wait"].includes(event.data.verb))
       label = event.data.label;
     if (event.type === "tool.start" && !["recall", "people", "shell"].includes(event.data.tool))

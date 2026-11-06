@@ -169,6 +169,43 @@ describe("the user's direct control stream", () => {
     expect(f.fake.calls).toEqual([]);
   });
 
+  it("delivers each input to the screen it names, keeping their order", async () => {
+    const f = await setup(),
+      ws = f.open();
+    await opened(ws);
+    const inputs: ManualStreamInput[] = [
+      { kind: "move", at: { x: 1, y: 1 }, screen: "browser" },
+      { kind: "move", at: { x: 2, y: 2 }, screen: "browser" },
+      { kind: "text", text: "a", screen: "browser" },
+      { kind: "text", text: "b", screen: "desktop" },
+      { kind: "click", at: { x: 3, y: 3 }, button: "left", count: 1, screen: "desktop" },
+    ];
+    send(ws, inputs);
+    await acked(ws, inputs.length);
+    expect(f.desktop.mock.calls.map((call) => call[2])).toEqual(["browser", "desktop"]);
+    // The screen is the stream's to route: what reaches a screen carries no trace of it.
+    expect(received(f.fake)).toEqual([
+      { kind: "move", to: { x: 2, y: 2 } },
+      "ab",
+      { kind: "click", at: { x: 3, y: 3 }, button: "left", count: 1 },
+    ]);
+    expect(f.fake.calls.filter((call) => call.path === "/type")).toHaveLength(2);
+    ws.close();
+  });
+
+  it("lets go of a held button before another screen takes input", async () => {
+    const f = await setup(),
+      ws = f.open();
+    await opened(ws);
+    send(ws, [
+      { kind: "down", at: { x: 1, y: 1 }, button: "left", screen: "desktop" },
+      { kind: "text", text: "a", screen: "browser" },
+    ]);
+    await acked(ws, 2);
+    expect(f.fake.calls.map((call) => call.path)).toEqual(["/input", "/release", "/type"]);
+    ws.close();
+  });
+
   it("delivers typing, keys and clicks in the order they were made", async () => {
     const f = await setup(),
       ws = f.open();

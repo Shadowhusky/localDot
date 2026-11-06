@@ -115,4 +115,108 @@ describe("what a task sees of a shared computer", () => {
     ]);
     await turn.release();
   });
+
+  it("brings a task on the web browser forward there, and leaves the desktop as it is", async () => {
+    const live = new LiveSessions();
+    const desktop = new FakeDesktop();
+    const entered: string[] = [];
+    const turns = new ComputerTurns({
+      live,
+      windows: () => (request) => desktop.read(request),
+      browser: (id) =>
+        id === "web"
+          ? {
+              enter: async () => {
+                entered.push(id);
+              },
+            }
+          : undefined,
+    });
+    for (const id of ["web", "local"]) live.start("cell", id, forever);
+    let turn = await turns.take("local", "cell", AbortSignal.timeout(1000));
+    const mine = desktop.open();
+    await turn.release();
+    turn = await turns.take("web", "cell", AbortSignal.timeout(1000));
+    expect(entered).toEqual(["web"]);
+    expect(desktop.active).toBe(mine);
+    await turn.release();
+  });
+
+  it("takes the turn back through the browser when a task gives way while its page loads", async () => {
+    const live = new LiveSessions();
+    const desktop = new FakeDesktop();
+    let entries = 0;
+    const turns = new ComputerTurns({
+      live,
+      windows: () => (request) => desktop.read(request),
+      browser: () => ({
+        enter: async () => {
+          entries++;
+        },
+      }),
+    });
+    for (const id of ["a", "b"]) live.start("cell", id, forever);
+    const turn = await turns.take("a", "cell", AbortSignal.timeout(1000));
+    expect(entries).toBe(1);
+    await turn.yielding(async () => {
+      expect(live.lease("cell").holder).toBeUndefined();
+      const other = await turns.take("b", "cell", AbortSignal.timeout(1000));
+      await other.release();
+    });
+    expect(entries).toBe(3);
+    expect(live.lease("cell").holder).toBe("a");
+    await turn.release();
+  });
+
+  it("gives way once, however many steps inside it ask to", async () => {
+    const f = fixture();
+    const turn = await f.turns.take("a", "cell", AbortSignal.timeout(1000));
+    await turn.yielding(async () => {
+      await turn.yielding(async () => {
+        expect(f.live.lease("cell").holder).toBeUndefined();
+      });
+      expect(f.live.lease("cell").holder).toBeUndefined();
+    });
+    expect(f.live.lease("cell").holder).toBe("a");
+    await turn.release();
+    expect(f.live.lease("cell").holder).toBeUndefined();
+  });
+
+  it("releases a turn whose window could not be brought forward", async () => {
+    const live = new LiveSessions();
+    const desktop = new FakeDesktop();
+    const turns = new ComputerTurns({
+      live,
+      windows: () => (request) => desktop.read(request),
+      browser: () => ({
+        enter: async () => {
+          throw new Error("stopped");
+        },
+      }),
+    });
+    live.start("cell", "a", forever);
+    await expect(turns.take("a", "cell", AbortSignal.timeout(1000))).rejects.toThrow("stopped");
+    expect(live.lease("cell").holder).toBeUndefined();
+  });
+
+  it("tells the recordings whose work the desktop shows, and the user's turn on either screen", async () => {
+    const live = new LiveSessions();
+    const desktop = new FakeDesktop();
+    const said: string[] = [];
+    const turns = new ComputerTurns({
+      live,
+      windows: () => (request) => desktop.read(request),
+      screens: {
+        coming: (_cell, id) => said.push(`coming ${id}`),
+        up: (id) => said.push(`up ${id}`),
+        forUser: (_cell, id) => said.push(`user ${id}`),
+      },
+    });
+    live.start("cell", "a", forever);
+    const turn = await turns.take("a", "cell", AbortSignal.timeout(1000));
+    await turn.release();
+    const user = await turns.take("a", "cell", AbortSignal.timeout(1000), true);
+    await user.release();
+    expect(said).toEqual(["coming a", "up a", "user a"]);
+  });
 });

@@ -9,7 +9,7 @@ export function fixtureModelAdmission(brains: Pick<BrainCells, "open">) {
   brains.open = async (opts) => {
     const cell = await open(opts);
     gates.set(cell.id, {
-      taskId: opts.sessionId,
+      taskId: opts.account ?? opts.sessionId,
       generationId: randomBytes(16).toString("hex"),
       epoch: 1,
       paused: true,

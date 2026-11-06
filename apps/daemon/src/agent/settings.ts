@@ -54,11 +54,20 @@ export class SettingsStore {
     } catch {
       /* Saving repairs invalid settings. */
     }
+    // A list that comes with the save is the user's own, removals included; a model leaving a role
+    // joins it.
     const models = new Map<string, RoleChoice>();
-    for (const doc of [previous, parsed.data]) {
-      for (const choice of [...(doc.models ?? []), doc.main, doc.fast, doc.local]) {
-        if (choice) models.set(JSON.stringify([choice.provider, choice.model, choice.key]), choice);
-      }
+    for (const choice of [
+      ...(parsed.data.models ? [] : (previous.models ?? [])),
+      previous.main,
+      previous.fast,
+      previous.local,
+      ...(parsed.data.models ?? []),
+      parsed.data.main,
+      parsed.data.fast,
+      parsed.data.local,
+    ]) {
+      if (choice) models.set(JSON.stringify([choice.provider, choice.model, choice.key]), choice);
     }
     const active = new Set(
       [parsed.data.main, parsed.data.fast, parsed.data.local]

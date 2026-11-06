@@ -17,6 +17,7 @@ export function deliverablesFor(
     start: ReviseDeps["start"];
     upload: ReviseDeps["access"];
     redactUserText: ReviseDeps["redactUserText"];
+    conversation?: DeliverablesDeps["conversation"];
   },
 ): Omit<DeliverablesDeps, "port"> {
   return {
@@ -28,5 +29,6 @@ export function deliverablesFor(
     opener: macOpener(),
     revise: { start: d.start, access: d.upload, redactUserText: d.redactUserText },
     computer: { cellOf: d.cellOf, access: d.access },
+    ...(d.conversation ? { conversation: d.conversation } : {}),
   };
 }

@@ -5,12 +5,14 @@ import type {
   AskRequestField,
   EventOf,
   GivenBack,
+  MessageModel,
   PageElement,
   PauseSnapshot,
   RecentLine,
   RuleChange,
   SubagentResume,
   SubagentStop,
+  TaskModelRef,
 } from "@localdot/protocol";
 import {
   APPROVAL_TIMEOUT_MS,
@@ -56,6 +58,8 @@ import type { TranscriptStore } from "./transcript.ts";
 import { WorkProgress } from "./work-progress.ts";
 
 export const AGENT = "main";
+// The field of the question that asks the user's tap before a saved login is filled.
+export const SAVED_LOGIN_TAP = "sign_in";
 // How long a hand-back waits for the user's input to land and the computer to confirm it.
 const HANDBACK_WAIT_MS = 5000;
 // After input whose landing was unknown, the computer is asked again this much later each time.
@@ -171,6 +175,14 @@ export class UserSpokeError extends Error {
 export interface UserListener {
   readonly signal: AbortSignal;
   readonly spoke: boolean;
+  // What ended it was queued for after this task.
+  readonly queued: boolean;
+  end(): void;
+}
+// A command of dot's, listening for the user: `said` resolves with what they say that dot hasn't
+// taken in.
+export interface UserSteering {
+  readonly said: Promise<InboxItem>;
   end(): void;
 }
 
@@ -229,7 +241,23 @@ export interface AgentSessionOptions {
 
 // Daemon-owned state outlives any brain or HTTP request. In particular, retirement cancels the
 // caller of a takeover but cannot hand the computer back on the user's behalf.
+// What a sent message asks of the turn it starts.
+export interface MessageTurn {
+  readonly model: MessageModel;
+  // The choice it came from, for a task that takes the message over.
+  readonly ref: TaskModelRef;
+  // Reaching dot would take it off the model it is on. That ends whatever it has running, so such a
+  // message waits for the task to finish unless the user says to steer with it.
+  moves(): boolean;
+  // It reached dot: from here dot runs on its model.
+  reached(): void;
+  // This task can't run its model: another must take over from the message on.
+  handOver?(): void;
+}
+
 export class AgentSession {
+  // The model dot runs on now, which each step records.
+  runningModel?: { route: string; model: string };
   // The computer this task shares with others, held for the user while they have control.
   computer?: { forUser(signal: AbortSignal): Promise<{ release(): Promise<void> }> };
   // Read when an action is admitted, so the chat's permission switch applies to
@@ -272,6 +300,9 @@ export class AgentSession {
   boot: BootConfig | undefined;
   toolToken: string | undefined;
   lastFrameId: string | undefined;
+  // The host of the page the task last opened in the web browser: what names it, of the tasks
+  // there, when the browser's one gate refuses a request.
+  browserHost: string | undefined;
   // Something other than the user reached the model since the user last spoke.
   #tainted = false;
   // Something other than the user has reached the model in this task: what dot plans after that
@@ -302,6 +333,7 @@ export class AgentSession {
   readonly abort = new AbortController();
   readonly #inbox: InboxItem[] = [];
   readonly #queued = new Map<string, string>();
+  readonly #turns = new Map<string, MessageTurn>();
   readonly #withdrawn = new Map<string, string>();
   readonly #cancelledQueued = new Set<string>();
   // The user's messages dot has received and not acted on, by id: no words of its own and no tool
@@ -319,6 +351,8 @@ export class AgentSession {
   // wait of dot's: a message ends one wait at most.
   #heard = 0;
   #cut = 0;
+  #announced = 0;
+  #leftRunning = 0;
   readonly #listeners = new Set<() => void>();
   // dot's next input waits for a fresh look at the screen, which the user has had.
   #lookFirst = false;
@@ -706,6 +740,13 @@ export class AgentSession {
       .filter((field) => field.kind === "api_key")
       .map((field) => structuredClone(field));
   }
+  // A tap on a saved login is the owner's own: a shared link's guest answers for no account of theirs.
+  asksSavedLogin(askId: string): boolean {
+    return (
+      this.#ask?.askId === askId &&
+      this.#ask.fields.some((field) => field.kind === "confirm" && field.id === SAVED_LOGIN_TAP)
+    );
+  }
   get pendingAsk(): string | undefined {
     return this.#ask?.askId;
   }
@@ -777,6 +818,17 @@ export class AgentSession {
       throw new SessionStoppedError();
     return this.#screens.lease(this.#screenScope(lease.generation, lease.signal));
   }
+  // On the web browser, what the task's turn on the computer starts with; undefined elsewhere.
+  get browserTurn(): { enter(signal: AbortSignal): Promise<void> } | undefined {
+    if (this.#screens?.selection.screen !== "browser") return undefined;
+    return {
+      enter: async (signal) => {
+        const generation = this.generation;
+        if (!generation || !this.#screens || this.#screenReady !== generation) return;
+        await this.#screens.enterTurn(this.#screenScope(generation, signal));
+      },
+    };
+  }
   async switchScreen(
     screen: ScreenName,
     lease: ToolLease,
@@ -842,7 +894,7 @@ export class AgentSession {
     this.#screenReady = undefined;
     if (this.#screens && !this.stopped) {
       // takeOver fences synchronously, including physical grants that are still being prepared.
-      this.#screenRetiring = this.#screens.takeOver();
+      this.#screenRetiring = this.#screens.takeOver(false);
       void this.#screenRetiring.catch(() => this.stop());
     }
   }
@@ -1018,6 +1070,9 @@ export class AgentSession {
     return record?.requestId === requestId ? record.released.then(() => {}) : Promise.resolve();
   }
   append(type: string, data: Record<string, unknown>, step?: string): void {
+    if (type === "step.start" && this.runningModel) data = { ...data, model: this.runningModel };
+    if (type === "model.usage" && (data.role === "main" || data.role === "local"))
+      this.runningModel = { route: String(data.route), model: String(data.model) };
     // Model notifications are buffered independently of tool requests. A late "acting"
     // message must not replace the daemon-owned question, approval, Pause or takeover.
     if (
@@ -1060,16 +1115,22 @@ export class AgentSession {
   }
   // The task's own message, which dot reads as its task rather than from its inbox. `sender`: the
   // shared link it came through.
-  askTask(sender?: string): void {
+  askTask(sender?: string, model?: MessageModel): void {
     const messageId = ulid();
-    this.append("message.user", { messageId, text: this.task, kind: "task" });
+    this.append("message.user", {
+      messageId,
+      text: this.task,
+      kind: "task",
+      ...(model ? { model } : {}),
+    });
     this.#unanswered.set(messageId, this.task);
     this.#senders.set(messageId, sender ?? null);
   }
-  post(kind: InboxItem["kind"], text: string, sender?: string): InboxItem {
+  post(kind: InboxItem["kind"], text: string, sender?: string, turn?: MessageTurn): InboxItem {
     const messageId = ulid();
     // Known as the user's before it lands, so a wait it ends hears it as theirs.
     if (kind !== "resume") this.#senders.set(messageId, sender ?? null);
+    if (turn) this.#turns.set(messageId, turn);
     return this.#deliverInbox(kind, text, messageId, true);
   }
   #deliverInbox(
@@ -1080,10 +1141,21 @@ export class AgentSession {
   ): InboxItem {
     if (this.stopped) throw new SessionStoppedError();
     const item = Object.freeze(InboxItem.parse({ seq: this.#seq + 1, messageId, kind, text }));
+    const turn = this.#turns.get(messageId);
     if (announce && kind !== "resume")
-      this.append("message.user", { messageId: item.messageId, text, kind });
+      this.append("message.user", {
+        messageId: item.messageId,
+        text,
+        kind,
+        ...(turn ? { model: turn.model } : {}),
+      });
     this.#seq = item.seq;
     this.#inbox.push(item);
+    // Before the wake: what the message wakes runs on its model.
+    if (turn) {
+      this.#turns.delete(messageId);
+      turn.reached();
+    }
     if (kind !== "resume") {
       this.#unanswered.set(messageId, text);
       this.requests.push(text);
@@ -1098,10 +1170,10 @@ export class AgentSession {
   }
   // Hold follow-ups outside the model inbox until its current task finishes. A queued
   // message can therefore be promoted without racing the model's inbox cursor.
-  enqueue(text: string, sender?: string): void {
+  enqueue(text: string, sender?: string, turn?: MessageTurn): void {
     if (this.stopped) throw new SessionStoppedError();
-    if (this.status === "idle") {
-      this.post("followup", text, sender);
+    if (this.status === "idle" && !turn?.handOver && !this.#queued.size) {
+      this.post("followup", text, sender, turn);
       return;
     }
     const item = InboxItem.parse({ seq: 1, messageId: ulid(), kind: "followup", text });
@@ -1111,14 +1183,38 @@ export class AgentSession {
       kind: "followup",
       queued: true,
       sessionId: this.id,
+      ...(turn ? { model: turn.model } : {}),
+      ...(turn?.handOver
+        ? { waitsFor: "handover" as const }
+        : turn?.moves()
+          ? { waitsFor: "switch" as const }
+          : {}),
     });
     this.#queued.set(item.messageId, text);
     this.#senders.set(item.messageId, sender ?? null);
+    if (turn) this.#turns.set(item.messageId, turn);
+    if (this.status === "idle") this.#flushQueued();
+    // A wait of dot's is no work to wait for.
+    this.#wake();
+  }
+  // Every message still queued, out of this task's way, for the task that takes them over.
+  takeQueued(): { text: string; sender?: string; turn?: MessageTurn }[] {
+    const taken = [...this.#queued].map(([messageId, text]) => {
+      const sender = this.#senders.get(messageId);
+      const turn = this.#turns.get(messageId);
+      this.append("message.delivery", { messageId, state: "withdrawn" });
+      this.#turns.delete(messageId);
+      return { text, ...(sender ? { sender } : {}), ...(turn ? { turn } : {}) };
+    });
+    this.#queued.clear();
+    return taken;
   }
   steerQueued(messageId: string): boolean {
     if (this.stopped) throw new SessionStoppedError();
     const text = this.#queued.get(messageId);
     if (text === undefined) return this.#inbox.some((item) => item.messageId === messageId);
+    // Its model can't run here, so it waits for this task to finish and hand it over.
+    if (this.#turns.get(messageId)?.handOver) return true;
     this.append("message.delivery", { messageId, state: "steering" });
     this.#deliverInbox("steer", text, messageId, false);
     this.#queued.delete(messageId);
@@ -1133,6 +1229,7 @@ export class AgentSession {
     if (text === undefined || this.stopped) return undefined;
     this.append("message.delivery", { messageId, state: "withdrawn" });
     this.#queued.delete(messageId);
+    this.#turns.delete(messageId);
     this.#withdrawn.set(messageId, text);
     return text;
   }
@@ -1141,11 +1238,50 @@ export class AgentSession {
     if (this.stopped || !this.#queued.has(messageId)) return false;
     this.append("message.delivery", { messageId, state: "cancelled" });
     this.#queued.delete(messageId);
+    this.#turns.delete(messageId);
     this.#cancelledQueued.add(messageId);
     return true;
   }
+  // Moves a waiting message in front of another, or to the end. Delivery and what Stop gives back
+  // follow the new order. False when either has left the queue.
+  moveQueued(messageId: string, before: string | null): boolean {
+    const text = this.#queued.get(messageId);
+    if (
+      this.stopped ||
+      text === undefined ||
+      messageId === before ||
+      (before !== null && !this.#queued.has(before))
+    )
+      return false;
+    const entries = [...this.#queued].filter(([id]) => id !== messageId);
+    const at = before === null ? entries.length : entries.findIndex(([id]) => id === before);
+    entries.splice(at, 0, [messageId, text]);
+    const order = entries.map(([id]) => id);
+    const next = order.values();
+    const senders = [...this.#senders].map(([id]) =>
+      this.#queued.has(id) ? (next.next().value as string) : id,
+    );
+    const who = new Map(this.#senders);
+    this.#senders.clear();
+    for (const id of senders) this.#senders.set(id, who.get(id) ?? null);
+    this.#queued.clear();
+    for (const [id, words] of entries) this.#queued.set(id, words);
+    this.append("message.queue", { order });
+    return true;
+  }
+  // One turn runs on one model: messages for another wait for the rest after it, and one for a
+  // model this task can't run hands the queue over.
   #flushQueued(): void {
+    let running: string | undefined;
     for (const [messageId, text] of this.#queued) {
+      const turn = this.#turns.get(messageId);
+      if (turn?.handOver) {
+        if (running === undefined) turn.handOver();
+        return;
+      }
+      const model = turn ? JSON.stringify(turn.model) : undefined;
+      if (running !== undefined && model !== undefined && model !== running) return;
+      running ??= model ?? "";
       this.append("message.delivery", { messageId, state: "sent" });
       this.#deliverInbox("followup", text, messageId, false);
       this.#queued.delete(messageId);
@@ -1201,23 +1337,45 @@ export class AgentSession {
   heard(seq: number): void {
     if (seq > this.#heard) this.#heard = Math.min(seq, this.#seq);
   }
+  // The newest message of the user's dot hasn't taken in, past `from`.
+  #unheard(from: number): InboxItem | undefined {
+    return this.#inbox.findLast(
+      (item) =>
+        item.seq > Math.max(this.#heard, from) &&
+        item.kind === "steer" &&
+        this.#senders.has(item.messageId),
+    );
+  }
   // For one wait of dot's: ends it as soon as the user says something dot hasn't taken in, at once
   // when they already have. Each message ends one wait at most, so a wait dot starts once it has
-  // heard the message runs its course.
-  listenForUser(signal: AbortSignal): UserListener {
+  // heard the message runs its course. With `takesQueued` a message queued for after this task
+  // reaches dot too: a long wait leaves dot free to read it.
+  listenForUser(signal: AbortSignal, takesQueued = false): UserListener {
     const spoke = new AbortController();
+    let queued = false;
     const end = () => {
       this.#listeners.delete(listen);
       signal.removeEventListener("abort", end);
     };
     const listen = () => {
-      const from = Math.max(this.#heard, this.#cut);
-      const said = this.#inbox.findLast(
-        (item) => item.seq > from && item.kind === "steer" && this.#senders.has(item.messageId),
-      );
-      if (!said || this.stopped) return;
+      if (this.stopped || spoke.signal.aborted) return;
+      const said = this.#unheard(this.#cut);
+      if (!said) {
+        if (!takesQueued) return;
+        // Each arrives as a steer, whose wake runs this again.
+        for (const messageId of [...this.#queued.keys()]) {
+          if (this.#turns.get(messageId)?.moves()) break;
+          queued = true;
+          this.steerQueued(messageId);
+        }
+        return;
+      }
       this.#cut = said.seq;
+      queueMicrotask(() => {
+        this.#announced = Math.max(this.#announced, said.seq);
+      });
       end();
+      this.append("message.delivery", { messageId: said.messageId, state: "woke" });
       spoke.abort(new UserSpokeError());
     };
     this.#listeners.add(listen);
@@ -1229,8 +1387,58 @@ export class AgentSession {
       get spoke() {
         return spoke.signal.aborted;
       },
+      get queued() {
+        return queued;
+      },
       end,
     };
+  }
+  // For a command of dot's that isn't a wait: says when the user says something dot hasn't taken in.
+  // Every command running then hears the same message; one started later doesn't.
+  whenUserSteers(signal: AbortSignal): UserSteering {
+    const { promise, resolve } = Promise.withResolvers<InboxItem>();
+    const end = () => {
+      this.#listeners.delete(listen);
+      signal.removeEventListener("abort", end);
+    };
+    const listen = () => {
+      const said = this.#unheard(this.#announced);
+      if (!said || this.stopped) return;
+      end();
+      queueMicrotask(() => {
+        this.#announced = Math.max(this.#announced, said.seq);
+      });
+      resolve(said);
+    };
+    this.#listeners.add(listen);
+    signal.addEventListener("abort", end, { once: true });
+    if (signal.aborted) end();
+    else listen();
+    return { said: promise, end };
+  }
+  // A command of dot's goes on past its reply, so that dot can read `said`, under a lease of its own:
+  // Stop, a takeover and a retired brain end it exactly as they end a command dot waits for, and
+  // cleanup waits for it. `commandEnded` gives the lease back once its end is known.
+  leaveRunning(generation: BrainGeneration, said: InboxItem): ToolLease {
+    const lease = this.admit(generation);
+    try {
+      this.append("message.delivery", { messageId: said.messageId, state: "left_running" });
+    } catch (error) {
+      lease.finish();
+      throw error;
+    }
+    this.#cut = Math.max(this.#cut, said.seq);
+    this.#leftRunning += 1;
+    return lease;
+  }
+  commandEnded(lease: ToolLease): void {
+    this.#leftRunning -= 1;
+    lease.finish();
+    this.#wake();
+  }
+  // Commands dot left running that have not ended yet.
+  get leftRunning(): number {
+    return this.#leftRunning;
   }
   async waitForUser(waitMs: number, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
@@ -1482,7 +1690,8 @@ export class AgentSession {
       if ((field.kind === "secret" || field.kind === "code") && typeof answer === "string") {
         secrets.push([field.id, answer]);
         record[field.id] = { provided: true };
-      } else if (field.kind === "api_key") record[field.id] = { provided: true };
+      } else if (field.kind === "api_key" || field.kind === "connect_app")
+        record[field.id] = { provided: true };
       else record[field.id] = recorded(field, answer, redact);
     }
     return ask.finish({ fields: record, skipped, secrets: new SecretAnswers(secrets), by: "user" });

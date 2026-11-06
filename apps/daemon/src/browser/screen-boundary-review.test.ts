@@ -75,13 +75,23 @@ function fixture() {
       scope.check();
       if (request.revision <= revision) throw new Error("stale");
       revision = request.revision;
-      if (request.holder === "user") holder = "user";
+      if (request.holder !== "agent") holder = "user";
       await controlBarrier(request);
       scope.check();
       if (request.revision !== revision) throw new Error("superseded");
-      holder = request.holder;
-      const { owner: _owner, ...receipt } = { owner: undefined, ...request };
-      return { ...receipt, reloaded: 0, selectionsCleared: true };
+      const held: "user" | "agent" = request.holder === "agent" ? "agent" : "user";
+      holder = held;
+      const { browserCellId, parentCellId, instance, requestId } = request;
+      return {
+        browserCellId,
+        parentCellId,
+        instance,
+        requestId,
+        revision: request.revision,
+        holder: held,
+        reloaded: 0,
+        selectionsCleared: true,
+      };
     }),
     close: vi.fn(),
     observe: vi.fn(async () => {

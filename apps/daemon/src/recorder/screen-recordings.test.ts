@@ -7,7 +7,7 @@ import { ALL_FORMATS, EncodedPacketSink, FilePathSource, Input } from "mediabunn
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventLog } from "../event-log.ts";
 import { RecordingBudget } from "./budget.ts";
-import { ScreenRecordings } from "./screen-recordings.ts";
+import { ScreenRecordings, STREAM_CATCHES_UP_MS } from "./screen-recordings.ts";
 import { FakeFeed } from "./testing/fake-feed.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -228,5 +228,141 @@ describe("shared recording budget", () => {
     expect(budget.bytes).toBe(100);
     expect(() => budget.owner("desktop").commit(1)).toThrow();
     expect(budget.bytes).toBe(100);
+  });
+});
+
+describe("two tasks on one screen", () => {
+  function pair() {
+    const home = mkdtempSync(join(tmpdir(), "screen-turn-recordings-"));
+    const clock = { now: 0, nowMicros: () => clock.now };
+    const log = new EventLog(home, clock);
+    const a = log.createSession("a");
+    const b = log.createSession("b");
+    const feeds = new Map<string, FakeFeed>();
+    const cells = { get: () => undefined, endpoints: () => undefined };
+    const attachCount = { n: 0 };
+    const recordings = new ScreenRecordings(
+      {
+        home,
+        clock,
+        eventLog: log,
+        cells,
+        freeBytes: () => 1024 ** 4,
+        startTimeoutMs: 10,
+        feedFor: (_cell, handlers) => new FakeFeed().attach(handlers),
+      },
+      {
+        cells,
+        feedFor: (_cell, handlers) => {
+          const feed = new FakeFeed();
+          feeds.set([a, b][attachCount.n++] ?? "", feed);
+          return feed.attach(handlers);
+        },
+      },
+    );
+    const cell = ulid();
+    const scope = { signal: new AbortController().signal, check: () => {} };
+    const selection = {
+      screen: "browser" as const,
+      cellId: cell,
+      geometry: { w: 64, h: 64, scale: 1 as const },
+      revision: 1,
+    };
+    const frame = (id: string, t: number, index = 0) =>
+      feeds
+        .get(id)
+        ?.frame(synthFrame({ widthMbs: 4, heightMbs: 4, keyEvery: 1 }, index), t, 64, 64);
+    const attach = async (id: string, t: number) => {
+      const attaching = recordings.attach(id, selection, scope);
+      frame(id, t);
+      await attaching;
+    };
+    cleanups.push(async () => {
+      await recordings.stopAll();
+      log.close();
+      rmSync(home, { recursive: true, force: true });
+    });
+    const path = (id: string) => join(home, "sessions", id, "recording-browser", "video.mp4");
+    return { clock, a, b, recordings, cell, frame, attach, path };
+  }
+
+  it("keeps each task's recording to the time its own window is on the screen", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const f = pair();
+      const both = [f.a, f.b];
+      await f.attach(f.a, 1000);
+      await f.attach(f.b, 2000);
+      f.clock.now = 10_000;
+      f.recordings.coming(f.cell, f.a, "browser", both);
+      f.recordings.up(f.a, "browser");
+      vi.advanceTimersByTime(STREAM_CATCHES_UP_MS);
+      f.frame(f.a, 20_000, 1);
+      f.frame(f.b, 20_000, 1);
+      f.clock.now = 30_000;
+      // Another task's window is on its way: nothing arriving from now on is a's.
+      f.recordings.coming(f.cell, f.b, "browser", both);
+      f.frame(f.a, 40_000, 2);
+      f.frame(f.b, 40_000, 2);
+      f.recordings.up(f.b, "browser");
+      // Frames already on their way still show a's window: b takes none until they cleared.
+      f.frame(f.b, 41_000, 3);
+      f.clock.now = 50_000;
+      vi.advanceTimersByTime(STREAM_CATCHES_UP_MS);
+      f.frame(f.b, 60_000, 4);
+      f.clock.now = 70_000;
+      await f.recordings.stopAll();
+      const a = f.recordings.info(f.a, "browser")?.manifest;
+      const b = f.recordings.info(f.b, "browser")?.manifest;
+      expect(await times(f.path(f.a))).not.toContain(40_000);
+      expect(await times(f.path(f.b))).not.toContain(20_000);
+      expect(await times(f.path(f.b))).not.toContain(41_000);
+      expect(await times(f.path(f.b))).toContain(60_000);
+      expect(a?.gaps).toContainEqual(expect.objectContaining({ reason: "other-task" }));
+      expect(b?.gaps).toContainEqual(expect.objectContaining({ reason: "other-task" }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts a task's recording held back if another task's window is on the screen", async () => {
+    const f = pair();
+    f.recordings.coming(f.cell, f.a, "browser", [f.a, f.b]);
+    await f.attach(f.a, 1000);
+    f.clock.now = 5000;
+    const attaching = f.recordings.attach(
+      f.b,
+      {
+        screen: "browser",
+        cellId: f.cell,
+        geometry: { w: 64, h: 64, scale: 1 },
+        revision: 1,
+      },
+      { signal: new AbortController().signal, check: () => {} },
+    );
+    f.frame(f.b, 6000);
+    await expect(attaching).rejects.toThrow();
+  });
+
+  it("gives every other task's recording a rest during the user's control, on both screens", () => {
+    const f = pair();
+    const away = vi.spyOn(f.recordings.browser, "away");
+    const awayDesktop = vi.spyOn(f.recordings.desktop, "away");
+    f.recordings.forUser(f.cell, f.a, [f.a, f.b]);
+    expect(away).toHaveBeenCalledExactlyOnceWith(f.b);
+    expect(awayDesktop).toHaveBeenCalledExactlyOnceWith(f.b);
+  });
+
+  it("changes nothing for a task alone on the computer", async () => {
+    const f = pair();
+    await f.attach(f.a, 1000);
+    const away = vi.spyOn(f.recordings.browser, "away");
+    f.recordings.coming(f.cell, f.a, "browser", [f.a]);
+    f.recordings.up(f.a, "browser");
+    expect(away).not.toHaveBeenCalled();
+    await f.recordings.stopAll();
+    expect(
+      f.recordings.info(f.a, "browser")?.manifest.gaps.filter((gap) => gap.reason === "other-task"),
+    ).toEqual([]);
   });
 });

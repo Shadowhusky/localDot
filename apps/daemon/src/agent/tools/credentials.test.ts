@@ -104,3 +104,87 @@ it("saves a general key through private input without inventing a provider or pr
   ).toBe(true);
   expect((await h.call({ ...request, key_id: "project-license" })).result.ok).toBe(false);
 });
+
+function connecting(connected: () => boolean, ended = false) {
+  const h = fixture();
+  const remove = vi.fn(async () => undefined);
+  const appsChanged = vi.fn();
+  const order: string[] = [];
+  const refresh = vi.fn(async () => {
+    order.push("listed");
+  });
+  appsChanged.mockImplementation(() => order.push("started again"));
+  const config = { id: "linear", name: "Linear" };
+  h.tools.connectors = {
+    connectTarget: (app: string) =>
+      app === "linear" ? { config, host: "mcp.linear.app", added: true, ended } : undefined,
+    isConnected: connected,
+    refresh,
+    remove,
+  } as never;
+  h.tools.appsChanged = appsChanged;
+  return { ...h, remove, appsChanged, order };
+}
+const connect = { action: "connect", app: "linear" };
+
+it("offers a card to connect an app, and moves its tools in once it is connected", async () => {
+  let connected = false;
+  const h = connecting(() => connected);
+  const work = h.call(connect);
+  const id = await asked(h);
+  const event = h.events().find((e) => e.type === "ask.request") as never as {
+    data?: { fields?: { kind: string; connect?: unknown }[] };
+  };
+  expect(event?.data?.fields?.[0]).toMatchObject({
+    kind: "connect_app",
+    connect: { connector: "linear", name: "Linear", host: "mcp.linear.app" },
+  });
+  expect(h.session.answerFields(id, { app: "yes" }, (s) => s)).toBe(false);
+  connected = true;
+  expect(h.session.answerFields(id, { app: true }, (s) => s)).toBe(true);
+  const { result } = await work;
+  expect(result.ok).toBe(true);
+  expect(h.appsChanged).toHaveBeenCalledWith(h.session);
+  // Its tools are listed first, or the new start wouldn't have them.
+  expect(h.order).toEqual(["listed", "started again"]);
+  expect(h.remove).not.toHaveBeenCalled();
+});
+
+it("takes a false answer for what it is when the app didn't connect", async () => {
+  const h = connecting(() => false);
+  const work = h.call(connect);
+  const id = await asked(h);
+  expect(h.session.answerFields(id, { app: true }, (s) => s)).toBe(true);
+  const { result } = await work;
+  expect(result.ok).toBe(false);
+  expect(h.appsChanged).not.toHaveBeenCalled();
+});
+
+it("takes the app away again when the user turns down one it added for the offer", async () => {
+  const h = connecting(() => false);
+  const work = h.call(connect);
+  const id = await asked(h);
+  expect(h.session.decline(id)).toBe(true);
+  const { result } = await work;
+  expect(result.ok).toBe(false);
+  expect(h.remove).toHaveBeenCalledWith("linear");
+  expect(JSON.stringify(result.content)).toContain("do not ask again");
+});
+
+it("doesn't offer an app already connected, or one it can't connect", async () => {
+  const h = connecting(() => true);
+  const already = await h.call(connect);
+  expect(already.result.ok).toBe(true);
+  expect(JSON.stringify(already.result.content)).toContain("already connected");
+  const unknown = await h.call({ action: "connect", app: "nothing" });
+  expect(unknown.result.ok).toBe(false);
+  expect(h.session.pendingAsk).toBeUndefined();
+});
+
+it("offers one whose sign-in has ended, as a reconnect", async () => {
+  const h = connecting(() => true, true);
+  const work = h.call(connect);
+  const id = await asked(h);
+  expect(h.session.answerFields(id, { app: true }, (s) => s)).toBe(true);
+  expect((await work).result.ok).toBe(true);
+});

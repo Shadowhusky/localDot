@@ -32,6 +32,7 @@ import {
   type BrowserSignInMode,
   BrowserSignInRequest,
   BrowserSignInState,
+  BrowserWindowReply,
 } from "../../../../packages/protocol/src/browser-control.ts";
 import {
   BrowserDownloadBinding,
@@ -40,6 +41,7 @@ import {
 import {
   BrowserSecretReply,
   BrowserSecretRequest,
+  BrowserSignInPage,
 } from "../../../../packages/protocol/src/browser-secret.ts";
 import {
   BrowserUploadOffer,
@@ -65,6 +67,7 @@ const tabs = z.strictObject({
   tabs: z.array(z.strictObject({ id: z.uuid(), ready: z.boolean() })).max(256),
 });
 const openedTab = z.strictObject({ tabId: z.uuid() });
+const signInPageReply = z.strictObject({ page: BrowserSignInPage.nullable() });
 const observation = z.strictObject({
   frame: ObserveResult.extend({
     width: z.literal(1280),
@@ -159,6 +162,7 @@ const REFUSALS = {
     "This page contains entered protected input, so it cannot be read safely. Complete or clear that input privately; do not restart the browser or repeat sign-in.",
   refused:
     "The browser refused this operation because its page, field, or control is not ready or has changed. The connection is still available. Read the current page before retrying; do not repeat unchanged calls.",
+  busy: "The web browser is still finishing the previous action. Try again in a moment.",
   stale: "The web browser or the selected screen changed during the request.",
   aborted: "The browser request timed out or was cancelled; the page may still have loaded.",
   unavailable: "The browser control connection is unavailable; the page may still be responsive.",
@@ -264,8 +268,75 @@ export class BrowserClient {
     return this.#json("POST", "/signin", request, scope, 30000, BrowserSignInState, 4096);
   }
 
+  // Where a saved login would go on the page the user holds; null when no page is in front.
+  async signInPage(
+    permit: BrowserManualPermit,
+    fields: boolean,
+    scope: BrowserScope,
+  ): Promise<BrowserSignInPage | null> {
+    const reply = await this.#json(
+      "POST",
+      "/manual/page",
+      { permit, request: { fields } },
+      scope,
+      6000,
+      signInPageReply,
+      4096,
+    );
+    return reply.page;
+  }
+
+  // The user's own tap on a saved login, under their permit. Same checks as an agent's secret.
+  manualSecret(
+    permit: BrowserManualPermit,
+    tabId: string,
+    raw: BrowserSecretRequest,
+    scope: BrowserScope,
+  ): Promise<BrowserSecretReply> {
+    const request = parse(BrowserSecretRequest, raw);
+    return this.#json(
+      "POST",
+      "/manual/secret",
+      { permit, tabId, request },
+      scope,
+      120000,
+      BrowserSecretReply,
+      4096,
+    );
+  }
+
   tabs(scope: BrowserScope): Promise<z.infer<typeof tabs>> {
     return this.#json("GET", "/tabs", undefined, scope, 3000, tabs, 65536);
+  }
+
+  // The task's own window in front: the one it has, one left for it, or a new one.
+  async enterWindow(
+    permit: BrowserActionPermit,
+    place: { continues?: string; fresh?: boolean },
+    scope: BrowserScope,
+  ): Promise<BrowserWindowReply> {
+    const capability = parse(BrowserActionPermit, permit);
+    this.#identity(capability);
+    return this.#json(
+      "POST",
+      "/windows/enter",
+      {
+        permit: capability,
+        ...(place.continues ? { continues: place.continues } : {}),
+        ...(place.fresh ? { fresh: true } : {}),
+      },
+      scope,
+      15000,
+      BrowserWindowReply,
+      65536,
+    );
+  }
+
+  // The tabs in the task's own windows.
+  ownTabs(permit: BrowserActionPermit, scope: BrowserScope): Promise<z.infer<typeof tabs>> {
+    const capability = parse(BrowserActionPermit, permit);
+    this.#identity(capability);
+    return this.#json("POST", "/windows/tabs", { permit: capability }, scope, 3000, tabs, 65536);
   }
 
   // A blank tab in front of the others; the earlier tabs stay open behind it.
@@ -654,8 +725,8 @@ export class BrowserClient {
     if (
       reply.revision !== request.revision ||
       reply.requestId !== request.requestId ||
-      reply.holder !== request.holder ||
-      (reply.holder === "agent" && !reply.selectionsCleared)
+      (request.holder === "agent" && (reply.holder !== "agent" || !reply.selectionsCleared)) ||
+      (request.holder === "user" && !request.alone && reply.holder !== "user")
     )
       throw new BrowserClientError("stale");
     return reply;
@@ -1041,11 +1112,18 @@ export class BrowserClient {
         pending.end(payload);
       });
       check();
-      if (path === "/secret" && response.statusCode === 422)
+      if ((path === "/secret" || path === "/manual/secret") && response.statusCode === 422)
         throw new BrowserClientError("login_form");
-      if (path === "/secret" && response.statusCode === 409)
+      if ((path === "/secret" || path === "/manual/secret") && response.statusCode === 409)
         throw new BrowserClientError("secret_refused");
       if (response.statusCode === 423) throw new BrowserClientError("protected_input");
+      if (path === "/windows/enter" && response.statusCode === 409) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of response) chunks.push(chunk as Buffer);
+        throw new BrowserClientError(
+          Buffer.concat(chunks).toString("utf8").includes('"busy"') ? "busy" : "refused",
+        );
+      }
       if (response.statusCode === 409) throw new BrowserClientError("refused");
       // browserd restarting its Chromium in place says when to ask again.
       if (response.statusCode === 503 && response.headers["retry-after"] !== undefined)
