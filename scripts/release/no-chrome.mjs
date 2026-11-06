@@ -52,15 +52,16 @@ async function listLayer(kind, chunks, visit) {
     partial = lines.pop() ?? "";
     for (const line of lines) visit(line);
   });
+  // GNU tar stops reading at the archive's end marker and closes its input; what's left is padding.
+  lister.stdin.on("error", () => {});
   const bytes = Readable.from(chunks, { objectMode: false });
-  await Promise.all([
-    kind === "gzip"
-      ? pipeline(bytes, createGunzip(), lister.stdin)
-      : kind === "zstd"
-        ? pipeline(bytes, createZstdDecompress(), lister.stdin)
-        : pipeline(bytes, lister.stdin),
-    finished,
-  ]);
+  const decode = kind === "gzip" ? [createGunzip()] : kind === "zstd" ? [createZstdDecompress()] : [];
+  const fed = pipeline(bytes, ...decode, lister.stdin).then(
+    () => undefined,
+    (error) => error,
+  );
+  const [error] = await Promise.all([fed, finished]);
+  if (error && error.code !== "ERR_STREAM_PREMATURE_CLOSE" && error.code !== "EPIPE") throw error;
   if (partial) visit(partial);
 }
 
@@ -128,23 +129,26 @@ export async function scanSavedImage(stream) {
     } else if (regular && size > 0) {
       const start = await reader.read(Math.min(size, 512));
       const kind = layerKind(start);
-      const rest = reader.take(size - start.length);
+      let taken = start.length;
       if (kind) {
         scanned.add(name);
         await listLayer(
           kind,
           (async function* () {
             yield start;
-            yield* rest;
+            for await (const chunk of reader.take(size - start.length)) {
+              taken += chunk.length;
+              yield chunk;
+            }
           })(),
           (path) => {
             entries++;
             if (forbiddenPath(path)) found.push(path);
           },
         );
-      } else {
-        for await (const _ of rest);
       }
+      // Whatever the lister left unread still belongs to this layer.
+      for await (const _ of reader.take(size - taken));
     } else {
       for await (const _ of reader.take(size));
     }
