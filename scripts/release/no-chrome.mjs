@@ -131,7 +131,16 @@ export async function scanSavedImage(stream) {
       const start = await reader.read(Math.min(size, 512));
       const kind = layerKind(start);
       let taken = start.length;
-      if (kind) {
+      if (!kind && start.length === 512 && start.every((byte) => byte === 0)) {
+        // A build step that changes no files leaves an empty layer: a tar of nothing but its
+        // end-of-archive blocks. It holds no files, so it is scanned once it is all zeros.
+        let empty = true;
+        for await (const chunk of reader.take(size - start.length)) {
+          taken += chunk.length;
+          empty &&= chunk.every((byte) => byte === 0);
+        }
+        if (empty) scanned.add(name);
+      } else if (kind) {
         scanned.add(name);
         await listLayer(
           kind,
