@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "914741a520244e4b2451f1cd887681c9712e532df077d62c4376875856d95912",
+  "inputSha256": "828b982bed74abf20d2688e77ed5f90c0dbc5855d17e23866453f3b425fcad65",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -128,8 +128,8 @@
     "apps/daemon/src/agent/output-store.ts": "f37ee506c7641605903905bb5d9ee2633b5dd42334e4cb2b6c807833e1415f05",
     "apps/daemon/src/agent/people.test.ts": "9d1dcaca36fbd8273108d308dc805a4a62aa781d564b24aba7553177edba6556",
     "apps/daemon/src/agent/people.ts": "941740e976686ed90b758cdb2b29142a062d63f2f7c63d5314ac6f2c99f90fb6",
-    "apps/daemon/src/agent/plan-usage.test.ts": "0b5fde882c1a958403bfa7069ec4a92075d752302c57b6a605a9bf45ad5b5cf7",
-    "apps/daemon/src/agent/plan-usage.ts": "b80bf49e6552d35b6cb9c6629f4d6fa2253658c438c9d3b6f2209acc72be4dff",
+    "apps/daemon/src/agent/plan-usage.test.ts": "d882ecc8c07221dd2745c9a52998e3968834a3c7dba9836060f8677bdd315334",
+    "apps/daemon/src/agent/plan-usage.ts": "e207be72955df81af60ab1041dd087a7fa0c59d9e2e807d6cde917e263e081c1",
     "apps/daemon/src/agent/policy.ts": "3f7bab146f9b1099aab8138479694d1b3f93d17a9818d0a2f83e3d8b64e2d6f5",
     "apps/daemon/src/agent/private-files.ts": "d7b340d8c5429f82ca8d37e1ad1363c15b17a8544e3bb3c71c4d205e9b0ff712",
     "apps/daemon/src/agent/provider-notice.test.ts": "7d55156dfe8bed50bc6f3ba4f1529f5d5f8f904b04a7cc28c5410f034d9ef41e",
@@ -1086,8 +1086,8 @@
     "packages/protocol/src/export-json-schema.ts": "9c0b59d585ee2433a7fa6cbe625bf7449125092b90ae6764ffed7a4e7c525267",
     "packages/protocol/src/exports.ts": "1861a64e724b3e9176d6b2de9242f9ef6f47b816e2798a7f0dc8eda1a2844dd1",
     "packages/protocol/src/geometry.ts": "e052bfe8b03d286aba2cdd8c67da6dc0a5ac690bbd7d71b46197c2c6191ac346",
-    "packages/protocol/src/guidance.test.ts": "200a0b0b2f9c53bfc3a360abda9643ef5a8fee1d57382dda728f17ce2509afc8",
-    "packages/protocol/src/guidance.ts": "15d7c5eefc596171b4909c8b58843c8aaab162efe894f98ce24ac1e8df96f442",
+    "packages/protocol/src/guidance.test.ts": "09d1288cc17356733e131ebdeab042c1fbac8482740d3f0d4200011cf5fef73b",
+    "packages/protocol/src/guidance.ts": "522b93023a53015999e4f23b0f7ed814bffae7526244a92d49365aa42feaec96",
     "packages/protocol/src/ids.test.ts": "dcb71161e312f986c03c90a7996521073ed3d0acb178eb29e3ffb211854a2ef1",
     "packages/protocol/src/ids.ts": "24b6b36d6a808271777faf88ae202e79ee8257b0d818f7680af637614641dc60",
     "packages/protocol/src/index.ts": "402b9b6cb6c684e43494687f3d6cbc83ba194ea3285e68b7383cd80c7bc55732",
@@ -1231,7 +1231,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "9727471b711fb2ae506fb24399508234f5e7065d0159006450b261aeb11ff777",
+  "reportSha256": "587d3115ccfd2c7d2dad0d38155a630e2bc57caa24db2830fd48ed6d541369dc",
   "exit": {
     "code": 0,
     "signal": null
