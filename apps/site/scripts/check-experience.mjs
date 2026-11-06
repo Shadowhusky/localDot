@@ -91,6 +91,25 @@ function look(page, chapter, at) {
   );
 }
 
+// How far above the foot of the phone's Chat thread dot's line at work rests; the app keeps it there,
+// over the composer, which the replay's note stands in for. Null while dot is not at work. Measured as
+// laid out, before the scene turns the phone.
+function chatFoot(page) {
+  return page.evaluate(() => {
+    const phone = document.querySelector(".site-phone");
+    const strip = phone?.querySelector(".dot-strip[data-live]");
+    const scroll = phone?.querySelector(".thread-scroll");
+    if (!strip || !scroll) return null;
+    const top = (el) => {
+      let y = 0;
+      for (let at = el; at && at !== phone; at = at.offsetParent) y += at.offsetTop;
+      return y;
+    };
+    const bottom = top(strip) - scroll.scrollTop + strip.offsetHeight;
+    return Math.round(top(scroll) + scroll.clientHeight - bottom);
+  });
+}
+
 const results = [];
 for (const [engine, launcher] of [
   ["chromium", chromium],
@@ -134,6 +153,20 @@ for (const [engine, launcher] of [
       await page.screenshot({
         path: new URL(`${engine}-${width}x${height}-app.png`, out).pathname,
       });
+      // The chat keeps to the replay's end while it plays, however the window grows round it as it
+      // rises on a phone: nothing offers to jump to the latest.
+      await page.waitForTimeout(3000);
+      const end = await page.evaluate(() => {
+        const scroll = document.querySelector(".site-app .thread-scroll");
+        return {
+          jump: !!document.querySelector(".site-app .thread-jump[data-shown]"),
+          below: scroll ? scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop : 0,
+        };
+      });
+      assert.ok(
+        !end.jump && end.below <= 1,
+        `${engine} ${width}x${height}: the chat left its end (${Math.round(end.below)} px below)`,
+      );
       // Beside the stage, the chat rail follows it with no empty column between them: the stage may
       // sit centred in its column, but an empty Activity column would leave over 300 px.
       const gap = await page.evaluate(() => {
@@ -156,6 +189,13 @@ for (const [engine, launcher] of [
         assert.equal(seen.overflow, false, `${where}: the page overflows sideways`);
         assert.ok(seen.words > 0, `${where}: no words show`);
         assert.ok(seen.inside, `${where}: words run off the screen`);
+        if (chapter === "views") {
+          const above = await chatFoot(page);
+          assert.ok(
+            above === null || Math.abs(above) <= 1,
+            `${where}: dot's line sits ${above} px above the foot of Chat`,
+          );
+        }
       }
       assert.deepEqual(errors, [], `${engine} ${width}x${height} logged errors`);
       await context.close();

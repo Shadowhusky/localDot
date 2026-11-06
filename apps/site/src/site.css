@@ -417,8 +417,41 @@ body {
 
 :is(.no-js, .no-gl) .cards,
 :is(.no-js, .no-gl) .ring,
-:is(.no-js, .no-gl) .site-phone {
+:is(.no-js, .no-gl) .site-phone,
+:is(.no-js, .no-gl) .site-several {
   display: none;
+}
+
+/* Several tasks at once, captured from the app: Studio at a desktop's size, or a tablet's where the
+   stage stands tall. Laid out once, like the phone, and placed by the scene (panel.ts). */
+.site-several {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1440px;
+  height: 900px;
+  overflow: hidden;
+  border-radius: 24px;
+  background-color: var(--color-void);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.14),
+    0 40px 120px rgb(0 0 0 / 0.65);
+  transform-origin: 0 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.site-several img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-aspect-ratio: 4 / 5) {
+  .site-several {
+    width: 820px;
+    height: 1180px;
+  }
 }
 
 /* Words beside dot's monitor on the left; centred under dot when it is centre stage. */

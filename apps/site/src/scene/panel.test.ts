@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { phoneCorners, phonePose } from "./phone.ts";
+import { panelCorners, panelPose } from "./panel.ts";
 
 const keys = [
   { at: 0.1, x: 0.5, y: 1.2, h: 0.8, yaw: 0.4, o: 0 },
@@ -7,21 +7,21 @@ const keys = [
   { at: 0.4, x: 0.9, y: 0.6, h: 0.5, yaw: 0, o: 1 },
 ];
 
-describe("the phone's place", () => {
+describe("a picture's place", () => {
   it("holds at the ends and passes through its keys", () => {
-    expect(phonePose(keys, 0).y).toBe(1.2);
-    expect(phonePose(keys, 0.2)).toMatchObject({ x: 0.5, y: 0.5, o: 1 });
-    expect(phonePose(keys, 1).x).toBe(0.9);
+    expect(panelPose(keys, 0).y).toBe(1.2);
+    expect(panelPose(keys, 0.2)).toMatchObject({ x: 0.5, y: 0.5, o: 1 });
+    expect(panelPose(keys, 1).x).toBe(0.9);
   });
 
   it("eases between keys", () => {
-    const y = phonePose(keys, 0.15).y;
+    const y = panelPose(keys, 0.15).y;
     expect(y).toBeGreaterThan(0.5);
     expect(y).toBeLessThan(1.2);
   });
 
   it("stands square when not turned, at its height and shape on the stage", () => {
-    const [a, b, c, d] = phoneCorners(
+    const [a, b, c, d] = panelCorners(
       { x: 0.5, y: 0.5, h: 0.5, yaw: 0, o: 1 },
       { w: 1000, h: 800 },
       0.5,
@@ -33,7 +33,7 @@ describe("the phone's place", () => {
   });
 
   it("draws its far edge shorter when turned", () => {
-    const [a, b, c, d] = phoneCorners(
+    const [a, b, c, d] = panelCorners(
       { x: 0.5, y: 0.5, h: 0.5, yaw: 0.3, o: 1 },
       { w: 1000, h: 800 },
       0.5,

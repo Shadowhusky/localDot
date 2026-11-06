@@ -111,17 +111,21 @@ back reverses it exactly. Copy lives in the DOM in reading order.
 
 ### 4. Text me, or sit beside me
 
-- "Text me." A phone rises in front of the window, which dims behind it: Chat, the app's own bar,
-  bubbles and foot, with dot and a small live picture of the computer, fed by the same recording as
-  the window. It is the same task, shown the other way. dot looks up at it.
-- "Or sit beside me." The window comes forward whole, Studio, and the phone comes down to its corner,
-  still running. Copy: "Studio keeps my computer, the chat and every step on one screen. Choose when
-  you set up and switch any time, on each device."
-- "Several at once." The phone goes, and a row of dots comes out at the foot of the window, each with
-  an accessory of its own, all watching. Copy: "Each task gets its own dot and browser window, and
-  they share your sign-ins, so two can work in the same site. Routines bring regular jobs back on
-  schedule."
-- With reduced motion the chapter is one still: the window with the phone at its corner.
+- "Text me." A phone rises in front of the window, which dims behind it, on Chat's list of
+  conversations, captured from the app: four tasks under way and earlier ones, each with its dressed
+  dot. dot looks up at it.
+- "Or sit beside me." The window comes forward whole, Studio, and the phone comes down to its corner
+  as the window's task opens on it over the list: Chat, the app's own bar, bubbles and foot, with dot
+  and a small live picture of the computer, fed by the same recording as the window. It is the same
+  task, shown the other way. Copy: "Studio keeps my computer, the chat and every step on one screen.
+  Choose when you set up and switch any time, on each device."
+- "Several at once." The phone goes, and the app with several tasks under way, captured in Studio,
+  comes up in front of the dimmed window: each task's dot in the rail, and dot reading Wikivoyage in
+  its own browser window, a frame of the Kyoto demo. Where the stage stands tall it is Studio at a
+  tablet's size. Copy: "Each task gets its own dot and browser window, and they share your sign-ins,
+  so two can work in the same site. Routines bring regular jobs back on schedule."
+- With reduced motion the chapter is one still: the window with the phone at its corner, and the
+  picture of several tasks over it while its words show.
 
 ### 5. Any model
 
@@ -246,9 +250,13 @@ layout and display type.
   the scene; the WebGL layer punches a transparent hole there, so the live app shows through and dot
   can pass in front of it. At rest the transform is removed so text stays sharp.
 - Provider ring: provider names are HTML positioned from the ring's 3D points.
-- The phone in chapter 4 is HTML too, placed with a CSS `matrix3d` as the export clips are (`scene/phone.ts`),
-  from keys in fractions of the stage, so it sits right at any size. Its code and styles load only
-  as the story nears it, and it can't be pressed or read out: it shows what the window already says.
+- The phone and the picture of several tasks in chapter 4 are HTML too, placed with a CSS `matrix3d`
+  as the export clips are (`scene/panel.ts`), from keys in fractions of the stage, so they sit right
+  at any size. Their code, styles and pictures load only as the story nears them, and they can't be
+  pressed or read out: they show what the words already say. The phone's Chat keeps dot's line in the
+  thread's flow, not sticky as in the app: WebKit measures sticky against the phone's scaled size.
+- The pictures in `public/screens` are captured from the app's UI fixture by
+  `apps/web/e2e/ui/readme-capture.ts`, in dark, at twice the size the site lays them out.
 - Fallback without WebGL: the app's 2D DotView with its plates, and the chapters as plain sections.
 
 ## Demos

@@ -50,8 +50,11 @@ available through `build:holding` for recovery.
   and serves only what a demo recorded about its results.
 - `src/dot3d`: dot in Three.js. The body's shader paints the eyes from the app's eye geometry, the
   app's `DotEngine` moves it, and outfits are the GLBs from `tools/dot-plates/export_glb.py`.
-- `src/scene`: the renderer, the app's screen placed in 3D with a CSS `matrix3d`, the phone, the ring
-  of models and the export clips.
+- `src/scene`: the renderer, the app's screen placed in 3D with a CSS `matrix3d`, the phone and the
+  picture of several tasks (`panel.ts`), the ring of models and the export clips.
+- `public/screens`: the app's own screens, Chat's list and Studio with several tasks under way, captured
+  from the app's UI fixture with `node --import tsx e2e/ui/readme-capture.ts` in `apps/web`, which needs
+  the Kyoto demo's video (Demos) for the frame on dot's screen.
 - `src/story`: scroll to chapter progress (`Director`), the camera and dot keyframes (`shots.ts`),
   each chapter's words fading in on their beats, and the places the address names (`places.ts`).
 

@@ -28,19 +28,21 @@ import type { ChapterName, Director } from "../story/director.ts";
 import { pinned, roleAt } from "../story/roles.ts";
 import { shotAt } from "../story/shot-at.ts";
 import {
-  CREW_LOOKS,
-  CREW_TALL,
-  CREW_WIDE,
+  PHONE_OPENS,
   PHONE_STILL_AT,
   PHONE_TALL,
   PHONE_WIDE,
+  SEVERAL_STILL_AT,
+  SEVERAL_TALL,
+  SEVERAL_WIDE,
+  SEVERAL_WIDEST,
   type Shot,
   TALL,
   WIDE,
 } from "../story/shots.ts";
 import { ease, mix, span } from "../story/tracks.ts";
 import { Cards } from "./cards.ts";
-import { Phone, type PhonePose, phonePose } from "./phone.ts";
+import { Panel, type PanelPose, panelPose } from "./panel.ts";
 import { Poke } from "./poke.ts";
 import { type Point2, quadCss } from "./quad.ts";
 import { Ring } from "./ring.ts";
@@ -98,8 +100,12 @@ export class World {
   private readonly beats: Beats;
   private readonly ring: Ring | null;
   private readonly cards: Cards | null;
-  private readonly phone: Phone | null;
-  private phonePose: PhonePose | null = null;
+  private readonly phone: Panel | null;
+  private phonePose: PanelPose | null = null;
+  private phoneOpen = "";
+  private readonly several: Panel | null;
+  private severalPose: PanelPose | null = null;
+  private picturesAsked = false;
   private running = true;
   private firstFrame: (() => void) | null = null;
   private introShown = "";
@@ -146,7 +152,9 @@ export class World {
     const cards = stage.querySelector<HTMLElement>(".cards");
     this.cards = cards ? new Cards(cards) : null;
     const phone = stage.querySelector<HTMLElement>(".site-phone");
-    this.phone = phone ? new Phone(phone) : null;
+    this.phone = phone ? new Panel(phone) : null;
+    const several = stage.querySelector<HTMLElement>(".site-several");
+    this.several = several ? new Panel(several) : null;
     this.beats.onShow = (text) => {
       if (text) this.dot.say(talkMs(text));
     };
@@ -195,6 +203,7 @@ export class World {
     this.camera.updateProjectionMatrix();
     this.cards?.resize();
     this.phone?.resize();
+    this.several?.resize();
     this.measureWindow();
   }
 
@@ -306,7 +315,6 @@ export class World {
     const [x, y] = this.toStage(placed.dotAt);
     this.poke?.place(x, y, radiusPx, this.w, placed.out > 0.9);
     this.lineUp(portrait, placed);
-    this.crew(portrait, placed);
     this.beats.update();
     this.extras(portrait);
     this.chrome(placed);
@@ -490,16 +498,23 @@ export class World {
       this.dot.setFocus(this.heroGaze());
     } else {
       const centre = this.toStage(this.dot.group.position);
+      const views = this.active("views") ? this.director.local("views") : null;
+      // In Chat and Several at once, the picture of the app in front; in Studio, the window.
+      const front =
+        views === null
+          ? null
+          : views > 0.66
+            ? this.severalPose
+            : views <= 0.42
+              ? this.phonePose
+              : null;
+      const picture = front && front.o > 0.05 ? front : null;
       const watching =
-        this.active("watch") ||
-        this.active("replay") ||
-        (this.active("views") && this.director.local("views") > 0.42);
-      if (this.active("views") && !watching && this.phonePose) {
-        // It looks up at the phone beside it.
+        this.active("watch") || this.active("replay") || (views !== null && !picture);
+      if (picture) {
+        // It looks up at the picture beside it.
         this.dot.setState("watching");
-        this.dot.setFocus(
-          gazeTo(this.phonePose.x * this.w - centre[0], this.phonePose.y * this.h - centre[1]),
-        );
+        this.dot.setFocus(gazeTo(picture.x * this.w - centre[0], picture.y * this.h - centre[1]));
       } else if (watching && site.control !== "you") {
         // It watches its own computer work.
         const monitor = this.toStage(this.onPlane(this.win.w * 0.36, this.win.h * 0.42));
@@ -558,45 +573,9 @@ export class World {
     });
   }
 
-  // Several at once: a row of dots at the foot of the window, each dressed as its own task, watching.
-  // The line-up's dots, which the Dots chapter has to itself.
-  private crew(portrait: boolean, placed: Placed): void {
-    const views = this.director.local("views");
-    const shown = span(views, 0.7, 0.8) * (1 - span(views, 0.96, 1));
-    if (shown <= 0) return;
-    const slots = portrait ? CREW_TALL : CREW_WIDE;
-    const distance = this.camera.position.distanceTo(placed.dotAt);
-    const short = Math.min(this.w, this.h);
-    const monitor = this.toStage(this.onPlane(this.win.w * 0.36, this.win.h * 0.42));
-    for (const [i, slot] of slots.entries()) {
-      const dot = this.lineup[i] as Dot3D;
-      const pop = this.reduced ? 1 : ease.out(span(shown, i * 0.14, i * 0.14 + 0.5));
-      dot.group.visible = pop > 0.001;
-      dot.group.position.copy(
-        this.atScreen(placed.pose, this.w * slot.x, this.h * slot.y, distance),
-      );
-      const radius = (portrait ? 0.075 : 0.045) * short * this.worldPerPx(distance);
-      dot.group.scale.setScalar(radius * pop);
-      dot.group.lookAt(this.camera.position);
-      dot.tip = perspectiveTip(radius, distance);
-      dot.wear(CREW_LOOKS[i] ?? []);
-      dot.setState("watching");
-      const centre = this.toStage(dot.group.position);
-      dot.setFocus(gazeTo(monitor[0] - centre[0], monitor[1] - centre[1]));
-      dot.update((dot.group.scale.x / this.worldPerPx(distance)) * this.renderer.getPixelRatio());
-    }
-  }
-
-  // The phone that shows Chat, the ring of models, the export clips, and the rewind.
+  // The pictures of the app in Chat and Studio, the ring of models, the export clips, and the rewind.
   private extras(portrait: boolean): void {
-    const views = this.director.local("views");
-    const nearViews = views > -0.25 && views < 1.02;
-    if (nearViews !== site.phone) setSite({ phone: nearViews });
-    this.phonePose =
-      views > 0 && views < 1
-        ? phonePose(portrait ? PHONE_TALL : PHONE_WIDE, this.reduced ? PHONE_STILL_AT : views)
-        : null;
-    this.phone?.update(this.phonePose, { w: this.w, h: this.h });
+    this.pictures(portrait);
     const models = this.director.local("models");
     this.ring?.update(
       Math.min(span(models, 0.02, 0.16), 1 - span(models, 0.86, 0.98)),
@@ -621,6 +600,51 @@ export class World {
         : site.rewind === null || Math.abs(rewind - site.rewind) > 0.002
     )
       setSite({ rewind });
+  }
+
+  // Chat's phone, which opens the task over its list on the way to the window's corner, and the app
+  // with several tasks at once. Their pictures load as the story nears them.
+  private pictures(portrait: boolean): void {
+    const views = this.director.local("views");
+    const near = views > -0.25 && views < 1.02;
+    if (near !== site.phone) setSite({ phone: near });
+    if (near && !this.picturesAsked) {
+      this.picturesAsked = true;
+      for (const source of this.stage.querySelectorAll<HTMLSourceElement>("source[data-srcset]"))
+        source.srcset = source.dataset.srcset ?? "";
+      for (const img of this.stage.querySelectorAll<HTMLImageElement>(
+        ":is(.site-phone, .site-several) img[data-src]",
+      ))
+        img.src = img.dataset.src ?? "";
+    }
+    const shown = views > 0 && views < 1;
+    const stage = { w: this.w, h: this.h };
+    const phoneAt = this.reduced ? PHONE_STILL_AT : views;
+    // With reduced motion the app with several tasks shows still while its words do, in the phone's
+    // place.
+    const still = this.reduced ? span(views, 0.68, 0.74) * (1 - span(views, 0.96, 1)) : 0;
+    const phone = shown ? panelPose(portrait ? PHONE_TALL : PHONE_WIDE, phoneAt) : null;
+    this.phonePose = phone && { ...phone, o: phone.o * (1 - still) };
+    this.phone?.update(this.phonePose, stage);
+    // With reduced motion the task cuts in over the list, where its opening would pass halfway.
+    const [opens, opened] = PHONE_OPENS;
+    const open = (
+      this.reduced ? Number(views >= (opens + opened) / 2) : ease.inOut(span(views, opens, opened))
+    ).toFixed(3);
+    if (open !== this.phoneOpen) {
+      this.phoneOpen = open;
+      this.phone?.el.style.setProperty("--open", open);
+    }
+    const several = portrait ? SEVERAL_TALL : SEVERAL_WIDE;
+    const pose = !shown
+      ? null
+      : this.reduced
+        ? { ...panelPose(several, SEVERAL_STILL_AT), o: still }
+        : panelPose(several, views);
+    const across = pose && this.several ? (pose.h * this.h * this.several.aspect) / this.w : 0;
+    const widest = portrait ? SEVERAL_WIDEST.tall : SEVERAL_WIDEST.wide;
+    this.severalPose = pose && across > widest ? { ...pose, h: (pose.h * widest) / across } : pose;
+    this.several?.update(this.severalPose, stage);
   }
 
   // From the docked dot to the work on the Theatre, as the app's eyes would turn.

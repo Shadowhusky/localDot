@@ -18,6 +18,7 @@ import {
   type ClaudeCodeStatus,
   type ComputerOperation,
   type ComputerOperationStep,
+  type ConversationLive,
   DEFAULT_RESEARCH_BUDGET,
   EXPECTED_OPERATION_MS,
   emptyManifest,
@@ -43,6 +44,7 @@ import {
   toBase64url,
   ulid,
   VaultUnlock,
+  type Wearable,
 } from "@localdot/protocol";
 import { normalizeCatalog, providerById } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
@@ -1493,6 +1495,179 @@ if (env.QA_PAST === "1")
     });
   }
 
+// QA_ACTIVITY=several: several tasks at once, as the website shows the app. dot plans Kyoto in the
+// browser window on screen while three more tasks work in theirs, with earlier conversations under
+// them. Each wears a set look, so the dots dress the same on every run. QA_PICTURE is the screen.
+interface SeveralTask {
+  ago: number;
+  title: string;
+  ask: string;
+  persona: PersonaId;
+  look: Wearable[];
+  // What dot last said in it.
+  said: string;
+  // What dot is doing in it now, while it works.
+  doing?: string;
+}
+const UNDER_WAY: SeveralTask[] = [
+  {
+    ago: 6 * 60_000,
+    title: "Breakout, starring dot",
+    ask: "Make a Breakout game where you're the ball",
+    persona: "coder",
+    look: ["hoodie", "sunglasses"],
+    said: "The game runs. Now I'm playing a round to check the bricks, the score and the lives.",
+    doing: "Playing a round to check the score",
+  },
+  {
+    ago: 12 * 60_000,
+    title: "Where my money went",
+    ask: "Make sense of my bank export",
+    persona: "finance",
+    look: ["suit", "bow"],
+    said: "Your export has 412 transactions from April to September. I'm giving each a category.",
+    doing: "Sorting June's transactions into categories",
+  },
+  {
+    ago: 3 * 60_000,
+    title: "A poster for Blue Hour",
+    ask: "Design a poster for a jazz night",
+    persona: "design",
+    look: ["beret", "scarf"],
+    said: "I'll go with deep blue and brass, and a moon made of circles.",
+    doing: "Setting the title in big type",
+  },
+];
+const ENDED: SeveralTask[] = [
+  {
+    ago: 3 * HOUR,
+    title: "A Reels teaser of Big Buck Bunny",
+    ask: "Cut a Reels teaser from a short film",
+    persona: "video",
+    look: ["headphones", "mustache"],
+    said: "The teaser is 20 seconds, with captions and the credit at the end.",
+  },
+  {
+    ago: 26 * HOUR,
+    title: "Flights to Lisbon in May",
+    ask: "Compare flights to Lisbon for the first week of May",
+    persona: "everyday",
+    look: ["cowboy-hat", "lei"],
+    said: "The cheapest is the 9:40 on Saturday 2 May, at £148 return.",
+  },
+  {
+    ago: 50 * HOUR,
+    title: "A plumber nearby",
+    ask: "Find a plumber near me with good reviews",
+    persona: "everyday",
+    look: ["beanie", "monocle"],
+    said: "Three plumbers near you have 4.8 stars or more. Their numbers are in a note.",
+  },
+  {
+    ago: 80 * HOUR,
+    title: "Clean up my Downloads folder",
+    ask: "Clean up my Downloads folder",
+    persona: "everyday",
+    look: ["propeller-cap", "overalls"],
+    said: "I sorted 86 files into folders and put the installers in one of their own.",
+  },
+];
+// The tasks under way beside the one on screen, as the runner tells the list about them.
+const alongside = new Map<string, ConversationLive>();
+function seedSeveralTask(task: SeveralTask) {
+  backdated(task.ago, () => {
+    const id = log.createSession(task.title);
+    const append = (type: string, data: Record<string, unknown>, step?: string) =>
+      log.append(id, { agent: "main", type, data, ...(step ? { step } : {}) } as never);
+    append("session.start", {
+      screen: { w: 2560, h: 1600, scale: 2 },
+      os: "linux",
+      title: task.title,
+    });
+    append("message.user", { messageId: ulid(), kind: "task", text: task.ask });
+    append("persona.choice", { persona: task.persona, by: "auto" });
+    append("message.assistant", { messageId: ulid(), text: task.said });
+    if (task.doing) {
+      append("step.start", { kind: "gui", intent: task.doing }, ulid());
+      alongside.set(id, {
+        state: "working",
+        since: new Date().toISOString(),
+        onScreen: false,
+        activity: task.doing,
+        persona: task.persona,
+      });
+    } else append("session.end", { reason: "done" });
+    conversations.organize(id, { look: task.look });
+  });
+}
+
+function seedSeveral(s: AgentSession) {
+  for (const task of [...ENDED, ...UNDER_WAY].sort((a, b) => b.ago - a.ago)) seedSeveralTask(task);
+  const a: Append = (type, data, step) => {
+    skew += type === "step.end" ? 1_400_000 : 300_000;
+    s.append(type, data, step);
+  };
+  a("message.user", {
+    messageId: ulid(),
+    kind: "task",
+    text: "Plan three autumn days in Kyoto for two people who love food, temples and long walks. Check opening hours and entry fees, and make it a PDF.",
+  });
+  a("persona.choice", {
+    persona: "research",
+    by: "auto",
+    reason: "Travel plans from public sources",
+  });
+  a("agent.state", { state: "thinking" });
+  a("message.assistant", {
+    messageId: ulid(),
+    text: "Sure. I'll read Wikivoyage and the temples' own sites, check the hours and fees, then lay out the days and make the PDF.",
+  });
+  a("plan.set", {
+    items: [
+      { id: "read", text: "Read up on the districts", status: "doing" },
+      { id: "check", text: "Check hours and entry fees", status: "todo" },
+      { id: "days", text: "Lay out the three days", status: "todo" },
+      { id: "pdf", text: "Make the PDF", status: "todo" },
+    ],
+  });
+  const guide = ulid();
+  a(
+    "step.start",
+    { kind: "browser", planItem: "read", intent: "Reading Wikivoyage's guide to Kyoto" },
+    guide,
+  );
+  a("tool.start", { tool: "browser_read", title: "Reading page" }, guide);
+  a("tool.end", { ok: true }, guide);
+  a("step.end", { status: "ok" }, guide);
+  a("message.assistant", {
+    messageId: ulid(),
+    text: "Kyoto's sights sit in clusters, so each day can keep to one area on foot. Higashiyama first: Kiyomizu-dera, Gion and the Philosopher's Path.",
+  });
+  a("message.user", {
+    messageId: ulid(),
+    kind: "steer",
+    text: "We land on Friday 13 November, so start the plan on the Saturday.",
+  });
+  a("message.assistant", {
+    messageId: ulid(),
+    text: "Got it: Saturday 14 to Monday 16 November. The maples should be near their best then.",
+  });
+  s.setStatus("running");
+  a("agent.state", { state: "acting" });
+  liveStep = ulid();
+  a(
+    "step.start",
+    { kind: "browser", planItem: "read", intent: "Reading about Higashiyama's temples" },
+    liveStep,
+  );
+  a(
+    "action.intent",
+    { verb: "click", label: "Open the See section", risk: "none", point: { x: 704, y: 1037 } },
+    liveStep,
+  );
+  conversations.organize(s.id, { look: ["mortarboard", "round-glasses", "star-pin"] });
+}
+
 // QA_LIBRARY=<n> seeds n ended tasks over the last four months for Replay's library: long and short
 // titles, every ending, and videos from a few megabytes to gigabytes (sparse files, so nothing is
 // written). As retention would have, a video older than 30 days is gone and its screenshots stay.
@@ -1563,15 +1738,18 @@ if (withSession && initial) {
   heldAt = base.nowMicros();
   const researching = env.QA_ACTIVITY === "research";
   const readme = env.QA_ACTIVITY === "readme";
+  const several = env.QA_ACTIVITY === "several";
   if (readme) earlier = seedReadmeFind();
   session = newSession(
     readme
       ? README_TITLE
-      : env.QA_ACTIVITY === "long"
-        ? "Sample · dog drawing"
-        : researching
-          ? "Sample · heat pump research"
-          : "Sample · monthly report",
+      : several
+        ? "Three autumn days in Kyoto"
+        : env.QA_ACTIVITY === "long"
+          ? "Sample · dog drawing"
+          : researching
+            ? "Sample · heat pump research"
+            : "Sample · monthly report",
     "Sample task",
     earlier,
     undefined,
@@ -1582,6 +1760,7 @@ if (withSession && initial) {
   if (env.QA_ACTIVITY === "long") seedLongTask(session);
   else if (researching) seedResearchTask(session);
   else if (readme) seedReadmeCheck(session);
+  else if (several) seedSeveral(session);
   else seedTask(session, phase === "finished");
   skew -= base.nowMicros() - heldAt;
   heldAt = undefined;
@@ -2068,6 +2247,7 @@ const agent: AgentRoutesDeps = {
       if (!session || key !== session.id) throw new AgentError(409, "This task has ended.");
       session.append("persona.choice", { persona, by: "user" });
     },
+    liveStatus: (key) => alongside.get(key),
     // As the runner does: the dot the live task works as now.
     dotOf: (key) => {
       if (!session || key !== session.id || session.stopped) return undefined;
@@ -2820,7 +3000,9 @@ routes.get("/owned-browser.js", (c) =>
 );
 routes.get("/__qa/picture", (c) => c.json({ ...pictureDown, home: desktopHome }));
 routes.get("/owned-desktop.webp", (c) =>
-  c.body(readFileSync(join(ASSETS, "frame-1.webp")), 200, { "content-type": "image/webp" }),
+  c.body(readFileSync(env.QA_PICTURE ?? join(ASSETS, "frame-1.webp")), 200, {
+    "content-type": "image/webp",
+  }),
 );
 
 // QA control plane (no auth; loopback only, scratch fixture). A step returns why it can't run.
