@@ -55,7 +55,8 @@ async function listLayer(kind, chunks, visit) {
   // GNU tar stops reading at the archive's end marker and closes its input; what's left is padding.
   lister.stdin.on("error", () => {});
   const bytes = Readable.from(chunks, { objectMode: false });
-  const decode = kind === "gzip" ? [createGunzip()] : kind === "zstd" ? [createZstdDecompress()] : [];
+  const decode =
+    kind === "gzip" ? [createGunzip()] : kind === "zstd" ? [createZstdDecompress()] : [];
   const fed = pipeline(bytes, ...decode, lister.stdin).then(
     () => undefined,
     (error) => error,
