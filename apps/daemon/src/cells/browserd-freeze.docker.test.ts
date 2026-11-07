@@ -55,6 +55,9 @@ setInterval(() => {
   while (performance.now() < end);
 }, 40);
 setInterval(() => {
+  fetch("/beat?page=" + location.pathname, { cache: "no-store" }).catch(() => {});
+}, 250);
+setInterval(() => {
   document.getElementById("state").textContent = JSON.stringify({
     ...stats,
     visible: document.visibilityState,
@@ -64,11 +67,27 @@ setInterval(() => {
 </script></body>`;
 
 const GATE = `
-import http.server, time, urllib.parse
+import http.server, json, time, urllib.parse
 page = ${JSON.stringify(BUSY)}.encode()
+beats = {}
 class Gate(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        path = urllib.parse.urlsplit(self.path).path
+        url = urllib.parse.urlsplit(self.path)
+        path = url.path
+        if path == "/beat":
+            which = urllib.parse.parse_qs(url.query).get("page", [""])[0]
+            beats[which] = beats.get(which, 0) + 1
+            self.send_response(204)
+            self.end_headers()
+            return
+        if path == "/beats":
+            body = json.dumps(beats).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         self.send_response(200)
         if path == "/slow.bin":
             self.send_header("content-type", "application/octet-stream")
@@ -210,6 +229,19 @@ describe.skipIf(!DOCKER_TESTS)("pages nobody uses, frozen in a real browser cell
     if (!names) return 0;
     const stat = docker("exec", names.browser, "cat", "/sys/fs/cgroup/cpu.stat");
     return Number(/usage_usec (\d+)/u.exec(stat)?.[1] ?? 0);
+  };
+  // How often each page has called home, counted by the gate: a frozen page's timers don't run.
+  const beats = (): Record<string, number> => {
+    if (!names) return {};
+    const read =
+      "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:3128/beats').read().decode())";
+    return JSON.parse(docker("exec", names.gate, "python3", "-c", read));
+  };
+  const beating = async (ms: number) => {
+    const before = beats();
+    await sleep(ms);
+    const after = beats();
+    return (page: string) => (after[page] ?? 0) - (before[page] ?? 0);
   };
   // The whole cell's CPU over a while, one core = 100 %.
   const cpu = async (ms = SAMPLE_MS) => {
@@ -494,7 +526,13 @@ describe.skipIf(!DOCKER_TESTS)("pages nobody uses, frozen in a real browser cell
     expect((await freeze([sessionB])).frozen).toBe(1);
     await sleep(2000);
     measured.oneFrozenCpu = await cpu();
-    expect(measured.oneFrozenCpu).toBeLessThan(Number(measured.twoBusyCpu) * 0.8);
+    // One busy page can take most of the cell's four CPUs by itself, so the cell's CPU alone can't
+    // tell one frozen page from none: what each page does can.
+    const calls = await beating(3000);
+    measured.frozenPageCalls = calls("/signin");
+    measured.workingPageCalls = calls("/app");
+    expect(measured.frozenPageCalls).toBe(0);
+    expect(measured.workingPageCalls).toBeGreaterThan(5);
     expect(await running(permitB, tabB)).toMatchObject({ visible: "visible" });
 
     // A's turn brings its window forward, shown and running.
