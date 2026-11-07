@@ -5,6 +5,9 @@ import { navigable } from "./cdp-guard.ts";
 
 export { BROWSER_NAVIGATION_TIMEOUT_MS };
 export const MAX_NAVIGATION_EVENTS = 256;
+// Documents a page may move on to by itself after the requested one commits, as web.telegram.org
+// sends itself to /k/ by script and a challenge page reloads itself.
+export const FOLLOWED_DOCUMENTS = 3;
 
 const identifier = schema.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
 const frameSchema = schema.object({
@@ -61,7 +64,9 @@ export async function navigateOwnedDocument(
   let dispatched = false;
   let initial: schema.infer<typeof frameSchema> | undefined;
   let acknowledgement: schema.infer<typeof acknowledgementSchema> | undefined;
-  let navigated: schema.infer<typeof frameSchema> | undefined;
+  // The root's documents in the order they committed: the requested one first, then any the page
+  // moved on to by itself.
+  const committed: schema.infer<typeof frameSchema>[] = [];
   let withinDocument: string | undefined;
   let eventCount = 0;
   const readyDocuments = new Set<string>();
@@ -86,10 +91,12 @@ export async function navigateOwnedDocument(
     if (!acknowledgement || !initial || refusal) return;
     if (acknowledgement.loaderId) {
       if (withinDocument !== undefined) return refuse("stale");
-      if (navigated && navigated.loaderId !== acknowledgement.loaderId) return refuse("stale");
-      if (navigated && readyDocuments.has(acknowledgement.loaderId)) loaded.resolve();
+      const requested = committed[0];
+      if (requested && requested.loaderId !== acknowledgement.loaderId) return refuse("stale");
+      const latest = committed.at(-1);
+      if (latest && readyDocuments.has(latest.loaderId)) loaded.resolve();
     } else {
-      if (navigated) return refuse("stale");
+      if (committed.length) return refuse("stale");
       if (withinDocument !== undefined) {
         if (withinDocument !== requestedUrl) return refuse("stale");
         loaded.resolve();
@@ -141,9 +148,14 @@ export async function navigateOwnedDocument(
       const frame = schema.object({ frame: frameSchema }).parse(params).frame;
       if (frame.parentId) return;
       count();
-      if (frame.id !== initial?.id || navigated || withinDocument !== undefined)
+      if (
+        frame.id !== initial?.id ||
+        withinDocument !== undefined ||
+        committed.some((document) => document.loaderId === frame.loaderId) ||
+        committed.length > FOLLOWED_DOCUMENTS
+      )
         return refuse("stale");
-      navigated = frame;
+      committed.push(frame);
     });
     listen("Page.navigatedWithinDocument", (params) => {
       const event = schema
@@ -153,7 +165,7 @@ export async function navigateOwnedDocument(
       count();
       // The committed document may rewrite its own URL with the history API before it loads, as
       // sign-in pages do; the final frame check still requires that same document.
-      if (navigated) return;
+      if (committed.length) return;
       if (withinDocument !== undefined) return refuse("stale");
       withinDocument = new URL(event.url).href;
     });
@@ -197,7 +209,7 @@ export async function navigateOwnedDocument(
       if (
         acknowledgement.frameId !== initial.id ||
         (acknowledgement.errorText && acknowledgement.errorText !== "net::ERR_ABORTED") ||
-        navigated ||
+        committed.length ||
         withinDocument !== undefined ||
         final.id !== initial.id ||
         final.loaderId !== initial.loaderId ||
@@ -219,7 +231,8 @@ export async function navigateOwnedDocument(
     check();
     if (
       final.id !== initial.id ||
-      final.loaderId !== (acknowledgement.loaderId ?? initial.loaderId) ||
+      final.loaderId !==
+        (acknowledgement.loaderId ? committed.at(-1)?.loaderId : initial.loaderId) ||
       !navigable(frameUrl(final)) ||
       (!acknowledgement.loaderId && frameUrl(final) !== requestedUrl)
     )
