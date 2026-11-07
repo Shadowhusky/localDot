@@ -17,6 +17,7 @@ import {
   connectorRoutes,
 } from "./connectors/routes.ts";
 import { type DeliverablesDeps, deliverableRoutes } from "./deliverables/routes.ts";
+import { type DockRoutesDeps, dockRoutes } from "./desktopd/dock.ts";
 import { type DoctorSelfTestsDeps, doctorSelfTestRoutes } from "./doctor-selftests.ts";
 import { type DotsRoutesDeps, dotsRoutes } from "./dots/routes.ts";
 import { errorCode } from "./error-code.ts";
@@ -59,6 +60,7 @@ export interface AppOptions {
   browserEngine?: BrowserEngineDeps;
   ui?: { dir: string };
   gateway?: GatewayRoutesDeps;
+  dock?: DockRoutesDeps;
   keys?: KeyRoutesDeps;
   agent?: AgentRoutesDeps;
   search?: SearchRoutesDeps;
@@ -94,6 +96,7 @@ export function createApp({
   browserEngine,
   ui,
   gateway,
+  dock,
   keys,
   agent,
   search,
@@ -289,6 +292,7 @@ export function createApp({
   if (search) searchRoutes(app, search);
   if (routines) routineRoutes(app, routines);
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
+  if (dock) dockRoutes(app, dock);
   if (replay) replayRoutes(app, replay);
   if (deliverables) deliverableRoutes(app, { ...deliverables, port });
   if (notify) notifyRoutes(app, notify);
