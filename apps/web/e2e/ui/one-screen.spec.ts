@@ -87,6 +87,23 @@ async function revealDock(page: Page) {
   await expect(dockUp(page)).toHaveCount(1);
 }
 
+// The item's shelf goes on from Plank's, to one item past its end (893 px across at 1x), and its
+// icon keeps Plank's 54 px pitch from the last pinned app's (centred on 856 px) and its centre line.
+async function onPlanksShelf(page: Page) {
+  const box = await pictureBox(page);
+  const unit = box.width / 1280;
+  const shelf = await stageOf(page).locator(".browser-dock[data-joined]").boundingBox();
+  const icon = await dockItem(page).locator(".browser-icon").boundingBox();
+  if (!shelf || !icon) throw new Error("The dock item is missing");
+  const near = (got: number, want: number) => expect(Math.abs(got - want)).toBeLessThanOrEqual(1);
+  near(shelf.x, box.x + 878 * unit);
+  near(shelf.x + shelf.width, box.x + (893 + 54) * unit);
+  near(shelf.y, box.y + 732 * unit);
+  near(shelf.y + shelf.height, box.y + box.height);
+  near(icon.x + icon.width / 2, box.x + (856 + 54) * unit);
+  near(icon.y + icon.height / 2, box.y + 765 * unit);
+}
+
 // The dock item, as a finger or a pointer reaches it: when a window is over the dock, the dock is
 // brought back first.
 async function useDock(page: Page) {
@@ -208,12 +225,13 @@ for (const colorScheme of ["light", "dark"] as const)
         await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
       }
       await expect(dockUp(page)).toHaveCount(0, { timeout: 8000 });
-      // An empty desktop leaves the dock clear: the item stays up.
+      // An empty desktop leaves the dock clear: the item stays up, the last on the dock's shelf.
       await page.request.post(`${fixture.origin}/__qa/desktop/home`);
       await expect(dockUp(page)).toHaveCount(1);
       await expect(dockItem(page)).toBeVisible();
       await page.waitForTimeout(1500);
       await expect(dockUp(page)).toHaveCount(1);
+      await onPlanksShelf(page);
       await shoot(page, "dock-clear");
       // A window over the dock again.
       await page.request.post(`${fixture.origin}/__qa/desktop/window`);
@@ -406,21 +424,21 @@ test("shows the window and its dock item in the desktop's own look", async ({ pa
   await inFront(page, "desktop");
   await page.request.post(`${fixture.origin}/__qa/desktop/home`);
   await page.mouse.move(box.x + 4, box.y + 4);
-  await expect(dockUp(page)).toHaveCount(1);
-  await page.waitForTimeout(300);
-  await crop(page, stageOf(page).locator(".browser-dock"), "dock-on-desktop");
+  await expect(stageOf(page).locator(".browser-dock[data-joined]")).toHaveCount(1);
+  await page.waitForTimeout(800);
+  await crop(page, stageOf(page).locator(".browser-dock"), "dock-on-desktop", 160);
 });
 
-async function crop(page: Page, target: Locator, name: string) {
+async function crop(page: Page, target: Locator, name: string, before = 24) {
   const box = await target.boundingBox();
   if (!box) throw new Error(`${name} is missing`);
   const pad = 24;
   await page.screenshot({
     path: test.info().outputPath(`${test.info().project.name}-${name}.png`),
     clip: {
-      x: box.x - pad,
+      x: box.x - before,
       y: box.y - pad,
-      width: box.width + 2 * pad,
+      width: box.width + before + pad,
       height: box.height + 2 * pad,
     },
   });

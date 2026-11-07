@@ -315,12 +315,23 @@ const show=(down)=>{
 const ask=()=>fetch('/__qa/picture',{cache:'no-store'}).then((r)=>r.json()).then((s)=>{seen=s;show(s[screen])}).catch(()=>{});
 ask();setInterval(ask,1000);
 `;
-// The desktop shows the last task's window, or (POST /__qa/desktop/home) its empty home screen.
+// The desktop shows the last task's window, or (POST /__qa/desktop/home) its empty home screen,
+// with its dock as Plank draws it at 2x (cells/desktop's localdot-glass): a shelf from 774 to 1786
+// across and 1464 down, 36 px corners, a 2 px edge half outside the glass and a shine inside it, and
+// nine 84 px tiles 108 px apart (stand-ins for the apps' icons, the second the desktop's Chromium).
 const DESKTOP_JS = clientJs(`const still=new Image();still.src='/owned-desktop.webp';
+const shelf=(inset,r)=>{ctx.beginPath();ctx.roundRect(774+inset,1464+inset,1012-2*inset,136-2*inset,r);};
+const tiles=['#4a8af4','#ffffff','#1e1e1e','#f2f0ec','#f4f4f4','#1c7ce8','#1fa83a','#f57c18','#efece6'];
 const home=()=>{const g=ctx.createLinearGradient(0,0,2560,1600);g.addColorStop(0,'#cdc6ee');
 g.addColorStop(0.5,'#e8ecf5');g.addColorStop(1,'#a8d2ee');ctx.fillStyle=g;ctx.fillRect(0,0,2560,1600);
-ctx.fillStyle='#f3f4f8';ctx.fillRect(0,0,2560,48);ctx.fillStyle='rgba(255,255,255,0.72)';
-ctx.fillRect(780,1452,1000,116);};
+ctx.fillStyle='#f3f4f8';ctx.fillRect(0,0,2560,48);
+const glass=ctx.createLinearGradient(0,1464,0,1600);glass.addColorStop(0,'rgba(248,248,250,0.863)');
+glass.addColorStop(1,'rgba(242,242,246,0.863)');shelf(0,36);ctx.fillStyle=glass;ctx.fill();
+ctx.lineWidth=2;ctx.strokeStyle='rgba(0,0,0,0.137)';ctx.stroke();
+const shine=ctx.createLinearGradient(0,1466,0,1598);shine.addColorStop(0,'rgba(255,255,255,0.59)');
+shine.addColorStop(1,'rgba(255,255,255,0.2)');shelf(3,33);ctx.strokeStyle=shine;ctx.stroke();
+tiles.forEach((fill,k)=>{const x=806+108*k;ctx.beginPath();ctx.roundRect(x,1490,84,84,19);ctx.fillStyle=fill;ctx.fill();
+if(k===1){ctx.beginPath();ctx.arc(x+42,1532,26,0,2*Math.PI);ctx.lineWidth=14;ctx.strokeStyle='#3d7ff0';ctx.stroke();}});};
 setInterval(()=>{if(seen.home)home();else if(still.complete)ctx.drawImage(still,0,0,canvas.width,canvas.height)},100);`);
 // The web browser's screen: a plain page, so a switch shows at a glance.
 const BROWSER_JS = clientJs(`const page=()=>{

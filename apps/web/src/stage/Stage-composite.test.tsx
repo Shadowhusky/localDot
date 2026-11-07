@@ -187,13 +187,17 @@ describe("the stage's one screen", () => {
       desktopFront(api);
       await waitFor(() => expect(shown()).toBe(true));
       expect(edge()).toBeNull();
+      // On the desktop's own shelf, as its last item.
+      expect(document.querySelector(".browser-dock")?.hasAttribute("data-joined")).toBe(true);
       dock.covered = true;
       await act(() => vi.advanceTimersByTimeAsync(DOCK_ASK_MS + 10));
       await waitFor(() => expect(shown()).toBe(false));
       expect(asked(fetchImpl)).toBeGreaterThanOrEqual(2);
-      // The pointer at the bottom edge brings it back, and it goes once the pointer leaves.
+      // The pointer at the bottom edge brings it back, on a shelf of its own, and it goes once the
+      // pointer leaves.
       fireEvent.pointerEnter(edge(), { pointerType: "mouse" });
       expect(shown()).toBe(true);
+      expect(document.querySelector(".browser-dock")?.hasAttribute("data-joined")).toBe(false);
       fireEvent.pointerLeave(edge(), { pointerType: "mouse" });
       fireEvent.pointerEnter(document.querySelector(".browser-dock") as HTMLElement, {
         pointerType: "mouse",
