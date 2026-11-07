@@ -564,41 +564,43 @@ agent = createAgent({
 });
 const running = agent;
 // Pages nobody uses in a computer's web browser freeze, until someone looks or a task needs them.
-idlePages = new BrowserIdlePages({
-  browsers: () =>
-    orchestrator.list().flatMap((cell) => {
-      const ready = owned.endpoints(cell.id);
-      return ready ? [{ parentCellId: cell.id, instance: ready.instance }] : [];
-    }),
-  viewers: (id) => browserStreams.forParent(id)?.stream.viewers ?? 0,
-  tasks: (id) =>
-    live.sessionsOn(id).map((sessionId) => {
-      const state = running.runner.liveStatus(sessionId)?.state;
-      return {
-        id: sessionId,
-        busy: state === "working" || state === "waiting-for-computer",
-        controlled: running.runner.get(sessionId)?.controlTaken === true,
-      };
-    }),
-  send: async (id, instance, request) => {
-    const ready = owned.endpoints(id);
-    if (ready?.instance !== instance) throw new Error("the web browser changed");
-    const client = new BrowserClient(ready);
-    try {
-      await client.lifecycle(
-        {
-          browserCellId: ready.browserCellId,
-          parentCellId: ready.parentCellId,
-          instance,
-          ...(request.frozen ? { frozen: true, keep: [...request.keep] } : { frozen: false }),
-        },
-        { signal: AbortSignal.timeout(20_000), check: () => {} },
-      );
-    } finally {
-      client.close();
-    }
-  },
-});
+// Opt-in until a task's own window can no longer freeze under it.
+if (process.env.LOCALDOT_IDLE_PAGES === "1")
+  idlePages = new BrowserIdlePages({
+    browsers: () =>
+      orchestrator.list().flatMap((cell) => {
+        const ready = owned.endpoints(cell.id);
+        return ready ? [{ parentCellId: cell.id, instance: ready.instance }] : [];
+      }),
+    viewers: (id) => browserStreams.forParent(id)?.stream.viewers ?? 0,
+    tasks: (id) =>
+      live.sessionsOn(id).map((sessionId) => {
+        const state = running.runner.liveStatus(sessionId)?.state;
+        return {
+          id: sessionId,
+          busy: state === "working" || state === "waiting-for-computer",
+          controlled: running.runner.get(sessionId)?.controlTaken === true,
+        };
+      }),
+    send: async (id, instance, request) => {
+      const ready = owned.endpoints(id);
+      if (ready?.instance !== instance) throw new Error("the web browser changed");
+      const client = new BrowserClient(ready);
+      try {
+        await client.lifecycle(
+          {
+            browserCellId: ready.browserCellId,
+            parentCellId: ready.parentCellId,
+            instance,
+            ...(request.frozen ? { frozen: true, keep: [...request.keep] } : { frozen: false }),
+          },
+          { signal: AbortSignal.timeout(20_000), check: () => {} },
+        );
+      } finally {
+        client.close();
+      }
+    },
+  });
 const idleWatches = [
   browserStreams.subscribe((cell) => idlePages?.changed(owned.parentOf(cell.id))),
   owned.subscribe((parent) => idlePages?.changed(parent)),
