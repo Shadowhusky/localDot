@@ -136,25 +136,49 @@ to the user, two video sources underneath. Everything is client-only except whic
 for; dot's screenshots and coordinates stay each screen's own.
 
 **Where it sits.** `stage/composite.ts`. The browser's whole 1280×800 picture fits under the desktop's
-24 px menu bar at one scale (0.97), so its pixels keep their shape, and a 19 px margin of desktop shows
-each side. The other way to fill the width is to squash it 3 % or to crop what dot can see, and a
-Chromium window one screen-bar shorter would change what dot's screenshots contain. The stage reads
-one to one no more often than it did: its canvas almost never has a device pixel per frame pixel.
+24 px menu bar and a 28 px title bar at one scale (0.935), so its pixels keep their shape, and a 42 px
+margin of desktop shows each side. The other way to fill the width is to squash it or to crop what dot
+can see, and a Chromium window one screen-bar shorter would change what dot's screenshots contain. The
+stage reads one to one no more often than it did: its canvas almost never has a device pixel per frame
+pixel.
+
+**How it looks.** The owner asked for no foreign button: the browser should read as a native window on
+dot's desktop. `stage/BrowserWindow.tsx` draws what the desktop's own apps have, from the desktop
+image's own look (cells/desktop): WhiteSur-Light's xfwm4 title bar over the picture (white, a grey
+edge, the title in Inter Semi-Bold 10 pt, #707070, centred), with the browser's name, as the page title
+never reaches the app, and the minimise light alone, where the desktop's windows have their first: no
+close, which would close dot's window, and no zoom. The web browser has an item in Plank's
+localdot-glass (48 px icons 54 px apart on a 67 px shelf, 18 px corners, the same fill and strokes),
+its own one-item shelf on the dock's line, 8 px right of where the desktop's nine pinned apps end. It
+can't be an item of Plank's own dock, and can't move Plank's items aside: Plank is in the desktop's X
+server, and the image stays as it is. Nor can the stage know where Plank is at a given moment: it
+hides whenever a desktop window overlaps it (`window-dodge`), it grows by an item for each unpinned app
+that runs, centred, and the browser's window covers it. So the item reads as the end of the dock when
+the dock shows and as a dock of one when it doesn't; with two or more unpinned apps running it would
+overlap Plank's last. A light under the item, in dot's colour, says dot works in the browser. With the
+window in front the item gets out of its way as Plank does for a window, and comes back while the
+pointer is at the bottom edge; with no hover, as on a phone, it stays up.
 
 **What follows what.** `useStageFront`: dot's latest confirmed screen is in front, unless the user
-brought the other forward with the control beside the full-screen button, or by a press on the menu
-bar. dot moving ends that, and so does the user handing back; taking control keeps what is on show. The
-window fades in over 160 ms, not under reduced motion. Per-task windows don't change this: the stream
-is the display, so the stage shows the task whose window is up, as in phase 1, and a task on the desktop
-isn't pulled along by another's turn in the browser.
+brought the other forward with the dock item, the minimise light, Alt+Tab, or a press on the menu bar
+or beside the window. dot moving ends that, and so does the user handing back; taking control keeps
+what is on show. A task on show that stops working, or that the page takes to be at rest, leaves its
+screen in front; a ticket says whether the browser still runs, and which, so a browser restarted since
+is the one shown and none falls back to the desktop. A new conversation, or one taken up, starts from
+the desktop, as a task does. The window fades in over 160 ms, not under reduced motion.
+Per-task windows don't change this: the stream is the display, so the stage shows the task whose
+window is up, as in phase 1, and a task on the desktop isn't pulled along by another's turn in the
+browser.
 
 **Input.** `stagePoint` routes by rectangle: the window to the browser, the bar to the desktop, the
-margins to nothing, since a click there must never land on a neighbour's control. A bar too thin to
-aim at (under 16 CSS px, as on a phone) takes nothing. A press stays on its own screen and stops at its
-edge. Keys and the control strip go to what is in front. The press that brings the other screen forward
-does so as it lets go, so its release can't go astray while the screens change places. Each stream
-message may name a `screen`; none means dot's, so a task that stays on one screen sends what it always
-did.
+margins to nothing, since a click there must never land on a neighbour's control, and the title bar
+to neither, as the stage's own. A bar too thin to aim at (under 16 CSS px, as on a phone) takes
+nothing. A press stays on its own screen and stops at its edge. Keys and the control strip go to what
+is in front; Alt+Tab or Command+Tab, from the keyboard field or a page with nothing else focused, bring
+the other forward and reach neither (a Mac keeps Command+Tab for itself). The keyboard field keeps the
+keys when the screens change places. The press that brings the other screen forward does so as it lets
+go, so its release can't go astray while the screens change places. Each stream message may name a
+`screen`; none means dot's, so a task that stays on one screen sends what it always did.
 
 **The daemon.** A hold may reach either screen, as `forUser` already assumed for recordings.
 `ManualStream` opens the access an input names, letting go of held buttons first. With dot on the
@@ -194,6 +218,7 @@ can show (7–32 % against 10–36 %).
 
 - A click beside the window does nothing, and so does a tap on the menu bar on a phone.
 - A press on the menu bar shows a menu only once it lets go and the desktop comes forward.
-- Bringing the screen forward takes the keyboard field's focus, so the next keys need a click first.
 - The clock in the menu bar can be up to half a minute old while the user only watches.
 - **Sign in without agent control** is offered only when dot's own screen is the browser.
+- The title bar names the browser, not the page: the page's title would have to come from browserd.
+- The dock item can't follow Plank: hidden, widened by unpinned apps or covered, Plank goes on as before.
