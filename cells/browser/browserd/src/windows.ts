@@ -18,6 +18,10 @@ const WINDOW_POLL_MS = 50;
 const SURFACE_SETTLES_MS = 3000;
 const SURFACE_RETRY_MS = 100;
 const WINDOW_STATE_MS = 2000;
+// A freeze leaves a window its task used this recently awake: the daemon's view of which tasks are at
+// work can lag a request the task has already sent, as a turn that starts just after it decided.
+export const BROWSER_FREEZE_AFTER_USE_MS = 10_000;
+const KEPT_USES = 512;
 
 export class BrowserWindowError extends Error {
   constructor(readonly reason: "unavailable" | "stale") {
@@ -56,6 +60,7 @@ export interface BrowserWindowsDeps {
   >;
   native: Pick<BrowserNative, "command">;
   secrets: Pick<BrowserSecrets, "secretPages" | "reload">;
+  now?(): number;
 }
 
 // One browser, one window per task. Each permit is good for its task's windows only: the one the
@@ -73,6 +78,8 @@ export class BrowserWindows {
   #uses = 0;
   // Raising, freezing and waking windows take turns.
   #queue: Promise<unknown> = Promise.resolve();
+  // When each task and tab was last used.
+  readonly #used = new Map<string, number>();
 
   constructor(private readonly deps: BrowserWindowsDeps) {}
 
@@ -156,6 +163,7 @@ export class BrowserWindows {
   ): Promise<BrowserWindowReply> {
     const sessionId = permit.owner.sessionId;
     const lease = this.deps.control.admit(permit);
+    this.#use(sessionId);
     try {
       const scope = AbortSignal.any([signal, lease.signal]);
       this.#sync();
@@ -208,6 +216,7 @@ export class BrowserWindows {
 
   // The user takes the browser in this task's window, after every action has drained.
   front(sessionId: string, signal: AbortSignal): Promise<void> {
+    this.#use(sessionId);
     return this.#exclusive(async () => {
       this.#sync();
       const window = this.#newest(sessionId);
@@ -218,7 +227,7 @@ export class BrowserWindows {
   }
 
   // Freezes the pages of every window but those of the tasks in `keep`, finished tasks' windows
-  // included, and wakes those.
+  // included, and wakes those. A window a task has just used stays as it is.
   freeze(keep: readonly string[], signal: AbortSignal): Promise<number> {
     return this.#exclusive(async () => {
       const pages = this.#sync();
@@ -231,6 +240,11 @@ export class BrowserWindows {
           await this.#wake(window, signal);
           continue;
         }
+        if (
+          this.#recent(window.owner) ||
+          pages.some((page) => page.windowId === window.id && this.#recent(page.id))
+        )
+          continue;
         const tabs = await this.#lifecycle(window, "frozen", pages, signal);
         if (!tabs) continue;
         window.frozen = true;
@@ -254,6 +268,7 @@ export class BrowserWindows {
   // Before anything reads or drives a tab: its window's pages wake, and with `show` its window
   // shows again if it is the one on screen. A window elsewhere shows as it comes forward.
   wakeTab(tabId: string, show: boolean, signal: AbortSignal): Promise<void> {
+    this.#use(tabId);
     if (!this.#asleep()) return Promise.resolve();
     return this.#exclusive(async () => {
       const page = this.#sync().find((candidate) => candidate.id === tabId);
@@ -266,6 +281,7 @@ export class BrowserWindows {
   }
 
   wakeTask(sessionId: string, signal: AbortSignal): Promise<void> {
+    this.#use(sessionId);
     if (!this.#asleep()) return Promise.resolve();
     return this.#exclusive(async () => {
       this.#sync();
@@ -281,6 +297,26 @@ export class BrowserWindows {
       this.#sync();
       await this.#showScreen(signal);
     });
+  }
+
+  #use(key: string): void {
+    const now = this.#now();
+    this.#used.delete(key);
+    this.#used.set(key, now);
+    if (this.#used.size <= KEPT_USES) return;
+    for (const [old, at] of this.#used) {
+      if (this.#used.size <= KEPT_USES && now - at < BROWSER_FREEZE_AFTER_USE_MS) break;
+      this.#used.delete(old);
+    }
+  }
+
+  #recent(key: string | undefined): boolean {
+    const at = key === undefined ? undefined : this.#used.get(key);
+    return at !== undefined && this.#now() - at < BROWSER_FREEZE_AFTER_USE_MS;
+  }
+
+  #now(): number {
+    return this.deps.now?.() ?? performance.now();
   }
 
   // A browser relaunched since has none of these pages.
