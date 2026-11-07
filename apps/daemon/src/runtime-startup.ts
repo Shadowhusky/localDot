@@ -11,6 +11,8 @@ export class RuntimeStartup {
   constructor(
     private readonly check: () => Promise<void>,
     private readonly now: () => number = Date.now,
+    // The same check, with longer to answer: a late reply long after the last one gets this.
+    private readonly patient: () => Promise<void> = check,
   ) {}
   async run(
     recover: () => Promise<void>,
@@ -54,10 +56,17 @@ export class RuntimeStartup {
       return { docker: "ready", startup: this.state };
     } catch (error) {
       // A refused or missing socket is gone; a reply that is only late is a busy engine.
-      const busy =
-        (error as { timedOut?: unknown })?.timedOut === true &&
-        this.now() - this.#readyAt < BUSY_GRACE_MS;
-      return { docker: busy ? "ready" : "unavailable", startup: this.state };
+      if ((error as { timedOut?: unknown })?.timedOut !== true)
+        return { docker: "unavailable", startup: this.state };
+      if (this.now() - this.#readyAt < BUSY_GRACE_MS)
+        return { docker: "ready", startup: this.state };
+      try {
+        await this.patient();
+        this.#readyAt = this.now();
+        return { docker: "ready", startup: this.state };
+      } catch {
+        return { docker: "unavailable", startup: this.state };
+      }
     }
   }
 }

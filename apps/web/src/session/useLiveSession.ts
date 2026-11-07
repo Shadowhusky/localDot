@@ -105,7 +105,9 @@ export function useLiveSession(
   const [answeredChoice, setAnsweredChoice] = useState(choice);
   const [agentFeed] = useState(createAgentFeed);
   const [version, setVersion] = useState(0);
-  const [ended, setEnded] = useState(false);
+  // The task whose end has been seen, by id: a flag would still hold the last task's end in the
+  // render that first shows the next one.
+  const [ended, setEnded] = useState<string | null>(null);
   // Read at the next render: the HUD re-reads each second anyway.
   const clock = useRef<SessionClock | null>(null);
   const modelRef = useRef<SessionModel>(emptyModel());
@@ -121,7 +123,8 @@ export function useLiveSession(
       : null;
   const previousCell = useRef(cellId);
   const lookNow = useRef(() => {});
-  // A task that has ended never runs again, whatever a slower answer says.
+  // A task whose end has been seen never runs again, whatever a slower answer says. Nothing else
+  // puts a task here: the computer may yet name one it left out.
   const over = useRef(new Set<string>());
 
   useEffect(() => {
@@ -137,7 +140,7 @@ export function useLiveSession(
   // A conversation chosen anew (a new one, or an older one continued) takes the page once no live
   // task is at work there. On opening, a running computer first says whether it still runs one.
   const applied = useRef<string | null | undefined>(undefined);
-  const working = !!shown?.live && !ended;
+  const working = !!shown?.live && ended !== shown.sessionId;
   const asking = !!cellId && ready && answered !== cellId;
   useEffect(() => {
     if (resting === undefined || resting === applied.current) return;
@@ -150,7 +153,8 @@ export function useLiveSession(
     if (working) return;
     applied.current = resting;
     setShown((now) => {
-      if (now?.live) over.current.add(now.sessionId);
+      // A task found at work since this render keeps the page.
+      if (now?.live && !over.current.has(now.sessionId)) return now;
       if (now?.sessionId === resting) return now.live ? { ...now, live: false } : now;
       return resting ? { sessionId: resting, cellId: null, live: false } : null;
     });
@@ -174,7 +178,8 @@ export function useLiveSession(
   }, [choice, resting]);
 
   // Asks the computer for its task: often while it may be starting one, every five seconds
-  // otherwise. A task the computer no longer runs stays on show, at rest.
+  // otherwise. A task the computer no longer runs stays on show, at rest; one answer that leaves
+  // out a task still at work is asked again a moment later, and only a second such answer rests it.
   useEffect(() => {
     if (!cellId || !ready) return;
     let cancelled = false;
@@ -182,6 +187,8 @@ export function useLiveSession(
     let again = false;
     let first = true;
     let misses = 0;
+    // Answers in a row that name no task of the chosen conversation.
+    let absent = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       if (cancelled || polling || document.visibilityState === "hidden") return;
@@ -200,7 +207,6 @@ export function useLiveSession(
           );
         // A computer running several tasks names the chosen conversation's own; an older daemon
         // runs one.
-        const running = reply?.sessions ?? (reply?.sessionId ? [reply.sessionId] : []);
         const live = reply?.sessions ? reply.current : reply?.sessionId;
         const found =
           typeof live === "string" && ULID_PATTERN.test(live) && !over.current.has(live)
@@ -210,13 +216,15 @@ export function useLiveSession(
           if (first) setAnswered(cellId);
           setAnsweredChoice(chosen.current);
           first = false;
+          absent = found ? 0 : absent + 1;
+          const gone = absent > 1;
           setShown((now) => {
             if (found)
               return now?.live && now.cellId === cellId && now.sessionId === found
                 ? now
                 : { sessionId: found, cellId, live: true };
             if (!now?.live || now.cellId !== cellId) return now;
-            if (!running.includes(now.sessionId)) over.current.add(now.sessionId);
+            if (!gone && !over.current.has(now.sessionId)) return now;
             return { ...now, live: false };
           });
         }
@@ -226,7 +234,10 @@ export function useLiveSession(
         misses++;
         if (!cancelled) {
           if (!document.hidden)
-            timer = setTimeout(poll, again ? 0 : misses < QUICK_POLLS ? POLL_MS : IDLE_POLL_MS);
+            timer = setTimeout(
+              poll,
+              again ? 0 : misses < QUICK_POLLS || absent === 1 ? POLL_MS : IDLE_POLL_MS,
+            );
         }
       }
     };
@@ -259,7 +270,6 @@ export function useLiveSession(
       modelRef.current = emptyModel();
       modelOwner.current = sessionId;
       stage.current?.resetSession();
-      setEnded(false);
       clock.current = null;
       setVersion((v) => v + 1);
     }
@@ -391,7 +401,7 @@ export function useLiveSession(
       over.current.add(sessionId);
       agentFeed.connection("ended");
       socket?.close();
-      setEnded(true);
+      setEnded(sessionId);
     };
     if (agentFeed.read().history) live();
     else {
@@ -442,7 +452,7 @@ export function useLiveSession(
     model,
     version,
     clock: owned ? clock.current : null,
-    ended: owned && (ended || atRest),
+    ended: owned && (ended === sessionId || atRest),
     resting: atRest,
     known,
     answered: !cellId || !ready || answeredChoice === choice,

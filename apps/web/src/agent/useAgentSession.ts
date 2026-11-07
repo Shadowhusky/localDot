@@ -249,7 +249,11 @@ export function useAgentSession(
   const error = current.streamError ?? (owned ? view.error : null);
   const authorityEpoch = owned ? view.epoch : null;
   const history = matches && current.history;
-  const interrupted = matches && atRest && current.history && !current.model.ended;
+  // A task the daemon still reports at work was not cut short, so Continue, which starts the next
+  // task, is not offered for it.
+  const atWork =
+    owned && view.availability === "ready" && !!view.snapshot && view.snapshot.status !== "ended";
+  const interrupted = matches && atRest && current.history && !current.model.ended && !atWork;
   const connection = matches ? current.connection : "connecting";
   // The same view while nothing in it changed, so what is drawn from it alone need not draw again.
   return useMemo(

@@ -582,6 +582,33 @@ it("shows a child agent left running in a task at rest as interrupted", async ()
   );
   view.unmount();
 });
+it("reads a task at rest as cut short only once the daemon no longer has it at work", async () => {
+  for (const [reply, interrupted] of [
+    [() => json(snapshot()), false],
+    [() => new Response("no such live task", { status: 404 }), true],
+  ] as const) {
+    const api = createApi("inert", {
+      origin: "http://fixture",
+      fetchImpl: async (url) => {
+        const path = new URL(String(url)).pathname;
+        if (path.endsWith("/live")) return new Response(null, { status: 204 });
+        if (path.startsWith("/api/agent/sessions/")) return reply();
+        return json({ originMicros: 0, t: 0 });
+      },
+    });
+    const view = renderHook(() => {
+      const stage = useRef<StageHandle | null>(null);
+      const live = useLiveSession(api, cell(), stage, SESSION);
+      return useAgentSession(api, cell(), live);
+    });
+    await advance(1000);
+    open();
+    await advance(1000);
+    expect(view.result.current.history).toBe(true);
+    expect(view.result.current.interrupted).toBe(interrupted);
+    view.unmount();
+  }
+});
 it("does not render the app again for a status poll that brings the same answer", async () => {
   const f = server(() => json(snapshot()));
   let commits = 0;

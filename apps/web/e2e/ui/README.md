@@ -67,7 +67,8 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   starts the browser again in place. `POST /__qa/picture/drop` and `/resume` (`?screen=desktop` or
   `browser`, else both) take a screen's picture away and bring it back, as a lost stream does.
   `POST /__qa/desktop/home` empties the desktop to its home screen, as when the last task worked only
-  in the web browser, and `/__qa/desktop/window` puts the spreadsheet window back.
+  in the web browser, and `/__qa/desktop/window` puts the spreadsheet window back. The fake
+  desktopd's window stack follows: the spreadsheet window, maximised, covers the dock.
 - **Update:** `POST /__qa/update` makes a new version of the computer ready (the island's one-time
   notice and Settings' Update row); `QA_UPDATE_MS` sets how long the update then takes.
 - **Typing:** `typing.spec.ts` measures each key press to the frame that shows it while

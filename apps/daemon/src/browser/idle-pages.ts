@@ -25,6 +25,9 @@ export interface BrowserIdlePagesDeps {
   tasks(parentCellId: string): readonly IdleTask[];
   send(parentCellId: string, instance: string, request: IdleRequest): Promise<void>;
   now?(): number;
+  // Shorter than a minute and ten seconds only where a test drives the policy against a real cell.
+  graceMs?: number;
+  sweepMs?: number;
 }
 
 interface Computer {
@@ -54,10 +57,7 @@ export class BrowserIdlePages {
   #disposed = false;
 
   constructor(private readonly deps: BrowserIdlePagesDeps) {
-    this.#sweep = setInterval(
-      () => this.#safely(() => this.#considerAll(true)),
-      IDLE_PAGES_SWEEP_MS,
-    );
+    this.#sweep = setInterval(() => this.#safely(() => this.#considerAll(true)), this.#sweepMs);
     this.#sweep.unref?.();
     this.changed();
   }
@@ -134,9 +134,9 @@ export class BrowserIdlePages {
     for (const id of new Set([...busy, ...computer.busy])) computer.busyAt.set(id, now);
     computer.busy = busy;
     for (const [id, at] of computer.busyAt)
-      if (now - at >= IDLE_PAGES_GRACE_MS) computer.busyAt.delete(id);
+      if (now - at >= this.#graceMs) computer.busyAt.delete(id);
     const request: IdleRequest =
-      now - computer.watchedAt < IDLE_PAGES_GRACE_MS
+      now - computer.watchedAt < this.#graceMs
         ? { frozen: false }
         : { frozen: true, keep: [...computer.busyAt.keys()].sort() };
     const key = JSON.stringify(request);
@@ -182,10 +182,10 @@ export class BrowserIdlePages {
     const waits = computer.watched
       ? []
       : [computer.watchedAt, ...computer.busyAt.values()]
-          .map((at) => at + IDLE_PAGES_GRACE_MS - now)
+          .map((at) => at + this.#graceMs - now)
           .filter((ms) => ms > 0);
     if (computer.failures)
-      waits.push(Math.min(RETRY_MS * 2 ** (computer.failures - 1), IDLE_PAGES_SWEEP_MS));
+      waits.push(Math.min(RETRY_MS * 2 ** (computer.failures - 1), this.#sweepMs));
     if (!waits.length) return;
     computer.timer = setTimeout(() => this.changed(parent), Math.min(...waits) + 1);
     computer.timer.unref?.();
@@ -196,6 +196,14 @@ export class BrowserIdlePages {
     try {
       work();
     } catch {}
+  }
+
+  get #graceMs(): number {
+    return this.deps.graceMs ?? IDLE_PAGES_GRACE_MS;
+  }
+
+  get #sweepMs(): number {
+    return this.deps.sweepMs ?? IDLE_PAGES_SWEEP_MS;
   }
 
   #now(): number {

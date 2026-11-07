@@ -10,10 +10,11 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type { BrowserEngineName } from "../../../../packages/protocol/src/browser-engine.ts";
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { onForeground } from "../lib/foreground.ts";
-import { BrowserEntry, sayApart } from "./BrowserEntry.tsx";
+import { BrowserWindow, sayApart } from "./BrowserWindow.tsx";
 import type { StagePoint } from "./composite.ts";
 import type { ScreenName, StageConnection } from "./connection.ts";
 import type { ProbeApi } from "./debug-hooks.ts";
@@ -26,12 +27,14 @@ import {
   type StreamPicture,
 } from "./live-stream.ts";
 import { ManualSurface, type ManualSurfaceHandle, type PointerMode } from "./ManualSurface.tsx";
+import { isApple, switchesWindow } from "./manual-keys.ts";
 import type { Flip } from "./probe.ts";
 import type { PumpStats } from "./pump.ts";
 import { StageCanvas } from "./StageCanvas.tsx";
 import { StageNotice } from "./StageNotice.tsx";
 import type { ReplayHandle, StageCanvasHandle, StageView } from "./stage-engine.ts";
 import { stageFramerate } from "./stream-quality.ts";
+import { useDockCovered } from "./useDockCovered.ts";
 import type { StageFront } from "./useStageFront.ts";
 import { useUnderDesktop } from "./useUnderDesktop.ts";
 import type {
@@ -62,6 +65,8 @@ export interface StageProps {
   parent?: CellSummary | null;
   // Which of them is in front, from useStageFront; else the one dot is on (`selection`).
   front?: StageFront;
+  // What the web browser runs, which its window and dock item are named and drawn for.
+  browserEngine?: BrowserEngineName;
   selection?: ScreenSelectionSnapshot;
   api: ApiClient;
   reconnects: number;
@@ -90,6 +95,14 @@ export interface StageProps {
 
 const quiet = () => () => {};
 const NO_FIELDS: readonly FieldMark[] = [];
+const SWITCH_KEYS = isApple() ? "Option-Tab" : "Alt+Tab";
+
+// Where the keys typed go, and the keys that bring the other window forward.
+export function keysTo(front: "desktop" | "browser"): string {
+  return front === "browser"
+    ? `Keys go to the web browser's window. ${SWITCH_KEYS} brings the desktop forward.`
+    : `Keys go to the desktop. ${SWITCH_KEYS} brings the web browser forward.`;
+}
 
 export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   {
@@ -102,6 +115,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     parentId,
     parent,
     front,
+    browserEngine,
     selection,
     dim = false,
     fields = NO_FIELDS,
@@ -327,6 +341,30 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     inSight,
     live: control,
   });
+  // Whether a window on the desktop covers its dock, asked only while the dock item could show.
+  const dockCovered = useDockCovered(
+    api,
+    mode === "live" && composite?.front === "desktop" && front && desktopUp && inSight
+      ? (parent?.id ?? null)
+      : null,
+  );
+
+  // While the user holds the computer, the app switcher's keys bring the other window forward, from
+  // the keyboard field or a page with nothing else focused, and reach neither screen.
+  const switching = mode === "live" && composite && manualActive ? front : undefined;
+  useEffect(() => {
+    if (!switching) return;
+    const key = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !switchesWindow(event)) return;
+      const at = event.target;
+      if (at instanceof HTMLElement && at !== document.body && !at.closest(".manual-keyboard"))
+        return;
+      event.preventDefault();
+      if (!event.repeat) switching.pick(surface === "browser" ? "desktop" : "browser");
+    };
+    window.addEventListener("keydown", key, true);
+    return () => window.removeEventListener("keydown", key, true);
+  }, [switching, surface]);
 
   useEffect(() => {
     if (params.get("probe") !== "1") return;
@@ -415,17 +453,20 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
             return stage?.stagePoint(point, composite.desktop, surface, pressed) ?? null;
           }}
           send={route}
-          keysTo={
-            composite
-              ? `Keys go to ${surface === "browser" ? "the web browser's window" : "the desktop"}.`
-              : undefined
-          }
+          keysTo={composite ? keysTo(surface) : undefined}
           onTyping={manual.onTyping}
           onRefused={manual.onRefused}
         />
       )}
-      {mode === "live" && front && composite && desktopUp && (
-        <BrowserEntry front={front} holding={control} />
+      {mode === "live" && composite && desktopUp && (
+        <BrowserWindow
+          screen={surface}
+          drawn={displayOwner === owner}
+          front={front}
+          holding={manualActive}
+          engine={browserEngine}
+          covered={dockCovered}
+        />
       )}
       {mode === "live" && connection && (
         <StageNotice connection={connection} onRetry={stream ? () => stream.retry() : undefined} />

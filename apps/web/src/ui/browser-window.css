@@ -1,0 +1,331 @@
+/* The web browser's window and its dock item on the stage (stage/BrowserWindow.tsx), drawn as the
+   desktop draws its own: WhiteSur-Light's xfwm4 title bar and Plank's localdot-glass dock
+   (cells/desktop). The screen box is the picture's: 16:10, fitted in the stage as the stage's camera
+   fits it, so --_px is one of the desktop's own 1280 px. It restyles kit buttons, so it follows the
+   kit layer. */
+@layer utilities {
+  /* Over the user's input and under what covers the picture: a notice, a switch's loading state.
+     Clipped, so a finger's reach past the picture's foot can't make the stage scroll when its
+     button takes focus. */
+  .stage > .browser-chrome {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    overflow: clip;
+    container-type: size;
+    pointer-events: none;
+  }
+
+  /* Not before the picture is, the window being drawn on it. */
+  .stage:not(.lit) > .browser-chrome {
+    visibility: hidden;
+  }
+
+  .browser-chrome-screen {
+    --_px: calc(100cqw / 1280);
+    position: relative;
+    width: min(100cqw, 160cqh);
+    aspect-ratio: 16 / 10;
+    container: desktop / inline-size;
+  }
+
+  /* The window's frame above the picture of its page (composite.ts browserWindow): the bar under the
+     menu bar, its title centred across it. */
+  .browser-titlebar {
+    position: absolute;
+    top: calc(var(--_px) * 24);
+    left: calc(var(--_px) * var(--_left));
+    width: calc(var(--_px) * var(--_width));
+    height: calc(var(--_px) * 28);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: calc(var(--_px) * 1) solid var(--color-stage-window-edge);
+    border-bottom: 0;
+    border-radius: calc(var(--_px) * 5) calc(var(--_px) * 5) 0 0;
+    background-color: var(--color-stage-window-bar);
+    box-shadow: var(--shadow-stage-window-bar);
+    clip-path: inset(-100% -100% 0 -100%);
+    color: var(--color-stage-window-title);
+    font: var(--font-weight-semibold) var(--text-stage-window-title) / normal var(--font-ui);
+    cursor: default;
+    user-select: none;
+    pointer-events: auto;
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  @starting-style {
+    .browser-titlebar {
+      opacity: 0;
+    }
+  }
+
+  .browser-title {
+    max-width: 60%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* The minimise light, where the desktop's windows have their first: there is no close, which
+     would close dot's window, and no zoom, as the window already fills the screen. */
+  .browser-minimise.ui-button {
+    --_bg: var(--color-stage-window-minimise);
+    --_bg-hover: var(--color-stage-window-minimise);
+    --_bg-pressed: var(--color-stage-window-minimise);
+    --_shadow: inset 0 0 0 calc(var(--_px) * 0.5) var(--color-stage-window-minimise-edge);
+    position: absolute;
+    top: calc(var(--_px) * 6);
+    left: calc(var(--_px) * 9.75);
+    width: calc(var(--_px) * 14);
+    min-width: 0;
+    height: calc(var(--_px) * 14);
+    min-height: 0;
+    padding: 0;
+    border-radius: var(--radius-full);
+  }
+
+  .browser-minimise.ui-button::after {
+    inset: calc(var(--_px) * -5);
+  }
+
+  .browser-minimise-glyph {
+    width: calc(var(--_px) * 8);
+    height: calc(var(--_px) * 1.5);
+    border-radius: var(--radius-full);
+    background-color: var(--color-stage-window-minimise-glyph);
+    opacity: 0;
+    transition: opacity var(--dur-hover) var(--ease-standard);
+  }
+
+  .browser-minimise.ui-button:is(:hover, :focus-visible, [data-pressed]) .browser-minimise-glyph {
+    opacity: 1;
+  }
+
+  /* The dock item on Plank's own line, as the desktop draws it at 1x and 2x (cells/desktop's
+     localdot-plank and localdot-glass theme): a shelf from 732 to 800 px down with 18 px corners, its
+     1 px edge half outside the glass, a 1 px shine inside that, and 48 px icons 54 px apart, their
+     boxes from 741 px down, the first from 400 px across. Plank's nine pinned apps end at 893 px, so
+     the item's box starts at 886 px, in a slot from 883 px; the running light sits on 795.5 px. Alone,
+     as when brought back over a window, it has a shelf of its own. */
+  .browser-dock {
+    --_slot: calc(var(--_px) * 10);
+    position: absolute;
+    top: calc(var(--_px) * 732);
+    left: calc(var(--_px) * 872);
+    width: calc(var(--_px) * 75);
+    height: calc(var(--_px) * 68);
+    border: calc(var(--_px) * 1) solid var(--color-stage-dock-edge);
+    border-radius: calc(var(--_px) * 18);
+    background-image: linear-gradient(
+      to bottom,
+      var(--color-stage-dock-glass-top),
+      var(--color-stage-dock-glass-bottom)
+    );
+    box-shadow: inset 0 0 0 calc(var(--_px) * 1) var(--color-stage-dock-shine);
+    pointer-events: auto;
+    transition:
+      opacity var(--dur-exit) var(--ease-standard),
+      translate var(--dur-exit) var(--ease-standard),
+      visibility 0s var(--dur-exit);
+  }
+
+  /* With the desktop's dock up, the item is its last: the shelf goes on from under Plank's rounded
+     end, which it covers with Plank's own glass and shine, row for row, and ends one item further on
+     with Plank's corner. Its edge lies half over the picture, as Plank's does. A divider stands
+     before the item, as before a Mac dock's other items. */
+  .browser-dock[data-joined] {
+    --_slot: calc(var(--_px) * 5);
+    left: calc(var(--_px) * 878);
+    width: calc(var(--_px) * 69);
+    border-left: 0;
+    border-radius: 0 calc(var(--_px) * 18) calc(var(--_px) * 18) 0;
+    background-origin: border-box;
+    background-repeat: no-repeat;
+    background-size: calc(100% - var(--_px) * 0.5) 100%;
+    background-image: linear-gradient(
+      to bottom,
+      transparent calc(var(--_px) * 0.5),
+      var(--color-stage-dock-shelf-top) calc(var(--_px) * 0.5),
+      var(--color-stage-dock-shelf-top) calc(var(--_px) * 1),
+      var(--color-stage-dock-shelf-shine-top) calc(var(--_px) * 1),
+      var(--color-stage-dock-shelf-shine-top) calc(var(--_px) * 2),
+      var(--color-stage-dock-shelf-top) calc(var(--_px) * 2),
+      var(--color-stage-dock-shelf-bottom) calc(100% - var(--_px) * 2),
+      var(--color-stage-dock-shelf-shine-bottom) calc(100% - var(--_px) * 2),
+      var(--color-stage-dock-shelf-shine-bottom) calc(100% - var(--_px) * 1),
+      var(--color-stage-dock-shelf-bottom) calc(100% - var(--_px) * 1),
+      var(--color-stage-dock-shelf-bottom) calc(100% - var(--_px) * 0.5),
+      transparent calc(100% - var(--_px) * 0.5)
+    );
+    box-shadow: inset calc(var(--_px) * -1) 0 0 0 var(--color-stage-dock-shine-side);
+  }
+
+  .browser-dock[data-joined]::before {
+    content: "";
+    position: absolute;
+    top: calc(var(--_px) * 16);
+    left: calc(var(--_px) * 5);
+    width: calc(var(--_px) * 1);
+    height: calc(var(--_px) * 34);
+    background-color: var(--color-stage-dock-divider);
+  }
+
+  /* Out of the way of a window over it, as the desktop's dock dodges one (Plank's window-dodge). */
+  .browser-dock:not([data-shown]) {
+    visibility: hidden;
+    opacity: 0;
+    translate: 0 calc(var(--_px) * 12);
+  }
+
+  .browser-dock[data-shown] {
+    transition:
+      opacity var(--dur-fade) var(--ease-standard),
+      translate var(--dur-fade) var(--ease-standard),
+      visibility 0s;
+  }
+
+  /* The bottom edge, where the pointer brings the dock back over a window, or a tap does. */
+  .browser-dock-edge {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: max(calc(var(--_px) * 4), calc(var(--spacing) * 1.5));
+    pointer-events: auto;
+  }
+
+  @media (pointer: coarse) {
+    .browser-dock-edge {
+      height: calc(var(--spacing) * 3);
+    }
+  }
+
+  /* The item's slot: the icon 8 px down, the running light under it. Its face is the dock's mark of
+     the app in front. */
+  .browser-dock-item.ui-button {
+    --_bg: transparent;
+    --_bg-hover: transparent;
+    --_bg-pressed: transparent;
+    position: absolute;
+    top: calc(var(--_px) * 4);
+    left: var(--_slot);
+    display: block;
+    width: calc(var(--_px) * 54);
+    min-width: 0;
+    height: calc(var(--_px) * 61);
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: calc(var(--_px) * 6);
+  }
+
+  .browser-dock-item.ui-button[data-open] {
+    --_bg: var(--color-stage-dock-active);
+    --_bg-hover: var(--color-stage-dock-active);
+    --_bg-pressed: var(--color-stage-dock-active);
+  }
+
+  .browser-dock-item.ui-button > .ui-button-content {
+    display: block;
+    height: 100%;
+  }
+
+  .browser-icon {
+    position: absolute;
+    top: calc(var(--_px) * 4);
+    left: calc(var(--_px) * 3);
+    width: calc(var(--_px) * 48);
+    height: calc(var(--_px) * 48);
+    overflow: visible;
+    transition: scale var(--dur-snappy) var(--ease-spring);
+  }
+
+  .browser-dock-item.ui-button[data-pressed] .browser-icon {
+    scale: 0.94;
+  }
+
+  .browser-icon-tile {
+    fill: var(--color-stage-dock-tile);
+    stroke: var(--color-stage-dock-tile-edge);
+    stroke-width: 0.5;
+    filter: drop-shadow(var(--shadow-stage-dock-tile));
+  }
+
+  .browser-icon-band-0 {
+    fill: var(--color-stage-browser-red);
+  }
+
+  .browser-icon-band-1 {
+    fill: var(--color-stage-browser-yellow);
+  }
+
+  .browser-icon-band-2 {
+    fill: var(--color-stage-browser-green);
+  }
+
+  .browser-icon-ring {
+    fill: var(--color-stage-browser-ring);
+  }
+
+  .browser-icon-core {
+    fill: var(--color-stage-browser-blue);
+  }
+
+  .browser-icon[data-engine="chromium"] .browser-icon-band-0 {
+    fill: var(--color-stage-chromium-mid);
+  }
+
+  .browser-icon[data-engine="chromium"] .browser-icon-band-1 {
+    fill: var(--color-stage-chromium-light);
+  }
+
+  .browser-icon[data-engine="chromium"] :is(.browser-icon-band-2, .browser-icon-core) {
+    fill: var(--color-stage-chromium-dark);
+  }
+
+  /* dot is at work in the web browser: the light a dock shows under a running app, in dot's colour. */
+  .browser-dock-dot {
+    display: none;
+    position: absolute;
+    bottom: calc(var(--_px) * 2.5);
+    left: 50%;
+    width: max(calc(var(--_px) * 3), var(--spacing));
+    aspect-ratio: 1;
+    border-radius: var(--radius-full);
+    background-color: var(--color-stage-xenon);
+    translate: -50% 50%;
+  }
+
+  .browser-dock-item[data-dot] .browser-dock-dot {
+    display: block;
+  }
+
+  /* A finger's reach, without a face as large. */
+  @media (pointer: coarse) {
+    .browser-minimise.ui-button::after {
+      inset: calc(var(--spacing) * -3);
+    }
+
+    .browser-dock-item.ui-button::after {
+      inset: calc(var(--spacing) * -2);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .browser-dock:not([data-shown]) {
+      translate: none;
+    }
+  }
+
+  /* While the picture rests in a thumbnail that opens the computer, the window is only drawn. */
+  .phone-picture[data-place="thumb"] .browser-titlebar {
+    pointer-events: none;
+  }
+
+  .phone-picture[data-place="thumb"] :is(.browser-dock, .browser-dock-edge, .browser-minimise) {
+    visibility: hidden;
+  }
+}
