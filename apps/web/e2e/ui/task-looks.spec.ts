@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { openSettings } from "../settings-ui.ts";
+import { keyboardFocus } from "./focus-ring.ts";
 import { expect, FIXTURE_START, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w14", "w39");
@@ -104,16 +105,6 @@ async function openLookChooser(page: Page) {
   const chooser = page.getByRole("dialog", { name: "Change look" });
   await expect(chooser).toBeVisible();
   return { row, chooser };
-}
-
-// Tabs until something wears the keyboard's ring, so what a script focuses next wears it too.
-// WebKit's Tab passes over radios and, between buttons, the page itself.
-async function keyboardFocus(page: Page) {
-  for (let press = 0; press < 4; press++) {
-    await page.keyboard.press("Tab");
-    if (await page.evaluate(() => document.activeElement?.matches(":focus-visible"))) return;
-  }
-  throw new Error("Tab never showed a focus ring");
 }
 
 // Each tile of `groups`, focused in turn by keyboard so it wears its ring, paints its rim, shadow

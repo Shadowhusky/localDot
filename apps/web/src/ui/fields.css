@@ -448,6 +448,13 @@
     outline-offset: var(--focus-offset);
   }
 
+  /* A row fills its group to the edges the group clips, so its ring is drawn inside it, as round as
+     the group, so at the group's ends it follows the corners. */
+  .ui-radio-cards[data-layout="rows"] > .ui-radio-card:has(> :focus-visible) {
+    border-radius: inherit;
+    outline-offset: calc(var(--focus-width) * -1);
+  }
+
   /* Rows sit in one raised group, divided by separators: a radio at the left, the title and its
      one-line description beside it. Tiles stand side by side, each its own raised card, and the
      chosen one wears an fg-1 rim and a check. */
