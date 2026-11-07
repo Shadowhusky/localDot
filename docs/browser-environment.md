@@ -35,6 +35,12 @@ malformed replies and uncertain writes to live targets still retain their existi
 This prevents ordinary iframe and popup teardown from closing every other tab. Browser recovery
 below handles crashed renderers and a stopped browser process, preserving the profile.
 
+A page may move on by itself once the document a navigation asked for has committed:
+web.telegram.org sends itself on to its app by script before it loads, and a challenge page
+reloads itself. A navigation follows up to three such documents and waits for the last one, where
+it used to refuse and, with no other task in the browser, restart Chromium in place. A document
+that commits before the requested one, or the same one twice, is still refused.
+
 ## Crash and hang recovery
 
 A renderer crash revokes only its tab's documents and reloads that tab (three times a minute at
@@ -92,7 +98,8 @@ busy for a moment, so the raise waits for a first good read. See
 ## Pages nobody uses
 
 A page keeps working behind other windows, so a busy one nobody uses (a video feed, say) used to
-cost the browser several CPUs for hours. The daemon (`browser/idle-pages.ts`) freezes the pages of
+cost the browser several CPUs for hours. With `LOCALDOT_IDLE_PAGES=1`, the daemon
+(`browser/idle-pages.ts`) freezes the pages of
 every window whose task isn't at work or waiting for its turn, once no one has watched the browser's
 stream or held the computer for a minute, and each window only a minute after its task last worked.
 A task waiting for the user counts as at rest: a sign-in left on screen freezes once nobody watches.
@@ -105,6 +112,8 @@ its window comes back, so browserd minimizes the window and has the window manag
 maximized and in front, as it was. It does this for the window on screen when it thaws, and for any
 other as a task's turn or the user's control raises it. Before anything reads or drives a page,
 browserd wakes it itself, and shows it if it is on screen, so no read depends on the daemon's timing.
+A freeze leaves alone a window its task used in the last ten seconds: the daemon's view of who is at
+work can lag a turn that started just after it decided.
 
 ## Browser defaults and site compatibility
 
