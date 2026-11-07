@@ -303,3 +303,36 @@ describe("the bubble that opens them", () => {
     expect(described?.textContent).toBe("2 others under way, 1 needs you");
   });
 });
+
+describe("choosing several on the phone's sheet", () => {
+  it("lists those under way as rows to tick, with no swipes, and gives the cards back after", async () => {
+    const working = entry("Compare flights", live("working", "Comparing the 9:40 fares"));
+    const done = entry("Clean up Downloads");
+    open([working, done]);
+    await screen.findByRole("region", { name: /^Under way/ });
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    expect(screen.queryByRole("region", { name: /^Under way/ })).toBeNull();
+    expect(document.querySelector(".ui-swipe")).toBeNull();
+    const boxes = screen.getAllByRole("checkbox", { name: /Compare flights|Clean up Downloads/ });
+    expect(boxes).toHaveLength(2);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all" }));
+    expect(boxes.map((each) => each.getAttribute("aria-checked"))).toEqual(["true", "true"]);
+    const remove = screen.getByRole("button", { name: "Delete…" });
+    expect(remove.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("region", { name: /^Under way/ })).toBeTruthy();
+  });
+
+  it("starts choosing from a row's menu, with that row ticked", async () => {
+    open([entry("Compare flights"), entry("Clean up Downloads")]);
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for Clean up Downloads" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Select" }));
+    const ticked = screen
+      .getAllByRole("checkbox")
+      .filter((each) => each.getAttribute("aria-checked") === "true");
+    expect(ticked.map((each) => each.textContent)).toEqual([
+      expect.stringContaining("Clean up Downloads"),
+    ]);
+    expect(document.activeElement).toBe(ticked[0]);
+  });
+});

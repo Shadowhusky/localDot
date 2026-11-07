@@ -259,4 +259,113 @@
     margin-inline-start: auto;
     font-weight: var(--font-weight-medium);
   }
+
+  /* Choosing several (ConversationSelection.tsx). Select waits at the head's far end; the rows'
+     ticks stand where their times were, at the row's end, and Select all's above them. */
+  .sessions-select {
+    margin-inline-start: auto;
+  }
+
+  .sessions[data-selecting] .sessions-item[data-current] > .sessions-selection {
+    opacity: 0;
+  }
+
+  .sessions-check {
+    justify-self: end;
+    margin-top: 0;
+  }
+
+  /* Its words over the names, its box over the ticks, which the row's content leaves 2 steps short
+     of its padding. */
+  .sessions-select-all {
+    flex-direction: row-reverse;
+    min-height: calc(var(--spacing) * 9);
+    padding-inline: calc(var(--spacing) * 11) calc(var(--spacing) * 5);
+  }
+
+  /* Its last action over the ticks. */
+  .sessions-actions {
+    flex: none;
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 5.5) calc(var(--spacing) * 2)
+      calc(var(--spacing) * 3);
+    border-top: 1px solid var(--color-separator);
+  }
+
+  .conversations-select-all {
+    align-items: center;
+  }
+
+  .conversations-select-all > .ui-checkbox {
+    margin-top: 0;
+  }
+
+  .conversations-actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+  }
+
+  .conversations-chosen {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .conversations-actions-tools {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--spacing);
+  }
+
+  /* The popover's and the sheet's: Select beside the search, the ticks in the rows' More column. */
+  .conversations-search-row {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .conversations-search-row > .conversations-search {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .conversations-select {
+    flex: none;
+  }
+
+  .conversations-check {
+    display: block;
+    margin: 0 auto;
+  }
+
+  /* The rows' own columns, so its box stands over their ticks. */
+  .conversations > .conversations-select-all {
+    display: grid;
+    flex: none;
+    grid-template-columns: minmax(0, 1fr) 32px;
+    gap: 0;
+    padding-inline: calc(var(--spacing) * 2.5) var(--spacing);
+  }
+
+  .conversations > .conversations-select-all > .ui-checkbox {
+    grid-area: 1 / 2;
+    justify-self: center;
+  }
+
+  .conversations > .conversations-select-all > .ui-choice-text {
+    grid-area: 1 / 1;
+  }
+
+  .conversations > .conversations-actions {
+    padding-top: calc(var(--spacing) * 2);
+    border-top: 1px solid var(--color-separator);
+  }
 }

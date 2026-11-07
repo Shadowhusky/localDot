@@ -326,3 +326,90 @@ it("keeps a state the daemon pushed while a read from before it was on its way",
   expect(screen.getByRole("img", { name: "Needs you" })).toBeTruthy();
   expect(reads).toBe(2);
 });
+
+const box = (name: RegExp) => screen.getByRole("checkbox", { name });
+const ticked = () =>
+  screen
+    .queryAllByRole("checkbox")
+    .filter((each) => each.getAttribute("aria-checked") === "true")
+    .map((each) => each.textContent?.match(/Alpha|Bravo|Charlie/)?.[0]);
+
+it("chooses several from Select, with Return and with Cmd or Shift, and Escape lets them go without closing", async () => {
+  const [a, b, c] = ["Alpha", "Bravo", "Charlie"].map((title, n) => entry(title, (n + 1) * HOUR));
+  const outer = vi.fn();
+  const onPick = vi.fn();
+  render(
+    // biome-ignore lint/a11y/noStaticElementInteractions: listens for what reaches the popover.
+    <div onKeyDown={(event) => outer(event.key)}>
+      <ConversationList
+        api={daemon([a, b, c] as ConversationEntry[])}
+        open
+        current={null}
+        facts={QUIET}
+        onPick={onPick}
+        onReplay={vi.fn()}
+      />
+    </div>,
+  );
+  const search = screen.getByRole("combobox", { name: "Search conversations" });
+  fireEvent.click(await screen.findByRole("button", { name: "Select" }));
+  expect(screen.queryByRole("button", { name: /^Actions for/ })).toBeNull();
+  fireEvent.keyDown(search, { key: "ArrowDown" });
+  fireEvent.keyDown(search, { key: "Enter" });
+  expect(ticked()).toEqual(["Bravo"]);
+  fireEvent.click(box(/Alpha/));
+  expect(ticked()).toEqual(["Alpha", "Bravo"]);
+  expect(screen.getByText("2 selected")).toBeTruthy();
+  fireEvent.click(rows()[2] as HTMLElement);
+  expect(ticked()).toEqual(["Alpha", "Bravo", "Charlie"]);
+  fireEvent.keyDown(search, { key: "Escape" });
+  expect(screen.queryAllByRole("checkbox")).toEqual([]);
+  expect(outer).not.toHaveBeenCalledWith("Escape");
+
+  fireEvent.click(screen.getByRole("button", { name: /^Done ?Charlie/ }), { metaKey: true });
+  expect(ticked()).toEqual(["Charlie"]);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Done ?Bravo/ }), { shiftKey: true });
+  expect(ticked()).toEqual(["Bravo"]);
+  fireEvent.click(box(/Alpha/), { shiftKey: true });
+  expect(ticked()).toEqual(["Alpha", "Bravo"]);
+  expect(onPick).not.toHaveBeenCalled();
+});
+
+it("deletes the chosen after one confirmation, and keeps one the daemon finds under way", async () => {
+  const [a, b, c] = ["Alpha", "Bravo", "Charlie"].map((title, n) => entry(title, (n + 1) * HOUR));
+  const deleted: string[] = [];
+  const api = createApi("fixture", {
+    origin: "http://fixture.test",
+    fetchImpl: async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      if (init?.method === "DELETE") {
+        if (path.endsWith(b?.sessionId ?? "")) return new Response(null, { status: 409 });
+        deleted.push(path);
+        return new Response(null, { status: 204 });
+      }
+      return Response.json({
+        conversations: [a, b, c].filter(
+          (each) => !deleted.some((gone) => gone.endsWith(each?.sessionId ?? "")),
+        ),
+      });
+    },
+  });
+  const onDeleted = vi.fn();
+  open([], { api, onDeleted });
+  fireEvent.click(await screen.findByRole("button", { name: "Select" }));
+  fireEvent.click(box(/Alpha/));
+  fireEvent.click(box(/Bravo/));
+  fireEvent.click(screen.getByRole("button", { name: "Delete…" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Delete 2 conversations?" });
+  expect(deleted).toEqual([]);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await within(dialog).findByText(
+    "1 conversation was deleted. 1 has a task under way. Stop it before deleting.",
+  );
+  expect(deleted).toEqual([`/api/conversations/${a?.sessionId}`]);
+  expect(onDeleted).toHaveBeenCalledWith(a?.sessions);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(ticked()).toEqual(["Bravo"]));
+  expect(screen.getByText("1 selected")).toBeTruthy();
+});

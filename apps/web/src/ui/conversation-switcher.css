@@ -17,8 +17,19 @@
     padding-top: var(--spacing);
   }
 
-  .conversations[data-layout="sheet"] > :is(.conversations-search, .conversations-note) {
+  .conversations[data-layout="sheet"] > :is(.conversations-search-row, .conversations-note) {
     margin-inline: var(--_gutter);
+  }
+
+  /* Choosing several: Select all over the rows' ticks, and what to do with them at the foot. */
+  .conversations[data-layout="sheet"] > .conversations-select-all {
+    margin-inline: calc(var(--spacing) * 2);
+    padding-inline: calc(var(--_gutter) - var(--spacing) * 2) var(--spacing);
+  }
+
+  .conversations[data-layout="sheet"] > .conversations-actions {
+    padding: calc(var(--spacing) * 2) var(--_gutter)
+      calc(var(--spacing) * 2 + env(safe-area-inset-bottom));
   }
 
   .conversations[data-layout="sheet"] > .conversations-body {

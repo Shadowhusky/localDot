@@ -25,12 +25,14 @@ export interface ConversationMenuProps {
   // Its dot's look, which outlives the menu: the chooser stays open once the menu has gone.
   onLook(entry: ConversationEntry, look: LookWearables | null): void;
   onDelete(): void;
+  // Starts selecting with this one, to act on several together.
+  onStartSelecting?(): void;
   // Items of the list's own, above the rest.
   children?: ReactNode;
 }
 
-// What can be done to one conversation from its row: name it, dress its dot, keep it on top, put it
-// away, tell it apart by colour, or delete it.
+// What can be done to one conversation from its row: choose it among others, name it, dress its dot,
+// keep it on top, put it away, tell it apart by colour, or delete it.
 export function ConversationMenu({
   entry,
   anchor,
@@ -45,6 +47,7 @@ export function ConversationMenu({
   onOrganize,
   onLook,
   onDelete,
+  onStartSelecting,
   children,
 }: ConversationMenuProps) {
   const [dressing, setDressing] = useState<ConversationEntry | null>(null);
@@ -67,6 +70,11 @@ export function ConversationMenu({
         align={align}
       >
         {children}
+        {onStartSelecting && (
+          <MenuItem icon="check-circle" onSelect={onStartSelecting}>
+            Select
+          </MenuItem>
+        )}
         <MenuItem icon="type" kbd={renameKeys} onSelect={onRename}>
           Rename
         </MenuItem>

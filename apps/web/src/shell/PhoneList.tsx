@@ -1,6 +1,7 @@
 import {
   type AttentionItem,
   CONVERSATION_NAME_CHARS,
+  type ConversationEntry,
   type ConversationTag,
   NOTIFY_COPY,
   notifyRouteOf,
@@ -37,6 +38,7 @@ import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
+import { CheckMark } from "../ui/CheckMark.tsx";
 import { TAG_NAMES, TagDot, TagMark } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
@@ -48,10 +50,13 @@ import { triggerProps } from "../ui/Popover.tsx";
 import { SessionGlyph } from "../ui/SessionGlyph.tsx";
 import { type SwipeAction, SwipeActions } from "../ui/SwipeActions.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { useEscape } from "../ui/useEscape.ts";
 import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { ConversationMenu } from "./ConversationMenu.tsx";
 import { ConversationPeek, type Peek } from "./ConversationPeek.tsx";
+import { adds, SelectAll, SelectionActions } from "./ConversationSelection.tsx";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
+import { useConversationSelection } from "./useConversationSelection.ts";
 import "../ui/conversations-layout.css";
 import "../ui/phone-layout.css";
 import "./rails.css";
@@ -163,7 +168,8 @@ function RailItem({
 }
 
 // The conversations, a phone's home: those pinned in a rail at the top, then the rest with whichever
-// needs the user first. A row slides aside to pin or archive and holds still for its menu.
+// needs the user first. A row slides aside to pin or archive and holds still for its menu. Select in
+// the bar, or in a row's menu, starts choosing several to act on together, each pinned one a row.
 export function PhoneList({
   api,
   current,
@@ -183,7 +189,9 @@ export function PhoneList({
   const actionAnchor = useRef<HTMLElement | null>(null);
   const actionRow = useRef<HTMLElement | null>(null);
   const [action, setAction] = useState<ConversationRow | null>(null);
-  const [deleting, setDeleting] = useState<ConversationRow | null>(null);
+  const [deleting, setDeleting] = useState<readonly ConversationEntry[] | null>(null);
+  // Select, then Cancel: where the confirmation for several opens and where focus goes after.
+  const selectToggle = useRef<HTMLButtonElement>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string; was: string } | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
   const editing = useRef(renaming);
@@ -213,16 +221,19 @@ export function PhoneList({
     () => new Map(found?.map((match) => [match.row.entry.sessionId, match])),
     [found],
   );
-  const pinned = useMemo(
-    () => (found ? [] : shown.filter((row) => row.entry.pinned)),
+  const listed = useMemo(
+    () => (found ? found.map((match) => match.row) : mostUrgent(shown)),
     [found, shown],
+  );
+  const selection = useConversationSelection(listed);
+  const pinned = useMemo(
+    () => (found || selection.selecting ? [] : shown.filter((row) => row.entry.pinned)),
+    [found, shown, selection.selecting],
   );
   const rows = useMemo(
     () =>
-      found
-        ? found.map((match) => match.row)
-        : mostUrgent(shown.filter((row) => !row.entry.pinned)),
-    [found, shown],
+      found || selection.selecting ? listed : mostUrgent(shown.filter((row) => !row.entry.pinned)),
+    [found, shown, listed, selection.selecting],
   );
   const attentionOf = useMemo(
     () => new Map(attention.map((item) => [item.sessionId, item])),
@@ -233,6 +244,7 @@ export function PhoneList({
 
   const running = (row: ConversationRow) =>
     row.active || !!row.entry.live || row.entry.sessions.includes(facts.live ?? "");
+  useEscape(selection.selecting && !deleting, selection.stop);
   const blocked = (row: ConversationRow) =>
     reason && row.entry.sessionId !== current ? reason : undefined;
   const organize = (row: ConversationRow, change: Organize) =>
@@ -278,6 +290,15 @@ export function PhoneList({
     body.current?.querySelector<HTMLElement>(
       `[data-conversation="${row.entry.sessionId}"] .phone-row`,
     ) ?? null;
+  // A row chosen from its menu takes the focus once it is a checkbox, a new element as it no longer
+  // slides.
+  const focusRow = useRef<ConversationRow | null>(null);
+  useEffect(() => {
+    const row = focusRow.current;
+    if (!row) return;
+    focusRow.current = null;
+    rowElement(row)?.focus();
+  });
   const swipes = (row: ConversationRow) => {
     const isPinned = !!row.entry.pinned;
     const pin: SwipeAction = {
@@ -391,6 +412,55 @@ export function PhoneList({
           const item = attentionOf.get(id);
           const line = rowLine(row, item);
           const unread = !!item && item.level !== "needs_you" && id !== current;
+          const choosing = selection.selecting;
+          const chosen = selection.chosen(id);
+          const button = (
+            <Button
+              variant="quiet"
+              className={clsx("phone-row", selecting && id === current && "phone-row-selected")}
+              data-status={row.status}
+              data-unread={unread || undefined}
+              role={choosing ? "checkbox" : undefined}
+              aria-checked={choosing ? chosen : undefined}
+              aria-label={`${row.title}. ${STATUS_LABEL[row.status]}. ${line}`}
+              aria-current={id === current || undefined}
+              disabledReason={choosing ? undefined : blocked(row)}
+              onKeyDown={choosing ? undefined : menuKey(row)}
+              onClick={(event) => {
+                if (choosing) selection.press(id, event.shiftKey);
+                else if (adds(event) || event.shiftKey)
+                  selection.start(id, event.shiftKey ? current : null);
+                else
+                  onOpen(
+                    row,
+                    event.currentTarget.querySelector<HTMLElement>(".conversation-avatar"),
+                  );
+              }}
+            >
+              <span className="phone-row-avatar">
+                <ConversationAvatar row={row} size={64} badged={false} tagged={false} />
+              </span>
+              <span className="phone-row-main">
+                <span className="phone-row-head">
+                  <span className="phone-row-title">
+                    {match ? <Highlight text={match.title} /> : row.title}
+                  </span>
+                  <time className="phone-row-time num" dateTime={row.since}>
+                    {whenLabel(row.since, now)}
+                  </time>
+                </span>
+                <span className="phone-row-foot">
+                  <span className="phone-row-line">
+                    {match?.snippet ? <Highlight text={match.snippet} before={32} /> : line}
+                  </span>
+                  <span className="phone-row-mark">
+                    <RowMark row={row} unread={unread} />
+                  </span>
+                </span>
+              </span>
+              {choosing && <CheckMark checked={chosen} className="phone-row-check" />}
+            </Button>
+          );
           return (
             <li
               key={id}
@@ -425,6 +495,8 @@ export function PhoneList({
                     }}
                   />
                 </div>
+              ) : choosing ? (
+                button
               ) : (
                 <SwipeActions
                   className="phone-row-swipe"
@@ -434,58 +506,20 @@ export function PhoneList({
                     if (from) hold(row, from);
                   }}
                 >
-                  <Button
-                    variant="quiet"
-                    className={clsx(
-                      "phone-row",
-                      selecting && id === current && "phone-row-selected",
-                    )}
-                    data-status={row.status}
-                    data-unread={unread || undefined}
-                    aria-label={`${row.title}. ${STATUS_LABEL[row.status]}. ${line}`}
-                    aria-current={id === current || undefined}
-                    disabledReason={blocked(row)}
-                    onKeyDown={menuKey(row)}
-                    onClick={(event) =>
-                      onOpen(
-                        row,
-                        event.currentTarget.querySelector<HTMLElement>(".conversation-avatar"),
-                      )
-                    }
-                  >
-                    <span className="phone-row-avatar">
-                      <ConversationAvatar row={row} size={64} badged={false} tagged={false} />
-                    </span>
-                    <span className="phone-row-main">
-                      <span className="phone-row-head">
-                        <span className="phone-row-title">
-                          {match ? <Highlight text={match.title} /> : row.title}
-                        </span>
-                        <time className="phone-row-time num" dateTime={row.since}>
-                          {whenLabel(row.since, now)}
-                        </time>
-                      </span>
-                      <span className="phone-row-foot">
-                        <span className="phone-row-line">
-                          {match?.snippet ? <Highlight text={match.snippet} before={32} /> : line}
-                        </span>
-                        <span className="phone-row-mark">
-                          <RowMark row={row} unread={unread} />
-                        </span>
-                      </span>
-                    </span>
-                  </Button>
+                  {button}
                 </SwipeActions>
               )}
               <TagMark tag={row.entry.tag} />
-              <IconButton
-                className="phone-row-actions"
-                icon="more-horizontal"
-                size={28}
-                label={`Actions for ${row.title}`}
-                {...triggerProps("menu", action?.entry.sessionId === id && !peek)}
-                onClick={(event) => openMenu(row, event.currentTarget)}
-              />
+              {!choosing && (
+                <IconButton
+                  className="phone-row-actions"
+                  icon="more-horizontal"
+                  size={28}
+                  label={`Actions for ${row.title}`}
+                  {...triggerProps("menu", action?.entry.sessionId === id && !peek)}
+                  onClick={(event) => openMenu(row, event.currentTarget)}
+                />
+              )}
             </li>
           );
         })}
@@ -493,48 +527,75 @@ export function PhoneList({
     );
 
   return (
-    <section ref={screen} className="phone-list-screen" aria-label="Conversations">
+    <section
+      ref={screen}
+      className="phone-list-screen"
+      aria-label="Conversations"
+      data-selecting={selection.selecting || undefined}
+    >
       <div ref={bar} className="phone-bar phone-list-bar">
         <div className="phone-bar-glass" />
         <div className="phone-list-inline-title" aria-hidden="true">
           Conversations
         </div>
         <div className="phone-bar-row phone-list-bar-row">
-          <Button
-            ref={pill}
-            variant="secondary"
-            round
-            icon="monitor"
-            className="phone-pill"
-            aria-label={`${computer.name}: this computer and app settings`}
-            {...triggerProps("menu", pillOpen)}
-            onClick={() => {
-              computer.onOpen?.();
-              setPillOpen(true);
-            }}
-          >
-            <span className="phone-pill-name">{computer.name}</span>
-            <Icon name="chevron-down" size={12} className="phone-pill-chevron" />
-          </Button>
-          <Menu
-            open={pillOpen}
-            onClose={() => setPillOpen(false)}
-            anchor={pill}
-            side="bottom"
-            align="start"
-            label="This computer and app settings"
-          >
-            {computer.menu}
-          </Menu>
-          <IconButton
-            size={36}
-            round
-            variant="filled"
-            icon="compose"
-            label="New conversation"
-            disabledReason={newReason}
-            onClick={onNew}
-          />
+          {selection.selecting ? (
+            <SelectAll
+              shown={rows.length}
+              chosen={selection.picked.length}
+              onChange={selection.all}
+            />
+          ) : (
+            <>
+              <Button
+                ref={pill}
+                variant="secondary"
+                round
+                icon="monitor"
+                className="phone-pill"
+                aria-label={`${computer.name}: this computer and app settings`}
+                {...triggerProps("menu", pillOpen)}
+                onClick={() => {
+                  computer.onOpen?.();
+                  setPillOpen(true);
+                }}
+              >
+                <span className="phone-pill-name">{computer.name}</span>
+                <Icon name="chevron-down" size={12} className="phone-pill-chevron" />
+              </Button>
+              <Menu
+                open={pillOpen}
+                onClose={() => setPillOpen(false)}
+                anchor={pill}
+                side="bottom"
+                align="start"
+                label="This computer and app settings"
+              >
+                {computer.menu}
+              </Menu>
+            </>
+          )}
+          {(selection.selecting || all.length > 0) && (
+            <Button
+              ref={selectToggle}
+              variant="quiet"
+              className="phone-select"
+              onClick={() => (selection.selecting ? selection.stop() : selection.start())}
+            >
+              {selection.selecting ? "Cancel" : "Select"}
+            </Button>
+          )}
+          {!selection.selecting && (
+            <IconButton
+              size={36}
+              round
+              variant="filled"
+              icon="compose"
+              label="New conversation"
+              disabledReason={newReason}
+              onClick={onNew}
+            />
+          )}
         </div>
       </div>
       <div className="phone-list-scroll" onScroll={onScroll}>
@@ -593,36 +654,51 @@ export function PhoneList({
             </ul>
           )}
           {content}
-          <div className="conversations-foot" data-loading={recent.loading || undefined}>
-            {view === "archived" ? (
-              <Button
-                variant="quiet"
-                size="sm"
-                icon="chevron-left"
-                onClick={() => setView("recent")}
-              >
-                Recent conversations
-              </Button>
-            ) : (
-              <>
-                <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
-                  See all in Replay
+          {!selection.selecting && (
+            <div className="conversations-foot" data-loading={recent.loading || undefined}>
+              {view === "archived" ? (
+                <Button
+                  variant="quiet"
+                  size="sm"
+                  icon="chevron-left"
+                  onClick={() => setView("recent")}
+                >
+                  Recent conversations
                 </Button>
-                {recent.archivedCount > 0 && (
-                  <Button
-                    variant="quiet"
-                    size="sm"
-                    icon="archive"
-                    onClick={() => setView("archived")}
-                  >
-                    Archived ({recent.archivedCount})
+              ) : (
+                <>
+                  <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
+                    See all in Replay
                   </Button>
-                )}
-              </>
-            )}
-          </div>
+                  {recent.archivedCount > 0 && (
+                    <Button
+                      variant="quiet"
+                      size="sm"
+                      icon="archive"
+                      onClick={() => setView("archived")}
+                    >
+                      Archived ({recent.archivedCount})
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
+      {selection.selecting && (
+        <SelectionActions
+          className="phone-select-actions"
+          api={api}
+          picked={selection.picked}
+          running={running}
+          onDelete={() => {
+            actionAnchor.current = selectToggle.current;
+            setDeleting(selection.picked.map((row) => row.entry));
+          }}
+          onDone={selection.stop}
+        />
+      )}
       <ConversationPeek
         peek={peek}
         now={now}
@@ -654,7 +730,12 @@ export function PhoneList({
             announce("conversation", "That change couldn't be saved. Try again.", "assertive"),
           );
         }}
-        onDelete={() => setDeleting(action)}
+        onDelete={() => setDeleting(action && [action.entry])}
+        onStartSelecting={() => {
+          if (!action) return;
+          selection.start(action.entry.sessionId);
+          focusRow.current = action;
+        }}
       >
         <MenuItem
           icon="message-circle"
@@ -668,10 +749,13 @@ export function PhoneList({
       </ConversationMenu>
       <DeleteConversationDialog
         api={api}
-        conversation={deleting?.entry ?? null}
+        conversations={deleting}
         anchor={actionAnchor}
         onClose={() => setDeleting(null)}
-        onDeleted={onDeleted}
+        onDeleted={(sessions) => {
+          onDeleted?.(sessions);
+          selection.drop(sessions);
+        }}
       />
     </section>
   );

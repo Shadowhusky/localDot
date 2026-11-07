@@ -3852,7 +3852,7 @@ function Theatre({ api }: { api: ApiClient }) {
         </ErrorBoundary>
         <DeleteConversationDialog
           api={api}
-          conversation={deletingCurrent}
+          conversations={deletingCurrent && [deletingCurrent]}
           anchor={deleteFrom}
           onClose={() => setDeletingCurrent(null)}
           onDeleted={conversationList.onDeleted}
