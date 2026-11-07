@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "2a4091b61fde6709b6937a4d33ec2afe03f83ab121aa49fe47f5f9bb0d129b37",
+  "inputSha256": "aeededa29b77fd6a388b26ede1f8e476ae9b36d0879f609db9b611480c2a2e6e",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -353,7 +353,7 @@
     "apps/daemon/src/app-events.test.ts": "79cd9982416e3ff809d07fb65d0c9b90f46bcb7d6badc2de17f9a57d0f94af5a",
     "apps/daemon/src/app-events.ts": "7728d5f3ba6c5c0e48b38df691e70a68a177df42ed6092f5bb6289d341e0e846",
     "apps/daemon/src/app.test.ts": "a291709dfeaa2fa674db0cfc5cd26e31a34087ca4967018aef354533d1d20f2d",
-    "apps/daemon/src/app.ts": "912d157074006c69d6d43633886c0755f562d167a05ea32d42050692778c69b8",
+    "apps/daemon/src/app.ts": "1d9f792065577803693cd69448d18ce1436db8c2573f9776dfe69b72926568a5",
     "apps/daemon/src/browser/accounts.test.ts": "00953e7a8d742c8f91da819e58b140c32f52dfa82f068e976aa19be964b4c4d1",
     "apps/daemon/src/browser/accounts.ts": "2fcb30d3bb6fb69803f9e2f4fbdd5c56048b2e56644bac64e2b858cbf59c7e79",
     "apps/daemon/src/browser/availability.test.ts": "9660d9354dc11db9eecd8a12596bb27ed7a5c4491f1f634b440e79e83c2d2517",
@@ -614,10 +614,12 @@
     "apps/daemon/src/desktopd/client.ts": "d31083d930740d23da9f1859cbe9dabb95d9734d9124fba2f71b1e261ad0907d",
     "apps/daemon/src/desktopd/clock-map.test.ts": "57b62edc199a8f1c2f96569273e23cc720ff9ded26f6269cec34f72912cbc271",
     "apps/daemon/src/desktopd/clock-map.ts": "7ae9ae1e694c201836a09edc9ebd0c89d28016814792de829e465f21296e3f9b",
+    "apps/daemon/src/desktopd/dock.test.ts": "37bfd8ae544b87aa0f210ea67592cb5ffc54a2f1c0d12d035fa3e5b82d4ea21a",
+    "apps/daemon/src/desktopd/dock.ts": "2acae930cc9cd857d6d9f2f0caa449f1e197d4792a7bbe2afdb91a5d727d51a0",
     "apps/daemon/src/desktopd/registry.test.ts": "9adb24a61accd48ac9d201c987a8ee9f8863bfcd8a8efa74847fcfe9cdad78e4",
     "apps/daemon/src/desktopd/registry.ts": "42bec42a7dedd1b7f0d06c6613a8210866acf7f154a7ad0b0dbbab794888b22a",
     "apps/daemon/src/desktopd/shell-handoff.test.ts": "df766a9cded56897fb7011bd6c407cdf99de714a649250a55ba2cc864f32fc0e",
-    "apps/daemon/src/desktopd/testing/fake-desktopd.ts": "004df58f2c7899a1040e01cbc2028e8f44655a5382208f39f274a1cc64c9859c",
+    "apps/daemon/src/desktopd/testing/fake-desktopd.ts": "0dbd1ada56a41d09c985185e2819a96f77d087da1e3cedc056dd0c110226e02c",
     "apps/daemon/src/desktopd/tools-client.test.ts": "cc362d716fa369184f1fdba7b28f1cfb99f39e024e6ebdba9678bef058b27c48",
     "apps/daemon/src/desktopd/tools-client.ts": "2875602d0e806f55cd30cea70ffd7b50541dde7af238461eae3fbfee11b11062",
     "apps/daemon/src/desktopd/upload-client.ts": "750b891490497e5f56d8bef236dd681d001d224fd21d20b687fb2994810fafdb",
@@ -753,7 +755,7 @@
     "apps/daemon/src/main-startup.test.ts": "1cd20bbb7e4c86b2f7e101388060d9e6b43186f8e36899c87d8d26dd010aea60",
     "apps/daemon/src/main-startup.ts": "2cace882eeec33364fa18a462fe7d2c736f799a6f1ac6e1ac1a773b42953de85",
     "apps/daemon/src/main.test.ts": "ef5addc925ec16e30250aa48d5549b7b9c74ccda51b0728944a3aec79e04109e",
-    "apps/daemon/src/main.ts": "d07d2d858c89445e7d6fce7cfe457fd9d5bb465cdae93d88ba12da2e8bb0f31d",
+    "apps/daemon/src/main.ts": "67f18588a3abf29299b3323b672d6ddb46188861e04e86d9cb0a884f2b59e495",
     "apps/daemon/src/notify/attention.test.ts": "0339830c9b226ceedbeb76b90ae19d0c642bc4ba3f8b9411440eff91dceabd7e",
     "apps/daemon/src/notify/attention.ts": "4070c8a942e81f7386bc6576b45ff8b4b2b812712f9073b48a394686b30d4ff4",
     "apps/daemon/src/notify/banner.test.ts": "b6f97743d58353ed9836b670cb6923c5ba6efc6a282a4cf16ee62bcea8ebc9c0",
@@ -1237,7 +1239,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "4910e8323ec25c1d55732d02a818d3a135becb37ffb044e64a74d7c1770ab3fd",
+  "reportSha256": "38cdad4c94a927ee2d733b536db8ea3731023a1728485e4e3c8f1fac33894188",
   "exit": {
     "code": 0,
     "signal": null
