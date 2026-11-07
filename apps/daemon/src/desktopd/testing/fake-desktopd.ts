@@ -6,6 +6,7 @@ import type {
   SettleResult,
   TypeProgress,
   TypeResult,
+  WindowsResult,
 } from "@localdot/protocol";
 import { Hono } from "hono";
 
@@ -21,6 +22,8 @@ export interface FakeScript {
   focused?: () => HitTestResult;
   find?: (req: unknown) => HitTestResult;
   launch?: (body: unknown) => { pid: number };
+  // The window stack, top first; none by default. Asked about once a second, so not recorded.
+  windows?: () => WindowsResult;
   // The PNG for a /zoom request, or undefined for a frame the fake no longer keeps (404).
   zoom?: (body: unknown) => Buffer | undefined;
   clockDelayMs?: number;
@@ -165,6 +168,7 @@ export class FakeDesktopd {
       this.calls.push({ path: "/launch", body });
       return c.json({ ...(this.script.launch?.(body) ?? { pid: 1234 }), armedMono: this.mono() });
     });
+    this.app.post("/windows", (c) => c.json(this.script.windows?.() ?? { ticks: 0, windows: [] }));
     this.app.post("/observe", (c) => {
       this.calls.push({ path: "/observe", body: null });
       return c.json(

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BrowserActionPermit } from "../../../../packages/protocol/src/browser-control.ts";
 import { BrowserTargetError } from "./targets.ts";
-import { BROWSER_KEPT_FREE_WINDOWS, BrowserWindows } from "./windows.ts";
+import {
+  BROWSER_FREEZE_AFTER_USE_MS,
+  BROWSER_KEPT_FREE_WINDOWS,
+  BrowserWindows,
+} from "./windows.ts";
 
 const browserCellId = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
 const parentCellId = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0M";
@@ -107,11 +111,13 @@ function fixture(start: { id: string; windowId: number; opener?: string }[] = []
       finish: finished,
     })),
   };
+  let now = 0;
   const windows = new BrowserWindows({
     control,
     targets: targets as never,
     native: native as never,
     secrets: secrets as never,
+    now: () => now,
   });
   const signal = new AbortController().signal;
   const enter = (sessionId: string, place: { continues?: string; fresh?: true } = {}) =>
@@ -135,6 +141,9 @@ function fixture(start: { id: string; windowId: number; opener?: string }[] = []
       stuck = value;
     },
     active: () => active,
+    later: (ms = BROWSER_FREEZE_AFTER_USE_MS) => {
+      now += ms;
+    },
   };
 }
 
@@ -318,6 +327,7 @@ describe("freezing pages nobody uses", () => {
     const tabB = (await f.enter(taskB)).tabs[0]?.id ?? "";
     await f.enter(taskA);
     f.commands.length = 0;
+    f.later();
     return { ...f, tabB };
   }
 
@@ -331,6 +341,32 @@ describe("freezing pages nobody uses", () => {
     expect(f.frozen()).toEqual(["first", "behind", f.tabB]);
     // Freezing touches neither the display nor any window's place on it.
     expect(f.commands).toEqual([]);
+  });
+
+  // The daemon's view of who is at work can lag a request the task already sent: a freeze worked
+  // out just before a task's turn must not land on the window that turn brought forward.
+  it("keeps awake a window its task has just entered, through a freeze sent before", async () => {
+    const f = await two();
+    await f.enter(taskA);
+    expect(await f.windows.freeze([], f.signal)).toBe(1);
+    expect(f.frozen()).toEqual([f.tabB]);
+    f.later(BROWSER_FREEZE_AFTER_USE_MS - 1);
+    await f.windows.freeze([], f.signal);
+    expect(f.frozen()).toEqual([f.tabB]);
+    f.later(1);
+    await f.windows.freeze([], f.signal);
+    expect(f.frozen()).toEqual([f.tabB, "first"]);
+  });
+
+  it("keeps awake a window whose page a task has just read or loaded", async () => {
+    const f = await two();
+    await f.windows.wakeTab(f.tabB, false, f.signal);
+    await f.windows.wakeTab("first", true, f.signal);
+    expect(await f.windows.freeze([], f.signal)).toBe(0);
+    expect(f.frozen()).toEqual([]);
+    await f.windows.wakeTask(taskB, f.signal);
+    f.later();
+    expect(await f.windows.freeze([], f.signal)).toBe(2);
   });
 
   it("wakes a window as its task is kept again, without bringing it forward", async () => {
@@ -374,6 +410,7 @@ describe("freezing pages nobody uses", () => {
   it("shows a lone task's frozen window on its turn, where nothing moved before", async () => {
     const f = fixture([{ id: "first", windowId: 1 }]);
     await f.enter(taskA);
+    f.later();
     await f.windows.freeze([], f.signal);
     await f.enter(taskA);
     expect(f.frozen()).toEqual([]);
@@ -387,6 +424,7 @@ describe("freezing pages nobody uses", () => {
   it("brings a window back through Chromium when the window manager leaves it minimized", async () => {
     const f = fixture([{ id: "first", windowId: 1 }]);
     await f.enter(taskA);
+    f.later();
     await f.windows.freeze([], f.signal);
     f.stick(true);
     await f.enter(taskA);
@@ -436,6 +474,7 @@ describe("freezing pages nobody uses", () => {
     f.commands.length = 0;
     await f.windows.wakeScreen(f.signal);
     expect(f.commands).toEqual([]);
+    f.later();
     await f.windows.freeze([taskA], f.signal);
     await f.windows.wakeScreen(f.signal);
     expect(f.commands.map(({ name }) => name)).toEqual(["windows"]);

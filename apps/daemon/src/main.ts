@@ -185,7 +185,11 @@ const runtimeAdmission = new RuntimeUpdateAdmission(home);
 const runtimeImages = serviceIdentity ? RuntimeImages.parse(imagesFromEnv()) : undefined;
 const fences = new ComputerFences(home, (id) => resetHolds.oldHeld(id), readNativeBoot());
 const docker = new DockerClient(findDockerSocket().path);
-const runtimeStartup = new RuntimeStartup(() => docker.checkReady(3000));
+const runtimeStartup = new RuntimeStartup(
+  () => docker.checkReady(3000),
+  Date.now,
+  () => docker.checkReady(10_000),
+);
 const startupAbort = new AbortController();
 shutdown.push({
   name: "runtime startup",
@@ -921,6 +925,7 @@ const app = createApp({
   browserStatus: { cells: orchestrator, browser, report: (message) => console.error(message) },
   browserEngine: browser,
   ui: { dir: webDir("dist") },
+  dock: { cells: orchestrator, registry },
   gateway: {
     registry,
     clock,

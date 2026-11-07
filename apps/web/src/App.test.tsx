@@ -668,7 +668,7 @@ describe("App token states", () => {
     expect(document.body.textContent).not.toContain("ENOENT");
     expect(
       calls.filter(
-        (call) => call.includes("/api/cells") && !/\/(live|accounts|browser)$/.test(call),
+        (call) => call.includes("/api/cells") && !/\/(live|accounts|browser|dock)$/.test(call),
       ),
     ).toEqual([
       "GET /api/cells",

@@ -155,16 +155,27 @@ function conversing(
   let live: string | null = null;
   // A computer running several tasks, of which `live` is the chosen conversation's own.
   let others: string[] | undefined;
+  // The next question about the computer's task waits for `release`, which answers it as things
+  // stand then.
+  let holding = false;
+  let held: (() => void) | undefined;
+  const answer = () => {
+    if (others)
+      return Response.json({
+        sessionId: live ?? others[0],
+        sessions: [...others, ...(live ? [live] : [])],
+        ...(live ? { current: live } : {}),
+      });
+    return live ? Response.json({ sessionId: live }) : new Response(null, { status: 204 });
+  };
   const fetchImpl = vi.fn<typeof fetch>(async (input) => {
     const path = new URL(String(input)).pathname;
     if (path.endsWith("/live")) {
-      if (others)
-        return Response.json({
-          sessionId: live ?? others[0],
-          sessions: [...others, ...(live ? [live] : [])],
-          ...(live ? { current: live } : {}),
-        });
-      return live ? Response.json({ sessionId: live }) : new Response(null, { status: 204 });
+      if (!holding) return answer();
+      holding = false;
+      return new Promise<Response>((resolve) => {
+        held = () => resolve(answer());
+      });
     }
     return Response.json({ originMicros: 0, serverMicros: 0 });
   });
@@ -190,6 +201,10 @@ function conversing(
       live = id;
       others = elsewhere;
     },
+    hold: () => {
+      holding = true;
+    },
+    release: () => held?.(),
     socketFor,
     play: async (id: string, ...events: string[]) => {
       const socket = socketFor(id);
@@ -233,6 +248,61 @@ it("keeps a task the daemon lost on show, at rest, so the next message starts a 
   await wait(5_000);
   expect(f.view.result.current).toMatchObject({ sessionId: SESSION, resting: true, ended: true });
   expect(f.view.result.current.model.ended).toEqual({ t: 0, reason: "interrupted" });
+});
+
+it("keeps the next task live when the computer and the conversation name it at once, just after the last one ended", async () => {
+  const f = conversing({ resting: SESSION });
+  f.run(SESSION);
+  await wait(1_000);
+  expect(f.view.result.current).toMatchObject({ sessionId: SESSION, resting: false });
+  // Continue with another model: the daemon ends the paused task and starts the next one while
+  // the page's question about the computer's task waits on it.
+  f.hold();
+  await wait(1_000);
+  await f.play(
+    SESSION,
+    event(0, "session.start", START),
+    event(1, "session.end", { reason: "stopped" }),
+  );
+  f.run(NEXT);
+  // Its answer and the conversation read back reach the page together.
+  await act(async () => {
+    f.release();
+    await vi.advanceTimersByTimeAsync(0);
+    f.view.rerender({ cell: ready, resting: NEXT });
+  });
+  expect(f.view.result.current).toMatchObject({ sessionId: NEXT, resting: false, ended: false });
+  await wait(10_000);
+  expect(f.view.result.current).toMatchObject({ sessionId: NEXT, resting: false, ended: false });
+  expect(f.view.result.current.model.ended).toBeNull();
+});
+
+it("keeps a running task live through one answer that leaves it out", async () => {
+  const f = conversing({ resting: SESSION });
+  f.run(SESSION);
+  await wait(1_000);
+  await f.play(SESSION, event(0, "session.start", START));
+  f.run(null);
+  await wait(1_000);
+  expect(f.view.result.current).toMatchObject({ sessionId: SESSION, resting: false, ended: false });
+  f.run(SESSION);
+  await wait(10_000);
+  expect(f.view.result.current).toMatchObject({ sessionId: SESSION, resting: false, ended: false });
+  expect(f.view.result.current.model.ended).toBeNull();
+});
+
+it("goes back to a task the computer turns out to run after all", async () => {
+  const f = conversing({ resting: SESSION });
+  f.run(SESSION);
+  await wait(1_000);
+  await f.play(SESSION, event(0, "session.start", START));
+  f.run(null);
+  await wait(5_000);
+  expect(f.view.result.current).toMatchObject({ sessionId: SESSION, resting: true });
+  f.run(SESSION);
+  await wait(5_000);
+  expect(f.view.result.current).toMatchObject({ sessionId: SESSION, resting: false, ended: false });
+  expect(f.view.result.current.model.ended).toBeNull();
 });
 
 it("clears the page for a new conversation once the live task has ended, and never brings it back", async () => {

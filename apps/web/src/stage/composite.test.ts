@@ -7,6 +7,7 @@ import {
   MENU_BAR_PX,
   type StagePoint,
   stagePoint,
+  TITLE_BAR_PX,
 } from "./composite.ts";
 
 const DESKTOP = { w: 2560, h: 1600 };
@@ -21,12 +22,16 @@ const hit = (point: { x: number; y: number }, within?: StagePoint | null) =>
   stagePoint(LARGE, DESKTOP, point, BACKING, "browser", within);
 
 describe("the web browser's window on the desktop", () => {
-  it("sits under the menu bar, its whole picture at one scale", () => {
-    expect(WINDOW.y).toBe(MENU_BAR_PX * 2);
-    expect(WINDOW.h).toBe(1600 - 48);
+  it("sits under the menu bar and its title bar, its whole picture at one scale", () => {
+    expect(WINDOW.top).toBe(MENU_BAR_PX * 2);
+    expect(WINDOW.y).toBe((MENU_BAR_PX + TITLE_BAR_PX) * 2);
+    expect(WINDOW.h).toBe(1600 - 104);
     expect(WINDOW.w / WINDOW.h).toBeCloseTo(1.6, 6);
     expect(WINDOW.x).toBeCloseTo((2560 - WINDOW.w) / 2, 6);
-    expect(browserWindow({ w: 1280, h: 800 }).y).toBe(MENU_BAR_PX);
+    expect(browserWindow({ w: 1280, h: 800 })).toMatchObject({
+      top: MENU_BAR_PX,
+      y: MENU_BAR_PX + TITLE_BAR_PX,
+    });
   });
 
   it("draws a browser pixel where a press there lands on that pixel", () => {
@@ -65,7 +70,14 @@ describe("what a pointer on the stage reaches", () => {
     expect(hit(at(640, 400))?.screen).toBe("browser");
     expect(hit(at(640, 10))).toEqual({ x: 1280, y: 20, screen: "desktop" });
     expect(hit(at(640, MENU_BAR_PX - 1))?.screen).toBe("desktop");
-    expect(hit(at(640, MENU_BAR_PX))?.screen).toBe("browser");
+    expect(hit(at(640, MENU_BAR_PX + TITLE_BAR_PX))?.screen).toBe("browser");
+  });
+
+  it("gives neither screen the window's title bar, which is the stage's own", () => {
+    expect(hit(at(640, MENU_BAR_PX))).toBeNull();
+    expect(hit(at(640, MENU_BAR_PX + TITLE_BAR_PX - 1))).toBeNull();
+    // Beside it is the desktop behind, as beside the window.
+    expect(hit(at(5, MENU_BAR_PX + 4))).toMatchObject({ screen: "desktop", behind: true });
   });
 
   it("gives a margin beside the window to the desktop behind it, to bring forward and no more", () => {
@@ -85,12 +97,14 @@ describe("what a pointer on the stage reaches", () => {
     expect(hit(at(640, 500), onBar)).toEqual({ x: 1280, y: 1000, screen: "desktop" });
   });
 
-  it("takes nothing on a bar or a margin too thin to aim at, on a phone's stage", () => {
+  it("takes nothing on a bar too thin to aim at, on a phone's stage, but a tap beside the window", () => {
     const tap = (x: number, y: number) =>
       stagePoint(PHONE, DESKTOP, at(x, y), PHONE_BACKING, "browser");
     expect(tap(195, 3)).toBeNull();
     expect(tap(195, 120)?.screen).toBe("browser");
-    expect(tap(1, 120)).toBeNull();
+    expect(tap(1, 120)).toMatchObject({ screen: "desktop", behind: true });
+    const narrow = { ...PHONE, width: 240, height: 150 };
+    expect(stagePoint(narrow, DESKTOP, at(1, 75), PHONE_BACKING, "browser")).toBeNull();
   });
 
   it("is off the stage, off every screen", () => {

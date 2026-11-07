@@ -162,8 +162,8 @@ it("draws the browser's marks through its window, and a covered screen's not at 
   const camera = state.cameras.at(-1) as { scale: number; ty: number };
   const desktop = state.desktopCameras.at(-1) as { scale: number; ty: number };
   expect(desktop.scale).toBeCloseTo(0.5);
-  expect(camera.scale).toBeCloseTo(0.5 * (1552 / 1600));
-  expect(camera.ty).toBeCloseTo(24);
+  expect(camera.scale).toBeCloseTo(0.5 * (1496 / 1600));
+  expect(camera.ty).toBeCloseTo(52);
   expect(state.scenes.at(-1)).not.toBeNull();
   await send({ type: "view", view: { composite: { ...COMPOSITE, front: "desktop" } } });
   tick();
