@@ -169,6 +169,22 @@ async function setup(enableNavigation = true) {
     closing = control.close();
   });
   const workWindow = { update: vi.fn(async () => {}), hide: vi.fn(async () => {}), close: vi.fn() };
+  const woken: string[] = [];
+  const windows = {
+    enter: vi.fn(async () => ({ tabs: [], opened: false })),
+    tabs: vi.fn(() => []),
+    freeze: vi.fn(async () => 3),
+    thaw: vi.fn(async () => {}),
+    wakeTab: vi.fn(async (tab: string, show: boolean) => {
+      woken.push(`tab ${tab} ${show ? "shown" : "behind"}`);
+    }),
+    wakeTask: vi.fn(async (sessionId: string) => {
+      woken.push(`task ${sessionId}`);
+    }),
+    wakeScreen: vi.fn(async () => {
+      woken.push("screen");
+    }),
+  };
   const service = new BrowserHttp({
     workWindow,
     config: {
@@ -198,6 +214,7 @@ async function setup(enableNavigation = true) {
       },
     },
     observation: { observe, lookup, read },
+    windows,
     navigation: enableNavigation ? navigation : undefined,
     ready: () => ready,
     fence,
@@ -270,6 +287,8 @@ async function setup(enableNavigation = true) {
   };
   return {
     workWindow,
+    windows,
+    woken,
     service,
     control,
     send,
@@ -992,4 +1011,85 @@ it("does not dismiss activity for timing or download bookkeeping", async () => {
   // Downloads are disabled in this fixture; even that metadata request must not hide work.
   await f.send("POST", "/downloads/list", { permit, tabId });
   expect(f.workWindow.hide).not.toHaveBeenCalled();
+});
+
+describe("pages nobody uses", () => {
+  it("freezes and thaws pages for the daemon, and refuses another browser's request", async () => {
+    const peer = await setup();
+    const freeze = { ...identity, frozen: true, keep: [owner.sessionId] };
+    const frozen = await peer.send("PUT", "/lifecycle", freeze);
+    expect(frozen.status).toBe(200);
+    expect(JSON.parse(frozen.text)).toEqual({ frozen: 3 });
+    expect(peer.windows.freeze).toHaveBeenCalledExactlyOnceWith(
+      [owner.sessionId],
+      expect.any(AbortSignal),
+    );
+    expect((await peer.send("PUT", "/lifecycle", { ...identity, frozen: false })).status).toBe(200);
+    expect(peer.windows.thaw).toHaveBeenCalledOnce();
+    const other = { ...freeze, instance: "0a9b6f0e-2f39-4a0c-8f51-0c1c4f2a4b7e" };
+    expect((await peer.send("PUT", "/lifecycle", other)).status).toBe(409);
+    expect((await peer.send("PUT", "/lifecycle", { ...identity, frozen: true })).status).toBe(400);
+    expect(
+      (await peer.send("PUT", "/lifecycle", { ...identity, frozen: false, keep: [] })).status,
+    ).toBe(400);
+    expect(peer.windows.freeze).toHaveBeenCalledOnce();
+    // Freezing pages is no visual action of a task's: the activity window stays as it is.
+    expect(peer.workWindow.hide).not.toHaveBeenCalled();
+  });
+
+  it("freezes nothing under a read or an input, and thaws at once", async () => {
+    const peer = await setup();
+    const reading = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    peer.setWork(async () => {
+      started.resolve();
+      await reading.promise;
+    });
+    const read = peer.send("POST", "/read", { permit, tabId, request: {} });
+    await started.promise;
+    const freeze = { ...identity, frozen: true, keep: [] };
+    const refused = await peer.send("PUT", "/lifecycle", freeze);
+    expect(refused.status).toBe(409);
+    expect(JSON.parse(refused.text)).toEqual({ error: "busy" });
+    expect((await peer.send("PUT", "/lifecycle", { ...identity, frozen: false })).status).toBe(200);
+    reading.resolve();
+    expect((await read).status).toBe(200);
+    expect((await peer.send("PUT", "/lifecycle", freeze)).status).toBe(200);
+    expect(peer.windows.freeze).toHaveBeenCalledOnce();
+  });
+
+  it("wakes a page before anything reads or drives it", async () => {
+    const peer = await setup();
+    const order: string[] = [];
+    peer.windows.wakeTab.mockImplementation(async () => {
+      order.push("woken");
+    });
+    peer.setWork(async () => {
+      order.push("read");
+    });
+    expect((await peer.send("POST", "/observe", { permit, tabId })).status).toBe(200);
+    expect(order).toEqual(["woken", "read"]);
+    expect(peer.windows.wakeTab).toHaveBeenLastCalledWith(tabId, true, expect.any(AbortSignal));
+    const url = "https://example.test/";
+    expect((await peer.send("POST", "/navigate", { permit, tabId, url })).status).toBe(200);
+    // A page loads without the display: it wakes, and shows when its window next comes forward.
+    expect(peer.windows.wakeTab).toHaveBeenLastCalledWith(tabId, false, expect.any(AbortSignal));
+    for (const route of ["/input", "/read", "/lookup", "/timing"])
+      expect((await peer.send("POST", route, { permit, tabId, request: {} })).status).toBe(200);
+    expect(peer.windows.wakeTab).toHaveBeenCalledTimes(6);
+    expect((await peer.send("POST", "/tabs", { permit })).status).toBe(200);
+    expect(peer.windows.wakeTask).toHaveBeenCalledExactlyOnceWith(
+      owner.sessionId,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("wakes what is on screen before the user's input reaches it", async () => {
+    const peer = await setup();
+    const { owner: _, ...user } = { ...permit, revision: 2 };
+    expect((await peer.send("PUT", "/control", { ...user, holder: "user" })).status).toBe(200);
+    const body = { permit: user, request: { kind: "text", text: "hello" } };
+    expect((await peer.send("POST", "/manual", body)).status).toBe(200);
+    expect(peer.woken).toEqual(["screen"]);
+  });
 });

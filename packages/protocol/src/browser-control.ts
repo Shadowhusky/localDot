@@ -68,6 +68,27 @@ export const BrowserWindowReply = schema.strictObject({
 });
 export type BrowserWindowReply = schema.infer<typeof BrowserWindowReply>;
 
+const browserIdentity = {
+  browserCellId: controlIdentity.browserCellId,
+  parentCellId: controlIdentity.parentCellId,
+  instance: controlIdentity.instance,
+};
+// Pages nobody uses are frozen: those of every window but the windows of the tasks in `keep`. A
+// thaw wakes every page; the window on screen shows again at once, the others as they come forward.
+export const BrowserLifecycleRequest = schema.discriminatedUnion("frozen", [
+  schema.strictObject({
+    ...browserIdentity,
+    frozen: schema.literal(true),
+    keep: schema.array(schema.string().regex(ULID_PATTERN)).max(256),
+  }),
+  schema.strictObject({ ...browserIdentity, frozen: schema.literal(false) }),
+]);
+export type BrowserLifecycleRequest = schema.infer<typeof BrowserLifecycleRequest>;
+export const BrowserLifecycleReply = schema.strictObject({
+  frozen: schema.number().int().nonnegative().max(256),
+});
+export type BrowserLifecycleReply = schema.infer<typeof BrowserLifecycleReply>;
+
 // Only the daemon retains this receipt from a completed user-control transition.
 // It carries no model owner and cannot be used by agent action endpoints.
 export const BrowserManualPermit = schema.strictObject(controlIdentity);
