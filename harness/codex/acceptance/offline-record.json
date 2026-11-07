@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "93571d3fff8a2d1b1ebe68951452dd7e397c08c94cbe16eff207560da70765ac",
+  "inputSha256": "17784f99be06f6a8edf6080c3f510a08af02b1e163a332052d96a0977c1de7cb",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -422,7 +422,7 @@
     "apps/daemon/src/cells/browser-spec.ts": "3ef5fd706a583c3d44fe68401cb191e10de34d8bad21fb7fd37a32c0d79d521e",
     "apps/daemon/src/cells/browserd-busy-page.docker.test.ts": "bcb4967d383c20af8e407bcb965687f389489588aac4a4e99db2b33c79c0f8a4",
     "apps/daemon/src/cells/browserd-drag.docker.test.ts": "4e18211af7626283747708047a445bc99197e26bc2519e4f15b20dc73eff1674",
-    "apps/daemon/src/cells/browserd-freeze.docker.test.ts": "2f09f02daf825b331897ebdea04ea6acbed4ed30575241d9f3a8b47217f1a38b",
+    "apps/daemon/src/cells/browserd-freeze.docker.test.ts": "9204ce9eeb6cc2ac597e1c5fe3b7e42f5a8eb468efc25a112a8628b2a6dda58d",
     "apps/daemon/src/cells/browserd-fresh-tab.docker.test.ts": "022d15c1e07c76dfbfa5c0134d21c3a7e19a5bfd30e6e42151ff52901578e767",
     "apps/daemon/src/cells/browserd-windows.docker.test.ts": "e8166dc3a224d302516196fd2b2c0de9f31444f975224a65a5b4570c32efa6ec",
     "apps/daemon/src/cells/capture.docker.test.ts": "316a310a6e9fed9025ac5a520398affd051c0c6cddde408f7b27d66b3121807f",
@@ -1235,7 +1235,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "b7778f29ed944f277aa39179e2bd0b2ff529f3839f1d9275d4860f829f69dd67",
+  "reportSha256": "a7199dd04876dd5c3ce5b5f6163cfc0b8f8854f8c425dae2494ecea94ad9387a",
   "exit": {
     "code": 0,
     "signal": null
