@@ -137,8 +137,9 @@ function collect({
     let top = Math.max(box.y, 0);
     let right = Math.min(box.x + box.width, innerWidth);
     let bottom = Math.min(box.y + box.height, innerHeight);
-    let fixed = getComputedStyle(element).position === "fixed";
-    for (let at = element.parentElement; at && !fixed; at = at.parentElement) {
+    // From the element itself: words it ends with an ellipsis run on past its edge.
+    let fixed = false;
+    for (let at: Element | null = element; at && !fixed; at = at.parentElement) {
       const style = getComputedStyle(at);
       if (style.overflowX !== "visible" || style.overflowY !== "visible") {
         const clip = at.getBoundingClientRect();
