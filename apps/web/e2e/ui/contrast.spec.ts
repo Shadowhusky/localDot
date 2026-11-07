@@ -298,6 +298,38 @@ test("the task list", async ({ page, ui }) => {
   await readable(page, ui, "task-list");
 });
 
+test("choosing several conversations, one of them under way", async ({ page, ui, viewStyle }) => {
+  test.skip(viewStyle === "chat", "Chat's list has its own walk");
+  await page.addInitScript(() =>
+    localStorage.setItem("localdot.panels.v1", JSON.stringify({ sessions: true })),
+  );
+  await ui.open("conversations-working");
+  if (isPhone(page)) {
+    await page.getByRole("button", { name: "Conversations", exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: "Conversations" });
+    await sheet.getByRole("button", { name: "Select", exact: true }).click();
+    await sheet.getByRole("checkbox", { name: /Sample · monthly report/ }).click();
+    await sheet.getByRole("checkbox", { name: /Find a plumber/ }).click();
+    await readable(page, ui, "selecting-sheet");
+    return;
+  }
+  const rail = page.getByRole("navigation", { name: "Conversations" });
+  await rail.getByRole("button", { name: "Select", exact: true }).click();
+  await rail.getByRole("checkbox", { name: /^Sample · monthly report/ }).click();
+  await rail.getByRole("checkbox", { name: /^Find a plumber/ }).click();
+  await page.mouse.move(0, 0);
+  await readable(page, ui, "selecting-rail");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Conversations", exact: true }).click();
+  const popover = page.getByRole("dialog", { name: "Conversations" });
+  await popover.getByRole("button", { name: "Select", exact: true }).click();
+  // Among what a search found: an empty field's words are the kit's, measured with the popover.
+  await popover.getByRole("combobox", { name: "Search conversations" }).fill("plumber");
+  await popover.getByRole("checkbox", { name: /Find a plumber/ }).click();
+  await page.mouse.move(0, 0);
+  await readable(page, ui, "selecting-popover");
+});
+
 test("the Workspace panel and its tabs", async ({ page, ui }) => {
   const fixture = await ui.open("running");
   await qa(page, fixture.origin, `files?count=5&recording=${fixture.seeded[0] ?? ""}`);
@@ -622,6 +654,16 @@ test.describe("Chat", () => {
       await page.getByRole("button", { name: /this computer and app settings$/ }).click();
       await expect(page.getByRole("menu").first()).toBeVisible();
       await readable(page, ui, "chat-pill-menu");
+    });
+
+    test("choosing several, one of them under way", async ({ page, ui }) => {
+      await ui.open("conversations-working");
+      const list = page.getByRole("region", { name: "Conversations" });
+      await list.getByRole("button", { name: "Select", exact: true }).click();
+      await list.getByRole("checkbox", { name: /^Sample · monthly report/ }).click();
+      await list.getByRole("checkbox", { name: /^Find a plumber/ }).click();
+      await page.mouse.move(0, 0);
+      await readable(page, ui, "chat-list-selecting");
     });
   });
 

@@ -23,6 +23,12 @@ const STATUS: Record<
   ready: { shape: "ready", control: /^Take control$/, label: "Ready" },
   "slow-keys": { shape: "ready", control: /^Take control$/, label: "Ready" },
   conversations: { shape: "ready", control: /^Take control$/, label: "Done" },
+  "conversations-working": {
+    shape: "task",
+    control: /^Stop$/,
+    label: "Select the Net total cell",
+    light: "dot",
+  },
   "chatgpt-plan": { shape: "ready", control: /^Take control$/, label: "Ready" },
   "plan-usage": { shape: "ready", control: /^Take control$/, label: "Ready" },
   running: { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },

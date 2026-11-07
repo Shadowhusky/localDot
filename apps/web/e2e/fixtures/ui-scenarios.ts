@@ -53,6 +53,10 @@ export const UI_SCENARIOS = {
     about: "A finished task in a conversation of three, with past conversations from the fortnight",
     boot: { QA_PHASE: "finished", QA_EARLIER: "2", QA_PAST: "1" },
   },
+  "conversations-working": {
+    about: "dot is working in a conversation of three, with past conversations from the fortnight",
+    boot: { QA_EARLIER: "2", QA_PAST: "1" },
+  },
   "chatgpt-plan": {
     about: "The main model runs on a signed-in ChatGPT plan; the computer is on with no task",
     boot: { QA_SESSION: "0", QA_SETTINGS: "chatgpt", QA_CHATGPT: "signed_in" },
