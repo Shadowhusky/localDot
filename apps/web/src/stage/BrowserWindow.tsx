@@ -64,9 +64,10 @@ const stay = (event: SyntheticEvent) => event.stopPropagation();
 
 // The web browser as one of the desktop's own apps: a window with the desktop's title bar while it
 // is in front, and an item in the dock's glass at the bottom, which shows the window or minimises it
-// as a dock does. Like the desktop's dock (Plank's window-dodge), the item gets out of the way of any
-// window over the dock, its own included, and comes back while the pointer is at the bottom edge or
-// for a moment after a tap there; with nothing over the dock it stays up.
+// as a dock does. With nothing over the dock it is the dock's last item, on the shelf the desktop
+// draws. Like that dock (Plank's window-dodge), it gets out of the way of any window over the dock,
+// its own included, and comes back on a shelf of its own while the pointer is at the bottom edge or
+// for a moment after a tap there.
 export function BrowserWindow({
   screen,
   drawn,
@@ -153,6 +154,7 @@ export function BrowserWindow({
           <div
             className="browser-dock"
             data-shown={!dodging || raised ? "" : undefined}
+            data-joined={dodging ? undefined : ""}
             onPointerEnter={dodging ? hover : undefined}
             onPointerLeave={dodging ? leave : undefined}
           >

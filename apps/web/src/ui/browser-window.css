@@ -104,14 +104,19 @@
     opacity: 1;
   }
 
-  /* The dock's glass, one item long, on the dock's own line beside its pinned apps (Plank: 48 px
-     icons, 54 px apart, 8 px of glass round them, 18 px corners; nine centred end at 892 px). */
+  /* The dock item on Plank's own line, as the desktop draws it at 1x and 2x (cells/desktop's
+     localdot-plank and localdot-glass theme): a shelf from 732 to 800 px down with 18 px corners, its
+     1 px edge half outside the glass, a 1 px shine inside that, and 48 px icons 54 px apart, their
+     boxes from 741 px down, the first from 400 px across. Plank's nine pinned apps end at 893 px, so
+     the item's box starts at 886 px, in a slot from 883 px; the running light sits on 795.5 px. Alone,
+     as when brought back over a window, it has a shelf of its own. */
   .browser-dock {
+    --_slot: calc(var(--_px) * 10);
     position: absolute;
     top: calc(var(--_px) * 732);
-    left: calc(var(--_px) * 900);
-    width: calc(var(--_px) * 74);
-    height: calc(var(--_px) * 67);
+    left: calc(var(--_px) * 872);
+    width: calc(var(--_px) * 75);
+    height: calc(var(--_px) * 68);
     border: calc(var(--_px) * 1) solid var(--color-stage-dock-edge);
     border-radius: calc(var(--_px) * 18);
     background-image: linear-gradient(
@@ -125,6 +130,47 @@
       opacity var(--dur-exit) var(--ease-standard),
       translate var(--dur-exit) var(--ease-standard),
       visibility 0s var(--dur-exit);
+  }
+
+  /* With the desktop's dock up, the item is its last: the shelf goes on from under Plank's rounded
+     end, which it covers with Plank's own glass and shine, row for row, and ends one item further on
+     with Plank's corner. Its edge lies half over the picture, as Plank's does. A divider stands
+     before the item, as before a Mac dock's other items. */
+  .browser-dock[data-joined] {
+    --_slot: calc(var(--_px) * 5);
+    left: calc(var(--_px) * 878);
+    width: calc(var(--_px) * 69);
+    border-left: 0;
+    border-radius: 0 calc(var(--_px) * 18) calc(var(--_px) * 18) 0;
+    background-origin: border-box;
+    background-repeat: no-repeat;
+    background-size: calc(100% - var(--_px) * 0.5) 100%;
+    background-image: linear-gradient(
+      to bottom,
+      transparent calc(var(--_px) * 0.5),
+      var(--color-stage-dock-shelf-top) calc(var(--_px) * 0.5),
+      var(--color-stage-dock-shelf-top) calc(var(--_px) * 1),
+      var(--color-stage-dock-shelf-shine-top) calc(var(--_px) * 1),
+      var(--color-stage-dock-shelf-shine-top) calc(var(--_px) * 2),
+      var(--color-stage-dock-shelf-top) calc(var(--_px) * 2),
+      var(--color-stage-dock-shelf-bottom) calc(100% - var(--_px) * 2),
+      var(--color-stage-dock-shelf-shine-bottom) calc(100% - var(--_px) * 2),
+      var(--color-stage-dock-shelf-shine-bottom) calc(100% - var(--_px) * 1),
+      var(--color-stage-dock-shelf-bottom) calc(100% - var(--_px) * 1),
+      var(--color-stage-dock-shelf-bottom) calc(100% - var(--_px) * 0.5),
+      transparent calc(100% - var(--_px) * 0.5)
+    );
+    box-shadow: inset calc(var(--_px) * -1) 0 0 0 var(--color-stage-dock-shine-side);
+  }
+
+  .browser-dock[data-joined]::before {
+    content: "";
+    position: absolute;
+    top: calc(var(--_px) * 16);
+    left: calc(var(--_px) * 5);
+    width: calc(var(--_px) * 1);
+    height: calc(var(--_px) * 34);
+    background-color: var(--color-stage-dock-divider);
   }
 
   /* Out of the way of a window over it, as the desktop's dock dodges one (Plank's window-dodge). */
@@ -164,14 +210,15 @@
     --_bg-hover: transparent;
     --_bg-pressed: transparent;
     position: absolute;
-    top: 0;
-    left: calc(var(--_px) * 9);
+    top: calc(var(--_px) * 4);
+    left: var(--_slot);
     display: block;
     width: calc(var(--_px) * 54);
     min-width: 0;
-    height: calc(var(--_px) * 65);
+    height: calc(var(--_px) * 61);
     min-height: 0;
     padding: 0;
+    border: 0;
     border-radius: calc(var(--_px) * 6);
   }
 
@@ -188,7 +235,7 @@
 
   .browser-icon {
     position: absolute;
-    top: calc(var(--_px) * 8);
+    top: calc(var(--_px) * 4);
     left: calc(var(--_px) * 3);
     width: calc(var(--_px) * 48);
     height: calc(var(--_px) * 48);
@@ -243,13 +290,13 @@
   .browser-dock-dot {
     display: none;
     position: absolute;
-    bottom: calc(var(--_px) * 1.5);
+    bottom: calc(var(--_px) * 2.5);
     left: 50%;
-    width: max(calc(var(--_px) * 4), var(--spacing));
+    width: max(calc(var(--_px) * 3), var(--spacing));
     aspect-ratio: 1;
     border-radius: var(--radius-full);
     background-color: var(--color-stage-xenon);
-    translate: -50% 0;
+    translate: -50% 50%;
   }
 
   .browser-dock-item[data-dot] .browser-dock-dot {

@@ -147,15 +147,21 @@ dot's desktop. `stage/BrowserWindow.tsx` draws what the desktop's own apps have,
 image's own look (cells/desktop): WhiteSur-Light's xfwm4 title bar over the picture (white, a grey
 edge, the title in Inter Semi-Bold 10 pt, #707070, centred), with the browser's name, as the page title
 never reaches the app, and the minimise light alone, where the desktop's windows have their first: no
-close, which would close dot's window, and no zoom. The web browser has an item in Plank's
-localdot-glass (48 px icons 54 px apart on a 67 px shelf, 18 px corners, the same fill and strokes),
-its own one-item shelf on the dock's line, 8 px right of where the desktop's nine pinned apps end. It
-can't be an item of Plank's own dock, and can't move Plank's items aside: Plank is in the desktop's X
-server, and the image stays as it is. Nor can the stage know where Plank is at a given moment: it
-hides whenever a desktop window overlaps it (`window-dodge`), it grows by an item for each unpinned app
-that runs, centred, and the browser's window covers it. So the item reads as the end of the dock when
-the dock shows and as a dock of one when it doesn't; with two or more unpinned apps running it would
-overlap Plank's last. A light under the item, in dot's colour, says dot works in the browser.
+close, which would close dot's window, and no zoom. The web browser is the dock's last item. Plank,
+as the desktop draws it at 1x and 2x, has a shelf from 387 to 893 px across and 732 to 800 px down,
+18 px corners, a 1 px edge half outside its glass and a 1 px shine inside, and 48 px icons 54 px
+apart, their boxes from 741 px down, the first from 400 px across. The stage's piece of shelf starts
+at 878 px, under Plank's rounded end, which it covers with Plank's own glass and shine copied row for
+row (opaque, measured over the Daylight wallpaper there), and ends at 947 px with Plank's corner: the
+shelf reads as one, an item longer. The item's box starts at 886 px, 54 px on from Plank's last, on
+the same centre line, and its running light sits on Plank's, 795.5 px down. Composited on a capture
+of the real desktop, its edges, icon centre and pitch land within a device pixel of Plank's at both
+scales, its glass within 4 levels of Plank's across the join. A divider stands before it, as before a
+Mac dock's other items: it also keeps it apart from the desktop's own Chromium, pinned second, when
+the web browser runs Chromium too. The item can't be one of Plank's, and can't move Plank's items
+aside: Plank is in the desktop's X server, and the image stays as it is. With an unpinned app running,
+Plank grows by an item each side and the piece covers part of its last. When the item comes back over
+a window it has a shelf of its own. A light under it, in dot's colour, says dot works in the browser.
 
 **Out of a window's way.** The item dodges windows as Plank does here (`hide-mode` `window-dodge`,
 `hide-delay` 300 ms, `unhide-delay` 0, no pressure reveal: cells/desktop's localdot-plank). Any
@@ -236,6 +242,7 @@ can show (7–32 % against 10–36 %).
 - The clock in the menu bar can be up to half a minute old while the user only watches.
 - **Sign in without agent control** is offered only when dot's own screen is the browser.
 - The title bar names the browser, not the page: the page's title would have to come from browserd.
-- The dock item can't follow Plank: hidden, widened by unpinned apps or covered, Plank goes on as before.
+- The dock item can't follow Plank's width: with an unpinned app running, Plank is an item wider each
+  side and the item's shelf covers part of its last item.
 - A minimised window over the dock's area keeps the item at the edge: desktopd would have to say which
   windows are hidden, a change to the desktop image.
