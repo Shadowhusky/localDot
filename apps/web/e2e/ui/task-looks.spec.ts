@@ -293,10 +293,13 @@ test("a task's look is changed from its menu, is saved, and can be given back", 
   const fixture = await ui.open("conversations");
   const { row, chooser } = await openLookChooser(page);
   const before = await lookOf(row);
+  // A head it isn't wearing, so choosing it is a change: the fixture's ids, which draw the look,
+  // are new on every run.
+  const [head, label] = before.includes("crown") ? ["top-hat", "Top hat"] : ["crown", "Crown"];
   await ui.settle();
   await page.screenshot({ path: test.info().outputPath("look-chooser.png") });
-  await chooser.getByRole("radio", { name: "Crown", exact: true }).click({ force: true });
-  await expect(row.locator('[data-wear="crown"]')).toHaveCount(1);
+  await chooser.getByRole("radio", { name: label, exact: true }).click({ force: true });
+  await expect(row.locator(`[data-wear="${head}"]`)).toHaveCount(1);
   await expect
     .poll(async () => {
       const list = await page.request.get(`${fixture.origin}/api/conversations`, {
@@ -305,7 +308,7 @@ test("a task's look is changed from its menu, is saved, and can be given back", 
       const { conversations } = (await list.json()) as { conversations: { look?: string[] }[] };
       return conversations.flatMap((conversation) => conversation.look ?? []);
     })
-    .toContain("crown");
+    .toContain(head);
   await chooser.getByRole("button", { name: "Reset" }).click();
   await expect.poll(() => lookOf(row)).toEqual(before);
 });
