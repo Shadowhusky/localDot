@@ -121,8 +121,9 @@ other task's recording on both screens. Desktop turns get the same gate.
 - The browser's one gate can't name a tab. A refused saved key goes to the task whose last opened page
   matches the host, else to the last to act. Connections beyond the web from the browser have no card
   and are refused. An "Allow once" is per computer, not per task.
-- A covered window keeps animating, so an idle animated page costs CPU; finished tasks' windows count
-  until closed.
+- A covered window keeps animating while its task is at work; pages nobody uses are frozen (see
+  [the browser environment](../../browser-environment.md#pages-nobody-uses)). Finished tasks'
+  windows count until closed.
 
 ## Phase 3: one screen
 

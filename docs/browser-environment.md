@@ -89,6 +89,23 @@ accessibility read of the active window works with several windows open, and a r
 busy for a moment, so the raise waits for a first good read. See
 [the design](superpowers/specs/2026-11-04-parallel-browser-windows.md).
 
+## Pages nobody uses
+
+A page keeps working behind other windows, so a busy one nobody uses (a video feed, say) used to
+cost the browser several CPUs for hours. The daemon (`browser/idle-pages.ts`) freezes the pages of
+every window whose task isn't at work or waiting for its turn, once no one has watched the browser's
+stream or held the computer for a minute, and each window only a minute after its task last worked.
+A task waiting for the user counts as at rest: a sign-in left on screen freezes once nobody watches.
+A viewer or the user's own control thaws every page at once.
+
+browserd freezes with CDP's `Page.setWebLifecycleState`: timers, frames and loading stop, while
+downloads, cookies and the stream go on. Chromium hides a page as it freezes it, so its window shows
+no page rather than its last picture, and waking it leaves it hidden; Chromium shows it again only as
+its window comes back, so browserd minimizes the window and has the window manager bring it back,
+maximized and in front, as it was. It does this for the window on screen when it thaws, and for any
+other as a task's turn or the user's control raises it. Before anything reads or drives a page,
+browserd wakes it itself, and shows it if it is on screen, so no read depends on the daemon's timing.
+
 ## Browser defaults and site compatibility
 
 The account browser is headed Chromium or Chrome with a persistent profile, a native user agent, and
