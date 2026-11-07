@@ -806,6 +806,38 @@ it("keeps late tool cleanup as a recovery receipt without resuming the timed-out
   }
 });
 
+describe("a Claude Code start with a slow first look", () => {
+  // A busy web browser's first look takes seconds; it is bounded on its own.
+  it("gives the look the whole start time, and the launch its own after it", async () => {
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const f = fixture({
+      startupMs: 300,
+      launch: vi.fn(async () => {
+        await pause(200);
+        return {
+          executable: "/Users/person/.local/bin/claude",
+          env: { HOME: "/Users/person", PATH: "/Users/person/.local/bin:/usr/bin" },
+          cwd: "/tmp/ld-claude-driver-work",
+          plan: "max",
+        };
+      }),
+      observe: vi.fn(async () => {
+        await pause(200);
+        return { frameId: ulid(), full: true as const, png: Buffer.from(PNG) };
+      }),
+    });
+    const result = f.run();
+    await until(() => (f.runs[0]?.prompts.length ?? 0) > 0);
+    await pause(200);
+    const fake = f.runs[0];
+    if (!fake) throw new Error("no run");
+    fake.emit(INIT, turn());
+    await fake.call("done", { summary: "Drawn", input_request: null, experience: null });
+    expect(await result).toBe(CLAUDE_CODE_DONE);
+    expect(f.states()).not.toContainEqual(expect.objectContaining({ state: "error" }));
+  });
+});
+
 describe("a Claude Code start that fails", () => {
   it("names an earlier task's unconfirmed exit and logs the cause", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});

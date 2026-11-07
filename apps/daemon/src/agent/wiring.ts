@@ -33,13 +33,18 @@ import {
   TOOL_API_PORT,
 } from "@localdot/protocol";
 import type { QuarantineItem } from "../../../../packages/protocol/src/quarantine.ts";
-import type { BrowserScope } from "../browser/client.ts";
+import { BrowserClientError, type BrowserScope } from "../browser/client.ts";
 import { releaseForFullAccess } from "../browser/full-access-downloads.ts";
 import { desktopPlacement } from "../browser/placement.ts";
 import type { QuarantineStore } from "../browser/quarantine.ts";
 import { quarantineAccess } from "../browser/quarantine-access.ts";
 import { releaseDownload } from "../browser/quarantine-routes.ts";
-import type { ScreenLease } from "../browser/screen-controller.ts";
+import {
+  BROWSER_FIRST_LOOK,
+  ScreenControlError,
+  type ScreenLease,
+  ScreenUnavailableError,
+} from "../browser/screen-controller.ts";
 import type { SessionScreens } from "../browser/session-screens.ts";
 import type { DockerClient } from "../cells/docker.ts";
 import { CellControlConflict, type CellOrchestrator } from "../cells/orchestrator.ts";
@@ -163,6 +168,9 @@ export interface AgentWiringDeps {
   liveChanged?: AgentRunnerDeps["liveChanged"];
 }
 export const BUILTIN_SKILLS = runtimeLayout.skills;
+// How long a native task's first look waits for the web browser, its turn on the computer included,
+// before the task starts on the desktop instead.
+export const FIRST_LOOK_MS = 15_000;
 // A native harness hands memory to the model here.
 function tainting<T extends { user: string; memory: string }>(session: AgentSession, memory: T): T {
   taintMemory(session.taint, memory);
@@ -529,12 +537,19 @@ export function createAgent(d: AgentWiringDeps) {
       credentials: serviceKeys,
     },
   };
+  const computerUp = (cellId: string) => {
+    const cell = d.cells.get(cellId);
+    return (
+      ready &&
+      !closing &&
+      d.monitor.health.online &&
+      cell?.state === "ready" &&
+      !cell.paused &&
+      !d.killSwitch.isBusy(cellId)
+    );
+  };
   // A native harness's first look at the task computer: one full screenshot of the selected screen.
-  const observe = async (
-    session: AgentSession,
-    generation: BrainGeneration,
-    signal: AbortSignal,
-  ) => {
+  const look = async (session: AgentSession, generation: BrainGeneration, signal: AbortSignal) => {
     const lease = session.admit(generation, signal);
     let screen: ScreenLease | undefined;
     let turn: ComputerTurn | undefined;
@@ -542,15 +557,9 @@ export function createAgent(d: AgentWiringDeps) {
     const check = () => {
       lease.check();
       screen?.check();
-      const cell = d.cells.get(session.cellId),
-        current = d.cells.endpoints(session.cellId)?.desktopd;
+      const current = d.cells.endpoints(session.cellId)?.desktopd;
       if (
-        !ready ||
-        closing ||
-        !d.monitor.health.online ||
-        cell?.state !== "ready" ||
-        cell.paused ||
-        d.killSwitch.isBusy(session.cellId) ||
+        !computerUp(session.cellId) ||
         !endpoint ||
         current?.token !== endpoint.token ||
         current.baseUrl !== endpoint.baseUrl
@@ -587,6 +596,50 @@ export function createAgent(d: AgentWiringDeps) {
       await turn?.release().catch(() => {});
       lease.finish();
     }
+  };
+  // A web browser that can't be read for that look, in FIRST_LOOK_MS or at all, costs the task the
+  // web browser, not its start: it starts on the desktop, told why, as when a switch to it fails.
+  const observe = async (
+    session: AgentSession,
+    generation: BrainGeneration,
+    signal: AbortSignal,
+  ) => {
+    if (session.screens?.selection.screen !== "browser") return look(session, generation, signal);
+    const budget = new AbortController();
+    const timer = setTimeout(() => budget.abort(), FIRST_LOOK_MS);
+    try {
+      return await look(session, generation, AbortSignal.any([signal, budget.signal]));
+    } catch (error) {
+      if (
+        signal.aborted ||
+        !session.isCurrent(generation) ||
+        session.controlHeld ||
+        session.safetyPause ||
+        session.screens?.selection.screen !== "browser" ||
+        !(
+          budget.signal.aborted ||
+          error instanceof ScreenUnavailableError ||
+          error instanceof ScreenControlError ||
+          error instanceof BrowserClientError
+        )
+      )
+        throw error;
+      if (!computerUp(session.cellId))
+        throw new AgentError(409, "The task computer changed during observation.");
+    } finally {
+      clearTimeout(timer);
+    }
+    console.error(
+      `a task's first look couldn't read the web browser; it starts on the desktop (task ${session.id})`,
+    );
+    const lease = session.admit(generation, signal);
+    try {
+      await session.switchScreen("desktop", lease, { daemon: true });
+    } finally {
+      lease.finish();
+    }
+    session.remind(BROWSER_FIRST_LOOK);
+    return look(session, generation, signal);
   };
   const nativeTasks = new NativeTasks(d.home);
   const nativeWork = (sessionId: string) => workRecord(workEvents(d.eventLog.logFile(sessionId)));

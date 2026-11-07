@@ -862,8 +862,11 @@ export class ClaudeCodeDriver {
           );
       if (Buffer.byteLength(prompt) > MAX_PROMPT_BYTES) throw new InputRefused("size");
       step = "screen";
+      // The first look, bounded on its own, has the whole start time, and so has the launch after it.
+      startupTimer.refresh();
       const observation = await d.observe(session, generation, signal);
       check();
+      startupTimer.refresh();
       if (session.safetyPause) throw new Error("Startup is fenced by Pause.");
       if (
         observation.full !== true ||

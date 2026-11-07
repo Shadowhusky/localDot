@@ -832,7 +832,7 @@ export class AgentSession {
   async switchScreen(
     screen: ScreenName,
     lease: ToolLease,
-    options: { restart?: boolean } = {},
+    options: { restart?: boolean; daemon?: boolean } = {},
   ): Promise<ScreenSwitchData> {
     lease.check();
     if (!this.#active.has(lease) || !this.#screens || this.#screenReady !== lease.generation)

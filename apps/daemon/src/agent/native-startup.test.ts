@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { BrowserClientError } from "../browser/client.ts";
+import { BrowserBusyError, ScreenUnavailableError } from "../browser/screen-controller.ts";
 import { InputRefused, loggedCause, startupFailure } from "./native-startup.ts";
 import { redactor } from "./redact.ts";
 import { NativeCleanupPending } from "./safety/native-tasks.ts";
@@ -71,6 +73,22 @@ describe("what the user is told about a start failure", () => {
       message: "Claude Code could not start.",
       detail: "The computer's screen couldn't be read.",
       next: "Wait until the computer is ready, then send your message again.",
+    });
+    vi.restoreAllMocks();
+  });
+
+  it("names the web browser, not the computer, when only the web browser failed its screen", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const browser = {
+      message: "Claude Code could not start.",
+      detail: "The web browser didn't answer in time; the computer itself is running.",
+      next: "Send your message again in a moment.",
+    };
+    expect(fail(new BrowserBusyError(), "screen")).toEqual(browser);
+    expect(fail(new BrowserClientError("aborted"), "screen")).toEqual(browser);
+    expect(fail(new ScreenUnavailableError("browser", true), "screens")).toEqual(browser);
+    expect(fail(new ScreenUnavailableError("desktop"), "screen")).toMatchObject({
+      detail: "The computer's screen couldn't be read.",
     });
     vi.restoreAllMocks();
   });

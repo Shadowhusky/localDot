@@ -1,3 +1,5 @@
+import { BrowserClientError } from "../browser/client.ts";
+import { ScreenUnavailableError } from "../browser/screen-controller.ts";
 import { RETRY_NEXT } from "./native-tools.ts";
 import type { Redactor } from "./redact.ts";
 import { NativeCleanupPending } from "./safety/native-tasks.ts";
@@ -41,6 +43,12 @@ const STEPS: Record<StartupStep, { detail: string; next: string }> = {
   },
   launch: { detail: "localDot couldn't launch it.", next: RETRY_NEXT },
   connection: { detail: "It didn't answer as expected.", next: RETRY_NEXT },
+};
+
+// A screen step that only the web browser failed: the computer itself runs.
+const BROWSER_SCREEN = {
+  detail: "The web browser didn't answer in time; the computer itself is running.",
+  next: "Send your message again in a moment.",
 };
 
 const NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
@@ -94,5 +102,11 @@ export function startupFailure(input: {
       detail: `An earlier ${harness} task on this computer hasn't been confirmed stopped.`,
       next: "Run localdot doctor to check the computer, then send your message again.",
     };
+  if (
+    (step === "screen" || step === "screens") &&
+    (cause instanceof BrowserClientError ||
+      (cause instanceof ScreenUnavailableError && cause.screen === "browser"))
+  )
+    return { message, ...BROWSER_SCREEN };
   return { message, ...STEPS[step] };
 }
