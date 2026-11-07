@@ -358,6 +358,70 @@ describe("owned root navigation", () => {
     },
   );
 
+  // A page may move on by itself once the requested document has committed: web.telegram.org
+  // sends itself on to /k/ by script before it has loaded, and a challenge page reloads itself.
+  // Neither leaves the navigation in doubt, nor the browser needing a restart.
+  it.each([
+    ["script-redirect", "ack-first"],
+    ["script-redirect", "events-first"],
+    ["self-reload", "ack-first"],
+    ["self-reload", "events-first"],
+  ])("follows the page's own %s once the requested document commits (%s)", async (kind, order) => {
+    const fixture = await setup();
+    const result = fixture.targets.navigate(fixture.tabId, destination);
+    await settle();
+    const ack = () =>
+      fixture.reply(fixture.navigation(), { frameId: "root", loaderId: "new-loader" });
+    if (order === "ack-first") ack();
+    fixture.cross();
+    const moved = {
+      id: "root",
+      loaderId: "moved-loader",
+      url: kind === "script-redirect" ? `${destination}/k/` : destination,
+    };
+    fixture.event("Page.frameNavigated", { frame: moved });
+    fixture.setFrame(moved);
+    fixture.load("moved-loader", "root", "DOMContentLoaded");
+    if (order === "events-first") ack();
+    await expect(result).resolves.toBeUndefined();
+    expect(fixture.fatal).not.toHaveBeenCalled();
+  });
+
+  it("waits for the document the page moved on to, not the one it left", async () => {
+    const fixture = await setup();
+    const result = fixture.targets.navigate(fixture.tabId, destination);
+    let done = false;
+    void result.then(() => {
+      done = true;
+    });
+    await settle();
+    fixture.reply(fixture.navigation(), { frameId: "root", loaderId: "new-loader" });
+    fixture.cross();
+    const moved = { id: "root", loaderId: "moved-loader", url: `${destination}/k/` };
+    fixture.event("Page.frameNavigated", { frame: moved });
+    fixture.setFrame(moved);
+    fixture.load("new-loader");
+    await settle();
+    expect(done).toBe(false);
+    fixture.load("moved-loader");
+    await expect(result).resolves.toBeUndefined();
+    expect(fixture.fatal).not.toHaveBeenCalled();
+  });
+
+  it("refuses a page that keeps moving on", async () => {
+    const fixture = await setup();
+    const result = fixture.targets.navigate(fixture.tabId, destination);
+    const refused = expect(result).rejects.toThrow();
+    await settle();
+    fixture.reply(fixture.navigation(), { frameId: "root", loaderId: "new-loader" });
+    fixture.cross();
+    for (let hop = 0; hop < 5; hop++)
+      fixture.event("Page.frameNavigated", {
+        frame: { id: "root", loaderId: `hop-${hop}`, url: `${destination}/${hop}` },
+      });
+    await refused;
+  });
+
   it.each(["root", "loader", "scheme"])("rechecks the final frame's %s", async (kind) => {
     const fixture = await setup();
     const result = fixture.targets.navigate(fixture.tabId, destination);
