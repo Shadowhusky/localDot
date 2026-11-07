@@ -62,6 +62,21 @@ it("keeps a busy engine ready while its readiness reply is only late, then gives
   now = 31_000;
   expect(await runtime.snapshot()).toEqual({ docker: "unavailable", startup: "ready" });
 });
+it("asks a late engine again, patiently, before calling it unavailable", async () => {
+  let now = 0;
+  const late = Object.assign(new Error("no reply within 3000 ms"), { timedOut: true });
+  const check = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValue(late);
+  const patient = vi.fn().mockResolvedValue(undefined);
+  const runtime = new RuntimeStartup(check, () => now, patient);
+  await runtime.run(async () => {}, { signal: new AbortController().signal });
+  now = 300_000;
+  expect(await runtime.snapshot()).toEqual({ docker: "ready", startup: "ready" });
+  expect(patient).toHaveBeenCalledOnce();
+  // Answered at last: a late reply within the grace after that is a busy engine again.
+  now = 310_000;
+  expect(await runtime.snapshot()).toEqual({ docker: "ready", startup: "ready" });
+  expect(patient).toHaveBeenCalledOnce();
+});
 it("reports a refused or missing socket as unavailable at once", async () => {
   const check = vi
     .fn()
