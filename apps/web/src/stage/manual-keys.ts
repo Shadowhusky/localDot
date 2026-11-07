@@ -110,6 +110,12 @@ export function routeKey(event: KeyLike, apple: boolean): KeyRoute {
     : { kind: "text" };
 }
 
+// Alt+Tab, and Command+Tab where the system lets it through: the app switcher's keys, which switch
+// between the desktop and the web browser's window when both are on the screen.
+export function switchesWindow(event: KeyLike): boolean {
+  return event.key === "Tab" && !event.ctrlKey && (event.altKey || event.metaKey);
+}
+
 // What turns the keyboard field's old text into its new text at its end: characters to delete,
 // then text to type. A phone keyboard's corrections and suggestions rewrite the word in place.
 export function textEdit(before: string, after: string): { erase: number; text: string } {

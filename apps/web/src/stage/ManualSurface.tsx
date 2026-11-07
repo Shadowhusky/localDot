@@ -52,6 +52,7 @@ const PAD = "\u200b".repeat(4);
 const NOTCH = [50, 3, 0.1];
 const PASTE_LIMIT = 4000;
 const ESCAPE_TWICE_MS = 500;
+const KEYS_KEPT_MS = 3000;
 const notches = (n: number) => Math.max(-32, Math.min(32, n));
 // Whole notches of travel, forgiving the float error of fractions that add up to one.
 const whole = (n: number) => Math.trunc(n + Math.sign(n) * 1e-9);
@@ -80,6 +81,8 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
       sent: null as Point | null,
       frame: 0,
       wheel: { dx: 0, dy: 0 },
+      // When the keys last had the field and input paused, as while the screens change places.
+      paused: 0,
     });
 
     // Built once: they read the latest props and state through refs.
@@ -130,11 +133,18 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
       },
     }));
     useEffect(() => {
-      if (live) return;
       const s = state.current;
+      if (live) {
+        // The screen that came forward takes the keys that went to the one before.
+        if (s.paused && performance.now() - s.paused < KEYS_KEPT_MS)
+          field.current?.focus({ preventScroll: true });
+        s.paused = 0;
+        return;
+      }
       cancelAnimationFrame(s.frame);
       s.frame = 0;
       s.hover = null;
+      s.paused = document.activeElement === field.current ? performance.now() : 0;
       field.current?.blur();
     }, [live]);
     useEffect(() => {

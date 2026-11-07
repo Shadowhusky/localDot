@@ -81,6 +81,7 @@ describe("stage geometry", () => {
     expect(onDesktop.y + onDesktop.h / 2).toBeCloseTo(400);
     const onBrowser = targetRingBox({ ...mark, screen: "browser" }, screen, stage);
     expect(onBrowser.x + onBrowser.w / 2).toBeCloseTo(640);
-    expect(onBrowser.y + onBrowser.h / 2).toBeCloseTo(24 + 776 / 2);
+    // Under the menu bar and the window's title bar: 24 and 28 of the desktop's 800 px.
+    expect(onBrowser.y + onBrowser.h / 2).toBeCloseTo(52 + 748 / 2);
   });
 });
