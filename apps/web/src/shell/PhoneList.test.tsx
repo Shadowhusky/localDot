@@ -310,3 +310,83 @@ describe("what a row says", () => {
     );
   });
 });
+
+describe("choosing several", () => {
+  const ticked = () =>
+    screen
+      .queryAllByRole("checkbox")
+      .filter((each) => each.getAttribute("aria-checked") === "true")
+      .map((each) => each.getAttribute("aria-label")?.split(".")[0]);
+
+  it("starts from Select in the bar, lists the pinned among the rows and deletes them once asked", async () => {
+    const pinned = entry("Weekly numbers", { pinned: true });
+    const hotel = entry("Book the hotel");
+    const fares = entry("Compare fares");
+    let list = [hotel, pinned, fares];
+    const removed: string[] = [];
+    const api = createApi("a".repeat(43), {
+      origin: "http://127.0.0.1",
+      fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        if (init?.method === "DELETE") {
+          removed.push(path);
+          list = list.filter((each) => !path.endsWith(each.sessionId));
+          return new Response(null, { status: 204 });
+        }
+        if (path === "/api/search") return Response.json({ hits: [], complete: true, mode: "fts" });
+        return Response.json({ conversations: list, archivedCount: 0 });
+      }) as typeof fetch,
+    });
+    const onDeleted = vi.fn();
+    render(
+      <PhoneList
+        api={api}
+        current={null}
+        facts={QUIET}
+        attention={[]}
+        onOpen={vi.fn()}
+        onNew={() => {}}
+        onReplay={() => {}}
+        onDeleted={onDeleted}
+        computer={{ name: "Studio Mac", menu: null }}
+      />,
+    );
+    await screen.findByRole("list", { name: "Pinned" });
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    expect(screen.queryByRole("list", { name: "Pinned" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New conversation" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Actions for/ })).toBeNull();
+    expect(rows()).toHaveLength(3);
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Weekly numbers/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Compare fares/ }));
+    expect(ticked()).toEqual(["Weekly numbers", "Compare fares"]);
+    expect(screen.getByText("2 selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete…" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete 2 conversations?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(removed.sort()).toEqual(
+      [pinned, fares].map((each) => `/api/conversations/${each.sessionId}`).sort(),
+    );
+    expect(onDeleted).toHaveBeenCalledWith([...pinned.sessions, ...fares.sessions]);
+    expect(screen.getByRole("button", { name: "Select" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New conversation" })).toBeTruthy();
+  });
+
+  it("starts from a row's menu with that row ticked, and Escape or Cancel lets them go", async () => {
+    open([entry("Book the hotel"), entry("Compare fares")]);
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for Compare fares" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Select" }));
+    expect(ticked()).toEqual(["Compare fares"]);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: /^Compare fares/ })),
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all" }));
+    expect(ticked()).toEqual(["Book the hotel", "Compare fares"]);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryAllByRole("checkbox")).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryAllByRole("checkbox")).toEqual([]);
+  });
+});

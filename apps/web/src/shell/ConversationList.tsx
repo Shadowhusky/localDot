@@ -4,11 +4,13 @@
 
 import {
   CONVERSATION_NAME_CHARS,
+  type ConversationEntry,
   type ConversationTag,
   RenameConversation,
 } from "@localdot/protocol";
 import {
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   useEffect,
   useId,
@@ -37,6 +39,7 @@ import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
+import { CheckMark } from "../ui/CheckMark.tsx";
 import { TAG_NAMES, TagDot } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
@@ -46,12 +49,15 @@ import { MenuItem } from "../ui/Menu.tsx";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
 import { type SwipeAction, SwipeActions } from "../ui/SwipeActions.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { useHandler } from "../ui/useHandler.ts";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { ConversationMenu } from "./ConversationMenu.tsx";
 import { ConversationPeek, type Peek } from "./ConversationPeek.tsx";
+import { adds, SelectAll, SelectionActions } from "./ConversationSelection.tsx";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import { LiveDeck } from "./LiveDeck.tsx";
+import { useConversationSelection } from "./useConversationSelection.ts";
 import "../ui/conversations-layout.css";
 import "./rails.css";
 
@@ -74,7 +80,8 @@ export interface ConversationListProps {
 
 // The recent conversations, those pinned and those under way first and the rest by day, a search
 // over them, best first, and the way into Replay for the rest. The search field keeps the focus while the arrows move through
-// the rows, as a picker's does.
+// the rows, as a picker's does. Select, a row's menu, or a row pressed with Cmd, Ctrl or Shift
+// starts choosing several to act on together; Escape lets them go.
 export function ConversationList({
   api,
   open,
@@ -93,7 +100,9 @@ export function ConversationList({
   const actionRow = useRef<HTMLElement | null>(null);
   const surface = useRef<HTMLElement | null>(null);
   const [action, setAction] = useState<ConversationRow | null>(null);
-  const [deleting, setDeleting] = useState<ConversationRow | null>(null);
+  const [deleting, setDeleting] = useState<readonly ConversationEntry[] | null>(null);
+  // Select, then Cancel: where the confirmation for several opens and where focus goes after.
+  const selectToggle = useRef<HTMLButtonElement>(null);
   // The row whose name is being typed in place, and what is typed. An empty name gives the
   // conversation back its automatic one.
   const [renaming, setRenaming] = useState<{ id: string; name: string; was: string } | null>(null);
@@ -141,10 +150,36 @@ export function ConversationList({
     () => (query.trim() ? searchConversations(shown, query, matches.tasks) : null),
     [shown, query, matches.tasks],
   );
+  // While choosing, every conversation is a row, in the order the list gives them.
+  const listed = useMemo(
+    () =>
+      found
+        ? found.map((match) => match.row)
+        : groupConversations(shown, now).flatMap((group) => group.rows),
+    [found, shown, now],
+  );
+  const selection = useConversationSelection(listed);
+  if (!open && selection.selecting) selection.stop();
+  // Escape anywhere in the popover or sheet lets the chosen go before it would close them. WebKit
+  // leaves focus on the popover itself after a press on a row, outside the list.
+  const root = useRef<HTMLDivElement>(null);
+  const letGo = useHandler((event: globalThis.KeyboardEvent) => {
+    if (event.key !== "Escape" || event.isComposing || deleting) return;
+    const around = root.current?.closest("[role='dialog']") ?? root.current;
+    if (!(event.target instanceof Node) || !around?.contains(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selection.stop();
+  });
+  useEffect(() => {
+    if (!selection.selecting) return;
+    document.addEventListener("keydown", letGo, true);
+    return () => document.removeEventListener("keydown", letGo, true);
+  }, [selection.selecting, letGo]);
   // On the sheet the conversations under way are cards above the rest, until a search.
   const live = useMemo(
-    () => (sheet && !found ? liveConversations(shown) : []),
-    [sheet, found, shown],
+    () => (sheet && !found && !selection.selecting ? liveConversations(shown) : []),
+    [sheet, found, shown, selection.selecting],
   );
   const groups = useMemo(
     (): ConversationGroup[] =>
@@ -198,9 +233,27 @@ export function ConversationList({
     if (box.top < view.top) port.scrollTop -= view.top - box.top;
     else if (box.bottom > view.bottom) port.scrollTop += box.bottom - view.bottom;
   }, [activeKey]);
+  // A row chosen from its menu takes the focus once it is a checkbox: on the sheet that is a new
+  // element, as the row no longer slides.
+  const focusRow = useRef<ConversationRow | null>(null);
+  useEffect(() => {
+    const row = focusRow.current;
+    if (!row) return;
+    focusRow.current = null;
+    document
+      .getElementById(optionId(row))
+      ?.querySelector<HTMLElement>(".conversations-pick")
+      ?.focus();
+  });
   const pick = (row: ConversationRow) => {
     if (reason && row.entry.sessionId !== current) return;
     onPick(row.entry.sessionId, row.entry.sessions);
+  };
+  const press = (row: ConversationRow, event: MouseEvent | KeyboardEvent) => {
+    const id = row.entry.sessionId;
+    if (selection.selecting) selection.press(id, event.shiftKey);
+    else if (adds(event) || event.shiftKey) selection.start(id, event.shiftKey ? current : null);
+    else pick(row);
   };
   const running = (row: ConversationRow) =>
     row.active || !!row.entry.live || row.entry.sessions.includes(facts.live ?? "");
@@ -291,7 +344,8 @@ export function ConversationList({
       }
     } else if (event.key === "Enter" && activeRow) {
       event.preventDefault();
-      pick(activeRow);
+      if (selection.selecting) press(activeRow, event);
+      else pick(activeRow);
     }
   };
 
@@ -394,6 +448,8 @@ export function ConversationList({
           const id = row.entry.sessionId;
           const isCurrent = id === current;
           const match = marked.get(id);
+          const choosing = selection.selecting;
+          const chosen = selection.chosen(id);
           const cells = (
             <>
               <div role="gridcell" className="conversations-main">
@@ -403,8 +459,13 @@ export function ConversationList({
                   <Button
                     variant="quiet"
                     className="conversations-pick"
-                    disabledReason={!isCurrent ? reason : undefined}
-                    onClick={() => pick(row)}
+                    role={choosing ? "checkbox" : undefined}
+                    aria-checked={choosing ? chosen : undefined}
+                    disabledReason={!isCurrent && !choosing ? reason : undefined}
+                    // While choosing, the whole row takes the press, its tick too.
+                    onClick={(event) => {
+                      if (!choosing) press(row, event);
+                    }}
                   >
                     <ConversationAvatar row={row} labelled />
                     <span className="conversations-title">
@@ -426,16 +487,20 @@ export function ConversationList({
                 )}
               </div>
               <div role="gridcell">
-                <IconButton
-                  icon="more-horizontal"
-                  size={28}
-                  className="conversations-more"
-                  label={`Actions for ${row.title}`}
-                  {...triggerProps("menu", action?.entry.sessionId === id)}
-                  onClick={(event) =>
-                    openMenu(row, event.currentTarget, event.currentTarget.closest("[role=row]"))
-                  }
-                />
+                {choosing ? (
+                  <CheckMark checked={chosen} className="conversations-check" />
+                ) : (
+                  <IconButton
+                    icon="more-horizontal"
+                    size={28}
+                    className="conversations-more"
+                    label={`Actions for ${row.title}`}
+                    {...triggerProps("menu", action?.entry.sessionId === id)}
+                    onClick={(event) =>
+                      openMenu(row, event.currentTarget, event.currentTarget.closest("[role=row]"))
+                    }
+                  />
+                )}
               </div>
             </>
           );
@@ -450,11 +515,12 @@ export function ConversationList({
               role="row"
               aria-selected={row === activeRow}
               aria-current={isCurrent || undefined}
-              aria-disabled={(!!reason && !isCurrent) || undefined}
+              aria-disabled={(!!reason && !isCurrent && !choosing) || undefined}
               className="conversations-row"
               data-active={row === activeRow || undefined}
               data-current={isCurrent || undefined}
               data-menu={action?.entry.sessionId === id || undefined}
+              onClick={choosing ? (event) => press(row, event) : undefined}
               onPointerMove={(event) => {
                 // A finger moving over the rows is scrolling them, not choosing one.
                 if (id !== activeKey && event.pointerType === "mouse") setActive(id);
@@ -467,7 +533,7 @@ export function ConversationList({
                 openMenu(row, more, event.currentTarget);
               }}
             >
-              {sheet && renaming?.id !== id ? (
+              {sheet && renaming?.id !== id && !choosing ? (
                 <SwipeActions
                   className="conversations-swipe"
                   {...swipes(row)}
@@ -514,29 +580,54 @@ export function ConversationList({
   );
 
   return (
-    <div className="conversations" data-layout={layout}>
-      <TextField
-        size="sm"
-        className="conversations-search"
-        prefix={<Icon name="search" />}
-        role="combobox"
-        aria-label="Search conversations"
-        aria-expanded={ordered.length > 0}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        aria-haspopup="grid"
-        aria-activedescendant={activeRow ? optionId(activeRow) : undefined}
-        placeholder="Search conversations"
-        enterKeyHint="go"
-        autoComplete="off"
-        spellCheck={false}
-        value={query}
-        onChange={(event) => {
-          setQuery(event.target.value);
-          setActive(null);
-        }}
-        onKeyDown={onKeyDown}
-      />
+    <div
+      ref={root}
+      className="conversations"
+      data-layout={layout}
+      data-selecting={selection.selecting || undefined}
+    >
+      <div className="conversations-search-row">
+        <TextField
+          size="sm"
+          className="conversations-search"
+          prefix={<Icon name="search" />}
+          role="combobox"
+          aria-label="Search conversations"
+          aria-expanded={ordered.length > 0}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-haspopup="grid"
+          aria-activedescendant={activeRow ? optionId(activeRow) : undefined}
+          placeholder="Search conversations"
+          enterKeyHint="go"
+          autoComplete="off"
+          spellCheck={false}
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setActive(null);
+          }}
+          onKeyDown={onKeyDown}
+        />
+        {(selection.selecting || all.length > 0) && (
+          <Button
+            ref={selectToggle}
+            variant="quiet"
+            size={sheet ? "md" : "sm"}
+            className="conversations-select"
+            onClick={() => (selection.selecting ? selection.stop() : selection.start())}
+          >
+            {selection.selecting ? "Cancel" : "Select"}
+          </Button>
+        )}
+      </div>
+      {selection.selecting && (
+        <SelectAll
+          shown={ordered.length}
+          chosen={selection.picked.length}
+          onChange={selection.all}
+        />
+      )}
       {reason && <p className="conversations-note">{reason}</p>}
       {renameError && (
         <p className="conversations-note" role="alert">
@@ -576,7 +667,7 @@ export function ConversationList({
           />
         )}
         {content}
-        {sheet && foot}
+        {sheet && !selection.selecting && foot}
       </div>
       <ConversationPeek
         peek={peek}
@@ -610,7 +701,12 @@ export function ConversationList({
             announce("conversation", "That change couldn't be saved. Try again.", "assertive"),
           );
         }}
-        onDelete={() => setDeleting(action)}
+        onDelete={() => setDeleting(action && [action.entry])}
+        onStartSelecting={() => {
+          if (!action) return;
+          selection.start(action.entry.sessionId);
+          focusRow.current = action;
+        }}
       >
         <MenuItem
           icon="message-circle"
@@ -624,12 +720,28 @@ export function ConversationList({
       </ConversationMenu>
       <DeleteConversationDialog
         api={api}
-        conversation={deleting?.entry ?? null}
+        conversations={deleting}
         anchor={actionAnchor}
         onClose={() => setDeleting(null)}
-        onDeleted={onDeleted}
+        onDeleted={(sessions) => {
+          onDeleted?.(sessions);
+          selection.drop(sessions);
+        }}
       />
-      {!sheet && foot}
+      {selection.selecting ? (
+        <SelectionActions
+          api={api}
+          picked={selection.picked}
+          running={running}
+          onDelete={() => {
+            actionAnchor.current = selectToggle.current;
+            setDeleting(selection.picked.map((row) => row.entry));
+          }}
+          onDone={selection.stop}
+        />
+      ) : (
+        !sheet && foot
+      )}
     </div>
   );
 }

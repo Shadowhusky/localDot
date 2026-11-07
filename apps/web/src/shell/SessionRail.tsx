@@ -1,3 +1,4 @@
+import type { ConversationEntry } from "@localdot/protocol";
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -28,6 +29,7 @@ import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
+import { CheckMark } from "../ui/CheckMark.tsx";
 import { TAG_NAMES } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
@@ -41,13 +43,16 @@ import { triggerProps } from "../ui/Popover.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { useTooltip } from "../ui/Tooltip.tsx";
+import { useEscape } from "../ui/useEscape.ts";
 import { useHandler } from "../ui/useHandler.ts";
 import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { ConversationMenu } from "./ConversationMenu.tsx";
+import { adds, SelectAll, SelectionActions } from "./ConversationSelection.tsx";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import type { Layout } from "./layout.ts";
 import { RailSearch } from "./RailSearch.tsx";
 import { switchConversation } from "./switch-motion.ts";
+import { useConversationSelection } from "./useConversationSelection.ts";
 import { DOCK_POINTER, useDockMagnify } from "./useDockMagnify.ts";
 import "../ui/conversations-layout.css";
 import "./rails.css";
@@ -111,7 +116,8 @@ const isToggle = (event: globalThis.KeyboardEvent) =>
 // keeps only their status marks and colour tags. A search at the top finds them by name and by what
 // was said in them. It follows the daemon's changes as they come and shares its list with the
 // conversations popover. The arrows move through the rows, Return takes one up, F2 renames one,
-// Shift+F10 or a right click opens its menu and Mod+\ collapses or expands the rail.
+// Shift+F10 or a right click opens its menu and Mod+\ collapses or expands the rail. Select, a
+// row's menu, or a row pressed with Cmd, Ctrl or Shift starts choosing several to act on together.
 export const SessionRail = memo(function SessionRail({
   api,
   current,
@@ -189,6 +195,8 @@ export const SessionRail = memo(function SessionRail({
     ? [...found.recent, ...found.archived].map((match) => match.row)
     : [...rows.pinned, ...rows.active, ...rows.rest, ...archivedShown];
   const order = listed.map((row) => row.entry.sessionId);
+  const selection = useConversationSelection(listed);
+  if (!expanded && selection.selecting) selection.stop();
 
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const searchField = useRef<HTMLInputElement>(null);
@@ -264,6 +272,8 @@ export const SessionRail = memo(function SessionRail({
       // Up from the first row goes back to the search.
       if (to < 0 && expanded) searchField.current?.focus();
       else if (id) buttons.current.get(id)?.focus();
+    } else if (selection.selecting) {
+      return;
     } else if (event.key === "F2" && expanded) {
       event.preventDefault();
       setEditing(row.entry.sessionId);
@@ -271,6 +281,14 @@ export const SessionRail = memo(function SessionRail({
       event.preventDefault();
       openMenu(row, event.currentTarget);
     }
+  };
+  const press = (row: ConversationRow, event: MouseEvent<HTMLButtonElement>) => {
+    const id = row.entry.sessionId;
+    if (selection.selecting) selection.press(id, event.shiftKey);
+    else if (adds(event) || event.shiftKey) {
+      onExpandedChange(true);
+      selection.start(id, event.shiftKey ? current : null);
+    } else pick(row);
   };
   const pick = (row: ConversationRow) => {
     const id = row.entry.sessionId;
@@ -288,6 +306,8 @@ export const SessionRail = memo(function SessionRail({
   const rail = useRef<HTMLElement>(null);
   const actionAnchor = useRef<HTMLButtonElement | null>(null);
   const actionRow = useRef<HTMLElement | null>(null);
+  // Select, then Cancel: where the confirmation for several opens and where focus goes after.
+  const selectToggle = useRef<HTMLButtonElement>(null);
   const [action, setAction] = useState<ConversationRow | null>(null);
   const openMenu = (row: ConversationRow, trigger: HTMLButtonElement) => {
     actionAnchor.current = trigger;
@@ -302,6 +322,7 @@ export const SessionRail = memo(function SessionRail({
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest("input, textarea")) return;
     event.preventDefault();
+    if (selection.selecting) return;
     const item =
       target?.closest<HTMLElement>("[data-flip]") ??
       rowLevelWith(event.currentTarget, event.clientY);
@@ -309,7 +330,8 @@ export const SessionRail = memo(function SessionRail({
     const trigger = row && buttons.current.get(row.entry.sessionId);
     if (row && trigger) openMenu(row, trigger);
   };
-  const [deleting, setDeleting] = useState<ConversationRow | null>(null);
+  const [deleting, setDeleting] = useState<readonly ConversationEntry[] | null>(null);
+  useEscape(selection.selecting && !deleting, selection.stop);
   const organize = (row: ConversationRow, change: Organize) =>
     organizeConversation(api, row.entry.sessionId, change).catch((failure) =>
       announce(
@@ -335,6 +357,8 @@ export const SessionRail = memo(function SessionRail({
       tabStop={row.entry.sessionId === stop}
       blocked={reason && row.entry.sessionId !== current ? reason : undefined}
       editing={row.entry.sessionId === editing}
+      choosing={selection.selecting}
+      chosen={selection.chosen(row.entry.sessionId)}
       menuOpen={action?.entry.sessionId === row.entry.sessionId}
       register={(element) => {
         if (element) buttons.current.set(row.entry.sessionId, element);
@@ -342,7 +366,7 @@ export const SessionRail = memo(function SessionRail({
       }}
       onFocus={() => setFocused(row.entry.sessionId)}
       onKeyDown={(event) => moveFocus(event, row)}
-      onPick={() => pick(row)}
+      onPick={(event) => press(row, event)}
       onMenu={(trigger) => openMenu(row, trigger)}
       onRenamed={(title, fromKeys) => void rename(row, title, fromKeys)}
     />
@@ -387,6 +411,7 @@ export const SessionRail = memo(function SessionRail({
       className="sessions"
       aria-label="Conversations"
       data-expanded={expanded || undefined}
+      data-selecting={selection.selecting || undefined}
     >
       <div className="sessions-head">
         <IconButton
@@ -396,8 +421,30 @@ export const SessionRail = memo(function SessionRail({
           kbd={RAIL_KEYS}
           onClick={toggle}
         />
+        {expanded && (selection.selecting || order.length > 0) && (
+          <Button
+            ref={selectToggle}
+            variant="quiet"
+            size="sm"
+            className="sessions-select"
+            onClick={() => (selection.selecting ? selection.stop() : selection.start())}
+          >
+            {selection.selecting ? "Cancel" : "Select"}
+          </Button>
+        )}
       </div>
-      <NewRow expanded={expanded} reason={newReason} onNew={onNew} />
+      {selection.selecting ? (
+        <div className="sessions-new">
+          <SelectAll
+            className="sessions-select-all"
+            shown={order.length}
+            chosen={selection.picked.length}
+            onChange={selection.all}
+          />
+        </div>
+      ) : (
+        <NewRow expanded={expanded} reason={newReason} onNew={onNew} />
+      )}
       <RailSearch
         expanded={expanded}
         query={query}
@@ -471,6 +518,20 @@ export const SessionRail = memo(function SessionRail({
           )}
         </div>
       </ScrollArea>
+      {selection.selecting && (
+        <SelectionActions
+          className="sessions-actions"
+          compact
+          api={api}
+          picked={selection.picked}
+          running={running}
+          onDelete={() => {
+            actionAnchor.current = selectToggle.current;
+            setDeleting(selection.picked.map((row) => row.entry));
+          }}
+          onDone={selection.stop}
+        />
+      )}
       <ConversationMenu
         entry={action?.entry ?? null}
         anchor={actionAnchor}
@@ -493,14 +554,23 @@ export const SessionRail = memo(function SessionRail({
             announce("conversation", "That change couldn't be saved. Try again.", "assertive"),
           );
         }}
-        onDelete={() => setDeleting(action)}
+        onDelete={() => setDeleting(action && [action.entry])}
+        onStartSelecting={() => {
+          if (!action) return;
+          onExpandedChange(true);
+          selection.start(action.entry.sessionId);
+          buttons.current.get(action.entry.sessionId)?.focus();
+        }}
       />
       <DeleteConversationDialog
         api={api}
-        conversation={deleting?.entry ?? null}
+        conversations={deleting}
         anchor={actionAnchor}
         onClose={() => setDeleting(null)}
-        onDeleted={onDeleted}
+        onDeleted={(sessions) => {
+          onDeleted?.(sessions);
+          selection.drop(sessions);
+        }}
       />
     </nav>
   );
@@ -603,11 +673,14 @@ interface RailRowProps {
   tabStop: boolean;
   blocked?: string;
   editing: boolean;
+  // Choosing several, and whether this one is among them: the row is a checkbox.
+  choosing: boolean;
+  chosen: boolean;
   menuOpen: boolean;
   register(element: HTMLButtonElement | null): void;
   onFocus(): void;
   onKeyDown(event: KeyboardEvent<HTMLButtonElement>): void;
-  onPick(): void;
+  onPick(event: MouseEvent<HTMLButtonElement>): void;
   onMenu(trigger: HTMLButtonElement): void;
   // The name given, or null to leave it as it was.
   onRenamed(title: string | null, fromKeys: boolean): void;
@@ -623,6 +696,8 @@ function RailRow({
   tabStop,
   blocked,
   editing,
+  choosing,
+  chosen,
   menuOpen,
   register,
   onFocus,
@@ -655,11 +730,13 @@ function RailRow({
             variant="quiet"
             className="sessions-row"
             tabIndex={tabStop ? 0 : -1}
+            role={choosing ? "checkbox" : undefined}
+            aria-checked={choosing ? chosen : undefined}
             aria-label={name}
             aria-current={current || undefined}
             aria-describedby={second && expanded ? activityId : undefined}
-            aria-keyshortcuts={expanded ? "F2 Shift+F10" : "Shift+F10"}
-            disabledReason={blocked}
+            aria-keyshortcuts={choosing ? undefined : expanded ? "F2 Shift+F10" : "Shift+F10"}
+            disabledReason={choosing ? undefined : blocked}
             onFocus={onFocus}
             onKeyDown={onKeyDown}
             onClick={onPick}
@@ -668,10 +745,14 @@ function RailRow({
             <span className="sessions-title">
               {match ? <Highlight text={match.title} /> : row.title}
             </span>
-            <span className="sessions-when num">
-              {row.entry.live?.onScreen && <Icon name="monitor" size={12} />}
-              {whenLabel(row.since, now)}
-            </span>
+            {choosing ? (
+              <CheckMark checked={chosen} className="sessions-check" />
+            ) : (
+              <span className="sessions-when num">
+                {row.entry.live?.onScreen && <Icon name="monitor" size={12} />}
+                {whenLabel(row.since, now)}
+              </span>
+            )}
             {second && (
               <span className="sessions-activity" data-shown={expanded || undefined}>
                 <span id={activityId} className="sessions-activity-text">
@@ -681,7 +762,7 @@ function RailRow({
             )}
           </Button>
           {tooltip}
-          {expanded && (
+          {expanded && !choosing && (
             <IconButton
               icon="more-horizontal"
               size={24}

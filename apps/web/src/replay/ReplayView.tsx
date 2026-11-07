@@ -46,6 +46,7 @@ import { Presence } from "../ui/Presence.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select } from "../ui/Select.tsx";
+import { useEscape } from "../ui/useEscape.ts";
 import { WorkView } from "../work/WorkView.tsx";
 import { CompareView } from "./CompareView.tsx";
 import { type Cleanup, deletable, pick, totalBytes } from "./cleanup.ts";
@@ -257,26 +258,6 @@ function NavBar({
       {viewControl}
     </nav>
   );
-}
-
-function useEscape(enabled: boolean, run: () => void) {
-  const latest = useRef(run);
-  latest.current = run;
-  useEffect(() => {
-    if (!enabled) return;
-    const key = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest("dialog, [aria-modal='true'], input, textarea, [role='listbox']")
-      )
-        return;
-      latest.current();
-    };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [enabled]);
 }
 
 function Library({

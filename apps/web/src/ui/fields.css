@@ -338,7 +338,8 @@
     }
   }
 
-  .ui-checkbox:has(> :is(:checked, [data-indeterminate])) {
+  .ui-checkbox:has(> :is(:checked, [data-indeterminate])),
+  .ui-checkbox[data-checked] {
     background-color: var(--color-fg-2);
     box-shadow: inset 0 0 0 var(--stroke-ring) var(--color-fg-2);
   }
@@ -364,7 +365,8 @@
   }
 
   .ui-checkbox > :checked:not([data-indeterminate]) ~ .ui-checkbox-mark .ui-checkbox-check,
-  .ui-checkbox > [data-indeterminate] ~ .ui-checkbox-mark .ui-checkbox-dash {
+  .ui-checkbox > [data-indeterminate] ~ .ui-checkbox-mark .ui-checkbox-dash,
+  .ui-checkbox[data-checked] .ui-checkbox-check {
     stroke-dashoffset: 0;
     transition: stroke-dashoffset var(--dur-snappy) var(--ease-enter) 40ms;
   }
