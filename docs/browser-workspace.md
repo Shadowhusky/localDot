@@ -12,8 +12,8 @@ The isolated computer shows one screen. Underneath it has a **desktop** and a se
 browser**, each in its own container with its own stream, and the stage draws the browser as one of
 the desktop's apps: a window under the desktop's menu bar with the desktop's own title bar (the
 browser's name and a minimise light; no close, which would close dot's window), as large as its shape
-allows, with a margin of desktop each side, and an item in the dock's glass beside the desktop's own
-dock. dot uses the web browser for anything online: opening a public web page brings that window
+allows, with a margin of desktop each side, and the last item on the desktop's own dock, after a
+divider. dot uses the web browser for anything online: opening a public web page brings that window
 forward. The desktop's own Chromium is for local files and pages served on the desktop itself, such as
 a site dot is building on localhost.
 
