@@ -1124,8 +1124,11 @@ export class CodexDriver {
       check();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       step = "screen";
+      // The first look, bounded on its own, has the whole start time, and so has the rest after it.
+      startupTimer.refresh();
       const observation = await d.observe(session, generation, signal);
       check();
+      startupTimer.refresh();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       if (
         observation.full !== true ||

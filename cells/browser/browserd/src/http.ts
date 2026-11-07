@@ -6,6 +6,8 @@ import { z as schema } from "zod";
 import {
   BrowserActionPermit,
   BrowserControlRequest,
+  BrowserLifecycleReply,
+  BrowserLifecycleRequest,
   BrowserManualPermit,
   BrowserManualReply,
   type BrowserSignInMode,
@@ -85,6 +87,7 @@ const routes = new Set([
   "POST /windows/enter",
   "POST /windows/tabs",
   "PUT /control",
+  "PUT /lifecycle",
   "POST /input",
   "POST /type",
   "POST /secret",
@@ -115,7 +118,8 @@ export interface BrowserHttpOptions {
   readonly instance: string;
   readonly control: Pick<BrowserControl, "holder" | "set">;
   readonly targets: Pick<BrowserTargets, "tabs">;
-  readonly windows?: Pick<BrowserWindows, "enter" | "tabs">;
+  readonly windows?: Pick<BrowserWindows, "enter" | "tabs"> &
+    Partial<Pick<BrowserWindows, "freeze" | "thaw" | "wakeTab" | "wakeTask" | "wakeScreen">>;
   readonly input: Pick<BrowserInput, "inject" | "type"> &
     Partial<Pick<BrowserInput, "timing" | "manual" | "secret">>;
   readonly observation: Pick<BrowserObservation, "observe"> &
@@ -462,6 +466,7 @@ export class BrowserHttp {
         }
         const parsed = BrowserUploadRequest.safeParse(value);
         if (!parsed.success) throw new HttpRefusal(400, "request");
+        await this.#options.windows?.wakeTab?.(parsed.data.tabId, false, signal);
         const receipt = await this.#options.uploads.upload(parsed.data, request, signal);
         this.#available(signal);
         send(response, 200, BrowserUploadReceipt.parse(receipt));
@@ -495,7 +500,11 @@ export class BrowserHttp {
       }
       // Metadata and download collection do not touch the screen. Keep the activity window
       // stable through those calls, but clear it before any visual action or control handoff.
-      if (!route.startsWith("POST /downloads/") && route !== "POST /timing")
+      if (
+        !route.startsWith("POST /downloads/") &&
+        route !== "POST /timing" &&
+        route !== "PUT /lifecycle"
+      )
         await this.#options.workWindow?.hide();
       if (route === "POST /stop") {
         const identity = identitySchema.safeParse(body);
@@ -524,6 +533,7 @@ export class BrowserHttp {
         if (!this.#options.uploads) throw new HttpRefusal(503, "unavailable");
         const access = BrowserUploadAccess.safeParse(body);
         if (!access.success) throw new HttpRefusal(400, "request");
+        await this.#options.windows?.wakeTab?.(access.data.tabId, false, signal);
         const chooser = await this.#options.uploads.chooser(access.data, signal);
         this.#available(signal);
         send(response, 200, { chooser: chooser ? BrowserUploadOffer.parse(chooser) : null });
@@ -535,6 +545,27 @@ export class BrowserHttp {
         const reply = await this.#options.control.set(parsed.data, signal);
         this.#available(signal);
         send(response, 200, reply);
+        return;
+      }
+      if (route === "PUT /lifecycle") {
+        const parsed = BrowserLifecycleRequest.safeParse(body);
+        if (!parsed.success) throw new HttpRefusal(400, "request");
+        const request = parsed.data;
+        if (
+          request.browserCellId !== this.#identity.browserCellId ||
+          request.parentCellId !== this.#identity.parentCellId ||
+          request.instance !== this.#identity.instance
+        )
+          throw new HttpRefusal(409, "refused");
+        const windows = this.#options.windows;
+        if (!windows?.freeze || !windows.thaw) throw new HttpRefusal(503, "unavailable");
+        // Nothing freezes under a read or an input; a thaw never waits.
+        if (request.frozen && this.#active) throw new HttpRefusal(409, "busy");
+        let frozen = 0;
+        if (request.frozen) frozen = await windows.freeze(request.keep, signal);
+        else await windows.thaw(signal);
+        this.#available(signal);
+        send(response, 200, BrowserLifecycleReply.parse({ frozen }));
         return;
       }
       if (route.startsWith("POST /downloads/")) {
@@ -607,6 +638,7 @@ export class BrowserHttp {
         const parsed = manualPageSchema.safeParse(body);
         if (!parsed.success) throw new HttpRefusal(400, "request");
         if (!this.#options.signInPage) throw new HttpRefusal(503, "unavailable");
+        await this.#options.windows?.wakeScreen?.(signal);
         this.#available(signal);
         const page = await this.#options.signInPage.read(
           parsed.data.permit,
@@ -624,6 +656,7 @@ export class BrowserHttp {
         if (!this.#options.input.secret) throw new HttpRefusal(503, "unavailable");
         this.#active = true;
         ownsSlot = true;
+        await this.#options.windows?.wakeScreen?.(signal);
         const reply = await this.#options.input.secret(
           parsed.data.permit,
           parsed.data.tabId,
@@ -642,6 +675,7 @@ export class BrowserHttp {
         if (!this.#options.input.manual) throw new HttpRefusal(503, "unavailable");
         this.#active = true;
         ownsSlot = true;
+        await this.#options.windows?.wakeScreen?.(signal);
         const reply = await this.#options.input.manual(
           parsed.data.permit,
           parsed.data.request,
@@ -679,6 +713,7 @@ export class BrowserHttp {
         if (this.#active) throw new HttpRefusal(409, "busy");
         this.#active = true;
         ownsSlot = true;
+        await this.#options.windows?.wakeTask?.(parsed.data.permit.owner.sessionId, signal);
         const opened = await this.#options.navigation.openTab(parsed.data.permit, signal);
         this.#available(signal);
         send(response, 200, opened);
@@ -699,6 +734,7 @@ export class BrowserHttp {
         ownsSlot = true;
       }
       const { permit, tabId } = parsed.data;
+      await this.#options.windows?.wakeTab?.(tabId, route !== "POST /navigate", signal);
       let result: unknown;
       if (route === "POST /observe")
         result = await this.#options.observation.observe(permit, tabId, signal);

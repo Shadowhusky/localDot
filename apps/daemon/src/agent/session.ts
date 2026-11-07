@@ -756,6 +756,11 @@ export class AgentSession {
   get controlHeld(): boolean {
     return this.#control !== undefined;
   }
+  // The user has the computer: they took it, or took the one dot handed over. A hand-over the user
+  // hasn't taken up yet isn't theirs.
+  get controlTaken(): boolean {
+    return this.#control?.taken === true;
+  }
   get manualControl(): "waiting" | "ready" | "busy" | "returning" | "unconfirmed" | undefined {
     const record = this.#control;
     return !record
@@ -832,7 +837,7 @@ export class AgentSession {
   async switchScreen(
     screen: ScreenName,
     lease: ToolLease,
-    options: { restart?: boolean } = {},
+    options: { restart?: boolean; daemon?: boolean } = {},
   ): Promise<ScreenSwitchData> {
     lease.check();
     if (!this.#active.has(lease) || !this.#screens || this.#screenReady !== lease.generation)

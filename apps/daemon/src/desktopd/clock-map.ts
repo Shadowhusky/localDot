@@ -16,6 +16,8 @@ export class ClockMap {
   constructor(
     private readonly ping: () => Promise<number>,
     private readonly now: () => number,
+    // A burst ends once it has run this long (ms), after its first ping.
+    private readonly burstMs = Number.POSITIVE_INFINITY,
   ) {}
 
   get sample(): ClockSample | undefined {
@@ -24,6 +26,7 @@ export class ClockMap {
 
   async sync(samples = 10): Promise<ClockSample> {
     let best: ClockSample | undefined;
+    const started = this.now();
     for (let i = 0; i < samples; i++) {
       const sent = this.now();
       const mono = await this.ping();
@@ -31,6 +34,7 @@ export class ClockMap {
       const rttMicros = got - sent;
       const candidate = { offsetMicros: msToMicros(mono) - (sent + got) / 2, rttMicros, at: got };
       if (!best || candidate.rttMicros < best.rttMicros) best = candidate;
+      if (got - started >= this.burstMs * 1000) break;
     }
     this.#sample = best as ClockSample;
     return this.#sample;

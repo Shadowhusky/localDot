@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BrowserActionPermit } from "../../../../packages/protocol/src/browser-control.ts";
+import { BrowserTargetError } from "./targets.ts";
 import { BROWSER_KEPT_FREE_WINDOWS, BrowserWindows } from "./windows.ts";
 
 const browserCellId = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
@@ -21,10 +22,14 @@ function permit(sessionId: string): BrowserActionPermit {
 }
 
 // Chromium and the display as far as the registry sees them: tabs in windows, and an X window for
-// each, the newest active.
+// each, the newest active. A minimized window comes back as the window manager activates it, unless
+// it is `stuck`.
 function fixture(start: { id: string; windowId: number; opener?: string }[] = []) {
   const pages = start.map((page) => ({ ready: true, ...page }));
   const xids = new Map<number, number>();
+  const states = new Map<number, string>();
+  const lifecycle = new Map<string, "frozen" | "active">();
+  let stuck = false;
   let active: number | undefined;
   const place = (windowId: number) => {
     if (!xids.has(windowId)) xids.set(windowId, 1000 + windowId);
@@ -46,6 +51,9 @@ function fixture(start: { id: string; windowId: number; opener?: string }[] = []
         };
       if (name === "activate") {
         active = args.window as number;
+        for (const [windowId, xid] of xids)
+          if (xid === active && states.get(windowId) === "minimized" && !stuck)
+            states.set(windowId, "maximized");
         return { active, changed: true, waitedMs: 1 };
       }
       if (name === "pointer") return { x: 5, y: 6 };
@@ -73,6 +81,19 @@ function fixture(start: { id: string; windowId: number; opener?: string }[] = []
       if (gone && !pages.some((page) => page.windowId === gone.windowId))
         xids.delete(gone.windowId);
     }),
+    closed: false,
+    lifecycle: vi.fn(async (tabId: string, state: "frozen" | "active") => {
+      if (!pages.some((page) => page.id === tabId)) throw new BrowserTargetError("stale");
+      lifecycle.set(tabId, state);
+    }),
+    window: vi.fn(async (tabId: string) => {
+      const windowId = pages.find((page) => page.id === tabId)?.windowId ?? 0;
+      return { windowState: states.get(windowId) ?? "maximized" };
+    }),
+    windowState: vi.fn(async (tabId: string, state: string) => {
+      const windowId = pages.find((page) => page.id === tabId)?.windowId ?? 0;
+      states.set(windowId, state);
+    }),
   };
   const secrets = {
     secretPages: vi.fn(async (): Promise<readonly string[]> => []),
@@ -95,7 +116,26 @@ function fixture(start: { id: string; windowId: number; opener?: string }[] = []
   const signal = new AbortController().signal;
   const enter = (sessionId: string, place: { continues?: string; fresh?: true } = {}) =>
     windows.enter({ permit: permit(sessionId), ...place }, signal);
-  return { windows, native, targets, secrets, pages, control, commands, enter, signal, xids };
+  const frozen = () =>
+    [...lifecycle].filter(([, state]) => state === "frozen").map(([tabId]) => tabId);
+  return {
+    windows,
+    native,
+    targets,
+    secrets,
+    pages,
+    control,
+    commands,
+    enter,
+    signal,
+    xids,
+    states,
+    frozen,
+    stick: (value: boolean) => {
+      stuck = value;
+    },
+    active: () => active,
+  };
 }
 
 describe("a window per task", () => {
@@ -267,5 +307,155 @@ describe("a window per task", () => {
     await expect(f.enter(taskB)).rejects.toThrow();
     expect(f.control.admit).toHaveBeenCalledTimes(2);
     expect(f.control.admit.mock.results.length).toBe(2);
+  });
+});
+
+describe("freezing pages nobody uses", () => {
+  // Task A and task B each have a window; A's is on screen.
+  async function two() {
+    const f = fixture([{ id: "first", windowId: 1 }]);
+    await f.enter(taskA);
+    const tabB = (await f.enter(taskB)).tabs[0]?.id ?? "";
+    await f.enter(taskA);
+    f.commands.length = 0;
+    return { ...f, tabB };
+  }
+
+  it("freezes every window but the kept tasks', a finished task's included", async () => {
+    const f = await two();
+    f.pages.push({ id: "behind", windowId: 1, ready: true });
+    expect(await f.windows.freeze([taskB], f.signal)).toBe(2);
+    expect(f.frozen()).toEqual(["first", "behind"]);
+    f.windows.release(taskB, false);
+    expect(await f.windows.freeze([], f.signal)).toBe(3);
+    expect(f.frozen()).toEqual(["first", "behind", f.tabB]);
+    // Freezing touches neither the display nor any window's place on it.
+    expect(f.commands).toEqual([]);
+  });
+
+  it("wakes a window as its task is kept again, without bringing it forward", async () => {
+    const f = await two();
+    await f.windows.freeze([], f.signal);
+    await f.windows.freeze([taskB], f.signal);
+    expect(f.frozen()).toEqual(["first"]);
+    expect(f.targets.lifecycle).toHaveBeenLastCalledWith(f.tabB, "active");
+    expect(f.commands.map(({ name }) => name)).not.toContain("activate");
+  });
+
+  it("passes over a tab that closed as it froze", async () => {
+    const f = await two();
+    f.targets.lifecycle.mockRejectedValueOnce(new BrowserTargetError("stale"));
+    expect(await f.windows.freeze([], f.signal)).toBe(1);
+    f.targets.lifecycle.mockRejectedValueOnce(new BrowserTargetError("closed"));
+    await expect(f.windows.freeze([], f.signal)).rejects.toThrow(BrowserTargetError);
+  });
+
+  it("shows a frozen window again as its task's turn brings it forward", async () => {
+    const f = await two();
+    await f.windows.freeze([], f.signal);
+    await f.enter(taskB);
+    expect(f.frozen()).toEqual(["first"]);
+    const names = f.commands.map(({ name }) => name);
+    // Minimized, then brought back by the window manager, in front: Chromium shows it again.
+    expect(f.targets.windowState).toHaveBeenCalledWith(f.tabB, "minimized");
+    expect(names.indexOf("activate")).toBeGreaterThan(-1);
+    expect(f.states.get(f.pages.find((page) => page.id === f.tabB)?.windowId ?? 0)).toBe(
+      "maximized",
+    );
+    expect(f.active()).toBe(f.xids.get(f.pages.at(-1)?.windowId ?? 0));
+    // Once shown, the next turn moves nothing.
+    f.commands.length = 0;
+    f.targets.windowState.mockClear();
+    await f.enter(taskB);
+    expect(f.targets.windowState).not.toHaveBeenCalled();
+    expect(f.commands.map(({ name }) => name)).toEqual(["windows"]);
+  });
+
+  it("shows a lone task's frozen window on its turn, where nothing moved before", async () => {
+    const f = fixture([{ id: "first", windowId: 1 }]);
+    await f.enter(taskA);
+    await f.windows.freeze([], f.signal);
+    await f.enter(taskA);
+    expect(f.frozen()).toEqual([]);
+    expect(f.targets.windowState).toHaveBeenCalledWith("first", "minimized");
+    expect(f.commands.find(({ name }) => name === "activate")?.args).toEqual({ window: 1001 });
+    f.commands.length = 0;
+    await f.enter(taskA);
+    expect(f.commands).toEqual([]);
+  });
+
+  it("brings a window back through Chromium when the window manager leaves it minimized", async () => {
+    const f = fixture([{ id: "first", windowId: 1 }]);
+    await f.enter(taskA);
+    await f.windows.freeze([], f.signal);
+    f.stick(true);
+    await f.enter(taskA);
+    expect(f.targets.windowState.mock.calls.map(([, state]) => state)).toEqual([
+      "minimized",
+      "normal",
+      "maximized",
+    ]);
+    expect(f.states.get(1)).toBe("maximized");
+  });
+
+  it("thaws every page and shows only the window on screen", async () => {
+    const f = await two();
+    await f.windows.freeze([], f.signal);
+    await f.windows.thaw(f.signal);
+    expect(f.frozen()).toEqual([]);
+    expect(f.targets.windowState.mock.calls).toEqual([["first", "minimized"]]);
+    expect(f.active()).toBe(1001);
+    // The window behind shows as its turn brings it forward.
+    f.targets.windowState.mockClear();
+    await f.enter(taskB);
+    expect(f.targets.windowState).toHaveBeenCalledWith(f.tabB, "minimized");
+  });
+
+  it("wakes a tab's window before it is read or driven, showing it only on screen", async () => {
+    const f = await two();
+    await f.windows.freeze([], f.signal);
+    await f.windows.wakeTab(f.tabB, true, f.signal);
+    expect(f.frozen()).toEqual(["first"]);
+    expect(f.targets.windowState).not.toHaveBeenCalled();
+    await f.windows.wakeTab("first", false, f.signal);
+    expect(f.frozen()).toEqual([]);
+    expect(f.targets.windowState).not.toHaveBeenCalled();
+    await f.windows.wakeTab("first", true, f.signal);
+    expect(f.targets.windowState.mock.calls).toEqual([["first", "minimized"]]);
+  });
+
+  it("wakes a task's windows, and the window on screen for the user's input", async () => {
+    const f = await two();
+    await f.windows.freeze([], f.signal);
+    await f.windows.wakeTask(taskB, f.signal);
+    expect(f.frozen()).toEqual(["first"]);
+    await f.windows.wakeScreen(f.signal);
+    expect(f.frozen()).toEqual([]);
+    expect(f.targets.windowState.mock.calls).toEqual([["first", "minimized"]]);
+    // Each input after that costs nothing, until something freezes again.
+    f.commands.length = 0;
+    await f.windows.wakeScreen(f.signal);
+    expect(f.commands).toEqual([]);
+    await f.windows.freeze([taskA], f.signal);
+    await f.windows.wakeScreen(f.signal);
+    expect(f.commands.map(({ name }) => name)).toEqual(["windows"]);
+  });
+
+  it("asks Chromium nothing to wake a browser with nothing frozen", async () => {
+    const f = await two();
+    await f.windows.wakeTab("first", true, f.signal);
+    await f.windows.wakeTask(taskA, f.signal);
+    await f.windows.wakeScreen(f.signal);
+    expect(f.targets.lifecycle).not.toHaveBeenCalled();
+    expect(f.commands).toEqual([]);
+  });
+
+  it("forgets frozen pages once the browser they were in is gone", async () => {
+    const f = await two();
+    await f.windows.freeze([], f.signal);
+    f.targets.closed = true;
+    f.targets.lifecycle.mockClear();
+    await f.windows.wakeScreen(f.signal);
+    expect(f.targets.lifecycle).not.toHaveBeenCalled();
   });
 });

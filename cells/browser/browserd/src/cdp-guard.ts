@@ -52,7 +52,7 @@ const commands = Object.freeze({
   "Browser.getWindowForTarget": target,
   "Browser.setWindowBounds": schema.strictObject({
     windowId: nodeId,
-    bounds: schema.strictObject({ windowState: schema.literal("maximized") }),
+    bounds: schema.strictObject({ windowState: schema.enum(["maximized", "minimized", "normal"]) }),
   }),
   "Target.setDiscoverTargets": schema.strictObject({ discover: schema.literal(true), filter }),
   "Target.setAutoAttach": schema.strictObject({
@@ -84,6 +84,7 @@ const commands = Object.freeze({
   "Page.bringToFront": empty,
   "Page.setInterceptFileChooserDialog": schema.strictObject({ enabled: schema.literal(true) }),
   "Page.handleJavaScriptDialog": schema.strictObject({ accept: schema.boolean() }),
+  "Page.setWebLifecycleState": schema.strictObject({ state: schema.enum(["frozen", "active"]) }),
   // A blank tab's viewport a pixel shorter and back, so that Chromium's accessibility sees its page.
   "Emulation.setDeviceMetricsOverride": schema.strictObject({
     width: schema.number().int().positive().max(8192),

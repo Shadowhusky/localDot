@@ -354,6 +354,29 @@ describe("daemon browser client", () => {
     expect(requests).toHaveLength(4);
   });
 
+  it("asks its own browser to freeze idle pages and refuses another's identity", async () => {
+    let body = "";
+    let method = "";
+    const f = await fixture((request, response) => {
+      method = request.method ?? "";
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => send(response, { frozen: 2 }));
+    });
+    const keep = [ulid()];
+    await expect(f.client.lifecycle({ ...f.id, frozen: true, keep }, f.scope)).resolves.toEqual({
+      frozen: 2,
+    });
+    expect(method).toBe("PUT");
+    expect(f.seen.at(-1)?.path).toBe("/lifecycle");
+    expect(JSON.parse(body)).toEqual({ ...f.id, frozen: true, keep });
+    await expect(
+      f.client.lifecycle({ ...f.id, instance: randomUUID(), frozen: false }, f.scope),
+    ).rejects.toMatchObject({ code: "stale" });
+    expect(f.seen).toHaveLength(1);
+  });
+
   it("parses a bounded browser observation and strict tab list", async () => {
     let reply: unknown;
     const f = await fixture((_request, response) => send(response, reply));

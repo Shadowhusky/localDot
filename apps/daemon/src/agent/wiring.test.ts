@@ -16,7 +16,14 @@ import {
 import { type ScreenName, ulid } from "@localdot/protocol";
 import { CHECK_MEMORY_FIRST } from "@localdot/protocol/guidance";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ScreenController, ScreenScope } from "../browser/screen-controller.ts";
+import { BrowserClientError } from "../browser/client.ts";
+import {
+  BROWSER_FIRST_LOOK,
+  BrowserBusyError,
+  ScreenControlError,
+  type ScreenController,
+  type ScreenScope,
+} from "../browser/screen-controller.ts";
 import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "../gateway/frames.ts";
@@ -29,7 +36,7 @@ import { SANDBOX_REASONS } from "./codex/setup.ts";
 import { MemoryStore } from "./memory.ts";
 import { AgentSession } from "./session.ts";
 import type { ToolApiDeps } from "./tool-api.ts";
-import { type AgentWiringDeps, createAgent } from "./wiring.ts";
+import { type AgentWiringDeps, createAgent, FIRST_LOOK_MS } from "./wiring.ts";
 
 const m = vi.hoisted(() => ({
   owner: undefined as CodexAuthOwnerDeps | undefined,
@@ -693,6 +700,131 @@ describe("ChatGPT production integration", () => {
         .map((event) => event.data),
     ).toEqual([{ kind: "screen", origin: "browser screen" }]);
     expect((await observeOn("desktop")).taint.tainted).toBe(false);
+  });
+  describe("a first look the web browser can't answer", () => {
+    // The controller as a task on the web browser sees it: its page doesn't come to the front.
+    const onBusyBrowser = (
+      f: ReturnType<typeof setup>,
+      refresh: (lease: { signal: AbortSignal }) => Promise<void>,
+    ) => {
+      f.deps.sessionScreens = {
+        install: vi.fn(),
+        manual: vi.fn(),
+        bind: vi.fn((_s: unknown, lease: { selection: { screen: ScreenName } }) => ({
+          cellId: f.cellId,
+          screen: lease.selection.screen,
+        })),
+        startBrowser: vi.fn(async () => {}),
+      } as unknown as AgentWiringDeps["sessionScreens"];
+      let screen: ScreenName = "browser";
+      const selection = () => ({ screen, cellId: f.cellId, geometry: null, revision: 1 });
+      const controller = {
+        activate: async () => ({}),
+        refreshBrowser: vi.fn(
+          async (lease: { selection: { screen: ScreenName }; signal: AbortSignal }) => {
+            if (lease.selection.screen === "browser") await refresh(lease);
+          },
+        ),
+        get selection() {
+          return selection();
+        },
+        enterTurn: async () => {},
+        switchTo: vi.fn(async (to: ScreenName) => {
+          screen = to;
+          return { ...selection(), by: "daemon" };
+        }),
+        lease: (scope: ScreenScope) => ({
+          selection: selection(),
+          signal: scope.signal,
+          check: () => scope.check(),
+          finish() {},
+        }),
+        takeOver: async () => {},
+        close: async () => {},
+      };
+      return controller;
+    };
+
+    it.each([
+      ["its page doesn't answer", () => Promise.reject(new BrowserBusyError())],
+      ["browserd gives up on it", () => Promise.reject(new BrowserClientError("aborted"))],
+    ])("starts the task on the desktop when %s, and tells it why", async (_name, refresh) => {
+      const f = setup();
+      const controller = onBusyBrowser(f, refresh);
+      await f.agent.start();
+      const s = f.session();
+      s.attachScreens(controller as unknown as ScreenController);
+      const remind = vi.spyOn(s, "remind");
+      const g = s.beginBrain();
+      await s.prepareScreens(g);
+      const result = await required(m.driver).observe(s, g, g.signal);
+      expect(controller.switchTo).toHaveBeenCalledExactlyOnceWith(
+        "desktop",
+        expect.objectContaining({ sessionId: s.id, generation: g.id }),
+        { daemon: true },
+      );
+      expect(remind).toHaveBeenCalledExactlyOnceWith(BROWSER_FIRST_LOOK);
+      expect(result.frameId).toBe(f.frameId);
+      expect(f.observe).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ screen: expect.objectContaining({ screen: "desktop" }) }),
+      );
+    });
+
+    it("gives the web browser its turn and its page a bounded time, then starts on the desktop", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const f = setup();
+        const controller = onBusyBrowser(
+          f,
+          (lease) =>
+            new Promise((_resolve, reject) =>
+              lease.signal.addEventListener("abort", () => reject(new ScreenControlError()), {
+                once: true,
+              }),
+            ),
+        );
+        await f.agent.start();
+        const s = f.session();
+        s.attachScreens(controller as unknown as ScreenController);
+        const g = s.beginBrain();
+        await s.prepareScreens(g);
+        const looking = required(m.driver).observe(s, g, g.signal);
+        await vi.advanceTimersByTimeAsync(FIRST_LOOK_MS + 1);
+        expect((await looking).frameId).toBe(f.frameId);
+        expect(controller.switchTo).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("leaves a look that lost its task, or a computer that changed, as it failed", async () => {
+      const f = setup();
+      const controller = onBusyBrowser(f, () => Promise.reject(new BrowserBusyError()));
+      await f.agent.start();
+      const s = f.session();
+      s.attachScreens(controller as unknown as ScreenController);
+      const g = s.beginBrain();
+      await s.prepareScreens(g);
+      f.change({ paused: true });
+      await expect(required(m.driver).observe(s, g, g.signal)).rejects.toThrow();
+      expect(controller.switchTo).not.toHaveBeenCalled();
+      expect(f.observe).not.toHaveBeenCalled();
+    });
+
+    it("leaves the task as it was when the web browser answers", async () => {
+      const f = setup();
+      const controller = onBusyBrowser(f, async () => {});
+      await f.agent.start();
+      const s = f.session();
+      s.attachScreens(controller as unknown as ScreenController);
+      const g = s.beginBrain();
+      await s.prepareScreens(g);
+      await required(m.driver).observe(s, g, g.signal);
+      expect(controller.switchTo).not.toHaveBeenCalled();
+      expect(f.observe).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ screen: expect.objectContaining({ screen: "browser" }) }),
+      );
+    });
   });
   it.each(["endpoint", "generation", "control", "keyd", "busy", "pause"])(
     "rejects a capture when %s changes while the gateway is pending",

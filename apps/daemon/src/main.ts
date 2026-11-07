@@ -15,7 +15,9 @@ import { createAgent } from "./agent/wiring.ts";
 import { createApp } from "./app.ts";
 import { AppEvents, appEventsRoute } from "./app-events.ts";
 import { browserBlock } from "./browser/availability.ts";
+import { BrowserClient } from "./browser/client.ts";
 import { BrowserDownloadCollector } from "./browser/download-collector.ts";
+import { BrowserIdlePages } from "./browser/idle-pages.ts";
 import { QuarantineStore } from "./browser/quarantine.ts";
 import { SessionScreens } from "./browser/session-screens.ts";
 import { BrowserStreams } from "./browser/streams.ts";
@@ -216,6 +218,7 @@ serviceReadiness = serviceIdentity
 const keydWiring = new CellKeydWiring({ keyd, docker });
 let agent: ReturnType<typeof createAgent> | undefined;
 let browser: BrowserOrchestrator | undefined;
+let idlePages: BrowserIdlePages | undefined;
 const store = new CellStore(home, keydPorts);
 const sizes = new ComputerSizes({
   home,
@@ -542,8 +545,10 @@ agent = createAgent({
   monitor: keydMonitor,
   killSwitch,
   shutdownFreezes,
-  liveChanged: (sessionId, live) =>
-    appEvents.publish({ type: "conversation.live", sessionId, ...(live ? { live } : {}) }),
+  liveChanged: (sessionId, state) => {
+    appEvents.publish({ type: "conversation.live", sessionId, ...(state ? { live: state } : {}) });
+    idlePages?.changed(live.cellOf(sessionId));
+  },
   keydPorts,
   toolPort,
   relay,
@@ -558,6 +563,46 @@ agent = createAgent({
   routines: routineToolPort({ store: routineStore, now: Date.now, zone, changed: routineChanged }),
 });
 const running = agent;
+// Pages nobody uses in a computer's web browser freeze, until someone looks or a task needs them.
+idlePages = new BrowserIdlePages({
+  browsers: () =>
+    orchestrator.list().flatMap((cell) => {
+      const ready = owned.endpoints(cell.id);
+      return ready ? [{ parentCellId: cell.id, instance: ready.instance }] : [];
+    }),
+  viewers: (id) => browserStreams.forParent(id)?.stream.viewers ?? 0,
+  tasks: (id) =>
+    live.sessionsOn(id).map((sessionId) => {
+      const state = running.runner.liveStatus(sessionId)?.state;
+      return {
+        id: sessionId,
+        busy: state === "working" || state === "waiting-for-computer",
+        controlled: running.runner.get(sessionId)?.controlTaken === true,
+      };
+    }),
+  send: async (id, instance, request) => {
+    const ready = owned.endpoints(id);
+    if (ready?.instance !== instance) throw new Error("the web browser changed");
+    const client = new BrowserClient(ready);
+    try {
+      await client.lifecycle(
+        {
+          browserCellId: ready.browserCellId,
+          parentCellId: ready.parentCellId,
+          instance,
+          ...(request.frozen ? { frozen: true, keep: [...request.keep] } : { frozen: false }),
+        },
+        { signal: AbortSignal.timeout(20_000), check: () => {} },
+      );
+    } finally {
+      client.close();
+    }
+  },
+});
+const idleWatches = [
+  browserStreams.subscribe((cell) => idlePages?.changed(owned.parentOf(cell.id))),
+  owned.subscribe((parent) => idlePages?.changed(parent)),
+];
 const routineLauncher = new RoutineLauncher({
   store: routineStore,
   cells: orchestrator,
@@ -689,6 +734,13 @@ shutdown.push(
   { name: "key events", stop: () => keydEvents.stop() },
   { name: "key monitor", stop: () => keydMonitor.stop() },
   { name: "browser warmer", stop: () => browserWarmer.dispose() },
+  {
+    name: "idle pages",
+    stop: () => {
+      for (const unsubscribe of idleWatches) unsubscribe();
+      idlePages?.dispose();
+    },
+  },
   { name: "Chrome updates", stop: browser.watchEngine() },
   { name: "browser recovery", stop: () => browserRecovery.close() },
   { name: "routine scheduler", stop: () => routineScheduler.stop() },

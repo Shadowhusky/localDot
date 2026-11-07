@@ -27,6 +27,8 @@ import {
   BrowserActionPermit,
   BrowserControlReply,
   BrowserControlRequest,
+  BrowserLifecycleReply,
+  BrowserLifecycleRequest,
   BrowserManualPermit,
   type BrowserManualReply,
   type BrowserSignInMode,
@@ -729,6 +731,26 @@ export class BrowserClient {
       (request.holder === "user" && !request.alone && reply.holder !== "user")
     )
       throw new BrowserClientError("stale");
+    return reply;
+  }
+
+  // Freezing many pages, or showing the window on screen again, takes a few seconds at most.
+  async lifecycle(
+    raw: BrowserLifecycleRequest,
+    scope: BrowserScope,
+  ): Promise<BrowserLifecycleReply> {
+    const request = parse(BrowserLifecycleRequest, raw);
+    this.#identity(request);
+    const reply = await this.#json(
+      "PUT",
+      "/lifecycle",
+      request,
+      scope,
+      15000,
+      BrowserLifecycleReply,
+      4096,
+    );
+    this.#checkScope(scope);
     return reply;
   }
 
