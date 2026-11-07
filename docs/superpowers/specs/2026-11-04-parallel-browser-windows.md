@@ -155,9 +155,24 @@ server, and the image stays as it is. Nor can the stage know where Plank is at a
 hides whenever a desktop window overlaps it (`window-dodge`), it grows by an item for each unpinned app
 that runs, centred, and the browser's window covers it. So the item reads as the end of the dock when
 the dock shows and as a dock of one when it doesn't; with two or more unpinned apps running it would
-overlap Plank's last. A light under the item, in dot's colour, says dot works in the browser. With the
-window in front the item gets out of its way as Plank does for a window, and comes back while the
-pointer is at the bottom edge; with no hover, as on a phone, it stays up.
+overlap Plank's last. A light under the item, in dot's colour, says dot works in the browser.
+
+**Out of a window's way.** The item dodges windows as Plank does here (`hide-mode` `window-dodge`,
+`hide-delay` 300 ms, `unhide-delay` 0, no pressure reveal: cells/desktop's localdot-plank). Any
+application window over the dock's area, Plank's pinned shelf and the item's together (387 to 974 px
+across, from 732 px down, at 1x), hides it, and so does the browser's own window in front. It comes
+back while the pointer is at the bottom edge and stays while the pointer is on it, going 300 ms after
+it leaves; a tap on the edge brings it for 4 seconds. With nothing over the dock it stays up.
+`GET /api/cells/:id/dock` answers `{ covered }` and nothing else: the daemon reads desktopd's window
+stack (`POST /windows`, frames only), at most every 0.7 s for every viewer, and the stage asks once a
+second while it shows the desktop and the item. desktopd's reply names no window's kind, and the
+desktop image stays as it is, so the desktop's furniture is told by its place: the desktop is the
+whole screen at the bottom of the stack, Plank's window a strip the screen's width along its foot
+(its frame stays the same whether Plank is up or not), the menu bar one along its head. A minimised
+window keeps its frame in the stack with nothing to say it is hidden, so it still counts: the item
+then waits at the edge although Plank is back. Until the computer answers, or when it can't, the item
+keeps out of the way. The chrome is clipped to the stage, so a finger's reach past the picture's foot
+can't make the stage scroll when the item takes focus.
 
 **What follows what.** `useStageFront`: dot's latest confirmed screen is in front, unless the user
 brought the other forward with the dock item, the minimise light, Alt+Tab, or a press on the menu bar
@@ -222,3 +237,5 @@ can show (7–32 % against 10–36 %).
 - **Sign in without agent control** is offered only when dot's own screen is the browser.
 - The title bar names the browser, not the page: the page's title would have to come from browserd.
 - The dock item can't follow Plank: hidden, widened by unpinned apps or covered, Plank goes on as before.
+- A minimised window over the dock's area keeps the item at the edge: desktopd would have to say which
+  windows are hidden, a change to the desktop image.

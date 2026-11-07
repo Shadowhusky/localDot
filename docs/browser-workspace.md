@@ -24,9 +24,10 @@ long as the web browser still runs; a new conversation, or one taken up, starts 
 task does. There is no switch between the two. The dock item shows the window or
 minimises it, as a dock does, and the title bar's minimise light minimises it; what you choose holds
 until dot next moves or you hand the computer back. While dot works in the browser a light shows under
-its dock item. With the window in front the dock item gets out of its way, as the desktop's dock does
-for a window over it, and comes back when the pointer reaches the bottom edge; on a touch screen it
-stays up. Renewing control on the same browser keeps its picture visible while input waits for fresh
+its dock item. Like the desktop's own dock, the item gets out of the way of any window over the dock,
+the browser's or a desktop app's, and comes back while the pointer is at the bottom edge, or for a
+few seconds after a tap there; with nothing over the dock it stays up, and while the computer can't
+say whether anything is, it keeps out of the way. Renewing control on the same browser keeps its picture visible while input waits for fresh
 status. A browser connection error does not redirect its input to the desktop or open a
 temporary browser. Retrying uses the same saved browser profile, so a connection failure does not ask
 you to sign in again.
