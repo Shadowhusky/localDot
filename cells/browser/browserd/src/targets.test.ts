@@ -831,6 +831,28 @@ describe("private browser target ownership", () => {
     fixture.targets.close();
   });
 
+  it("freezes and wakes a page in its own session, and minimizes its window", async () => {
+    const fixture = await started();
+    await fixture.targets.lifecycle(fixture.tabId, "frozen");
+    expect(fixture.writes.at(-1)).toMatchObject({
+      method: "Page.setWebLifecycleState",
+      params: { state: "frozen" },
+      sessionId: "session-1",
+    });
+    await fixture.targets.lifecycle(fixture.tabId, "active");
+    expect(fixture.writes.at(-1)).toMatchObject({ params: { state: "active" } });
+    await fixture.targets.windowState(fixture.tabId, "minimized");
+    expect(fixture.writes.at(-1)).toMatchObject({
+      method: "Browser.setWindowBounds",
+      params: { windowId: 7, bounds: { windowState: "minimized" } },
+    });
+    await expect(
+      fixture.targets.lifecycle("6a0f8a3e-8f4b-4f5e-9d61-2f8c7e7b1a10", "frozen"),
+    ).rejects.toThrow("stale");
+    expect(fixture.fatal).not.toHaveBeenCalled();
+    fixture.targets.close();
+  });
+
   it("contains malformed geometry without exposing private response details", async () => {
     const fixture = await started();
     fixture.intercept((command) => {

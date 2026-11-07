@@ -7,7 +7,7 @@ import {
 import type { BrowserControl } from "./control.ts";
 import type { BrowserNative } from "./native.ts";
 import type { BrowserSecrets } from "./secrets.ts";
-import type { BrowserPage, BrowserTargets } from "./targets.ts";
+import { type BrowserPage, type BrowserTargets, pageChanged } from "./targets.ts";
 
 // How many windows of finished tasks stay open for the next task and for a conversation that goes
 // on: each holds its page's memory and about 100 MiB of its own.
@@ -17,6 +17,7 @@ const WINDOW_POLL_MS = 50;
 // After a raise Chromium's accessibility is busy with the focus change for a moment.
 const SURFACE_SETTLES_MS = 3000;
 const SURFACE_RETRY_MS = 100;
+const WINDOW_STATE_MS = 2000;
 
 export class BrowserWindowError extends Error {
   constructor(readonly reason: "unavailable" | "stale") {
@@ -33,13 +34,25 @@ interface TaskWindow {
   left?: string;
   // Newest use last: what a task's next turn brings forward.
   used: number;
+  // Its pages are frozen.
+  frozen?: boolean;
+  // Its page was hidden as it froze and hasn't been on screen since.
+  hidden?: boolean;
 }
 
 export interface BrowserWindowsDeps {
   control: Pick<BrowserControl, "admit">;
   targets: Pick<
     BrowserTargets,
-    "pages" | "openWindow" | "settleNewWindow" | "activate" | "closeTab"
+    | "closed"
+    | "pages"
+    | "openWindow"
+    | "settleNewWindow"
+    | "activate"
+    | "closeTab"
+    | "lifecycle"
+    | "window"
+    | "windowState"
   >;
   native: Pick<BrowserNative, "command">;
   secrets: Pick<BrowserSecrets, "secretPages" | "reload">;
@@ -52,8 +65,14 @@ export class BrowserWindows {
   readonly #windows = new Map<number, TaskWindow>();
   readonly #pointers = new Map<string, { x: number; y: number }>();
   #front?: string;
+  // The window last brought forward.
+  #top?: TaskWindow;
+  // A window was frozen since the one on screen last showed.
+  #screenAsleep = false;
   #opening?: string;
   #uses = 0;
+  // Raising, freezing and waking windows take turns.
+  #queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: BrowserWindowsDeps) {}
 
@@ -127,12 +146,21 @@ export class BrowserWindows {
   }
 
   async enter(raw: unknown, signal: AbortSignal): Promise<BrowserWindowReply> {
-    const { permit, continues, fresh } = BrowserWindowEntry.parse(raw);
+    const entry = BrowserWindowEntry.parse(raw);
+    return this.#exclusive(() => this.#enter(entry, signal));
+  }
+
+  async #enter(
+    { permit, continues, fresh }: BrowserWindowEntry,
+    signal: AbortSignal,
+  ): Promise<BrowserWindowReply> {
     const sessionId = permit.owner.sessionId;
     const lease = this.deps.control.admit(permit);
     try {
       const scope = AbortSignal.any([signal, lease.signal]);
       this.#sync();
+      for (const own of this.#windows.values())
+        if (own.owner === sessionId) await this.#wake(own, scope);
       let window = this.#newest(sessionId);
       let opened = false;
       if (!window) {
@@ -147,6 +175,7 @@ export class BrowserWindows {
         if (window) {
           window.owner = sessionId;
           window.used = ++this.#uses;
+          await this.#wake(window, scope);
           if (others && window.left !== sessionId) await this.#scrub(window, scope);
           delete window.left;
         } else {
@@ -178,10 +207,181 @@ export class BrowserWindows {
   }
 
   // The user takes the browser in this task's window, after every action has drained.
-  async front(sessionId: string, signal: AbortSignal): Promise<void> {
-    this.#sync();
-    const window = this.#newest(sessionId);
-    if (window) await this.#raise(window, sessionId, signal);
+  front(sessionId: string, signal: AbortSignal): Promise<void> {
+    return this.#exclusive(async () => {
+      this.#sync();
+      const window = this.#newest(sessionId);
+      if (!window) return;
+      await this.#wake(window, signal);
+      await this.#raise(window, sessionId, signal);
+    });
+  }
+
+  // Freezes the pages of every window but those of the tasks in `keep`, finished tasks' windows
+  // included, and wakes those.
+  freeze(keep: readonly string[], signal: AbortSignal): Promise<number> {
+    return this.#exclusive(async () => {
+      const pages = this.#sync();
+      const kept = new Set(keep);
+      let frozen = 0;
+      for (const window of [...this.#windows.values()]) {
+        signal.throwIfAborted();
+        const task = window.owner ?? window.left;
+        if (task && kept.has(task)) {
+          await this.#wake(window, signal);
+          continue;
+        }
+        const tabs = await this.#lifecycle(window, "frozen", pages, signal);
+        if (!tabs) continue;
+        window.frozen = true;
+        window.hidden = true;
+        this.#screenAsleep = true;
+        frozen += tabs;
+      }
+      return frozen;
+    });
+  }
+
+  // Every page wakes, and the window on screen shows again.
+  thaw(signal: AbortSignal): Promise<void> {
+    return this.#exclusive(async () => {
+      this.#sync();
+      for (const window of [...this.#windows.values()]) await this.#wake(window, signal);
+      await this.#showScreen(signal);
+    });
+  }
+
+  // Before anything reads or drives a tab: its window's pages wake, and with `show` its window
+  // shows again if it is the one on screen. A window elsewhere shows as it comes forward.
+  wakeTab(tabId: string, show: boolean, signal: AbortSignal): Promise<void> {
+    if (!this.#asleep()) return Promise.resolve();
+    return this.#exclusive(async () => {
+      const page = this.#sync().find((candidate) => candidate.id === tabId);
+      const window = page?.windowId === undefined ? undefined : this.#windows.get(page.windowId);
+      if (!window) return;
+      await this.#wake(window, signal);
+      if (show && window.hidden && window === (await this.#onScreen(signal)))
+        await this.#show(window, signal);
+    });
+  }
+
+  wakeTask(sessionId: string, signal: AbortSignal): Promise<void> {
+    if (!this.#asleep()) return Promise.resolve();
+    return this.#exclusive(async () => {
+      this.#sync();
+      for (const window of [...this.#windows.values()])
+        if (window.owner === sessionId) await this.#wake(window, signal);
+    });
+  }
+
+  // The user's input reaches whatever is on screen: once it shows, their input costs nothing more.
+  wakeScreen(signal: AbortSignal): Promise<void> {
+    if (!this.#screenAsleep || !this.#asleep()) return Promise.resolve();
+    return this.#exclusive(async () => {
+      this.#sync();
+      await this.#showScreen(signal);
+    });
+  }
+
+  // A browser relaunched since has none of these pages.
+  #asleep(): boolean {
+    return (
+      !this.deps.targets.closed &&
+      [...this.#windows.values()].some((window) => window.frozen || window.hidden)
+    );
+  }
+
+  async #wake(window: TaskWindow, signal: AbortSignal): Promise<void> {
+    if (!window.frozen) return;
+    await this.#lifecycle(window, "active", this.deps.targets.pages(), signal);
+    delete window.frozen;
+  }
+
+  // Each ready tab of the window; a tab that closes or changes meanwhile is passed over. Chromium's
+  // answer is always waited for: one given up on would end the connection every tab shares.
+  async #lifecycle(
+    window: TaskWindow,
+    state: "frozen" | "active",
+    pages: readonly BrowserPage[],
+    signal: AbortSignal,
+  ): Promise<number> {
+    let changed = 0;
+    for (const tab of pages.filter((page) => page.windowId === window.id && page.ready)) {
+      signal.throwIfAborted();
+      try {
+        await this.deps.targets.lifecycle(tab.id, state);
+        changed += 1;
+      } catch (error) {
+        if (!pageChanged(error)) throw error;
+      }
+    }
+    return changed;
+  }
+
+  async #showScreen(signal: AbortSignal): Promise<void> {
+    const window = await this.#onScreen(signal);
+    if (window) await this.#wake(window, signal);
+    if (window?.hidden) await this.#show(window, signal);
+    this.#screenAsleep = false;
+  }
+
+  // The window on the display: the active one, else the only one, else the one last brought
+  // forward.
+  async #onScreen(signal: AbortSignal): Promise<TaskWindow | undefined> {
+    const windows = [...this.#windows.values()];
+    if (windows.length <= 1) return windows[0];
+    const active = (await this.deps.native.command("windows", {}, signal)).windows.find(
+      (w) => w.active,
+    );
+    const top = this.#top && this.#windows.get(this.#top.id) === this.#top ? this.#top : undefined;
+    return windows.find((window) => active && window.xid === active.id) ?? top;
+  }
+
+  // Chromium shows a page it froze again only as its window comes back on screen: the window is
+  // minimized and brought back, in front and maximized as it was.
+  async #show(window: TaskWindow, signal: AbortSignal): Promise<void> {
+    const tab = this.deps.targets.pages().find((page) => page.windowId === window.id && page.ready);
+    if (!tab) {
+      delete window.hidden;
+      return;
+    }
+    await this.#wake(window, signal);
+    window.xid ??= await this.#place(window, signal);
+    const xid = window.xid;
+    await this.deps.targets.windowState(tab.id, "minimized");
+    await this.#windowState(tab.id, (state) => state === "minimized", signal);
+    await this.deps.native.command("activate", { window: xid }, signal);
+    if (!(await this.#windowState(tab.id, (state) => state !== "minimized", signal))) {
+      await this.deps.targets.windowState(tab.id, "normal");
+      await this.#windowState(tab.id, (state) => state === "normal", signal);
+      await this.deps.targets.windowState(tab.id, "maximized");
+      const { active } = await this.deps.native.command("activate", { window: xid }, signal);
+      if (active !== xid) throw new BrowserWindowError("unavailable");
+    }
+    for (const deadline = performance.now() + SURFACE_SETTLES_MS; ; ) {
+      const surface = await this.deps.native.command("surface", { window: xid }, signal);
+      if (surface.page || performance.now() >= deadline) break;
+      await sleep(SURFACE_RETRY_MS, undefined, { signal });
+    }
+    delete window.hidden;
+  }
+
+  async #windowState(
+    tabId: string,
+    reached: (state: string) => boolean,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    for (const deadline = performance.now() + WINDOW_STATE_MS; ; ) {
+      if (reached((await this.deps.targets.window(tabId, signal)).windowState)) return true;
+      if (performance.now() >= deadline) return false;
+      await sleep(WINDOW_POLL_MS, undefined, { signal });
+    }
+  }
+
+  #exclusive<T>(work: () => Promise<T>): Promise<T> {
+    const turn = this.#queue.then(work);
+    this.#queue = turn.catch(() => {});
+    return turn;
   }
 
   // Sign-in mode relaunches the browser, whose restored windows nothing could tell apart: only the
@@ -302,8 +502,9 @@ export class BrowserWindows {
   // hover keeps its menu), and the window comes forward.
   async #raise(window: TaskWindow, sessionId: string, signal: AbortSignal): Promise<void> {
     const previous = this.#front;
-    if (this.#windows.size === 1 && (!previous || previous === sessionId)) {
+    if (this.#windows.size === 1 && (!previous || previous === sessionId) && !window.hidden) {
       this.#front = sessionId;
+      this.#top = window;
       return;
     }
     const native = this.deps.native;
@@ -316,6 +517,8 @@ export class BrowserWindows {
       await native.command("clearSelections", {}, signal);
     }
     window.xid ??= await this.#place(window, signal);
+    if (window.hidden) await this.#show(window, signal);
+    this.#screenAsleep = false;
     const { windows } = await native.command("windows", {}, signal);
     if (!windows.some((w) => w.id === window.xid)) {
       delete window.xid;
@@ -324,6 +527,7 @@ export class BrowserWindows {
     const xid = window.xid;
     // Set before it moves: a page opening a window as this one comes up is this task's.
     this.#front = sessionId;
+    this.#top = window;
     if (windows.find((w) => w.active)?.id !== xid) {
       const reply = await native.command("activate", { window: xid }, signal);
       if (reply.active !== xid) throw new BrowserWindowError("unavailable");

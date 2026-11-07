@@ -899,12 +899,32 @@ export class BrowserTargets {
   }
 
   async maximize(tabId: string, signal?: AbortSignal): Promise<void> {
+    await this.windowState(tabId, "maximized", signal);
+  }
+
+  async windowState(
+    tabId: string,
+    windowState: "maximized" | "minimized" | "normal",
+    signal?: AbortSignal,
+  ): Promise<void> {
     await this.window(tabId, signal);
     const target = this.#tab(tabId);
     await this.#broker.send(
       "Browser.setWindowBounds",
-      { windowId: target.windowId, bounds: { windowState: "maximized" } },
+      { windowId: target.windowId, bounds: { windowState } },
       { signal },
+    );
+    this.#sameTab(target);
+  }
+
+  // A frozen page runs no timers, frames or loading. Chromium hides a page as it freezes it, and
+  // waking it leaves it hidden until its window comes back on screen.
+  async lifecycle(tabId: string, state: "frozen" | "active", signal?: AbortSignal): Promise<void> {
+    const target = this.#tab(tabId);
+    await this.#broker.send(
+      "Page.setWebLifecycleState",
+      { state },
+      { sessionId: target.sessionId, signal },
     );
     this.#sameTab(target);
   }

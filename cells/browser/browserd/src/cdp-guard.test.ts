@@ -30,6 +30,8 @@ const roots: [string, Record<string, unknown>][] = [
   ["Browser.cancelDownload", { guid: download }],
   ["Browser.getWindowForTarget", { targetId: "page-1" }],
   ["Browser.setWindowBounds", { windowId: 1, bounds: { windowState: "maximized" } }],
+  ["Browser.setWindowBounds", { windowId: 1, bounds: { windowState: "minimized" } }],
+  ["Browser.setWindowBounds", { windowId: 1, bounds: { windowState: "normal" } }],
   ["Target.setDiscoverTargets", { discover: true, filter: targetFilter }],
   [
     "Target.setAutoAttach",
@@ -53,6 +55,8 @@ const pages: [string, Record<string, unknown>][] = [
   ["Page.bringToFront", {}],
   ["Page.setInterceptFileChooserDialog", { enabled: true }],
   ["Page.handleJavaScriptDialog", { accept: false }],
+  ["Page.setWebLifecycleState", { state: "frozen" }],
+  ["Page.setWebLifecycleState", { state: "active" }],
   [
     "Emulation.setDeviceMetricsOverride",
     { width: 1280, height: 712, deviceScaleFactor: 0, mobile: false },
@@ -148,6 +152,35 @@ describe("closed private CDP command boundary", () => {
     "constructor",
   ])("refuses %s before anything can be sent to Chromium", (method) => {
     expect(() => guardCdpCommand(method, {}, capabilities, "session-1")).toThrow("method");
+  });
+
+  it("sets a page's lifecycle and a window's state to known values only", () => {
+    for (const state of ["paused", "hidden", ""])
+      expect(() =>
+        guardCdpCommand("Page.setWebLifecycleState", { state }, capabilities, "session-1"),
+      ).toThrow("params");
+    for (const windowState of ["fullscreen", "hidden"])
+      expect(() =>
+        guardCdpCommand(
+          "Browser.setWindowBounds",
+          { windowId: 1, bounds: { windowState } },
+          capabilities,
+        ),
+      ).toThrow("params");
+    expect(() =>
+      guardCdpCommand(
+        "Browser.setWindowBounds",
+        { windowId: 1, bounds: { windowState: "normal", width: 10 } },
+        capabilities,
+      ),
+    ).toThrow("params");
+    expect(() =>
+      guardCdpCommand(
+        "Browser.setWindowBounds",
+        { windowId: 2, bounds: { windowState: "minimized" } },
+        capabilities,
+      ),
+    ).toThrow("scope");
   });
 
   it("forbids script injection and navigation of unowned targets", () => {
