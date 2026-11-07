@@ -1,5 +1,12 @@
 import type { ScreenName } from "@localdot/protocol";
-import { type CSSProperties, type SyntheticEvent, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type PointerEvent,
+  type SyntheticEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type {
   BrowserEngineName,
   BrowserEngineStatus,
@@ -44,8 +51,10 @@ export function dockItemLabel(front: StageFront): string {
     : "Show the web browser";
 }
 
-// How long the dock stays up once the pointer has left it, as the desktop's own does.
+// How long the dock stays up once the pointer has left it, as the desktop's own does, and after a
+// tap on the bottom edge, which no pointer leaves.
 const DOCK_HIDE_MS = 300;
+const DOCK_TAP_MS = 4000;
 // The window in the desktop's own 1280 × 800 measure, which the stylesheet draws it in.
 const FRAME = browserWindow({ w: 1280, h: 800 });
 const PLACE = { "--_left": FRAME.x, "--_width": FRAME.w } as CSSProperties;
@@ -55,14 +64,16 @@ const stay = (event: SyntheticEvent) => event.stopPropagation();
 
 // The web browser as one of the desktop's own apps: a window with the desktop's title bar while it
 // is in front, and an item in the dock's glass at the bottom, which shows the window or minimises it
-// as a dock does. With the window in front the dock gets out of its way, as the desktop's dock does
-// for a window over it, and comes back when the pointer reaches the bottom edge.
+// as a dock does. Like the desktop's dock (Plank's window-dodge), the item gets out of the way of any
+// window over the dock, its own included, and comes back while the pointer is at the bottom edge or
+// for a moment after a tap there; with nothing over the dock it stays up.
 export function BrowserWindow({
   screen,
   drawn,
   front,
   holding,
   engine,
+  covered,
 }: {
   // What is in front.
   screen: ScreenName;
@@ -72,6 +83,8 @@ export function BrowserWindow({
   front?: StageFront;
   holding: boolean;
   engine?: BrowserEngineName;
+  // A desktop window lies over the dock; null while the computer hasn't said.
+  covered: boolean | null;
 }) {
   const open = screen === "browser";
   const name = browserName(engine);
@@ -85,17 +98,28 @@ export function BrowserWindow({
   useEffect(() => {
     if (problem) showToast({ id: "screen", title: problem, tone: "danger" });
   }, [problem]);
+  const dodging = open || covered !== false;
   const [raised, setRaised] = useState(false);
-  if (raised && !open) setRaised(false);
+  if (raised && !dodging) setRaised(false);
   const lowering = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const touched = useRef(false);
   useEffect(() => () => clearTimeout(lowering.current), []);
-  const raise = () => {
+  const lower = (ms = DOCK_HIDE_MS) => {
+    clearTimeout(lowering.current);
+    lowering.current = setTimeout(() => setRaised(false), ms);
+  };
+  const hover = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") return;
     clearTimeout(lowering.current);
     setRaised(true);
   };
-  const lower = () => {
-    clearTimeout(lowering.current);
-    lowering.current = setTimeout(() => setRaised(false), DOCK_HIDE_MS);
+  const leave = (event: PointerEvent) => {
+    if (event.pointerType === "mouse") lower();
+  };
+  const tap = (event: PointerEvent) => {
+    if (event.pointerType === "mouse") return;
+    setRaised(true);
+    lower(DOCK_TAP_MS);
   };
   const { triggerProps, tooltip } = useTooltip({ content: name });
   return (
@@ -128,9 +152,9 @@ export function BrowserWindow({
         {front && (
           <div
             className="browser-dock"
-            data-shown={!open || raised ? "" : undefined}
-            onPointerEnter={open ? raise : undefined}
-            onPointerLeave={open ? lower : undefined}
+            data-shown={!dodging || raised ? "" : undefined}
+            onPointerEnter={dodging ? hover : undefined}
+            onPointerLeave={dodging ? leave : undefined}
           >
             <Button
               {...triggerProps.handlers}
@@ -143,7 +167,14 @@ export function BrowserWindow({
               data-dot={front.dot === "browser" ? "" : undefined}
               onMouseDown={keepKeys}
               onDoubleClick={stay}
-              onClick={() => front.pick(open ? "desktop" : "browser")}
+              onPointerDown={(event) => {
+                touched.current = event.pointerType !== "mouse";
+              }}
+              onClick={() => {
+                front.pick(open ? "desktop" : "browser");
+                // A finger leaves no pointer over the dock to keep it up.
+                if (touched.current) lower();
+              }}
             >
               <BrowserIcon engine={engine} />
               <span className="browser-dock-dot" aria-hidden="true" />
@@ -151,12 +182,13 @@ export function BrowserWindow({
             {tooltip}
           </div>
         )}
-        {front && open && (
+        {front && dodging && (
           <div
             className="browser-dock-edge"
             aria-hidden="true"
-            onPointerEnter={raise}
-            onPointerLeave={lower}
+            onPointerEnter={hover}
+            onPointerLeave={leave}
+            onPointerDown={tap}
           />
         )}
       </div>

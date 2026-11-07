@@ -4,13 +4,16 @@
    fits it, so --_px is one of the desktop's own 1280 px. It restyles kit buttons, so it follows the
    kit layer. */
 @layer utilities {
-  /* Over the user's input and under what covers the picture: a notice, a switch's loading state. */
+  /* Over the user's input and under what covers the picture: a notice, a switch's loading state.
+     Clipped, so a finger's reach past the picture's foot can't make the stage scroll when its
+     button takes focus. */
   .stage > .browser-chrome {
     position: absolute;
     inset: 0;
     z-index: 2;
     display: grid;
     place-items: center;
+    overflow: clip;
     container-type: size;
     pointer-events: none;
   }
@@ -124,7 +127,7 @@
       visibility 0s var(--dur-exit);
   }
 
-  /* Out of the way of a window over it, as the desktop's dock dodges one. */
+  /* Out of the way of a window over it, as the desktop's dock dodges one (Plank's window-dodge). */
   .browser-dock:not([data-shown]) {
     visibility: hidden;
     opacity: 0;
@@ -138,7 +141,7 @@
       visibility 0s;
   }
 
-  /* The bottom edge, where the pointer brings the dock back over the window. */
+  /* The bottom edge, where the pointer brings the dock back over a window, or a tap does. */
   .browser-dock-edge {
     position: absolute;
     right: 0;
@@ -146,6 +149,12 @@
     left: 0;
     height: max(calc(var(--_px) * 4), calc(var(--spacing) * 1.5));
     pointer-events: auto;
+  }
+
+  @media (pointer: coarse) {
+    .browser-dock-edge {
+      height: calc(var(--spacing) * 3);
+    }
   }
 
   /* The item's slot: the icon 8 px down, the running light under it. Its face is the dock's mark of
@@ -255,19 +264,6 @@
 
     .browser-dock-item.ui-button::after {
       inset: calc(var(--spacing) * -2);
-    }
-  }
-
-  /* Without a pointer to reach the bottom edge, the dock stays up. */
-  @media (hover: none) {
-    .browser-dock:not([data-shown]) {
-      visibility: visible;
-      opacity: 1;
-      translate: none;
-    }
-
-    .browser-dock-edge {
-      display: none;
     }
   }
 

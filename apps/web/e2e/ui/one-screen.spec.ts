@@ -73,20 +73,27 @@ async function inFront(page: Page, screen: "browser" | "desktop") {
   await expect.poll(() => onToolbar(page)).toBe(screen === "browser");
 }
 
-// The dock item, as a finger or a pointer reaches it: with the window in front a pointer brings the
-// dock up from the bottom edge first, as the desktop's own dock comes back.
-async function useDock(page: Page) {
-  const item = dockItem(page);
-  if (isPhone(page)) {
-    await item.tap();
-    return;
-  }
-  if (!(await item.isVisible())) {
+// The dock item is up: over an empty dock, or brought back at the bottom edge.
+const dockUp = (page: Page) => stageOf(page).locator(".browser-dock[data-shown]");
+
+// Brings the dock back from the bottom edge, as the desktop's own dock comes back: a pointer
+// resting there, or a tap.
+async function revealDock(page: Page) {
+  if (isPhone(page)) await stageOf(page).locator(".browser-dock-edge").tap();
+  else {
     const box = await pictureBox(page);
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height - 1);
-    await expect(item).toBeVisible();
   }
-  await item.click();
+  await expect(dockUp(page)).toHaveCount(1);
+}
+
+// The dock item, as a finger or a pointer reaches it: when a window is over the dock, the dock is
+// brought back first.
+async function useDock(page: Page) {
+  const item = dockItem(page);
+  if (!(await dockUp(page).count())) await revealDock(page);
+  if (isPhone(page)) await item.tap();
+  else await item.click();
 }
 
 runAt("c14", "c39", "w14", "w39");
@@ -175,16 +182,60 @@ test("the window stays in front once dot's task in it ends", async ({ page, ui }
   ).toHaveCount(0);
 });
 
+for (const colorScheme of ["light", "dark"] as const)
+  test.describe(`${colorScheme} dock`, () => {
+    test.use({ colorScheme });
+
+    test("the dock item keeps out of a window's way over the dock, as the desktop's dock does", async ({
+      page,
+      ui,
+    }) => {
+      if (colorScheme === "light")
+        await page.addInitScript(() => localStorage.setItem("localdot.appearance.v1", "daylight"));
+      const fixture = await ui.open("running");
+      await ui.picture();
+      // The last task's window is maximised over the dock: the item waits at the bottom edge.
+      await expect(dockUp(page)).toHaveCount(0);
+      await expect(dockItem(page)).toBeHidden();
+      await shoot(page, "dock-covered");
+      // The pointer at the bottom edge, or a tap there, brings it back over the window.
+      await revealDock(page);
+      await expect(dockItem(page)).toBeVisible();
+      await shoot(page, "dock-revealed");
+      // It goes again once the pointer leaves it, or a moment after the tap.
+      if (!isPhone(page)) {
+        const box = await pictureBox(page);
+        await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+      }
+      await expect(dockUp(page)).toHaveCount(0, { timeout: 8000 });
+      // An empty desktop leaves the dock clear: the item stays up.
+      await page.request.post(`${fixture.origin}/__qa/desktop/home`);
+      await expect(dockUp(page)).toHaveCount(1);
+      await expect(dockItem(page)).toBeVisible();
+      await page.waitForTimeout(1500);
+      await expect(dockUp(page)).toHaveCount(1);
+      await shoot(page, "dock-clear");
+      // A window over the dock again.
+      await page.request.post(`${fixture.origin}/__qa/desktop/window`);
+      await expect(dockUp(page)).toHaveCount(0);
+      // From the edge, the item still brings the web browser forward, and the picture stays put.
+      await page.request.post(`${fixture.origin}/__qa/browser/start`);
+      await useDock(page);
+      await inFront(page, "browser");
+      expect(await stageOf(page).evaluate((stage) => stage.scrollTop)).toBe(0);
+    });
+  });
+
 test("its dock item minimises the window and shows it again", async ({ page, ui }) => {
   const fixture = await ui.open("running");
   await ui.picture();
   const item = dockItem(page);
-  await expect(item).toHaveAccessibleName("Show the web browser");
+  await expect(item).toHaveAttribute("aria-label", "Show the web browser");
   await page.request.post(`${fixture.origin}/__qa/screen?to=browser`);
   await inFront(page, "browser");
   await useDock(page);
   await inFront(page, "desktop");
-  await expect(item).toHaveAccessibleName("Show the web browser, where dot is working");
+  await expect(item).toHaveAttribute("aria-label", "Show the web browser, where dot is working");
   await useDock(page);
   await inFront(page, "browser");
   // Its title bar's minimise light does the same.
@@ -193,7 +244,7 @@ test("its dock item minimises the window and shows it again", async ({ page, ui 
   else await minimise.click();
   await inFront(page, "desktop");
   await page.request.post(`${fixture.origin}/__qa/screen`);
-  await expect(item).toHaveAccessibleName("Show the web browser");
+  await expect(item).toHaveAttribute("aria-label", "Show the web browser");
   // One desktop: nothing switches between a desktop and a web browser, and no button says so.
   await expect(page.getByRole("button", { name: /^(desktop|web browser)$|forward/i })).toHaveCount(
     0,
@@ -353,7 +404,9 @@ test("shows the window and its dock item in the desktop's own look", async ({ pa
   await crop(page, stageOf(page).locator(".browser-dock"), "dock-over-window");
   await page.request.post(`${fixture.origin}/__qa/screen`);
   await inFront(page, "desktop");
+  await page.request.post(`${fixture.origin}/__qa/desktop/home`);
   await page.mouse.move(box.x + 4, box.y + 4);
+  await expect(dockUp(page)).toHaveCount(1);
   await page.waitForTimeout(300);
   await crop(page, stageOf(page).locator(".browser-dock"), "dock-on-desktop");
 });

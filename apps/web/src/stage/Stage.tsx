@@ -34,6 +34,7 @@ import { StageCanvas } from "./StageCanvas.tsx";
 import { StageNotice } from "./StageNotice.tsx";
 import type { ReplayHandle, StageCanvasHandle, StageView } from "./stage-engine.ts";
 import { stageFramerate } from "./stream-quality.ts";
+import { useDockCovered } from "./useDockCovered.ts";
 import type { StageFront } from "./useStageFront.ts";
 import { useUnderDesktop } from "./useUnderDesktop.ts";
 import type {
@@ -340,6 +341,13 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     inSight,
     live: control,
   });
+  // Whether a window on the desktop covers its dock, asked only while the dock item could show.
+  const dockCovered = useDockCovered(
+    api,
+    mode === "live" && composite?.front === "desktop" && front && desktopUp && inSight
+      ? (parent?.id ?? null)
+      : null,
+  );
 
   // While the user holds the computer, the app switcher's keys bring the other window forward, from
   // the keyboard field or a page with nothing else focused, and reach neither screen.
@@ -457,6 +465,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
           front={front}
           holding={manualActive}
           engine={browserEngine}
+          covered={dockCovered}
         />
       )}
       {mode === "live" && connection && (

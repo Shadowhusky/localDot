@@ -1768,7 +1768,25 @@ if (withSession && initial) {
 const latestTask = session?.id ?? earlier;
 if (latestTask) conversations.adopt(latestTask);
 
+// The desktop's window stack at 2x, top first: its dock, its menu bar, the last task's window
+// maximised over them (none on the home screen) and the desktop itself.
+const desktopWindows = () => {
+  const frame = (x: number, y: number, w: number, h: number) => ({ x, y, w, h });
+  const window = (id: number, at: ReturnType<typeof frame>) => ({
+    id,
+    pid: 100 + id,
+    frame: at,
+    active: false,
+  });
+  return [
+    window(1, frame(0, 1416, 2560, 184)),
+    window(2, frame(0, 0, 2560, 48)),
+    ...(desktopHome ? [] : [{ ...window(3, frame(0, 48, 2560, 1552)), active: true }]),
+    window(4, frame(0, 0, 2560, 1600)),
+  ];
+};
 const native = new FakeDesktopd({
+  windows: () => ({ ticks: 0, windows: desktopWindows() }),
   type: (body) => ({
     progress: [],
     result: {
@@ -2692,6 +2710,8 @@ const routes = createApp({
   desktop: realDesktop,
   accounts,
   browserEngine,
+  // The computer's dock, read from the fake desktopd's window stack.
+  dock: { cells, registry: { for: (id) => (cells.get(id) ? { client } : undefined) } },
   gateway: {
     registry,
     clock,

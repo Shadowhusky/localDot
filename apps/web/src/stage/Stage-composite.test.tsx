@@ -7,6 +7,7 @@ import { createApi } from "../lib/api.ts";
 import { FakeWorker, fakeChromium, playInClient } from "../testing/fake-chromium.ts";
 import { closeStreams } from "./live-stream.ts";
 import { Stage } from "./Stage.tsx";
+import { DOCK_ASK_MS } from "./useDockCovered.ts";
 import type { StageFront } from "./useStageFront.ts";
 import { UNDER_AWAKE_MS, UNDER_REFRESH_MS } from "./useUnderDesktop.ts";
 
@@ -48,8 +49,13 @@ const fakeTimers = () =>
     shouldAdvanceTime: true,
   });
 
-function daemon() {
+// `dock.covered`: what the computer says of its dock; null, that it can't say.
+function daemon(dock: { covered: boolean | null } = { covered: false }) {
   const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    if (String(input).endsWith("/dock"))
+      return dock.covered === null
+        ? new Response("the computer's windows can't be read", { status: 502 })
+        : Response.json({ covered: dock.covered });
     const browser = String(input).includes("browser-stream-ticket");
     const id = browser ? BROWSER : DESKTOP;
     const path = `/cells/${id}/${browser ? "browser" : "desktop"}/${"T".repeat(22)}/`;
@@ -152,13 +158,83 @@ describe("the stage's one screen", () => {
       />,
     );
     const item = await screen.findByRole("button", { name: "Show the web browser" });
-    expect(item.closest(".browser-dock")?.hasAttribute("data-shown")).toBe(true);
+    await waitFor(() =>
+      expect(item.closest(".browser-dock")?.hasAttribute("data-shown")).toBe(true),
+    );
     expect(item.querySelector(".browser-icon")?.getAttribute("data-engine")).toBe("chrome");
     expect(screen.queryByRole("group", { name: /window$/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^(desktop|web browser)$/i })).toBeNull();
     expect(screen.queryByText("Web browser")).toBeNull();
     fireEvent.click(item);
     expect(front.pick).toHaveBeenCalledWith("browser");
+  });
+
+  describe("its dock item, as the desktop's dock", () => {
+    const shown = () => document.querySelector(".browser-dock")?.hasAttribute("data-shown");
+    const edge = () => document.querySelector(".browser-dock-edge") as HTMLElement;
+    const desktopFront = (api: ReturnType<typeof daemon>["api"]) =>
+      render(
+        <Stage {...props(api)} cell={cell(DESKTOP)} selection={onDesktop} front={frontOf({})} />,
+      );
+    const asked = (fetchImpl: ReturnType<typeof daemon>["fetchImpl"]) =>
+      fetchImpl.mock.calls.filter(([url]) => String(url).endsWith(`/api/cells/${DESKTOP}/dock`))
+        .length;
+
+    it("stays up over an empty dock, and out of the way of a window over it", async () => {
+      const dock = { covered: false as boolean | null };
+      const { api, fetchImpl } = daemon(dock);
+      fakeTimers();
+      desktopFront(api);
+      await waitFor(() => expect(shown()).toBe(true));
+      expect(edge()).toBeNull();
+      dock.covered = true;
+      await act(() => vi.advanceTimersByTimeAsync(DOCK_ASK_MS + 10));
+      await waitFor(() => expect(shown()).toBe(false));
+      expect(asked(fetchImpl)).toBeGreaterThanOrEqual(2);
+      // The pointer at the bottom edge brings it back, and it goes once the pointer leaves.
+      fireEvent.pointerEnter(edge(), { pointerType: "mouse" });
+      expect(shown()).toBe(true);
+      fireEvent.pointerLeave(edge(), { pointerType: "mouse" });
+      fireEvent.pointerEnter(document.querySelector(".browser-dock") as HTMLElement, {
+        pointerType: "mouse",
+      });
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(shown()).toBe(true);
+      fireEvent.pointerLeave(document.querySelector(".browser-dock") as HTMLElement, {
+        pointerType: "mouse",
+      });
+      await act(() => vi.advanceTimersByTimeAsync(400));
+      expect(shown()).toBe(false);
+      // A tap there brings it back for a moment.
+      fireEvent.pointerDown(edge(), { pointerType: "touch" });
+      expect(shown()).toBe(true);
+      await act(() => vi.advanceTimersByTimeAsync(4100));
+      expect(shown()).toBe(false);
+      dock.covered = false;
+      await act(() => vi.advanceTimersByTimeAsync(DOCK_ASK_MS + 10));
+      await waitFor(() => expect(shown()).toBe(true));
+    });
+
+    it("keeps out of the way while the computer can't say, and asks nothing of a covered stage", async () => {
+      const { api, fetchImpl } = daemon({ covered: null });
+      const view = desktopFront(api);
+      await waitFor(() => expect(asked(fetchImpl)).toBe(1));
+      await act(() => Promise.resolve());
+      expect(shown()).toBe(false);
+      expect(edge()).not.toBeNull();
+      view.rerender(
+        <Stage
+          {...props(api)}
+          cell={cell(DESKTOP)}
+          selection={onDesktop}
+          front={frontOf({})}
+          covered
+        />,
+      );
+      fakeTimers();
+      await act(() => vi.advanceTimersByTimeAsync(DOCK_ASK_MS * 3));
+      expect(asked(fetchImpl)).toBe(1);
+    });
   });
 
   it("marks the dock item while dot works in the minimised window", async () => {
@@ -196,7 +272,9 @@ describe("the stage's one screen", () => {
     // The dock gets out of the window's way until the pointer reaches the bottom edge.
     const dock = document.querySelector(".browser-dock") as HTMLElement;
     expect(dock.hasAttribute("data-shown")).toBe(false);
-    fireEvent.pointerEnter(document.querySelector(".browser-dock-edge") as HTMLElement);
+    fireEvent.pointerEnter(document.querySelector(".browser-dock-edge") as HTMLElement, {
+      pointerType: "mouse",
+    });
     expect(dock.hasAttribute("data-shown")).toBe(true);
     const item = within(dock).getByRole("button", { name: "Minimise the web browser" });
     expect(item.hasAttribute("data-open")).toBe(true);
