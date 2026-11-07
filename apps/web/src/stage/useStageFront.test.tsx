@@ -33,7 +33,7 @@ afterEach(cleanup);
 function setup(
   initial: {
     selection?: ScreenSelectionSnapshot;
-    sessionId?: string;
+    sessionId?: string | null;
     holding?: boolean;
   },
   ticket: () => Response = () => Response.json({ cellId: BROWSER, ticket: "t", path: "/x" }),
@@ -102,6 +102,52 @@ describe("what the stage has in front", () => {
     expect(result.current.screen).toBe("desktop");
     rerender({ sessionId: "task", selection: onBrowser, holding: false });
     expect(result.current.screen).toBe("browser");
+  });
+
+  it("follows dot onto the web browser and back with no word from the user", () => {
+    const { result, rerender, fetchImpl } = setup({ selection: onDesktop });
+    rerender({ sessionId: "task", selection: onBrowser });
+    expect(result.current.screen).toBe("browser");
+    rerender({ sessionId: "task", selection: { ...onDesktop, revision: 5 } });
+    expect(result.current.screen).toBe("desktop");
+    rerender({ sessionId: "task", selection: { ...onBrowser, revision: 6 } });
+    expect(result.current.screen).toBe("browser");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps the screen a task last used once it stops working, checking its browser still runs", async () => {
+    const retired = { ...onBrowser, cellId: "01JXYZ0000000000000000CCCC" };
+    const { result, rerender, fetchImpl } = setup({ selection: retired });
+    // The task ends, or is at rest: its selection is no longer shown.
+    rerender({ sessionId: "task" });
+    // dot's window stays on show while a ticket says which browser runs now.
+    expect(result.current.screen).toBe("browser");
+    expect(result.current.dot).toBeNull();
+    expect(result.current.browser).toMatchObject({ cellId: retired.cellId });
+    await waitFor(() => expect(result.current.browser).toMatchObject({ cellId: BROWSER }));
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.current.problem).toBeNull();
+  });
+
+  it("starts another task, a conversation taken up or a new one from the desktop", () => {
+    const { result, rerender } = setup({ selection: onBrowser });
+    rerender({ sessionId: "older" });
+    expect(result.current.screen).toBe("desktop");
+    rerender({ sessionId: "task" });
+    expect(result.current.screen).toBe("browser");
+    rerender({ sessionId: null });
+    expect(result.current.screen).toBe("desktop");
+  });
+
+  it("goes to the desktop, saying nothing, when the task's browser no longer runs", async () => {
+    const { result, rerender, fetchImpl } = setup(
+      { selection: onBrowser },
+      () => new Response("the browser is unavailable", { status: 409 }),
+    );
+    rerender({ sessionId: "task" });
+    await waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.screen).toBe("desktop"));
+    expect(result.current.problem).toBeNull();
   });
 
   it("forgets the choice with the task", () => {
