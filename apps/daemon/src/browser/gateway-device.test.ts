@@ -143,6 +143,47 @@ describe("leased browser gateway device", () => {
     await expect(f.device.client.clock()).resolves.toEqual({ mono: 50 });
     expect(f.client.clock).toHaveBeenCalledTimes(2);
   });
+  // Each ping is a read of the page in front, which a busy page answers in seconds.
+  it("maps a busy page's clock from its first ping instead of nine more", async () => {
+    const f = fixture(2);
+    let now = 100_000;
+    f.client.clock.mockImplementation(async () => {
+      now += 6_500_000;
+      return { mono: 50 };
+    });
+    const device = browserGatewayDevice({ ...f.options, now: () => now });
+    const sample = await device.clocks.sync();
+    expect(f.client.clock).toHaveBeenCalledOnce();
+    expect(sample.rttMicros).toBe(6_500_000);
+  });
+  it("still takes the closest of a burst on a page that answers at once", async () => {
+    const f = fixture(2);
+    let now = 100_000;
+    f.client.clock.mockImplementation(async () => {
+      now += 20_000;
+      return { mono: 50 };
+    });
+    const device = browserGatewayDevice({ ...f.options, now: () => now });
+    await device.clocks.sync();
+    expect(f.client.clock).toHaveBeenCalledTimes(10);
+  });
+  it("waits for a ping as long as for any read of the page, and no longer", async () => {
+    const f = fixture(2);
+    f.client.clock.mockImplementation(
+      (...args: unknown[]) =>
+        new Promise((_resolve, reject) =>
+          (args[2] as { signal: AbortSignal }).signal.addEventListener(
+            "abort",
+            () => reject(new BrowserClientError("aborted")),
+            { once: true },
+          ),
+        ),
+    );
+    const device = browserGatewayDevice({ ...f.options, lookupMs: 600 });
+    const started = performance.now();
+    await expect(device.client.clock()).rejects.toThrow();
+    expect(performance.now() - started).toBeLessThan(1500);
+  });
   it("ends its lookups by its deadline, leaving none to hold browserd", async () => {
     const f = fixture(2);
     f.client.lookup.mockRejectedValue(new BrowserClientError("unavailable"));

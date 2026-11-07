@@ -10,10 +10,13 @@ type Client = Pick<BrowserClient, "clock" | "settle" | "lookup" | "observe" | "i
   Partial<Pick<BrowserClient, "secret">>;
 
 // A page refuses reads while it settles (frames come and go, its address changes), and a heavy one
-// answers each in seconds: the element under a point may take as long as browserd gives a read,
-// and no request outlives it to hold browserd's one action slot.
+// answers each in seconds: the element under a point, like the page in front a clock ping reads
+// first, may take as long as browserd gives a read, and no request outlives it to hold browserd's
+// one action slot.
 export const BROWSER_LOOKUP_MS = 16_000;
-const CLOCK_MS = 3000;
+// A clock ping is such a read: on a busy page each takes seconds, and more of them map its clock no
+// closer.
+const CLOCK_BURST_MS = 1000;
 const RETRY_MS = 250;
 
 // One admitted screen action owns this adapter. The action gateway remains responsible for
@@ -94,7 +97,7 @@ export function browserGatewayDevice(options: {
     return { ...result, target: target(result.target), window: null };
   };
   const device: NativeDevice["client"] = {
-    clock: () => settling(CLOCK_MS, (owner) => client.clock(permit, tabId, owner)),
+    clock: () => settling(lookupMs, (owner) => client.clock(permit, tabId, owner)),
     settle: async (request = {}) => {
       const owner = scope();
       const result = await client.settle(permit, tabId, request, owner);
@@ -171,7 +174,7 @@ export function browserGatewayDevice(options: {
             secret(permit, tabId, { ...request, at: toModel(request.at) }, scope(signal)),
         }
       : {}),
-    clocks: new ClockMap(async () => (await device.clock()).mono, now),
+    clocks: new ClockMap(async () => (await device.clock()).mono, now, CLOCK_BURST_MS),
     lookupMs,
   };
 }

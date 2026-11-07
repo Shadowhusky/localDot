@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as wait } from "node:timers/promises";
 import { ulid } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -10,7 +11,9 @@ import { BrowserStartCancelled } from "../cells/browser-ledger.ts";
 import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { BrowserClientError, type BrowserScope } from "./client.ts";
 import {
+  BROWSER_FOREGROUND_MS,
   BROWSER_WINDOW_LOST,
+  BrowserBusyError,
   browserUnavailableText,
   ScreenControlError,
   ScreenController,
@@ -575,7 +578,7 @@ describe("session screen coordinator", () => {
       const pending = expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(
         ScreenUnavailableError,
       );
-      await vi.advanceTimersByTimeAsync(6001);
+      await vi.advanceTimersByTimeAsync(BROWSER_FOREGROUND_MS + 1);
       await pending;
       expect(f.client.clock).toHaveBeenCalledOnce();
       expect(f.deps.publish).not.toHaveBeenCalled();
@@ -1250,6 +1253,174 @@ describe("a web browser that stopped working", () => {
     );
     expect(f.deps.contain).not.toHaveBeenCalled();
     await controller.close();
+  });
+});
+
+// A page whose main thread runs for seconds at a time: browserd's geometry probe waits out two of
+// its turns, so it answers, but in seconds.
+function answersIn(ms: number, refuse = false) {
+  return (_permit: unknown, _tabId: string, scope: BrowserScope) =>
+    new Promise<{ mono: number }>((resolve, reject) => {
+      const timer = setTimeout(
+        () => (refuse ? reject(new BrowserClientError("refused")) : resolve({ mono: 50 })),
+        ms,
+      );
+      scope.signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(new BrowserClientError("aborted"));
+        },
+        { once: true },
+      );
+    });
+}
+
+describe("a web browser on a busy page", () => {
+  it("reads it after the user hands it back, though each probe takes seconds to answer", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    try {
+      await f.controller.switchTo("browser", f.scope);
+      await f.controller.takeOver();
+      await f.controller.handback(f.scope);
+      f.client.clock.mockImplementation(answersIn(6500));
+      const lease = f.controller.lease(f.scope);
+      const read = f.controller.refreshBrowser(lease);
+      const settled = vi.fn();
+      void read.then(settled, settled);
+      await vi.advanceTimersByTimeAsync(6600);
+      expect(settled).toHaveBeenCalledWith(undefined);
+      expect(f.controller.browserAccess(lease).tabId).toBe(f.tabId);
+      lease.finish();
+      expect(f.deps.contain).not.toHaveBeenCalled();
+      await f.controller.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps looking while the page refuses a probe, and finds it on the next", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    try {
+      await f.controller.switchTo("browser", f.scope);
+      f.client.clock
+        .mockImplementationOnce(answersIn(4000, true))
+        .mockImplementation(answersIn(4000));
+      f.client.clock.mockClear();
+      const lease = f.controller.lease(f.scope);
+      const read = f.controller.refreshBrowser(lease);
+      const settled = vi.fn();
+      void read.then(settled, settled);
+      await vi.advanceTimersByTimeAsync(4100);
+      // The search's own pause before it looks again.
+      await wait(200);
+      await vi.advanceTimersByTimeAsync(4100);
+      expect(settled).toHaveBeenCalledWith(undefined);
+      expect(f.client.clock).toHaveBeenCalledTimes(2);
+      lease.finish();
+      await f.controller.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says the page didn't answer, and keeps dot's grant, when no probe finds it in time", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const report = vi.fn();
+    const controller = new ScreenController({ ...f.deps, report });
+    try {
+      await controller.switchTo("browser", f.scope);
+      f.client.clock.mockImplementation(answersIn(1000, true));
+      const lease = controller.lease(f.scope);
+      const read = controller.refreshBrowser(lease);
+      const failure = read.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(BROWSER_FOREGROUND_MS + 1200);
+      const error = await failure;
+      expect(error).toBeInstanceOf(BrowserBusyError);
+      expect(error).toBeInstanceOf(ScreenUnavailableError);
+      expect((error as Error).message).toMatch(/running, but its page didn't answer in time/u);
+      expect((error as Error).message).not.toMatch(/computer/u);
+      expect(report).toHaveBeenCalledWith(
+        "the web browser couldn't be read: its page didn't answer in time",
+      );
+      // Nothing changed hands: the same lease still reaches the same tab, and nothing was stopped.
+      expect(() => lease.check()).not.toThrow();
+      expect(controller.browserAccess(lease).tabId).toBe(f.tabId);
+      expect(controller.selection.screen).toBe("browser");
+      expect(f.deps.browser.stop).not.toHaveBeenCalled();
+      expect(f.deps.fenceSession).not.toHaveBeenCalled();
+      expect(f.deps.contain).not.toHaveBeenCalled();
+      lease.finish();
+      await controller.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still tells a read that lost its screen that screen control ended", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    try {
+      await f.controller.switchTo("browser", f.scope);
+      f.client.clock.mockImplementation(answersIn(6500));
+      const lease = f.controller.lease(f.scope);
+      const failure = f.controller.refreshBrowser(lease).catch((error: unknown) => error);
+      const taking = f.controller.takeOver();
+      await vi.advanceTimersByTimeAsync(10);
+      const error = await failure;
+      expect(error).toBeInstanceOf(ScreenControlError);
+      expect(error).not.toBeInstanceOf(ScreenUnavailableError);
+      lease.finish();
+      await taking;
+      await f.controller.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("goes on, on the desktop, when its page can't be found for a switch, and says why", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    try {
+      await f.controller.switchTo("browser", f.scope);
+      await f.controller.takeOver();
+      f.client.clock.mockImplementation(answersIn(1000, true));
+      const handing = f.controller.handback(f.scope);
+      await vi.advanceTimersByTimeAsync(BROWSER_FOREGROUND_MS + 1200);
+      const result = await handing;
+      expect(result.screen).toBe("desktop");
+      expect(f.holder()).toBe("user");
+      expect(f.deps.contain).not.toHaveBeenCalled();
+      expect(f.deps.browser.stop).not.toHaveBeenCalled();
+      f.client.clock.mockImplementation(answersIn(1000, true));
+      const switching = f.controller.switchTo("browser", f.scope).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(BROWSER_FOREGROUND_MS + 1200);
+      const error = await switching;
+      expect(error).toBeInstanceOf(BrowserBusyError);
+      expect((error as Error).message).toMatch(/you're on the desktop/u);
+      await f.controller.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("is left by a task at the daemon's word, recorded and with no grant left", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    expect(f.holder()).toBe("agent");
+    const result = await f.controller.switchTo("desktop", f.scope, { daemon: true });
+    expect(result).toMatchObject({ screen: "desktop", by: "daemon" });
+    expect(f.deps.publish).toHaveBeenLastCalledWith(result);
+    expect(f.deps.attachRecording).toHaveBeenLastCalledWith(
+      expect.objectContaining({ screen: "desktop" }),
+      expect.anything(),
+    );
+    expect(f.holder()).toBe("user");
+    expect(f.controller.selection.screen).toBe("desktop");
+    await f.controller.close();
   });
 });
 

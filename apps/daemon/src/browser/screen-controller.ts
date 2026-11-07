@@ -128,9 +128,13 @@ class SignInStillHeldError extends ScreenControlError {}
 export const BROWSER_WINDOW_LOST =
   "localDot: your web browser window was closed while you waited (the browser restarted, or was relaunched for a sign-in). Saved sign-ins are kept. A new blank window is yours: open your page again with browser_navigate.";
 
+// What a task hears when its first look couldn't read the web browser, and it starts on the desktop.
+export const BROWSER_FIRST_LOOK =
+  "localDot: the web browser didn't answer in time for your first look at the screen, so you start on the desktop. Its saved sign-ins are kept: switch_screen to it when you need it, and if it still doesn't answer, tell the user. Don't sign in on the desktop's Chromium or open another browser instead.";
+
 export class ScreenUnavailableError extends Error {
   constructor(
-    screen: ScreenName,
+    readonly screen: ScreenName,
     starting = false,
     readonly problem?: string,
     readonly status?: BrowserStatus,
@@ -145,6 +149,20 @@ export class ScreenUnavailableError extends Error {
             : `The web browser couldn't open.${problem ? ` What went wrong: ${problem.replace(/\.$/u, "")}.` : ""} localDot restarts it by itself and keeps the saved sign-ins. Don't sign in on the desktop's Chromium or launch another browser as a workaround. Retry the visible web browser once after about 20 seconds (switch_screen with restart: true restarts it if it stays stuck), then tell the user what you couldn't do if it still fails.`,
     );
     this.name = "ScreenUnavailableError";
+  }
+}
+
+const BUSY_ADVICE =
+  "a busy page can keep it waiting for seconds. Don't restart the web browser for this, which closes its pages, and don't sign in on the desktop's Chromium or open another browser instead. If it keeps happening, tell the user the page is too busy to work with.";
+
+// The web browser runs, but its page didn't answer in time: nothing was done there.
+export class BrowserBusyError extends ScreenUnavailableError {
+  constructor(onDesktop = false) {
+    super("browser");
+    this.name = "BrowserBusyError";
+    this.message = onDesktop
+      ? `The web browser is running, but its page didn't answer in time, so you're on the desktop: switch to it again in a moment; ${BUSY_ADVICE}`
+      : `The web browser is running, but its page didn't answer in time. Nothing was done there: try again in a moment; ${BUSY_ADVICE}`;
   }
 }
 
@@ -175,6 +193,10 @@ const RESTART_WAIT_MS = 500;
 const RESTART_WAITS = 40;
 const BUSY_WAIT_MS = 100;
 const BUSY_WAITS = 50;
+// browserd finds the page in front by reading every tab of the window and the page's layout, each
+// on its page's main thread, which a busy page answers only between its long tasks: seconds a probe.
+// The search goes on while browserd answers, each request within the client's own bound.
+export const BROWSER_FOREGROUND_MS = 15_000;
 
 // This object belongs to a session, not a model call. Display selection never grants
 // input: every operation needs a lease bound to this screen, generation and revision.
@@ -324,26 +346,34 @@ export class ScreenController {
     if (lease.selection.screen !== "browser") return;
     const owner = this.#browser;
     if (!owner?.permit) throw new ScreenControlError();
-    const tabId = await this.#foreground(owner, this.#browserScope(owner, lease));
+    let tabId: string;
+    try {
+      tabId = await this.#foreground(owner, this.#browserScope(owner, lease));
+    } catch (error) {
+      // A read that lost its screen hears so; one that still holds it was kept waiting by the page.
+      if (error instanceof BrowserBusyError) {
+        lease.check();
+        this.#reportBrowser(error, "the web browser couldn't be read");
+      }
+      throw error;
+    }
     lease.check();
     owner.tabId = tabId;
     this.#tabs.set(lease, tabId);
   }
 
-  // restart: dot found the web browser stuck and asks for it to be started again first.
+  // restart: dot found the web browser stuck and asks for it to be started again first. daemon: the
+  // daemon, not dot, moves the task, as when its first look can't read the web browser.
   async switchTo(
     screen: ScreenName,
     raw: ScreenScope,
-    options: { restart?: boolean } = {},
+    options: { restart?: boolean; daemon?: boolean } = {},
   ): Promise<ScreenSwitchData> {
     if (!ScreenName.safeParse(screen).success) return Promise.reject(new ScreenControlError());
-    return this.#switch(
-      screen,
-      this.#scope(raw),
-      false,
-      false,
-      screen === "browser" && options.restart === true,
-    );
+    return this.#switch(screen, this.#scope(raw), false, {
+      restart: screen === "browser" && options.restart === true,
+      daemon: options.daemon === true,
+    });
   }
 
   // The web browser as the daemon sees it, for dot's work context.
@@ -356,7 +386,7 @@ export class ScreenController {
   async openForUser(url: string, raw: ScreenScope): Promise<void> {
     const scope = this.#scope(raw);
     if (this.#held || this.#ownerGeneration !== undefined) throw new ScreenControlError();
-    await this.#switch("browser", scope, false, true);
+    await this.#switch("browser", scope, false, { forUser: true });
     const lease = this.lease(scope);
     try {
       const { client, permit, tabId } = this.browserAccess(lease);
@@ -754,8 +784,7 @@ export class ScreenController {
     screen: ScreenName,
     scope: ScreenScope,
     handback: boolean,
-    forUser = false,
-    restart = false,
+    { forUser = false, restart = false, daemon = false } = {},
   ): Promise<ScreenSwitchData> {
     const epoch = this.#epoch;
     const guard = () => {
@@ -872,7 +901,7 @@ export class ScreenController {
             cellId,
             geometry,
             revision: this.#selection.revision + 1,
-            by: handback || forUser ? "daemon" : "agent",
+            by: handback || forUser || daemon ? "daemon" : "agent",
           });
           const selection = Object.freeze({
             screen,
@@ -933,6 +962,7 @@ export class ScreenController {
             this.#reportBrowser(error);
             const desktop = await this.#onDesktop(scope, operationScope, handback, recorded);
             if (handback && desktop) return desktop;
+            if (error instanceof BrowserBusyError) throw new BrowserBusyError(true);
             throw await this.#browserUnavailable();
           } else if (handback || integrity) {
             // An unrecorded screen, an unjournaled selection or a daemon handback that cannot
@@ -978,15 +1008,17 @@ export class ScreenController {
     );
   }
 
-  #reportBrowser(error: unknown): void {
+  #reportBrowser(error: unknown, what = "the web browser couldn't be shown"): void {
     this.deps.report?.(
-      `the web browser couldn't be shown: ${
-        error instanceof BrowserClientError ||
-        error instanceof BrowserLifecycleError ||
-        error instanceof ScreenControlError ||
-        (error instanceof Error && error.name === "ScreenRecordingError")
-          ? error.message
-          : "unknown"
+      `${what}: ${
+        error instanceof BrowserBusyError
+          ? "its page didn't answer in time"
+          : error instanceof BrowserClientError ||
+              error instanceof BrowserLifecycleError ||
+              error instanceof ScreenControlError ||
+              (error instanceof Error && error.name === "ScreenRecordingError")
+            ? error.message
+            : "unknown"
       }`,
     );
   }
@@ -1052,13 +1084,14 @@ export class ScreenController {
 
   async #foreground(owner: BrowserOwner, outer: BrowserScope): Promise<string> {
     const expiry = new AbortController();
-    const deadline = setTimeout(() => expiry.abort(), 6000);
+    const deadline = setTimeout(() => expiry.abort(), BROWSER_FOREGROUND_MS);
     const signal = AbortSignal.any([outer.signal, expiry.signal]);
     const scope: BrowserScope = {
       signal,
       check: () => {
         outer.check();
-        if (signal.aborted) throw new ScreenControlError();
+        if (outer.signal.aborted) throw new ScreenControlError();
+        if (expiry.signal.aborted) throw new BrowserBusyError();
       },
     };
     try {
@@ -1095,6 +1128,13 @@ export class ScreenController {
         await sleep(150, undefined, { signal });
         scope.check();
       }
+    } catch (error) {
+      // A request that got no answer within its own bound, like the search as a whole, was kept
+      // waiting by the page; one whose screen ended hears that instead.
+      scope.check();
+      throw error instanceof BrowserClientError && error.code === "aborted"
+        ? new BrowserBusyError()
+        : error;
     } finally {
       clearTimeout(deadline);
     }
