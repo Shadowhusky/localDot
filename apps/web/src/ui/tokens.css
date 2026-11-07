@@ -186,15 +186,35 @@
   --color-stage-key-bevel: var(--color-key-bevel);
   --color-stage-spill: var(--color-spill);
   --color-stage-spill-xenon: var(--color-spill-xenon);
-  /* The computer's own menu bar (cells/desktop's xfce4-panel), light in every appearance as the
-     computer keeps its own theme: the web browser's entry the stage draws on it. */
-  --color-desktop-bar-fg: #1d1d1f;
-  --color-desktop-bar-hover: rgba(0, 0, 0, 0.06);
-  --color-desktop-bar-active: rgba(0, 0, 0, 0.11);
-  --color-desktop-bar-glass: rgba(246, 246, 248, 0.96);
-  --shadow-desktop-bar-entry: 0 0 0 0.5px rgba(0, 0, 0, 0.16), 0 1px 3px rgba(0, 0, 0, 0.22);
-  /* Its type, Inter Medium 10 pt, in the picture's own measure: the desktop's 1280 px are 100cqw. */
-  --text-desktop-bar: 1.015625cqw;
+  /* The computer's own window and dock look (cells/desktop: WhiteSur-Light's xfwm4 frames and
+     Plank's localdot-glass theme), light in every appearance as the computer keeps its own theme:
+     the web browser's title bar and dock item the stage draws on its picture. */
+  --color-stage-window-bar: #ffffff;
+  --color-stage-window-edge: #939393;
+  --color-stage-window-title: #707070;
+  --color-stage-window-minimise: #fac536;
+  --color-stage-window-minimise-edge: #dca31c;
+  --color-stage-window-minimise-glyph: #7d621b;
+  --color-stage-dock-glass-top: rgba(248, 248, 250, 0.86);
+  --color-stage-dock-glass-bottom: rgba(242, 242, 246, 0.86);
+  --color-stage-dock-edge: rgba(0, 0, 0, 0.14);
+  --color-stage-dock-shine: rgba(255, 255, 255, 0.59);
+  --color-stage-dock-active: rgba(0, 0, 0, 0.07);
+  --color-stage-dock-tile: #ffffff;
+  --color-stage-dock-tile-edge: rgba(0, 0, 0, 0.12);
+  --shadow-stage-dock-tile: 0 1px 2px rgba(0, 0, 0, 0.18);
+  --shadow-stage-window-bar: 0 -1px 4px rgba(0, 0, 0, 0.16);
+  --color-stage-browser-red: #db4437;
+  --color-stage-browser-yellow: #f4b400;
+  --color-stage-browser-green: #0f9d58;
+  --color-stage-browser-blue: #4285f4;
+  --color-stage-browser-ring: #ffffff;
+  --color-stage-chromium-dark: #1a73e8;
+  --color-stage-chromium-mid: #4c8bf5;
+  --color-stage-chromium-light: #8ab4f8;
+  /* The title's type, Inter Semi-Bold 10 pt, in the picture's own measure: the desktop's 1280 px
+     are 100cqw. */
+  --text-stage-window-title: 1.0416667cqw;
 
   --color-state-hover: rgba(255, 255, 255, 0.06);
   /* The band of light that sweeps a skeleton's bones. */

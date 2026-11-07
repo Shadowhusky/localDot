@@ -9,28 +9,35 @@ For implementation contracts and the comparison with other agents, see
 ## One screen for one task
 
 The isolated computer shows one screen. Underneath it has a **desktop** and a separate **web
-browser**, each in its own container with its own stream, and the stage draws the browser as a
-window on the desktop: under the desktop's menu bar, as large as its shape allows, with a slim margin
-of desktop each side. dot uses the web browser for anything online: opening a public web page brings
-that window forward. The desktop's own Chromium is for local files and pages served on the desktop
-itself, such as a site dot is building on localhost.
+browser**, each in its own container with its own stream, and the stage draws the browser as one of
+the desktop's apps: a window under the desktop's menu bar with the desktop's own title bar (the
+browser's name and a minimise light; no close, which would close dot's window), as large as its shape
+allows, with a margin of desktop each side, and an item in the dock's glass beside the desktop's own
+dock. dot uses the web browser for anything online: opening a public web page brings that window
+forward. The desktop's own Chromium is for local files and pages served on the desktop itself, such as
+a site dot is building on localhost.
 
 The window follows dot: it comes forward when dot works in the web browser and goes back when dot
 works on the desktop, by the latest confirmed screen selection, whichever arrives first from the task
-events or live status. There is no switch between the two. The desktop's menu bar has a **Web
-browser** entry, as a taskbar does, that minimises the window or shows it again; what you choose
-holds until dot next moves or you hand the computer back. Behind the desktop the window is wholly
-covered, so the entry is how to bring it back. Renewing control on the same browser keeps its picture
-visible while input waits for fresh status. A browser connection error does not redirect its input to the desktop or open a
+events or live status. When the task on show stops working, the screen it last used stays on show, as
+long as the web browser still runs; a new conversation, or one taken up, starts from the desktop, as a
+task does. There is no switch between the two. The dock item shows the window or
+minimises it, as a dock does, and the title bar's minimise light minimises it; what you choose holds
+until dot next moves or you hand the computer back. While dot works in the browser a light shows under
+its dock item. With the window in front the dock item gets out of its way, as the desktop's dock does
+for a window over it, and comes back when the pointer reaches the bottom edge; on a touch screen it
+stays up. Renewing control on the same browser keeps its picture visible while input waits for fresh
+status. A browser connection error does not redirect its input to the desktop or open a
 temporary browser. Retrying uses the same saved browser profile, so a connection failure does not ask
 you to sign in again.
 
 While you hold the computer, input goes to what is under your pointer: the window to the browser and
 the menu bar above it to the desktop. A click on the menu bar brings the desktop forward once it lets
 go, and so does a click on the desktop in a margin beside the window, which goes no further, as a
-click on a window behind does. Keys go to whichever is in front. On a phone the menu bar and margins
-are too thin to aim at, so they take no taps, and the entry is a round button hanging from the bar.
-dot's own screen doesn't change with what you bring forward: its screenshots and coordinates stay that screen's own. Reaching the browser
+click on a window behind does. The title bar is the stage's own: a press there reaches neither screen.
+Keys go to whichever is in front, and Alt+Tab (Option-Tab on a Mac; Command-Tab is the system's)
+brings the other forward without reaching either. On a phone the menu bar is too thin to aim at, so it
+takes no taps. dot's own screen doesn't change with what you bring forward: its screenshots and coordinates stay that screen's own. Reaching the browser
 while dot is on the desktop takes it for you at your first input there, as a takeover on the browser
 does, and the next task to use it starts by clearing your selections and reloading pages holding
 secrets.

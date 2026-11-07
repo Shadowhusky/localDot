@@ -9,6 +9,9 @@ import { worldPoint } from "./manual-point.ts";
 // The desktop's menu bar stays in view over the browser, at this height before the screen's scale
 // (cells/desktop/root/defaults/localdot/xfce4-panel.xml).
 export const MENU_BAR_PX = 24;
+// The title bar the stage draws on the browser's window, as tall as the desktop's own windows' (the
+// WhiteSur-Light xfwm4 theme, cells/desktop/Dockerfile).
+export const TITLE_BAR_PX = 28;
 // A strip of the desktop this thin on the stage, in CSS px, can't be aimed at: it takes no input.
 export const MIN_TARGET_PX = 16;
 // A margin beside the window this thin, in CSS px, is the window's edge to a finger: it takes nothing.
@@ -19,22 +22,25 @@ export interface StageScreen {
   h: number;
 }
 
-// The browser's screen on the desktop's, in the desktop's pixels. Its whole picture fits under the
-// menu bar at one scale, so its pixels keep their shape and the desktop shows in a slim margin each
-// side, where a click lands on nothing.
+// The browser's screen on the desktop's, in the desktop's pixels: its whole picture under the menu
+// bar and the window's title bar (from `top`), at one scale, so its pixels keep their shape and the
+// desktop shows in a margin each side, where a click lands on nothing.
 export interface BrowserWindow {
   x: number;
   y: number;
   w: number;
   h: number;
   scale: number;
+  top: number;
 }
 
 export function browserWindow(desktop: StageScreen): BrowserWindow {
-  const y = Math.round((MENU_BAR_PX * desktop.w) / MODEL_SCREEN.width);
+  const unit = desktop.w / MODEL_SCREEN.width;
+  const top = Math.round(MENU_BAR_PX * unit);
+  const y = top + Math.round(TITLE_BAR_PX * unit);
   const scale = (desktop.h - y) / desktop.h;
   const w = desktop.w * scale;
-  return { x: (desktop.w - w) / 2, y, w, h: desktop.h - y, scale };
+  return { x: (desktop.w - w) / 2, y, w, h: desktop.h - y, scale, top };
 }
 
 // The camera a browser picture draws under, given the desktop's.
@@ -94,10 +100,12 @@ export function stagePoint(
     desktopH: desktop.h,
     zoom: 1,
   });
-  if (world.y >= window.y) {
+  if (world.y >= window.top) {
+    // The title bar is the stage's own: it takes its presses before they come here.
+    if (world.y < window.y && world.x >= window.x && world.x < window.x + window.w) return null;
     const margin = (window.x * camera.scale * rect.width) / backing.w;
     return margin >= MIN_EDGE_PX ? { ...whole(world, "desktop"), behind: true } : null;
   }
-  const bar = (window.y * camera.scale * rect.height) / backing.h;
+  const bar = (window.top * camera.scale * rect.height) / backing.h;
   return bar >= MIN_TARGET_PX ? whole(world, "desktop") : null;
 }

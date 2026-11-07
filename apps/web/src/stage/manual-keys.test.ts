@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type KeyLike, routeKey, textEdit, textInputs } from "./manual-keys.ts";
+import { type KeyLike, routeKey, switchesWindow, textEdit, textInputs } from "./manual-keys.ts";
 
 const press = (key: string, over: Partial<KeyLike> = {}): KeyLike => ({
   key,
@@ -11,6 +11,15 @@ const press = (key: string, over: Partial<KeyLike> = {}): KeyLike => ({
 });
 
 describe("keys on the computer view", () => {
+  it("knows the app switcher's keys, and leaves Ctrl+Tab and Tab to the computer", () => {
+    expect(switchesWindow(press("Tab", { altKey: true }))).toBe(true);
+    expect(switchesWindow(press("Tab", { altKey: true, shiftKey: true }))).toBe(true);
+    expect(switchesWindow(press("Tab", { metaKey: true }))).toBe(true);
+    expect(switchesWindow(press("Tab", { ctrlKey: true }))).toBe(false);
+    expect(switchesWindow(press("Tab"))).toBe(false);
+    expect(switchesWindow(press("a", { altKey: true }))).toBe(false);
+  });
+
   it("lets printable text, Shift and Option characters and composition reach the keyboard field", () => {
     for (const key of ["a", "Z", "@", " ", "中", "!", "1"])
       expect(routeKey(press(key), false)).toEqual({ kind: "text" });

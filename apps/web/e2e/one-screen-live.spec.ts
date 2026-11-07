@@ -23,6 +23,13 @@ test.afterAll(async () => {
   await daemon?.stop();
 });
 
+// The window's own minimise light, in its title bar, and the web browser's item in the dock.
+const minimise = (page: Page) =>
+  page
+    .getByRole("group", { name: /window$/ })
+    .getByRole("button", { name: "Minimise the web browser" });
+const showBrowser = (page: Page) => page.getByRole("button", { name: /^Show the web browser/ });
+
 const browserContainer = (cellId: string) =>
   docker("ps", "--filter", `label=localdot.parent=${cellId}`, "--format", "{{.Names}}")
     .split("\n")
@@ -83,7 +90,8 @@ test("both streams make one screen, and input reaches the screen under the point
   const browser = browserContainer(cellId);
   expect(browser).not.toBe("");
 
-  // The user takes the computer with dot on the desktop, and brings the browser forward.
+  // The user takes the computer with dot on the desktop, and brings the browser forward from its
+  // dock item.
   const taken = await daemon.request(`/api/cells/${cellId}/takeover`, { method: "POST" });
   expect(taken.status).toBe(202);
   await expect(page.getByRole("button", { name: "Hand back" })).toBeEnabled({ timeout: 60_000 });
@@ -97,10 +105,10 @@ test("both streams make one screen, and input reaches the screen under the point
     y: box.y + (WINDOW.y + y * WINDOW.scale) * scale,
   });
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.getByRole("button", { name: /^Show the web browser/ }).click();
+  await showBrowser(page).click();
   await expect(page.locator('iframe.desktop-frame[src*="/browser/"]')).toHaveCount(1);
   await expect(surface).toHaveAttribute("data-live", "");
-  await expect(page.getByRole("button", { name: "Minimise the web browser" })).toBeVisible();
+  await expect(minimise(page)).toBeVisible();
   await page.waitForTimeout(1500);
   await shoot(page, "desktop-browser-in-front");
 
@@ -140,18 +148,23 @@ test("both streams make one screen, and input reaches the screen under the point
     .toBe(true);
   expect(pointer(browser), "the browser's pointer stayed put").toEqual(browserBefore);
   // That press brought the desktop forward; it shows, and keys now go there.
-  await expect(page.getByRole("button", { name: /^Show the web browser/ })).toBeVisible();
+  await expect(showBrowser(page)).toBeVisible();
+  await expect(page.getByLabel("Type on the computer")).toHaveAttribute(
+    "aria-description",
+    /^Keys go to the desktop\./,
+  );
   await expect(surface).toHaveAttribute("data-live", "");
   await page.waitForTimeout(800);
   await shoot(page, "desktop-desktop-in-front");
 
-  // Back to the browser: its picture comes back at once, and a hand-back leaves dot's screen alone.
-  await page.getByRole("button", { name: /^Show the web browser/ }).click();
-  await expect(page.getByRole("button", { name: "Minimise the web browser" })).toBeVisible();
+  // Alt+Tab brings the browser back, its picture at once, and reaches neither screen; a hand-back
+  // leaves dot's screen alone.
+  await page.keyboard.press("Alt+Tab");
+  await expect(minimise(page)).toBeVisible();
   await expect(surface).toHaveAttribute("data-live", "");
   await page.getByRole("button", { name: "Hand back" }).click();
   await expect(page.getByRole("button", { name: "Hand back" })).toHaveCount(0, { timeout: 30_000 });
-  await expect(page.getByRole("button", { name: /^Show the web browser/ })).toBeVisible();
+  await expect(showBrowser(page)).toBeVisible();
 
   // The stage follows the task: the web browser opened for the user comes forward by itself.
   const signIn = await daemon.request(`/api/cells/${cellId}/accounts/sign-in`, {
@@ -160,9 +173,7 @@ test("both streams make one screen, and input reaches the screen under the point
     body: JSON.stringify({ site: "example.com" }),
   });
   expect(signIn.status).toBe(202);
-  await expect(page.getByRole("button", { name: "Minimise the web browser" })).toBeVisible({
-    timeout: 30_000,
-  });
+  await expect(minimise(page)).toBeVisible({ timeout: 30_000 });
   await expect(surface).toHaveAttribute("data-live", "");
   const pointBack = onScreen(1000, 700);
   await page.mouse.click(pointBack.x, pointBack.y);
@@ -199,7 +210,7 @@ test("both streams make one screen, and input reaches the screen under the point
       await expect(shown.locator(".manual-surface")).toHaveAttribute("data-live", "", {
         timeout: 60_000,
       });
-      const toBrowser = shown.getByRole("button", { name: /^Show the web browser/ });
+      const toBrowser = showBrowser(shown);
       const hit = size === "phone" ? () => toBrowser.tap() : () => toBrowser.click();
       await hit();
       await expect(shown.locator('iframe.desktop-frame[src*="/browser/"]')).toHaveCount(1);
@@ -243,9 +254,9 @@ test("both streams make one screen, and input reaches the screen under the point
           )
           .toContain(title);
       }
-      const toDesktop = shown.getByRole("button", { name: "Minimise the web browser" });
+      const toDesktop = minimise(shown);
       await (size === "phone" ? toDesktop.tap() : toDesktop.click());
-      await expect(shown.getByRole("button", { name: /^Show the web browser/ })).toBeVisible();
+      await expect(showBrowser(shown)).toBeVisible();
       await expect(shown.locator(".manual-surface")).toHaveAttribute("data-live", "");
       await shown.waitForTimeout(800);
       await shoot(shown, `${size}-${colorScheme}-desktop`);

@@ -47,11 +47,13 @@ const TEXT_NEEDS = 4.5;
 const LARGE_TEXT_NEEDS = 3;
 const LINE_NEEDS = 3;
 
-// Parts that are not the app's own colour choices: dot, and a file's own page. The stage's picture
-// is a canvas, so what's measured there is only what the app lays over it.
+// Parts that are not the app's own colour choices: dot, a file's own page, and the web browser's app
+// icon in the computer's dock. The stage's picture is a canvas, so what's measured there is only what
+// the app lays over it.
 const NOT_OURS = [
   ".dot",
   ".dot-avatar",
+  ".browser-icon",
   ".viewer-page-canvas",
   ".viewer-frame",
   ".textLayer",

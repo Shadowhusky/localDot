@@ -250,6 +250,7 @@ import { switchToDot, useLocalDots } from "./shell/useLocalDots.ts";
 import { useMobileScreen } from "./shell/useMobileScreen.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
 import { otherView, switchViewLabel, useViewStyle, type ViewStyle } from "./shell/view-style.ts";
+import { runningEngine } from "./stage/BrowserWindow.tsx";
 import { useStageConnection, useStagePicture } from "./stage/connection.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { SharedScreen, useSharedLook } from "./stage/SharedScreen.tsx";
@@ -840,6 +841,8 @@ function Theatre({ api }: { api: ApiClient }) {
     agent.sessionId,
     !!agent.model.pendingTakeover,
   );
+  // What the web browser runs, for its window's title and its dock item.
+  const stageEngine = useBrowserEngine(api, !!cell);
   const shownScreen = stageFront.screen;
   const browserScreen = useBrowserScreen(api, cell, stageFront.browser);
   const physicalStageCell = shownScreen === "browser" ? browserScreen.cell : cell;
@@ -2743,6 +2746,7 @@ function Theatre({ api }: { api: ApiClient }) {
           parentId={cell?.id}
           parent={cell}
           front={stageFront}
+          browserEngine={runningEngine(stageEngine.status)}
           selection={selectedScreen}
           api={api}
           reconnects={reconnects + browserScreen.reconnects}
