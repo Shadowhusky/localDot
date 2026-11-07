@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { openSettings } from "../settings-ui.ts";
 import { expect, FIXTURE_START, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w14", "w39");
@@ -91,6 +92,141 @@ const appearance = (page: Page, value: string) =>
     window.dispatchEvent(new StorageEvent("storage", { key: "localdot.appearance.v1" }));
   }, value);
 
+// The first conversation's look chooser, opened from its row's menu.
+async function openLookChooser(page: Page) {
+  const rows = await openList(page);
+  const row = rows.first();
+  await expect(row).toBeVisible();
+  await platesIn(row);
+  if (!isPhone(page)) await row.hover();
+  await row.getByRole("button", { name: /^Actions for/ }).click();
+  await page.getByRole("menuitem", { name: "Change look" }).click();
+  const chooser = page.getByRole("dialog", { name: "Change look" });
+  await expect(chooser).toBeVisible();
+  return { row, chooser };
+}
+
+// Tabs until something wears the keyboard's ring, so what a script focuses next wears it too.
+// WebKit's Tab passes over radios and, between buttons, the page itself.
+async function keyboardFocus(page: Page) {
+  for (let press = 0; press < 4; press++) {
+    await page.keyboard.press("Tab");
+    if (await page.evaluate(() => document.activeElement?.matches(":focus-visible"))) return;
+  }
+  throw new Error("Tab never showed a focus ring");
+}
+
+// Each tile of `groups`, focused in turn by keyboard so it wears its ring, paints its rim, shadow
+// and ring inside every box that clips it: across, inside each one's padding box; down, inside the
+// nearest scroller's whole range, which scrolling brings into view. Its dot sits in the middle of
+// its picture, and the picture in the middle of the tile across.
+async function tileFaults(page: Page, groups: Locator) {
+  await keyboardFocus(page);
+  return groups.evaluateAll((all) => {
+    const faults: string[] = [];
+    const tiles = all.flatMap((group) => [
+      ...group.querySelectorAll<HTMLElement>(":scope > .ui-radio-card"),
+    ]);
+    for (const tile of tiles) {
+      const name = `${tile.parentElement?.getAttribute("aria-label")} ${tile.querySelector(".ui-choice-label")?.textContent}`;
+      const off = (what: string, by: number, slack = 0.5) => {
+        if (by > slack) faults.push(`${name}: ${what} by ${by.toFixed(1)} px`);
+      };
+      tile.querySelector("input")?.focus({ preventScroll: true });
+      const style = getComputedStyle(tile);
+      const box = tile.getBoundingClientRect();
+      const ringed = style.outlineStyle !== "none";
+      if (!ringed) faults.push(`${name}: no focus ring`);
+      const ring = ringed
+        ? Number.parseFloat(style.outlineOffset) + Number.parseFloat(style.outlineWidth)
+        : 0;
+      let [left, top, right, bottom] = [
+        box.left - ring,
+        box.top - ring,
+        box.right + ring,
+        box.bottom + ring,
+      ];
+      for (const shadow of style.boxShadow.replace(/[a-z-]+\([^)]*\)/g, "").split(",")) {
+        if (/inset|none/.test(shadow)) continue;
+        const [x = 0, y = 0, blur = 0, spread = 0] = shadow
+          .trim()
+          .split(/\s+/)
+          .map(Number.parseFloat);
+        left = Math.min(left, box.left + x - blur - spread);
+        top = Math.min(top, box.top + y - blur - spread);
+        right = Math.max(right, box.right + x + blur + spread);
+        bottom = Math.max(bottom, box.bottom + y + blur + spread);
+      }
+      let scroller = false;
+      for (let clip = tile.parentElement; clip; clip = clip.parentElement) {
+        const { overflowX, overflowY } = getComputedStyle(clip);
+        if (overflowX !== "visible" || overflowY !== "visible") {
+          const at = clip.getBoundingClientRect();
+          const inner = at.left + clip.clientLeft;
+          const what = clip.className.split(" ")[0];
+          off(`cut at ${what}'s left`, inner - left);
+          off(`cut at ${what}'s right`, right - inner - clip.clientWidth);
+          if (!scroller && /auto|scroll/.test(overflowY)) {
+            scroller = true;
+            const start = at.top + clip.clientTop - clip.scrollTop;
+            off(`cut at ${what}'s top`, start - top);
+            off(`cut at ${what}'s bottom`, bottom - start - clip.scrollHeight);
+          }
+        }
+        if (clip.getAttribute("role") === "dialog") break;
+      }
+      const picture = tile.querySelector(".ui-radio-card-preview > *")?.getBoundingClientRect();
+      const dot = tile.querySelector(".dot, .dot-avatar")?.getBoundingClientRect();
+      if (!picture || !dot) {
+        faults.push(`${name}: no dot`);
+        continue;
+      }
+      const across = (rect: DOMRect) => rect.x + rect.width / 2;
+      const down = (rect: DOMRect) => rect.y + rect.height / 2;
+      off("dot off its picture's middle across", Math.abs(across(dot) - across(picture)), 1);
+      off("dot off its picture's middle down", Math.abs(down(dot) - down(picture)), 1);
+      off("picture off the tile's middle across", Math.abs(across(picture) - across(box)), 1);
+    }
+    if (!tiles.length) faults.push("no tiles");
+    return faults;
+  });
+}
+
+// The first row's first and last tiles, at the grid's two edges.
+async function edgeTiles(group: Locator) {
+  const tiles = group.locator(":scope > .ui-radio-card");
+  const tops = await tiles.evaluateAll((items) =>
+    items.map((item) => Math.round(item.getBoundingClientRect().top)),
+  );
+  return [tiles.first(), tiles.nth(tops.filter((top) => top === tops[0]).length - 1)] as const;
+}
+
+// The tiles' faults in Graphite and Daylight, with pictures of `frame` in each: the ring on the
+// first group's left and right edges, and on the last tile, scrolled to the end.
+async function tileFaultsInEach(
+  page: Page,
+  settle: () => Promise<void>,
+  groups: Locator,
+  frame: Locator,
+) {
+  const faults: string[] = [];
+  for (const value of ["graphite", "daylight"]) {
+    await appearance(page, value);
+    await expect(page.locator("html")).toHaveAttribute("data-appearance", value);
+    await settle();
+    faults.push(...(await tileFaults(page, groups)).map((fault) => `${value} ${fault}`));
+    const [left, right] = await edgeTiles(groups.first());
+    const end = groups.last().locator(":scope > .ui-radio-card").last();
+    for (const [edge, tile] of Object.entries({ left, right, end })) {
+      await tile.scrollIntoViewIfNeeded();
+      await tile.locator("input").focus();
+      await settle();
+      await frame.screenshot({ path: test.info().outputPath(`tiles-${value}-${edge}.png`) });
+    }
+  }
+  return faults;
+}
+
 test("every task in a long list has a dot of its own, the same after a reload", async ({
   page,
   ui,
@@ -164,16 +300,8 @@ test("a task's look is changed from its menu, is saved, and can be given back", 
 }) => {
   await expanded(page, true);
   const fixture = await ui.open("conversations");
-  const rows = await openList(page);
-  const row = rows.first();
-  await expect(row).toBeVisible();
-  await platesIn(row);
+  const { row, chooser } = await openLookChooser(page);
   const before = await lookOf(row);
-  if (!isPhone(page)) await row.hover();
-  await row.getByRole("button", { name: /^Actions for/ }).click();
-  await page.getByRole("menuitem", { name: "Change look" }).click();
-  const chooser = page.getByRole("dialog", { name: "Change look" });
-  await expect(chooser).toBeVisible();
   await ui.settle();
   await page.screenshot({ path: test.info().outputPath("look-chooser.png") });
   await chooser.getByRole("radio", { name: "Crown", exact: true }).click({ force: true });
@@ -189,6 +317,30 @@ test("a task's look is changed from its menu, is saved, and can be given back", 
     .toContain("crown");
   await chooser.getByRole("button", { name: "Reset" }).click();
   await expect.poll(() => lookOf(row)).toEqual(before);
+});
+
+test("the look chooser's tiles show whole, rims and rings, each dot in its middle", async ({
+  page,
+  ui,
+}) => {
+  await expanded(page, true);
+  await ui.open("conversations");
+  const { chooser } = await openLookChooser(page);
+  await platesIn(chooser);
+  const groups = chooser.locator(".ui-radio-cards");
+  expect(await tileFaultsInEach(page, ui.settle, groups, chooser)).toEqual([]);
+});
+
+test("Settings' dot and accessory tiles show whole, rims and rings, each dot in its middle", async ({
+  page,
+  ui,
+}) => {
+  await ui.open("ready");
+  const sheet = await openSettings(page, undefined, "Your dot");
+  const groups = sheet.locator(".persona-picker, .accessory-picker");
+  await groups.last().scrollIntoViewIfNeeded();
+  await platesIn(groups);
+  expect(await tileFaultsInEach(page, ui.settle, groups, sheet)).toEqual([]);
 });
 
 const wornIn = (where: Locator) =>

@@ -76,10 +76,14 @@
     gap: calc(var(--spacing) * 2);
   }
 
+  /* The scroller reaches 6 px past the column on every side, so it doesn't cut the outer tiles'
+     rims, shadows and focus rings, while the tiles keep to the column's edges. */
   .look-choices {
     display: grid;
     gap: calc(var(--spacing) * 3);
     max-height: min(52vh, calc(var(--spacing) * 96));
+    margin: calc(var(--spacing) * -1.5);
+    padding: calc(var(--spacing) * 1.5);
     overflow-y: auto;
     overscroll-behavior: contain;
   }
@@ -96,6 +100,7 @@
   .look-tile {
     display: grid;
     place-items: center;
+    width: 100%;
     height: calc(var(--spacing) * 12);
     border-radius: var(--radius-row);
     background: linear-gradient(180deg, var(--color-void), var(--color-raised-2));
