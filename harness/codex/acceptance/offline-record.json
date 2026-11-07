@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "17784f99be06f6a8edf6080c3f510a08af02b1e163a332052d96a0977c1de7cb",
+  "inputSha256": "04e26129b81d7af27c4094ceeb39b8a0fc21b712f4a3e49902d7618d2716de4c",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -751,7 +751,7 @@
     "apps/daemon/src/main-startup.test.ts": "1cd20bbb7e4c86b2f7e101388060d9e6b43186f8e36899c87d8d26dd010aea60",
     "apps/daemon/src/main-startup.ts": "2cace882eeec33364fa18a462fe7d2c736f799a6f1ac6e1ac1a773b42953de85",
     "apps/daemon/src/main.test.ts": "ef5addc925ec16e30250aa48d5549b7b9c74ccda51b0728944a3aec79e04109e",
-    "apps/daemon/src/main.ts": "adf810453611b859f2abbf2946e02b8fc995bbd7220246989fd54575ee23a0d7",
+    "apps/daemon/src/main.ts": "8af7370ab2c5c3ad04502b44fc5b850a650902edc9a3b45e82e242b37252322e",
     "apps/daemon/src/notify/attention.test.ts": "0339830c9b226ceedbeb76b90ae19d0c642bc4ba3f8b9411440eff91dceabd7e",
     "apps/daemon/src/notify/attention.ts": "4070c8a942e81f7386bc6576b45ff8b4b2b812712f9073b48a394686b30d4ff4",
     "apps/daemon/src/notify/banner.test.ts": "b6f97743d58353ed9836b670cb6923c5ba6efc6a282a4cf16ee62bcea8ebc9c0",
@@ -1235,7 +1235,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "a7199dd04876dd5c3ce5b5f6163cfc0b8f8854f8c425dae2494ecea94ad9387a",
+  "reportSha256": "6aad299ccd7d93addf8de3582d7081a1522d2b5d42fadcc651f03491db5dc822",
   "exit": {
     "code": 0,
     "signal": null
