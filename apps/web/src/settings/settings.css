@@ -1219,6 +1219,7 @@
 .accessory-preview {
   display: grid;
   place-items: center;
+  width: 100%;
   height: calc(var(--spacing) * 14);
   border-radius: var(--radius-row);
   background: linear-gradient(180deg, var(--color-void), var(--color-raised-2));

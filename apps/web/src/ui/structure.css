@@ -917,9 +917,10 @@
   /* A grouped list (Group.tsx): one raised surface, rows 44 tall with a separator between each. A
      phone draws them as an iOS list: 48 px rows in touch type, separators that start after a tile. */
   .ui-group {
+    --_corner: var(--radius-group);
     min-width: 0;
     overflow: clip;
-    border-radius: var(--radius-group);
+    border-radius: var(--_corner);
     background-color: var(--color-raised);
     box-shadow: var(--shadow-raised);
   }
@@ -987,7 +988,10 @@
     transition-duration: var(--dur-press);
   }
 
+  /* The row fills the group to the edges it clips, so its ring is drawn inside it, as round as the
+     group, so at the group's ends it follows the corners, wherever the row sits in the group. */
   button.ui-group-row:focus-visible {
+    border-radius: var(--_corner);
     outline: var(--focus-width) solid var(--color-fg-1);
     outline-offset: calc(var(--focus-width) * -1);
   }
@@ -1191,7 +1195,7 @@
 
   @media (--phone) {
     .ui-group {
-      border-radius: var(--radius-lg);
+      --_corner: var(--radius-lg);
       box-shadow: none;
     }
 

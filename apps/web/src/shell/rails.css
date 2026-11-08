@@ -344,7 +344,8 @@
   background-color: var(--color-state-pressed);
 }
 
-.conversations-row:is([data-current], [data-active]) .conversations-when {
+.conversations-row:is([data-current], [data-active])
+  :is(.conversations-when, .conversations-activity) {
   color: var(--color-fg-2);
 }
 

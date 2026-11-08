@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import type { ConversationEntry, ConversationLive, SearchHit } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { LiveFacts } from "../agent/conversation-list.ts";
 import { createApi } from "../lib/api.ts";
 import { FakeWebSocket } from "../testing/fake-websocket.ts";
+import { Announcer } from "../ui/Announcer.tsx";
 import { ConversationList } from "./ConversationList.tsx";
 import { usePanelPreferences } from "./panel-preferences.ts";
 import { SessionRail, type SessionRailProps } from "./SessionRail.tsx";
@@ -605,4 +607,157 @@ it("deletes a conversation from its menu once asked, and never one under way", a
   fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
   await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(trip.sessions));
   await waitFor(() => expect(screen.queryByRole("button", { name: /^Plan the trip/ })).toBeNull());
+});
+
+const checkbox = (name: RegExp) => within(nav()).getByRole("checkbox", { name });
+const checked = () =>
+  within(nav())
+    .queryAllByRole("checkbox")
+    .filter((box) => box.getAttribute("aria-checked") === "true")
+    .map((box) => box.getAttribute("aria-label")?.split(",")[0]);
+
+it("chooses several from Select, a row's menu, or a row pressed with Cmd or Shift, and Escape lets them go", async () => {
+  const [a, b, c, d] = ["Alpha", "Bravo", "Charlie", "Delta"].map((title, n) =>
+    entry(title, HOURS(n + 1)),
+  );
+  const { props } = rail([a, b, c, d] as ConversationEntry[], { current: a?.sessionId ?? null });
+  await screen.findByRole("button", { name: /^Delta/ });
+  fireEvent.click(within(nav()).getByRole("button", { name: "Select" }));
+  expect(within(nav()).queryByRole("button", { name: "New conversation" })).toBeNull();
+  expect(checked()).toEqual([]);
+  fireEvent.click(checkbox(/^Bravo/));
+  fireEvent.click(checkbox(/^Delta/), { shiftKey: true });
+  expect(checked()).toEqual(["Bravo", "Charlie", "Delta"]);
+  expect(within(nav()).getByText("3 selected")).toBeTruthy();
+  const all = within(nav()).getByRole("checkbox", { name: "Select all" }) as HTMLInputElement;
+  expect(all.indeterminate).toBe(true);
+  fireEvent.click(all);
+  expect(checked()).toEqual(["Alpha", "Bravo", "Charlie", "Delta"]);
+  fireEvent.click(checkbox(/^Charlie/), { shiftKey: true });
+  expect(checked()).toEqual(["Alpha", "Bravo", "Delta"]);
+  expect(props.onPick).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(within(nav()).queryAllByRole("checkbox")).toEqual([]);
+  expect(within(nav()).getByRole("button", { name: "New conversation" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Charlie/ }), { metaKey: true });
+  expect(checked()).toEqual(["Charlie"]);
+  fireEvent.click(within(nav()).getByRole("button", { name: "Cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Charlie/ }), { shiftKey: true });
+  expect(checked()).toEqual(["Alpha", "Bravo", "Charlie"]);
+  fireEvent.keyDown(window, { key: "Escape" });
+
+  fireEvent.contextMenu(screen.getByRole("button", { name: /^Bravo/ }));
+  fireEvent.click(within(menu()).getByRole("menuitem", { name: "Select" }));
+  expect(checked()).toEqual(["Bravo"]);
+  expect(document.activeElement).toBe(checkbox(/^Bravo/));
+  expect(props.onPick).not.toHaveBeenCalled();
+});
+
+it("expands a collapsed rail to choose, and lets the choice go when it collapses", async () => {
+  const { api } = daemon([entry("Alpha", HOURS(1)), entry("Bravo", HOURS(2))]);
+  function Expandable() {
+    const [expanded, setExpanded] = useState(false);
+    return (
+      <SessionRail
+        api={api}
+        current={null}
+        facts={QUIET}
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+        onPick={() => {}}
+        onNew={() => {}}
+      />
+    );
+  }
+  render(<Expandable />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Alpha/ }), { ctrlKey: true });
+  expect(nav().getAttribute("data-expanded")).toBe("true");
+  expect(checked()).toEqual(["Alpha"]);
+  fireEvent.click(screen.getByRole("button", { name: "Collapse conversations" }));
+  fireEvent.click(screen.getByRole("button", { name: "Expand conversations" }));
+  expect(within(nav()).queryAllByRole("checkbox")).toEqual([]);
+});
+
+it("says how many are chosen as the count changes", async () => {
+  render(<Announcer />);
+  rail([entry("Alpha", HOURS(1)), entry("Bravo", HOURS(2))]);
+  fireEvent.click(await within(nav()).findByRole("button", { name: "Select" }));
+  fireEvent.click(checkbox(/^Alpha/));
+  fireEvent.click(checkbox(/^Bravo/));
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("2 selected"), {
+    timeout: 4000,
+  });
+});
+
+it("deletes the chosen after one confirmation that names how many and says it can't be undone", async () => {
+  const [a, b, c] = ["Alpha", "Bravo", "Charlie"].map((title, n) => entry(title, HOURS(n + 1)));
+  const onDeleted = vi.fn();
+  const { state } = rail([a, b, c] as ConversationEntry[], { onDeleted });
+  fireEvent.click(await within(nav()).findByRole("button", { name: "Select" }));
+  fireEvent.click(checkbox(/^Alpha/));
+  fireEvent.click(checkbox(/^Charlie/));
+  fireEvent.click(within(nav()).getByRole("button", { name: "Delete…" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Delete 2 conversations?" });
+  expect(dialog.textContent).toContain("This can't be undone.");
+  expect(state.list).toHaveLength(3);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(onDeleted).toHaveBeenCalledWith([...a!.sessions, ...c!.sessions]));
+  await waitFor(() => expect(rowNames()).toEqual([expect.stringMatching(/^Bravo/)]));
+  expect(state.list.map((each) => each.title)).toEqual(["Bravo"]);
+  expect(within(nav()).getByRole("button", { name: "Select" })).toBeTruthy();
+});
+
+it("keeps Delete and Archive out of reach while a chosen conversation has a task under way", async () => {
+  const trip = entry("Plan the trip", HOURS(1));
+  const working = entry("Tidy the photos", HOURS(3), null, {
+    state: "working",
+    ago: MINUTE,
+    onScreen: true,
+  });
+  rail([trip, working]);
+  fireEvent.click(await within(nav()).findByRole("button", { name: "Select" }));
+  fireEvent.click(within(nav()).getByRole("checkbox", { name: "Select all" }));
+  const remove = within(nav()).getByRole("button", { name: "Delete…" });
+  const archive = within(nav()).getByRole("button", { name: "Archive" });
+  expect(remove.getAttribute("aria-disabled")).toBe("true");
+  expect(archive.getAttribute("aria-disabled")).toBe("true");
+  expect(remove.getAttribute("aria-describedby")).toBeTruthy();
+  expect(document.getElementById(remove.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+    "One of these has a task under way. Stop it or unselect it before deleting.",
+  );
+  expect(within(nav()).getByRole("button", { name: "Pin" }).getAttribute("aria-disabled")).toBe(
+    null,
+  );
+  fireEvent.click(remove);
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  fireEvent.click(checkbox(/^Tidy the photos/));
+  expect(remove.getAttribute("aria-disabled")).toBe(null);
+});
+
+it("pins and archives the chosen together, then stops choosing", async () => {
+  const [a, b, c] = ["Alpha", "Bravo", "Charlie"].map((title, n) => entry(title, HOURS(n + 1)));
+  const { state } = rail([a, b, c] as ConversationEntry[]);
+  fireEvent.click(await within(nav()).findByRole("button", { name: "Select" }));
+  fireEvent.click(checkbox(/^Alpha/));
+  fireEvent.click(checkbox(/^Bravo/));
+  fireEvent.click(within(nav()).getByRole("button", { name: "Pin" }));
+  await waitFor(() => expect(within(nav()).queryAllByRole("checkbox")).toEqual([]));
+  expect(state.posts.map((post) => post.path).sort()).toEqual([
+    `/api/conversations/${a?.sessionId}/pin`,
+    `/api/conversations/${b?.sessionId}/pin`,
+  ]);
+  await screen.findByRole("list", { name: "Pinned" });
+
+  fireEvent.click(within(nav()).getByRole("button", { name: "Select" }));
+  fireEvent.click(checkbox(/^Alpha/));
+  fireEvent.click(checkbox(/^Bravo/));
+  expect(within(nav()).getByRole("button", { name: "Unpin" })).toBeTruthy();
+  fireEvent.click(within(nav()).getByRole("button", { name: "Archive" }));
+  await waitFor(() => expect(rowNames()).toEqual([expect.stringMatching(/^Charlie/)]));
+  expect(state.posts.slice(2).map((post) => post.body)).toEqual([
+    { archived: true },
+    { archived: true },
+  ]);
 });

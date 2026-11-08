@@ -18,6 +18,7 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   ready: hud("Ready"),
   "slow-keys": hud("Ready"),
   conversations: hud("Done"),
+  "conversations-working": hud("Select the Net total cell"),
   "chatgpt-plan": hud("Ready"),
   "plan-usage": hud("Ready"),
   running: hud("Select the Net total cell"),

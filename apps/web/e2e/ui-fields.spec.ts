@@ -1,5 +1,6 @@
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
 import { DESKTOP, openKitPage, PHONE, startKitGallery } from "./kit-gallery.ts";
+import { ringFaultsInEach } from "./ui/focus-ring.ts";
 import { ENGINES } from "./ui-fixture.ts";
 
 // A touch tablet with room for a popover beside the trigger.
@@ -534,5 +535,18 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await expect(login).toHaveAccessibleDescription("Install localDot to start it at login");
       expect(await seen()).toEqual({ violations: [], styles: 0 });
       await context.close();
+    });
+
+    test("a focused row's ring shows whole inside its group, in each appearance and contrast", async () => {
+      for (const options of [DESKTOP, PHONE]) {
+        const { context, page, seen } = await open(browser, options);
+        const rows = page
+          .getByRole("radiogroup", { name: "When dot asks first" })
+          .getByRole("radio");
+        await rows.first().scrollIntoViewIfNeeded();
+        expect(await ringFaultsInEach(page, rows)).toEqual([]);
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      }
     });
   });
