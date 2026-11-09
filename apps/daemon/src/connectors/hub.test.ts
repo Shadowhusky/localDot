@@ -321,9 +321,13 @@ describe("what a card needs from the hub", () => {
       },
     });
 
-  it("names an app whose sign-in stands between it and the task, by id, catalog or name", () => {
-    const { hub } = setup();
-    const config = oauth(hub);
+  it("names an app whose sign-in really ended, by id, catalog or name", async () => {
+    const { hub, app } = setup(TOOLS, [http("connector-linear", ["mcp.linear.app"])]);
+    const config = oauth(hub, "connector-linear");
+    expect(hub.ended("linear")).toBeUndefined();
+    app.state.fail = new Error("401 Unauthorized");
+    await hub.refresh(config.id);
+    expect(hub.isConnected(config.id)).toBe(false);
     const named = { connector: config.id, name: "Linear", host: "mcp.linear.app" };
     expect(hub.ended(config.id)).toEqual(named);
     expect(hub.ended("linear")).toEqual(named);
@@ -331,9 +335,9 @@ describe("what a card needs from the hub", () => {
     expect(hub.ended("nothing like it")).toBeUndefined();
   });
 
-  it("names nothing for an app that is connected, or that no sign-in would help", () => {
+  it("names nothing for an app never signed in, or that no sign-in would help", () => {
     const { hub } = setup();
-    oauth(hub, "connector-linear");
+    oauth(hub);
     expect(hub.ended("linear")).toBeUndefined();
     hub.add({
       name: "Keyed",

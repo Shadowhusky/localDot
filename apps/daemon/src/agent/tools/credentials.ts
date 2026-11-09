@@ -258,8 +258,7 @@ export async function apiRequestTool(
   else if (reply.status === 401 && !reply.keydReason)
     ctx.session.raiseBlocker({ kind: "key", id: input.key_id, problem: "rejected" });
   const ok = reply.status >= 200 && reply.status < 300;
-  if (ok)
-    ctx.session.clearBlockers((blocker) => blocker.kind === "key" && blocker.id === input.key_id);
+  if (ok) ctx.session.keyWorked(input.key_id);
   let path: string | undefined;
   if (input.output_path && !reply.truncated) {
     try {

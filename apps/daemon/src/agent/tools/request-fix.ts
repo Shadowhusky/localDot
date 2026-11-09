@@ -33,11 +33,16 @@ async function realBlocker(
       const key = keys?.find((one) => one.id === input.key_id);
       if (!key)
         return `No saved key is named ${input.key_id}. For a key that doesn't exist yet, use credentials action request.`;
-      return {
-        kind: "key",
-        id: key.id,
-        problem: key.rebound ? "rebound" : key.reenter ? "reenter" : "rejected",
-      };
+      const problem = key.rebound
+        ? "rebound"
+        : key.reenter
+          ? "reenter"
+          : ctx.session.keyRefused(key.id)
+            ? "rejected"
+            : undefined;
+      return problem
+        ? { kind: "key", id: key.id, problem }
+        : `The key ${key.id} hasn't been refused in this task, so localDot shows no card. Call api_request with it first, and read what the service answers.`;
     }
     case "app": {
       const app = input.app ? deps.connectors?.ended(input.app) : undefined;

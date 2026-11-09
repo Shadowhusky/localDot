@@ -220,26 +220,41 @@ describe("request_fix: a card on dot's say-so", () => {
     expect(raises(events())).toHaveLength(1);
   });
 
-  it("offers to replace a saved key, naming it as localDot holds it", async () => {
+  it("offers a refused key's card only once the key has been refused in this task", async () => {
     const { call, events, session, tools } = setup();
-    tools.credentials = {
-      list: async () => [{ id: "openai", kind: "llm" }] as never,
-      request: async () => {
-        throw new Error("unused");
-      },
-    };
+    const service = (status: number) => ({
+      list: async () => [{ id: "openai", kind: "http" }] as never,
+      request: async () => ({
+        status,
+        contentType: "text/plain",
+        body: Buffer.from("x"),
+        truncated: false,
+      }),
+    });
+    const request = { key_id: "openai", url: "https://api.openai.com/v1/models" };
+    tools.credentials = service(200) as never;
     const missing = await call("request_fix", { kind: "key", key_id: "stripe" });
     expect(said(missing.body)).toMatch(/credentials action request/);
+    const healthy = await call("request_fix", { kind: "key", key_id: "openai" });
+    expect(healthy.body.ok).toBe(false);
+    expect(said(healthy.body)).toMatch(/hasn't been refused/);
+    await call("api_request", request);
+    expect((await call("request_fix", { kind: "key", key_id: "openai" })).body.ok).toBe(false);
     expect(raises(events())).toEqual([]);
-    const reply = call("request_fix", { kind: "key", key_id: "openai" });
-    await until(() => raises(events()).length === 1);
+    tools.credentials = service(401) as never;
+    await call("api_request", request);
     expect(raises(events())[0]?.blocker).toEqual({
       kind: "key",
       id: "openai",
       problem: "rejected",
     });
+    const reply = call("request_fix", { kind: "key", key_id: "openai" });
+    await until(() => session.status === "waiting_user");
     session.clearBlockers((blocker) => blocker.kind === "key");
     expect((await reply).body.ok).toBe(true);
+    tools.credentials = service(200) as never;
+    await call("api_request", request);
+    expect((await call("request_fix", { kind: "key", key_id: "openai" })).body.ok).toBe(false);
   });
 
   it("says which way a saved key needs fixing, from the key itself", async () => {

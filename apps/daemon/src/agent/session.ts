@@ -377,6 +377,7 @@ export class AgentSession {
   });
   // dot's own request_fix calls waiting on a card.
   #fixWaits = 0;
+  readonly #refusedKeys = new Set<string>();
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
   readonly #manual = new Map<ManualLease, ManualCall>();
@@ -1400,7 +1401,17 @@ export class AgentSession {
   }
   // Undefined once the task has stopped, or while the user's Not now holds.
   raiseBlocker(blocker: Blocker, options?: RaiseOptions): OpenBlocker | undefined {
+    if (blocker.kind === "key" && options?.by !== "dot") this.#refusedKeys.add(blocker.id);
     return this.stopped ? undefined : this.#blockers.raise(blocker, options);
+  }
+  // Whether localDot has seen this key refused in this task: what dot's own word for it is checked by.
+  keyRefused(id: string): boolean {
+    return this.#refusedKeys.has(id);
+  }
+  // A call with the key went through.
+  keyWorked(id: string): void {
+    this.#refusedKeys.delete(id);
+    this.clearBlockers((blocker) => blocker.kind === "key" && blocker.id === id);
   }
   clearBlockers(
     matches: (blocker: Blocker) => boolean,
