@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { APPEARANCE_EVENT } from "../onboarding/appearance.ts";
 import { FakeWorker, fakeChromium } from "../testing/fake-chromium.ts";
 import type { FrameSource } from "./frame-source.ts";
-import { backingScale, holdEngine, RESIZE_SETTLE_MS } from "./stage-engine.ts";
+import { backingScale, holdEngine, RESIZE_SETTLE_MS, RESTART_MS } from "./stage-engine.ts";
 
 // A kept stage outlives its page in tests and on a remount; one that is away read the theme from
 // whatever the document held then, and threw where it held no tokens.
@@ -240,5 +240,175 @@ describe("backingScale", () => {
 
   it("follows a box with no size yet to the device", () => {
     expect(backingScale({ width: 0, height: 0 }, 2)).toBe(2);
+  });
+});
+
+describe("starting again", () => {
+  const placed = () => {
+    const restore = fakeChromium();
+    const anchor = document.createElement("template");
+    document.body.append(anchor);
+    const held = holdEngine(null);
+    held.engine.place(anchor);
+    const first = FakeWorker.instances.at(-1) as FakeWorker;
+    return {
+      ...held,
+      anchor,
+      first,
+      restarts: vi.fn(),
+      done() {
+        held.release();
+        anchor.remove();
+        restore();
+      },
+    };
+  };
+  const source = (): FrameSource => ({
+    trackId: "t",
+    readable: new ReadableStream<VideoFrame>(),
+    stop: vi.fn(),
+  });
+
+  it("starts a new worker on a new canvas, in the same place, with all the page told the old one", () => {
+    const { engine, anchor, first, restarts, done } = placed();
+    try {
+      engine.onRestart(restarts);
+      const old = engine.canvas;
+      engine.setView({ dim: true });
+      engine.setView({ fps: 30 });
+      engine.setClock({ wallAnchor: 1, sessionAnchor: 2 } as never);
+      engine.pushEvents([{ type: "a" }] as never);
+      engine.pushEvents([{ type: "b" }] as never);
+      engine.attach(source());
+      engine.restart();
+      const next = FakeWorker.instances.at(-1) as FakeWorker;
+      expect(next).not.toBe(first);
+      expect(first.terminated).toBe(true);
+      expect(engine.canvas).not.toBe(old);
+      expect(old.isConnected).toBe(false);
+      expect(engine.canvas.nextElementSibling).toBe(anchor);
+      expect(engine.canvas.className).toBe("stage-canvas");
+      const sent = next.sent.map(({ message }) => message);
+      expect(sent[0]?.type).toBe("init");
+      expect(sent).toContainEqual({ type: "view", view: { dim: true, fps: 30 } });
+      expect(sent).toContainEqual({ type: "clock", clock: { wallAnchor: 1, sessionAnchor: 2 } });
+      expect(sent).toContainEqual({ type: "events", events: [{ type: "a" }, { type: "b" }] });
+      expect(sent.some(({ type }) => type === "frames")).toBe(false);
+      expect(restarts).toHaveBeenCalledOnce();
+    } finally {
+      done();
+    }
+  });
+
+  it("forgets what a new session no longer holds", () => {
+    const { engine, done } = placed();
+    try {
+      engine.pushEvents([{ type: "a" }] as never);
+      engine.resetSession();
+      engine.pushEvents([{ type: "b" }] as never);
+      engine.restart();
+      const sent = (FakeWorker.instances.at(-1) as FakeWorker).sent.map(({ message }) => message);
+      expect(sent).toContainEqual({ type: "events", events: [{ type: "b" }] });
+    } finally {
+      done();
+    }
+  });
+
+  it("tells a listener the stage's reports go on from the new worker", () => {
+    const { engine, done } = placed();
+    try {
+      const stats = vi.fn();
+      engine.onStats(stats);
+      engine.restart();
+      const next = FakeWorker.instances.at(-1) as FakeWorker;
+      engine.attach(source());
+      const frames = next.sent.findLast(({ message }) => message.type === "frames");
+      next.onmessage?.({
+        data: {
+          type: "stats",
+          sourceId: frames?.message.sourceId,
+          stats: { presented: 1, fps: 30, lastFrameAt: 1, width: 1280, height: 800 },
+        },
+      });
+      expect(stats).toHaveBeenCalledOnce();
+    } finally {
+      done();
+    }
+  });
+
+  it("starts again when its worker's script doesn't load, less often each time", () => {
+    vi.useFakeTimers();
+    const { first, done } = placed();
+    try {
+      first.onerror?.(new Event("error"));
+      vi.advanceTimersByTime(RESTART_MS.min);
+      expect(FakeWorker.instances.at(-1)).not.toBe(first);
+      const second = FakeWorker.instances.at(-1) as FakeWorker;
+      second.onerror?.(new Event("error"));
+      vi.advanceTimersByTime(RESTART_MS.min);
+      expect(FakeWorker.instances.at(-1)).toBe(second);
+      vi.advanceTimersByTime(RESTART_MS.min);
+      expect(FakeWorker.instances.at(-1)).not.toBe(second);
+    } finally {
+      done();
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a worker that started and then threw to show that it stopped", () => {
+    vi.useFakeTimers();
+    const { first, done } = placed();
+    try {
+      first.onmessage?.({ data: { type: "caps", tracks: false } });
+      first.onerror?.(new Event("error"));
+      vi.advanceTimersByTime(RESTART_MS.max);
+      expect(FakeWorker.instances.at(-1)).toBe(first);
+    } finally {
+      done();
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds off asking again and again, until a viewer insists", () => {
+    const { engine, first, done } = placed();
+    try {
+      engine.restart();
+      const second = FakeWorker.instances.at(-1) as FakeWorker;
+      expect(second).not.toBe(first);
+      engine.restart();
+      expect(FakeWorker.instances.at(-1)).toBe(second);
+      engine.restart({ now: true });
+      expect(FakeWorker.instances.at(-1)).not.toBe(second);
+    } finally {
+      done();
+    }
+  });
+
+  it("stays out of a replay's way", () => {
+    const { engine, first, done } = placed();
+    try {
+      engine.replay.open({ sessionId: "s" } as never);
+      engine.restart();
+      expect(FakeWorker.instances.at(-1)).toBe(first);
+      engine.replay.close();
+      engine.restart();
+      expect(FakeWorker.instances.at(-1)).not.toBe(first);
+    } finally {
+      done();
+    }
+  });
+
+  it("starts when it is next placed, if it has no place now", () => {
+    const { engine, anchor, first, done } = placed();
+    try {
+      engine.unplace(anchor);
+      engine.restart();
+      expect(FakeWorker.instances.at(-1)).toBe(first);
+      expect(first.terminated).toBe(true);
+      engine.place(anchor);
+      expect(FakeWorker.instances.at(-1)).not.toBe(first);
+    } finally {
+      done();
+    }
   });
 });
