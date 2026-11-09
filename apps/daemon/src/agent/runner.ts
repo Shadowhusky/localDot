@@ -586,7 +586,9 @@ export class AgentRunner {
     if (!rt.stalled) return;
     const subject = rt.stalled;
     rt.stalled = undefined;
-    rt.session.clearBlockers((blocker) => blockerSubject(blocker) === subject);
+    rt.session.clearBlockers((blocker) => blockerSubject(blocker) === subject, {
+      outcome: "worked",
+    });
   }
   // A key refused for a reason of its own: one keyd says the user must enter again or deal with.
   async #refusedKey(rt: Runtime, secretId: string): Promise<void> {
@@ -678,8 +680,7 @@ export class AgentRunner {
     const stalled = rt.stalled;
     rt.stalled = undefined;
     const cleared = session.clearBlockers((blocker) => blockerSubject(blocker) === stalled, {
-      provider: ref.provider,
-      model: ref.model,
+      movedTo: { provider: ref.provider, model: ref.model },
     });
     if (turn.handOver) {
       try {

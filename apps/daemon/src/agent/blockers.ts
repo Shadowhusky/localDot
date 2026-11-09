@@ -7,6 +7,11 @@ export interface OpenBlocker {
   readonly required: boolean;
 }
 export type BlockerOutcome = EventOf<"blocker.clear">["data"]["outcome"];
+export interface ClearOptions {
+  movedTo?: EventOf<"blocker.clear">["data"]["movedTo"];
+  // worked: a call through it went through, which says nothing of what the user did.
+  outcome?: "fixed" | "worked";
+}
 export interface RaiseOptions {
   // Who noticed: localDot from the failure, or dot asking for it.
   by?: "localdot" | "dot";
@@ -84,20 +89,21 @@ export class BlockerDesk {
   }
   clear(
     matches: (blocker: Blocker) => boolean,
-    movedTo?: EventOf<"blocker.clear">["data"]["movedTo"],
+    { movedTo, outcome = "fixed" }: ClearOptions = {},
   ): OpenBlocker[] {
     const cleared: OpenBlocker[] = [];
     for (const [subject, open] of [...this.#open]) {
       if (!matches(open.blocker)) continue;
       this.#open.delete(subject);
-      this.#ended.set(open.blockerId, "fixed");
+      this.#ended.set(open.blockerId, outcome);
       this.port.cleared({
         blockerId: open.blockerId,
-        outcome: "fixed",
+        outcome,
         ...(movedTo ? { movedTo } : {}),
       });
       cleared.push(open);
-      if (this.#told.delete(subject)) this.port.tell(blockerNote(open.blocker, "fixed"), true);
+      const told = this.#told.delete(subject);
+      if (told && outcome === "fixed") this.port.tell(blockerNote(open.blocker, "fixed"), true);
     }
     if (cleared.length) this.port.changed();
     return cleared;

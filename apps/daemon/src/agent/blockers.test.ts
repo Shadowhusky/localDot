@@ -608,6 +608,29 @@ describe("failures localDot recognises by itself", () => {
     ]);
   });
 
+  it("doesn't take a call that went through for the user's fix", async () => {
+    const { call, events, session, tools } = setup();
+    const start = session.inboxSequence;
+    const service = (status: number) => ({
+      list: async () => [{ id: "github", kind: "http" }] as never,
+      request: async () => ({
+        status,
+        contentType: "text/plain",
+        body: Buffer.from("x"),
+        truncated: false,
+      }),
+    });
+    const request = { key_id: "github", url: "https://api.github.com/user" };
+    tools.credentials = service(401) as never;
+    await call("api_request", request);
+    tools.credentials = service(200) as never;
+    await call("api_request", request);
+    const heard = (await session.inbox(start, 0)).items.map((item) => item.text).join("\n");
+    expect(heard).not.toContain("the user entered");
+    expect(clears(events()).map((data) => data.outcome)).toEqual(["worked"]);
+    expect(session.openBlockers).toEqual([]);
+  });
+
   describe("a connected app's tool", () => {
     const entry = {
       connectorId: "github",

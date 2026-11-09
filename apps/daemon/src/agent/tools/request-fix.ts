@@ -6,6 +6,7 @@ import { fail, movedOnFix, type ToolCallContext, type ToolDeps, text } from "./d
 const ASK_WINDOW_MS = 30 * 60_000;
 const STILL_OPEN =
   "This isn't fixed yet, and localDot's card stays up. Carry on with what doesn't need it, or end your turn and say what is left: you'll be told once it is fixed. Don't raise it again or ask the user about it.";
+const IT_WORKED = "A call with it just went through, so localDot's card has gone. Carry on with the task.";
 export const KEYS_NOT_LOCKED =
   "Saved keys aren't locked, so localDot shows no card. If something still fails, the cause is something else: don't ask the user to unlock anything or for a passphrase.";
 
@@ -93,6 +94,8 @@ export async function waitForFix(
       return { ok: true, content: [text(blockerNote(blocker, "dismissed"))] };
     case "moved_on":
       return { ok: true, content: [text(movedOnFix(ctx.session))] };
+    case "worked":
+      return { ok: true, content: [text(IT_WORKED)] };
     case "fixed":
     case "moot":
       return { ok: true, content: [text(blockerNote(blocker, "fixed"))] };

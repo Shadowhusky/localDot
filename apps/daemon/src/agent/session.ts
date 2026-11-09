@@ -41,6 +41,7 @@ import type { GuiAction, NativeActionIdentity } from "../gateway/gateway.ts";
 import {
   BlockerDesk,
   type BlockerOutcome,
+  type ClearOptions,
   type OpenBlocker,
   type RaiseOptions,
 } from "./blockers.ts";
@@ -1408,16 +1409,19 @@ export class AgentSession {
   keyRefused(id: string): boolean {
     return this.#refusedKeys.has(id);
   }
-  // A call with the key went through.
+  // A call with the key went through. That says nothing of what the user did, so dot, whose own call
+  // it was, hears nothing, and the card leaves a line saying only that.
   keyWorked(id: string): void {
     this.#refusedKeys.delete(id);
-    this.clearBlockers((blocker) => blocker.kind === "key" && blocker.id === id);
+    this.clearBlockers((blocker) => blocker.kind === "key" && blocker.id === id, {
+      outcome: "worked",
+    });
   }
   clearBlockers(
     matches: (blocker: Blocker) => boolean,
-    movedTo?: EventOf<"blocker.clear">["data"]["movedTo"],
+    options?: ClearOptions,
   ): readonly OpenBlocker[] {
-    return this.stopped ? [] : this.#blockers.clear(matches, movedTo);
+    return this.stopped ? [] : this.#blockers.clear(matches, options);
   }
   dismissBlocker(blockerId: string): boolean {
     return !this.stopped && this.#blockers.dismiss(blockerId);

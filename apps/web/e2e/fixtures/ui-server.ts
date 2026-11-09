@@ -2185,8 +2185,7 @@ const agent: AgentRoutesDeps = {
       conversations.chooseModel(conversations.latest(id), ref);
       effects.push(`model:${ref.model}`);
       session.clearBlockers((blocker) => blocker.kind === "model" || blocker.kind === "key", {
-        provider: ref.provider,
-        model: ref.model,
+        movedTo: { provider: ref.provider, model: ref.model },
       });
       session.setStatus("running");
       session.append("agent.state", { state: "thinking" });

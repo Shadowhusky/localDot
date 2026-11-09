@@ -2297,7 +2297,7 @@ describe("ChatGPT runner lifecycle", () => {
         inputTokens: 1,
         outputTokens: 1,
       });
-      expect(blockers(f, s.id).at(-1)).toBe("fixed");
+      expect(blockers(f, s.id).at(-1)).toBe("worked");
       expect(s.openBlockers).toEqual([]);
     });
 

@@ -168,6 +168,9 @@ describe("a card on the timeline", () => {
     expect(markOf(ev("blocker.clear", { blockerId: "b", outcome: "fixed" }))?.label).toBe(
       "Fixed from the conversation",
     );
+    expect(markOf(ev("blocker.clear", { blockerId: "b", outcome: "worked" }))?.label).toBe(
+      "It worked again",
+    );
     expect(markOf(ev("blocker.clear", { blockerId: "b", outcome: "dismissed" }))?.label).toBe(
       "You said not now",
     );

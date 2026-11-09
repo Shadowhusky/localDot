@@ -375,6 +375,13 @@ describe("the line a card leaves", () => {
         ),
       ),
     ).toContain("Switched to kimi-k3.1");
+    const worked = { ...fixed, outcome: "worked" as const };
+    expect(
+      line(card({ kind: "key", id: "openai", problem: "rejected" }, { cleared: worked })),
+    ).toContain("openai key worked");
+    expect(
+      line(card({ kind: "app", connector: "gh", name: "GitHub", host: "h" }, { cleared: worked })),
+    ).toContain("GitHub worked again");
     expect(line(card({ kind: "computer", state: "stopped" }, { cleared: fixed }))).toContain(
       "Your computer is back on",
     );

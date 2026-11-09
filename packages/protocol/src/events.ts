@@ -369,7 +369,8 @@ export const BlockerClear = event(
   "blocker.clear",
   z.strictObject({
     blockerId: z.string().regex(ULID_PATTERN),
-    outcome: z.enum(["fixed", "dismissed", "moot", "moved_on"]),
+    // fixed: the thing itself was fixed. worked: only that a call through it went through.
+    outcome: z.enum(["fixed", "worked", "dismissed", "moot", "moved_on"]),
     // A model's: the one the task moved to, when it moved.
     movedTo: MessageModel.pick({ provider: true, model: true }).optional(),
   }),

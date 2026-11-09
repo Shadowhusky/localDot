@@ -61,6 +61,7 @@ export async function connectorTool(
   } else
     ctx.session.clearBlockers(
       (blocker) => blocker.kind === "app" && blocker.connector === entry.connectorId,
+      { outcome: "worked" },
     );
   const said = outcome.text || (outcome.ok ? "(The app returned nothing.)" : "The call failed.");
   ctx.session.tainted = true;
