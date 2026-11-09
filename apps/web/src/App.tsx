@@ -3163,6 +3163,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 modelName={names.name}
                 onDismiss={aside.dismiss}
                 onRetry={aside.retry}
+                onStop={aside.stop}
                 onModels={showModels}
                 onSpending={(trigger) => showSettings(trigger, "spending")}
               />

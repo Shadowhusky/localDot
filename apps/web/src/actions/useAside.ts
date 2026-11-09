@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
-import { askSideQuestion, type SideAnswer, SideQuestionFailure } from "./side-question.ts";
+import {
+  askSideQuestion,
+  type SideAnswer,
+  SideQuestionFailure,
+  type SideStep,
+} from "./side-question.ts";
 
 // What shows at the end of the thread for the user alone: a side question and its answer, or the
 // plans' usage. dot never sees either.
@@ -11,7 +16,9 @@ export type Aside =
       readonly id: number;
       readonly sessionId: string;
       readonly question: string;
-      readonly phase: "asking" | "answered" | "failed";
+      readonly phase: "asking" | "answered" | "failed" | "stopped";
+      // What it has done so far, oldest first.
+      readonly steps?: readonly SideStep[];
       readonly answer?: SideAnswer;
       readonly problem?: string;
       // The fix is choosing a model.
@@ -23,6 +30,8 @@ export interface AsideControl {
   readonly aside: Aside | null;
   ask(question: string): void;
   retry(): void;
+  // Stops the question under way, leaving it shown.
+  stop(): void;
   showUsage(): void;
   dismiss(): void;
 }
@@ -33,7 +42,7 @@ export function useAside(api: ApiClient, sessionId: string | null): AsideControl
   const ids = useRef(0);
   const latest = useRef({ api, sessionId });
   latest.current = { api, sessionId };
-  const stop = useCallback(() => {
+  const halt = useCallback(() => {
     asking.current?.abort();
     asking.current = null;
   }, []);
@@ -42,19 +51,24 @@ export function useAside(api: ApiClient, sessionId: string | null): AsideControl
     setAside((shown) =>
       shown?.kind === "question" && shown.sessionId !== sessionId ? null : shown,
     );
-    return stop;
-  }, [sessionId, stop]);
+    return halt;
+  }, [sessionId, halt]);
   const ask = useCallback(
     (question: string) => {
       const { api, sessionId } = latest.current;
       if (!sessionId) return;
-      stop();
+      halt();
       const abort = new AbortController();
       asking.current = abort;
       const id = ++ids.current;
       const shown = { kind: "question", id, sessionId, question } as const;
-      setAside({ ...shown, phase: "asking" });
-      askSideQuestion(api, sessionId, question, abort.signal).then(
+      const steps: SideStep[] = [];
+      setAside({ ...shown, phase: "asking", steps });
+      askSideQuestion(api, sessionId, question, abort.signal, (step) => {
+        if (abort.signal.aborted) return;
+        steps.push(step);
+        setAside({ ...shown, phase: "asking", steps: [...steps] });
+      }).then(
         (answer) => {
           if (abort.signal.aborted) return;
           asking.current = null;
@@ -72,7 +86,7 @@ export function useAside(api: ApiClient, sessionId: string | null): AsideControl
         },
       );
     },
-    [stop],
+    [halt],
   );
   return {
     aside,
@@ -80,12 +94,20 @@ export function useAside(api: ApiClient, sessionId: string | null): AsideControl
     retry: () => {
       if (aside?.kind === "question") ask(aside.question);
     },
+    stop: () => {
+      halt();
+      setAside((shown) =>
+        shown?.kind === "question" && shown.phase === "asking"
+          ? { ...shown, phase: "stopped" }
+          : shown,
+      );
+    },
     showUsage: () => {
-      stop();
+      halt();
       setAside({ kind: "usage", id: ++ids.current });
     },
     dismiss: () => {
-      stop();
+      halt();
       setAside(null);
     },
   };

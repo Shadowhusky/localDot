@@ -34,8 +34,11 @@ import {
   SIGN_IN_BROWSER_WAIT_MS,
 } from "./runner.ts";
 import { ComputerFences } from "./safety/fences.ts";
+import { ModelAnswerError } from "./safety/judge-model.ts";
 import { type AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
+import type { SideGo, SideModel } from "./side/agent.ts";
+import { sideSpendLedger } from "./side/spend.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
 
@@ -1453,6 +1456,35 @@ describe("Claude Code (your plan)", () => {
     session.stop();
     await f.live.settled(session.id);
   });
+  // A plan's model as the side agent runs it, answering from what it is given.
+  const planModel = (asked: SideGo[], text = "It is comparing two flights.") =>
+    vi.fn(
+      (quick: { model: string }, role: SideModel["role"]): SideModel => ({
+        provider: "claude-code",
+        model: quick.model,
+        role,
+        tools: true,
+        images: true,
+        plan: true,
+        run: async (go) => {
+          asked.push(go);
+          go.used({ inputTokens: 40, outputTokens: 9 });
+          await go.tools.call("finish", { status: "found", answer: ` ${text} ` }, go.signal);
+        },
+      }),
+    );
+  const sideDeps = (plan: NonNullable<AgentRunnerDeps["side"]>["plan"]) => ({
+    api: () => {
+      throw new Error("no key should be asked for here");
+    },
+    ...(plan ? { plan } : {}),
+    readers: (sessionId: string, _session: unknown, logFile: string) => ({
+      sessionId,
+      logFile,
+      redact: (text: string) => text,
+    }),
+    ledger: sideSpendLedger,
+  });
   it("answers a side question on the plan's fast model from the task's record, which never hears of it", async () => {
     const f = claudeSetup();
     f.setSettings({
@@ -1460,53 +1492,47 @@ describe("Claude Code (your plan)", () => {
       fast: { provider: "claude-code", model: "haiku" },
     });
     f.secrets.mockResolvedValue([]);
-    const asked: { system: string; prompt: string }[] = [];
-    const answer = vi.fn(() => async (system: string, prompt: string) => {
-      asked.push({ system, prompt });
-      return { text: " It is comparing two flights. ", inputTokens: 40, outputTokens: 9 };
-    });
-    if (f.deps.claudeCode) f.deps.claudeCode.answer = answer;
+    const asked: SideGo[] = [];
+    f.deps.side = sideDeps(planModel(asked));
     const session = await f.runner.start(f.cellId, "Find flights to Lisbon");
     await until(() => session.status === "idle");
     const transcript = f.deps.transcripts.read(session.id);
     const delivered = session.delivered;
+    const before = f.log.read(session.id).length;
     const reply = await f.runner.sideAnswer(
       session.id,
       "Which airline is cheaper?",
       new AbortController().signal,
     );
-    expect(reply).toEqual({
+    expect(reply).toMatchObject({
       answer: "It is comparing two flights.",
       provider: "claude-code",
       model: "haiku",
+      status: "found",
+      spend: { plan: true, usd: 0, inputTokens: 40, outputTokens: 9 },
     });
-    // A new conversation's naming request goes to the same model first.
-    const side = asked.find((call) => call.prompt.includes("Side question:"));
-    expect(side?.prompt).toContain("The user: Find flights to Lisbon");
-    expect(side?.prompt).toContain("Side question: Which airline is cheaper?");
-    expect(side?.system).toContain("dot never sees this question or your answer");
+    expect(asked[0]?.prompt).toContain("The user: Find flights to Lisbon");
+    expect(asked[0]?.prompt).toContain("Side question: Which airline is cheaper?");
+    expect(asked[0]?.system).toContain("dot never sees this question or your answer");
     expect(f.deps.transcripts.read(session.id)).toEqual(transcript);
     expect(session.delivered).toBe(delivered);
+    expect(f.log.read(session.id)).toHaveLength(before);
     const log = JSON.stringify(f.log.read(session.id));
     expect(log).not.toContain("airline");
     expect(log).not.toContain("comparing two flights");
     session.stop();
     await f.live.settled(session.id);
-    // An ended task is asked about on the saved fast model; there is no task left to count it in.
+    // An ended task is asked about on the saved fast model.
     await expect(
       f.runner.sideAnswer(session.id, "Did it finish?", new AbortController().signal),
     ).resolves.toMatchObject({ answer: "It is comparing two flights.", model: "haiku" });
-    expect(asked.filter((call) => call.prompt.includes("Side question:"))).toHaveLength(2);
+    expect(asked).toHaveLength(2);
+    expect(asked[1]?.prompt).toContain("This task has ended.");
   });
   it("answers a side question on the main model without a fast one, and says when none can", async () => {
     const f = claudeSetup();
     f.secrets.mockResolvedValue([]);
-    const answer = vi.fn((quick: { model: string }) => async () => ({
-      text: `from ${quick.model}`,
-      inputTokens: 1,
-      outputTokens: 1,
-    }));
-    if (f.deps.claudeCode) f.deps.claudeCode.answer = answer;
+    f.deps.side = sideDeps(planModel([], "from sonnet"));
     const session = await f.runner.start(f.cellId, "Fixture task");
     await until(() => session.status === "idle");
     const signal = new AbortController().signal;
@@ -1516,7 +1542,7 @@ describe("Claude Code (your plan)", () => {
     });
     session.stop();
     await f.live.settled(session.id);
-    if (f.deps.claudeCode) delete f.deps.claudeCode.answer;
+    f.deps.side = sideDeps(undefined);
     await expect(f.runner.sideAnswer(session.id, "Why?", signal)).rejects.toMatchObject({
       status: 409,
       problem: "no-spare-model",
@@ -1524,6 +1550,136 @@ describe("Claude Code (your plan)", () => {
     await expect(f.runner.sideAnswer(ulid(), "Why?", signal)).rejects.toMatchObject({
       status: 404,
     });
+  });
+  it("asks another model the user has set up on the ChatGPT plan, whose one process is the task's", async () => {
+    const f = setup();
+    const keys: KeydRecord[] = [
+      {
+        id: "anthropic",
+        kind: "llm",
+        provider: "anthropic",
+        createdAt: "2026-10-03T00:00:00Z",
+        updatedAt: "2026-10-03T00:00:00Z",
+      },
+    ];
+    f.setSettings({
+      main: { provider: "chatgpt", model: "gpt-6-astra" },
+      fast: { provider: "anthropic", model: "claude-haiku-4-5-20251001", key: "anthropic" },
+    });
+    f.secrets.mockResolvedValue(keys);
+    const asked: SideGo[] = [];
+    const api = vi.fn(
+      (
+        role: { providerId: string; model: { id: string } },
+        side: SideModel["role"],
+      ): SideModel => ({
+        provider: role.providerId,
+        model: role.model.id,
+        role: side,
+        tools: true,
+        images: true,
+        run: async (go) => {
+          asked.push(go);
+          await go.tools.call(
+            "finish",
+            { status: "not_found", answer: "Not in the log." },
+            go.signal,
+          );
+        },
+      }),
+    );
+    f.deps.side = { ...sideDeps(undefined), api: api as never };
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => f.run.mock.calls.length === 1);
+    const runs = f.run.mock.calls.length;
+    const reply = await f.runner.sideAnswer(session.id, "Why?", new AbortController().signal);
+    expect(reply).toMatchObject({
+      provider: "anthropic",
+      model: "claude-haiku-4-5-20251001",
+      answer: "Not in the log.",
+      // The plan can't take over: the question ends with what the other model found.
+      ended: "no-main",
+    });
+    expect(f.run.mock.calls.length).toBe(runs);
+    expect(asked).toHaveLength(1);
+    session.stop();
+    await f.live.settled(session.id);
+  });
+  it("says honestly why a task on the ChatGPT plan alone can't take a side question", async () => {
+    const f = setup();
+    f.setSettings({ main: { provider: "chatgpt", model: "gpt-6-astra" } });
+    f.deps.side = sideDeps(undefined);
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => f.run.mock.calls.length === 1);
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).rejects.toMatchObject({ status: 409, problem: "no-spare-model" });
+    session.stop();
+    await f.live.settled(session.id);
+    // At rest it is the same, without even reading the account: that takes a Codex process, and
+    // one here would hold the account dot's next turn needs.
+    const read = f.account.status.mock.calls.length;
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).rejects.toMatchObject({ status: 409, problem: "no-spare-model" });
+    expect(f.account.status.mock.calls.length).toBe(read);
+    expect(f.run).toHaveBeenCalledOnce();
+  });
+  it("goes from a plan that refuses to another model the user has set up", async () => {
+    const f = claudeSetup();
+    f.setSettings({
+      main: { provider: "claude-code", model: "sonnet" },
+      fast: { provider: "anthropic", model: "claude-haiku-4-5-20251001", key: "anthropic" },
+    });
+    f.secrets.mockResolvedValue([
+      {
+        id: "anthropic",
+        kind: "llm",
+        provider: "anthropic",
+        createdAt: "2026-10-03T00:00:00Z",
+        updatedAt: "2026-10-03T00:00:00Z",
+      },
+    ]);
+    const plan = vi.fn(
+      (quick: { model: string }, role: SideModel["role"]): SideModel => ({
+        provider: "claude-code",
+        model: quick.model,
+        role,
+        tools: true,
+        images: true,
+        plan: true,
+        run: async () => {
+          throw new ModelAnswerError(undefined, "You've hit your usage limit");
+        },
+      }),
+    );
+    const api = vi.fn(
+      (
+        role: { providerId: string; model: { id: string } },
+        side: SideModel["role"],
+      ): SideModel => ({
+        provider: role.providerId,
+        model: role.model.id,
+        role: side,
+        tools: true,
+        images: true,
+        run: async (go) => {
+          await go.tools.call("finish", { status: "found", answer: "From the key." }, go.signal);
+        },
+      }),
+    );
+    f.deps.side = { ...sideDeps(plan), api: api as never };
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).resolves.toMatchObject({
+      answer: "From the key.",
+      provider: "anthropic",
+      failed: { model: "sonnet", reason: "You've hit your usage limit" },
+    });
+    session.stop();
+    await f.live.settled(session.id);
   });
   it("checks where data goes as on the ChatGPT plan: with a Jev key, unsure without keys, off when off", async () => {
     const at = "2026-10-03T00:00:00Z";

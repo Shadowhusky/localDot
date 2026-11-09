@@ -48,7 +48,14 @@ function setup(
     continue: doable("Nothing is paused"),
     take: doable(),
     handBack: doable("dot has the computer"),
-    aside: { aside: null, ask: vi.fn(), retry: vi.fn(), showUsage: vi.fn(), dismiss: vi.fn() },
+    aside: {
+      aside: null,
+      ask: vi.fn(),
+      retry: vi.fn(),
+      stop: vi.fn(),
+      showUsage: vi.fn(),
+      dismiss: vi.fn(),
+    },
     newConversation: doable(),
     conversations: {
       current: SESSION,

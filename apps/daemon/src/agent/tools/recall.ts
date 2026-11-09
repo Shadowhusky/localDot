@@ -17,6 +17,29 @@ const KIND_WORD = {
   note: "daily note",
 } as const;
 
+// What a search of earlier tasks and saved facts found.
+export function recalled(
+  deps: Pick<ToolDeps, "recall" | "recallExperience">,
+  query: string,
+  limit: number,
+  sessionId: string,
+): { body: string; found: boolean } {
+  const hits = deps.recall?.(query, limit, sessionId) ?? [];
+  const experience = deps.recallExperience?.(query, sessionId) ?? "";
+  const history = hits.length
+    ? hits
+        .map(
+          (h, i) =>
+            `${i + 1}. ${h.title} · ${h.day} · ${KIND_WORD[h.kind]}${h.sessionId ? ` · task ${h.sessionId}` : ""}\n   ${h.snippet}${h.context ? `\n${h.context}` : ""}`,
+        )
+        .join("\n")
+    : "No earlier tasks match.";
+  return {
+    body: experience ? `${experience}\n\n${history}` : history,
+    found: hits.length > 0 || !!experience,
+  };
+}
+
 // Earlier tasks hold what pages said, so a recall reaches the model as untrusted text and marks the
 // task as having read private data.
 export async function recallTool(
@@ -35,19 +58,14 @@ export async function recallTool(
     tool: "recall",
     title: clipText(`Search earlier tasks: ${query}`, 200),
   });
-  const hits = deps.recall?.(query, input.limit ?? RECALL_DEFAULT_LIMIT, ctx.session.id) ?? [];
-  const experience = deps.recallExperience?.(query, ctx.session.id) ?? "";
-  const history = hits.length
-    ? hits
-        .map(
-          (h, i) =>
-            `${i + 1}. ${h.title} · ${h.day} · ${KIND_WORD[h.kind]}${h.sessionId ? ` · task ${h.sessionId}` : ""}\n   ${h.snippet}${h.context ? `\n${h.context}` : ""}`,
-        )
-        .join("\n")
-    : "No earlier tasks match.";
-  const body = experience ? `${experience}\n\n${history}` : history;
+  const { body, found } = recalled(
+    deps,
+    query,
+    input.limit ?? RECALL_DEFAULT_LIMIT,
+    ctx.session.id,
+  );
   ctx.session.tainted = true;
-  if (hits.length || experience) ctx.session.taint.add("recall", "earlier tasks", body);
+  if (found) ctx.session.taint.add("recall", "earlier tasks", body);
   ctx.check();
   append(ctx, "tool.output", { stream: "stdout", chunk: ctx.redact(body) });
   append(ctx, "tool.end", { ok: true });

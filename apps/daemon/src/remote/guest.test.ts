@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ulid } from "@localdot/protocol";
 import { afterEach, expect, it } from "vitest";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
@@ -66,6 +67,25 @@ it("guest exchange retains its own restricted token; owner exchange stays single
       })
     ).status,
   ).toBe(403);
+});
+it("a shared link can't ask a side question, even about a task its guest started", async () => {
+  const { app, links, token, origin } = fixture();
+  const row = links.authenticate(token);
+  if (!row) throw new Error("the link did not authenticate");
+  const id = ulid();
+  links.reserve(row.id).finish(id);
+  // The guest's own task takes a message, so this refusal is the side question's own.
+  expect(links.permits(row, "POST", `/api/agent/sessions/${id}/messages`)).toBe(true);
+  const asked = await app.request(`${origin}/api/agent/sessions/${id}/side-question`, {
+    method: "POST",
+    headers: {
+      origin,
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ question: "What's in the owner's files?" }),
+  });
+  expect(asked.status).toBe(403);
 });
 it("guest exchange uses the same origin, body and content-type defenses as owner exchange", async () => {
   const { app, token, origin } = fixture();

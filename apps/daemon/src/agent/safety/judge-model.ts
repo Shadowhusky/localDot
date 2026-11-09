@@ -30,7 +30,7 @@ const clipped = (text: string) => {
   const line = text.trim().replace(/\s+/g, " ");
   return line.length > REASON_CHARS ? `${line.slice(0, REASON_CHARS)}…` : line;
 };
-function saidInError(body: string): string {
+export function saidInError(body: string): string {
   try {
     const reply = JSON.parse(body) as {
       detail?: unknown;
@@ -38,6 +38,12 @@ function saidInError(body: string): string {
       error?: unknown;
     };
     const error = reply.error as { message?: unknown } | string | undefined;
+    // keyd's own refusal when a limit stops a request names which limit.
+    if (
+      typeof error === "object" &&
+      (error as { type?: unknown } | null)?.type === "budget_exceeded"
+    )
+      return `budget_exceeded ${(error as { scope?: unknown }).scope}`;
     const said =
       (typeof error === "object" ? error?.message : error) ?? reply.detail ?? reply.message;
     return typeof said === "string" ? clipped(said) : "";
@@ -53,7 +59,7 @@ const responsesText = (reply: unknown) =>
 
 // Server-sent events open with a field or a comment, JSON with a brace or bracket. A relay may label
 // its stream as anything, so the body decides.
-const SSE_START = /^\s*(?:data|event|id|retry)?:/;
+export const SSE_START = /^\s*(?:data|event|id|retry)?:/;
 
 // A Responses stream's answer: its deltas, or what its last event holds when it sent none.
 function streamedText(events: string): string {
@@ -91,7 +97,10 @@ const texts = (parts: unknown, key = "text"): string =>
 
 // The fields that set a model's thinking to `effort` in a plain request, for the wires that take
 // one there; any other model thinks as it does by default.
-function thinking(b: ModelBinding, effort: ReasoningEffort | undefined): Record<string, unknown> {
+export function thinking(
+  b: ModelBinding,
+  effort: ReasoningEffort | undefined,
+): Record<string, unknown> {
   if (!effort || !b.provider) return {};
   const { wire, efforts } = modelControls(b.provider, b.model, b.controls);
   if (!efforts.includes(effort)) return {};
@@ -279,6 +288,46 @@ export async function cappedText(reply: Reply, max: number): Promise<string> {
   }
 }
 
+// One request through a keyd listener, where the model's key is swapped in and its cost counted:
+// the reply's body, or the provider's refusal as a ModelAnswerError.
+export async function gatewayPost(
+  b: ModelBinding,
+  at: { port: number; token: string },
+  path: string,
+  headers: Record<string, string>,
+  body: unknown,
+  signal: AbortSignal,
+  fetch: typeof undiciFetch = undiciFetch,
+): Promise<{ body: string; streamed: boolean }> {
+  const agent = new ProxyAgent({
+    uri: `http://127.0.0.1:${at.port}`,
+    token: `Basic ${Buffer.from(`brain:${at.token}`).toString("base64")}`,
+    proxyTunnel: false,
+  });
+  try {
+    const reply = await fetch(`${gatewayBaseURL(b.route)}/${path}`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      dispatcher: agent,
+      redirect: "error",
+      signal,
+    });
+    if (!reply.ok) {
+      const refusal = await cappedText(reply, MAX_ERROR_BYTES).catch(() => "");
+      throw new ModelAnswerError(reply.status, saidInError(refusal));
+    }
+    const text = await cappedText(reply, MAX_REPLY_BYTES);
+    return {
+      body: text,
+      streamed:
+        !!reply.headers.get("content-type")?.includes("text/event-stream") || SSE_START.test(text),
+    };
+  } finally {
+    await agent.close().catch(() => {});
+  }
+}
+
 // Through the task's own keyd listener, where the model's key is swapped in and its cost counted.
 export function gatewayCompletion(
   binding: () => ModelBinding | undefined,
@@ -296,36 +345,14 @@ export function gatewayCompletion(
     const at = listener();
     if (!b || !at) throw new Error("the fast model is not running");
     const call = completionCall(b, system, prompt, image, effort);
-    const agent = new ProxyAgent({
-      uri: `http://127.0.0.1:${at.port}`,
-      token: `Basic ${Buffer.from(`brain:${at.token}`).toString("base64")}`,
-      proxyTunnel: false,
-    });
+    const reply = await gatewayPost(b, at, call.path, call.headers, call.body, signal, fetch);
+    if (reply.streamed) return streamedText(reply.body);
+    let parsed: unknown;
     try {
-      const reply = await fetch(`${gatewayBaseURL(b.route)}/${call.path}`, {
-        method: "POST",
-        headers: { ...call.headers, "content-type": "application/json" },
-        body: JSON.stringify(call.body),
-        dispatcher: agent,
-        redirect: "error",
-        signal,
-      });
-      if (!reply.ok) {
-        const body = await cappedText(reply, MAX_ERROR_BYTES).catch(() => "");
-        throw new ModelAnswerError(reply.status, saidInError(body));
-      }
-      const body = await cappedText(reply, MAX_REPLY_BYTES);
-      if (reply.headers.get("content-type")?.includes("text/event-stream") || SSE_START.test(body))
-        return streamedText(body);
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(body);
-      } catch {
-        throw new ModelAnswerError(undefined, "its answer could not be read");
-      }
-      return call.read(parsed);
-    } finally {
-      await agent.close().catch(() => {});
+      parsed = JSON.parse(reply.body);
+    } catch {
+      throw new ModelAnswerError(undefined, "its answer could not be read");
     }
+    return call.read(parsed);
   };
 }

@@ -86,7 +86,6 @@ import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
-import { sideQuestionEvents, sideQuestionPrompt } from "../../../daemon/src/agent/side-question.ts";
 import { plainForm } from "../../../daemon/src/agent/tools/ask.ts";
 import { createApp } from "../../../daemon/src/app.ts";
 import { AppEvents, appEventsRoute } from "../../../daemon/src/app-events.ts";
@@ -143,6 +142,7 @@ import { UI_CSP } from "../../../daemon/src/static-ui.ts";
 import { attachUpgradeRouter } from "../../../daemon/src/upgrade-router.ts";
 import { fakeDockerRoom } from "./fake-docker-room.ts";
 import { fakeDots } from "./fake-dots.ts";
+import { fixtureSideAgent } from "./side-agent.ts";
 import {
   bootStep,
   type CellKind,
@@ -2212,18 +2212,8 @@ const agent: AgentRoutesDeps = {
       await endLive();
       return true;
     },
-    // A side question answered from the task's own record, as the fast model reads it.
-    sideAnswer: async (id, question) => {
-      const { prompt } = sideQuestionPrompt(sideQuestionEvents(log.logFile(id)), question);
-      const step = /^\[\w+\] (.+)$/m.exec(prompt)?.[1];
-      return {
-        answer: step
-          ? `dot is still on its first step, **${step}**. Nothing has been bought or sent yet.`
-          : "Nothing has happened in this task yet.",
-        provider: "openai",
-        model: "gpt-6-luna",
-      };
-    },
+    // The real side agent, reading the task's own log and frames, with only its model scripted.
+    sideAnswer: fixtureSideAgent({ home: HOME, log, frames }),
     // A task's own model, kept as the real runner keeps it.
     taskModel: (id) => conversations.model(conversations.latest(id)),
     chooseTaskModel: (id, ref) => {
