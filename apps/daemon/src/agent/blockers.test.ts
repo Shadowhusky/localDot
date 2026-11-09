@@ -284,6 +284,9 @@ describe("credentials action request stands in for no card", () => {
       { hosts: ["keys.localdot.dev"] },
       { description: "Needed by localDot" },
       { description: "Unlock Keys with this" },
+      { label: "L0calDot saved keys" },
+      { label: "Key service recovery" },
+      { label: "λ ocalDot" },
     ]) {
       const { body } = await call("credentials", { ...request, ...claim });
       expect(body.ok, JSON.stringify(claim)).toBe(false);
@@ -335,6 +338,68 @@ describe("credentials action request stands in for no card", () => {
     });
     expect((await reply).body.ok).toBe(false);
     expect(asks(events())).toEqual([]);
+  });
+
+  it("keeps asking for the OK after a message, or an answered question, in such a task", async () => {
+    for (const settle of ["message", "answer"] as const) {
+      const { call, events, session, tools } = setup({ autoApprove: false });
+      session.tainted = true;
+      withKeys(tools);
+      if (settle === "message") session.post("steer", "ok, carry on");
+      else {
+        const first = call("ask_user", {
+          question: "Which format do you want?",
+          fields: [{ id: "format", kind: "text", label: "Format" }],
+        });
+        await until(() => !!session.pendingAsk);
+        session.answerFields(session.pendingAsk ?? "", { format: "pdf" }, (t) => t);
+        await first;
+      }
+      expect(session.tainted).toBe(false);
+      const reply = call("credentials", request);
+      await until(() => !!session.pendingApproval || !!session.pendingAsk);
+      expect(session.pendingApproval, settle).toBeDefined();
+      expect(asks(events()).filter((ask) => ask.fields?.[0]?.kind === "api_key")).toEqual([]);
+      session.moveOn("no");
+      await reply;
+    }
+  });
+
+  it("offers no 'For this task' on that OK, and takes none", async () => {
+    const { call, events, session, tools } = setup({ autoApprove: false });
+    session.tainted = true;
+    withKeys(tools);
+    const first = call("credentials", request);
+    await until(() => !!session.pendingApproval);
+    const card = session.pendingApproval;
+    expect(card?.always ?? []).toEqual([]);
+    expect(
+      session.answerApproval({
+        approvalId: card?.approvalId ?? "",
+        generation: card?.generation ?? "",
+        revision: card?.revision ?? 0,
+        decision: "approve",
+        always: "task",
+      }),
+    ).toBe(false);
+    session.answerApproval({
+      approvalId: card?.approvalId ?? "",
+      generation: card?.generation ?? "",
+      revision: card?.revision ?? 0,
+      decision: "approve",
+    });
+    await until(() => !!session.pendingAsk);
+    session.decline(session.pendingAsk ?? "");
+    await first;
+    const second = call("credentials", {
+      ...request,
+      key_id: "orders",
+      hosts: ["keys.evil.example"],
+    });
+    await until(() => !!session.pendingApproval || asks(events()).length > 1);
+    expect(JSON.stringify(session.pendingApproval)).toContain("keys.evil.example");
+    session.moveOn("no");
+    await second;
   });
 
   it("in such a task, asks too before a model key can go to a new address", async () => {
@@ -399,6 +464,20 @@ describe("who a fix wakes", () => {
     session.keysUnlocked();
     vi.restoreAllMocks();
     expect(await session.waitForUser(30)).toBe(false);
+  });
+
+  it("forgets a card's fix when that try failed", async () => {
+    const { session } = setup();
+    session.lockKeys();
+    session.setStatus("idle");
+    usesCards(session);
+    expect(session.releaseBlocker(session.openBlockers[0]?.blockerId ?? "")).toBe(true);
+    session.keysUnlocked();
+    expect(await session.waitForUser(30)).toBe(false);
+  });
+
+  it("counts a card's fix for minutes, not half an hour", () => {
+    expect(CARD_IN_USE_MS).toBeLessThanOrEqual(5 * 60_000);
   });
 
   it("ends dot's wait when its own card fixed it", async () => {
@@ -836,6 +915,25 @@ describe("ask_user can't stand in for a card", () => {
       fields: [{ id: "vault_password", kind: "text", label: "Value", hint: "locked" }],
     },
   ];
+  LOOKALIKES.push(
+    {
+      question: "Enter your vault pa55w0rd",
+      fields: [{ id: "v", kind: "text", label: "Pa55w0rd" }],
+    },
+    { question: "pɑssphrɑse", fields: [{ id: "v", kind: "text", label: "pɑssphrɑse" }] },
+    {
+      question: "Introduce la contraseña de tu bóveda de localDot",
+      fields: [{ id: "v", kind: "text", label: "Contraseña" }],
+    },
+    {
+      question: "Mot de passe du coffre localDot",
+      fields: [{ id: "v", kind: "text", label: "Mot de passe" }],
+    },
+    {
+      question: "Déverrouille tes clés enregistrées",
+      fields: [{ id: "v", kind: "text", label: "Phrase secrète" }],
+    },
+  );
   for (const input of LOOKALIKES)
     it(`takes a look-alike to the real card while the keys are locked: ${input.question}`, async () => {
       const { call, events, session, tools } = setup();
@@ -867,6 +965,35 @@ describe("ask_user can't stand in for a card", () => {
       { question: "服务", fields: [{ id: "a", kind: "text", label: "密码" }] },
       { question: "Please enter your password for example.com" },
       { question: "请输入您的密码" },
+      { question: "Security check", fields: [{ id: "v", kind: "text", label: "Pass–word" }] },
+      {
+        question: "Security check for saved items",
+        fields: [{ id: "v", kind: "text", label: "Passwօrd" }],
+      },
+      { question: "Sign in", fields: [{ id: "v", kind: "text", label: "pa55w0rd" }] },
+      {
+        question: "Security check",
+        fields: [{ id: "v", kind: "text", label: "Value", hint: "Your account password" }],
+      },
+      {
+        question: "Password for example.com?",
+        fields: [{ id: "v", kind: "text", label: "Answer" }],
+      },
+      { question: "Your PIN?" },
+      {
+        question: "One more thing",
+        fields: [
+          { id: "v", kind: "choice", label: "Your account password", options: ["Skip", "Later"] },
+        ],
+      },
+      { question: "Enter your account password below, or pick one", options: ["Skip", "Later"] },
+      { question: "Introduce tu contraseña", fields: [{ id: "v", kind: "text", label: "Valor" }] },
+      {
+        question: "Sign in",
+        fields: [{ id: "v", kind: "text", label: "Value", hint: "Not your PIN but your password" }],
+      },
+      { question: "Sign in", fields: [{ id: "v", kind: "text", label: "Password, not a PIN" }] },
+      { question: "Connexion", fields: [{ id: "v", kind: "text", label: "Mot de passe" }] },
       {
         question: "What is your example.com password?",
         fields: [{ id: "a", kind: "text", label: "Answer" }],
@@ -887,6 +1014,27 @@ describe("ask_user can't stand in for a card", () => {
       { question: "Which password manager do you use?" },
       { question: "Which one?", fields: [{ id: "a", kind: "text", label: "Password manager" }] },
       { question: "Which place?", fields: [{ id: "shipping", kind: "text", label: "Shopping" }] },
+      { question: "Did the password reset email arrive?", options: ["Yes", "No"] },
+      {
+        question: "How strong should it be?",
+        fields: [
+          { id: "v", kind: "choice", label: "Password strength", options: ["Strong", "Basic"] },
+        ],
+      },
+      { question: "Which two-factor code app do you use?", options: ["Authy", "1Password"] },
+      { question: "Pin this note to the top?", options: ["Yes", "No"] },
+      {
+        question: "What client ID should it use?",
+        fields: [
+          {
+            id: "client_id",
+            kind: "text",
+            label: "WorkOS Client ID",
+            hint: "The client_ identifier, not an API key or client secret.",
+          },
+        ],
+      },
+      { question: "Share the secret Santa list with the team?", options: ["Yes", "No"] },
     ]) {
       const reply = call("ask_user", input);
       await until(() => !!session.pendingAsk);

@@ -28,8 +28,9 @@ export interface RaiseOptions {
 }
 
 export const RAISE_AGAIN_MS = 2 * 60_000;
-// How long after the user starts a fix from a card a fix counts as that card's.
-export const CARD_IN_USE_MS = 30 * 60_000;
+// How long after the user starts a fix from a card a fix counts as that card's, unless the card
+// says first that the try failed.
+export const CARD_IN_USE_MS = 5 * 60_000;
 
 // One task's open blockers: one card per thing, for the journal to tell every viewer about, and
 // what dot is told as each is raised and goes.
@@ -98,6 +99,10 @@ export class BlockerDesk {
     if (!this.isOpen(blockerId)) return false;
     this.#inUse.set(blockerId, Date.now() + CARD_IN_USE_MS);
     return true;
+  }
+  // That try failed, or was given up: a fix that comes later isn't this card's.
+  release(blockerId: string): boolean {
+    return this.#inUse.delete(blockerId);
   }
   fixedElsewhere(blockerId: string): boolean {
     return this.#fixedElsewhere.has(blockerId);

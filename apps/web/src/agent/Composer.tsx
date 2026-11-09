@@ -106,6 +106,9 @@ export interface ComposerProps {
   onSending?(on: boolean): void;
   // What dot waits on the user for: a message moves on from it, and reaches dot straight away.
   waitingOn?: DotWait;
+  // A field for a secret is up in this conversation, whatever else dot waits on: what is typed here
+  // may be meant for it, so nothing goes without one more step and none of it is kept.
+  secretField?: boolean;
   // A card in the rail, or one rounded field in a phone's toolbar with its controls inside it.
   layout?: "card" | "pill";
   // What the field says while empty, when it isn't the usual words.
@@ -379,6 +382,9 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   // A message held back while dot waits for a secret, and the words the user has said may go.
   const [held, setHeld] = useState(false);
   const heldShown = useRef(held);
+  // The user said to send this as a message: it isn't held again on its way.
+  const sendConfirmed = useRef(false);
+  const secretNow = useRef(false);
   const heldLater = useRef(false);
   const accepted = useRef(0);
   const mounted = useRef(true);
@@ -488,7 +494,12 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   const draft = useRef(0);
   // A long text moved out of the field as its message was sent goes once it has uploaded.
   const sendOnceUploaded = useRef<boolean | null>(null);
+  // Returns whether it was turned away: long text would be uploaded at once, before any send.
   const addLongText = (text: string, kind: LongText) => {
+    if (secretNow.current && !sendConfirmed.current) {
+      setProblem("Long text isn't taken while a field for a secret is up. Nothing was kept.");
+      return true;
+    }
     const { clean, removed } = withoutKeyLike(text);
     if (removed)
       setProblem(
@@ -496,10 +507,11 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           ? "Keys were taken out of the pasted text. Paste keys straight into Keys."
           : "Keys were taken out of your text. Paste keys straight into Keys.",
       );
-    if (!clean.trim()) return;
+    if (!clean.trim()) return false;
     const { file, label } = longTextFile(clean, kind, pasteNames.current);
     uploads.addText(file, label, clean);
     announce("composer", "The long text is attached as a file.");
+    return false;
   };
   const addLongNow = useRef(addLongText);
   addLongNow.current = addLongText;
@@ -568,11 +580,12 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   // by the guard's own notice when it can read that much.
   const moveToFile = (input: HTMLTextAreaElement) => {
     if (input.value.length <= KEY_SCAN_CHARS) guardOwner.current.check(input);
-    addLongText(input.value, "typed");
+    const refused = addLongText(input.value, "typed");
     input.value = "";
     revision.current += 1;
     keepDraft("");
     measure(input);
+    return refused;
   };
   // Text past what the guard can read never reaches it.
   const checked = (input: HTMLTextAreaElement) => {
@@ -765,6 +778,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     live: true,
     changed: (input, caret) => {
       revision.current += 1;
+      sendConfirmed.current = false;
       if (heldShown.current) setHeld(false);
       if (caret !== undefined) {
         checked(input);
@@ -786,11 +800,13 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     },
   });
   const talking = voice.state.phase !== "idle";
-  const secretWait = WAITS_FOR_A_SECRET.has(props.waitingOn);
+  const secretWait = WAITS_FOR_A_SECRET.has(props.waitingOn) || !!props.secretField;
+  secretNow.current = secretWait;
   useLayoutEffect(() => {
     if (!secretWait) return;
     keepDraft("");
     draftsHeld = true;
+    sendConfirmed.current = false;
     accepted.current = revision.current;
     return () => {
       draftsHeld = false;
@@ -810,6 +826,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   }, [secretWait, measure]);
   // dot has the message: its files went with it, and the draft clears unless it changed since.
   const delivered = (record: Delivery) => {
+    sendConfirmed.current = false;
     announce(
       "composer",
       record.request.research
@@ -935,7 +952,12 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     if (!input || composing.current || (talking && !voiceFinished)) return;
     if (commands.submit(input.value) === "handled") return;
     if (pending.current) return;
-    if (secretWait && !sendsAnyway && input.value.trim()) {
+    if (
+      secretWait &&
+      !sendsAnyway &&
+      !sendConfirmed.current &&
+      (input.value.trim() || uploads.rows.length)
+    ) {
       heldLater.current = later;
       setHeld(true);
       announce("composer", HELD);
@@ -1003,6 +1025,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   };
   const sendHeld = () => {
     accepted.current = revision.current;
+    sendConfirmed.current = true;
     setHeld(false);
     if (!touch) field()?.focus();
     submit(heldLater.current, false, true);
@@ -1173,14 +1196,17 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       },
       onInput: (event) => {
         revision.current += 1;
+        sendConfirmed.current = false;
         if (heldShown.current) setHeld(false);
         sendOnceUploaded.current = null;
-        if (event.currentTarget.value.length > TEXT_BOUND && !composing.current)
+        const refused =
+          event.currentTarget.value.length > TEXT_BOUND &&
+          !composing.current &&
           moveNow.current(event.currentTarget);
         guardOwner.current.input(event.currentTarget, event.nativeEvent);
         measure(event.currentTarget, true);
         weigh(event.currentTarget);
-        if (problemShown.current !== null) setProblem(null);
+        if (!refused && problemShown.current !== null) setProblem(null);
         const input = event.currentTarget;
         window.clearTimeout(draft.current);
         unkeptDraft = () => keepDraft(guardOwner.current.notice ? "" : input.value);
@@ -1197,12 +1223,14 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           pasted.length + input.value.length - (input.selectionEnd - input.selectionStart) >
           LONG_TEXT
         ) {
+          sendConfirmed.current = false;
           if (problemShown.current !== null) setProblem(null);
           addLongNow.current(pasted, "pasted");
           return;
         }
         input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
         revision.current += 1;
+        sendConfirmed.current = false;
         if (heldShown.current) setHeld(false);
         keepDraft(guardOwner.current.check(input) ? input.value : "");
         measure(input);
@@ -1261,6 +1289,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       : reason;
   attach.current = (files) => {
     if (attachReason || !files.length) return false;
+    sendConfirmed.current = false;
     uploads.select(files);
     return true;
   };
@@ -1300,7 +1329,14 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     choosing &&
       props.modelAfter &&
       !empty && { text: `Runs on ${props.modelAfter} after this task`, alert: false },
-    props.waitingOn && !empty && { text: MOVES_ON[props.waitingOn], alert: false },
+    props.waitingOn &&
+      !empty && {
+        text:
+          props.secretField && !WAITS_FOR_A_SECRET.has(props.waitingOn)
+            ? `${MOVES_ON[props.waitingOn]}. Messages aren't kept secret`
+            : MOVES_ON[props.waitingOn],
+        alert: false,
+      },
   ].filter((notice) => !!notice);
   // The notices fold away holding their last words.
   const shownNotices = useRef(notices);
@@ -1430,7 +1466,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
             size={pill ? 36 : 28}
             round={pill}
             multiple
-            onFiles={(files) => uploads.select(files)}
+            onFiles={(files) => attach.current([...files])}
             disabledReason={attachReason}
           />
           {!pill && (

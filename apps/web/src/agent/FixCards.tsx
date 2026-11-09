@@ -20,7 +20,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { Select } from "../ui/Select.tsx";
 import type { DotWait } from "./Composer.tsx";
-import { emptyMessageBoxHasKeys } from "./message-box.ts";
+import { emptyMessageBoxHasKeys, typedLately } from "./message-box.ts";
 import type { AgentBlocker } from "./model.ts";
 import { timeLabel } from "./thread.ts";
 import { useAppConnect } from "./useAppConnect.ts";
@@ -62,16 +62,14 @@ export interface FixDeps {
 export function FixCards({ blockers, deps }: { blockers: readonly AgentBlocker[]; deps: FixDeps }) {
   return blockers.map((open) => <FixCard key={open.blockerId} open={open} deps={deps} />);
 }
+// A card with a field for a secret: the passphrase, or a key entered again here.
+export const takesSecret = ({ blocker }: AgentBlocker) =>
+  blocker.kind === "keys_locked" || (blocker.kind === "key" && blocker.problem !== "rebound");
 // What a message moves on from while cards are up: a card that takes a secret warns that a message
 // isn't kept secret. Nothing can be sent while the computer is off, so its card says nothing here.
 export function fixWait(blockers: readonly AgentBlocker[]): DotWait | undefined {
   if (!blockers.some(({ blocker }) => blocker.kind !== "computer")) return undefined;
-  return blockers.some(
-    ({ blocker }) =>
-      blocker.kind === "keys_locked" || (blocker.kind === "key" && blocker.problem !== "rebound"),
-  )
-    ? "private-fix"
-    : "fix";
+  return blockers.some(takesSecret) ? "private-fix" : "fix";
 }
 // Keys already open need no card, whatever a slower word from the task says.
 export const fixesToShow = (blockers: readonly AgentBlocker[], health: KeydHealth | null) =>
@@ -129,11 +127,14 @@ function Shell({
   // Typing starts in its field when nothing else has the focus, or when only the empty message box
   // does, so the card never takes the keys from what you were typing elsewhere and a secret doesn't
   // land in the box. A phone otherwise keeps its keyboard down until a field is tapped.
+  // A key's field never takes them by itself: what is typed there is saved over the key.
+  const focusable = open.blocker.kind !== "key";
   useEffect(() => {
+    if (!focusable || typedLately()) return;
     const active = document.activeElement;
     if (!emptyMessageBoxHasKeys() && (touch || (active && active !== document.body))) return;
     card.current?.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true });
-  }, [touch]);
+  }, [touch, focusable]);
   return (
     <section
       ref={card}
@@ -184,13 +185,27 @@ function NotNow({ open, deps }: { open: AgentBlocker; deps: FixDeps }) {
 
 export const dismissBlocker = (api: ApiClient, sessionId: string, blockerId: string) =>
   api.post(`/api/agent/sessions/${sessionId}/blockers/${blockerId}/dismiss`);
-// Said before a fix starts, so that the fix is known as this card's and the task carries on. It
-// holds nothing typed. Should it not arrive, the fix still goes ahead and dot waits for a word.
-const usingCard = async (deps: FixDeps, { blockerId }: AgentBlocker) => {
-  await deps.api
-    .post(`/api/agent/sessions/${deps.sessionId}/blockers/${blockerId}/use`)
-    .catch(() => undefined);
+// Said before a fix starts, so that the fix is known as this card's and the task carries on, and
+// taken back if that try fails. It holds nothing typed. Should it not arrive, the fix still goes
+// ahead and dot waits for a word.
+const cardUse = (deps: FixDeps, { blockerId }: AgentBlocker) =>
+  `/api/agent/sessions/${deps.sessionId}/blockers/${blockerId}/use`;
+const usingCard = async (deps: FixDeps, open: AgentBlocker) => {
+  await deps.api.post(cardUse(deps, open)).catch(() => undefined);
 };
+const cardFailed = (deps: FixDeps, open: AgentBlocker) => {
+  void deps.api.del(cardUse(deps, open)).catch(() => undefined);
+};
+// A fix tried from the card: the card's mark goes with a try that fails.
+async function fromCard<T>(deps: FixDeps, open: AgentBlocker, fix: () => Promise<T>): Promise<T> {
+  await usingCard(deps, open);
+  try {
+    return await fix();
+  } catch (error) {
+    cardFailed(deps, open);
+    throw error;
+  }
+}
 
 function KeysFix({ open, deps }: { open: BlockerOf<"keys_locked">; deps: FixDeps }) {
   const setup = deps.keys.health?.vault?.state === "setup";
@@ -206,10 +221,7 @@ function KeysFix({ open, deps }: { open: BlockerOf<"keys_locked">; deps: FixDeps
       {unlock && (
         <UnlockKeys
           setup={setup}
-          unlock={async (passphrase) => {
-            await usingCard(deps, open);
-            return unlock(passphrase);
-          }}
+          unlock={(passphrase) => fromCard(deps, open, () => unlock(passphrase))}
           label={setup ? "Choose a passphrase" : "Unlock saved keys"}
           actions={<NotNow open={open} deps={deps} />}
         />
@@ -280,10 +292,7 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
         <KeyForm
           active
           reenter={record}
-          save={async (...entered) => {
-            await usingCard(deps, open);
-            return deps.keys.save(...entered);
-          }}
+          save={(...entered) => fromCard(deps, open, () => deps.keys.save(...entered))}
           busy={deps.keys.busy}
           unavailable={noSaving(deps.keys.health)}
           actions={way}
@@ -301,7 +310,12 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
 function AppFix({ open, deps }: { open: BlockerOf<"app">; deps: FixDeps }) {
   const { connector, name, host } = open.blocker;
   // The daemon hears the sign-in finish by itself and clears the card on every device.
-  const sign = useAppConnect({ api: deps.api, connector, onConnected: () => {} });
+  const sign = useAppConnect({
+    api: deps.api,
+    connector,
+    onConnected: () => {},
+    onGaveUp: () => cardFailed(deps, open),
+  });
   return (
     <Shell open={open} title={`Connect ${name}`}>
       <p className="thread-recovery-text">

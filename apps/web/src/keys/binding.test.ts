@@ -212,6 +212,35 @@ describe("valueProblem", () => {
   });
 });
 
+describe("valueProblem for words that aren't a key", () => {
+  const anthropic = `sk-ant-${"api"}03-${"a1B2".repeat(10)}`;
+  it("refuses spaces inside a model key or a bearer token", () => {
+    expect(valueProblem("please also check the logs", "llm")).toBeDefined();
+    expect(valueProblem("abc def ghi", "http", { format: "bearer" })).toBeDefined();
+    expect(valueProblem("Token abcdefgh", "http", { format: "raw" })).toBeUndefined();
+    expect(valueProblem("correct horse battery", "secret")).toBeUndefined();
+  });
+  it("refuses, over a saved key, what reads as a message", () => {
+    expect(
+      valueProblem("please also check logs", "http", { format: "raw", replacing: true }),
+    ).toBeDefined();
+    expect(
+      valueProblem("Token abcdefgh", "http", { format: "raw", replacing: true }),
+    ).toBeUndefined();
+  });
+  it("over a saved model key, takes only what looks like that provider's key", () => {
+    const over = { provider: "anthropic", replacing: true };
+    expect(valueProblem(anthropic, "llm", over)).toBeUndefined();
+    expect(valueProblem("not-an-anthropic-key-value", "llm", over)).toMatch(/Anthropic/);
+    expect(
+      valueProblem("not-an-anthropic-key-value", "llm", { provider: "anthropic" }),
+    ).toBeUndefined();
+    expect(
+      valueProblem("anything-goes-here", "llm", { provider: "mistral", replacing: true }),
+    ).toBeUndefined();
+  });
+});
+
 describe("Claude plan tokens", () => {
   const SENTENCE =
     "Claude plan tokens can't be used here: Anthropic doesn't allow other apps to sign in with them. To use your plan, choose Claude Code (your plan) in Settings, or add an Anthropic API key.";

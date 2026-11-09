@@ -39,6 +39,40 @@ it("says in localDot's words that a form dot wrote never takes its passphrase", 
   expect(screen.getByText(/localDot never asks for its passphrase here/)).toBeTruthy();
 });
 
+it("says it on a choice the user may answer in their own words", () => {
+  mount({
+    askId: "a",
+    question: "Which one?",
+    fields: [{ id: "pick", kind: "choice", label: "Pick", options: ["A", "B"], required: true }],
+  } as never);
+  expect(screen.getByText(/localDot never asks for its passphrase here/)).toBeTruthy();
+});
+
+it("says it on a request for a service key", () => {
+  mount({
+    askId: "a",
+    question: "Add Weather?",
+    fields: [
+      {
+        id: "key",
+        kind: "api_key",
+        label: "API key",
+        credential: {
+          binding: {
+            id: "weather",
+            kind: "http",
+            hosts: ["api.weather.example"],
+            header: "x-key",
+            format: "raw",
+          },
+          metadata: { label: "Weather" },
+        },
+      },
+    ],
+  } as never);
+  expect(screen.getByText(/localDot never asks for its passphrase here/)).toBeTruthy();
+});
+
 it("has no such line where nothing can be typed", () => {
   mount({
     askId: "a",

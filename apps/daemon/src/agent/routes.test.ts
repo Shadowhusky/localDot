@@ -626,6 +626,13 @@ describe("agent user routes", () => {
       409,
     );
   });
+  it("forgets a card's fix when the owner's try failed", async () => {
+    const f = await setup();
+    const open = f.session.raiseBlocker({ kind: "keys_locked" });
+    const release = vi.spyOn(f.session, "releaseBlocker");
+    expect((await f.send("DELETE", endpoint(`blockers/${open?.blockerId}/use`))).status).toBe(204);
+    expect(release).toHaveBeenCalledWith(open?.blockerId);
+  });
   it("a shared link's guest gains nothing from a card", async () => {
     const f = await setup();
     const retryOnModel = vi.fn(async () => {});
@@ -646,6 +653,11 @@ describe("agent user routes", () => {
       });
     expect((await post("dismiss")).status).toBe(403);
     expect((await post("use")).status).toBe(403);
+    const released = await guest.request(
+      `http://127.0.0.1:4747${endpoint(`blockers/${open?.blockerId}/use`)}`,
+      { method: "DELETE" },
+    );
+    expect(released.status).toBe(403);
     expect(f.session.openBlockers).toHaveLength(1);
     const model = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
     expect((await post("model", { model })).status).toBe(403);

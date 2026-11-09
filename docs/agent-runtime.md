@@ -256,20 +256,27 @@ localDot mark.
 
 Keeping a form of dot's from passing for a card is a mitigation, not a guarantee.
 `apps/daemon/src/agent/tools/card-words.ts` normalises `ask_user`'s strings, `request_takeover`'s note
-and what `credentials` `request` would show (NFKC, format characters, marks on Latin letters and common
-look-alikes) and reads them for words about unlocking localDot's keys, in English and Chinese. Those get
-the real card while the vault is locked and a refusal otherwise, and a key request that claims to be
-localDot's is refused. A paraphrase, another language or a picture of the words gets past this. What
-holds regardless: the passphrase field is only ever on localDot's card; a form of dot's says in fixed
-words that localDot never asks for its passphrase there; plain-text fields named like a secret are
-refused, again by word list, so an answer to a form that gets past it does land in the log and reach
-dot; and in a task that has read outside words, a key request loses dot's description and needs an OK
-before a key can go to a place no saved key goes to. A lone confirm while a card is up is refused, except
-the brain's own guard, told by its call and its fixed words.
+and what `credentials` `request` would show (NFKC, format characters, marks on Latin letters, dashes,
+digits written for letters, and common Cyrillic, Greek, Armenian and Latin look-alikes) and reads them
+for words about unlocking localDot's keys or a secret named beside a vault, in English, Chinese,
+Spanish and French. Those get the real card while the vault is locked and a refusal otherwise, and a
+key request named like localDot or its key service is refused. A paraphrase ("the phrase you chose
+when you set up this app"), another language or a picture of the words gets past this. What holds
+regardless: the passphrase field is only ever on localDot's card; a form of dot's where the user can
+type, including a request for a service key and a choice with its own-words row, says in fixed words
+that localDot never asks for its passphrase there; and a plain answer that names a secret is refused,
+in a field's id, label or hint, in a choice, or in a question with no field or plain options, with or
+without a verb ("Password for example.com?"). That is a word list too, so a form that gets past it
+does land its answer in the log and in dot's context. A key request in a task that has ever read
+outside words, whatever the user has said since, loses dot's description and needs an OK before a key
+can go to a place no saved key goes to; that OK covers the one request and offers no "For this task".
+A lone confirm while a card is up is refused, except the brain's own guard, told by its call and its
+fixed words.
 
 A task carries on by itself only when the fix came through its own card, on any device: the card tells
-the daemon (`/blockers/:id/use`, owner only, holding nothing typed) as the user starts the fix, and that
-counts for 30 minutes. It holds for tasks that have read web pages too. Fixed any other way, such as from
+the daemon (`/blockers/:id/use`, owner only, holding nothing typed) as the user starts the fix. That
+counts for five minutes, and the card takes it back (`DELETE` on the same path) when the unlock or the
+key's save fails or the app's sign-in is given up. It holds for tasks that have read web pages too. Fixed any other way, such as from
 Keys or from another conversation's card, the card still closes and leaves its line, but nothing restarts:
 dot hears with the next message, a stalled task or a `request_fix` call waits with `fixed elsewhere`, and
 Continue or a message moves it on. This binds what a task does when it is stopped. A task still running
@@ -368,8 +375,14 @@ commands answers only once each has ended or gone to the background.
 The message box works during any wait of dot's. It sends straight away, except while a field for a
 secret is up (a card that takes one, a question with a password, code or key): then Enter and Send only
 bring up a step that says "Send as a message — dot will read this", since the words may be that secret.
-The card or form takes the keys from an empty box. No draft is kept during such a wait, one kept from
-before it is cleared, and whatever is typed during it is cleared when it ends. A message the owner sends
+This holds whatever else dot is waiting on beside it: a plain question or an approval next to the Unlock
+card still holds the box. While a field for a secret is up, long text isn't moved into a file (which
+would upload it at once), and an attached file is held like words. A card or form takes the keys from
+an empty box, unless a key was pressed in the last three seconds; a key's field never takes them by
+itself, since what is typed there is saved over the key. Over a saved key, a model key or bearer token
+with spaces, a value that reads as a sentence, or a model key that doesn't look like its provider's is
+refused. No draft is kept during such a wait, one kept from before it is cleared, and whatever is typed
+during it is cleared when it ends. A message the owner sends
 moves on from the wait, on the daemon, whichever client sent it and whichever harness runs the
 task: the tool call blocked on the wait returns, and the message reaches dot as a steer, through the
 same inbox as any other. It is never taken for the wait's answer, and it isn't queued behind it.
