@@ -2000,9 +2000,9 @@ swap_begin() {
     # The lock names the dead installer, which would let another one start on top of this.
     sh -c 'echo $PPID' >"$PREFIX/.package-install.lock/pid" 2>/dev/null
     recover_package_swap
-    if [ "${PACKAGE_RESTORED:-0}" = 1 ]; then update_stage failed true; else update_stage failed false; fi
     rm -f "$PREFIX/.package-install.lock/pid"
     rmdir "$PREFIX/.package-install.lock" 2>/dev/null || true
+    if [ "${PACKAGE_RESTORED:-0}" = 1 ]; then update_stage failed true; else update_stage failed false; fi
   ) </dev/null &
   # The watcher's own pid, so a daemon can tell an undoing still to come from one that never will.
   printf '%s\n%s\n' "$PACKAGE_ROLLBACK" "$!" >"$journal.new"
@@ -2056,9 +2056,10 @@ package_exit() {
   [ "${PACKAGE_RESTORED:-0}" != 1 ] || restored=true
   swap_end
   [ -z "${PACKAGE_SCRATCH:-}" ] || rm -rf "$PACKAGE_SCRATCH"
-  [ "$result" = 0 ] || update_stage failed "$restored"
   rm -f "$PREFIX/.package-install.lock/pid"
   rmdir "$PREFIX/.package-install.lock" 2>/dev/null || true
+  # Last, so a retry on reading it doesn't find the lock still held.
+  [ "$result" = 0 ] || update_stage failed "$restored"
   exit "$result"
 }
 
