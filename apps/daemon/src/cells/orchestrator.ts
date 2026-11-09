@@ -901,8 +901,15 @@ export class CellOrchestrator {
       );
       if (!answers) continue;
       await this.start(id).catch(() => {});
-      if (this.#live.get(id)?.state === "starting" || this.#live.get(id)?.state === "ready")
-        this.#failUpdate(id, stage, BACK_AS_IT_WAS);
+      const state = this.#live.get(id)?.state;
+      if (state === "starting" || state === "ready") {
+        // Starting finishes an update that had got past its swap, so it may have worked after all.
+        if (this.deps.updates?.available(id)) this.#failUpdate(id, stage, BACK_AS_IT_WAS);
+        else {
+          this.#updateFailures.delete(id);
+          this.#emit(id);
+        }
+      }
       return;
     }
   }

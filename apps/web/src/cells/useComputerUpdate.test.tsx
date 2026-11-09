@@ -365,6 +365,17 @@ describe("what an update says", () => {
     expect(toasts().join()).toContain("Your files and sign-ins are all still there.");
   });
 
+  it("doesn't call a refused press an update", async () => {
+    const { api, answer } = control();
+    render(<Watch api={api} computer={cell({ updateAvailable: true })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await act(async () =>
+      answer(new Response("Wait for dot to finish, or stop the task first.", { status: 409 })),
+    );
+    await settle(2000);
+    expect(toasts().join()).not.toContain("Your computer is updated");
+  });
+
   it("says nothing of an update this page never saw", async () => {
     const { api } = control();
     render(<Watch api={api} computer={cell({ state: "ready" })} />);

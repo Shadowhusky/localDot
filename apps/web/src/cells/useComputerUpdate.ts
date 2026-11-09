@@ -252,7 +252,6 @@ export function useUpdateProgressNotice(
       dismissToast(GOING);
       return;
     }
-    watched.current = true;
     dismissToast(DONE);
     showToast({
       id: GOING,
@@ -261,6 +260,8 @@ export function useUpdateProgressNotice(
       action: { label: "Details", onAction: () => detailsRef.current() },
     });
   }, [going]);
+  // Only what the daemon took on can end in "updated": a refused press never began.
+  if (cell?.updating) watched.current = true;
   const id = cell?.id ?? null;
   const failure = update.failure;
   const offered = !!update.offered;

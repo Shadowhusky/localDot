@@ -2838,7 +2838,7 @@ function Theatre({ api }: { api: ApiClient }) {
       names={names}
       dotLook={shown.lookAs}
       computerReady={cell?.state === "ready" && !cell.paused}
-      computerUpdating={!!cell?.updating}
+      computerUpdating={!!cell?.updating && cell.state !== "ready"}
       live={
         !viewedConversation && foot && !session.ended
           ? sentThinking
