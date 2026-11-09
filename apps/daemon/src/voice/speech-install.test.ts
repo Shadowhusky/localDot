@@ -3,11 +3,14 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,7 +63,12 @@ const pins = (files: Record<string, string>) =>
 
 const ENGINE_FILES = { "bin/engine": "#!/bin/sh\n", "lib/libonnx.dylib": "library" };
 const LIGHT_FILES = { "model.onnx": "light model", "tokens.txt": "light tokens" };
-const LANGUAGES_FILES = { "model.onnx": "languages model", "tokens.txt": "languages tokens" };
+// A folder among its files, as Qwen3-ASR's tokenizer is.
+const LANGUAGES_FILES = {
+  "model.onnx": "languages model",
+  "tokens.txt": "languages tokens",
+  "tokenizer/vocab.json": "{}",
+};
 
 function catalog(): SpeechCatalog {
   return {
@@ -71,6 +79,7 @@ function catalog(): SpeechCatalog {
         "darwin-arm64": {
           files: pins(ENGINE_FILES),
           sources: [pack("engine", "engine-root", ENGINE_FILES)],
+          libraryPaths: [".", "../lib", "../../../sherpa_onnx/lib"],
         },
       },
     },
@@ -327,7 +336,7 @@ describe("installing speech", { timeout: 30_000 }, () => {
     await speech.cancel();
     expect(speech.status().job).toBeNull();
     expect(speech.status().installed).toBeNull();
-    expect(readdirSync(join(speechDir(), "partial"))).toEqual([]);
+    expect(existsSync(join(speechDir(), "partial"))).toBe(false);
     expect(runs).toEqual([]);
   });
 
@@ -356,6 +365,7 @@ describe("installing speech", { timeout: 30_000 }, () => {
     expect(speech.status().installed).toMatchObject({ tier: "languages" });
     expect(existsSync(join(speechDir(), "models", "light"))).toBe(false);
     expect(existsSync(join(speechDir(), "models", "languages", "model.onnx"))).toBe(true);
+    expect(speech.model()).not.toBeNull();
     expect(asked.filter(({ url }) => url.includes("engine"))).toHaveLength(1);
   });
 
@@ -476,6 +486,198 @@ describe("installing speech", { timeout: 30_000 }, () => {
     speech.start("light");
     await settled(speech);
     expect(execFileSync("stat", statMode(speechDir()), { encoding: "utf8" }).trim()).toBe("700");
+  });
+});
+
+describe("what installed.json may decide", { timeout: 30_000 }, () => {
+  const record = (value: unknown) => {
+    mkdirSync(speechDir(), { recursive: true, mode: 0o700 });
+    writeFileSync(join(speechDir(), "installed.json"), JSON.stringify(value));
+  };
+  const forged = (engineVersion: string) => ({
+    tier: "light",
+    engineVersion,
+    binary: "../../../../../../../../../../../../../../bin/sh",
+    engineFiles: {},
+    modelFiles: {},
+    flags: {},
+    args: ["-c", "echo ran"],
+    languages: null,
+  });
+
+  it("never takes the program, its arguments or its files from it", async () => {
+    record(forged("1.0.0"));
+    const speech = installer();
+    await speech.ready;
+    expect(speech.model()).toBeNull();
+    expect(JSON.stringify(speech.status())).not.toContain("bin/sh");
+  });
+
+  it("runs what the catalog names once the files are in place", async () => {
+    const first = installer();
+    await first.ready;
+    first.start("light");
+    await settled(first);
+    await first.close();
+    expect(JSON.parse(readFileSync(join(speechDir(), "installed.json"), "utf8"))).toEqual({
+      tier: "light",
+      engineVersion: "1.0.0",
+    });
+    const later = installer();
+    await later.ready;
+    expect(later.model()?.binary).toBe(join(speechDir(), "engine", "1.0.0", "bin/engine"));
+    expect(later.model()?.args).toContain("--extra=1");
+  });
+
+  it("asks for a reinstall when it names a version the catalog doesn't, and deletes nothing outside", async () => {
+    const victim = join(home, "victim");
+    mkdirSync(victim);
+    writeFileSync(join(victim, "keep.txt"), "user data");
+    for (const value of [
+      forged("../../victim"),
+      { tier: "light", engineVersion: "../../victim" },
+    ]) {
+      record(value);
+      const speech = installer();
+      await speech.ready;
+      expect(speech.model()).toBeNull();
+      if (Object.keys(value).length === 2)
+        expect(speech.status().installed).toMatchObject({
+          tier: "light",
+          damaged: true,
+          reason: "outdated",
+        });
+      speech.start("languages");
+      await settled(speech);
+      expect(speech.status().installed).toMatchObject({ tier: "languages", damaged: false });
+      expect(readFileSync(join(victim, "keep.txt"), "utf8")).toBe("user data");
+      await speech.close();
+      rmSync(speechDir(), { recursive: true, force: true });
+    }
+  });
+
+  it("removes an old folder that's a link as the link, never what it points to", async () => {
+    const speech = installer();
+    await speech.ready;
+    speech.start("light");
+    await settled(speech);
+    const outside = join(home, "elsewhere");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "keep.txt"), "user data");
+    symlinkSync(outside, join(speechDir(), "engine", "0.9.0"));
+    symlinkSync(outside, join(speechDir(), "models", "old"));
+    speech.start("languages");
+    await settled(speech);
+    expect(readFileSync(join(outside, "keep.txt"), "utf8")).toBe("user data");
+    expect(existsSync(join(speechDir(), "engine", "0.9.0"))).toBe(false);
+    expect(existsSync(join(speechDir(), "models", "old"))).toBe(false);
+  });
+
+  it("deletes nothing through a folder swapped for a link", async () => {
+    const speech = installer();
+    await speech.ready;
+    speech.start("light");
+    await settled(speech);
+    const outside = join(home, "elsewhere");
+    renameSync(join(speechDir(), "models"), outside);
+    symlinkSync(outside, join(speechDir(), "models"));
+    speech.start("languages");
+    await settled(speech);
+    expect(existsSync(join(outside, "light", "model.onnx"))).toBe(true);
+    expect(lstatSync(join(speechDir(), "models")).isSymbolicLink()).toBe(false);
+    expect(speech.status().installed).toMatchObject({ tier: "languages", damaged: false });
+  });
+});
+
+describe("what runs beside the program", { timeout: 30_000 }, () => {
+  const installed = async () => {
+    const speech = installer();
+    await speech.ready;
+    speech.start("light");
+    await settled(speech);
+    expect(speech.model()).not.toBeNull();
+    return speech;
+  };
+  const engineDir = () => join(speechDir(), "engine", "1.0.0");
+
+  it("won't run with an unpinned file beside the program", async () => {
+    const speech = await installed();
+    writeFileSync(join(engineDir(), "bin", "libonnx.dylib"), "planted");
+    expect(speech.model()).toBeNull();
+    expect(speech.status().installed).toMatchObject({ damaged: true, reason: "changed" });
+  });
+
+  it("won't run with a library folder the program searches outside its own", async () => {
+    const speech = await installed();
+    mkdirSync(join(speechDir(), "sherpa_onnx", "lib"), { recursive: true });
+    writeFileSync(join(speechDir(), "sherpa_onnx", "lib", "libstdc++.so.6"), "planted");
+    expect(speech.model()).toBeNull();
+  });
+
+  it("won't run with an unpinned file beside the model, or a pinned one made a link", async () => {
+    const speech = await installed();
+    writeFileSync(join(speechDir(), "models", "light", "extra.onnx"), "planted");
+    expect(speech.model()).toBeNull();
+    const again = await (async () => {
+      rmSync(speechDir(), { recursive: true, force: true });
+      return installed();
+    })();
+    const binary = join(engineDir(), "bin", "engine");
+    const copy = join(home, "engine-copy");
+    renameSync(binary, copy);
+    symlinkSync(copy, binary);
+    expect(again.model()).toBeNull();
+  });
+
+  it("installing again clears what was planted and runs once more", async () => {
+    const speech = await installed();
+    writeFileSync(join(engineDir(), "bin", "libonnx.dylib"), "planted");
+    mkdirSync(join(speechDir(), "sherpa_onnx", "lib"), { recursive: true });
+    expect(speech.model()).toBeNull();
+    speech.start("light");
+    await settled(speech);
+    expect(speech.status().job).toBeNull();
+    expect(existsSync(join(engineDir(), "bin", "libonnx.dylib"))).toBe(false);
+    expect(existsSync(join(speechDir(), "sherpa_onnx", "lib"))).toBe(false);
+    expect(speech.model()).not.toBeNull();
+  });
+});
+
+describe("cancelling", { timeout: 30_000 }, () => {
+  it("refuses a new press until the clean-up is done, then installs", async () => {
+    const url = pinned.tiers[0]?.sources[0]?.url ?? "";
+    hang.add(url);
+    const speech = installer();
+    await speech.ready;
+    speech.start("light");
+    await vi.waitFor(() => expect(speech.status().job?.stage).toBe("model"), { timeout: 25_000 });
+    hang.clear();
+    const cancelled = speech.cancel();
+    expect(() => speech.start("light")).toThrow(SpeechInstallRefused);
+    await expect(speech.remove()).rejects.toBeInstanceOf(SpeechInstallRefused);
+    await cancelled;
+    expect(speech.status().job).toBeNull();
+    speech.start("light");
+    await settled(speech);
+    expect(speech.status().installed).toMatchObject({ tier: "light", damaged: false });
+  });
+});
+
+describe("a source with bad bytes", { timeout: 30_000 }, () => {
+  it("is downloaded once, then the next source is used", async () => {
+    const mirrored = catalog();
+    const tier = mirrored.tiers[0];
+    const good = tier?.sources[0];
+    if (!tier || !good) throw new Error("catalog");
+    const bad = { ...good, url: "https://mirror.test/light.tar.gz" };
+    served.set(bad.url, Buffer.alloc(good.bytes, 3));
+    tier.sources = [bad, good];
+    const speech = installer({ catalog: mirrored });
+    await speech.ready;
+    speech.start("light");
+    await settled(speech);
+    expect(speech.status().installed).toMatchObject({ tier: "light" });
+    expect(asked.filter(({ url }) => url === bad.url)).toHaveLength(1);
   });
 });
 

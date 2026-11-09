@@ -130,7 +130,12 @@ import { loadOrCreateToken } from "./token.ts";
 import { installedAppUpdater } from "./updates/installed-updater.ts";
 import { sourceAppUpdater } from "./updates/source-updater.ts";
 import { attachUpgradeRouter } from "./upgrade-router.ts";
-import { findSpeechModel, hostSpeechLookup, installedSpeech } from "./voice/speech.ts";
+import {
+  findSpeechModel,
+  hostSpeechLookup,
+  installedSpeech,
+  sweepVoiceAudio,
+} from "./voice/speech.ts";
 import { SPEECH_CATALOG } from "./voice/speech-catalog.ts";
 import { hostOfThisComputer } from "./voice/speech-fit.ts";
 import { SpeechInstaller } from "./voice/speech-install.ts";
@@ -836,6 +841,8 @@ const appUpdater = serviceIdentity
   : await sourceAppUpdater(home, process.env.LOCALDOT_INSTALL_PREFIX, installWait, installSettled);
 appUpdater.start();
 shutdown.unshift({ name: "app updater", stop: () => appUpdater.close() });
+const voiceAudio = join(home, "voice-audio");
+await sweepVoiceAudio(voiceAudio);
 const speechInstaller = new SpeechInstaller({
   home,
   catalog: SPEECH_CATALOG,
@@ -972,7 +979,9 @@ const app = createApp({
   connectors: { hub: agent.connectors, keyd, signIn: agent.connectorSignIn },
   notify: notify.routes,
   voice: {
-    speech: installedSpeech(hostSpeechLookup, () => speechInstaller.model()),
+    speech: installedSpeech(hostSpeechLookup, () => speechInstaller.model(), {
+      audio: voiceAudio,
+    }),
     install: speechInstaller,
   },
   previews,

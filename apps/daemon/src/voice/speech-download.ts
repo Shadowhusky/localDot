@@ -121,9 +121,13 @@ export async function downloadVerified(input: VerifiedDownload): Promise<void> {
   const attempts = input.attempts ?? ATTEMPTS;
   let fruitless = 0;
   let wholeAgain = false;
+  // A file built on bytes kept from earlier may hold a bad partial, so it gets one fresh try. One that
+  // came whole from a single request and doesn't match is the server's fault: the next source is.
+  let resumed = false;
   for (;;) {
     input.signal.throwIfAborted();
     const before = await sizeOf();
+    if (before > 0) resumed = true;
     let failure: unknown;
     if (before < input.bytes)
       try {
@@ -137,12 +141,13 @@ export async function downloadVerified(input: VerifiedDownload): Promise<void> {
     if (after === input.bytes) {
       if ((await sha256Of(part)) === input.sha256) break;
       await rm(part, { force: true });
-      if (wholeAgain)
+      if (wholeAgain || !resumed)
         throw new SpeechDownloadProblem(
           "verify",
           "The download didn't match the release's checksum. Nothing was installed.",
         );
       wholeAgain = true;
+      resumed = false;
       continue;
     }
     if (failure instanceof SpeechDownloadProblem && failure.problem === "verify") {
