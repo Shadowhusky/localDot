@@ -343,7 +343,9 @@ export class Previews {
     });
     const fronts = await this.#readFronts();
     const front = frontFor(fronts, requestHost);
-    if (!front) throw new PreviewError(409, { state: "needs-tailscale", message: fronts.problem });
+    // On the Mac's own localhost a preview needs no tailnet.
+    if (!front && request.local === undefined)
+      throw new PreviewError(409, { state: "needs-tailscale", message: fronts.problem });
     const target =
       "url" in request
         ? previewTarget(request.url, listing.addresses)
@@ -362,32 +364,49 @@ export class Previews {
       throw new PreviewError(409, {
         message: `Nothing is running at ${target.host} in your computer. Start it, then try again.`,
       });
-    const open = await this.#site(cellId, target, front);
+    const open =
+      front && request.local === undefined
+        ? await this.#site(cellId, target, front)
+        : await this.#local(cellId, target, request.local ?? target.port);
     return { preview: this.#item(open, front), open: this.#link(open, front, target.path) };
   }
 
   // A page in one preview going to another server in the same computer: that server's preview, and
-  // the link that signs the device in to it there.
-  #hop(cellId: string, target: PreviewTarget, requestHost: string): Promise<string> {
+  // the link that signs the device in to it there. From a preview on the Mac, the other server
+  // opens on the Mac too, at its own port.
+  #hop(
+    cellId: string,
+    target: PreviewTarget,
+    requestHost: string,
+    local: boolean,
+  ): Promise<string> {
     return this.#queued(async () => {
       const front = frontFor(await this.#readFronts(), requestHost);
-      if (!front || this.#endpoint(cellId) === "off")
+      if ((!front && !local) || this.#endpoint(cellId) === "off")
         throw new PreviewError(409, { message: "Open it from localDot instead." });
-      return this.#link(await this.#site(cellId, target, front), front, target.path);
+      const open =
+        front && !local
+          ? await this.#site(cellId, target, front)
+          : await this.#local(cellId, target, target.port, false);
+      return this.#link(open, front, target.path);
     });
   }
 
-  #link(open: Open, front: PreviewFront, path: string): string {
-    return `https://${front.hostname}:${open.site.port}${ENTRY_PATH}#${open.site.mint(path)}`;
+  #link(open: Open, front: PreviewFront | undefined, path: string): string {
+    return `${this.#origin(open, front)}${ENTRY_PATH}#${open.site.mint(path)}`;
+  }
+
+  #origin(open: Open, front: PreviewFront | undefined): string {
+    if (open.site.local) return `http://localhost:${open.site.port}`;
+    return front ? `https://${front.hostname}:${open.site.port}` : "";
   }
 
   // The open preview of `target`'s server, or a new one. Every loopback name reaches the same
   // server; each *.localhost name is a site of its own.
   async #site(cellId: string, target: PreviewTarget, front: PreviewFront): Promise<Open> {
-    const name = new URL(`${target.scheme}://${target.host}`).hostname;
-    const key = `${target.scheme}://${LOOPBACK.has(name) ? "loopback" : name}:${target.port}`;
+    const key = siteKey(target);
     const open =
-      [...this.#open.values()].find((o) => o.cellId === cellId && o.key === key) ??
+      [...this.#open.values()].find((o) => o.cellId === cellId && o.key === key && !o.site.local) ??
       (await this.#create(cellId, target, key, front));
     if (front.serve && !open.served && this.deps.serve) {
       await this.#serve(open.site.port);
@@ -409,7 +428,7 @@ export class Previews {
         hosts: () => frontHosts(this.#fronts, port),
         connect: (to) => this.#connect(cellId, to),
         computer: () => this.#computer(cellId),
-        hop: (to, host) => this.#hop(cellId, to, host),
+        hop: (to, host) => this.#hop(cellId, to, host, false),
         reused: this.#lastKey.get(port) !== key,
         now: this.#now,
       });
@@ -447,6 +466,66 @@ export class Previews {
     });
   }
 
+  // A preview on the Mac's own loopback at http://localhost:<port>: the address the app's sign-in
+  // provider has registered, so its redirects and callbacks land on the app. The owner chooses the
+  // port; one something on the Mac already answers on, or one of the block, is refused. Another app
+  // the owner had open at the same address gives it up.
+  async #local(cellId: string, target: PreviewTarget, port: number, replace = true): Promise<Open> {
+    const { from, to } = this.deps.range;
+    if (port >= from && port <= to)
+      throw new PreviewError(400, {
+        message: `localDot keeps localhost:${port} for its own previews. Choose another port.`,
+      });
+    const key = siteKey(target);
+    const there = this.#open.get(port);
+    if (there?.site.local && there.cellId === cellId && there.key === key) return there;
+    if (there && !replace)
+      throw new PreviewError(409, {
+        message: `localhost:${port} on this Mac is showing another app. Open this one from localDot.`,
+      });
+    if (there) {
+      this.#end(there);
+      await there.site.closed;
+    }
+    const site = new PreviewSite({
+      port,
+      target,
+      local: true,
+      hosts: () => localHosts(target, port),
+      connect: (to) => this.#connect(cellId, to),
+      computer: () => this.#computer(cellId),
+      hop: (to, host) => this.#hop(cellId, to, host, true),
+      reused: false,
+      now: this.#now,
+    });
+    try {
+      await site.listen();
+    } catch (error) {
+      site.close();
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EADDRINUSE")
+        throw new PreviewError(409, {
+          message: `Something on this Mac already uses localhost:${port}. Stop it, or choose another port.`,
+        });
+      if (code === "EACCES")
+        throw new PreviewError(409, {
+          message: `This Mac doesn't let localDot use localhost:${port}. Choose another port.`,
+        });
+      throw error;
+    }
+    const open: Open = {
+      site,
+      cellId,
+      key,
+      openedAt: new Date(this.#now()).toISOString(),
+      served: false,
+      answered: true,
+      seenAt: this.#now(),
+    };
+    this.#open.set(port, open);
+    return open;
+  }
+
   // The block's ports a new preview may take, best first: the one this server had before (a device
   // keeps nothing of another's there), then those unused longest, so a browser seldom meets a port
   // that served something else. With every port taken, the preview whose server has gone and that
@@ -461,6 +540,7 @@ export class Previews {
     if (free.length) return free;
     const gone = [...this.#open.values()]
       .filter((open) => {
+        if (open.site.local) return false;
         const ports = this.#computers.get(open.cellId)?.computer.ports;
         return open.site.idleFor() > 0 && ports !== undefined && !ports.has(open.site.target.port);
       })
@@ -655,9 +735,10 @@ export class Previews {
     return {
       id: open.site.id,
       target: `${scheme}://${host}/`,
-      origin: front ? `https://${front.hostname}:${open.site.port}` : "",
+      origin: this.#origin(open, front),
       openedAt: open.openedAt,
       ...(named(open) ? { state: open.answered ? "answering" : "not-answering" } : {}),
+      ...(open.site.local ? { local: true as const } : {}),
     };
   }
 
@@ -801,6 +882,20 @@ export class Previews {
 
 type Listening = Pick<PreviewServer, "port" | "url" | "name"> &
   Pick<PreviewListing["listeners"][number], "task" | "project" | "started" | "cpu" | "clients">;
+
+// Every loopback name reaches the same server; each *.localhost name is a site of its own.
+function siteKey(target: PreviewTarget): string {
+  const name = new URL(`${target.scheme}://${target.host}`).hostname;
+  return `${target.scheme}://${LOOPBACK.has(name) ? "loopback" : name}:${target.port}`;
+}
+
+// The names a preview on the Mac's `port` answers to: the loopback ones, and a *.localhost site's.
+function localHosts(target: PreviewTarget, port: number): Set<string> {
+  const name = new URL(`${target.scheme}://${target.host}`).hostname;
+  return new Set(
+    [...LOOPBACK, ...(name.endsWith(".localhost") ? [name] : [])].map((host) => `${host}:${port}`),
+  );
+}
 
 // A *.localhost site is one name among those its port's proxy routes.
 const named = (open: Open) =>
