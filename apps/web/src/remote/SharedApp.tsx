@@ -45,7 +45,8 @@ export function SharedApp({ api }: { api: ApiClient }) {
     conversation.choice,
   );
   const agent = useAgentSession(api, computer.cell, live);
-  const selection = agent.watchScreen ?? agent.snapshot?.screen;
+  // The web browser is signed in as the owner: a link without their apps watches the desktop.
+  const selection = grant?.apps ? (agent.watchScreen ?? agent.snapshot?.screen) : undefined;
   const browser = useBrowserScreen(api, computer.cell, selection);
   const watchingBrowser = selection?.screen === "browser";
   const shown = watchingBrowser ? browser.cell : computer.cell;

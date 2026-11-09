@@ -53,6 +53,25 @@ it("keeps the owner's apps and keys off a link unless it opts in, links made bef
   expect(restored.authenticate(plain.token)?.apps).toBe(false);
   expect(restored.list().map((link) => link.apps)).toEqual([false, false]);
 });
+it("shows the signed-in web browser only to a link with the owner's apps", () => {
+  const { links } = make();
+  const cell = ulid();
+  const paths = [
+    ["POST", `/api/cells/${cell}/browser-stream-ticket`],
+    ["GET", `/api/browsers/${cell}`],
+    ["HEAD", `/api/browsers/${cell}`],
+    ["GET", `/api/browsers/${cell}/status`],
+  ] as const;
+  for (const setting of [{}, { replay: true, settings: true }]) {
+    const row = links.authenticate(links.create({ ...options, ...setting }).token);
+    if (!row) throw new Error("the link did not authenticate");
+    for (const [method, path] of paths) expect(links.permits(row, method, path), path).toBe(false);
+    expect(links.permits(row, "POST", `/api/cells/${cell}/stream-ticket`)).toBe(true);
+  }
+  const row = links.authenticate(links.create({ ...options, apps: true }).token);
+  if (!row) throw new Error("the link did not authenticate");
+  for (const [method, path] of paths) expect(links.permits(row, method, path), path).toBe(true);
+});
 it("revokes just one of several permanent links and its stream tickets", () => {
   const { links } = make();
   const first = links.create({ ...options, expiresInHours: null }),
