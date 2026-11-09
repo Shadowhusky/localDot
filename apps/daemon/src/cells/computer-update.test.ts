@@ -949,6 +949,7 @@ describe("an update that can't be finished", () => {
     await waitUntil(() => orchestrator.get(id)?.state === "ready");
     expect(fake.state.containers.get(record.docker.desktop)?.image).toBe(NEW_DESKTOP);
     expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
+    expect(orchestrator.get(id)?.updateFailure).toBeUndefined();
   });
 
   it("lets Remove through while Docker keeps refusing the last step", async () => {

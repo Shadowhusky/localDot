@@ -817,6 +817,11 @@ export class CellOrchestrator {
         });
       throw error;
     });
+    // Nothing left to update: an unfinished one just finished, or the new version is what's starting.
+    if (this.#updateFailures.has(id) && !this.deps.updates?.available(id)) {
+      this.#updateFailures.delete(id);
+      this.#emit(id);
+    }
     const begun = await this.#startContainers(
       record,
       0,
