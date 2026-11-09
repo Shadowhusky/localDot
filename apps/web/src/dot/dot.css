@@ -133,6 +133,67 @@
   }
 }
 
+/* A deleted conversation's dot bursting (pop.ts): a copy above the page, as the row closes under it. */
+.dot-pop-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow: hidden;
+  contain: strict;
+  pointer-events: none;
+}
+
+.dot-pop {
+  position: absolute;
+  display: block;
+}
+
+.dot-pop-ball,
+.dot-pop-worn {
+  position: absolute;
+  inset: 0;
+  display: block;
+  will-change: transform, opacity;
+}
+
+.dot-pop .dot-avatar {
+  width: 100%;
+  height: 100%;
+}
+
+.dot-pop .dot-face {
+  transform-origin: 50% 43%;
+}
+
+.dot-pop-ring {
+  position: absolute;
+  inset: 12.5%;
+  border: 2px solid var(--color-fg-3);
+  border-radius: var(--radius-full);
+  opacity: 0;
+}
+
+.dot-pop-bit {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: var(--radius-full);
+  background-image: radial-gradient(circle at 35% 30%, var(--dot-body) 45%, var(--color-fg-3));
+  opacity: 0;
+}
+
+.dot-pop-bit[data-spark] {
+  border-radius: 0;
+  background-image: none;
+  background-color: var(--color-xenon);
+  clip-path: polygon(50% 0, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0 50%, 40% 40%);
+}
+
+/* Its copy stands in for it from the first frame. */
+[data-leaving="pop"] :is(.dot-avatar, .dot) {
+  visibility: hidden;
+}
+
 .dot-flat {
   fill: var(--dot-body);
 }

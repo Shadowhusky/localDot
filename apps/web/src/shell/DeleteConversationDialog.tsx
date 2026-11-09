@@ -1,11 +1,13 @@
 import { type RefObject, useEffect, useState } from "react";
-import { readConversationsAgain } from "../agent/conversation-list.ts";
+import { dropConversations, holdConversations } from "../agent/conversation-list.ts";
 import { deleteConversations, removalProblem } from "../agent/conversation-selection.ts";
 import { count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
+import { canFocus } from "../ui/focus.ts";
+import { landingAfter, popConversations } from "./conversation-leave.ts";
 
 export interface DeleteConversationDialogProps {
   api: ApiClient;
@@ -14,18 +16,24 @@ export interface DeleteConversationDialogProps {
   conversations: readonly { sessionId: string; sessions: readonly string[] }[] | null;
   anchor: RefObject<HTMLElement | null>;
   onClose(): void;
+  // As soon as the daemon has deleted them.
   onDeleted?(sessions: readonly string[]): void;
+  // Once their rows have played out and left the lists.
+  onRowsGone?(sessions: readonly string[]): void;
 }
 
 // Asks before conversations and everything they recorded go for good. The daemon refuses one while
 // any of its tasks is under way; that one, or one that couldn't go, stays and the confirmation stays
-// open to say so.
+// open to say so. Nothing moves until the daemon has answered: the confirmation's busy button covers
+// the wait, and a dot that burst can't come back, so only those truly gone ever do. The lists hold
+// their rows meanwhile, as a read could take one away before it had played out.
 export function DeleteConversationDialog({
   api,
   conversations,
   anchor,
   onClose,
   onDeleted,
+  onRowsGone,
 }: DeleteConversationDialogProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,19 +45,39 @@ export function DeleteConversationDialog({
     if (!conversations || busy) return;
     setBusy(true);
     setError(null);
+    const letGo = holdConversations(api);
     const result = await deleteConversations(
       api,
       conversations.map((conversation) => conversation.sessionId),
     );
     setBusy(false);
     const gone = conversations.filter((each) => result.deleted.includes(each.sessionId));
-    if (gone.length > 0) onDeleted?.(gone.flatMap((each) => each.sessions));
-    if (result.live.length > 0 || result.failed.length > 0) setError(removalProblem(result));
+    const stays = result.live.length > 0 || result.failed.length > 0;
+    if (gone.length === 0) letGo();
     else {
-      if (n > 1) announce("conversation", `Deleted ${count(n, "conversation", "conversations")}.`);
+      const ids = gone.map((each) => each.sessionId);
+      const sessions = gone.flatMap((each) => each.sessions);
+      const land = landingAfter(ids);
+      if (!stays && !outsideRows(anchor.current, ids)) anchor.current = land();
+      onDeleted?.(sessions);
+      popConversations(
+        ids,
+        () => {
+          dropConversations(api, ids);
+          onRowsGone?.(sessions);
+          letGo();
+        },
+        {
+          land,
+          under: stays ? document.querySelector('.ui-layer[data-kind="dialog"]') : null,
+        },
+      );
+    }
+    if (stays) setError(removalProblem(result));
+    else {
+      announce("conversation", `Deleted ${count(n, "conversation", "conversations")}.`);
       onClose();
     }
-    if (gone.length > 0) readConversationsAgain(api);
   };
   return (
     <Dialog
@@ -77,4 +105,10 @@ export function DeleteConversationDialog({
       </Button>
     </Dialog>
   );
+}
+
+// Whether focus can go back to what asked once these conversations have gone.
+function outsideRows(anchor: HTMLElement | null, ids: readonly string[]): boolean {
+  const row = anchor?.closest<HTMLElement>("[data-conversation]");
+  return canFocus(anchor) && !(row && ids.includes(row.dataset.conversation ?? ""));
 }
