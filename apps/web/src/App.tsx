@@ -46,8 +46,8 @@ import {
   STATUS_LABEL,
 } from "./agent/conversation-list.ts";
 import { conversationBlockReason } from "./agent/conversation-state.ts";
+import { FixCards } from "./agent/FixCards.tsx";
 import { useTaskStalled } from "./agent/heartbeat.ts";
-import { KeysLockedCard } from "./agent/KeysLockedCard.tsx";
 import { LatestSteps } from "./agent/LatestSteps.tsx";
 import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
 import { markdownToPlain } from "./agent/markdown.ts";
@@ -57,7 +57,7 @@ import { giveBack, sendAfter } from "./agent/queued-draft.ts";
 import { requestResearch, researchWait } from "./agent/research.ts";
 import { uploadFile } from "./agent/resumable-upload.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
-import { TaskRecovery } from "./agent/TaskRecovery.tsx";
+import { planResets, TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
 import { useConversation } from "./agent/useConversation.ts";
@@ -2088,12 +2088,8 @@ function Theatre({ api }: { api: ApiClient }) {
     }
   };
   const tipAction = idle?.action;
-  // This task met locked saved keys (or its model's key is in them), and they are still locked.
-  const keysLockedHere =
-    vaultLocked(keys.health) &&
-    !!agent.sessionId &&
-    !agent.model.ended &&
-    (agent.model.keysLocked || agent.model.state?.reason === STALL.keysLocked);
+  // What the task is waiting on the user to fix, as its own log says on every device.
+  const fixes = agent.fixes ?? [];
   const bandLine = hearing ? LISTENING_LINE : idle ? idle.text : narration;
   const bandSpeaker = hearing || idle ? "dot" : speaker;
   const pendingQuestion = agent.model.pendingAsk
@@ -3054,13 +3050,49 @@ function Theatre({ api }: { api: ApiClient }) {
         !viewedConversation && (
           <>
             {!stack && handOffNote}
-            {keysLockedHere && keys.unlock ? (
-              <KeysLockedCard
-                setup={keys.health?.vault?.state === "setup"}
-                unlock={keys.unlock}
-                onOpenKeys={(trigger) => showSettings(trigger, "keys", "keys-unlock")}
+            {fixes.length > 0 && agent.sessionId && !controls.fenced && (
+              <FixCards
+                blockers={fixes}
+                deps={{
+                  api,
+                  sessionId: agent.sessionId,
+                  keys,
+                  models: {
+                    groups: modelChoices,
+                    current: currentModel,
+                    differs: modelDiffers,
+                    remember: (option) => taskModel.choose(option.choice),
+                  },
+                  stall:
+                    agent.model.state?.state === "paused"
+                      ? {
+                          ...(agent.model.state.reason ? { reason: agent.model.state.reason } : {}),
+                          ...(agent.model.state.detail ? { detail: agent.model.state.detail } : {}),
+                        }
+                      : undefined,
+                  planResets: planResets(agent.model),
+                  local:
+                    taskModels?.kind === "api" &&
+                    taskModels.roles.some(
+                      (role) =>
+                        role.role === "main" && ["ollama", "lmstudio"].includes(role.provider),
+                    ),
+                  retry: {
+                    run: controls.resume,
+                    reason: controls.canResumeTask
+                      ? undefined
+                      : "The task can't continue right now.",
+                  },
+                  computer: {
+                    action: computerAction,
+                    run: (kind) => onComputer[kind](),
+                  },
+                  runtimeChanged: runtime.check,
+                  onOpenKeys: (trigger) => showSettings(trigger, "keys"),
+                }}
               />
-            ) : (
+            )}
+            {!fixes.some((open) => open.required) && (
               <TaskRecovery
                 agent={agent}
                 controls={controls}
@@ -3068,6 +3100,15 @@ function Theatre({ api }: { api: ApiClient }) {
                 onReenterKey={reenterKey}
                 onContinue={continueTask}
                 onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
+                computer={
+                  computerAction && computerAction.kind !== "stop"
+                    ? {
+                        label: computerAction.kind === "resume" ? "Resume" : "Turn on",
+                        reason: computerAction.enabled ? undefined : "Wait a moment",
+                        run: () => onComputer[computerAction.kind](),
+                      }
+                    : undefined
+                }
                 onResumeSelected={modelDiffers && recoveryWait ? carryOn : undefined}
                 resumeBlocked={modelSaving ? "Saving the selected model…" : undefined}
                 onReport={report.start}

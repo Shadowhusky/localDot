@@ -41,6 +41,7 @@ import { CopyButton } from "./CopyButton.tsx";
 import { cancelQueuedMessage, steerQueuedMessage } from "./control-api.ts";
 import { DotChoice } from "./DotChoice.tsx";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
+import { FixLine } from "./FixCards.tsx";
 import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine, StepsCaption, sameLive, sameSteps } from "./LiveWorkLine.tsx";
 import type { AgentMessage, AgentResult, AgentWords } from "./model.ts";
@@ -573,6 +574,10 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       was.at === now.at &&
       was.handed === now.handed &&
       was.declined === now.declined,
+  },
+  fix: {
+    draw: ({ item, thread }) => <FixLine blocker={item.blocker} names={thread.names} />,
+    same: (was, now, then, thread) => was.blocker === now.blocker && then.names === thread.names,
   },
   work: {
     draw: ({ item, thread }) =>

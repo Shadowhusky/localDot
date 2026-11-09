@@ -6,6 +6,7 @@ import {
 } from "@localdot/protocol";
 import {
   type FormEvent,
+  type ReactNode,
   type Ref,
   useCallback,
   useEffect,
@@ -67,6 +68,8 @@ export interface KeyFormProps {
   onHolding?(holding: boolean): void;
   // Offers Cancel, which clears the form, then calls this.
   onCancel?(): void;
+  // More ways on, beside Save.
+  actions?: ReactNode;
   // A saved key whose value is stored again, under the same name and destination: only the key
   // itself is asked for.
   reenter?: KeyRecord;
@@ -130,6 +133,7 @@ export function KeyForm({
   preset,
   onHolding,
   onCancel,
+  actions,
   reenter,
 }: KeyFormProps) {
   const statusId = useId();
@@ -683,6 +687,7 @@ export function KeyForm({
             Cancel
           </Button>
         )}
+        {actions}
         <Button
           type="submit"
           variant="primary"

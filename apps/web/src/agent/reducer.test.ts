@@ -1,6 +1,6 @@
 import { LocalDotEvent, ulidTime } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { emptyAgentModel, AGENT_LIMITS as L } from "./model.ts";
+import { emptyAgentModel, AGENT_LIMITS as L, openBlockers } from "./model.ts";
 import { createAgentFeed, parseAgentEvent, projectAgentEvent } from "./reducer.ts";
 
 const id = (n: number) => String(n).padStart(26, "0");
@@ -21,11 +21,46 @@ const message = id(10000),
   ask = id(20000),
   takeover = id(20001);
 describe("bounded agent projection", () => {
-  it("holds the Unlock card up from saved keys meeting a lock until they open again", () => {
+  const card = id(30000);
+  const raised = ev(0, "blocker.raise", {
+    blockerId: card,
+    blocker: { kind: "keys_locked" },
+    by: "localdot",
+  });
+  it("holds a card up from when it is raised until any device's fix clears it", () => {
+    const up = reduce([raised]);
+    expect(openBlockers(up).map((open) => open.blockerId)).toEqual([card]);
+    const fixed = projectAgentEvent(
+      up,
+      ev(1, "blocker.clear", { blockerId: card, outcome: "fixed" }),
+    );
+    expect(openBlockers(fixed)).toEqual([]);
+    expect(fixed.blockers.get(card)?.cleared?.outcome).toBe("fixed");
+    expect(openBlockers(emptyAgentModel())).toEqual([]);
+  });
+  it("draws one card for one blocker, even when it is raised again", () => {
+    const again = ev(1, "blocker.raise", {
+      blockerId: card,
+      blocker: { kind: "keys_locked" },
+      by: "localdot",
+      required: true,
+    });
+    const model = reduce([raised, again]);
+    expect(openBlockers(model)).toHaveLength(1);
+    expect(openBlockers(model)[0]).toMatchObject({ required: true, seq: 0 });
+  });
+  it("a card from a task that is over waits for nobody", () => {
+    const model = reduce([raised, ev(1, "session.end", { reason: "stopped" })]);
+    expect(openBlockers(model)).toEqual([]);
+    expect(model.blockers.get(card)?.cleared).toBeUndefined();
+  });
+  it("reads an old log's keys.lock as the same history", () => {
     const locked = reduce([ev(0, "keys.lock", { locked: true })]);
-    expect(locked.keysLocked).toBe(true);
-    expect(projectAgentEvent(locked, ev(1, "keys.lock", { locked: false })).keysLocked).toBe(false);
-    expect(emptyAgentModel().keysLocked).toBe(false);
+    expect(openBlockers(locked).map((open) => open.blocker)).toEqual([{ kind: "keys_locked" }]);
+    const open = projectAgentEvent(locked, ev(1, "keys.lock", { locked: false }));
+    expect(openBlockers(open)).toEqual([]);
+    expect([...open.blockers.values()][0]?.cleared?.outcome).toBe("fixed");
+    expect(openBlockers(emptyAgentModel())).toEqual([]);
   });
   it("correlates interleaved messages by ID; finals replace deltas and ignore later deltas/replay", () => {
     const events = [

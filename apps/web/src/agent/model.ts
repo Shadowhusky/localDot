@@ -100,6 +100,18 @@ export type AgentTakeover = EventOf<"takeover.request">["data"] & {
   readonly endTime?: number;
   readonly endAt?: number;
 };
+// Something the user can fix in the conversation: its card while it is open, then a line in the
+// thread. `seq` and the times are the raise's, `cleared` holds how it ended.
+export type AgentBlocker = EventOf<"blocker.raise">["data"] & {
+  readonly seq?: number;
+  readonly at?: number;
+  readonly time?: number;
+  readonly cleared?: EventOf<"blocker.clear">["data"] & {
+    readonly seq: number;
+    readonly at: number;
+    readonly time: number;
+  };
+};
 export interface AgentChange {
   readonly id: string;
   readonly step?: string;
@@ -257,13 +269,16 @@ export interface AgentModel {
   readonly retrying: boolean;
   readonly subscription: Reported<EventOf<"subscription.usage">["data"]> | null;
   readonly budget: Reported<EventOf<"budget.exceeded">["data"]> | null;
-  // The task met locked saved keys, and they haven't opened since.
-  readonly keysLocked: boolean;
+  readonly blockers: ReadonlyMap<string, AgentBlocker>;
   readonly spend: AgentSpend | null;
   readonly spendCalls: readonly SpendCall[];
   // Older material can be fetched from the event log by the later history UI. Never imply that
   // a bounded projection is the complete transcript.
   readonly historyTruncated: boolean;
+}
+// The cards still waiting on the user, oldest first. A task that is over waits for nobody.
+export function openBlockers(model: AgentModel): readonly AgentBlocker[] {
+  return model.ended ? [] : [...model.blockers.values()].filter((open) => !open.cleared);
 }
 // The hand-over the user holds the computer under: one they asked for, or dot's once they took it.
 export function heldByUser(model: AgentModel): AgentTakeover | undefined {
@@ -318,7 +333,7 @@ export function emptyAgentModel(): AgentModel {
     retrying: false,
     subscription: null,
     budget: null,
-    keysLocked: false,
+    blockers: new Map(),
     spend: null,
     spendCalls: [],
     historyTruncated: false,

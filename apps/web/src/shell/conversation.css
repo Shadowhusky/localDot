@@ -1284,6 +1284,25 @@
   }
 }
 
+/* localDot's own card: the mark says whose words these are, as nothing in a message can. */
+.thread-fix-origin {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1);
+  margin-bottom: calc(var(--spacing) * -2);
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.thread-fix .keys-unlock-form,
+.thread-fix .keys-form {
+  min-width: 0;
+}
+
+.thread-fix + .thread-fix {
+  margin-top: calc(var(--spacing) * 3);
+}
+
 .thread-recovery-title {
   color: var(--color-fg-1);
   font:

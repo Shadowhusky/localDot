@@ -12,6 +12,7 @@ import {
 } from "./activity.ts";
 import {
   AGENT_LIMITS,
+  type AgentBlocker,
   type AgentChange,
   type AgentDotChoice,
   type AgentMessage,
@@ -79,6 +80,8 @@ export type ThreadItem =
   // The computer changing hands: the user took it or dot handed it over (`handed`), or the user
   // handed it back, maybe saying "Not now" to dot's hand-off (`declined`).
   | (Item<"control"> & { took: boolean; at?: number; handed?: boolean; declined?: boolean })
+  // A card that is history: what happened to it, in a line. An open one is a card, outside the rows.
+  | (Item<"fix"> & { blocker: AgentBlocker })
   // The steps dot took between two things it said, or since the last while it works.
   | (Item<"work"> & {
       turn: string;
@@ -154,6 +157,9 @@ export function threadItems(
   proposals: Iterable<RoutineProposal> = [],
   origin?: SessionOrigin,
   dots: Iterable<AgentDotChoice> = [],
+  blockers: Iterable<AgentBlocker> = [],
+  // The task waits on its open cards. A task that isn't live reads them as history.
+  taskLive = false,
 ): ThreadItem[] {
   const placed: Placed[] = [];
   const place = (item: ThreadItem, order: number | undefined) =>
@@ -251,6 +257,20 @@ export function threadItems(
         },
         takeover.endSeq,
       );
+  }
+  for (const blocker of blockers) {
+    if (!blocker.cleared && taskLive) continue;
+    const at = blocker.cleared ?? blocker;
+    place(
+      {
+        kind: "fix",
+        key: `fix-${blocker.blockerId}`,
+        speaker: "dot",
+        atMs: sessionMs(at.at),
+        blocker,
+      },
+      at.seq,
+    );
   }
   const sorted = placed
     .sort((a, b) =>

@@ -219,6 +219,37 @@ probes against the final sources; `check:codex-release` verified the resulting r
 The real-account acceptance suite was not run.
 
 
+## Fixing a blocker in the conversation
+
+When something stops dot that the user can fix inside localDot, the fix is a card in the thread, not
+directions. A blocker has a typed kind (`packages/protocol/src/blockers.ts`), a `blocker.raise` event,
+a card in `apps/web/src/agent/FixCards.tsx` and a `blocker.clear` event.
+
+| Kind | Noticed from | The card | Clears on |
+| --- | --- | --- | --- |
+| `keys_locked` | keyd's denial or 423 while the vault is locked, a saved login or connected app failing while it is, the model's own key | Passphrase, sealed to keyd | The vault opening |
+| `key` | keyd naming a key to re-enter or changed outside localDot, a service's or the model's 401 | The Keys form for that one key | The key saved and usable |
+| `app` | A connected app's sign-in ending | Connect | The sign-in finishing |
+| `model` | The provider refusing, not answering or out of quota | Try again, or another model | The model answering, or moving to another |
+| `computer` | The computer going off or pausing under a task at work | Turn on, or Resume | The computer ready |
+| `runtime` | Docker gone, with the computer or the brain | Start Docker | Docker answering |
+
+The daemon raises a card from the failure itself. Otherwise dot calls `request_fix`, which takes a kind
+and an id and no words; the daemon checks the blocker is real first, so a page can't summon a card by
+telling dot to ask for one. `ask_user` can't stand in: a question about unlocking localDot's keys, or a
+lone confirm while a card is up, gets the real card or a refusal. Whichever way a card is raised, one
+thing has one card (`blockerSubject`).
+
+The card's words are localDot's, chosen by kind, and nothing dot or a page wrote reaches them. What is
+typed goes from the card to keyd, sealed in the page as in Keys: it never enters the task's log,
+transcript, the model's context or the daemon's log. Only the owner may answer: `/blockers/*` and
+`/api/runtime/start` refuse a shared link, as `/api/keyd/unlock` does.
+
+When a card clears, on any device, the task goes on by itself: dot hears it, a stalled model is resumed,
+and the card leaves one line in the thread. Not now tells dot to carry on without it or finish and say
+what is left, and the card isn't offered again until the user speaks. A card still open when its task
+ends reads as history. `keys.lock` from before all this still loads, as the same history.
+
 ## External waiting and premature completion
 
 The game runs `01M4V5BRM1DTGEVJXNERKTBPMF` and `01M4V5KACPNE0PJE3XMH55TA51`
