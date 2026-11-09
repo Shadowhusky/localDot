@@ -9,12 +9,14 @@ export type AwayCause = "stream" | "switch" | "browser";
 export type AwayLevel = "blip" | "brief" | "long";
 
 export const LONG_AWAY_MS = 10_000;
+// A first picture this long in coming: the page says so and offers to try again, and goes on trying.
+export const LONG_FIRST_MS = 20_000;
 
 // "first" until this view has shown the computer's picture: the screen is still on its way. After
 // that a picture is "shown", or held on the stage while it is "away"; it never reads as first again
 // until the computer goes down and comes back.
 export type StageConnection =
-  | { phase: "first" }
+  | { phase: "first"; long?: true }
   | { phase: "shown" }
   | { phase: "away"; cause: AwayCause; screen: ScreenName; level: AwayLevel };
 
@@ -29,6 +31,8 @@ export interface ConnectionInput {
   // The picture is put away on purpose (the computer is paused, or Replay covers the stage) and
   // something else says so.
   resting: boolean;
+  // Times the viewer asked for a first picture to try again: the wait counts from the last.
+  tries?: number;
 }
 
 export interface ConnectionMemory {
@@ -37,9 +41,18 @@ export interface ConnectionMemory {
   seen: ScreenName | null;
   // When the picture went, and when it went for its current reason.
   away: { since: number; cause: AwayCause; causeSince: number } | null;
+  // When this view began waiting for its first picture, on which try.
+  first: number | null;
+  tries: number;
 }
 
-export const NO_CONNECTION: ConnectionMemory = { computer: null, seen: null, away: null };
+export const NO_CONNECTION: ConnectionMemory = {
+  computer: null,
+  seen: null,
+  away: null,
+  first: null,
+  tries: 0,
+};
 
 // Returns `memory` itself when nothing changed, so a render can tell.
 export function stepConnection(
@@ -52,9 +65,15 @@ export function stepConnection(
   if (input.picture === "live")
     return own.seen === input.screen && !own.away
       ? own
-      : { computer: own.computer, seen: input.screen, away: null };
+      : { ...own, seen: input.screen, away: null, first: null };
   // A hidden page and a paused computer lose nothing; the clock starts when they come back.
-  if (!own.seen || input.resting || input.picture === "suspended")
+  const tries = input.tries ?? 0;
+  if (!own.seen) {
+    const waiting = !!input.computer && !input.resting && input.picture !== "suspended";
+    const first = !waiting ? null : own.first !== null && own.tries === tries ? own.first : now;
+    return first === own.first && tries === own.tries ? own : { ...own, first, tries };
+  }
+  if (input.resting || input.picture === "suspended")
     return own.away ? { ...own, away: null } : own;
   const cause: AwayCause =
     input.screen !== own.seen ? "switch" : input.screenUp ? "stream" : "browser";
@@ -68,7 +87,10 @@ export function connectionAt(
   now: number,
 ): StageConnection {
   if (input.picture === "live") return { phase: "shown" };
-  if (!memory.seen) return { phase: "first" };
+  if (!memory.seen)
+    return input.picture === "none" && memory.first !== null && now - memory.first >= LONG_FIRST_MS
+      ? { phase: "first", long: true }
+      : { phase: "first" };
   const away = memory.away;
   if (!away) return { phase: "shown" };
   // A held stream has already been gone a second.
@@ -83,6 +105,8 @@ export function connectionAt(
 
 // When a connection that is away next changes level by time alone.
 function nextLevelAt(memory: ConnectionMemory, connection: StageConnection): number | null {
+  if (connection.phase === "first")
+    return memory.first === null || connection.long ? null : memory.first + LONG_FIRST_MS;
   if (connection.phase !== "away" || !memory.away) return null;
   if (connection.level === "blip") return memory.away.since + HELD_AFTER_MS;
   if (connection.level === "brief") return memory.away.causeSince + LONG_AWAY_MS;

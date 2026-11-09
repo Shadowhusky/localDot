@@ -6,6 +6,7 @@ import {
   type ConnectionMemory,
   connectionAt,
   LONG_AWAY_MS,
+  LONG_FIRST_MS,
   NO_CONNECTION,
   type StageConnection,
   stepConnection,
@@ -39,6 +40,57 @@ const away = (
 ): StageConnection => ({ phase: "away", cause, screen, level });
 
 describe("the stage's connection", () => {
+  it("says so when a first picture is long in coming, and counts again from a new try", () => {
+    expect(
+      run([
+        [1_000, {}],
+        [1_000 + LONG_FIRST_MS - 1, {}],
+        [1_000 + LONG_FIRST_MS, {}],
+        [2_000 + LONG_FIRST_MS, { tries: 1 }],
+        [2_000 + 2 * LONG_FIRST_MS, { tries: 1 }],
+      ]),
+    ).toEqual([
+      { phase: "first" },
+      { phase: "first" },
+      { phase: "first", long: true },
+      { phase: "first" },
+      { phase: "first", long: true },
+    ]);
+  });
+
+  it("doesn't count a first picture that nothing is asking for", () => {
+    for (const quiet of [{ resting: true }, { picture: "suspended" as const }, { computer: null }])
+      expect(
+        run([
+          [0, {}],
+          [LONG_FIRST_MS - 1, quiet],
+          [LONG_FIRST_MS * 2, {}],
+          [LONG_FIRST_MS * 3 - 1, {}],
+          [LONG_FIRST_MS * 3, {}],
+        ]),
+      ).toEqual([
+        { phase: "first" },
+        { phase: "first" },
+        { phase: "first" },
+        { phase: "first" },
+        { phase: "first", long: true },
+      ]);
+  });
+
+  it("wakes by itself when a first picture has been long in coming", () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useStageConnection(at()));
+      expect(result.current).toEqual({ phase: "first" });
+      act(() => {
+        vi.advanceTimersByTime(LONG_FIRST_MS);
+      });
+      expect(result.current).toEqual({ phase: "first", long: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("is first only until this view has shown a picture", () => {
     expect(
       run([

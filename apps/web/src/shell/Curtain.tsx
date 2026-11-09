@@ -46,6 +46,15 @@ export interface CurtainProps {
   ready?: boolean;
   showDot: boolean;
   onReload?(): void;
+  // While connecting: no picture has come, for long enough to say so.
+  stuck?: ScreenStuck;
+}
+
+// A first picture that has been long in coming, and the way on from it.
+export interface ScreenStuck {
+  // The web browser in front isn't up, which no stream can mend: the desktop is the way on.
+  browser: boolean;
+  retry(): void;
 }
 
 export interface ReplaceAction {
@@ -93,10 +102,13 @@ export function Curtain({
   ready = false,
   showDot,
   onReload,
+  stuck,
 }: CurtainProps) {
   const phone = useMediaQuery(PHONE);
   const fresh = phase === "checking" || runtimeProblem ? undefined : freshStart;
   const recovering = !runtimeProblem && !fresh && phase === "unavailable" && !!replace;
+  const noPicture =
+    !runtimeProblem && !fresh && phase === "connecting" && !updating ? stuck : undefined;
   const copy: Copy | null = runtimeProblem
     ? {
         title:
@@ -125,8 +137,11 @@ export function Curtain({
             progress: false,
             button: { label: "Replace computer" },
           }
-        : curtainCopy(phase, { first, waking, updating, caption, notice, action });
-  const enabled = runtimeProblem ? true : recovering ? replace.enabled : action?.enabled;
+        : noPicture
+          ? noPictureCopy(noPicture)
+          : curtainCopy(phase, { first, waking, updating, caption, notice, action });
+  const enabled =
+    runtimeProblem || noPicture ? true : recovering ? replace.enabled : action?.enabled;
   const anyway =
     !runtimeProblem && !recovering && !copy?.progress && action?.kind === "start"
       ? startAnyway
@@ -183,7 +198,7 @@ export function Curtain({
               run={fresh.run}
             />
           ) : (
-            (action || recovering || runtimeProblem) &&
+            (action || recovering || runtimeProblem || noPicture) &&
             copy?.button && (
               <Button
                 variant="primary"
@@ -199,9 +214,11 @@ export function Curtain({
                     ? onRuntimeRetry
                     : copy.progress
                       ? undefined
-                      : recovering
-                        ? replace.run
-                        : (anyway ?? onAction)
+                      : noPicture
+                        ? noPicture.retry
+                        : recovering
+                          ? replace.run
+                          : (anyway ?? onAction)
                 }
               >
                 {anyway ? "Start anyway" : copy.button.label}
@@ -239,6 +256,22 @@ function freshStartCopy({ busy, note }: FreshStartAction): Copy {
         title: "Your computer needs a fresh start",
         sub: note ?? NEEDS_FRESH_START,
         progress: false,
+      };
+}
+
+function noPictureCopy({ browser }: ScreenStuck): Copy {
+  return browser
+    ? {
+        title: "The web browser isn't ready",
+        sub: "Your computer is running, and its web browser hasn't come up yet.",
+        progress: false,
+        button: { label: "Show the desktop" },
+      }
+    : {
+        title: "Can't show your screen yet",
+        sub: "Your computer is running, and localDot keeps trying. You can also try again now.",
+        progress: false,
+        button: { label: "Try again" },
       };
 }
 

@@ -1215,7 +1215,9 @@ function Theatre({ api }: { api: ApiClient }) {
       : physicalStageCell && controls.stopStatus.phase === "stopped"
         ? { ...physicalStageCell, state: "stopped" as const }
         : physicalStageCell;
+  const [screenTries, setScreenTries] = useState(0);
   const connection = useStageConnection({
+    tries: screenTries,
     computer:
       cell?.state === "ready" &&
       !cell.fenced &&
@@ -2327,6 +2329,8 @@ function Theatre({ api }: { api: ApiClient }) {
       onClose={() => setChoosingDot(false)}
     />
   );
+  // Dot's web browser isn't up: there is no stream to retry, while the desktop has its own.
+  const browserDown = shownScreen === "browser" && physicalStageCell?.state !== "ready";
   const curtainView = (
     <Curtain
       phase={curtain.phase}
@@ -2355,6 +2359,18 @@ function Theatre({ api }: { api: ApiClient }) {
       operation={operation}
       ready={curtain.lifting}
       showDot={showDot.value}
+      stuck={
+        connection.phase === "first" && connection.long
+          ? {
+              browser: browserDown,
+              retry() {
+                setScreenTries((tries) => tries + 1);
+                if (browserDown) stageFront.pick("desktop");
+                else stage.current?.retryStream();
+              },
+            }
+          : undefined
+      }
     />
   );
   // The conversation on show, by the entry the list read for it.
