@@ -123,6 +123,25 @@ for (const { name, choice } of [
       await shot(page, ui, "done");
     });
 
+    test("the notice's Update follows the same steps as Settings", async ({ page, ui }) => {
+      const fixture = await ui.open("ready");
+      await offer(page, fixture.origin);
+      await notices(page).getByRole("button", { name: "Update", exact: true }).click();
+      await expect(notices(page).getByText(/Updating your computer · Step 1 of 6/)).toBeVisible();
+      await steps(page, fixture.origin, {
+        stage: "keep",
+        share: "0.3",
+        detail: "Comparing it with the new version",
+      });
+      await expect(
+        notices(page).getByText(/Step 3 of 6 · Comparing it with the new version/),
+      ).toBeVisible();
+      await notices(page).getByRole("button", { name: "Details" }).click();
+      const sheet = page.getByRole("dialog").filter({ has: page.locator("#settings-sheet-body") });
+      await expect(stepNow(page)).toHaveText("Keep your apps and files");
+      await expect(sheet.getByText("Step 3 of 6 · Comparing it with the new version")).toBeVisible();
+    });
+
     test("a failed update says what happened, that the files are kept, and retries", async ({
       page,
       ui,
@@ -137,7 +156,12 @@ for (const { name, choice } of [
       });
       await expect(notices(page).getByText("Your computer wasn't updated")).toBeVisible();
       await expect(notices(page).getByRole("button", { name: "Retry" })).toBeVisible();
-      const row = sheet.locator(".ui-group-row").filter({ hasText: "wasn't updated" });
+      const row = sheet.locator(".ui-group-row").filter({ hasText: "Not updated" });
+      await expect(row.getByText("Not updated")).toBeVisible();
+      const label = await row
+        .locator(".settings-update-label")
+        .evaluate((e) => [e.scrollWidth, e.clientWidth]);
+      expect(label[0]).toBeLessThanOrEqual(label[1] ?? 0);
       await expect(row.getByText(/Docker has run out of disk space/)).toBeVisible();
       await expect(
         row.getByRole("list", { name: "Update steps" }).locator('li[data-state="failed"]'),
@@ -151,7 +175,7 @@ for (const { name, choice } of [
       page,
       ui,
     }) => {
-      await ui.open(isPhone(page) ? "conversations" : "fenced");
+      await ui.open("fenced");
       let phase = "retiring";
       let record: Record<string, unknown> | undefined;
       await page.route("**/api/cells/*/fence", (route) =>
@@ -172,14 +196,6 @@ for (const { name, choice } of [
           },
         }),
       );
-      if (isPhone(page)) {
-        await ui.step("fenced");
-        await page.goBack().catch(() => {});
-        await page.evaluate(() => {
-          window.location.hash = "";
-        });
-        await page.locator(".phone-notice").first().getByRole("button", { name: "Details" }).click();
-      }
       await page.getByRole("button", { name: "Replace computer" }).click();
       const words = page.locator(".curtain-sub");
       await expect(words).toContainText("Step 1 of 3 · Saving the old computer. Your files are kept.");
@@ -305,6 +321,6 @@ test("what a computer update says stays readable in every appearance", async ({ 
     fail: "keep",
     message: "Your computer couldn't be updated. It's back as it was, and your files are kept.",
   });
-  await expect(sheet.getByText("Your computer wasn't updated", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("Not updated", { exact: true })).toBeVisible();
   await read("failed");
 });

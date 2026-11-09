@@ -958,9 +958,7 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
         <span className="settings-update-label" role="status">
           <span data-shown={update.busy || failure ? undefined : ""}>New version ready</span>
           <span data-shown={update.busy ? "" : undefined}>Updating…</span>
-          <span data-shown={failure && !update.busy ? "" : undefined}>
-            Your computer wasn't updated
-          </span>
+          <span data-shown={failure && !update.busy ? "" : undefined}>Not updated</span>
         </span>
       }
       detail={

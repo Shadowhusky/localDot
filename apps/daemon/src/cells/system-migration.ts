@@ -305,7 +305,7 @@ export class SystemMigration {
       const done = await docker.request<{ StatusCode: number }>({
         method: "POST",
         path: `${route(id)}/wait`,
-        timeoutMs: 300000,
+        timeoutMs: LONG_STEP_MS,
       });
       if (done.StatusCode !== 0) throw failure();
       return helperOutput(

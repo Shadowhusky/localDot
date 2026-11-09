@@ -772,7 +772,7 @@ describe("settings inspector", () => {
     const update = { available: true, busy: false, error: null, run, failure };
     const view = render(<SettingsSheet {...props()} update={update} />);
     fireEvent.click(screen.getByRole("button", { name: "Your computer" }));
-    expect(within(sheet()).getByText("Your computer wasn't updated")).toBeTruthy();
+    expect(within(sheet()).getByText("Not updated")).toBeTruthy();
     expect(within(sheet()).getByText(failure.message)).toBeTruthy();
     expect(
       within(within(sheet()).getByRole("list", { name: "Update steps" }))
