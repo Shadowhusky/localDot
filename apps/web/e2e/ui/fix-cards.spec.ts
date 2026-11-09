@@ -517,8 +517,11 @@ test.describe("a secret and the message box", () => {
     const box = await messageBox(page);
     await box.click();
     await box.fill("please carry on");
-    await trySending(page);
-    await expect(box).toHaveValue("");
+    // A message can't go until the page has caught up with the task, and stays in the box till then.
+    await expect(async () => {
+      await trySending(page);
+      await expect(box).toHaveValue("", { timeout: 2000 });
+    }).toPass();
     await box.focus();
     await page.request.post(`${fixture.origin}/__qa/keys-locked`);
     const card = page.getByRole("region", { name: "Unlock your saved keys" });
