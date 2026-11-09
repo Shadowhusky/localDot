@@ -77,6 +77,15 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   `POST /__qa/talk?turns=<n>&short=1` for more) with real wheels and touch drags, while `scroll-recorder.ts`
   notes what each painted frame shows. It fails on anything that moved further than the reader's input
   explains and on any row in view taken out of the page. `QA_SCROLL_OUT=<file>` appends each run's numbers.
+- **Unfolding:** `unfold-motion.spec.ts` and `unfold-file.spec.ts` read the frames as painted, with the
+  motion on, as a step, run or file opens: the page moves with the opening or not at all, and nothing
+  moves once it has opened.
+- **Scrollbars:** `scrollbars.spec.ts` walks the same states as the contrast sweep (`app-walk.ts`), and
+  what only long words show, at `c14` `c39` `w14` `w39` in light and dark. With classic scrollbars
+  forced on, it fails on anything that always draws a bar with nothing to scroll, overflows by a pixel
+  or two or only by what a `::before` or `::after` draws, or scrolls sideways without being meant to
+  (`SIDEWAYS` in `scrollbars.ts`). Each project walks in one view; `QA_SWEEP_VIEW=chat` or `studio`
+  walks every project in that view, and `QA_SWEEP_SIZE=1100x640` at that window size.
 - **Performance:** `perf-live-run.spec.ts` and `perf-stage.spec.ts` count what watching a task costs
   the page and the stage, under `POST /__qa/live-run?ms=<n>` and a GPU-decoded stand-in for the
   stream (`perf.ts`), with generous budgets. `QA_PERF_OUT=<file>` appends each run's numbers;
