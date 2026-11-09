@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +18,7 @@ import {
   type SpeechLookup,
   speechTranscriber,
   spokenText,
+  sweepVoiceAudio,
 } from "./speech.ts";
 
 function lookup(files: readonly string[], env: NodeJS.ProcessEnv = {}): SpeechLookup {
@@ -133,24 +142,29 @@ describe("turning speech into text", () => {
 });
 
 it("does not stay busy if the temporary folder cannot be created", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ld-voice-blocked-"));
+  writeFileSync(join(dir, "a-file"), "");
   const speech = speechTranscriber(
     { binary: "/bin/whisper-cli", model: "/model", englishOnly: false },
-    { tmp: "/nonexistent/localdot/voice" },
+    { tmp: join(dir, "a-file", "voice") },
   );
-  await expect(speech.transcribe(new Uint8Array([1]), "en")).rejects.toMatchObject({
-    code: "ENOENT",
-  });
-  await expect(speech.transcribe(new Uint8Array([1]), "en")).rejects.toMatchObject({
-    code: "ENOENT",
-  });
+  try {
+    await expect(speech.transcribe(new Uint8Array([1]), "en")).rejects.toMatchObject({
+      code: "ENOTDIR",
+    });
+    await expect(speech.transcribe(new Uint8Array([1]), "en")).rejects.toMatchObject({
+      code: "ENOTDIR",
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 it("does not start a model for an already cancelled request", async () => {
-  const speech = speechTranscriber({
-    binary: "/bin/whisper-cli",
-    model: "/model",
-    englishOnly: false,
-  });
+  const speech = speechTranscriber(
+    { binary: "/bin/whisper-cli", model: "/model", englishOnly: false },
+    { tmp: join(tmpdir(), "ld-voice-never-made") },
+  );
   await expect(
     speech.transcribe(new Uint8Array([1]), "en", AbortSignal.abort()),
   ).rejects.toMatchObject({ name: "AbortError" });
@@ -184,6 +198,8 @@ it("passes cancellation to the process and accepts the next recording after it e
   }
 });
 
+const AUDIO = join(tmpdir(), "ld-voice-route-audio");
+
 describe("which speech model the voice route uses", () => {
   const hand = lookup([
     "/opt/homebrew/bin/whisper-cli",
@@ -199,6 +215,7 @@ describe("which speech model the voice route uses", () => {
     const route = installedSpeech(
       () => hand,
       () => ours,
+      { audio: AUDIO },
     )();
     expect(route?.languages).toEqual(["zh", "en"]);
     expect(route?.englishOnly).toBe(false);
@@ -208,6 +225,7 @@ describe("which speech model the voice route uses", () => {
     const route = installedSpeech(
       () => hand,
       () => null,
+      { audio: AUDIO },
     )();
     expect(route).not.toBeNull();
     expect(route?.languages).toBeNull();
@@ -218,6 +236,7 @@ describe("which speech model the voice route uses", () => {
     const route = installedSpeech(
       () => hand,
       () => usable,
+      { audio: AUDIO },
     );
     expect(route()?.languages).toEqual(["zh", "en"]);
     usable = null;
@@ -232,6 +251,7 @@ describe("which speech model the voice route uses", () => {
       installedSpeech(
         () => named,
         () => ours,
+        { audio: AUDIO },
       )()?.languages,
     ).toBeNull();
   });
@@ -241,6 +261,7 @@ describe("which speech model the voice route uses", () => {
       installedSpeech(
         () => lookup([]),
         () => null,
+        { audio: AUDIO },
       )(),
     ).toBeNull();
   });
@@ -249,6 +270,7 @@ describe("which speech model the voice route uses", () => {
     const route = installedSpeech(
       () => hand,
       () => ours,
+      { audio: AUDIO },
     );
     expect(route()).toBe(route());
   });
@@ -335,5 +357,44 @@ describe("running the installed model", () => {
     expect(timeout).toBeGreaterThanOrEqual(120_000);
     await speech.transcribe(new Uint8Array(44 + 2 * 16_000), "en");
     expect(timeout).toBe(30_000);
+  });
+});
+
+describe("where audio waits while it's read", () => {
+  let home: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "ld-voice-home-"));
+  });
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  it("is a private folder under localDot's home, never the system's temporary folder", async () => {
+    const audio = join(home, "voice-audio");
+    let wav = "";
+    const execFile: ExecFile = (_file, args, _options, callback) => {
+      wav = args[args.indexOf("-f") + 1] ?? "";
+      callback(null, "words\n");
+    };
+    const hand = lookup([
+      "/opt/homebrew/bin/whisper-cli",
+      "/Users/me/.cache/whisper.cpp/ggml-base.bin",
+    ]);
+    const route = installedSpeech(
+      () => hand,
+      () => null,
+      { audio, execFile },
+    )();
+    await route?.transcribe(new Uint8Array([1]), "en");
+    expect(wav.startsWith(`${audio}/`)).toBe(true);
+    expect(statSync(audio).mode & 0o777).toBe(0o700);
+    expect(readdirSync(audio)).toEqual([]);
+  });
+
+  it("is emptied at start-up of anything a stopped localDot left behind", async () => {
+    const audio = join(home, "voice-audio");
+    mkdirSync(join(audio, "localdot-voice-abc"), { recursive: true });
+    writeFileSync(join(audio, "localdot-voice-abc", "speech-0.wav"), "someone talking");
+    await sweepVoiceAudio(audio);
+    expect(readdirSync(audio)).toEqual([]);
+    expect(statSync(audio).mode & 0o777).toBe(0o700);
   });
 });

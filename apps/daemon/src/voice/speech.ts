@@ -1,7 +1,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { speechChunks } from "./speech-chunks.ts";
 
@@ -121,9 +121,17 @@ export const speechTimeoutMs = (bytes: number) =>
 const NOISE = /^[[(].*[\])]$/;
 const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}　-〿＀-￯]/u;
 
+// Where recordings wait while they're read: a private folder under localDot's home, emptied at
+// start-up, so audio never outlives a daemon that stopped mid-way.
+export async function sweepVoiceAudio(dir: string) {
+  await rm(dir, { recursive: true, force: true });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await chmod(dir, 0o700);
+}
+
 export function speechTranscriber(
   model: SpeechModel,
-  opts: { execFile?: ExecFile; tmp?: string } = {},
+  opts: { execFile?: ExecFile; tmp: string },
 ): Transcriber {
   const run = opts.execFile ?? (nodeExecFile as unknown as ExecFile);
   let busy = false;
@@ -138,7 +146,8 @@ export function speechTranscriber(
       busy = true;
       let dir: string | undefined;
       try {
-        dir = await mkdtemp(join(opts.tmp ?? tmpdir(), "localdot-voice-"));
+        await mkdir(opts.tmp, { recursive: true, mode: 0o700 });
+        dir = await mkdtemp(join(opts.tmp, "localdot-voice-"));
         signal?.throwIfAborted();
         const pieces = installed ? speechChunks(wav) : [wav];
         const files = pieces.map((_, index) => join(dir as string, `speech-${index}.wav`));
@@ -225,8 +234,9 @@ function installedWords(out: string, pieces: number): string[] {
 // model keeps its transcriber, and with it the one-at-a-time rule. A model named in
 // LOCALDOT_SPEECH_MODEL comes first, then what localDot installed, then any Whisper found here.
 export function installedSpeech(
-  lookup = hostSpeechLookup,
-  ours: () => InstalledModel | null = () => null,
+  lookup: () => SpeechLookup,
+  ours: () => InstalledModel | null,
+  opts: { audio: string; execFile?: ExecFile },
 ): () => Transcriber | null {
   let kept: { key: string; transcriber: Transcriber } | null = null;
   return () => {
@@ -240,7 +250,11 @@ export function installedSpeech(
     const key = isInstalled(model)
       ? `${model.binary}\n${model.args.join("\n")}`
       : `${model.binary}\n${model.model}`;
-    if (kept?.key !== key) kept = { key, transcriber: speechTranscriber(model) };
+    if (kept?.key !== key)
+      kept = {
+        key,
+        transcriber: speechTranscriber(model, { tmp: opts.audio, execFile: opts.execFile }),
+      };
     return kept.transcriber;
   };
 }

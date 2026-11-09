@@ -50,7 +50,7 @@ describe.runIf(on)("a real speech install", { timeout: 60 * 60_000 }, () => {
       const model = speech.model();
       expect(model).not.toBeNull();
       if (!model) return;
-      const heard = speechTranscriber(model);
+      const heard = speechTranscriber(model, { tmp: join(dir, "voice-audio") });
       const said: string[] = [];
       for (const file of spoken(dir)) {
         const started = Date.now();
