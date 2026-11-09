@@ -139,7 +139,9 @@ for (const { name, choice } of [
       await notices(page).getByRole("button", { name: "Details" }).click();
       const sheet = page.getByRole("dialog").filter({ has: page.locator("#settings-sheet-body") });
       await expect(stepNow(page)).toHaveText("Keep your apps and files");
-      await expect(sheet.getByText("Step 3 of 6 · Comparing it with the new version")).toBeVisible();
+      await expect(
+        sheet.getByText("Step 3 of 6 · Comparing it with the new version"),
+      ).toBeVisible();
     });
 
     test("a failed update says what happened, that the files are kept, and retries", async ({
@@ -178,9 +180,7 @@ for (const { name, choice } of [
       await ui.open("fenced");
       let phase = "retiring";
       let record: Record<string, unknown> | undefined;
-      await page.route("**/api/cells/*/fence", (route) =>
-        route.fulfill({ json: { revision: 1 } }),
-      );
+      await page.route("**/api/cells/*/fence", (route) => route.fulfill({ json: { revision: 1 } }));
       await page.route("**/api/cells/*/replacement", (route) => {
         const oldCellId = new URL(route.request().url()).pathname.split("/")[3];
         const { requestId } = route.request().postDataJSON();
@@ -198,7 +198,9 @@ for (const { name, choice } of [
       );
       await page.getByRole("button", { name: "Replace computer" }).click();
       const words = page.locator(".curtain-sub");
-      await expect(words).toContainText("Step 1 of 3 · Saving the old computer. Your files are kept.");
+      await expect(words).toContainText(
+        "Step 1 of 3 · Saving the old computer. Your files are kept.",
+      );
       await expect(page.getByRole("heading", { name: "Replacing your computer" })).toBeVisible();
       await expect(words).toHaveText(/^\d+:\d\d · /);
       await shot(page, ui, "replacing");
