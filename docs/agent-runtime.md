@@ -235,21 +235,49 @@ a card in `apps/web/src/agent/FixCards.tsx` and a `blocker.clear` event.
 | `runtime` | Docker gone, with the computer or the brain | Start Docker | Docker answering |
 
 The daemon raises a card from the failure itself. Otherwise dot calls `request_fix`, which takes a kind
-and an id and no words; the daemon checks the blocker is real first, so a page can't summon a card by
-telling dot to ask for one. `ask_user` can't stand in: a question about unlocking localDot's keys, or a
-lone confirm while a card is up, gets the real card or a refusal. Whichever way a card is raised, one
-thing has one card (`blockerSubject`).
+and an id and no words, and the daemon checks the blocker first: the vault locked, keyd's flag on the
+key or a 401 for it in this task, a sign-in seen to end, the computer off, Docker down. Anything else is
+an error, so a page can't summon a card by telling dot to ask for one. A stall the brain reports is
+checked the same way, against `keyd.secrets()` and the vault's health, since its word comes from a model
+call's reply; keyd also removes `X-Keyd-*` from upstream replies. One thing has one card
+(`blockerSubject`). A card that ended with nothing fixed may come back once, then only after a wait that
+grows each time. The user's Not now holds until the owner's own message, not a guest's or a routine's.
 
-The card's words are localDot's, chosen by kind, and nothing dot or a page wrote reaches them. What is
-typed goes from the card to keyd, sealed in the page as in Keys: it never enters the task's log,
-transcript, the model's context or the daemon's log. Only the owner may answer: `/blockers/*` and
-`/api/runtime/start` refuse a shared link, as `/api/keyd/unlock` does.
+Secrets typed into a card go from the card to keyd, sealed in the page as in Keys: they never enter the
+task's log, transcript, the model's context or the daemon's log. Only the owner may answer:
+`/blockers/*` and `/api/runtime/start` refuse a shared link, as `/api/keyd/unlock` does. A guest reading
+the log (`/events`, `/history`, `/stream`) sees `unknown` for the key in `blocker.raise` and `key.use`.
 
-When a card clears, on any device, the task goes on by itself: dot hears it, a stalled model is resumed,
-and the card leaves one line in the thread. Not now tells dot to carry on without it or finish and say
-what is left, and the card isn't offered again until the user speaks. A message moves on from a card
-as from any other wait (see "Messages while dot waits on the user"). A card still open when its task
-ends reads as history. `keys.lock` from before all this still loads, as the same history.
+A card's sentences are localDot's, chosen by kind. Three things on it are not, and are set apart: a key's
+id, in a code style after "Saved as", which dot may have chosen when it asked for the key; a provider's
+refusal, quoted and marked as the provider's; and an app's name and host, from its saved configuration.
+A key's label stays off the card, since dot can write that. A card dot asked for says so beside the
+localDot mark.
+
+Keeping a form of dot's from passing for a card is a mitigation, not a guarantee.
+`apps/daemon/src/agent/tools/card-words.ts` normalises `ask_user`'s strings, `request_takeover`'s note
+and what `credentials` `request` would show (NFKC, format characters, marks on Latin letters and common
+look-alikes) and reads them for words about unlocking localDot's keys, in English and Chinese. Those get
+the real card while the vault is locked and a refusal otherwise, and a key request that claims to be
+localDot's is refused. A paraphrase, another language or a picture of the words gets past this. What
+holds regardless: the passphrase field is only ever on localDot's card; a form of dot's says in fixed
+words that localDot never asks for its passphrase there; plain-text fields named like a secret are
+refused, again by word list, so an answer to a form that gets past it does land in the log and reach
+dot; and in a task that has read outside words, a key request loses dot's description and needs an OK
+before a key can go to a place no saved key goes to. A lone confirm while a card is up is refused, except
+the brain's own guard, told by its call and its fixed words.
+
+A task carries on by itself only when the fix came through its own card, on any device: the card tells
+the daemon (`/blockers/:id/use`, owner only, holding nothing typed) as the user starts the fix, and that
+counts for 30 minutes. It holds for tasks that have read web pages too. Fixed any other way, such as from
+Keys or from another conversation's card, the card still closes and leaves its line, but nothing restarts:
+dot hears with the next message, a stalled task or a `request_fix` call waits with `fixed elsewhere`, and
+Continue or a message moves it on. This binds what a task does when it is stopped. A task still running
+can retry on its own and find the keys open. A task that ended blocked or gave up gets its ordinary idle
+time and no more; one that ended its turn on a card waits up to four hours for it. A call that goes through
+closes a card as `worked`, which doesn't claim the user did anything. A message moves on from a card as
+from any other wait (see "Messages while dot waits on the user"). A card still open when its task ends
+reads as history. `keys.lock` from before all this still loads, as the same history.
 
 ## External waiting and premature completion
 
@@ -337,8 +365,12 @@ commands answers only once each has ended or gone to the background.
 
 ## Messages while dot waits on the user
 
-The message box works during any wait of dot's and sends straight away. A message the owner sends
-then moves on from the wait, on the daemon, whichever client sent it and whichever harness runs the
+The message box works during any wait of dot's. It sends straight away, except while a field for a
+secret is up (a card that takes one, a question with a password, code or key): then Enter and Send only
+bring up a step that says "Send as a message — dot will read this", since the words may be that secret.
+The card or form takes the keys from an empty box. No draft is kept during such a wait, one kept from
+before it is cleared, and whatever is typed during it is cleared when it ends. A message the owner sends
+moves on from the wait, on the daemon, whichever client sent it and whichever harness runs the
 task: the tool call blocked on the wait returns, and the message reaches dot as a steer, through the
 same inbox as any other. It is never taken for the wait's answer, and it isn't queued behind it.
 

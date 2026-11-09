@@ -34,6 +34,7 @@ import { RevealedText } from "./ApprovalValue.tsx";
 import { type AskDraft, type AskState, useAskState } from "./ask-draft.ts";
 import {
   type AskField,
+  asksPrivate,
   confirmsBySubmit,
   fieldProblem,
   fieldValue,
@@ -47,6 +48,7 @@ import { CopyButton } from "./CopyButton.tsx";
 import { FileTransferFailure } from "./file-transfer.ts";
 import { KeyFound } from "./KeyFound.tsx";
 import { markdownToPlain } from "./markdown.ts";
+import { emptyMessageBoxHasKeys } from "./message-box.ts";
 import { PrivateKeyRequest } from "./PrivateKeyRequest.tsx";
 import type { UploadOptions } from "./resumable-upload.ts";
 import { hiddenWarning, plainReveal, revealText } from "./reveal-text.ts";
@@ -134,14 +136,17 @@ function StandardAskForm({
 
   // Typing starts in the first field when it takes typing and nothing else has focus, so a question
   // never takes the keys from what you were typing elsewhere. A phone keeps its keyboard down until
-  // a field is tapped.
+  // a field is tapped. A form that takes a secret also takes the keys from the empty message box, so
+  // the secret doesn't land there.
   const typed = TYPED.has(fields[0]?.kind ?? "qr");
+  const secret = asksPrivate(fields);
   useEffect(() => {
-    if (touch || reason || layout === "sheet" || !typed) return;
-    const active = document.activeElement;
-    if (active && active !== document.body) return;
+    if (reason) return;
+    const free = !document.activeElement || document.activeElement === document.body;
+    const asked = !touch && layout !== "sheet" && typed && free;
+    if (!asked && !(secret && emptyMessageBoxHasKeys())) return;
     form.current?.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true });
-  }, [touch, reason, layout, typed]);
+  }, [touch, reason, layout, typed, secret]);
 
   // Nothing waits on an answer the user may leave to dot. A field that needs one, or holds one
   // that doesn't fit, takes focus and says why, so a phone opens its keyboard there.

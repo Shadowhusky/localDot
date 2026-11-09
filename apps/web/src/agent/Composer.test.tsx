@@ -7,7 +7,7 @@ import { requestRevise } from "../deliverables/revise-draft.ts";
 import { createApi } from "../lib/api.ts";
 import type { TextAreaProps } from "../ui/TextArea.tsx";
 import { splitAttachments, withAttachments } from "./attachments.ts";
-import { Composer, type ComposerProps } from "./Composer.tsx";
+import { Composer, type ComposerProps, keepDraftNow } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { editQueued, giveBack, sendAfter } from "./queued-draft.ts";
@@ -1498,7 +1498,6 @@ describe("typing", () => {
 describe("sending while dot waits on the user", () => {
   it.each([
     ["question", "Sending moves on from dot's question"],
-    ["private", "Sending moves on from dot's question. Messages aren't kept secret"],
     ["approval", "Sending moves on without approving"],
     ["computer", "Sending hands the computer back"],
   ] as const)(
@@ -1561,6 +1560,91 @@ describe("sending while dot waits on the user", () => {
       kind: "steer",
       text: "Use this plan instead\n\nAttached files on this computer:\n- ~/Downloads/plan.pdf",
     });
+  });
+});
+
+describe("sending while dot waits for something private", () => {
+  const DRAFT = "localdot.composer-draft.v1";
+  const STEP = { name: "Send as a message — dot will read this" };
+  const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))));
+
+  it.each([
+    ["private", "Sending moves on from dot's question. Messages aren't kept secret"],
+    ["private-fix", "Sending moves on without fixing this. Messages aren't kept secret"],
+  ] as const)("sends nothing on Enter or Send alone during a %s wait", async (waitingOn, hint) => {
+    const f = setup(undefined, { waitingOn });
+    f.input("correct horse battery");
+    expect(screen.getByText(hint)).toBeTruthy();
+    expect(screen.queryByRole("button", STEP)).toBeNull();
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    f.submit();
+    await settle();
+    expect(f.requests).toEqual([]);
+    expect(f.field.value).toBe("correct horse battery");
+    const step = screen.getByRole("button", STEP);
+    expect(document.activeElement).not.toBe(step);
+    fireEvent.click(step);
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "correct horse battery" });
+  });
+
+  it("asks again once the words change", async () => {
+    const f = setup(undefined, { waitingOn: "private-fix" });
+    f.input("one");
+    f.submit();
+    expect(screen.getByRole("button", STEP)).toBeTruthy();
+    f.input("two");
+    expect(screen.queryByRole("button", STEP)).toBeNull();
+    f.submit();
+    fireEvent.click(screen.getByRole("button", STEP));
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "two" });
+  });
+
+  it("sends a plain question's message straight away", async () => {
+    const f = setup(undefined, { waitingOn: "fix" });
+    f.input("skip that");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+  });
+
+  it("keeps no draft of what is typed during the wait", () => {
+    const f = setup(undefined, { waitingOn: "private" });
+    f.input("correct horse battery");
+    keepDraftNow();
+    expect(localStorage.getItem(DRAFT)).toBeNull();
+  });
+
+  it("clears a draft kept from before the wait, and keeps it once more if nothing was typed", () => {
+    const f = setup();
+    f.input("my note");
+    keepDraftNow();
+    expect(localStorage.getItem(DRAFT)).toContain("my note");
+    f.update({ waitingOn: "private-fix" });
+    expect(localStorage.getItem(DRAFT)).toBeNull();
+    expect(f.field.value).toBe("my note");
+    f.update({ waitingOn: undefined });
+    expect(f.field.value).toBe("my note");
+    expect(localStorage.getItem(DRAFT)).toContain("my note");
+  });
+
+  it("clears what was typed during the wait once it ends, and says so", () => {
+    const f = setup(undefined, { waitingOn: "private-fix" });
+    f.input("correct horse battery");
+    f.update({ waitingOn: undefined });
+    expect(f.field.value).toBe("");
+    keepDraftNow();
+    expect(localStorage.getItem(DRAFT)).toBeNull();
+    expect(screen.getByText(/cleared, in case it was a passphrase/)).toBeTruthy();
+  });
+
+  it("keeps none of it for a draft timer that outlives the box", () => {
+    const f = setup(undefined, { waitingOn: "private" });
+    f.input("correct horse battery");
+    f.unmount();
+    keepDraftNow();
+    expect(localStorage.getItem(DRAFT)).toBeNull();
   });
 });
 

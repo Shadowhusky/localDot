@@ -20,6 +20,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { Select } from "../ui/Select.tsx";
 import type { DotWait } from "./Composer.tsx";
+import { emptyMessageBoxHasKeys } from "./message-box.ts";
 import type { AgentBlocker } from "./model.ts";
 import { timeLabel } from "./thread.ts";
 import { useAppConnect } from "./useAppConnect.ts";
@@ -125,11 +126,12 @@ function Shell({
   const id = useId();
   const card = useRef<HTMLElement>(null);
   const touch = useMediaQuery(TOUCH);
-  // Typing starts in its field when nothing else has the focus, so the card never takes the keys
-  // from what you were typing elsewhere. A phone keeps its keyboard down until a field is tapped.
+  // Typing starts in its field when nothing else has the focus, or when only the empty message box
+  // does, so the card never takes the keys from what you were typing elsewhere and a secret doesn't
+  // land in the box. A phone otherwise keeps its keyboard down until a field is tapped.
   useEffect(() => {
     const active = document.activeElement;
-    if (touch || (active && active !== document.body)) return;
+    if (!emptyMessageBoxHasKeys() && (touch || (active && active !== document.body))) return;
     card.current?.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true });
   }, [touch]);
   return (

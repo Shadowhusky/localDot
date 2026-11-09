@@ -36,6 +36,7 @@ import {
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
+import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { FileButton } from "../ui/FileButton.tsx";
 import { focusWithoutScroll } from "../ui/focus.ts";
@@ -127,6 +128,10 @@ export interface ComposerProps {
 }
 // `private`: a question with something that must not go in a message, such as a password.
 export type DotWait = "question" | "private" | "approval" | "computer" | "fix" | "private-fix";
+// A secret field is up, and a secret typed here by mistake would be a message: it takes one more step.
+const WAITS_FOR_A_SECRET: ReadonlySet<DotWait | undefined> = new Set(["private", "private-fix"]);
+const HELD = "Not sent. dot reads what you send here, and it stays in the conversation.";
+const SEND_HELD = "Send as a message — dot will read this";
 const MOVES_ON: Readonly<Record<DotWait, string>> = {
   question: "Sending moves on from dot's question",
   private: "Sending moves on from dot's question. Messages aren't kept secret",
@@ -228,9 +233,12 @@ function readDraft(): string {
     return "";
   }
 }
+// While dot waits for a secret, what is typed may be that secret, so none of it is kept.
+let draftsHeld = false;
 function keepDraft(text: string): void {
   try {
-    if (text.trim()) localStorage.setItem(DRAFT_KEY, JSON.stringify({ text, at: Date.now() }));
+    if (text.trim() && !draftsHeld)
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ text, at: Date.now() }));
     else localStorage.removeItem(DRAFT_KEY);
   } catch {
     /* A blocked store keeps the draft for this page only. */
@@ -368,6 +376,11 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     sessionId: props.agent.sessionId,
   });
   const composing = useRef(false);
+  // A message held back while dot waits for a secret, and the words the user has said may go.
+  const [held, setHeld] = useState(false);
+  const heldShown = useRef(held);
+  const heldLater = useRef(false);
+  const accepted = useRef(0);
   const mounted = useRef(true);
   const wasKeysOpen = useRef(props.keysOpen);
   // Without a thread to wait in, a message waits above the composer.
@@ -379,6 +392,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     current.current = props;
     guardOwner.current = guard;
     problemShown.current = problem;
+    heldShown.current = held;
   });
   useLayoutEffect(() => {
     const previous = identity.current;
@@ -751,6 +765,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     live: true,
     changed: (input, caret) => {
       revision.current += 1;
+      if (heldShown.current) setHeld(false);
       if (caret !== undefined) {
         checked(input);
         keepDraft(input.value);
@@ -771,6 +786,28 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     },
   });
   const talking = voice.state.phase !== "idle";
+  const secretWait = WAITS_FOR_A_SECRET.has(props.waitingOn);
+  useLayoutEffect(() => {
+    if (!secretWait) return;
+    keepDraft("");
+    draftsHeld = true;
+    accepted.current = revision.current;
+    return () => {
+      draftsHeld = false;
+      window.clearTimeout(draft.current);
+      unkeptDraft = null;
+      setHeld(false);
+      const box = form.current?.querySelector("textarea");
+      if (!box) return;
+      if (revision.current === accepted.current) keepDraft(box.value);
+      else if (box.value.trim()) {
+        box.value = "";
+        revision.current += 1;
+        measure(box);
+        setProblem("What you typed during that wait was cleared, in case it was a passphrase.");
+      }
+    };
+  }, [secretWait, measure]);
   // dot has the message: its files went with it, and the draft clears unless it changed since.
   const delivered = (record: Delivery) => {
     announce(
@@ -893,11 +930,17 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       if (pending.current === record) pending.current = null;
     }
   };
-  const submit = (later = false, voiceFinished = false) => {
+  const submit = (later = false, voiceFinished = false, sendsAnyway = false) => {
     const input = field();
     if (!input || composing.current || (talking && !voiceFinished)) return;
     if (commands.submit(input.value) === "handled") return;
     if (pending.current) return;
+    if (secretWait && !sendsAnyway && input.value.trim()) {
+      heldLater.current = later;
+      setHeld(true);
+      announce("composer", HELD);
+      return;
+    }
     if (input.value.length > TEXT_BOUND) {
       moveToFile(input);
       sendOnceUploaded.current = later;
@@ -957,6 +1000,12 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       return;
     }
     deliver(text, chosen, later);
+  };
+  const sendHeld = () => {
+    accepted.current = revision.current;
+    setHeld(false);
+    if (!touch) field()?.focus();
+    submit(heldLater.current, false, true);
   };
   const sendVoice = async () => {
     if (voiceSubmission.current) return;
@@ -1124,6 +1173,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       },
       onInput: (event) => {
         revision.current += 1;
+        if (heldShown.current) setHeld(false);
         sendOnceUploaded.current = null;
         if (event.currentTarget.value.length > TEXT_BOUND && !composing.current)
           moveNow.current(event.currentTarget);
@@ -1153,6 +1203,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         }
         input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
         revision.current += 1;
+        if (heldShown.current) setHeld(false);
         keepDraft(guardOwner.current.check(input) ? input.value : "");
         measure(input);
         weigh(input);
@@ -1319,6 +1370,19 @@ export const Composer = memo(function Composer(props: ComposerProps) {
               <span>{notice.text}</span>
             </p>
           ))}
+        </Collapse>
+        <Collapse open={held} className="composer-notices">
+          {held && (
+            <div className="composer-held">
+              <p className="composer-notice" role="status">
+                <Icon name="circle-alert" size={12} className="composer-notice-icon" />
+                <span>{HELD}</span>
+              </p>
+              <Button size="sm" disabledReason={sendReason} onClick={sendHeld}>
+                {SEND_HELD}
+              </Button>
+            </div>
+          )}
         </Collapse>
         <Collapse open={!!revising} className="composer-files">
           {shownRevising.current && (

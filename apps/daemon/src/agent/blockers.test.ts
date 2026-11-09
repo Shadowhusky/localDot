@@ -161,6 +161,16 @@ describe("a blocker on a task", () => {
     expect(raises(events())).toHaveLength(6);
   });
 
+  it("always lets dot join a card that is up, whatever held it back before", () => {
+    const { session } = setup();
+    session.raiseBlocker(KEY);
+    session.moveOn("do something else", undefined);
+    session.raiseBlocker(KEY);
+    session.moveOn("do something else", undefined);
+    const stall = session.raiseBlocker(KEY, { required: true, tell: false });
+    expect(session.raiseBlocker(KEY)?.blockerId).toBe(stall?.blockerId);
+  });
+
   it("tells dot when its asking is what holds a card back", async () => {
     const { call, session, tools } = setup();
     tools.keysLocked = () => true;

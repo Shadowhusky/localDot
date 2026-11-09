@@ -71,8 +71,9 @@ export class BlockerDesk {
   raise(blocker: Blocker, options: RaiseOptions = {}): OpenBlocker | undefined {
     const { by = "localdot", required = false, tell = true } = options;
     const subject = blockerSubject(blocker);
-    if (!required && (this.#declined.has(subject) || this.#tooSoon(subject))) return undefined;
     let open = this.#open.get(subject);
+    if (!open && !required && (this.#declined.has(subject) || this.#tooSoon(subject)))
+      return undefined;
     if (!open || (required && !open.required)) {
       open = { blockerId: open?.blockerId ?? ulid(), blocker: open?.blocker ?? blocker, required };
       this.port.raised({

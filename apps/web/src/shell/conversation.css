@@ -1869,6 +1869,13 @@
   text-wrap: pretty;
 }
 
+.composer-held {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding-bottom: calc(var(--spacing) * 2);
+}
+
 .composer-files .file-chips-block {
   padding: var(--spacing) 0 calc(var(--spacing) * 2);
 }
