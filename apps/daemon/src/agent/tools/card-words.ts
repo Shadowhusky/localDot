@@ -86,6 +86,14 @@ const A_SECRET = [
   "密码|密碼|口令|密钥|密鑰|金鑰|パスワード",
 ].join("|");
 const NAMES_A_SECRET = new RegExp(A_SECRET, "iu");
+// "Not an API key or client secret" names what the answer isn't. Only the secrets the denial itself
+// lists are passed over: "not your PIN but your password" still names the password.
+const ARTICLE = String.raw`(?:(?:an?|the|your|any)\s+)?`;
+const DENIED = new RegExp(
+  String.raw`\b(?:not|never|no|nor)\s+${ARTICLE}(?:${A_SECRET})(?:\s*(?:,|\bor\b|\bnor\b)\s*${ARTICLE}(?:${A_SECRET}))*`,
+  "giu",
+);
+const affirmed = (words: string) => plainWords(words).replace(DENIED, " ");
 const ASKS_FOR_A_SECRET = new RegExp(
   [
     String.raw`\b(?:enter|type|provide|give|send|share|paste|input|supply|tell\s+me|what(?:'s|\s+is)|need|introduce|escribe|ingresa|indica|saisis\w*|entre[rz]?|tape[rz]?|donne[rz]?)\b[^?!\n]{0,60}(?:${A_SECRET})`,
@@ -139,7 +147,7 @@ export const aimsAtKeys = (words: string) =>
 export function asksSecretInPlainText(input: AskUserInput): boolean {
   const fields = input.fields ?? [];
   const named = (words: string) =>
-    NAMES_A_SECRET.test(plainWords(words)) || /\bsecrets?\b/iu.test(plainWords(words));
+    NAMES_A_SECRET.test(affirmed(words)) || /\bsecrets?\b/iu.test(affirmed(words));
   if (
     fields.some(
       (f) => OWN_WORDS.has(f.kind) && named(`${fieldWords(f.id)}\n${f.label}\n${f.hint ?? ""}`),
@@ -149,5 +157,5 @@ export function asksSecretInPlainText(input: AskUserInput): boolean {
   const typedPrivately = fields.some((f) => f.kind === "secret" || f.kind === "code");
   // A question with options or nothing to fill in is answered in the user's own words too.
   const answeredInWords = !fields.length || fields.some((f) => OWN_WORDS.has(f.kind));
-  return !typedPrivately && answeredInWords && ASKS_FOR_A_SECRET.test(plainWords(input.question));
+  return !typedPrivately && answeredInWords && ASKS_FOR_A_SECRET.test(affirmed(input.question));
 }

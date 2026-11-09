@@ -988,6 +988,11 @@ describe("ask_user can't stand in for a card", () => {
       },
       { question: "Enter your account password below, or pick one", options: ["Skip", "Later"] },
       { question: "Introduce tu contraseña", fields: [{ id: "v", kind: "text", label: "Valor" }] },
+      {
+        question: "Sign in",
+        fields: [{ id: "v", kind: "text", label: "Value", hint: "Not your PIN but your password" }],
+      },
+      { question: "Sign in", fields: [{ id: "v", kind: "text", label: "Password, not a PIN" }] },
       { question: "Connexion", fields: [{ id: "v", kind: "text", label: "Mot de passe" }] },
       {
         question: "What is your example.com password?",
@@ -1018,6 +1023,17 @@ describe("ask_user can't stand in for a card", () => {
       },
       { question: "Which two-factor code app do you use?", options: ["Authy", "1Password"] },
       { question: "Pin this note to the top?", options: ["Yes", "No"] },
+      {
+        question: "What client ID should it use?",
+        fields: [
+          {
+            id: "client_id",
+            kind: "text",
+            label: "WorkOS Client ID",
+            hint: "The client_ identifier, not an API key or client secret.",
+          },
+        ],
+      },
       { question: "Share the secret Santa list with the team?", options: ["Yes", "No"] },
     ]) {
       const reply = call("ask_user", input);
