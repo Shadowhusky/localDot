@@ -63,7 +63,12 @@ const pins = (files: Record<string, string>) =>
 
 const ENGINE_FILES = { "bin/engine": "#!/bin/sh\n", "lib/libonnx.dylib": "library" };
 const LIGHT_FILES = { "model.onnx": "light model", "tokens.txt": "light tokens" };
-const LANGUAGES_FILES = { "model.onnx": "languages model", "tokens.txt": "languages tokens" };
+// A folder among its files, as Qwen3-ASR's tokenizer is.
+const LANGUAGES_FILES = {
+  "model.onnx": "languages model",
+  "tokens.txt": "languages tokens",
+  "tokenizer/vocab.json": "{}",
+};
 
 function catalog(): SpeechCatalog {
   return {
@@ -360,6 +365,7 @@ describe("installing speech", { timeout: 30_000 }, () => {
     expect(speech.status().installed).toMatchObject({ tier: "languages" });
     expect(existsSync(join(speechDir(), "models", "light"))).toBe(false);
     expect(existsSync(join(speechDir(), "models", "languages", "model.onnx"))).toBe(true);
+    expect(speech.model()).not.toBeNull();
     expect(asked.filter(({ url }) => url.includes("engine"))).toHaveLength(1);
   });
 
