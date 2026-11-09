@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type ExecFile,
   findSpeechModel,
+  installedSpeech,
   SpeechBusyError,
   type SpeechLookup,
   speechTranscriber,
@@ -110,17 +111,17 @@ describe("turning speech into text", () => {
   });
 
   it("removes the audio when the model fails, and takes one recording at a time", async () => {
-    let finish: (error: Error | null, out: string) => void = () => {};
+    let finish: ((error: Error | null, out: string) => void) | undefined;
     const execFile: ExecFile = (_file, _args, _options, callback) => {
       finish = callback;
     };
     const speech = speechTranscriber(model, { execFile, tmp });
     const first = speech.transcribe(new Uint8Array([1]), null);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.waitFor(() => expect(finish).toBeDefined());
     await expect(speech.transcribe(new Uint8Array([1]), null)).rejects.toBeInstanceOf(
       SpeechBusyError,
     );
-    finish(new Error("crashed"), "");
+    finish?.(new Error("crashed"), "");
     await expect(first).rejects.toThrow("crashed");
     expect(readdirSync(tmp)).toEqual([]);
   });
@@ -181,4 +182,158 @@ it("passes cancellation to the process and accepts the next recording after it e
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+describe("which speech model the voice route uses", () => {
+  const hand = lookup([
+    "/opt/homebrew/bin/whisper-cli",
+    "/Users/me/.cache/whisper.cpp/ggml-base.bin",
+  ]);
+  const ours = {
+    binary: "/home/.localdot/speech/engine/2.0.1/bin/sherpa-onnx-offline",
+    args: ["--encoder=/home/.localdot/speech/models/light/encoder.onnx"],
+    languages: ["zh", "en"],
+  };
+
+  it("uses what localDot installed once it has passed its checks", () => {
+    const route = installedSpeech(
+      () => hand,
+      () => ours,
+    )();
+    expect(route?.languages).toEqual(["zh", "en"]);
+    expect(route?.englishOnly).toBe(false);
+  });
+
+  it("keeps a hand-installed Whisper working when nothing is installed here", () => {
+    const route = installedSpeech(
+      () => hand,
+      () => null,
+    )();
+    expect(route).not.toBeNull();
+    expect(route?.languages).toBeNull();
+  });
+
+  it("falls back to a hand-installed Whisper when the installed files fail their checks", () => {
+    let usable: typeof ours | null = ours;
+    const route = installedSpeech(
+      () => hand,
+      () => usable,
+    );
+    expect(route()?.languages).toEqual(["zh", "en"]);
+    usable = null;
+    expect(route()?.languages).toBeNull();
+  });
+
+  it("lets a model named in LOCALDOT_SPEECH_MODEL outrank an install", () => {
+    const named = lookup(["/usr/bin/whisper-cli", "/models/ggml-small.bin"], {
+      LOCALDOT_SPEECH_MODEL: "/models/ggml-small.bin",
+    });
+    expect(
+      installedSpeech(
+        () => named,
+        () => ours,
+      )()?.languages,
+    ).toBeNull();
+  });
+
+  it("has none with neither", () => {
+    expect(
+      installedSpeech(
+        () => lookup([]),
+        () => null,
+      )(),
+    ).toBeNull();
+  });
+
+  it("keeps the one-at-a-time rule while the same model stays in use", () => {
+    const route = installedSpeech(
+      () => hand,
+      () => ours,
+    );
+    expect(route()).toBe(route());
+  });
+});
+
+describe("running the installed model", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "ld-voice-installed-"));
+  });
+  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+  const installed = {
+    binary: "/speech/bin/sherpa-onnx-offline",
+    args: ["--encoder=/speech/models/light/encoder.onnx", "--num-threads=4"],
+    languages: ["zh", "en"],
+  };
+
+  it("passes the audio last and reads the words from its one line of JSON", async () => {
+    let seen: readonly string[] = [];
+    const execFile: ExecFile = (_file, args, _options, callback) => {
+      seen = args;
+      callback(
+        null,
+        '{"lang": "", "emotion": "", "event": "", "text": "Please 把这个 file 上传到 Google Drive， 然后 share 给我。", "timestamps": [0.32]}\n',
+      );
+    };
+    const speech = speechTranscriber(installed, { execFile, tmp });
+    await expect(speech.transcribe(new Uint8Array([1, 2]), "zh")).resolves.toBe(
+      "Please 把这个 file 上传到 Google Drive，然后 share 给我。",
+    );
+    expect(seen.slice(0, 2)).toEqual(installed.args);
+    expect(seen.at(-1)).toMatch(/speech-0\.wav$/);
+    expect(readdirSync(tmp)).toEqual([]);
+  });
+
+  it("sends a long recording in pieces, a few to a run, in order, and joins the words", async () => {
+    const runs: string[][] = [];
+    const execFile: ExecFile = (_file, args, _options, callback) => {
+      const pieces = args.filter((arg) => arg.endsWith(".wav"));
+      runs.push(pieces.map((piece) => piece.split("/").at(-1) ?? ""));
+      callback(
+        null,
+        pieces.map((piece) => `{"text": "第${/(\d+)\.wav$/.exec(piece)?.[1]}段"}`).join("\n"),
+      );
+    };
+    const speech = speechTranscriber(installed, { execFile, tmp });
+    const long = new Uint8Array(44 + 2 * 16_000 * 50);
+    await expect(speech.transcribe(long, "zh")).resolves.toBe("第0段第1段第2段第3段");
+    expect(runs).toEqual([["speech-0.wav", "speech-1.wav", "speech-2.wav"], ["speech-3.wav"]]);
+    expect(readdirSync(tmp)).toEqual([]);
+  });
+
+  it("doesn't pass off a partial answer as the whole recording", async () => {
+    const execFile: ExecFile = (_file, _args, _options, callback) =>
+      callback(null, '{"text": "only the first piece"}\n');
+    const speech = speechTranscriber(installed, { execFile, tmp });
+    await expect(speech.transcribe(new Uint8Array(44 + 2 * 16_000 * 40), "en")).rejects.toThrow(
+      /no words line/,
+    );
+  });
+
+  it("treats a run with no words line as a failure, not as silence", async () => {
+    const execFile: ExecFile = (_file, _args, _options, callback) => callback(null, "nothing\n");
+    const speech = speechTranscriber(installed, { execFile, tmp });
+    await expect(speech.transcribe(new Uint8Array([1]), "en")).rejects.toThrow(/no words line/);
+  });
+
+  it("returns silence as no words", async () => {
+    const execFile: ExecFile = (_file, _args, _options, callback) =>
+      callback(null, '{"text": "", "timestamps": []}\n');
+    const speech = speechTranscriber(installed, { execFile, tmp });
+    await expect(speech.transcribe(new Uint8Array([1]), "en")).resolves.toBe("");
+  });
+
+  it("gives a long recording longer to finish", async () => {
+    let timeout = 0;
+    const execFile: ExecFile = (_file, args, options, callback) => {
+      timeout = options.timeout;
+      const pieces = args.filter((arg) => arg.endsWith(".wav"));
+      callback(null, pieces.map(() => '{"text": "ok"}').join("\n"));
+    };
+    const speech = speechTranscriber(installed, { execFile, tmp });
+    await speech.transcribe(new Uint8Array(44 + 2 * 16_000 * 120), "en");
+    expect(timeout).toBeGreaterThanOrEqual(120_000);
+    await speech.transcribe(new Uint8Array(44 + 2 * 16_000), "en");
+    expect(timeout).toBe(30_000);
+  });
 });
