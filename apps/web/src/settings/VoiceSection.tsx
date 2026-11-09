@@ -8,8 +8,10 @@ import { Switch } from "../ui/Switch.tsx";
 import { AUTO_LANGUAGE, languageName, speechLanguage, VOICE_LANGUAGES } from "../voice/language.ts";
 import type { VoicePrefs } from "../voice/prefs.ts";
 import type { VoiceRoute } from "../voice/support.ts";
+import type { SpeechInstallControl } from "../voice/useSpeechInstall.ts";
 import { HOLD_KEYS } from "../voice/useVoice.ts";
 import { routeDetail, routeLabel } from "../voice/words.ts";
+import { SpeechInstallPanel } from "./SpeechInstall.tsx";
 
 export interface VoiceControl {
   prefs: VoicePrefs;
@@ -20,6 +22,8 @@ export interface VoiceControl {
   browser: readonly string[];
   downloading: boolean;
   download(): void;
+  // A speech model installed on the computer running localDot, for its owner to manage.
+  speech?: SpeechInstallControl;
 }
 
 export function VoiceSection({ voice }: { voice: VoiceControl }) {
@@ -27,6 +31,7 @@ export function VoiceSection({ voice }: { voice: VoiceControl }) {
   // A keyboard shortcut means nothing on a touch screen.
   const keys = useMediaQuery(TOUCH) ? null : formatKeys(HOLD_KEYS(isApple())).label;
   const offer = route.kind === "none" && route.why === "download";
+  const computer = voice.speech?.status?.host.computer;
   return (
     <>
       <p className="settings-lede">
@@ -36,14 +41,14 @@ export function VoiceSection({ voice }: { voice: VoiceControl }) {
       <Group>
         <GroupRow
           label="Speech to text"
-          detail={routeDetail(route)}
+          detail={routeDetail(route, computer)}
           trailing={
             offer ? (
               <Button size="sm" busy={voice.downloading} onClick={voice.download}>
                 Download
               </Button>
             ) : (
-              routeLabel(route)
+              routeLabel(route, computer)
             )
           }
         />
@@ -69,6 +74,12 @@ export function VoiceSection({ voice }: { voice: VoiceControl }) {
           onCheckedChange={(online) => voice.change({ online })}
         />
       </Group>
+      {voice.speech && (
+        <SpeechInstallPanel
+          speech={voice.speech}
+          language={speechLanguage(prefs.language, voice.browser)}
+        />
+      )}
       <Group>
         <Switch
           className="ui-group-row"

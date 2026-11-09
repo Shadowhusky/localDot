@@ -83,6 +83,9 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   `POST /__qa/desktop/home` empties the desktop to its home screen, as when the last task worked only
   in the web browser, and `/__qa/desktop/window` puts the spreadsheet window back. The fake
   desktopd's window stack follows: the spreadsheet window, maximised, covers the dock.
+- **Speech install:** `POST /__qa/speech` with JSON moves the computer's speech install on, or stands
+  in for what's already there: `{"job": {"stage": "model", "doneBytes": 1000}}`, `{"handInstalled": …}`,
+  `{"installed": …, "using": "installed"}`. It's in memory only; the real install has its own tests.
 - **Update:** `POST /__qa/update` makes a new version of the computer ready (the island's one-time
   notice and Settings' Update row); `QA_UPDATE_MS` sets how long the update then takes.
 - **Typing:** `typing.spec.ts` measures each key press to the frame that shows it while

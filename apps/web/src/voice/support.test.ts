@@ -3,7 +3,13 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../lib/api.ts";
-import { browserSpeech, macSpeech, useVoiceSupport, voiceRoute } from "./support.ts";
+import {
+  browserSpeech,
+  macSpeech,
+  refreshVoiceSupport,
+  useVoiceSupport,
+  voiceRoute,
+} from "./support.ts";
 import { routeBlocked, routeLabel } from "./words.ts";
 
 const brands = (...names: string[]) =>
@@ -25,11 +31,17 @@ describe("where speech becomes text", () => {
     });
     expect(voiceRoute({ browser: "local", mac: null }, false, "en-US")).toEqual({ kind: "device" });
     expect(voiceRoute({ browser: "online", mac: "all" }, true, "ja-JP")).toEqual({ kind: "mac" });
-    expect(voiceRoute({ browser: "online", mac: "en" }, false, "ja-JP")).toEqual({
+    expect(voiceRoute({ browser: "online", mac: ["en"] }, false, "ja-JP")).toEqual({
       kind: "none",
       why: "online-off",
     });
-    expect(voiceRoute({ browser: "online", mac: "en" }, false, "en-GB")).toEqual({ kind: "mac" });
+    expect(voiceRoute({ browser: "online", mac: ["en"] }, false, "en-GB")).toEqual({ kind: "mac" });
+    expect(voiceRoute({ browser: "local", mac: ["zh", "en"] }, false, "zh-CN")).toEqual({
+      kind: "mac",
+    });
+    expect(voiceRoute({ browser: "local", mac: ["zh", "en"] }, false, "ja-JP")).toEqual({
+      kind: "device",
+    });
     expect(voiceRoute({ browser: "online", mac: null }, true, "en-US")).toEqual({
       kind: "online",
     });
@@ -47,6 +59,7 @@ describe("where speech becomes text", () => {
   it("names the route and why the mic can't be used", () => {
     expect(routeLabel({ kind: "device" })).toBe("On this device");
     expect(routeLabel({ kind: "mac" })).toBe("On your Mac");
+    expect(routeLabel({ kind: "mac" }, "computer")).toBe("On your computer");
     expect(routeLabel({ kind: "online" })).toBe("Online");
     expect(routeBlocked({ kind: "none", why: "checking" })).toContain("Checking speech support");
     expect(routeBlocked({ kind: "none", why: "download" })).toBeUndefined();
@@ -87,7 +100,12 @@ describe("where speech becomes text", () => {
         }),
       }) as unknown as ApiClient;
     expect(await macSpeech(api({ onMac: { available: true, englishOnly: false } }))).toBe("all");
-    expect(await macSpeech(api({ onMac: { available: true, englishOnly: true } }))).toBe("en");
+    expect(await macSpeech(api({ onMac: { available: true, englishOnly: true } }))).toEqual(["en"]);
+    expect(
+      await macSpeech(
+        api({ onMac: { available: true, englishOnly: false, languages: ["zh", "en"] } }),
+      ),
+    ).toEqual(["zh", "en"]);
     expect(await macSpeech(api({ onMac: { available: false } }))).toBeNull();
     expect(await macSpeech(api(new Error("404")))).toBeNull();
   });
@@ -100,6 +118,18 @@ it("explains insecure remote links before attempting to open the microphone", ()
     why: "insecure",
   });
   vi.unstubAllGlobals();
+});
+
+it("uses a model as soon as its install finishes, with no reload", async () => {
+  let available = false;
+  const api = {
+    get: vi.fn(async () => ({ onMac: { available, englishOnly: false, languages: ["zh", "en"] } })),
+  } as unknown as ApiClient;
+  const view = renderHook(() => useVoiceSupport(api, "zh-CN"));
+  await waitFor(() => expect(view.result.current.support?.mac).toBeNull());
+  available = true;
+  act(() => refreshVoiceSupport());
+  await waitFor(() => expect(view.result.current.support?.mac).toEqual(["zh", "en"]));
 });
 
 it("refreshes a newly available local engine on return to the app", async () => {

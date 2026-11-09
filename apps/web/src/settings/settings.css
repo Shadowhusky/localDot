@@ -884,6 +884,78 @@
   margin-top: var(--_settings-block);
 }
 
+/* Speech on the computer: its row, the tiers to choose from, and how an install is going. */
+.speech-install {
+  margin-block: var(--_settings-block);
+}
+
+.speech-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--spacing);
+}
+
+.speech-progress > .speech-actions {
+  margin-top: var(--spacing);
+}
+
+.speech-tiers {
+  margin-top: calc(var(--spacing) * 3);
+}
+
+.speech-tier-facts,
+.speech-tier-warning {
+  display: block;
+  margin-top: var(--spacing);
+  font-variant-numeric: tabular-nums;
+}
+
+.speech-tier-facts {
+  color: var(--color-fg-3);
+}
+
+.speech-tier-warning {
+  color: var(--color-fg-1);
+}
+
+.speech-install-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  margin-top: calc(var(--spacing) * 3);
+}
+
+.speech-install-free {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.speech-progress {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
+  padding: calc(var(--spacing) * 2) 0 var(--spacing) calc(var(--spacing) * 10);
+}
+
+.speech-progress-detail,
+.speech-progress-error {
+  margin: 0;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.speech-progress-error {
+  color: var(--color-fg-1);
+}
+
+@media (max-width: 480px) {
+  .speech-progress {
+    padding-left: 0;
+  }
+}
+
 /* How the last Stop went: Details sits under the computer's name, past its tile. */
 .settings-stop-details {
   margin: calc(var(--spacing) * 0.5) 0 calc(var(--spacing) * 0.5) calc(var(--spacing) * 10);

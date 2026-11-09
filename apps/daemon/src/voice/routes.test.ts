@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
+import { RemoteLinks } from "../remote/links.ts";
 import { SPEECH_RATE, speechWav } from "./routes.ts";
 import { SpeechBusyError, type Transcriber } from "./speech.ts";
+import { SpeechInstallRefused } from "./speech-install.ts";
 
 const PORT = 4750;
 const TOKEN = "t".repeat(43);
@@ -109,5 +111,141 @@ describe("voice routes", () => {
     expect(speechWav(wav(8))).toBe(true);
     const short = wav(8).subarray(0, 50);
     expect(speechWav(short)).toBe(false);
+  });
+});
+
+describe("installing speech on this computer", () => {
+  const GUEST = "g".repeat(43);
+  let starts: string[];
+  let cancels: number;
+  let removes: number;
+  let refused: boolean;
+  let guestApp: ReturnType<typeof createApp>;
+  const status = { supported: true, job: null };
+  const install = {
+    status: () => status as never,
+    start: (tier: string) => {
+      if (refused) throw new SpeechInstallRefused("Another speech model is already downloading.");
+      starts.push(tier);
+    },
+    cancel: async () => {
+      cancels += 1;
+    },
+    remove: async () => {
+      removes += 1;
+    },
+  };
+  beforeEach(() => {
+    starts = [];
+    cancels = 0;
+    removes = 0;
+    refused = false;
+    const links = {
+      permits: new RemoteLinks(home).permits.bind({ active: () => ({ id: "a" }) }),
+      onRevoke: () => () => {},
+      sessions: () => [],
+    };
+    guestApp = createApp({
+      token: TOKEN,
+      port: PORT,
+      eventLog: new EventLog(home),
+      voice: { speech: () => null, install },
+      remoteAccess: {
+        links,
+        authenticate: (given?: string) => (given === GUEST ? { id: "a", replay: true } : null),
+      } as never,
+    });
+  });
+
+  const owner = { ...bearer, "content-type": "application/json" };
+  const ask = (path: string, method: string, headers: Record<string, string>, body?: string) =>
+    guestApp.request(url(path), { method, headers, body });
+
+  it("reads where things stand without starting anything", async () => {
+    const reply = await ask("/api/voice/install", "GET", bearer);
+    expect(reply.status).toBe(200);
+    expect(await reply.json()).toEqual(status);
+    expect(starts).toEqual([]);
+  });
+
+  it("starts only when pressed, with a known tier", async () => {
+    const reply = await ask("/api/voice/install", "POST", owner, JSON.stringify({ tier: "light" }));
+    expect(reply.status).toBe(202);
+    expect(starts).toEqual(["light"]);
+    expect((await ask("/api/voice/install", "POST", owner, "{}")).status).toBe(400);
+    expect(
+      (await ask("/api/voice/install", "POST", owner, JSON.stringify({ tier: "huge" }))).status,
+    ).toBe(400);
+    expect(
+      (
+        await ask(
+          "/api/voice/install",
+          "POST",
+          owner,
+          JSON.stringify({ tier: "languages", url: "x" }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(starts).toEqual(["light"]);
+  });
+
+  it("says when another install holds the turn", async () => {
+    refused = true;
+    const reply = await ask(
+      "/api/voice/install",
+      "POST",
+      owner,
+      JSON.stringify({ tier: "languages" }),
+    );
+    expect(reply.status).toBe(409);
+    expect(await reply.text()).toMatch(/already downloading/);
+  });
+
+  it("cancels and removes", async () => {
+    expect((await ask("/api/voice/install/cancel", "POST", bearer)).status).toBe(200);
+    expect(cancels).toBe(1);
+    expect((await ask("/api/voice/install", "DELETE", bearer)).status).toBe(200);
+    expect(removes).toBe(1);
+  });
+
+  it("needs the owner's token", async () => {
+    expect((await ask("/api/voice/install", "GET", {})).status).toBe(401);
+    expect((await ask("/api/voice/install", "POST", {}, "{}")).status).toBe(401);
+    expect((await ask("/api/voice/install/cancel", "POST", {})).status).toBe(401);
+    expect((await ask("/api/voice/install", "DELETE", {})).status).toBe(401);
+  });
+
+  it("refuses a shared link's guest at every door", async () => {
+    const guest = { authorization: `Bearer ${GUEST}`, "content-type": "application/json" };
+    expect((await ask("/api/voice/install", "GET", guest)).status).toBe(403);
+    expect(
+      (await ask("/api/voice/install", "POST", guest, JSON.stringify({ tier: "light" }))).status,
+    ).toBe(403);
+    expect((await ask("/api/voice/install/cancel", "POST", guest)).status).toBe(403);
+    expect((await ask("/api/voice/install", "DELETE", guest)).status).toBe(403);
+    expect(starts).toEqual([]);
+    expect(cancels).toBe(0);
+    expect(removes).toBe(0);
+  });
+
+  it("leaves transcription with no route once a guest asks", async () => {
+    const guest = { authorization: `Bearer ${GUEST}`, "content-type": "audio/wav" };
+    expect((await ask("/api/voice", "GET", guest)).status).toBe(403);
+    expect((await ask("/api/voice/transcribe", "POST", guest)).status).toBe(403);
+  });
+});
+
+describe("what the page is told about the installed model", () => {
+  it("says which languages it hears", async () => {
+    speech = { englishOnly: false, languages: ["zh", "en"], transcribe: async () => "" };
+    expect(await (await app.request(url("/api/voice"), { headers: bearer })).json()).toEqual({
+      onMac: { available: true, englishOnly: false, languages: ["zh", "en"] },
+    });
+  });
+
+  it("refuses a language the model can't hear, so the browser's own speech is used", async () => {
+    speech = { englishOnly: false, languages: ["zh", "en"], transcribe: async () => "words" };
+    expect((await post(wav(1600), "?lang=ja")).status).toBe(422);
+    expect((await post(wav(1600), "?lang=zh")).status).toBe(200);
   });
 });

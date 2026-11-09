@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 import { constants, userInfo } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import { DEFAULT_AUTONOMY, TOOL_API_PORT } from "@localdot/protocol";
@@ -130,7 +130,10 @@ import { loadOrCreateToken } from "./token.ts";
 import { installedAppUpdater } from "./updates/installed-updater.ts";
 import { sourceAppUpdater } from "./updates/source-updater.ts";
 import { attachUpgradeRouter } from "./upgrade-router.ts";
-import { installedSpeech } from "./voice/speech.ts";
+import { findSpeechModel, hostSpeechLookup, installedSpeech } from "./voice/speech.ts";
+import { SPEECH_CATALOG } from "./voice/speech-catalog.ts";
+import { hostOfThisComputer } from "./voice/speech-fit.ts";
+import { SpeechInstaller } from "./voice/speech-install.ts";
 
 timestampLogs();
 const home = localdotHome();
@@ -833,6 +836,20 @@ const appUpdater = serviceIdentity
   : await sourceAppUpdater(home, process.env.LOCALDOT_INSTALL_PREFIX, installWait, installSettled);
 appUpdater.start();
 shutdown.unshift({ name: "app updater", stop: () => appUpdater.close() });
+const speechInstaller = new SpeechInstaller({
+  home,
+  catalog: SPEECH_CATALOG,
+  host: hostOfThisComputer(),
+  handInstalled: () => {
+    const hand = findSpeechModel(hostSpeechLookup());
+    return hand
+      ? { model: basename(hand.model).slice(0, 128), englishOnly: hand.englishOnly }
+      : null;
+  },
+  handInstalledChosen: () =>
+    !!process.env.LOCALDOT_SPEECH_MODEL && !!findSpeechModel(hostSpeechLookup()),
+});
+shutdown.unshift({ name: "speech installer", stop: () => speechInstaller.close() });
 const accessLinks = new AccessLinks(port, home);
 void accessLinks.read().catch(() => {});
 // A task from before this daemon started is known only by its log; it ran on the one computer.
@@ -954,7 +971,10 @@ const app = createApp({
   },
   connectors: { hub: agent.connectors, keyd, signIn: agent.connectorSignIn },
   notify: notify.routes,
-  voice: { speech: installedSpeech() },
+  voice: {
+    speech: installedSpeech(hostSpeechLookup, () => speechInstaller.model()),
+    install: speechInstaller,
+  },
   previews,
   dots,
   reports: {

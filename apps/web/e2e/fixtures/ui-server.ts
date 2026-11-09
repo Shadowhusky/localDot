@@ -143,6 +143,7 @@ import { attachUpgradeRouter } from "../../../daemon/src/upgrade-router.ts";
 import { fakeDockerRoom } from "./fake-docker-room.ts";
 import { fakeDots } from "./fake-dots.ts";
 import { fixtureSideAgent } from "./side-agent.ts";
+import { speechFixture } from "./speech-fixture.ts";
 import {
   bootStep,
   type CellKind,
@@ -2779,6 +2780,7 @@ const connectorSignIn = new ConnectorSignIn({
     return true;
   },
 });
+const speech = speechFixture();
 const routes = createApp({
   token: TOKEN,
   port: PORT,
@@ -2838,8 +2840,9 @@ const routes = createApp({
   // QA_UI_DIR serves another build of the app, such as an earlier one to measure against.
   ui: { dir: env.QA_UI_DIR ?? fileURLToPath(new URL("../../dist", import.meta.url)) },
   notify: notify.routes,
-  // No speech model on the fixture's computer: the browser's own speech, or none, is used.
-  voice: { speech: () => null },
+  // No speech model on the fixture's computer until a test installs one: the browser's own speech,
+  // or none, is used.
+  voice: { speech: speech.speech, install: speech.install },
   routines: {
     store: routineStore,
     scheduler: { replan: planRoutines },
@@ -4137,6 +4140,12 @@ const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | un
 };
 const reply = (problem: string | undefined) =>
   problem ? new Response(problem, { status: 409 }) : Response.json({ ok: true });
+
+// Moves the computer's speech install on; see speech-fixture.ts.
+routes.post("/__qa/speech", async (c) => {
+  speech.set(await c.req.json());
+  return reply(undefined);
+});
 
 // A new version of the computer becomes ready.
 routes.post("/__qa/update", (c) => {

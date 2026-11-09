@@ -68,6 +68,15 @@ export function walkTheApp(look: Look) {
     await look(page, ui, "setup-thinks");
   });
 
+  test("setup's Talk to dot", async ({ page, ui }) => {
+    await page.addInitScript(() =>
+      localStorage.setItem("localdot.onboarding.v1", JSON.stringify({ step: "speech" })),
+    );
+    await ui.open("first-run");
+    await expect(page.getByRole("heading", { name: "Talk to dot" })).toBeVisible();
+    await look(page, ui, "setup-speech");
+  });
+
   for (const scenario of [
     "starting",
     "reconnecting",
