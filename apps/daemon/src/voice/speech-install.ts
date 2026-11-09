@@ -1,8 +1,18 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { chmod, mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { z } from "zod";
 import {
   type SpeechInstallJob,
@@ -18,6 +28,7 @@ import {
   SPEECH_NOTICES,
   type SpeechBundle,
   type SpeechCatalog,
+  type SpeechEngineTarget,
   type SpeechFilePin,
   type SpeechSource,
   type SpeechTierSpec,
@@ -68,20 +79,9 @@ export interface SpeechInstallerOptions {
   changed?(): void;
 }
 
-const Pins = z.record(
-  z.string().max(256),
-  z.strictObject({ sha256: z.string().regex(/^[0-9a-f]{64}$/), bytes: z.number().int() }),
-);
-const Installed = z.strictObject({
-  tier: SpeechTierId,
-  engineVersion: z.string().max(32),
-  binary: z.string().max(256),
-  engineFiles: Pins,
-  modelFiles: Pins,
-  flags: z.record(z.string().max(64), z.string().max(256)),
-  args: z.array(z.string().max(128)).max(16),
-  languages: z.array(z.string().max(8)).max(64).nullable(),
-});
+// Only which tier and which program version. What runs, with which files and arguments, always comes
+// from the catalog, and a version it doesn't know is never used in a path.
+const Installed = z.strictObject({ tier: SpeechTierId, engineVersion: z.string().max(32) });
 type Installed = z.infer<typeof Installed>;
 const Under = z.strictObject({ tier: SpeechTierId, stage: SpeechInstallStage });
 
@@ -175,6 +175,42 @@ class InstallStep extends Error {
   }
 }
 
+// The folder holds exactly these files, as plain files, and only the folders they need.
+function holdsExactly(dir: string, files: Record<string, SpeechFilePin>): boolean {
+  const wanted = new Set(Object.keys(files));
+  const folders = new Set<string>();
+  for (const path of wanted)
+    for (let at = dirname(path); at !== "."; at = dirname(at)) folders.add(at);
+  const walk = (inside: string): boolean =>
+    readdirSync(join(dir, inside)).every((name) => {
+      const path = inside ? `${inside}/${name}` : name;
+      const found = lstatSync(join(dir, path));
+      if (found.isDirectory()) return folders.has(path) && walk(path);
+      return found.isFile() && wanted.has(path);
+    });
+  try {
+    return lstatSync(dir).isDirectory() && walk("");
+  } catch {
+    return false;
+  }
+}
+
+const within = (dir: string, path: string) => path === dir || path.startsWith(`${dir}${sep}`);
+
+// Bytes of the plain files under a folder, links not followed.
+function treeBytes(dir: string): number {
+  try {
+    return readdirSync(dir).reduce((total, name) => {
+      const found = lstatSync(join(dir, name));
+      return (
+        total + (found.isDirectory() ? treeBytes(join(dir, name)) : found.isFile() ? found.size : 0)
+      );
+    }, 0);
+  } catch {
+    return 0;
+  }
+}
+
 const sumBytes = (bundle: SpeechBundle) =>
   Object.values(bundle.files).reduce((total, file) => total + file.bytes, 0);
 const bundleDownload = (bundle: SpeechBundle) => bundle.sources[0]?.bytes ?? 0;
@@ -198,12 +234,13 @@ function downloadWords(problem: SpeechDownloadProblem["problem"], what: string) 
 export class SpeechInstaller {
   readonly ready: Promise<void>;
   #installed: Installed | null = null;
-  // The installed files passed their hashes in this run, with the size and time of each.
-  #verified: { path: string; size: number; mtimeMs: number }[] | null = null;
-  #damaged = false;
+  // The installed files passed their hashes in this run, with what identifies each since.
+  #verified: { path: string; size: number; mtimeMs: number; ino: number }[] | null = null;
+  #damaged: "changed" | "outdated" | null = null;
   #job: SpeechInstallJob | null = null;
   #abort: AbortController | null = null;
   #running: Promise<void> | null = null;
+  #cancelling: Promise<void> | null = null;
 
   constructor(private readonly options: SpeechInstallerOptions) {
     this.ready = this.#recover();
@@ -217,6 +254,20 @@ export class SpeechInstaller {
   }
   get #target() {
     return catalogTarget(this.options.catalog, this.options.host);
+  }
+
+  // What the record names, if it's what this catalog ships for this computer.
+  #current(): { tier: SpeechTierSpec; engine: SpeechEngineTarget } | null {
+    const record = this.#installed;
+    const engine = this.#target;
+    const tier = this.options.catalog.tiers.find((one) => one.id === record?.tier);
+    if (!record || !engine || !tier || record.engineVersion !== this.options.catalog.engine.version)
+      return null;
+    return { tier, engine };
+  }
+
+  get #engineDir() {
+    return join(this.#root, "engine", this.options.catalog.engine.version);
   }
 
   async #recover() {
@@ -263,93 +314,148 @@ export class SpeechInstaller {
     }
   }
 
-  #filesOf(record: Installed) {
-    const engine = join(this.#root, "engine", record.engineVersion);
-    const model = join(this.#root, "models", record.tier);
+  #modelDir(tier: TierId) {
+    return join(this.#root, "models", tier);
+  }
+
+  #filesOf(current: { tier: SpeechTierSpec; engine: SpeechEngineTarget }) {
+    const model = this.#modelDir(current.tier.id);
     return [
-      ...Object.entries(record.engineFiles).map(([path, pin]) => ({
-        path: join(engine, path),
+      ...Object.entries(current.engine.files).map(([path, pin]) => ({
+        path: join(this.#engineDir, path),
         pin,
       })),
-      ...Object.entries(record.modelFiles).map(([path, pin]) => ({ path: join(model, path), pin })),
+      ...Object.entries(current.tier.files).map(([path, pin]) => ({
+        path: join(model, path),
+        pin,
+      })),
     ];
   }
 
-  async #verifyInstalled() {
-    const record = this.#installed;
-    if (!record) return;
-    const seen: { path: string; size: number; mtimeMs: number }[] = [];
-    for (const { path, pin } of this.#filesOf(record)) {
+  // The library folders the program searches first that lie outside its own folder, where nothing
+  // may be. Inside it, holdsExactly already allows only the pinned files.
+  #outsideLibraryPaths(engine: SpeechEngineTarget) {
+    const programDir = dirname(join(this.#engineDir, this.options.catalog.engine.binary));
+    return engine.libraryPaths
+      .map((path) => resolve(programDir, path))
+      .filter((path) => !within(this.#engineDir, path));
+  }
+
+  // Exactly the pinned files where the program and model are, and nothing where it looks for
+  // libraries, every time before it runs.
+  #layoutHolds(current: { tier: SpeechTierSpec; engine: SpeechEngineTarget }) {
+    if (!holdsExactly(this.#engineDir, current.engine.files)) return false;
+    if (!holdsExactly(this.#modelDir(current.tier.id), current.tier.files)) return false;
+    return this.#outsideLibraryPaths(current.engine).every((path) => {
       try {
-        const found = await stat(path);
+        lstatSync(path);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+  }
+
+  async #verifyInstalled() {
+    const current = this.#current();
+    this.#verified = null;
+    if (!current) {
+      this.#damaged = this.#installed ? "outdated" : null;
+      return;
+    }
+    const seen: { path: string; size: number; mtimeMs: number; ino: number }[] = [];
+    for (const { path, pin } of this.#filesOf(current)) {
+      try {
+        const found = await lstat(path);
         if (!found.isFile() || found.size !== pin.bytes || (await sha256Of(path)) !== pin.sha256) {
-          this.#damaged = true;
-          this.#verified = null;
+          this.#damaged = "changed";
           return;
         }
-        seen.push({ path, size: found.size, mtimeMs: found.mtimeMs });
+        seen.push({ path, size: found.size, mtimeMs: found.mtimeMs, ino: found.ino });
       } catch {
-        this.#damaged = true;
-        this.#verified = null;
+        this.#damaged = "changed";
         return;
       }
     }
-    this.#damaged = false;
+    if (!this.#layoutHolds(current)) {
+      this.#damaged = "changed";
+      return;
+    }
+    this.#damaged = null;
     this.#verified = seen;
   }
 
-  // The hashes were checked at start-up and after installing. A file touched since isn't run.
-  #stillVerified() {
+  // The hashes were checked at start-up and after installing. A file touched since, or anything
+  // added beside them, stops them being run.
+  #stillVerified(current: { tier: SpeechTierSpec; engine: SpeechEngineTarget }) {
     if (!this.#verified) return false;
-    for (const { path, size, mtimeMs } of this.#verified) {
+    const same = this.#verified.every(({ path, size, mtimeMs, ino }) => {
       try {
-        const found = statSync(path);
-        if (found.size === size && found.mtimeMs === mtimeMs) continue;
+        const found = lstatSync(path);
+        return (
+          found.isFile() && found.size === size && found.mtimeMs === mtimeMs && found.ino === ino
+        );
       } catch {
-        // Gone counts as changed.
+        return false;
       }
-      this.#verified = null;
-      this.#damaged = true;
-      return false;
-    }
-    return true;
+    });
+    if (same && this.#layoutHolds(current)) return true;
+    this.#verified = null;
+    this.#damaged = "changed";
+    return false;
   }
 
   // The installed model to run, only once its files have matched their hashes.
   model(): InstalledSpeechModel | null {
-    const record = this.#installed;
-    if (!record || !this.#stillVerified()) return null;
+    const current = this.#current();
+    if (!current || !this.#stillVerified(current)) return null;
     return {
-      binary: join(this.#root, "engine", record.engineVersion, record.binary),
-      args: this.#runArgs(record, join(this.#root, "models", record.tier)),
-      languages: record.languages,
+      binary: join(this.#engineDir, this.options.catalog.engine.binary),
+      args: this.#runArgs(current.tier, this.#modelDir(current.tier.id)),
+      languages: current.tier.languages,
     };
   }
 
-  #runArgs(record: Pick<Installed, "flags" | "args">, dir: string) {
+  #runArgs(tier: SpeechTierSpec, dir: string) {
     return [
-      ...Object.entries(record.flags).map(([flag, file]) => `--${flag}=${join(dir, file)}`),
-      ...record.args,
+      ...Object.entries(tier.flags).map(([flag, file]) => `--${flag}=${join(dir, file)}`),
+      ...tier.args,
       `--num-threads=${speechThreads(this.options.host)}`,
     ];
+  }
+
+  // Refuses any path that resolves outside <home>/speech, links included.
+  async #removeInside(target: string) {
+    const root = await realpath(this.#root).catch(() => null);
+    const parent = await realpath(dirname(target)).catch(() => null);
+    if (!root || !parent) return;
+    const path = join(parent, basename(target));
+    if (!within(root, path) || path === root)
+      throw new Error("refused to remove a path outside the speech folder");
+    await rm(path, { recursive: true, force: true });
+  }
+
+  // A folder of ours that's a real folder, not a link to somewhere else.
+  async #realFolder(path: string) {
+    const found = await lstat(path).catch(() => null);
+    if (found && !found.isDirectory()) await rm(path, { force: true });
+    await mkdir(path, { recursive: true, mode: 0o700 });
   }
 
   #totals(tier: TierId) {
     const spec = this.options.catalog.tiers.find((one) => one.id === tier);
     const engine = this.#target;
     return (
-      (spec ? bundleDownload(spec) : 0) +
-      (engine && this.#installed?.engineVersion !== this.options.catalog.engine.version
-        ? bundleDownload(engine)
-        : 0)
+      (spec ? bundleDownload(spec) : 0) + (engine && !this.#current() ? bundleDownload(engine) : 0)
     );
   }
 
   status(): SpeechInstallStatus {
     const { catalog, host, handInstalled, handInstalledChosen } = this.options;
     const engine = this.#target;
-    const engineHere = this.#installed?.engineVersion === catalog.engine.version;
     const installed = this.#installed;
+    const current = this.#current();
+    const engineHere = !!current;
     const spec = catalog.tiers.find((tier) => tier.id === installed?.tier);
     const usable = this.model() !== null;
     const hand = handInstalled?.() ?? null;
@@ -379,8 +485,11 @@ export class SpeechInstaller {
         ? {
             tier: installed.tier,
             name: spec?.name ?? installed.tier,
-            diskBytes: this.#filesOf(installed).reduce((total, file) => total + file.pin.bytes, 0),
-            damaged: this.#damaged,
+            diskBytes: current
+              ? this.#filesOf(current).reduce((total, file) => total + file.pin.bytes, 0)
+              : treeBytes(join(this.#root, "engine")) + treeBytes(join(this.#root, "models")),
+            damaged: this.#damaged !== null,
+            ...(this.#damaged ? { reason: this.#damaged } : {}),
           }
         : null,
       handInstalled: hand,
@@ -406,12 +515,15 @@ export class SpeechInstaller {
     if (!tier) throw new SpeechInstallRefused("That speech model isn't available.");
     if (!this.#target)
       throw new SpeechInstallRefused("There's no speech program for this system yet.");
+    if (this.#cancelling)
+      throw new SpeechInstallRefused(
+        "The last download is still being cleared away. Try again in a moment.",
+      );
     if (this.#job?.state === "running") {
       if (this.#job.tier === tier.id) return;
       throw new SpeechInstallRefused(`Another speech model is already downloading.`);
     }
-    const engineCurrent = this.#installed?.engineVersion === this.options.catalog.engine.version;
-    if (this.#installed?.tier === tier.id && engineCurrent && !this.#damaged) {
+    if (this.#installed?.tier === tier.id && this.model()) {
       this.#job = null;
       return;
     }
@@ -445,13 +557,17 @@ export class SpeechInstaller {
   async #install(tier: SpeechTierSpec, signal: AbortSignal) {
     const engine = this.#target;
     if (!engine) throw new InstallStep("unpack", "There's no speech program for this system yet.");
-    await mkdir(this.#root, { recursive: true, mode: 0o700 });
+    await this.#realFolder(this.#root);
     await chmod(this.#root, 0o700);
+    for (const folder of ["engine", "models", "partial", "staging"])
+      await this.#realFolder(join(this.#root, folder));
     await this.#enter(tier.id, "checking");
     const version = this.options.catalog.engine.version;
-    const engineDir = join(this.#root, "engine", version);
+    const engineDir = this.#engineDir;
     const engineHere =
-      this.#installed?.engineVersion === version && (await this.#bundleMatches(engineDir, engine));
+      this.#installed?.engineVersion === version &&
+      holdsExactly(engineDir, engine.files) &&
+      (await this.#bundleMatches(engineDir, engine));
     const fetchEngine = !engineHere;
     const totalBytes = bundleDownload(tier) + (fetchEngine ? bundleDownload(engine) : 0);
     await this.#checkRoom(tier, fetchEngine ? engine : null);
@@ -487,23 +603,16 @@ export class SpeechInstaller {
 
       await this.#enter(tier.id, "testing");
       if (fetchEngine) await this.#commit(join(staging, "engine"), engineDir);
-      const modelDir = join(this.#root, "models", tier.id);
+      // Nothing may wait where the program looks for libraries before it first runs.
+      for (const path of this.#outsideLibraryPaths(engine))
+        if (within(this.#root, path)) await this.#removeInside(path);
+      const modelDir = this.#modelDir(tier.id);
       const stagedModel = join(staging, "model");
-      const record: Installed = {
-        tier: tier.id,
-        engineVersion: version,
-        binary: this.options.catalog.engine.binary,
-        engineFiles: engine.files,
-        modelFiles: tier.files,
-        flags: tier.flags,
-        args: [...tier.args],
-        languages: tier.languages ? [...tier.languages] : null,
-      };
-      const binary = join(engineDir, record.binary);
+      const record: Installed = { tier: tier.id, engineVersion: version };
+      const binary = join(engineDir, this.options.catalog.engine.binary);
       await chmod(binary, 0o700);
-      await this.#tryOnce(binary, stagedModel, record, signal);
+      await this.#tryOnce(binary, stagedModel, tier, signal);
       signal.throwIfAborted();
-      const previous = this.#installed;
       await this.#commit(stagedModel, modelDir);
       await this.#writeRecord("installed.json", record);
       await writeFile(join(this.#root, "NOTICES.txt"), `${tier.credit}\n\n${SPEECH_NOTICES}\n`, {
@@ -511,19 +620,19 @@ export class SpeechInstaller {
       });
       this.#installed = record;
       await this.#verifyInstalled();
-      if (previous && previous.tier !== tier.id)
-        await rm(join(this.#root, "models", previous.tier), { recursive: true, force: true });
-      if (previous && previous.engineVersion !== version)
-        await rm(join(this.#root, "engine", previous.engineVersion), {
-          recursive: true,
-          force: true,
-        });
-      await rm(this.#partials, { recursive: true, force: true });
+      // Whatever else is there, by what's on disk rather than by any record.
+      for (const [folder, keep] of [
+        ["models", tier.id],
+        ["engine", version],
+      ] as const)
+        for (const name of await readdir(join(this.#root, folder)))
+          if (name !== keep) await this.#removeInside(join(this.#root, folder, name));
+      await this.#removeInside(this.#partials);
       await mkdir(this.#partials, { recursive: true, mode: 0o700 });
-      await rm(join(this.#root, "installing.json"), { force: true });
+      await this.#removeInside(join(this.#root, "installing.json"));
       this.#job = null;
     } finally {
-      await rm(staging, { recursive: true, force: true }).catch(() => {});
+      await this.#removeInside(staging).catch(() => {});
     }
   }
 
@@ -635,18 +744,17 @@ export class SpeechInstaller {
   }
 
   async #commit(from: string, to: string) {
-    await mkdir(join(to, ".."), { recursive: true, mode: 0o700 });
-    await rm(to, { recursive: true, force: true });
+    await this.#removeInside(to);
     await rename(from, to);
   }
 
-  async #tryOnce(binary: string, modelDir: string, record: Installed, signal: AbortSignal) {
+  async #tryOnce(binary: string, modelDir: string, tier: SpeechTierSpec, signal: AbortSignal) {
     const wav = join(modelDir, ".silence.wav");
     await writeFile(wav, silentWav(), { mode: 0o600 });
     try {
       const out = await (this.options.run ?? hostRun)(
         binary,
-        [...this.#runArgs(record, modelDir), wav],
+        [...this.#runArgs(tier, modelDir), wav],
         signal,
       );
       if (!out.includes('"text"')) throw new Error("no words line");
@@ -658,34 +766,38 @@ export class SpeechInstaller {
         "The speech program couldn't start on this computer. Your files are fine, and nothing changed. Tell us your system version if this keeps happening.",
       );
     } finally {
-      await rm(wav, { force: true });
+      await this.#removeInside(wav);
     }
   }
 
+  // A press while this clears away is refused, so a new download never loses its files to it.
   async cancel(): Promise<void> {
-    const job = this.#job;
-    if (!job) return;
-    this.#abort?.abort(new Error("cancelled"));
-    await this.#running?.catch(() => {});
-    this.#job = null;
-    await rm(this.#partials, { recursive: true, force: true }).catch(() => {});
-    if (existsSync(this.#root)) {
-      mkdirSync(this.#partials, { recursive: true, mode: 0o700 });
-      await rm(join(this.#root, "installing.json"), { force: true }).catch(() => {});
-      await rm(join(this.#root, "staging"), { recursive: true, force: true }).catch(() => {});
+    if (this.#cancelling) return this.#cancelling;
+    if (!this.#job) return;
+    this.#cancelling = (async () => {
+      this.#abort?.abort(new Error("cancelled"));
+      await this.#running?.catch(() => {});
+      this.#job = null;
+      await this.#removeInside(this.#partials).catch(() => {});
+      await this.#removeInside(join(this.#root, "installing.json")).catch(() => {});
+      // Nothing else installed: a cancel leaves no program behind either.
+      if (!this.#installed) await this.#removeInside(join(this.#root, "engine")).catch(() => {});
+      this.options.changed?.();
+    })();
+    try {
+      await this.#cancelling;
+    } finally {
+      this.#cancelling = null;
     }
-    // Nothing else installed: a cancel leaves no program behind either.
-    if (!this.#installed) await rm(join(this.#root, "engine"), { recursive: true, force: true });
-    this.options.changed?.();
   }
 
   async remove(): Promise<void> {
-    if (this.#job?.state === "running")
+    if (this.#job?.state === "running" || this.#cancelling)
       throw new SpeechInstallRefused("Cancel the download before removing speech.");
     this.#job = null;
     this.#installed = null;
     this.#verified = null;
-    this.#damaged = false;
+    this.#damaged = null;
     await rm(this.#root, { recursive: true, force: true });
     this.options.changed?.();
   }

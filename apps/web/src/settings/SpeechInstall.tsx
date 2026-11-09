@@ -143,15 +143,17 @@ export function SpeechInstallPanel({
             leading={<IconTile icon="mic" />}
             label={installed.name}
             detail={
-              installed.damaged
-                ? "Its files changed since they were installed, so localDot won't run them. Install it again to fix this."
-                : `Installed by localDot · ${sizeWords(installed.diskBytes)}${
-                    status.using === "hand-installed"
-                      ? " · Not in use: LOCALDOT_SPEECH_MODEL names another model"
-                      : installedTier && !hearsLanguage(installedTier, language)
-                        ? " · Doesn't hear the language you chose, so your browser's speech is used for that"
-                        : ""
-                  }`
+              installed.reason === "outdated"
+                ? "It was installed by another version of localDot, so this one won't run it. Install it again to use it."
+                : installed.damaged
+                  ? "Its files changed, or something was added beside them, so localDot won't run them. Install it again to fix this."
+                  : `Installed by localDot · ${sizeWords(installed.diskBytes)}${
+                      status.using === "hand-installed"
+                        ? " · Not in use: LOCALDOT_SPEECH_MODEL names another model"
+                        : installedTier && !hearsLanguage(installedTier, language)
+                          ? " · Doesn't hear the language you chose, so your browser's speech is used for that"
+                          : ""
+                    }`
             }
             trailing={
               !job && (

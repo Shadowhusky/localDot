@@ -40,11 +40,17 @@ export interface SpeechTierSpec extends SpeechBundle {
   args: readonly string[];
 }
 
+export interface SpeechEngineTarget extends SpeechBundle {
+  // Where the program and its library look for libraries before the system's own folders, relative
+  // to the program's folder (its LC_RPATH or DT_RPATH). Nothing may be in one outside the bundle.
+  libraryPaths: readonly string[];
+}
+
 export interface SpeechEngineSpec {
   version: string;
   // The program's path within its bundle.
   binary: string;
-  targets: Partial<Record<string, SpeechBundle>>;
+  targets: Partial<Record<string, SpeechEngineTarget>>;
 }
 
 export interface SpeechCatalog {
@@ -55,7 +61,7 @@ export interface SpeechCatalog {
 export const catalogTarget = (
   catalog: SpeechCatalog,
   host: Pick<SpeechHost, "platform" | "arch">,
-): SpeechBundle | undefined => catalog.engine.targets[`${host.platform}-${host.arch}`];
+): SpeechEngineTarget | undefined => catalog.engine.targets[`${host.platform}-${host.arch}`];
 
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
@@ -78,6 +84,8 @@ export const SPEECH_CATALOG: SpeechCatalog = {
     binary: "bin/sherpa-onnx-offline",
     targets: {
       "darwin-arm64": {
+        // All four builds, read with otool -l and the ELF dynamic section on 9 November 2026.
+        libraryPaths: [".", "../lib", "../../../sherpa_onnx/lib"],
         files: {
           "bin/sherpa-onnx-offline": {
             sha256: "2bda8e350cce4d77e1ffda40c71289e3db14bfeaa026ab6ba286c7b829673dfe",
@@ -98,6 +106,7 @@ export const SPEECH_CATALOG: SpeechCatalog = {
         ],
       },
       "darwin-x64": {
+        libraryPaths: [".", "../lib", "../../../sherpa_onnx/lib"],
         files: {
           "bin/sherpa-onnx-offline": {
             sha256: "220367793f1021fe2e7f54537fcf9869564725ad9bc0dfc1396027e7356b018b",
@@ -118,6 +127,7 @@ export const SPEECH_CATALOG: SpeechCatalog = {
         ],
       },
       "linux-x64": {
+        libraryPaths: [".", "../lib", "../../../sherpa_onnx/lib"],
         files: {
           "bin/sherpa-onnx-offline": {
             sha256: "1dc6b2842f521538a2d73d0bb1002f7c6b1acd1bc0fbf10fbb6a823c8c1a1c60",
@@ -138,6 +148,7 @@ export const SPEECH_CATALOG: SpeechCatalog = {
         ],
       },
       "linux-arm64": {
+        libraryPaths: [".", "../lib", "../../../sherpa_onnx/lib"],
         files: {
           "bin/sherpa-onnx-offline": {
             sha256: "d193811d7bb7f92deb45fbb6643d4df32a3116a5b8ab53f3fe87c3200d172364",

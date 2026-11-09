@@ -77,8 +77,10 @@ export const SpeechInstallStatus = schema.strictObject({
       tier: SpeechTierId,
       name: schema.string().max(32),
       diskBytes: schema.number().int().nonnegative(),
-      // The files no longer match what was installed, so they aren't run.
+      // Not run: its files changed or something was added beside them, or it's from a version of
+      // localDot whose speech program this one doesn't know. Installing again fixes both.
       damaged: schema.boolean(),
+      reason: schema.enum(["changed", "outdated"]).optional(),
     })
     .nullable(),
   // A Whisper the person set up themselves. localDot only ever reads it.

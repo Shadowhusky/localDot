@@ -159,6 +159,22 @@ describe("Settings › Voice › speech model", () => {
     expect(screen.getByText(/Doesn't hear the language you chose/)).toBeTruthy();
   });
 
+  it("asks for a reinstall of a model another version of localDot installed", () => {
+    panel(
+      control({
+        installed: {
+          tier: "balanced",
+          name: "Balanced",
+          diskBytes: 210 * MB,
+          damaged: true,
+          reason: "outdated",
+        },
+      }),
+    );
+    expect(screen.getByText(/installed by another version of localDot/)).toBeTruthy();
+    expect(screen.getByRole("radiogroup")).toBeTruthy();
+  });
+
   it("offers to reinstall damaged files rather than running them", () => {
     panel(
       control({
