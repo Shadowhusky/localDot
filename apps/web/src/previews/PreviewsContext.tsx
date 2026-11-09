@@ -52,6 +52,8 @@ export interface Previews {
   copy(request: PreviewRequest, trigger: HTMLElement): void;
   // Ends every preview link, so each device has to open it from localDot again.
   signOut(trigger: HTMLElement): void;
+  // Ends one preview, such as one on this Mac's localhost ("end " and its id while pending).
+  end(id: string, trigger: HTMLElement): void;
   // Ends the server on a port, in the computer.
   stop(port: number, trigger: HTMLElement): void;
   // Requests being opened or copied ("copy " before its key), "stop " and a port, and "sign-out".
@@ -70,7 +72,7 @@ const FRESH_MS = 30_000;
 const LINK_MS = 120_000;
 
 export const requestKey = (request: PreviewRequest) =>
-  "url" in request ? `url ${request.url}` : `port ${request.port}`;
+  `${"url" in request ? `url ${request.url}` : `port ${request.port}`}${request.local ? ` at ${request.local}` : ""}`;
 
 // iOS opens a tab only inside the tap itself, so the tab opens blank before the preview exists. It
 // never learns which page opened it.
@@ -185,12 +187,14 @@ export function usePreviewsState(
     [sessionId],
   );
 
-  // A state that keeps previews from opening, known lately: the tap explains it at once.
+  // A state that keeps previews from opening, known lately: the tap explains it at once. One on
+  // this Mac's localhost needs no Tailscale.
   const refused = useCallback(
     (request: PreviewRequest, trigger: HTMLElement) => {
       const seen = latest.current;
       if (!seen?.status || seen.status.state === "ready" || Date.now() - seen.at >= FRESH_MS)
         return false;
+      if (request.local && seen.status.state === "needs-tailscale") return false;
       refuse(trigger, unavailable(seen.status.state, seen.status.message), request);
       load();
       return true;
@@ -281,6 +285,21 @@ export function usePreviewsState(
     [api, sessionId, run, refuse],
   );
 
+  const end = useCallback(
+    (id: string, trigger: HTMLElement) => {
+      const key = `end ${id}`;
+      if (!sessionId || busy.current.has(key)) return;
+      setNotice(null);
+      run(key, () =>
+        stopPreview(api, sessionId, id).catch((error: unknown) => {
+          if (!(error instanceof ApiError && error.status === 404))
+            refuse(trigger, { message: "localDot couldn't close it. Try again." });
+        }),
+      );
+    },
+    [api, sessionId, run, refuse],
+  );
+
   const stop = useCallback(
     (port: number, trigger: HTMLElement) => {
       const key = `stop ${port}`;
@@ -332,6 +351,7 @@ export function usePreviewsState(
             open,
             copy,
             signOut,
+            end,
             stop,
             pending,
             notice,
@@ -348,6 +368,7 @@ export function usePreviewsState(
       open,
       copy,
       signOut,
+      end,
       stop,
       pending,
       notice,

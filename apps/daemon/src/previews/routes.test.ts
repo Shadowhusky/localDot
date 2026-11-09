@@ -71,6 +71,24 @@ describe("preview routes", () => {
       { url: "http://localhost:5173/" },
       "100.91.187.75:4744",
     ]);
+    await hono.request(
+      `/api/sessions/${TASK}/previews`,
+      post({ url: "http://localhost:5173/", local: 3000 }),
+    );
+    expect(calls[2]).toEqual([
+      "open",
+      TASK,
+      { url: "http://localhost:5173/", local: 3000 },
+      "100.91.187.75:4744",
+    ]);
+    expect(
+      (
+        await hono.request(
+          `/api/sessions/${TASK}/previews`,
+          post({ url: "http://localhost:5173/", local: 443 }),
+        )
+      ).status,
+    ).toBe(400);
     const refused = await hono.request(
       `/api/sessions/${TASK}/previews`,
       post({ url: "https://example.com/" }),
@@ -96,6 +114,11 @@ describe("preview routes", () => {
     expect((await hono.request(`/api/sessions/${TASK}/previews`)).status).toBe(403);
     expect(
       (await hono.request(`/api/sessions/${TASK}/previews`, post({ url: "http://localhost:1/" })))
+        .status,
+    ).toBe(403);
+    // Nor on the owner's Mac.
+    expect(
+      (await hono.request(`/api/sessions/${TASK}/previews`, post({ port: 5173, local: 3000 })))
         .status,
     ).toBe(403);
     expect(
