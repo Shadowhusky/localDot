@@ -54,6 +54,7 @@ async function leavesALine(rail: Locator, line: string | RegExp) {
   await expect(rail.locator(".thread-fix")).toHaveCount(0);
   await expect(rail.locator('.thread-row[data-kind="fix"]').getByText(line)).toBeVisible();
   await expect(rail.getByRole("button", { name: /^Done$/ })).toHaveCount(0);
+  await rail.screenshot({ path: test.info().outputPath("after.png") });
 }
 
 for (const view of VIEWS)

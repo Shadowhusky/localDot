@@ -124,6 +124,17 @@
   background-color: var(--color-separator);
 }
 
+/* A card's line can name a long key or app. */
+.thread-row[data-kind="fix"] .thread-divider {
+  white-space: normal;
+}
+
+.thread-row[data-kind="fix"] .thread-divider > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
 /* The dot Auto chose: the dot in its outfit, why, and the way to change it. */
 .thread-dot {
   display: flex;
