@@ -290,6 +290,12 @@ export interface AgentRunnerDeps {
     Partial<Pick<Conversations, "names" | "persona" | "model" | "chooseModel" | "latest" | "link">>;
   // The shared links whose tasks a carried-on task counts against.
   links?: Pick<RemoteLinks, "reserve" | "active">;
+  // keyd's hold on a computer's web keys, and its release with fresh stand-ins for them.
+  keysHeld?: {
+    hold(cellId: string): Promise<void>;
+    release(cellId: string): Promise<void>;
+    held?(cellId: string): Promise<boolean>;
+  };
   installSkills(cellId: string, signal: AbortSignal, persona?: PersonaId): Promise<SkillSummary[]>;
   prepareDesktop?(session: AgentSession): Promise<void>;
   waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
@@ -488,6 +494,10 @@ const native = (selection: ModelSelection) =>
 export class AgentRunner {
   readonly sessions = new Map<string, AgentSession>();
   readonly #runtime = new Map<string, Runtime>();
+  // The shared link's tasks holding each computer's keys, and keyd's hold and release calls for
+  // it, one at a time.
+  readonly #keyHolds = new Map<string, number>();
+  readonly #keyCalls = new Map<string, Promise<void>>();
   // Bounded daemon-lifetime history only: never keep AgentSession, leases, brain IDs or keys.
   readonly #terminal = new Map<string, TerminalTaskSnapshot>();
   readonly #starting = new Set<string>();
@@ -828,6 +838,8 @@ export class AgentRunner {
       throw error;
     }
     let reservation: ReturnType<RemoteLinks["reserve"]> | undefined;
+    let letKeysGo: (() => void) | undefined;
+    let running = false;
     try {
       // A routine's run goes on in the routine's own conversation, never the one the user has open.
       // A conversation record that can't be read never keeps a task from starting.
@@ -945,6 +957,8 @@ export class AgentRunner {
           ? origin.data.name
           : (named?.automatic ?? messageName(task))
       ).slice(0, 200);
+      // Before the task exists, so not one step of it runs while the computer's keys still work.
+      if (guest && !guest.apps) letKeysGo = await this.#holdKeys(cellId);
       const id = this.deps.eventLog.createSession(title);
       const session = new AgentSession(
         id,
@@ -1086,6 +1100,13 @@ export class AgentRunner {
           (stop) => this.#run(rt, stop),
           this.deps.prepareDesktop && alone ? (stop) => this.#prepareDesktop(rt, stop) : undefined,
         );
+        running = true;
+        const letGo = letKeysGo;
+        if (letGo)
+          void this.deps.live.settled(id).then(
+            () => letGo(),
+            () => letGo(),
+          );
       } catch (error) {
         session.stop();
         await session.screensSettled().catch(() => {});
@@ -1111,10 +1132,67 @@ export class AgentRunner {
       return session;
     } catch (error) {
       reservation?.finish();
+      if (!running) letKeysGo?.();
       throw error;
     } finally {
       admittedNext();
     }
+  }
+  #keyCall(cellId: string, step: () => Promise<void>): Promise<void> {
+    const next = (this.#keyCalls.get(cellId) ?? Promise.resolve()).catch(() => {}).then(step);
+    this.#keyCalls.set(cellId, next);
+    return next;
+  }
+  holdsKeys(cellId: string): boolean {
+    return this.#keyHolds.has(cellId);
+  }
+  // After a restart, keyd may still hold a computer's keys for a shared link's task that no
+  // longer runs: the computer gets them back, fresh.
+  async releaseStrayHold(cellId: string): Promise<void> {
+    const keys = this.deps.keysHeld;
+    if (!keys?.held || this.#keyHolds.has(cellId)) return;
+    await this.#keyCall(cellId, async () => {
+      if (!this.#keyHolds.has(cellId) && (await keys.held?.(cellId))) await keys.release(cellId);
+    });
+  }
+  // A shared link's task without the owner's apps shares the computer's one proxy with every
+  // program on it, the owner's tasks' included: keyd refuses the computer's web keys until the
+  // last such task on it ends, then gives it fresh ones, so none the task could read still work.
+  async #holdKeys(cellId: string): Promise<() => void> {
+    const keys = this.deps.keysHeld;
+    if (!keys)
+      throw new AgentError(
+        503,
+        "This computer's saved keys can't be held for a shared link's task.",
+      );
+    const queued = (step: () => Promise<void>) => this.#keyCall(cellId, step);
+    this.#keyHolds.set(cellId, (this.#keyHolds.get(cellId) ?? 0) + 1);
+    let released = false;
+    // A hold keyd may not have made is never released here: the keys stay held, never open.
+    const letGo = (release = true) => {
+      if (released) return;
+      released = true;
+      const left = (this.#keyHolds.get(cellId) ?? 1) - 1;
+      if (left > 0) {
+        this.#keyHolds.set(cellId, left);
+        return;
+      }
+      this.#keyHolds.delete(cellId);
+      if (release)
+        void queued(() => keys.release(cellId)).catch(() =>
+          console.error("a computer's saved keys were not given back after a shared link's task"),
+        );
+    };
+    try {
+      await queued(() => keys.hold(cellId));
+    } catch {
+      letGo(false);
+      throw new AgentError(
+        503,
+        "This computer's saved keys couldn't be held for a shared link's task. Try again.",
+      );
+    }
+    return letGo;
   }
   // The shared link a task works for, from the task while it runs or from its record after.
   #linkOf(sessionId: string | undefined): { id: string; apps: boolean } | undefined {

@@ -1257,6 +1257,7 @@ describe("a task started through a shared link", () => {
     };
     const spec = { name: "github__list_issues", app: "GitHub", description: "", inputSchema: {} };
     h.deps.connectors = () => ({ specs: [spec], get: () => undefined });
+    h.deps.keysHeld = { hold: async () => {}, release: async () => {} };
     const start = () =>
       h.runner.start(
         h.cellId,
@@ -1291,4 +1292,95 @@ describe("a task started through a shared link", () => {
       expect(session.connectors.specs).toHaveLength(apps ? 1 : 0);
     },
   );
+});
+
+describe("a computer a shared link's task works on", () => {
+  function held(h: ReturnType<typeof setup>, fail = false) {
+    const calls: string[] = [];
+    h.deps.keysHeld = {
+      hold: async (cell) => {
+        calls.push(
+          `hold ${cell === h.cellId ? "this" : "another"} computer, ${h.opens.length} brains open`,
+        );
+        if (fail) throw new Error("keyd is away");
+      },
+      release: async (cell) => {
+        calls.push(`release ${cell === h.cellId ? "this" : "another"} computer`);
+      },
+    };
+    return calls;
+  }
+  const guest = { sender: "link", guest: { apps: false } } as const;
+  it("holds its saved keys before the task's first step, until its last such task has ended", async () => {
+    const h = setup();
+    const calls = held(h);
+    const first = await h.runner.start(h.cellId, "Book a table", undefined, guest);
+    expect(calls).toEqual(["hold this computer, 0 brains open"]);
+    await h.ready();
+    const second = await h.runner.start(h.cellId, "Find a plumber", undefined, {
+      ...guest,
+      continues: null,
+    });
+    await h.runner.stopRun(first.id);
+    await h.live.settled(first.id);
+    expect(calls).toEqual([
+      "hold this computer, 0 brains open",
+      "hold this computer, 1 brains open",
+    ]);
+    await h.runner.stopRun(second.id);
+    await h.live.settled(second.id);
+    await until(() => calls.length === 3);
+    expect(calls.at(-1)).toBe("release this computer");
+  });
+  it("holds nothing for the owner's own task, or for a link with the owner's apps", async () => {
+    const h = setup();
+    const calls = held(h);
+    const owner = await h.runner.start(h.cellId, "Book a table", undefined, { byOwner: true });
+    await h.ready();
+    await h.runner.stopRun(owner.id);
+    await h.live.settled(owner.id);
+    const apps = await h.runner.start(h.cellId, "Book a table", undefined, {
+      sender: "link",
+      guest: { apps: true },
+    });
+    await h.runner.stopRun(apps.id);
+    await h.live.settled(apps.id);
+    expect(calls).toEqual([]);
+  });
+  it("gives back keys keyd still holds for a shared link's task that no longer runs", async () => {
+    const h = setup();
+    const calls = held(h);
+    let stillHeld = true;
+    h.deps.keysHeld = {
+      ...(h.deps.keysHeld as NonNullable<typeof h.deps.keysHeld>),
+      held: async () => stillHeld,
+    };
+    const running = await h.runner.start(h.cellId, "Book a table", undefined, guest);
+    await h.runner.releaseStrayHold(h.cellId);
+    expect(calls).toEqual(["hold this computer, 0 brains open"]);
+    await h.runner.stopRun(running.id);
+    await h.live.settled(running.id);
+    await until(() => calls.length === 2);
+    // A daemon that restarted knows of no task, while keyd still holds the computer's keys.
+    calls.length = 0;
+    await h.runner.releaseStrayHold(h.cellId);
+    expect(calls).toEqual(["release this computer"]);
+    stillHeld = false;
+    await h.runner.releaseStrayHold(h.cellId);
+    expect(calls).toEqual(["release this computer"]);
+  });
+  it("starts no shared link's task whose computer's keys can't be held", async () => {
+    const h = setup();
+    const calls = held(h, true);
+    await expect(h.runner.start(h.cellId, "Book a table", undefined, guest)).rejects.toThrow(
+      /keys/,
+    );
+    expect(calls).toEqual(["hold this computer, 0 brains open"]);
+    expect(h.opens).toHaveLength(0);
+    expect(h.live.sessionsOn(h.cellId)).toEqual([]);
+    delete h.deps.keysHeld;
+    await expect(h.runner.start(h.cellId, "Book a table", undefined, guest)).rejects.toThrow(
+      /keys/,
+    );
+  });
 });

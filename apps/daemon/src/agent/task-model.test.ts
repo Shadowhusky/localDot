@@ -149,6 +149,7 @@ function setup(initial: AgentSettings = { main: SONNET, models: [HAIKU, OPUS] })
   const runner = new AgentRunner({
     home,
     links,
+    keysHeld: { hold: async () => {}, release: async () => {} },
     eventLog: log,
     live,
     cell: (id) =>

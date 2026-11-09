@@ -307,6 +307,19 @@ export class KeydClient {
       .revoked;
   }
 
+  // keyd refuses every key the cell's programs send until releaseKeys, which drops the cell's
+  // surrogates too: mint it fresh ones after.
+  async holdKeys(id: string): Promise<void> {
+    const path = `/v1/cells/${segment(id)}/keys-held`;
+    this.#check(await this.#send("PUT", path), path);
+  }
+
+  async releaseKeys(id: string): Promise<number> {
+    return (
+      await this.#json("DELETE", `/v1/cells/${segment(id)}/keys-held`, undefined, KeydRevoked)
+    ).revoked;
+  }
+
   async mint(id: string, secrets: string[]): Promise<Record<string, string>> {
     const path = `/v1/cells/${segment(id)}/surrogates`;
     return (await this.#json("POST", path, { secrets }, KeydMinted)).surrogates ?? {};

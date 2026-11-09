@@ -26,6 +26,7 @@ export interface FakeCell {
   // Every surrogate keyd still accepts for the cell: minting adds one, only a revoke ends them.
   valid: Set<string>;
   revoked: number;
+  keysHeld: boolean;
 }
 
 export interface FakeCall {
@@ -305,6 +306,7 @@ export class FakeKeyd {
         surrogates,
         valid: new Set(Object.values(surrogates)),
         revoked: 0,
+        keysHeld: false,
       });
       const opened: KeydOpened = {
         cellId: req.cellId,
@@ -316,7 +318,7 @@ export class FakeKeyd {
       };
       return reply(res, 201, opened);
     }
-    const cell = /^\/v1\/cells\/([^/]+)(\/revoke|\/surrogates)?$/.exec(path);
+    const cell = /^\/v1\/cells\/([^/]+)(\/revoke|\/surrogates|\/keys-held)?$/.exec(path);
     if (cell) {
       const id = decodeURIComponent(cell[1] ?? "");
       const found = this.cells.get(id);
@@ -331,6 +333,7 @@ export class FakeKeyd {
             secretId,
             surrogateId: "0123456789ab",
           })),
+          keysHeld: found.keysHeld,
         });
       }
       if (method === "DELETE" && !cell[2]) {
@@ -342,6 +345,17 @@ export class FakeKeyd {
         found.surrogates = {};
         found.valid.clear();
         found.revoked += 1;
+        return reply(res, 200, { revoked });
+      }
+      if (method === "PUT" && cell[2] === "/keys-held") {
+        found.keysHeld = true;
+        return reply(res, 204);
+      }
+      if (method === "DELETE" && cell[2] === "/keys-held") {
+        const revoked = found.valid.size;
+        found.surrogates = {};
+        found.valid.clear();
+        found.keysHeld = false;
         return reply(res, 200, { revoked });
       }
       if (method === "POST" && cell[2] === "/surrogates") {
