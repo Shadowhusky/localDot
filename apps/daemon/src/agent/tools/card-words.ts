@@ -83,22 +83,50 @@ const A_SECRET = [
   String.raw`\bmots? de passe\b${ABOUT}`,
   String.raw`\bphrase secrete\b`,
   String.raw`\bcode (?:secret|pin)\b`,
+  String.raw`\b(?:passwort|kennwort)\w*`,
+  String.raw`\bsenhas?\b${ABOUT}`,
+  String.raw`\bparola d['’]?\s*ordine\b`,
+  // A pass, as a password: "your pass", not "your boarding pass".
+  String.raw`\b(?:your|my)\s+pass\b(?![\s_-]*(?:word|code|phrase))`,
+  String.raw`\b(?:log[\s_-]?in|sign[\s_-]?in|one[\s_-]?time|verification|2fa|two[\s_-]?factor|auth(?:entication)?|otp|mfa|sms)[\s_-]+codes?\b`,
+  String.raw`\b(?:t?otp|mfa)\b`,
+  String.raw`\b(?:credit[\s_-]+|debit[\s_-]+)?card[\s_-]*(?:number|no\b|#)`,
+  String.raw`\bcv[vc]2?\b|\bcsc\b`,
+  String.raw`\bssn\b|\bsocial[\s_-]+security(?:[\s_-]+(?:number|no\b))?|\bnational[\s_-]+insurance[\s_-]+number\b`,
   "密码|密碼|口令|密钥|密鑰|金鑰|パスワード",
 ].join("|");
 const NAMES_A_SECRET = new RegExp(A_SECRET, "iu");
-// "Not an API key or client secret" names what the answer isn't. Only the secrets the denial itself
-// lists are passed over: "not your PIN but your password" still names the password.
+// "Not an API key or client secret" names what the answer isn't. Only the secret the negation is on
+// is passed over, with bare nouns joined to it by "or": one with its own article or possessive is
+// named anew ("not the PIN or the password", "no PIN nor your password", "not a PIN, your password").
 const ARTICLE = String.raw`(?:(?:an?|the|your|any)\s+)?`;
+const OWN_DETERMINER = String.raw`(?:an?|the|your|my|our|their|his|her|its|any|this|that)\b`;
 const DENIED = new RegExp(
-  String.raw`\b(?:not|never|no|nor)\s+${ARTICLE}(?:${A_SECRET})(?:\s*(?:,|\bor\b|\bnor\b)\s*${ARTICLE}(?:${A_SECRET}))*`,
+  String.raw`\b(?:not|never|no)\s+${ARTICLE}(?:[\p{L}-]+\s+)?(?:${A_SECRET})(?:\s+(?:or|nor)\s+(?!${OWN_DETERMINER})(?:${A_SECRET}))*`,
   "giu",
 );
-const affirmed = (words: string) => plainWords(words).replace(DENIED, " ");
+const affirmed = (words: string) =>
+  plainWords(words)
+    .replace(DENIED, " ")
+    .replace(/^[\s,;:]+/u, "");
+// Words in scripts the look-alikes would turn into Latin letters, read as written.
+const native = (words: string) =>
+  words
+    .normalize("NFKC")
+    .replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, "")
+    .toLowerCase();
+const NATIVE_SECRET =
+  /парол[ьяеюи]|пин[\s-]?код|비밀번호|암호|暗証番号|パスワード|密码|密碼|口令|密钥|密鑰|金鑰/u;
+const NATIVE_FIRST = new RegExp(String.raw`^(?:ваш[аеи]?\s+)?(?:${NATIVE_SECRET.source})`, "u");
+const NATIVE_ASKS =
+  /введите|укажите|напишите|сообщите|입력|入力|输入|輸入|提供|告诉|告訴|填写|填寫|教えて/u;
 const ASKS_FOR_A_SECRET = new RegExp(
   [
-    String.raw`\b(?:enter|type|provide|give|send|share|paste|input|supply|tell\s+me|what(?:'s|\s+is)|need|introduce|escribe|ingresa|indica|saisis\w*|entre[rz]?|tape[rz]?|donne[rz]?)\b[^?!\n]{0,60}(?:${A_SECRET})`,
+    String.raw`\b(?:enter|type|provide|give|send|share|paste|input|supply|tell\s+me|what(?:'s|\s+is)|need|introduce|escribe|ingresa|indica|saisis\w*|entre[rz]?|tape[rz]?|donne[rz]?|gib|gebe|geben|eingeben|eintragen|nenne|nennen|digite|digita|informe|insira|introduza|inserisci|inserire|scrivi)\b[^?!\n]{0,60}(?:${A_SECRET})`,
     // Just the thing itself, "Password for example.com?" or "Your PIN?", not "Pin this note?"
-    String.raw`^(?:(?:your|the|my|tu|su|votre|ton)\s+)?(?:[\p{L}.-]+\s+)?(?:${A_SECRET})\s*(?:$|[?:.]|\s+(?:for|of|on|at|please|por|para|de|du|pour)\b)`,
+    String.raw`^(?:(?:your|the|my|tu|su|votre|ton)\s+)?(?:[\p{L}.-]+\s+)?(?:${A_SECRET})\s*(?:$|[?:.!]|\s+(?:for|of|on|at|please|por|para|de|du|pour)\b)`,
+    // "Your password, please", but not "Pin, star or archive this?"
+    String.raw`^(?:your|my|tu|su|votre|ton)\s+(?:[\p{L}.-]+\s+)?(?:${A_SECRET})\s*,`,
     String.raw`(?:输入|輸入|提供|告诉|告訴|填写|填寫)[^。？！\n]{0,20}(?:密码|密碼|口令|密钥|密鑰|金鑰)`,
   ].join("|"),
   "iu",
@@ -147,7 +175,9 @@ export const aimsAtKeys = (words: string) =>
 export function asksSecretInPlainText(input: AskUserInput): boolean {
   const fields = input.fields ?? [];
   const named = (words: string) =>
-    NAMES_A_SECRET.test(affirmed(words)) || /\bsecrets?\b/iu.test(affirmed(words));
+    NAMES_A_SECRET.test(affirmed(words)) ||
+    /\bsecrets?\b/iu.test(affirmed(words)) ||
+    NATIVE_SECRET.test(native(words));
   if (
     fields.some(
       (f) => OWN_WORDS.has(f.kind) && named(`${fieldWords(f.id)}\n${f.label}\n${f.hint ?? ""}`),
@@ -157,5 +187,12 @@ export function asksSecretInPlainText(input: AskUserInput): boolean {
   const typedPrivately = fields.some((f) => f.kind === "secret" || f.kind === "code");
   // A question with options or nothing to fill in is answered in the user's own words too.
   const answeredInWords = !fields.length || fields.some((f) => OWN_WORDS.has(f.kind));
-  return !typedPrivately && answeredInWords && ASKS_FOR_A_SECRET.test(affirmed(input.question));
+  const asked = native(input.question);
+  return (
+    !typedPrivately &&
+    answeredInWords &&
+    (ASKS_FOR_A_SECRET.test(affirmed(input.question)) ||
+      (NATIVE_SECRET.test(asked) && NATIVE_ASKS.test(asked)) ||
+      NATIVE_FIRST.test(asked.trim()))
+  );
 }
