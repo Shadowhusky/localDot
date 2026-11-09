@@ -345,7 +345,7 @@ describe("what the message box says while a card is up", () => {
     expect(fixWait([card({ kind: "key", id: "a", problem: "reenter" })])).toBe("private-fix");
     expect(fixWait([card({ kind: "key", id: "a", problem: "rebound" })])).toBe("fix");
     expect(fixWait([card({ kind: "runtime" })])).toBe("fix");
-    expect(fixWait([card({ kind: "computer", state: "paused" })])).toBe("fix");
+    expect(fixWait([card({ kind: "computer", state: "paused" })])).toBeUndefined();
     expect(fixWait([card({ kind: "runtime" }), card({ kind: "keys_locked" })])).toBe("private-fix");
   });
 });

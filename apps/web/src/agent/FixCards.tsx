@@ -62,9 +62,9 @@ export function FixCards({ blockers, deps }: { blockers: readonly AgentBlocker[]
   return blockers.map((open) => <FixCard key={open.blockerId} open={open} deps={deps} />);
 }
 // What a message moves on from while cards are up: a card that takes a secret warns that a message
-// isn't kept secret.
+// isn't kept secret. Nothing can be sent while the computer is off, so its card says nothing here.
 export function fixWait(blockers: readonly AgentBlocker[]): DotWait | undefined {
-  if (!blockers.length) return undefined;
+  if (!blockers.some(({ blocker }) => blocker.kind !== "computer")) return undefined;
   return blockers.some(
     ({ blocker }) =>
       blocker.kind === "keys_locked" || (blocker.kind === "key" && blocker.problem !== "rebound"),

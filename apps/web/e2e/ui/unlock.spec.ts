@@ -66,6 +66,10 @@ test("the chat asks for the passphrase in a card, says when it's wrong, and goes
 
 test("the link to Keys lights the unlock form in Settings", async ({ page, ui }, testInfo) => {
   await ui.open("keys-locked");
+  // The app is up, so what the address says next is heard.
+  await expect(
+    (await chatRail(page)).getByRole("region", { name: "Unlock your saved keys" }),
+  ).toBeVisible();
   await page.evaluate(() => {
     window.location.hash = "settings=keys&tip=unlock";
   });
