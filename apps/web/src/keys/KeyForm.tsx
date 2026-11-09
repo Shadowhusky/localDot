@@ -17,6 +17,7 @@ import {
   useState,
 } from "react";
 import { Button } from "../ui/Button.tsx";
+import { Checkbox } from "../ui/Checkbox.tsx";
 import { Combobox } from "../ui/Combobox.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -142,6 +143,9 @@ export function KeyForm({
   const paired = !useMediaQuery(PHONE);
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [tried, setTried] = useState(false);
+  // A general secret has no shape to tell it from typed words, so replacing a saved one is said in so
+  // many words first.
+  const [replacing, setReplacing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
@@ -165,6 +169,7 @@ export function KeyForm({
   const locked = Boolean(unavailable) || busy;
   const report = () => holding.current?.(!!valueRef.current?.value);
   const general = (reenter?.kind ?? draft.kind) === "secret";
+  const asksToReplace = !!reenter && general;
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -373,6 +378,11 @@ export function KeyForm({
     }
     setTried(true);
     setSaved(null);
+    if (asksToReplace && !replacing) {
+      setProblem({ field: "value", message: "Tick Replace the saved secret, then save." });
+      reveal();
+      return;
+    }
     const value = general ? input.value : input.value.trim();
     // Clear before any callback, including one that throws synchronously.
     input.value = "";
@@ -663,6 +673,17 @@ export function KeyForm({
           />
         )}
       </Field>
+      {asksToReplace && (
+        <Checkbox
+          label="Replace the saved secret"
+          description="What you typed above takes its place."
+          checked={replacing}
+          onCheckedChange={(on) => {
+            setReplacing(on);
+            if (on && problem?.field === "value") setProblem(null);
+          }}
+        />
+      )}
       <div className="keys-form-actions">
         <div id={statusId} className="keys-form-status">
           {shown?.field === "form" ? (
