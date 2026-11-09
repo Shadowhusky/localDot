@@ -1134,6 +1134,16 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         : c.text("that card is not waiting", 409);
     }),
   );
+  app.delete(
+    "/api/agent/sessions/:id/blockers/:blockerId/use",
+    route(async (c) => {
+      ownerOnly(c);
+      const s = active(c.req.param("id") ?? "");
+      check(c.req.raw.signal);
+      s.releaseBlocker(c.req.param("blockerId") ?? "");
+      return c.body(null, 204);
+    }),
+  );
   app.post(
     "/api/agent/sessions/:id/blockers/:blockerId/model",
     route(async (c) => {

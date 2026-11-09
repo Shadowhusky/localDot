@@ -510,6 +510,11 @@ export class AgentSession {
   get tainted(): boolean {
     return this.#tainted;
   }
+  // The task has read outside words at some point. Unlike tainted, the user's word doesn't clear it:
+  // what was read stays in dot's context.
+  get readOutside(): boolean {
+    return this.#heardOthers;
+  }
   set tainted(value: boolean) {
     this.#tainted = value;
     if (value) this.#heardOthers = true;
@@ -1437,6 +1442,9 @@ export class AgentSession {
   }
   useBlocker(blockerId: string): boolean {
     return !this.stopped && this.#blockers.use(blockerId);
+  }
+  releaseBlocker(blockerId: string): boolean {
+    return this.#blockers.release(blockerId);
   }
   dismissBlocker(blockerId: string): boolean {
     return !this.stopped && this.#blockers.dismiss(blockerId);

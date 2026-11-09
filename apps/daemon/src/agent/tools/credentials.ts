@@ -82,8 +82,8 @@ export async function credentialsTool(
   const metadata = KeyMetadata.parse({
     label: input.label ?? input.key_id,
     service: input.service ?? input.provider,
-    // What a task has read can write this, so a task that has read anything gets no words of its own.
-    description: ctx.session.tainted ? undefined : input.description,
+    // What a task has read can write this, so a task that ever read anything gets no words of its own.
+    description: ctx.session.readOutside ? undefined : input.description,
   });
   const saved = await deps.credentials.list();
   const existing = saved.find((key) => key.id === binding.id);
@@ -101,7 +101,7 @@ export async function credentialsTool(
     return fail(
       "That key name is already used for a different credential. Select the matching saved key or a new name; do not overwrite it.",
     );
-  if (ctx.session.tainted) {
+  if (ctx.session.readOutside) {
     const refused = await newPlaceRefused(ctx, binding, saved);
     if (refused) return refused;
   }
@@ -192,6 +192,7 @@ async function newPlaceRefused(
         exposed: "keys__add",
         actionClass: "network",
         asks: true,
+        once: true,
         host: fresh[0] ?? "",
         card: {
           title: "Send a new key to a new place",

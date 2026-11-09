@@ -66,6 +66,8 @@ export interface ConnectorFacts {
   readonly host?: string;
   // The user set this tool to ask first, which holds in every mode.
   readonly asks?: true;
+  // Every time, for this step alone: no yes for the task or a place covers a later one.
+  readonly once?: true;
   // What the card says, when not the action class's own words.
   readonly card?: { readonly title: string; readonly why: string };
 }

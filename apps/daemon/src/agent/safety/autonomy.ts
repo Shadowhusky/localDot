@@ -132,7 +132,7 @@ export function alwaysOptions(
 ): AlwaysOption[] {
   // A yes for an app's tool lasts this task and covers that tool only.
   if (facts.operation === "connector")
-    return ALWAYS_SCOPES[actionClass].includes("task") && facts.connector
+    return ALWAYS_SCOPES[actionClass].includes("task") && facts.connector && !facts.connector.once
       ? [{ scope: "task", label: "For this task", tool: facts.connector.exposed }]
       : [];
   const { site, app } = placeOf(facts);
@@ -183,8 +183,8 @@ export function decideAutonomy(
     const decision = decide(acting, ctx.session.autonomy, (actionClass) =>
       relaxes(actionClass, place),
     );
-    if (decision.mode !== "handoff")
-      return { ...decision, mode: relaxes(decision.actionClass, place) ? "act" : "ask", place };
+    const relaxed = !acting.connector.once && relaxes(decision.actionClass, place);
+    if (decision.mode !== "handoff") return { ...decision, mode: relaxed ? "act" : "ask", place };
   }
   if (permission === "custom")
     return {
