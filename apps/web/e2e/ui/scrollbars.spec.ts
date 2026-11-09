@@ -176,8 +176,13 @@ test("long words in a conversation's name and its steps", async ({ page, ui }) =
     localStorage.setItem("localdot.panels.v1", JSON.stringify({ sessions: true })),
   );
   const fixture = await ui.open("conversations-working");
-  await page.request.post(`${fixture.origin}/__qa/steps?n=2&label=${encodeURIComponent(long)}`);
-  await expect(page.locator(".thread-work").last()).toBeVisible();
+  // A step's label is at most 80 characters.
+  const step = long.slice(0, 80);
+  const added = await page.request.post(
+    `${fixture.origin}/__qa/steps?n=2&label=${encodeURIComponent(step)}`,
+  );
+  expect(added.ok(), await added.text()).toBe(true);
+  await expect(page.getByText(step).first()).toBeVisible();
   await noStray(page, ui, "long-names");
   const row = page.locator(".thread-work-list button.activity-row-head").last();
   if (await row.isVisible()) {

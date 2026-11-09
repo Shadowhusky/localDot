@@ -25,6 +25,8 @@ const SIDEWAYS = [
 
 // Overflow this small can only be rounding, padding or something drawn past an edge.
 const SLIGHT = 2;
+// Hold a conversation of any length, which can end a pixel or two past the view for real.
+const FEEDS = ".thread-scroll";
 // As far as a control reaches past its edge for the pointer, which is scrollable overflow. Further
 // than this, what a ::before or ::after adds is a spacer, there on purpose.
 const REACH = 12;
@@ -35,7 +37,7 @@ const REACH = 12;
 // its room to do so. An element that draws none is left alone.
 export const strayScrollbars = (page: Page) =>
   page.evaluate(
-    async ({ sideways, slight, reach }): Promise<StrayScrollbar[]> => {
+    async ({ sideways, slight, reach, feeds }): Promise<StrayScrollbar[]> => {
       const frames = async (count: number) => {
         for (let frame = 0; frame < count; frame++) await new Promise(requestAnimationFrame);
       };
@@ -91,7 +93,7 @@ export const strayScrollbars = (page: Page) =>
             if (flow === "scroll") report("always shows a bar, with nothing to scroll");
           } else if (bare[axis] <= 0 && by <= reach)
             report("only what its ::before or ::after draws overflows");
-          else if (by <= slight) report("overflows by a pixel or two");
+          else if (by <= slight && !node.matches(feeds)) report("overflows by a pixel or two");
           else if (axis === "x" && !node.closest(sideways))
             report("scrolls sideways, though it isn't meant to");
         };
@@ -103,5 +105,5 @@ export const strayScrollbars = (page: Page) =>
       await frames(4);
       return found;
     },
-    { sideways: SIDEWAYS, slight: SLIGHT, reach: REACH },
+    { sideways: SIDEWAYS, slight: SLIGHT, reach: REACH, feeds: FEEDS },
   );
