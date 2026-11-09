@@ -318,7 +318,8 @@ describe("a message's model", () => {
     const seq = session.inboxSequence;
     await f.runner.retryOnModel(session.id, { ...SONNET });
     expect(session.inboxSequence).toBe(seq + 1);
-    expect(f.events(session.id, "blocker.clear").at(-1)?.data).not.toHaveProperty("movedTo");
+    expect(session.openBlockers).toHaveLength(1);
+    expect(f.events(session.id, "blocker.clear")).toEqual([]);
   });
 
   it("the model card hands over to the conversation's next task for another kind of model", async () => {

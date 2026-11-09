@@ -666,14 +666,17 @@ export class AgentRunner {
     const { session } = rt;
     const turn = await this.messageTurn(id, ref, signal);
     if (!turn || session.stopped) throw new AgentError(404, "no such live task");
-    const moved = { provider: ref.provider, model: ref.model };
-    const moves = turn.moves();
+    // The same model is a retry, whose card holds until the model answers.
+    if (!turn.moves()) {
+      session.post("resume", "");
+      return;
+    }
     const stalled = rt.stalled;
     rt.stalled = undefined;
-    const cleared = session.clearBlockers(
-      (blocker) => blockerSubject(blocker) === stalled,
-      moves ? moved : undefined,
-    );
+    const cleared = session.clearBlockers((blocker) => blockerSubject(blocker) === stalled, {
+      provider: ref.provider,
+      model: ref.model,
+    });
     if (turn.handOver) {
       try {
         await this.start(session.cellId, CARRY_ON, signal, { continues: id, model: ref });
@@ -687,8 +690,7 @@ export class AgentRunner {
       return;
     }
     rt.pause = undefined;
-    if (moves) turn.reached();
-    else session.post("resume", "");
+    turn.reached();
   }
   resolveRoles(keys: KeydRecord[], settings = this.deps.settings()): ResolvedRole[] {
     const snapshot = AgentSettings.parse(settings);
