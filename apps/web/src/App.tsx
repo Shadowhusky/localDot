@@ -46,7 +46,7 @@ import {
   STATUS_LABEL,
 } from "./agent/conversation-list.ts";
 import { conversationBlockReason } from "./agent/conversation-state.ts";
-import { FixCards } from "./agent/FixCards.tsx";
+import { FixCards, fixesToShow } from "./agent/FixCards.tsx";
 import { useTaskStalled } from "./agent/heartbeat.ts";
 import { LatestSteps } from "./agent/LatestSteps.tsx";
 import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
@@ -2089,7 +2089,7 @@ function Theatre({ api }: { api: ApiClient }) {
   };
   const tipAction = idle?.action;
   // What the task is waiting on the user to fix, as its own log says on every device.
-  const fixes = agent.fixes ?? [];
+  const fixes = fixesToShow(agent.fixes ?? [], keys.health);
   const bandLine = hearing ? LISTENING_LINE : idle ? idle.text : narration;
   const bandSpeaker = hearing || idle ? "dot" : speaker;
   const pendingQuestion = agent.model.pendingAsk

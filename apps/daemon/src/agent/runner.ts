@@ -147,9 +147,12 @@ const CARD_STATES = new Set<CellSummary["state"]>(["stopped", "failed"]);
 // fence or replacement holds.
 export function computerDown(cell: CellSummary | undefined): "stopped" | "paused" | undefined {
   if (!cell || cell.fenced || cell.replacementPending) return undefined;
+  // A stop that failed left it running: finishing the stop is the way on, not starting it.
+  if (cell.error?.startsWith("stop failed")) return undefined;
   if (CARD_STATES.has(cell.state)) return "stopped";
   return cell.state === "ready" && cell.paused ? "paused" : undefined;
 }
+export const computerUp = (cell: CellSummary): boolean => cell.state === "ready" && !cell.paused;
 export const RAISE_BUDGET_FIRST = "Raise this task's budget before resuming it.";
 export const CLAUDE_CODE_OFF = "Claude Code isn't available on this computer.";
 // Recovery waits own no user decision or desktop control. They can be retired
@@ -623,12 +626,8 @@ export class AgentRunner {
     for (const id of this.deps.live.sessionsOn?.(cell.id) ?? []) {
       const rt = this.#runtime.get(id);
       if (!rt || rt.session.stopped) continue;
-      if (!down) {
-        rt.session.clearBlockers((blocker) => blocker.kind === "computer");
-        continue;
-      }
-      if (rt.session.status === "idle") continue;
-      void this.#computerWentDown(rt, down);
+      if (computerUp(cell)) rt.session.clearBlockers((blocker) => blocker.kind === "computer");
+      else if (down && rt.session.status !== "idle") void this.#computerWentDown(rt, down);
     }
   }
   async #computerWentDown(rt: Runtime, state: "stopped" | "paused"): Promise<void> {

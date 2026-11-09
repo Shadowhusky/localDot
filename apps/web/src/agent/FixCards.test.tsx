@@ -6,7 +6,7 @@ import { type KeydHealth, type KeyRecord, unlockKeys } from "../keys/keys-api.ts
 import type { KeysController } from "../keys/useKeys.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { ModelOption } from "../settings/model-options.ts";
-import { FixCards, type FixDeps, FixLine } from "./FixCards.tsx";
+import { FixCards, type FixDeps, FixLine, fixesToShow } from "./FixCards.tsx";
 import type { AgentBlocker } from "./model.ts";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { threadItems } from "./thread.ts";
@@ -118,9 +118,20 @@ describe("a card for each kind", () => {
   });
 
   it("offers no unlock once the keys are open, on the news of any device", () => {
-    const { deps } = setup({}, { health: health("ready") });
-    show({ kind: "keys_locked" }, deps);
-    expect(screen.queryByRole("region")).toBeNull();
+    const blockers = [card({ kind: "keys_locked" })];
+    expect(fixesToShow(blockers, health("locked"))).toEqual(blockers);
+    expect(fixesToShow(blockers, health("setup"))).toEqual(blockers);
+    expect(fixesToShow(blockers, health("ready"))).toEqual([]);
+    const other = [card({ kind: "runtime" })];
+    expect(fixesToShow(other, health("ready"))).toEqual(other);
+  });
+
+  it("offers to try again when the model met the refusal, since the key may be fine", async () => {
+    const { deps } = setup();
+    show({ kind: "key", id: "openai", problem: "rejected" }, deps, { required: true });
+    expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(deps.retry.run).toHaveBeenCalledOnce());
   });
 
   it("takes a replacement for a refused key, saved through Keys with nothing else", async () => {
@@ -129,7 +140,7 @@ describe("a card for each kind", () => {
     const region = screen.getByRole("region", { name: "Your openai key was refused" });
     const field = within(region).getByLabelText(/key/i) as HTMLInputElement;
     expect(within(region).queryByLabelText("Name")).toBeNull();
-    fireEvent.change(field, { target: { value: "sk-new-value-for-this-key-0123456789" } });
+    fireEvent.change(field, { target: { value: "sk-replacement" } });
     fireEvent.submit(within(region).getByRole("form", { name: "Re-enter openai" }));
     await waitFor(() => expect(keys.save).toHaveBeenCalledOnce());
     expect(vi.mocked(keys.save).mock.calls[0]?.[0]).toMatchObject({ id: "openai", kind: "llm" });

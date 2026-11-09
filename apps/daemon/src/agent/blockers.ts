@@ -76,6 +76,12 @@ export class BlockerDesk {
     for (const [subject, open] of this.#open)
       if (open.blockerId === blockerId) this.#told.delete(subject);
   }
+  // Its wait ended with the card still up: dot hears when it goes, as it was told it would.
+  leave(blockerId: string): void {
+    for (const [subject, open] of this.#open)
+      if (open.blockerId === blockerId && blockerNote(open.blocker, "fixed"))
+        this.#told.add(subject);
+  }
   clear(
     matches: (blocker: Blocker) => boolean,
     movedTo?: EventOf<"blocker.clear">["data"]["movedTo"],

@@ -98,6 +98,8 @@ export function markOf(e: LocalDotEvent): TimelineMark | null {
       );
     case "memory.change":
       return mark("memory", `Updated ${e.data.file}`);
+    case "keys.lock":
+      return mark("event", e.data.locked ? "Saved keys were locked" : "Keys unlocked");
     case "blocker.raise":
       return mark("event", blockerLine(e.data.blocker, "open"), "attention");
     case "blocker.clear":

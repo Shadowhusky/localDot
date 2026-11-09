@@ -316,6 +316,28 @@ describe("request_fix: a card on dot's say-so", () => {
     expect(raises(events())).toHaveLength(1);
   });
 
+  it("tells dot when a card it gave up waiting on is fixed after all", async () => {
+    const { call, session, tools } = setup({ askTimeoutMs: 20 });
+    tools.keysLocked = () => true;
+    await call("request_fix", { kind: "keys_locked" });
+    const seq = session.inboxSequence;
+    session.keysUnlocked();
+    expect(await inbox(session, seq)).toEqual([KEYS_UNLOCKED_NOTE]);
+  });
+
+  it("tells dot once when a card it is waiting on goes: its call says so", async () => {
+    const { call, events, session, tools } = setup();
+    tools.keysLocked = () => true;
+    session.lockKeys();
+    const reply = call("request_fix", { kind: "keys_locked" });
+    await until(() => session.status === "waiting_user");
+    const seq = session.inboxSequence;
+    session.keysUnlocked();
+    await reply;
+    expect(session.inboxSequence).toBe(seq);
+    expect(raises(events())).toHaveLength(1);
+  });
+
   it("stops waiting for a Pause, as a question does", async () => {
     const { call, events, session, tools } = setup();
     tools.keysLocked = () => true;
@@ -403,12 +425,38 @@ describe("ask_user can't stand in for a card", () => {
     expect((await reply).body.ok).toBe(true);
   });
 
-  it("leaves a website's own passphrase field alone", async () => {
+  it("leaves a website's own passphrase field alone while the keys are open", async () => {
     const { call, session, tools } = setup();
-    tools.keysLocked = () => true;
+    tools.keysLocked = () => false;
     const reply = call("ask_user", {
       question: "What should the new wifi passphrase be?",
       fields: [{ id: "pass", kind: "text", label: "New passphrase" }],
+    });
+    await until(() => !!session.pendingAsk);
+    session.decline(session.pendingAsk ?? "");
+    expect((await reply).body.ok).toBe(true);
+  });
+
+  it("takes any passphrase asked for while the keys are locked to the real card", async () => {
+    const { call, events, session, tools } = setup();
+    tools.keysLocked = () => true;
+    const reply = call("ask_user", {
+      question: "Enter your passphrase",
+      fields: [{ id: "pass", kind: "secret", label: "Passphrase" }],
+    });
+    await until(() => raises(events()).length === 1);
+    expect(events().some((event) => event.type === "ask.request")).toBe(false);
+    expect(raises(events())[0]?.blocker).toEqual({ kind: "keys_locked" });
+    session.keysUnlocked();
+    expect((await reply).body.ok).toBe(true);
+  });
+
+  it("leaves other people's keys out of it", async () => {
+    const { call, session, tools } = setup();
+    tools.keysLocked = () => false;
+    const reply = call("ask_user", {
+      question: "Did you leave your keys locked in the car?",
+      fields: [{ id: "where", kind: "text", label: "Where are they" }],
     });
     await until(() => !!session.pendingAsk);
     session.decline(session.pendingAsk ?? "");

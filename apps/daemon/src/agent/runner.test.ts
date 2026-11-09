@@ -30,6 +30,7 @@ import {
   AgentError,
   AgentRunner,
   type AgentRunnerDeps,
+  computerDown,
   SIGN_IN_BROWSER_WAIT_MS,
 } from "./runner.ts";
 import { ComputerFences } from "./safety/fences.ts";
@@ -2320,6 +2321,58 @@ describe("ChatGPT runner lifecycle", () => {
       expect(s.openBlockers[0]?.blocker).toEqual({ kind: "runtime" });
       down = false;
       await until(() => s.openBlockers.length === 0);
+    });
+
+    it("keeps the card up while the computer is on its way back", async () => {
+      const f = setup();
+      const s = await working(f);
+      f.runner.cellChanged(off(f, "stopped"));
+      await until(() => s.openBlockers.length === 1);
+      const cell = f.deps.cell(f.cellId) as NonNullable<ReturnType<typeof f.deps.cell>>;
+      f.runner.cellChanged({ ...cell, state: "starting" });
+      expect(s.openBlockers).toHaveLength(1);
+      f.runner.cellChanged({ ...cell, state: "ready" });
+      expect(s.openBlockers).toEqual([]);
+    });
+
+    it("waits out Docker when it takes the brain with it, counting no crash", async () => {
+      const f = setup();
+      let down = false;
+      f.deps.runtimeDown = async () => down;
+      f.deps.runtimeCheckMs = 1;
+      f.run.mockImplementationOnce(async (session) => {
+        const generation = session.beginBrain();
+        session.setStatus("running");
+        down = true;
+        session.retireBrain(generation);
+        return 137;
+      });
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]).toMatchObject({ blocker: { kind: "runtime" }, required: true });
+      expect(s.status).toBe("paused");
+      expect(f.sleep).not.toHaveBeenCalled();
+      expect(f.run).toHaveBeenCalledTimes(1);
+      down = false;
+      await until(() => s.openBlockers.length === 0);
+      await until(() => f.run.mock.calls.length === 2);
+      expect(blockers(f, s.id).at(-1)).toBe("fixed");
+    });
+
+    it("a computer whose stop failed offers nothing to start", () => {
+      const cell = {
+        id: "c",
+        scale: 1,
+        createdAt: "",
+        stream: NO_STREAM,
+        state: "failed",
+      } as const;
+      expect(computerDown(cell)).toBe("stopped");
+      expect(computerDown({ ...cell, error: "stop failed: docker" })).toBeUndefined();
+      expect(computerDown({ ...cell, fenced: true })).toBeUndefined();
+      expect(computerDown({ ...cell, state: "starting" })).toBeUndefined();
+      expect(computerDown({ ...cell, state: "ready", paused: true })).toBe("paused");
+      expect(computerDown({ ...cell, state: "ready" })).toBeUndefined();
     });
 
     it("a stopped task raises nothing, whatever happens to its computer", async () => {

@@ -7,7 +7,7 @@ import { chooseView, expect, runAt, test } from "./harness.ts";
 runAt("c14", "c39", "w14", "w39");
 
 const PASSPHRASE = "correct horse battery";
-const KEY_VALUE = "sk-ant-CANARYreplacementvalue0123456789abcdef";
+const KEY_VALUE = `sk-ant-api03-${"q".repeat(40)}`;
 const VIEWS = ["chat", "studio"] as const;
 const LOOKS = ["daylight", "graphite"] as const;
 

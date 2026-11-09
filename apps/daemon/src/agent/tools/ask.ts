@@ -155,8 +155,9 @@ function shownAnswer(field: Pick<AskRequestField, "kind">, value: AskFieldRecord
   return value;
 }
 
-const ABOUT_LOCALDOT_KEYS = /\b(localdot|saved keys|your keys)\b/i;
-const UNLOCKING = /\b(unlock|locked|pass ?phrase)\b/i;
+const ABOUT_LOCALDOT_KEYS = /\b(?:[Ll]ocal[Dd]ot|[Ss]aved keys|Keys)\b/;
+const UNLOCKING = /\b(?:unlock|locked|pass ?phrase)\b/i;
+const PASSPHRASE = /\bpass ?phrase\b/i;
 const CARD_IS_UP =
   "localDot's own card for this is on screen and says when it is done, so don't ask the user to confirm it. Call request_fix to wait for it, or carry on with what doesn't need it.";
 // The brain's own guard, not a word from the model.
@@ -175,10 +176,11 @@ async function cardInstead(
     input.question,
     ...fields.flatMap((field) => [field.label, field.hint ?? ""]),
   ].join(" ");
+  const locked = deps.keysLocked?.();
   if (ABOUT_LOCALDOT_KEYS.test(words) && UNLOCKING.test(words))
-    return deps.keysLocked?.()
-      ? waitForFix(deps, ctx, { kind: "keys_locked" })
-      : fail(KEYS_NOT_LOCKED);
+    return locked ? waitForFix(deps, ctx, { kind: "keys_locked" }) : fail(KEYS_NOT_LOCKED);
+  // While the vault is locked, any passphrase asked for through dot could be its own.
+  if (locked && PASSPHRASE.test(words)) return waitForFix(deps, ctx, { kind: "keys_locked" });
   const only = fields.length === 1 ? fields[0] : undefined;
   if (only?.kind === "confirm" && only.id !== KEEP_GOING && ctx.session.openBlockers.length)
     return fail(CARD_IS_UP);

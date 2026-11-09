@@ -72,7 +72,7 @@ import { PlanUsageStore } from "../../../daemon/src/agent/plan-usage.ts";
 import { RecentActivity } from "../../../daemon/src/agent/recent-activity.ts";
 import { ResearchLog } from "../../../daemon/src/agent/research.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
-import { AgentError, computerDown } from "../../../daemon/src/agent/runner.ts";
+import { AgentError, computerUp } from "../../../daemon/src/agent/runner.ts";
 import {
   approvalDraft,
   authorizePrepared,
@@ -551,7 +551,7 @@ let raisedDuringPause = false;
 let session: AgentSession | undefined;
 // The computer coming back clears what waited on it, as the real runner hears it.
 cells.subscribe((cell) => {
-  if (!computerDown(cell)) session?.clearBlockers((blocker) => blocker.kind === "computer");
+  if (computerUp(cell)) session?.clearBlockers((blocker) => blocker.kind === "computer");
 });
 // The user's own hold on the computer, with no task, while it is the live session.
 let holder: AgentSession | undefined;

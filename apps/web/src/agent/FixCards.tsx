@@ -58,10 +58,11 @@ export interface FixDeps {
 // only from the task's blocker events and never from anything dot or a page wrote. The words are
 // fixed by kind, and a secret goes straight from the card to the key service.
 export function FixCards({ blockers, deps }: { blockers: readonly AgentBlocker[]; deps: FixDeps }) {
-  return blockers
-    .filter((open) => open.blocker.kind !== "keys_locked" || vaultLocked(deps.keys.health))
-    .map((open) => <FixCard key={open.blockerId} open={open} deps={deps} />);
+  return blockers.map((open) => <FixCard key={open.blockerId} open={open} deps={deps} />);
 }
+// Keys already open need no card, whatever a slower word from the task says.
+export const fixesToShow = (blockers: readonly AgentBlocker[], health: KeydHealth | null) =>
+  blockers.filter((open) => open.blocker.kind !== "keys_locked" || vaultLocked(health));
 
 function FixCard({ open, deps }: { open: AgentBlocker; deps: FixDeps }) {
   const { blocker } = open;
@@ -217,6 +218,14 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
         </div>
       </Shell>
     );
+  // Where the model itself met the refusal, the key may be fine: trying again is the other way on.
+  const way = open.required ? (
+    <Button variant="quiet" onClick={() => void deps.retry.run()}>
+      Try again
+    </Button>
+  ) : (
+    <NotNow open={open} deps={deps} />
+  );
   return (
     <Shell
       kind="key"
@@ -234,14 +243,12 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
           save={deps.keys.save}
           busy={deps.keys.busy}
           unavailable={noSaving(deps.keys.health)}
-          actions={<NotNow open={open} deps={deps} />}
+          actions={way}
         />
       ) : (
         <>
           <p className="thread-recovery-reason">Looking up the key…</p>
-          <div className="thread-recovery-actions">
-            <NotNow open={open} deps={deps} />
-          </div>
+          <div className="thread-recovery-actions">{way}</div>
         </>
       )}
     </Shell>

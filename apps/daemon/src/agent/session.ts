@@ -1376,6 +1376,7 @@ export class AgentSession {
       return this.#blockers.outcome(blockerId) ?? "fixed";
     } finally {
       this.#fixWaits--;
+      this.#blockers.leave(blockerId);
       if (!this.stopped && !this.#control && !this.safetyPause && !this.#ask)
         this.status = "running";
     }
