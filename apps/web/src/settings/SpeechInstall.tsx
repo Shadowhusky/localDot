@@ -89,7 +89,7 @@ export function SpeechProgress({ job, children }: { job: SpeechInstallJob; child
           {detail && <span className="speech-progress-detail">{detail}</span>}
         </>
       )}
-      <ol className="settings-steps speech-steps" aria-label="Install steps">
+      <ol className="settings-steps settings-update-steps" aria-label="Install steps">
         {INSTALL_STAGES.map(({ stage, name }, index) => {
           const state = index < at ? "done" : index === at ? (failed ? "failed" : "doing") : "todo";
           return (

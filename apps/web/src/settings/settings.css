@@ -945,15 +945,6 @@
   color: var(--color-fg-1);
 }
 
-.speech-steps .settings-step {
-  min-height: 0;
-  padding: var(--spacing) 0;
-}
-
-.speech-steps .settings-step + .settings-step {
-  box-shadow: none;
-}
-
 @media (max-width: 480px) {
   .speech-progress {
     padding-left: 0;
