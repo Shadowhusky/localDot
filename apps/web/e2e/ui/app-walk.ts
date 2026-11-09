@@ -152,6 +152,27 @@ export function walkTheApp(look: Look) {
     await look(page, ui, "connections-catalog");
   });
 
+  test("Add models, with a long list and a provider to set up", async ({ page, ui }) => {
+    const fixture = await ui.open("ready");
+    await qa(page, fixture.origin, "own-endpoint?models=40");
+    const settings = await openSettings(page, undefined, "Models");
+    await settings
+      .getByRole("region", { name: "Your models" })
+      .getByRole("button", { name: "Add models" })
+      .click();
+    const sheet = page.getByRole("dialog", { name: "Add models" });
+    const choose = async (name: RegExp) => {
+      await press(page, sheet.getByRole("combobox", { name: "From", exact: true }));
+      await press(page, page.getByRole("option", { name }));
+    };
+    await choose(/^relay\.example/);
+    await expect(sheet.getByRole("checkbox")).toHaveCount(40);
+    await look(page, ui, "add-models-list");
+    await choose(/^Groq/);
+    await expect(sheet.getByRole("textbox", { name: "Key", exact: true })).toBeVisible();
+    await look(page, ui, "add-models-set-up");
+  });
+
   test("saved logins in Keys, with an import's summary", async ({ page, ui }) => {
     const fixture = await ui.open("ready");
     expect((await page.request.post(`${fixture.origin}/__qa/logins`)).ok()).toBe(true);

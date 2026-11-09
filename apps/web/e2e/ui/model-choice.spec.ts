@@ -104,8 +104,16 @@ test("Settings keeps several models on one key, each on or off, any of them the 
   await section.getByRole("button", { name: "Add models" }).click();
   const sheet = page.getByRole("dialog", { name: "Add models" });
   await expect(sheet).toBeVisible();
-  await sheet.getByRole("combobox", { name: "From" }).click();
-  await page.getByRole("option", { name: /relay\.example/ }).click();
+  // From searches every provider; a phone's list is a sheet a finger taps.
+  const from = sheet.getByRole("combobox", { name: "From", exact: true });
+  const option = page.getByRole("option", { name: /relay\.example/ });
+  if (isPhone(page)) {
+    await from.tap();
+    await option.tap();
+  } else {
+    await from.click();
+    await option.click();
+  }
   // The endpoint's own list, and a model it doesn't list, added by hand.
   await sheet.getByText("gpt-6.1-terra", { exact: true }).click();
   await sheet.getByLabel("Add by ID").fill("gpt-6-luna-new");

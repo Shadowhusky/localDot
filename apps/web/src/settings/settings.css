@@ -131,6 +131,17 @@
   background-color: var(--color-overlay);
 }
 
+/* A provider set up where its models are added: what it needs, where to get a key, and the form. */
+.settings-setup {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+
+.settings-setup > p {
+  margin: 0;
+}
+
 /* Typed values sit at a row's end at one width, so a row never grows with what is typed. */
 .settings-body .ui-group-row .ui-text-field {
   flex: none;
@@ -1141,7 +1152,8 @@
     calc(var(--spacing) * 3);
 }
 
-.connectors-link {
+.connectors-link,
+.settings-setup-link {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1149,21 +1161,24 @@
   margin-top: var(--spacing);
 }
 
-.connectors-link > a {
+.connectors-link > a,
+.settings-setup-link > a {
   color: var(--color-fg-1);
   text-decoration: underline;
   text-decoration-color: var(--color-fg-3);
   text-underline-offset: calc(var(--spacing) * 0.5);
 }
 
-.connectors-host {
+/* fg-2: on the chip's fill, fg-3 falls short of 4.5:1 in the dark appearances. */
+.connectors-host,
+.settings-setup-host {
   display: inline-flex;
   align-items: center;
   height: 16px;
   padding: 0 calc(var(--spacing) * 1.25);
   border-radius: var(--radius-tag);
   background-color: var(--color-control);
-  color: var(--color-fg-3);
+  color: var(--color-fg-2);
   font:
     var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
     var(--font-ui);
