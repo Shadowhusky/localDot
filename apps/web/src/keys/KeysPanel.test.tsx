@@ -147,7 +147,7 @@ describe("a key to enter again", () => {
     expect(within(form).queryByLabelText(LABEL)).toBeNull();
     expect(within(form).queryByLabelText("Hosts")).toBeNull();
     expect(within(form).queryByRole("radio", { name: "Custom API" })).toBeNull();
-    type("Key", " sk-forecast-again ");
+    type("Key", " sk-forecast-again2 ");
     fireEvent.click(saveButton());
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(save).toHaveBeenCalledWith(
@@ -160,7 +160,7 @@ describe("a key to enter again", () => {
         methods: ["GET"],
         paths: ["/v1/forecast"],
       },
-      "sk-forecast-again",
+      "sk-forecast-again2",
     );
     await waitFor(() =>
       expect(screen.queryByRole("form", { name: "Re-enter forecast" })).toBeNull(),
