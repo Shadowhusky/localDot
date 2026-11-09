@@ -46,7 +46,7 @@ function amount(done: number, total: number) {
 }
 
 export function downloadDetail(done: number | undefined, total: number | undefined) {
-  if (done === undefined) return "Downloading";
+  if (done === undefined || (!total && done < 5e5)) return "Downloading";
   if (!total) return `Downloading · ${size(done)} so far`;
   const seen = Math.min(done, total);
   return `Downloading · ${Math.floor((seen / total) * 100)}% · ${amount(seen, total)}`;
