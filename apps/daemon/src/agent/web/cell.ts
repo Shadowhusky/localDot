@@ -24,7 +24,12 @@ export interface WebGet {
   readonly signal: AbortSignal;
   readonly accept: string;
   readonly maxBytes: number;
+  // A site the request stays on: a redirect anywhere else isn't followed.
+  readonly within?: string;
 }
+
+export const onSite = (url: URL, site: string) =>
+  url.hostname === site || url.hostname.endsWith(`.${site}`);
 export interface WebAccess {
   get(url: URL, options: WebGet): Promise<WebReply>;
 }
@@ -91,6 +96,8 @@ export class WebCell implements WebAccess {
         await reply.body?.cancel().catch(() => {});
         const next = absolute(reply.headers.get("location") ?? undefined, current);
         if (!next) throw new WebError("The site redirected to an address that can't be read.");
+        if (options.within && !onSite(next, options.within))
+          throw new WebError("The site sent the request to another site, which wasn't followed.");
         current = next;
         continue;
       }

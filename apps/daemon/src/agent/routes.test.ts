@@ -628,6 +628,7 @@ describe("agent user routes", () => {
     const REPLY = {
       status: "found" as const,
       sources: [],
+      links: [],
       spend: {
         usd: 0.002,
         limitUSD: 0.25,

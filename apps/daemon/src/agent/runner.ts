@@ -1415,7 +1415,6 @@ export class AgentRunner {
     if (!side) throw new SideQuestionError(409, "no-spare-model");
     const live = this.#runtime.get(sessionId);
     const rt = live && !live.session.stopped && live.selection.kind !== "none" ? live : undefined;
-    const claude = this.deps.claudeCode;
     let problem: SideQuestionError | undefined;
     const selection =
       rt?.selection ??
@@ -1424,15 +1423,12 @@ export class AgentRunner {
         problem = error;
         return { kind: "none" as const };
       }));
-    const models = await sideModels(selection, {
-      settings: this.deps.settings(),
-      keys: () => this.deps.keyd.secrets(),
-      catalog: () => this.deps.catalog(),
-      claudeReady: async () => (await claude?.status())?.state === "signed_in",
+    const models = sideModels(selection, {
       api: side.api,
       ...(side.plan ? { plan: side.plan } : {}),
     });
     if (!models.length) throw problem ?? new SideQuestionError(409, "no-spare-model");
+    if (!models.some((model) => model.tools)) throw new SideQuestionError(409, "no-tool-model");
     const readers = side.readers(sessionId, rt?.session, file);
     const { system, prompt } = sideQuestionPrompt(
       sideQuestionEvents(file),

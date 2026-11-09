@@ -4,7 +4,7 @@ import {
   type WebSearchInput,
   type WebSearchKind,
 } from "@localdot/protocol";
-import { type WebAccess, WebError } from "./cell.ts";
+import { onSite, type WebAccess, WebError } from "./cell.ts";
 import { ENGINES, type Engine, SearchBlocked, type SearchHit, thumbnailUrl } from "./engines.ts";
 import { decodeText } from "./html.ts";
 import { toJpeg } from "./picture.ts";
@@ -44,11 +44,16 @@ async function ask(
   keep: (hit: SearchHit) => boolean,
   signal: AbortSignal,
 ): Promise<SearchHit[]> {
+  // A search goes to the engine alone: one sent on to another site carries its words there, and
+  // what that site returns is no engine's results.
+  const site = engine.host.split(".").slice(-2).join(".");
   const reply = await web.get(engine.address(query), {
     signal,
     accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
     maxBytes: PAGE_BYTES,
+    within: site,
   });
+  if (!onSite(reply.url, site)) throw new NoResults("sent the search to another site");
   if (reply.status !== 200) throw new NoResults(`answered ${reply.status}`);
   const found = engine.read(decodeText(reply.body, reply.contentType));
   if (!found.length) throw new NoResults("found nothing");

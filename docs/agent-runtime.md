@@ -396,21 +396,42 @@ tools leaves the question to the next, and a model without images isn't offered 
 reports `found`, `partial` or `not_found`, and that field alone decides what happens next, never the
 words of the answer. Anything short of `found` goes to the main model by itself, with what the first
 model found and what it checked. If there's no main model to go to, or no room left, the question
-ends with what it found and says so. After the task's own models, any other model set up in Settings
-can answer if they fail.
+ends with what it found and says so.
+
+Only the models the user chose for the task answer: its main model and, where the task uses them, its
+fast and local models, as its next message would run on them. The user already showed the task to
+each, so going from one to another takes nothing anywhere new. No other model, even one set up in
+Settings, is asked: that would take the task's record to a provider, or from a local model to the
+cloud, without the user choosing it. A task none of whose models can answer says why instead.
 
 - **Claude Code:** a process of its own with no built-in tools, whose MCP server serves only the side
   tools (`claude-code/side.ts`). A tool outside them is refused, and using one ends that model's go.
 - **ChatGPT plan:** never asked. Every Codex turn is a fresh process that holds the account's
-  credentials, so one here could keep dot's next turn waiting. Other models set up in Settings
-  answer instead; with none, the answer says why.
+  credentials, so one here could keep dot's next turn waiting. A ChatGPT task has no other model of
+  its own, so it says it can't take a side question.
 
 **Limits**, for both models together (`SIDE_LIMITS`): 120 seconds, 75 of them for any one model, 8
 reads per model, and $0.25, or 300,000 tokens on a plan, where no money is counted. keyd holds the
-money limit too. Near a limit a model is offered only `finish`, so it ends by saying what it found.
+money limit too: each model's listener gets only what is left, and when it closes, what keyd counted
+on it replaces the replies' own count if that is more, which covers a reply that gave no usage and a
+call cut short. Near a limit a model is offered only `finish`, so it ends by saying what it found.
 
-**Web.** `web_fetch` opens only an address in the user's question or in this question's own search
-results. A page can't have what was read sent to a host of its choosing, whether by naming the
-address or by having the model compose one: nobody can be asked here, as dot's purpose check can.
-A `web_search` goes only to the search engines, and one holding something the redactor catches isn't
-sent. Both go through the same keyd web cell as dot's, so the same egress rules hold.
+**Web.** Nothing the side agent reads leaves it, since nobody can be asked here, as dot's purpose check
+can ask:
+
+- `web_fetch` opens only an address in the user's question or in this question's own search results,
+  never one a page named or the model composed.
+- A `web_search` is refused when it carries what the question was given or read: the record and every
+  tool result are kept as `TaskTaint` fingerprints, never as text, and a query is checked against them
+  once the words of the user's own question are taken out. So a user can have something searched by
+  writing it in their question. A query the redactor changes isn't sent either.
+- A search's `!bang` and `\` commands are taken out, and every search, dot's too, stays on its engine's
+  site (`WebGet.within`): a redirect elsewhere isn't followed, and a page from elsewhere gives no
+  results, nor addresses `web_fetch` may open.
+- In the answer, only those same addresses are links. Any other shows as text with its site, as its
+  address may carry what was read.
+
+Both tools go through the same keyd web cell as dot's, so the same egress rules hold.
+
+**The record** it opens with is what was said in the task and its plan, without messages the user
+took back, inside `<untrusted>` blocks: a line in it can't end the block or ask a question of its own.

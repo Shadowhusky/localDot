@@ -8,7 +8,8 @@ export interface SideListener {
   readonly binding: ModelBinding;
   readonly at: { readonly port: number; readonly token: string };
   readonly effort?: ReasoningEffort;
-  close(): Promise<void>;
+  // What keyd counted it spending, when keyd can say.
+  close(): Promise<number | undefined>;
 }
 // A keyd listener of the question's own, with this model's key and what's left of its limit: its
 // cost never reaches the task's budget, and keyd stops it at the limit even if this count is wrong.
@@ -42,6 +43,7 @@ export function apiSideModel(
     run: async (go: SideGo) => {
       const priced = role.model.inputUSDPerMTok > 0 || role.model.outputUSDPerMTok > 0;
       const listener = await open(role, priced && !role.flat ? go.leftUSD : undefined, go.signal);
+      let counted = 0;
       try {
         const messages: SideMessage[] = [{ role: "user", text: go.prompt }];
         let nudged = false;
@@ -57,11 +59,9 @@ export function apiSideModel(
             listener.effort,
             fetch,
           );
-          go.used({
-            inputTokens: step.inputTokens,
-            outputTokens: step.outputTokens,
-            usd: usdOf(role, step.inputTokens, step.outputTokens),
-          });
+          const usd = usdOf(role, step.inputTokens, step.outputTokens);
+          counted += usd;
+          go.used({ inputTokens: step.inputTokens, outputTokens: step.outputTokens, usd });
           go.note(step.text);
           messages.push({ role: "assistant", step });
           if (!step.calls.length) {
@@ -78,7 +78,10 @@ export function apiSideModel(
           messages.push({ role: "tools", results });
         }
       } finally {
-        await listener.close();
+        // keyd's count holds what a reply didn't say and what a call cut short spent.
+        const spent = await listener.close().catch(() => undefined);
+        if (spent !== undefined && spent - counted > 1e-9)
+          go.used({ inputTokens: 0, outputTokens: 0, usd: spent - counted });
       }
     },
   };
