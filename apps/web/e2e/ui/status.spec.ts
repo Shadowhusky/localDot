@@ -23,6 +23,7 @@ const STATUS: Record<
   ready: { shape: "ready", control: /^Take control$/, label: "Ready" },
   "slow-keys": { shape: "ready", control: /^Take control$/, label: "Ready" },
   conversations: { shape: "ready", control: /^Take control$/, label: "Done" },
+  "shared-links": { shape: "ready", control: /^Take control$/, label: "Done" },
   "conversations-working": {
     shape: "task",
     control: /^Stop$/,

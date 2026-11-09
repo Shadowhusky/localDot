@@ -131,6 +131,8 @@ import { createNotify } from "../../../daemon/src/notify/wiring.ts";
 import { writeManifest } from "../../../daemon/src/recorder/manifest.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
+import { RemoteLinks } from "../../../daemon/src/remote/links.ts";
+import type { RemoteAccess } from "../../../daemon/src/remote/manager.ts";
 import { stopAll } from "../../../daemon/src/routines/stop-all.ts";
 import { RoutineStore, scheduleOf, toRoutine } from "../../../daemon/src/routines/store.ts";
 import { SearchFeed } from "../../../daemon/src/search/search-feed.ts";
@@ -2508,7 +2510,11 @@ const exportJobs = new ExportJobs({
       ? new ChromeRenderer({ origin: `http://127.0.0.1:${PORT}`, token: TOKEN })
       : fakeRenderer,
 });
-attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
+// QA_LINKS=1: shared links, kept as the daemon keeps them; POST /__qa/link makes one and answers
+// with its secret, which a guest's page signs in with.
+const links = env.QA_LINKS === "1" ? new RemoteLinks(HOME) : undefined;
+const guests = links && { links, authenticate: (given?: string) => links.authenticate(given) };
+attachUpgradeRouter(server, { port: PORT, token: TOKEN, ...(guests ? { guests } : {}) }, [
   exportsStreamRoute(exportJobs),
   cellStatusRoute(cells),
   cellStatusRoute(browserStreams, "browsers"),
@@ -2698,6 +2704,7 @@ const routes = createApp({
   token: TOKEN,
   port: PORT,
   eventLog: log,
+  ...(guests ? { remoteAccess: guests as unknown as RemoteAccess } : {}),
   dots: dotsHere.deps,
   connectors: {
     hub: connectorHub,
@@ -4925,6 +4932,18 @@ routes.post("/__qa/scenario/:name", async (c) => {
   if (!wanted) return c.text("unknown scenario", 404);
   if (!wanted.step) return c.text(`start the fixture with --scenario ${name}`, 409);
   return reply(await STEPS[wanted.step]());
+});
+routes.post("/__qa/link", async (c) => {
+  if (!links) return c.text("start the fixture with QA_LINKS=1", 409);
+  const { token, grant } = links.create({
+    label: "Alex",
+    expiresInHours: 1,
+    maxTasks: 5,
+    taskBudgetUSD: 2,
+    model: { provider: "anthropic", model: "claude-sonnet-5-5" },
+    ...(await c.req.json().catch(() => ({}))),
+  });
+  return c.json({ token, id: grant.id });
 });
 routes.get("/__qa/manual-inputs", (c) => c.json(manualInputs));
 routes.get("/__qa/notify", (c) => c.json(notified));
