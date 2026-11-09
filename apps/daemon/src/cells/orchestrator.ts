@@ -840,9 +840,13 @@ export class CellOrchestrator {
     // Refuse missing prerequisites before #withBrowser fences and stops the user's browser.
     // #update repeats this check after acquiring the lifecycle queue.
     if (!this.deps.updates) throw new CellControlConflict("Updates are unavailable.");
-    await this.fetchUpdate(id);
-    await this.deps.updates.prepare(this.#require(id));
-    return this.#withBrowser(id, () => this.#update(id));
+    try {
+      await this.fetchUpdate(id);
+      await this.deps.updates.prepare(this.#require(id));
+      return await this.#withBrowser(id, () => this.#update(id));
+    } finally {
+      this.endFetch(id);
+    }
   }
 
   // Gets the new version onto this computer first: the slow part, and one that stops nothing.
@@ -871,12 +875,17 @@ export class CellOrchestrator {
       // Docker going away cuts the pull off just as a dropped connection does.
       const reason = (await this.#dockerAnswers()) ? updateReason(error) : DOCKER_STOPPED;
       this.#failUpdate(id, "download", sentences(NOT_DOWNLOADED, reason));
+      this.endFetch(id);
       throw new CellControlConflict(NOT_DOWNLOADED);
-    } finally {
-      this.#fetching.delete(id);
-      this.#updateProgress.delete(id);
-      this.#emit(id);
     }
+    this.#reportUpdate(id, { stage: "download" });
+  }
+
+  // A finished download still counts as updating, so no device sees it end before the update does.
+  endFetch(id: string): void {
+    if (!this.#fetching.delete(id)) return;
+    if (!this.#updating.has(id)) this.#updateProgress.delete(id);
+    this.#emit(id);
   }
 
   #reportUpdate(id: string, progress: ComputerUpdateProgress): void {
@@ -940,6 +949,7 @@ export class CellOrchestrator {
     const owned = await inspectOwnedCell(this.#docker, id, record.docker, record.ownership);
     if (this.#held(id)) throw new CellControlConflict("the computer is held for replacement");
     this.#updating.add(id);
+    this.#fetching.delete(id);
     this.#updateFailures.delete(id);
     this.#updateProgress.set(id, { stage: "stop" });
     const stopping: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };

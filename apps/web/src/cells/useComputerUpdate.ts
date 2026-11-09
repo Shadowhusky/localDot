@@ -288,7 +288,7 @@ export function useUpdateProgressNotice(
       }),
     });
   }, [id, failure, offered]);
-  const settled = !going && !failure && cell?.state === "ready";
+  const settled = !going && !failure && !offered && cell?.state === "ready";
   useEffect(() => {
     if (!settled || !watched.current) return;
     watched.current = false;

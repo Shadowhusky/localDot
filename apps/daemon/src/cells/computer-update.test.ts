@@ -655,6 +655,25 @@ describe("an update whose download runs first", () => {
     expect(fake.state.containers.get(record.docker.desktop)?.running).toBe(true);
   });
 
+  it("says it is updating without a break from the download to stopping", async () => {
+    const { state, pull } = download();
+    const { updates, orchestrator, changes, id, record } = await setup({}, { pull });
+    rebuild();
+    await updates.check(record);
+    const missing = vi.spyOn(updates, "missing").mockResolvedValue(["registry/desktop@sha256:x"]);
+    const from = changes.length;
+    const running = orchestrator.update(id);
+    await vi.waitFor(() => expect(state.finish).toBeDefined());
+    missing.mockResolvedValue([]);
+    state.finish?.();
+    await running;
+    const seen = changes.slice(from).filter((c) => c.id === id);
+    const stopped = seen.findIndex((c) => c.updateProgress?.stage === "stop");
+    expect(stopped).toBeGreaterThan(0);
+    expect(seen.slice(0, stopped).filter((c) => !c.updating)).toEqual([]);
+    expect(orchestrator.get(id)?.updating).toBeUndefined();
+  });
+
   it("says Docker stopped answering when that is what cut the download off", async () => {
     const { state, pull } = download(new UpdateFailure("network"));
     const { updates, orchestrator, id, record } = await setup({}, { pull });
@@ -1305,10 +1324,12 @@ describe("updateComputer admission", () => {
     const fetchUpdate = vi.fn(async () => {
       session.status = "working";
     });
-    await expect(updateComputer({ ...d, cells: { ...d.cells, fetchUpdate } }, ID)).rejects.toThrow(
-      "Wait for dot to finish",
-    );
+    const endFetch = vi.fn();
+    await expect(
+      updateComputer({ ...d, cells: { ...d.cells, fetchUpdate, endFetch } }, ID),
+    ).rejects.toThrow("Wait for dot to finish");
     expect(d.cells.update).not.toHaveBeenCalled();
+    expect(endFetch).toHaveBeenCalledWith(ID);
   });
 
   it("refuses while dot works, while the user holds the computer, or when fenced", async () => {

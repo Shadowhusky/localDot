@@ -635,7 +635,10 @@ function ownedContainers(record: CellRecord): { gate: string; desktop: string } 
 export class ComputerUpdateRefused extends CellControlConflict {}
 
 export interface UpdateAdmissionDeps {
-  cells: Pick<CellOrchestrator, "get" | "update"> & { fetchUpdate?(id: string): Promise<void> };
+  cells: Pick<CellOrchestrator, "get" | "update"> & {
+    fetchUpdate?(id: string): Promise<void>;
+    endFetch?(id: string): void;
+  };
   live: Pick<LiveSessions, "get" | "admitIdleOperation" | "idleOperationPending">;
   runner: {
     holds(sessionId: string): boolean;
@@ -671,21 +674,25 @@ export async function updateComputer(
     return d.runner.release;
   };
   inTheWay();
-  // A download can take many minutes, and the computer stays in use throughout.
-  await d.cells.fetchUpdate?.(id);
-  const release = inTheWay();
-  if (release) {
-    try {
-      await release.call(d.runner, signal);
-    } catch {
-      throw busy();
-    }
-  }
-  const admission = d.live.admitIdleOperation(id);
-  if (!admission) throw busy();
   try {
-    await d.cells.update(id);
+    // A download can take many minutes, and the computer stays in use throughout.
+    await d.cells.fetchUpdate?.(id);
+    const release = inTheWay();
+    if (release) {
+      try {
+        await release.call(d.runner, signal);
+      } catch {
+        throw busy();
+      }
+    }
+    const admission = d.live.admitIdleOperation(id);
+    if (!admission) throw busy();
+    try {
+      await d.cells.update(id);
+    } finally {
+      admission.release();
+    }
   } finally {
-    admission.release();
+    d.cells.endFetch?.(id);
   }
 }

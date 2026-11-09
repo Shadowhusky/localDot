@@ -389,6 +389,23 @@ describe("what an update says", () => {
     expect(toasts().join()).toContain("Your files and sign-ins are all still there.");
   });
 
+  it("doesn't call it updated while the new version is still on offer", async () => {
+    const { api } = control();
+    const view = render(
+      <Watch
+        api={api}
+        computer={cell({ updating: true, updateProgress: { stage: "download" } })}
+      />,
+    );
+    await settle();
+    view.rerender(<Watch api={api} computer={cell({ updateAvailable: true })} />);
+    await settle(2000);
+    expect(toasts().join()).not.toContain("Your computer is updated");
+    view.rerender(<Watch api={api} computer={cell({})} />);
+    await settle(2000);
+    expect(toasts().join()).toContain("Your computer is updated");
+  });
+
   it("doesn't call a refused press an update", async () => {
     const { api, answer } = control();
     render(<Watch api={api} computer={cell({ updateAvailable: true })} />);
