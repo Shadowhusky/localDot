@@ -849,6 +849,14 @@ gallery's `#looks` page; `e2e/ui/task-looks.spec.ts`.
 - **Plates.** All a dot shows comes in together (`whenImagesIn`, `whenPlatesIn` in `dot/plates.ts`): a
   dot or a row's mark waits until its whole set is decoded, a plain ball standing in only if that
   takes over 200 ms, and a change of outfit keeps the old one on until the new one can be drawn.
+- **Deleted.** The dot goes as a soap bubble does (`dot/pop.ts`): it shuts its eyes, squashes,
+  stretches and bursts into drops, and a hat is tossed up and hangs before it drops. A copy of its
+  plates plays over the page in transform and opacity, so the commit that takes the row away can't
+  stutter it. Nothing moves until the daemon has answered: a burst can't be taken back, and the
+  confirmation's busy button covers the wait. Several ripple, tightening to end within a second, and
+  leave in one commit (`shell/conversation-leave.ts`, `closeGap` in `ui/flip.ts`). Reduced motion
+  only fades; archiving fades with no burst; a short list's row folds (`foldAway` in `ui/leave.ts`).
+  `e2e/ui/delete-motion.spec.ts` plays them frame by frame.
 - **Rejected.** Tinting the body: dot is porcelain, and a tinted ball stops being dot. Hue-rotating
   plates in the browser: the shadows they carry go wrong. A shuffled look when the list changes: two
   neighbours would then never match, and no row would keep its face.
