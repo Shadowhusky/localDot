@@ -25,7 +25,11 @@ const openUpdates = async (page: Page) => {
 const notices = (page: Page) => page.getByRole("region", { name: /notifications/i });
 const pressUpdate = async (page: Page) => {
   const { sheet } = await openUpdates(page);
+  const answered = page.waitForResponse(
+    (r) => r.url().endsWith("/update") && r.request().method() === "POST",
+  );
   await sheet.getByRole("button", { name: "Update", exact: true }).click();
+  await answered;
   return sheet;
 };
 const stepNow = (page: Page) => page.locator('[aria-label="Update steps"] li[aria-current="step"]');
@@ -98,6 +102,8 @@ for (const { name, choice } of [
       await shot(page, ui, "start");
 
       await closeSettings(page);
+      // A mouse left resting on the toast holds it, and on a phone Done sits right over it.
+      await page.mouse.move(0, 0);
       if (!isPhone(page)) {
         const curtain = page.getByRole("region", { name: "Updating your computer" });
         await expect(curtain.locator(".curtain-sub")).toContainText("Step 5 of 6");

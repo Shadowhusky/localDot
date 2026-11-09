@@ -332,6 +332,27 @@ release only after services have stopped; opening another tab or an idle convers
 restart. Failed activation uses the existing rollback transaction and does not repeat each launch.
 Packaged publication/signing/installed acceptance gates remain in [release packaging](release-packaging.md).
 
+### Updating your computer
+
+Settings → Your computer → Computer updates offers a new version of the computer itself, separately
+from localDot, whenever a newer image is on this machine or a pinned one is still to be downloaded.
+**Update** goes through six steps, shown in the same list and bar on every device with localDot open
+and through a reload: get the new version, stop your computer, keep your apps and files, install the
+new version, start your computer, reconnect the screen. A download says how far it has got when
+Docker reports it. Keeping your apps and files is usually the long step, and it says what it is doing.
+A notice elsewhere in the app and the panel over the computer say the same step, and that files and
+sign-ins stay.
+
+If it takes more than three minutes, or three times what the computer usually takes, the page says
+that is normal for a computer with many apps. After half an hour it says it is taking much longer
+than it should and what to do, and keeps watching. A task that's working holds the update back and
+says so; nothing stops it. A download that stops moving for five minutes is reported.
+
+If an update can't finish, every device says once what happened, and Settings marks the step that
+failed with **Retry**. The computer goes back as it was and your files stay. If Docker goes away
+part-way, localDot says so and brings the computer back by itself within half an hour of Docker
+returning, finishing the update if it had got past the swap.
+
 ## Several dots on one computer
 
 Each dot has its own data folder, address, saved keys and computer, and one installation runs them
