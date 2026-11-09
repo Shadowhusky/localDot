@@ -2369,7 +2369,7 @@ describe("ChatGPT runner lifecycle", () => {
       } as const;
       expect(computerDown(cell)).toBe("stopped");
       expect(computerDown({ ...cell, error: "stop failed: docker" })).toBeUndefined();
-      expect(computerDown({ ...cell, fenced: true })).toBeUndefined();
+      expect(computerDown({ ...cell, fenced: { revision: 1 } })).toBeUndefined();
       expect(computerDown({ ...cell, state: "starting" })).toBeUndefined();
       expect(computerDown({ ...cell, state: "ready", paused: true })).toBe("paused");
       expect(computerDown({ ...cell, state: "ready" })).toBeUndefined();

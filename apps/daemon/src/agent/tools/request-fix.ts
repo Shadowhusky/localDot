@@ -87,6 +87,7 @@ export async function waitForFix(
     case "dismissed":
       return { ok: true, content: [text(blockerNote(blocker, "dismissed"))] };
     case "fixed":
+    case "moot":
       return { ok: true, content: [text(blockerNote(blocker, "fixed"))] };
   }
 }
