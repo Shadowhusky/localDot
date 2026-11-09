@@ -19,13 +19,13 @@ const address = (href: string) => {
     return href;
   }
 };
-// An answer opens only the addresses the user wrote or its own searches found: any other may carry
-// what it read to whoever made it up.
+// An answer opens only the addresses the user wrote or its own searches found, as they were found:
+// anything the model added, a fragment or another spelling, may carry what it read.
 const opensOnly = (links: readonly string[] | undefined) => {
-  const open = new Set((links ?? []).map(address));
-  return (href: string) => open.has(address(href));
+  const open = new Map((links ?? []).map((link) => [address(link), link]));
+  return (href: string) => open.get(address(href));
 };
-const opensNone = () => false;
+const opensNone = () => undefined;
 const SOURCE_WORDS: Record<string, string> = {
   record: "what was said in the task",
   log: "the task's log",

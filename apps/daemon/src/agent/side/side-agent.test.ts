@@ -891,7 +891,7 @@ describe("what a page can make it do", () => {
     });
     await ask(f, [obedient], { readers: readers(f, { web, desktop: () => desktop as never }) });
     // The page can't close the block that marks it as data.
-    expect(read).toContain("‹/untrusted");
+    expect(read).toContain("[/untrusted");
     expect(read.match(/<\/untrusted>/g)).toHaveLength(1);
     for (const reply of Object.values(replies)) expect(reply).toContain("can only read");
     expect(web.get).not.toHaveBeenCalled();
@@ -990,7 +990,7 @@ describe("what a page can make it do", () => {
           await finish(go, "found", "Done.", ["web"]);
         }),
       ],
-      { readers: readers(f, { web }) },
+      { readers: readers(f, { web }), question: "Are there lisbon flights?" },
     );
     expect(results).toContain("<untrusted");
     expect(fetched).toContain("<untrusted");
@@ -1014,78 +1014,134 @@ describe("what a page can make it do", () => {
   });
   const searched = (asked: URL[]) => asked.map((url) => url.searchParams.get("q"));
 
-  it("won't search with what it read, but searches the user's own words", async () => {
-    const f = fixture();
+  const FILE =
+    "Settlement agreement for Jane Doe: account 99-1234, the house at Elm Road goes to her.";
+  const reading = () => ({
+    readFile: async (path: string) => ({
+      path,
+      content: FILE,
+      bytes: FILE.length,
+      truncated: false,
+      binary: false,
+    }),
+    listDir: vi.fn(),
+    fetchFile: vi.fn(),
+  });
+  // Each query is sent or refused; what was sent is what the engines got.
+  async function searches(
+    f: Fixture,
+    queries: readonly string[],
+    {
+      question,
+      before = [],
+      prompt,
+      models = 1,
+    }: {
+      question: string;
+      before?: readonly [string, unknown][];
+      prompt?: string;
+      models?: 1 | 2;
+    },
+  ) {
     const asked: URL[] = [];
-    const desktop = {
-      readFile: async (path: string) => ({
-        path,
-        content:
-          "Settlement account 99-1234 for J. Doe, agreed in the mediation session, ref QX-7781",
-        bytes: 84,
-        truncated: false,
-        binary: false,
-      }),
-      listDir: vi.fn(),
-      fetchFile: vi.fn(),
+    const replies: SideResultLike[] = [];
+    const searching = (status: string) => async (go: SideGo) => {
+      for (const [name, input] of before) await go.tools.call(name, input, go.signal);
+      for (const query of queries)
+        replies.push(await go.tools.call("web_search", { query }, go.signal));
+      await finish(go, status, "Done.");
     };
-    const replies: Record<string, SideResultLike> = {};
     await ask(
       f,
-      [
-        model("m", "main", async (go) => {
-          await go.tools.call("read_file", { path: "~/divorce.txt" }, go.signal);
-          for (const query of [
-            "Settlement account 99-1234 J. Doe",
-            "99-1234",
-            "agreed in the mediation session",
-            "PIN 4417-9921",
-            "what is QX-7781 used for",
-            "how do settlement accounts work",
-          ])
-            replies[query] = await go.tools.call("web_search", { query }, go.signal);
-          await finish(go, "found", "Done.");
-        }),
-      ],
+      models === 2
+        ? [model("fast", "fast", searching("not_found")), model("main", "main", searching("found"))]
+        : [model("m", "main", searching("found"))],
       {
-        readers: readers(f, { web: engine(asked), desktop: () => desktop as never }),
-        question: "What is QX-7781 used for?",
-        prompt:
-          "<record>\nThe user: my PIN 4417-9921 is new\n</record>\n\nSide question: What is QX-7781 used for?",
-        limits: { calls: 20 },
+        readers: readers(f, { web: engine(asked), desktop: () => reading() as never }),
+        question,
+        prompt: prompt ?? `<record>\nThe user: hello\n</record>\n\nSide question: ${question}`,
+        limits: { calls: 60 },
       },
     );
-    for (const query of [
-      "Settlement account 99-1234 J. Doe",
-      "99-1234",
-      "agreed in the mediation session",
-      "PIN 4417-9921",
-    ])
-      expect(replies[query]?.text).toContain("wasn't sent");
-    expect(replies["what is QX-7781 used for"]?.ok).toBe(true);
-    expect(replies["how do settlement accounts work"]?.ok).toBe(true);
-    expect(searched(asked).some((q) => q?.includes("99-1234") || q?.includes("4417"))).toBe(false);
-  });
+    return { replies, sent: searched(asked).filter((q, at, all) => all.indexOf(q) === at) };
+  }
+  const QUESTION = "What are the best flights from Leeds to Lisbon in May?";
 
-  it("takes bangs and backslashes out, so no engine sends the search on", async () => {
+  it("sends only a run of the user's own words, in order, as plain words", async () => {
     const f = fixture();
-    const asked: URL[] = [];
-    await ask(
+    const r = await searches(
       f,
       [
-        model("m", "main", async (go) => {
-          for (const query of ["!site lisbon flights", "\\lisbon hotels", "lisbon !g trains", "!"])
-            await go.tools.call("web_search", { query }, go.signal);
-          await finish(go, "found", "Done.");
-        }),
+        "flights from Leeds to Lisbon",
+        "flights from leeds ))~(*&^",
+        "flights 🌑🌑 lisbon",
+        "lisbon leeds",
+        "flights Jane",
+        "!g flights",
       ],
-      { readers: readers(f, { web: engine(asked) }), limits: { calls: 20 } },
+      { question: QUESTION },
     );
-    const queries = searched(asked);
-    expect(queries).toContain("lisbon flights");
-    expect(queries).toContain("lisbon hotels");
-    expect(queries).toContain("lisbon trains");
-    expect(queries.some((q) => q?.includes("!") || q?.includes("\\"))).toBe(false);
+    expect(r.sent).toEqual(["flights from leeds to lisbon", "flights from leeds"]);
+    expect(r.replies.map((reply) => reply.ok)).toEqual([true, true, false, false, false, false]);
+    expect(r.replies[2]?.text).toContain("wasn't sent");
+    expect(r.replies[2]?.text).toContain("run of words from the user's question");
+  });
+
+  it("sends letters as plain lower case, so case and full-width letters carry nothing", async () => {
+    const f = fixture();
+    const r = await searches(f, ["BeSt FlIgHtS", "ｂｅｓｔ flights"], { question: QUESTION });
+    expect(r.sent).toEqual(["best flights"]);
+  });
+
+  it("makes at most two searches for a question, across both models", async () => {
+    const f = fixture();
+    const r = await searches(f, ["best flights", "flights from leeds", "lisbon in may"], {
+      question: QUESTION,
+      models: 2,
+    });
+    expect(r.sent).toEqual(["best flights", "flights from leeds"]);
+    expect(r.replies.filter((reply) => reply.ok)).toHaveLength(2);
+    expect(r.replies.at(-1)?.text).toContain("two searches");
+  });
+
+  it("treats the opening record as private from the start", async () => {
+    const f = fixture();
+    const prompt =
+      "<record>\nThe user: I'm Jane Doe, my new address is 14 Elm Road Leeds and my passport number is X12345678. Please book the flights.\n</record>\n\nSide question: how is it going?";
+    const r = await searches(
+      f,
+      [
+        "Jane Doe new address 14 Elm Road Leeds",
+        "Doe Leeds Elm passport flights",
+        "87654321X",
+        "one two three four five six seven eight",
+        "latest news today",
+      ],
+      { question: "how is it going?", prompt },
+    );
+    expect(r.sent).toEqual([]);
+  });
+
+  it("is held to the same rule after reading a file", async () => {
+    const f = fixture();
+    const r = await searches(f, ["build Settlement", "how is the build going ))~(*&^"], {
+      question: "how is the build going?",
+      before: [["read_file", { path: "~/x.txt" }]],
+    });
+    expect(r.sent).toEqual(["how is the build going"]);
+  });
+
+  it("sends a quoted list only as the user wrote it, never rearranged", async () => {
+    const f = fixture();
+    const r = await searches(
+      f,
+      ["nine nine one two three four Jane Doe Elm Road", "Jane Doe Elm Road"],
+      {
+        question:
+          "what does this mean: zero one two three four five six seven eight nine Jane Doe Elm Road",
+      },
+    );
+    expect(r.sent).toEqual(["jane doe elm road"]);
   });
 
   it("lets the answer link only to addresses the user wrote or its own search found", async () => {
@@ -1106,8 +1162,8 @@ describe("what a page can make it do", () => {
       f,
       [
         model("m", "main", async (go) => {
-          await go.tools.call("read_file", { path: "a" }, go.signal);
           await go.tools.call("web_search", { query: "lisbon flights" }, go.signal);
+          await go.tools.call("read_file", { path: "a" }, go.signal);
           await finish(go, "found", "Done.");
         }),
       ],
@@ -1116,7 +1172,7 @@ describe("what a page can make it do", () => {
           web: engine(asked, "https://flights.example/lisbon"),
           desktop: () => desktop as never,
         }),
-        question: "Is https://example.org/hours right?",
+        question: "Is https://example.org/hours right, and are there lisbon flights?",
       },
     );
     expect(reply.links).toContain("https://example.org/hours");

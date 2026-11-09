@@ -23,9 +23,9 @@ export function linkHost(href: string): string {
   return new URL(href).hostname.replace(/^www\./, "");
 }
 
-// Which addresses may be opened. One that may not shows as plain text: its address may carry what
-// the text was written from to whoever made it up.
-type LinkRule = (href: string) => boolean;
+// The address a link opens, or undefined for one that may not be opened, which shows as plain
+// text: its address may carry what the text was written from to whoever made it up.
+type LinkRule = (href: string) => string | undefined;
 const Links = createContext<LinkRule | undefined>(undefined);
 
 function Unopened({ text, href }: { text: string; href: string }) {
@@ -36,14 +36,15 @@ function Unopened({ text, href }: { text: string; href: string }) {
   );
 }
 function LinkView({ node }: { node: Extract<Inline, { kind: "link" }> }) {
-  if (useContext(Links)?.(node.href) === false)
-    return <Unopened text={node.text} href={node.href} />;
+  const rule = useContext(Links);
+  const href = rule ? rule(node.href) : node.href;
+  if (href === undefined) return <Unopened text={node.text} href={node.href} />;
   return (
-    <LocalAddress href={node.href} text={node.text}>
+    <LocalAddress href={href} text={node.text}>
       <span className="md-link">
         <a
-          href={node.href}
-          title={node.href}
+          href={href}
+          title={href}
           target="_blank"
           rel="noopener noreferrer"
           referrerPolicy="no-referrer"
@@ -52,26 +53,27 @@ function LinkView({ node }: { node: Extract<Inline, { kind: "link" }> }) {
         </a>
         <span className="md-host">
           <Icon name="share" size={12} />
-          {linkHost(node.href)}
+          {linkHost(href)}
         </span>
       </span>
     </LocalAddress>
   );
 }
 function ImageView({ node }: { node: Extract<Inline, { kind: "image" }> }) {
-  if (useContext(Links)?.(node.href) === false)
-    return <Unopened text={node.text || "Image"} href={node.href} />;
+  const rule = useContext(Links);
+  const href = rule ? rule(node.href) : node.href;
+  if (href === undefined) return <Unopened text={node.text || "Image"} href={node.href} />;
   return (
     <a
       className="md-host md-image"
-      href={node.href}
-      title={node.text || node.href}
+      href={href}
+      title={node.text || href}
       target="_blank"
       rel="noopener noreferrer"
       referrerPolicy="no-referrer"
     >
       <Icon name="share" size={12} />
-      Image · {linkHost(node.href)}
+      Image · {linkHost(href)}
     </a>
   );
 }
@@ -222,7 +224,7 @@ export const SafeMarkdown = memo(function SafeMarkdown({
   announce?(text: string): void;
   // Said under text too long to show whole.
   shortened?: string;
-  // Which addresses may be opened; left out, all may.
+  // The address each link opens, if any; left out, every link opens as written.
   links?: LinkRule;
 }) {
   const settled = useSettledText(text, streaming);

@@ -17,9 +17,11 @@ const role = resolveRole(
   keys,
 );
 
-function quick(answer: () => Promise<Response>) {
+const gate = { taskIdOf: () => "" };
+function quick(answer: () => Promise<Response>, options: { settleMs?: number } = {}) {
   const calls: string[] = [];
-  const gate = { taskId: "", paused: true };
+  const held = { taskId: "", paused: true };
+  gate.taskIdOf = () => held.taskId;
   const keyd = {
     openCell: vi.fn(async (req: { cellId: string; port: number; secrets: string[] }) => {
       calls.push(`open ${req.cellId}`);
@@ -35,23 +37,23 @@ function quick(answer: () => Promise<Response>) {
       return true;
     }),
     beginPricedTask: vi.fn(async (_cell: string, taskId: string) => {
-      gate.taskId = taskId;
+      held.taskId = taskId;
     }),
     modelAdmission: vi.fn(async () => ({
-      taskId: gate.taskId,
+      taskId: held.taskId,
       generationId: "g".repeat(32),
       epoch: 1,
-      paused: gate.paused,
+      paused: held.paused,
       active: 0,
       retired: false,
     })),
     setModelAdmission: vi.fn(async (_cell: string, write: ModelAdmissionWrite) => {
-      gate.paused = write.state === "paused";
+      held.paused = write.state === "paused";
       return {
-        taskId: gate.taskId,
+        taskId: held.taskId,
         generationId: write.generationId,
         epoch: 2,
-        paused: gate.paused,
+        paused: held.paused,
         active: 0,
         retired: false,
       };
@@ -63,7 +65,7 @@ function quick(answer: () => Promise<Response>) {
       cellId: id,
       role: "brain",
       port: 4788,
-      task: { id: gate.taskId, limitUSD: 0.2, spentUSD: 0.07 },
+      task: { id: held.taskId, limitUSD: 0.2, spentUSD: 0.07 },
     })),
   };
   const ports = { reserve: vi.fn(() => 4788), release: vi.fn() };
@@ -74,7 +76,12 @@ function quick(answer: () => Promise<Response>) {
     },
   );
   return {
-    model: new QuickModel({ keyd: keyd as never, ports, fetch: fetch as never }),
+    model: new QuickModel({
+      keyd: keyd as never,
+      ports,
+      fetch: fetch as never,
+      ...(options.settleMs ? { settleMs: options.settleMs } : {}),
+    }),
     keyd,
     ports,
     fetch,
@@ -207,5 +214,44 @@ describe("a side question's own listener", () => {
     });
     const listener = await q.model.sideListener(role, 0.2, signal);
     await expect(listener.close()).resolves.toBeUndefined();
+  });
+  it("waits for keyd to settle a call still in flight before reading what it spent", async () => {
+    const q = quick(async () => said("{}"));
+    const listener = await q.model.sideListener(role, 0.2, signal);
+    let polls = 0;
+    q.keyd.modelAdmission.mockImplementation(async () => {
+      polls += 1;
+      return {
+        taskId: gate.taskIdOf(),
+        generationId: "g".repeat(32),
+        epoch: 2,
+        paused: false,
+        active: polls < 3 ? 1 : 0,
+        retired: false,
+      };
+    });
+    q.keyd.cell.mockImplementation(async (id: string) => ({
+      cellId: id,
+      role: "brain",
+      port: 4788,
+      task: { id: gate.taskIdOf(), limitUSD: 0.2, spentUSD: polls < 3 ? 0.05 : 0.07 },
+    }));
+    await expect(listener.close()).resolves.toBeCloseTo(0.07);
+    expect(polls).toBeGreaterThanOrEqual(3);
+  });
+  it("doesn't wait long for a keyd that never settles", async () => {
+    const q = quick(async () => said("{}"), { settleMs: 60 });
+    const listener = await q.model.sideListener(role, 0.2, signal);
+    q.keyd.modelAdmission.mockImplementation(async () => ({
+      taskId: gate.taskIdOf(),
+      generationId: "g".repeat(32),
+      epoch: 2,
+      paused: false,
+      active: 1,
+      retired: false,
+    }));
+    const started = Date.now();
+    await expect(listener.close()).resolves.toBeCloseTo(0.07);
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });

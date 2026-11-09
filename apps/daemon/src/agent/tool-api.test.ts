@@ -129,7 +129,7 @@ describe("Review Focus 1: prompt injection from a web page", () => {
     expect(text.startsWith('<untrusted source="web page https://example.com/">')).toBe(true);
     expect(text.match(/<\/untrusted>/g)).toHaveLength(1);
     expect(text.endsWith("</untrusted>")).toBe(true);
-    expect(text).toContain("‹/untrusted");
+    expect(text).toContain("[/untrusted");
     expect(h.session.tainted).toBe(true);
   });
 

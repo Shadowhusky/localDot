@@ -198,7 +198,6 @@ export async function runSideAgent(run: SideRun): Promise<SideReply> {
     run.question,
     () => meter.wrappingUp(),
     (line) => run.onEvent?.({ progress: line }),
-    before,
   );
   let best: { finish: SideFinish; by: SideModel } | undefined;
   let failed: { model: string; reason: string } | undefined;

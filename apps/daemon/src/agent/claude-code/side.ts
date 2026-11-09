@@ -123,12 +123,26 @@ export function claudeCodeSideModel(
         }),
       });
       const counted = new Set<string>();
+      let started = false;
       try {
         for await (const message of query) {
           go.signal.throwIfAborted();
-          // A tool it offers that isn't a side tool is one a newer Claude Code switched on.
-          if (Init.safeParse(message).data?.tools.some((tool) => !SIDE_TOOLS.includes(tool)))
+          // It starts by saying which tools it offers, in this shape and no other: one it can't be
+          // read from, or one not a side tool, may be a tool a newer Claude Code switched on.
+          const init = Init.safeParse(message);
+          const { type, subtype } = (message ?? {}) as { type?: unknown; subtype?: unknown };
+          // Before its start, a system message, a reply or a result means it didn't start as
+          // expected; a notice such as a rate limit says nothing about tools.
+          const telling =
+            type === "system" || type === "assistant" || type === "user" || type === "result";
+          if (((!started && telling) || subtype === "init") && !init.success)
+            throw new ModelAnswerError(undefined, "Claude Code didn't start as expected");
+          if (init.data?.tools.some((tool) => !SIDE_TOOLS.includes(tool)))
             throw new ModelAnswerError(undefined, "Claude Code offered tools of its own");
+          if (init.success) {
+            started = true;
+            continue;
+          }
           const said = Assistant.safeParse(message).data?.message;
           if (said) {
             for (const block of said.content)

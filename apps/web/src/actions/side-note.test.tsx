@@ -435,6 +435,23 @@ describe("side questions", () => {
       expect(note.textContent).toContain("https://evil.example/bare?d=2");
     });
 
+    it("opens the allowed address itself, never the model's fragment or spelling", () => {
+      const view = shown({
+        answer: {
+          answer:
+            "[Open](https://example.org/hours#d=99-1234), https://example.org/hours#d=5, [again](https://EXAMPLE.org:443/x/../hours), [q](https://example.org/hours?d=1) and [u](https://d:99@example.org/hours)",
+          provider: "p",
+          model: "m",
+          links: ["https://example.org/hours"],
+        },
+      });
+      expect(hrefs(view.getByRole("region", { name: "Side question" }))).toEqual([
+        "https://example.org/hours",
+        "https://example.org/hours",
+        "https://example.org/hours",
+      ]);
+    });
+
     it("opens nothing when the answer names no address it may open", () => {
       const view = shown({ answer: { answer: TEXT, provider: "p", model: "m" } });
       expect(hrefs(view.getByRole("region", { name: "Side question" }))).toEqual([]);
