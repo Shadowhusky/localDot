@@ -79,6 +79,7 @@ const keyReply = (path: string): Response | undefined => {
   if (path === `/api/cells/${CELL_ID}/stream-ticket`)
     return json({ ticket: "T".repeat(22), path: `/cells/${CELL_ID}/desktop/${"T".repeat(22)}/` });
   if (path === "/api/voice") return json({ onMac: { available: false } });
+  if (path === "/api/voice/install") return new Response("not found", { status: 404 });
   if (path === `/api/cells/${CELL_ID}/quarantine`) return json({ items: [] });
   if (path === "/api/session-index") return json({ sessions: [], next: null });
   if (path === "/api/conversation") return json({ sessions: [], more: false });

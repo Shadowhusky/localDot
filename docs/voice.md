@@ -15,7 +15,7 @@ Settings → Voice and the optional **Talk to dot** step of setup install a spee
 | Tier | Model | Download | Memory at most | Good at |
 | --- | --- | --- | --- | --- |
 | Light | SenseVoice Small, int8 | about 180 MB | 520 MB | The quickest, even on an older computer. Chinese, English, Cantonese, Japanese, Korean |
-| Balanced | X-ASR zh-en, int8 | about 155 MB | 900 MB | The most accurate for Chinese, English and both in one sentence, with punctuation |
+| Balanced | X-ASR zh-en, int8 | about 155 MB | 900 MB | The most accurate for Chinese, and for Chinese mixed with English, with punctuation. Good English too |
 | Most languages | Qwen3-ASR 0.6B, int8 | about 860 MB | 2 GB | The strongest English, and about 30 languages. Slower, and it needs a capable computer |
 
 Downloads include the 20–28 MB speech program, once. The daemon reads memory, cores and architecture on the computer running localDot and suggests a tier: Balanced, or Light where Balanced would crowd or crawl. It warns honestly about the rest and always lets the person choose. Only the program's `-offline` command and ONNX Runtime are kept; neither runs when nobody is talking.

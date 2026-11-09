@@ -17,7 +17,8 @@ export function speechFixture() {
       {
         id: "light",
         name: "Light",
-        summary: "Quickest on an older computer. Chinese, English, Cantonese, Japanese and Korean.",
+        summary:
+          "The quickest, even on an older computer. Hears Chinese, English, Cantonese, Japanese and Korean.",
         credit: "SenseVoice Small (FunASR model licence), run by sherpa-onnx (Apache-2.0).",
         languages: ["zh", "en", "ja", "ko", "yue"],
         downloadBytes: 182 * MB,
@@ -28,7 +29,8 @@ export function speechFixture() {
       {
         id: "balanced",
         name: "Balanced",
-        summary: "Most accurate for Chinese, English and both in one sentence, with punctuation.",
+        summary:
+          "The most accurate for Chinese, and for Chinese mixed with English, with punctuation. Good English too.",
         credit: "X-ASR zh-en (Apache-2.0), run by sherpa-onnx (Apache-2.0).",
         languages: ["zh", "en"],
         downloadBytes: 150 * MB,

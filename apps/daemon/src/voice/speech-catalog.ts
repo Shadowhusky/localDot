@@ -195,7 +195,8 @@ export const SPEECH_CATALOG: SpeechCatalog = {
     {
       id: "balanced",
       name: "Balanced",
-      summary: "The most accurate for Chinese, English and both in one sentence, with punctuation.",
+      summary:
+        "The most accurate for Chinese, and for Chinese mixed with English, with punctuation. Good English too.",
       credit: "X-ASR zh-en (Apache-2.0), run by sherpa-onnx (Apache-2.0).",
       languages: ["zh", "en"],
       memoryBytes: 900 * MB,
