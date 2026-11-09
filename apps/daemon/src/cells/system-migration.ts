@@ -25,6 +25,8 @@ const PackageTexts = z.record(z.string(), z.string().nullable());
 const route = (id: string) => `/containers/${encodeURIComponent(id)}`;
 export const SYSTEM_BASE = "localdot.system-base";
 export const SYSTEM_SOURCE = "localdot.system-source";
+// A computer can have gigabytes to save, and Docker says nothing of how far along it is.
+const LONG_STEP_MS = 20 * 60_000;
 const failure = () =>
   new Error(
     "Couldn’t prepare the computer update. Your apps and files are still there. Try again.",
@@ -106,15 +108,20 @@ export class SystemMigration {
     return { sourceId, sourceImage: source.Image, base, image };
   }
 
-  async prepare(record: CellRecord, target: string): Promise<string> {
+  async prepare(
+    record: CellRecord,
+    target: string,
+    report: (progress: { share?: number; detail?: string }) => void = () => {},
+  ): Promise<string> {
     const { sourceId, sourceImage, base, image } = await this.#inspect(record, target, true);
     const docker = this.docker;
     const operation = randomUUID();
     const helpers: string[] = [];
+    report({ share: 0, detail: "Saving what's on your computer" });
     const checkpoint = await this.docker.request<{ Id: string }>({
       method: "POST",
       path: "/commit",
-      timeoutMs: 300000,
+      timeoutMs: LONG_STEP_MS,
       query: {
         container: sourceId,
         pause: "false",
@@ -127,6 +134,7 @@ export class SystemMigration {
     let candidate: string | undefined;
     let delivered = false;
     try {
+      report({ share: 0.3, detail: "Comparing it with the new version" });
       const original = await scan(base);
       const fresh = await scan(target);
       const saved = await scan(checkpoint.Id);
@@ -151,6 +159,7 @@ export class SystemMigration {
         after[path] = entry;
       }
       const plan = migrationPlan(before, after, saved.manifest);
+      report({ share: 0.5, detail: "Moving your apps and settings across" });
       const clone = await helper(
         checkpoint.Id,
         PREPARE_SYSTEM,
@@ -188,10 +197,11 @@ export class SystemMigration {
         await put(clone, JSON.stringify({ remove: [], directories: [], ldconfig: true }));
         await run(clone);
       }
+      report({ share: 0.7, detail: "Saving the new version with your apps" });
       const committed = await this.docker.request<{ Id: string }>({
         method: "POST",
         path: "/commit",
-        timeoutMs: 300000,
+        timeoutMs: LONG_STEP_MS,
         query: {
           container: clone,
           pause: "false",
@@ -218,6 +228,7 @@ export class SystemMigration {
       });
       const result = imageId.parse(committed.Id);
       candidate = result;
+      report({ share: 0.9, detail: "Checking that everything came across" });
       verifyMigration(saved.manifest, after, (await scan(result)).manifest, plan);
       delivered = true;
       return result;

@@ -42,6 +42,12 @@ function amount(done: number, total: number) {
     : `${Math.round(done / 1e6)} of ${Math.round(total / 1e6)} MB`;
 }
 
+export function downloadDetail(done: number | undefined, total: number | undefined) {
+  if (!total || done === undefined) return "Downloading";
+  const seen = Math.min(done, total);
+  return `Downloading · ${Math.floor((seen / total) * 100)}% · ${amount(seen, total)}`;
+}
+
 function detail(line: UpdateProgressLine) {
   const share = line.share ?? (line.total ? Math.min(1, (line.done ?? 0) / line.total) : undefined);
   const percent = share !== undefined ? ` · ${Math.floor(share * 100)}%` : "";

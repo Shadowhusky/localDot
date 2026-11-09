@@ -1,7 +1,11 @@
 import { isDeepStrictEqual as equal } from "node:util";
 import {
+  type ComputerOperation,
   type ComputerOperationKind,
   type ComputerOperationStep,
+  type ComputerUpdateFailure,
+  type ComputerUpdateProgress,
+  type ComputerUpdateStage,
   SELFTEST_CHECK_IDS,
   type SelfTestCheck,
   selfTestPassed,
@@ -11,6 +15,7 @@ import { ComputerResetRecord } from "../../../../packages/protocol/src/computer-
 import { computerCapacity } from "../dots/capacity.ts";
 import type { CellKeyd } from "../keyd/cell-wiring.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
+import { downloadDetail, stallGuard, UpdateFailure } from "../updates/progress.ts";
 import type { ComputerSizes } from "./computer-size.ts";
 import type { ComputerUpdates } from "./computer-update.ts";
 import { type DiagnosticSelfTest, probeDiagnosticSelfTest } from "./diagnostic-selftest.ts";
@@ -80,7 +85,8 @@ export interface OrchestratorDeps {
     | "swap"
     | "recover"
     | "discard"
-  >;
+  > &
+    Partial<Pick<ComputerUpdates, "missing" | "fetch">>;
   diagnosticProbe?(
     endpoint: CellEndpoints["desktopd"],
     signal: AbortSignal,
@@ -239,6 +245,30 @@ export const UPDATE_BLOCKED =
   "An installed app changed files this update needs, so it can't be applied automatically. Your computer is unchanged; you can keep using it. To get the new version, Start fresh in Settings; it erases your computer's files.";
 const UPDATE_UNDONE = "Your computer couldn't be updated. It's back as it was.";
 const UPDATE_STOPPED = "Your computer couldn't be updated. Turn it on to keep using it.";
+const BACK_AS_IT_WAS =
+  "Your computer couldn't be updated. It's back as it was, and your files are kept.";
+const COMING_BACK =
+  "Your computer couldn't be updated. Your files are kept. It starts again by itself as soon as Docker answers.";
+const NOT_STARTED =
+  "Your computer was updated but didn't start. Your files are kept. Start it again.";
+const NOT_DOWNLOADED =
+  "The new version couldn't be downloaded. Your computer is still running, and your files are kept.";
+// How long a computer an update left off waits for Docker to come back, and how often it asks.
+const BRING_BACK_MS = 30 * 60_000;
+const BRING_BACK_EVERY_MS = 5_000;
+// A computer may have gigabytes to save, and Docker says nothing of how far along it is.
+const PULL_STALL_MS = 5 * 60_000;
+
+function updateReason(error: unknown): string | undefined {
+  if (error instanceof UpdateFailure) return error.reason;
+  const text = error instanceof Error ? error.message : "";
+  if (/no space left on device|disk quota exceeded|not enough space/i.test(text))
+    return "Docker has run out of disk space. Free some up and try again.";
+  if (error instanceof DockerError && error.status === 0)
+    return "Docker stopped answering. Check that it's running, then try again.";
+  return undefined;
+}
+const sentences = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ");
 
 // Detail that comes from a container or from desktopd is cut to this length before it is shown.
 const MAX_DETAIL = 200;
@@ -303,6 +333,10 @@ export class CellOrchestrator {
   readonly #browserStopAttempts = new Map<string, number>();
   // From an update's stop until its computer is ready again or fails.
   readonly #updating = new Set<string>();
+  // Downloading what an update needs, with the computer still running as it was.
+  readonly #fetching = new Set<string>();
+  readonly #updateProgress = new Map<string, ComputerUpdateProgress>();
+  readonly #updateFailures = new Map<string, ComputerUpdateFailure>();
   #browserRecoveries = 0;
   #browserRecoveryEpoch = 0;
   #browserRecoveryFailed = false;
@@ -801,8 +835,76 @@ export class CellOrchestrator {
     // Refuse missing prerequisites before #withBrowser fences and stops the user's browser.
     // #update repeats this check after acquiring the lifecycle queue.
     if (!this.deps.updates) throw new CellControlConflict("Updates are unavailable.");
+    await this.fetchUpdate(id);
     await this.deps.updates.prepare(this.#require(id));
     return this.#withBrowser(id, () => this.#update(id));
+  }
+
+  // Gets the new version onto this computer first: the slow part, and one that stops nothing.
+  async fetchUpdate(id: string): Promise<void> {
+    const updates = this.deps.updates;
+    if (!updates?.fetch) return;
+    const fetchImages = updates.fetch.bind(updates);
+    const record = this.#require(id);
+    if (!(await updates.missing?.().catch(() => []))?.length) return;
+    this.#updateFailures.delete(id);
+    this.#fetching.add(id);
+    this.#reportUpdate(id, { stage: "download", detail: "Downloading" });
+    try {
+      await stallGuard(new AbortController().signal, PULL_STALL_MS, (signal, touch) =>
+        fetchImages(record, signal, ({ done, total }) => {
+          touch();
+          const share = total ? Math.min(1, (done ?? 0) / total) : undefined;
+          this.#reportUpdate(id, {
+            stage: "download",
+            ...(share !== undefined && { share: Math.floor(share * 1000) / 1000 }),
+            detail: downloadDetail(done, total),
+          });
+        }),
+      );
+    } catch (error) {
+      this.#failUpdate(id, "download", sentences(NOT_DOWNLOADED, updateReason(error)));
+      throw new CellControlConflict(NOT_DOWNLOADED);
+    } finally {
+      this.#fetching.delete(id);
+      this.#updateProgress.delete(id);
+      this.#emit(id);
+    }
+  }
+
+  #reportUpdate(id: string, progress: ComputerUpdateProgress): void {
+    this.#updateProgress.set(id, progress);
+    this.#emit(id);
+  }
+
+  #failUpdate(id: string, stage: ComputerUpdateStage, message: string): void {
+    this.#updateFailures.set(id, {
+      stage,
+      message: message.slice(0, 400),
+      at: this.#updateFailures.get(id)?.at ?? this.#now(),
+    });
+    this.#updateProgress.delete(id);
+    this.#emit(id);
+  }
+
+  // Docker went away with the computer off. It starts again once Docker answers, unless the user
+  // has done something else with it by then.
+  async #bringBack(id: string, stage: ComputerUpdateStage): Promise<void> {
+    const left = this.#live.get(id);
+    const until = this.#now() + BRING_BACK_MS;
+    while (!this.#disposed && this.#now() < until) {
+      await new Promise((resolve) => setTimeout(resolve, BRING_BACK_EVERY_MS).unref?.());
+      if (this.#live.get(id) !== left) return;
+      const answers = await this.#docker.request({ method: "GET", path: "/_ping" }).then(
+        () => true,
+        (error: unknown) => !(error instanceof DockerError) || error.status !== 0,
+      );
+      if (!answers) continue;
+      await this.start(id).catch(() => {});
+      if (this.#live.get(id)?.state === "starting" || this.#live.get(id)?.state === "ready")
+        this.#failUpdate(id, stage, BACK_AS_IT_WAS);
+      return;
+    }
   }
 
   async #update(id: string): Promise<void> {
@@ -821,6 +923,8 @@ export class CellOrchestrator {
     const owned = await inspectOwnedCell(this.#docker, id, record.docker, record.ownership);
     if (this.#held(id)) throw new CellControlConflict("the computer is held for replacement");
     this.#updating.add(id);
+    this.#updateFailures.delete(id);
+    this.#updateProgress.set(id, { stage: "stop" });
     const stopping: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };
     this.#ops.begin(id, "update", "shutdown", { startedAt });
     this.#set(id, stopping);
@@ -841,10 +945,16 @@ export class CellOrchestrator {
         await this.#stopContainer(container.id);
       }
       this.#step(id, "install");
-      next = await updates.swap(await this.#finishUpdate(record), (n) => this.#adopt(n));
+      next = await updates.swap(await this.#finishUpdate(record), (n) => this.#adopt(n), {
+        step: (stage) => this.#reportUpdate(id, { stage }),
+        migration: (progress) => this.#reportUpdate(id, { stage: "keep", ...progress }),
+      });
+      this.#reportUpdate(id, { stage: "start" });
     } catch (error) {
       console.error(`computer update ${id} failed:`, error);
+      const stage = this.#updateProgress.get(id)?.stage ?? "stop";
       this.#updating.delete(id);
+      this.#updateProgress.delete(id);
       if (!this.#current(id, stopping)) throw error;
       if (updates.pending(id)) {
         const unfinished =
@@ -853,7 +963,9 @@ export class CellOrchestrator {
             error.message === UPDATE_NEEDS_FRESH_START)
             ? error.message
             : UPDATE_UNFINISHED;
+        this.#failUpdate(id, stage, unfinished);
         this.#set(id, { state: "failed", restarts: 0, stream: NO_STREAM, error: unfinished });
+        this.#detach(id, this.#bringBack(id, stage));
         throw new CellControlConflict(unfinished);
       }
       const old = this.#require(id);
@@ -861,9 +973,23 @@ export class CellOrchestrator {
         kind: "start",
         timed: false,
       }).catch(() => false);
+      this.#failUpdate(
+        id,
+        stage,
+        back
+          ? error instanceof SystemMigrationConflict
+            ? UPDATE_BLOCKED
+            : error instanceof SystemBaseMissing
+              ? error.message
+              : sentences(BACK_AS_IT_WAS, updateReason(error))
+          : COMING_BACK,
+      );
       if (back) this.#detach(id, this.#waitReady(old));
-      else if (this.#current(id, stopping))
-        this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
+      else {
+        if (this.#current(id, stopping))
+          this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
+        this.#detach(id, this.#bringBack(id, stage));
+      }
       throw new CellControlConflict(
         back
           ? error instanceof SystemMigrationConflict
@@ -880,6 +1006,7 @@ export class CellOrchestrator {
     } catch (error) {
       if (this.#current(id, stopping))
         this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
+      this.#detach(id, this.#bringBack(id, "start"));
       throw error;
     }
   }
@@ -1930,7 +2057,12 @@ export class CellOrchestrator {
   }
 
   #set(id: string, live: Live): void {
-    if (live.state !== "stopping" && live.state !== "starting") this.#updating.delete(id);
+    if (live.state !== "stopping" && live.state !== "starting" && this.#updating.delete(id)) {
+      // An update past its swap can only go forward: what's left is starting the new version.
+      if (live.state !== "ready" && this.#updateProgress.get(id)?.stage === "start")
+        this.#failUpdate(id, "start", NOT_STARTED);
+      this.#updateProgress.delete(id);
+    }
     // Every way into starting or stopping has a start time, even one that began no operation.
     if (live.state === "starting" || live.state === "stopping") {
       if (!this.#ops.running(id))
@@ -2178,6 +2310,15 @@ export class CellOrchestrator {
       return { absent: true, revoked };
     });
   }
+  // Once the new version is ready, all that's left of its update is the screen coming back.
+  #summaryProgress(id: string, operation: ComputerOperation | undefined) {
+    const progress = this.#updateProgress.get(id);
+    if (progress) return { updateProgress: progress };
+    return operation?.kind === "update" && operation.step === "screen"
+      ? { updateProgress: { stage: "reconnect" as const } }
+      : {};
+  }
+
   #summary(record: CellRecord): CellSummary {
     // Before Docker reconciliation answers, absence of a snapshot is not proof of shutdown.
     const live = this.#live.get(record.id) ?? {
@@ -2206,9 +2347,16 @@ export class CellOrchestrator {
       ...(live.error ? { error: live.error } : {}),
       ...(live.paused ? { paused: true as const } : {}),
       ...(operation ? { operation } : {}),
-      ...(this.#updating.has(record.id) ? { updating: true as const } : {}),
+      ...(this.#updating.has(record.id) || this.#fetching.has(record.id)
+        ? { updating: true as const }
+        : {}),
+      ...this.#summaryProgress(record.id, operation),
+      ...(this.#updateFailures.has(record.id)
+        ? { updateFailure: this.#updateFailures.get(record.id) }
+        : {}),
       ...(this.deps.updates?.needsFreshStart(record.id) ? { needsFreshStart: true as const } : {}),
       ...(!this.#updating.has(record.id) &&
+      !this.#fetching.has(record.id) &&
       !this.#held(record.id) &&
       this.deps.updates?.available(record.id)
         ? { updateAvailable: true as const }

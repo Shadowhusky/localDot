@@ -24,6 +24,7 @@ import { BrowserStreams } from "./browser/streams.ts";
 import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
 import { BrowserRecovery, credentialsChanged } from "./cells/browser-recovery.ts";
+import { pullPinnedImages } from "./cells/computer-image-pull.ts";
 import { ComputerSizes } from "./cells/computer-size.ts";
 import { ComputerUpdates, updateComputer } from "./cells/computer-update.ts";
 import { DockerClient } from "./cells/docker.ts";
@@ -239,7 +240,8 @@ const updates = new ComputerUpdates({
   stream,
   relay,
   preflightSystem: (record, target) => migration.preflight(record, target),
-  migrateSystem: (record, target) => migration.prepare(record, target),
+  migrateSystem: (record, target, report) => migration.prepare(record, target, report),
+  pull: pullPinnedImages,
 });
 const orchestrator = new CellOrchestrator({
   updates,

@@ -111,6 +111,14 @@ class Lasting extends CellControlConflict {
   }
 }
 const NOT_HERE = "The new version isn't on this Mac yet.";
+const PINNED = /@sha256:[0-9a-f]{64}$/;
+
+export interface PullProgress {
+  done?: number;
+  total?: number;
+}
+export type MigrationReport = (progress: { share?: number; detail?: string }) => void;
+export type UpdateStep = "keep" | "replace";
 
 // The new desktop image an update was refused for because an installed app changed files it
 // needs. The same image would meet the same files again; a different one is offered afresh.
@@ -126,7 +134,13 @@ export interface ComputerUpdatesDeps {
   relay?: () => Promise<GateRelay>;
   everyMs?: number;
   preflightSystem?(record: CellRecord, target: string): Promise<void>;
-  migrateSystem?(record: CellRecord, target: string): Promise<string>;
+  migrateSystem?(record: CellRecord, target: string, report?: MigrationReport): Promise<string>;
+  // Fetches pinned images Docker doesn't hold. Its reports are of bytes, as Docker tells them.
+  pull?(
+    references: string[],
+    signal: AbortSignal,
+    report: (progress: PullProgress) => void,
+  ): Promise<void>;
 }
 
 // Whether a computer runs older images than its configured tags name now, and the swap that
@@ -135,6 +149,7 @@ export class ComputerUpdates {
   readonly #docker: Docker;
   readonly #preflight: ComputerUpdatesDeps["preflightSystem"];
   readonly #migrate: ComputerUpdatesDeps["migrateSystem"];
+  readonly #pull: ComputerUpdatesDeps["pull"];
   readonly #images: Images;
   readonly #relay: () => Promise<GateRelay>;
   readonly #stream: StreamOptions;
@@ -149,6 +164,7 @@ export class ComputerUpdates {
   constructor(deps: ComputerUpdatesDeps) {
     this.#docker = deps.docker;
     this.#migrate = deps.migrateSystem;
+    this.#pull = deps.pull;
     this.#preflight = deps.preflightSystem;
     this.#images = deps.images;
     this.#relay = deps.relay ?? (() => Promise.resolve(HOST_RELAY));
@@ -199,14 +215,22 @@ export class ComputerUpdates {
   // Resolves whether the answer changed. A Docker that does not answer changes nothing.
   async check(record: CellRecord): Promise<boolean> {
     let target: string | undefined;
+    let missing = false;
     try {
       target = await this.#outdated(record);
+      missing = !target && !!record.ownership && (await this.missing()).length > 0;
     } catch {
       return false;
     }
     const refused = this.#refused.get(record.id);
     if (target && refused && refused !== target) this.#forget(record.id);
-    const offer = !target ? undefined : refused === target ? "blocked" : "available";
+    const offer = missing
+      ? "available"
+      : !target
+        ? undefined
+        : refused === target
+          ? "blocked"
+          : "available";
     const before = this.#offers.get(record.id);
     if (offer) this.#offers.set(record.id, offer);
     else this.#offers.delete(record.id);
@@ -233,6 +257,30 @@ export class ComputerUpdates {
     return () => clearInterval(timer);
   }
 
+  // The pinned images Docker doesn't hold. A local tag is left out: no registry could answer it.
+  async missing(): Promise<string[]> {
+    if (!this.#pull) return [];
+    const missing: string[] = [];
+    for (const role of ROLES) {
+      const reference = this.#images[role];
+      if (!PINNED.test(reference)) continue;
+      const found = await this.#read(`/images/${encodeURIComponent(reference)}/json`);
+      if (!found) missing.push(reference);
+    }
+    return missing;
+  }
+
+  // Gets what the update needs while the computer goes on as it was.
+  async fetch(
+    record: CellRecord,
+    signal: AbortSignal,
+    report: (progress: PullProgress) => void,
+  ): Promise<void> {
+    if (!this.#pull || this.pending(record.id)) return;
+    const missing = await this.missing();
+    if (missing.length) await this.#pull(missing, signal, report);
+  }
+
   // Refuses an update that can't go ahead, before anything is stopped. An unfinished one is
   // finished first, so it is never refused here.
   async prepare(record: CellRecord): Promise<void> {
@@ -248,7 +296,14 @@ export class ComputerUpdates {
   }
 
   // The computer must be stopped. Resolves the record that now owns the new containers.
-  async swap(record: CellRecord, save: Save): Promise<CellRecord> {
+  async swap(
+    record: CellRecord,
+    save: Save,
+    report: { step(step: UpdateStep): void; migration: MigrationReport } = {
+      step() {},
+      migration() {},
+    },
+  ): Promise<CellRecord> {
     if (this.#store().read(record.id)) throw failure();
     const previous = ownedContainers(record);
     const target = await this.#targets();
@@ -263,11 +318,15 @@ export class ComputerUpdates {
     }
     if (this.#migrate) {
       const target = images.desktop;
-      images.desktop = await this.#migrate(record, target).catch((error: unknown) => {
-        if (error instanceof SystemMigrationConflict) this.#refuse(record.id, target);
-        throw error;
-      });
+      report.step("keep");
+      images.desktop = await this.#migrate(record, target, report.migration).catch(
+        (error: unknown) => {
+          if (error instanceof SystemMigrationConflict) this.#refuse(record.id, target);
+          throw error;
+        },
+      );
     } else await requireUnmodifiedSystem(this.#docker, previous.desktop);
+    report.step("replace");
     // The gate's token follows the gate image: a computer made before the gate captured apps that
     // ignore the proxy gets one, and one going onto a gate image that can't capture gives it up.
     // It is kept before anything is made, so the new containers match it from their first start.
@@ -576,7 +635,7 @@ function ownedContainers(record: CellRecord): { gate: string; desktop: string } 
 export class ComputerUpdateRefused extends CellControlConflict {}
 
 export interface UpdateAdmissionDeps {
-  cells: Pick<CellOrchestrator, "get" | "update">;
+  cells: Pick<CellOrchestrator, "get" | "update"> & { fetchUpdate?(id: string): Promise<void> };
   live: Pick<LiveSessions, "get" | "admitIdleOperation" | "idleOperationPending">;
   runner: {
     holds(sessionId: string): boolean;
@@ -602,14 +661,22 @@ export async function updateComputer(
   if (cell.updateBlocked) throw new ComputerUpdateRefused(UPDATE_BLOCKED);
   if (!cell.updateAvailable) throw new ComputerUpdateRefused("Your computer is up to date.");
   const busy = () => new ComputerUpdateRefused("Wait for dot to finish, or stop the task first.");
-  const sessionId = d.live.get(id);
-  if (sessionId) {
+  const inTheWay = () => {
+    const sessionId = d.live.get(id);
+    if (!sessionId) return undefined;
     const session = d.runner.get(sessionId);
     if (d.runner.holds(sessionId) || session?.controlHeld)
       throw new ComputerUpdateRefused("Hand back the computer first.");
     if (session?.status !== "idle" || !d.runner.release) throw busy();
+    return d.runner.release;
+  };
+  inTheWay();
+  // A download can take many minutes, and the computer stays in use throughout.
+  await d.cells.fetchUpdate?.(id);
+  const release = inTheWay();
+  if (release) {
     try {
-      await d.runner.release(signal);
+      await release.call(d.runner, signal);
     } catch {
       throw busy();
     }

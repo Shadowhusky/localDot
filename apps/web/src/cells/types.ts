@@ -1,4 +1,8 @@
-import type { ComputerOperation } from "@localdot/protocol";
+import type {
+  ComputerOperation,
+  ComputerUpdateFailure,
+  ComputerUpdateProgress,
+} from "@localdot/protocol";
 
 export type Scale = 1 | 2;
 
@@ -28,6 +32,9 @@ export interface CellSummary {
   // A newer build is here, but installed apps changed files it needs; Update can't apply it.
   updateBlocked?: true;
   updating?: true;
+  // The stage of an update under way, and how the last one ended if it didn't work.
+  updateProgress?: ComputerUpdateProgress;
+  updateFailure?: ComputerUpdateFailure;
   // Its update can't be finished; only a fresh start brings the computer back.
   needsFreshStart?: true;
   // The start, update or stop going on, from when the daemon began it.

@@ -41,3 +41,30 @@ export const ComputerOperation = z.strictObject({
   expectedMs: Ms.min(1),
 });
 export type ComputerOperation = z.infer<typeof ComputerOperation>;
+
+// What a computer's update goes through, as the person watching it sees it.
+export const COMPUTER_UPDATE_STAGES = [
+  "download",
+  "stop",
+  "keep",
+  "replace",
+  "start",
+  "reconnect",
+] as const;
+export const ComputerUpdateStage = z.enum(COMPUTER_UPDATE_STAGES);
+export type ComputerUpdateStage = z.infer<typeof ComputerUpdateStage>;
+export const ComputerUpdateProgress = z.strictObject({
+  stage: ComputerUpdateStage,
+  // How far this stage has got, 0-1, when it can tell.
+  share: z.number().min(0).max(1).optional(),
+  detail: z.string().max(120).optional(),
+});
+export type ComputerUpdateProgress = z.infer<typeof ComputerUpdateProgress>;
+// How the last update ended when it didn't work. Every device and a reloaded page reads it here;
+// `at` names it, so a device says it once.
+export const ComputerUpdateFailure = z.strictObject({
+  stage: ComputerUpdateStage,
+  message: z.string().max(400),
+  at: Ms,
+});
+export type ComputerUpdateFailure = z.infer<typeof ComputerUpdateFailure>;
