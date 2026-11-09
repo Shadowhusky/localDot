@@ -1032,9 +1032,9 @@ describe("research mode routes", () => {
     const f = await setup();
     const task = `/api/cells/${CELL}/agent`;
     expect((await f.send("POST", task, { task: "Compare", mode: "research" })).status).toBe(202);
-    expect(f.start.mock.calls[0]?.[3]).toEqual({ research: true });
+    expect(f.start.mock.calls[0]?.[3]).toEqual({ research: true, byOwner: true });
     expect((await f.send("POST", task, { task: "Book" })).status).toBe(202);
-    expect(f.start.mock.calls[1]).toHaveLength(3);
+    expect(f.start.mock.calls[1]?.[3]).toEqual({ byOwner: true });
     expect((await f.send("POST", task, { task: "Book", mode: "deep" })).status).toBe(400);
     expect(f.start).toHaveBeenCalledTimes(2);
   });

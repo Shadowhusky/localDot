@@ -335,6 +335,8 @@ export class AgentSession {
   recent: readonly RecentLine[] = [];
   // Present when the task came through a shared link: what of the owner's it may use.
   guest: GuestAccess | undefined;
+  // The shared link the task works for.
+  link: string | undefined;
   // The connected apps' tools this task's model was shown.
   connectors: TaskConnectors = NO_TASK_CONNECTORS;
   readonly workProgress = new WorkProgress();
@@ -1171,6 +1173,7 @@ export class AgentSession {
       text: this.task,
       kind: "task",
       ...(model ? { model } : {}),
+      ...(sender ? { link: sender } : {}),
     });
     this.#unanswered.set(messageId, this.task);
     this.#senders.set(messageId, sender ?? null);
@@ -1192,12 +1195,14 @@ export class AgentSession {
     if (this.stopped) throw new SessionStoppedError();
     const item = Object.freeze(InboxItem.parse({ seq: this.#seq + 1, messageId, kind, text }));
     const turn = this.#turns.get(messageId);
+    const sender = this.#senders.get(messageId);
     if (announce && kind !== "resume")
       this.append("message.user", {
         messageId: item.messageId,
         text,
         kind,
         ...(turn ? { model: turn.model } : {}),
+        ...(sender ? { link: sender } : {}),
       });
     this.#seq = item.seq;
     this.#inbox.push(item);
@@ -1288,6 +1293,7 @@ export class AgentSession {
         : turn?.moves()
           ? { waitsFor: "switch" as const }
           : {}),
+      ...(sender ? { link: sender } : {}),
     });
     this.#queued.set(item.messageId, text);
     this.#senders.set(item.messageId, sender ?? null);

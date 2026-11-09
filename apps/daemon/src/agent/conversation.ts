@@ -353,22 +353,25 @@ export class Conversations {
           : [],
       ),
     );
-    const waiting = new Map<string, string>();
+    // What came through a shared link is never taken for the owner's own words.
+    const said = (data: { text: string; link?: string | undefined }) =>
+      `${data.link ? "Someone with a shared link" : "The user"}: ${clip(data.text)}`;
+    const waiting = new Map<string, { text: string; link?: string | undefined }>();
     for (const event of events) {
       switch (event.type) {
         case "message.user":
           if (unsaid.has(event.data.messageId)) break;
-          if (event.data.queued) waiting.set(event.data.messageId, event.data.text);
-          else turns.push(`The user: ${clip(event.data.text)}`);
+          if (event.data.queued) waiting.set(event.data.messageId, event.data);
+          else turns.push(said(event.data));
           break;
         case "message.delivery": {
-          const text = waiting.get(event.data.messageId);
+          const message = waiting.get(event.data.messageId);
           waiting.delete(event.data.messageId);
           if (
-            text !== undefined &&
+            message !== undefined &&
             (event.data.state === "sent" || event.data.state === "steering")
           )
-            turns.push(`The user: ${clip(text)}`);
+            turns.push(said(message));
           break;
         }
         case "message.assistant":
@@ -519,6 +522,13 @@ ${checkpoint}`),
       };
     const { autoTitle, userTitle } = this.log.titles(task);
     return { automatic: autoTitle ?? facts.title, ...(userTitle ? { user: userTitle } : {}) };
+  }
+
+  // The shared link a task works for, as its session.start records it.
+  link(sessionId: string): { id: string; apps: boolean } | undefined {
+    if (!this.has(sessionId)) return undefined;
+    const start = this.#head(sessionId).find((event) => event.type === "session.start");
+    return start?.type === "session.start" ? start.data.link : undefined;
   }
 
   isTask(sessionId: string): boolean {

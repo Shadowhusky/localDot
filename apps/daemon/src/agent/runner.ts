@@ -59,6 +59,7 @@ import type { StopOutcome } from "../gateway/kill-switch.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import { type KeydHealth, vaultLocked } from "../keyd/monitor.ts";
+import type { RemoteLinks } from "../remote/links.ts";
 import {
   activeRoles,
   BindingError,
@@ -223,6 +224,9 @@ export interface TaskStartOptions {
   readonly sender?: string;
   // Present when the task came through a shared link: what of the owner's it may use.
   readonly guest?: GuestAccess;
+  // The owner asked for this task themselves. Otherwise a task that carries on a shared link's
+  // task works for that link, within its limits.
+  readonly byOwner?: true;
 }
 export class AgentError extends Error {
   constructor(
@@ -283,7 +287,9 @@ export interface AgentRunnerDeps {
   recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
-    Partial<Pick<Conversations, "names" | "persona" | "model" | "chooseModel" | "latest">>;
+    Partial<Pick<Conversations, "names" | "persona" | "model" | "chooseModel" | "latest" | "link">>;
+  // The shared links whose tasks a carried-on task counts against.
+  links?: Pick<RemoteLinks, "reserve" | "active">;
   installSkills(cellId: string, signal: AbortSignal, persona?: PersonaId): Promise<SkillSummary[]>;
   prepareDesktop?(session: AgentSession): Promise<void>;
   waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
@@ -774,10 +780,15 @@ export class AgentRunner {
     const revises =
       options.revises === undefined ? undefined : ReviseLink.safeParse(options.revises);
     if (revises && !revises.success) throw new AgentError(400, "invalid revised file");
-    const budget = options.budgetUSD;
+    const requested = options.budgetUSD;
     if (
-      budget !== undefined &&
-      !(Number.isFinite(budget) && budget > 0 && budget <= 10_000 && Math.round(budget * 1e6) >= 1)
+      requested !== undefined &&
+      !(
+        Number.isFinite(requested) &&
+        requested > 0 &&
+        requested <= 10_000 &&
+        Math.round(requested * 1e6) >= 1
+      )
     )
       throw new AgentError(400, "invalid task budget");
     const idle = options.idleMs;
@@ -816,12 +827,8 @@ export class AgentRunner {
       admittedNext();
       throw error;
     }
+    let reservation: ReturnType<RemoteLinks["reserve"]> | undefined;
     try {
-      // Capture at request admission, before prior-task retirement or preflight can await.
-      const settings = AgentSettings.parse({
-        ...this.deps.settings(),
-        ...(options.main ? { main: options.main, fast: undefined, local: undefined } : {}),
-      });
       // A routine's run goes on in the routine's own conversation, never the one the user has open.
       // A conversation record that can't be read never keeps a task from starting.
       let continues: string | undefined;
@@ -834,9 +841,38 @@ export class AgentRunner {
         } catch {
           console.error("the earlier conversation could not be read");
         }
+      // Carrying a shared link's task on, by the owner's model card or a message for another model,
+      // is that link's task too: it counts against the link and keeps its limits.
+      const carried = options.guest || options.byOwner ? undefined : this.#linkOf(continues);
+      if (carried) {
+        try {
+          reservation = this.deps.links?.reserve(carried.id);
+        } catch {
+          reservation = undefined;
+        }
+        if (!reservation)
+          throw new AgentError(
+            409,
+            "The shared link this task works for has ended or used its tasks.",
+          );
+      }
+      const guest = options.guest ?? (carried && { apps: carried.apps });
+      const sender = options.sender ?? carried?.id;
+      const main = options.main ?? reservation?.model;
+      const budget = reservation
+        ? Math.min(
+            reservation.budgetUSD,
+            this.deps.settings().taskBudgetUSD ?? reservation.budgetUSD,
+          )
+        : requested;
+      // Capture at request admission, before prior-task retirement or preflight can await.
+      const settings = AgentSettings.parse({
+        ...this.deps.settings(),
+        ...(main ? { main, fast: undefined, local: undefined } : {}),
+      });
       // Settings holds the default: a task runs on what was chosen for it, and goes on with it.
       if (options.model) settings.main = this.#choiceOf(options.model, continues);
-      else if (!options.main && continues)
+      else if (!main && continues)
         settings.main = this.#conversationModel(continues) ?? settings.main;
       // The conversation's own task makes way for the new one; the computer's other tasks go on.
       const previous = continues ? this.sessions.get(continues) : undefined;
@@ -881,7 +917,7 @@ export class AgentRunner {
           continues = undefined;
         }
       let recent: RecentLine[] = [];
-      if (settings.recentActivity !== "off" && this.deps.recentActivity && !options.guest)
+      if (settings.recentActivity !== "off" && this.deps.recentActivity && !guest)
         try {
           recent = this.deps.recentActivity.list().map(({ sessionId: _, ...line }) => line);
         } catch {
@@ -924,7 +960,8 @@ export class AgentRunner {
       );
       session.earlier = earlier;
       session.inherited = inherited;
-      session.guest = options.guest;
+      session.guest = guest;
+      session.link = guest && sender;
       session.permissionMode = () => {
         // A routine set to ask first or only read keeps its own policy whatever the chat's mode.
         if (session.run && session.run.profile !== "act_within_rules") return "custom";
@@ -1028,8 +1065,9 @@ export class AgentRunner {
           ...(revises?.success ? { revises: revises.data } : {}),
           ...(session.research ? { research: session.research.budget } : {}),
           persona: persona ?? DEFAULT_PERSONA,
+          ...(guest && sender ? { link: { id: sender, apps: guest.apps } } : {}),
         });
-        session.askTask(options.sender, settings.main && messageModel(settings.main));
+        session.askTask(sender, settings.main && messageModel(settings.main));
         if (settings.main)
           try {
             this.deps.conversations?.chooseModel?.(id, settings.main);
@@ -1062,9 +1100,34 @@ export class AgentRunner {
         } catch {
           console.error("the current conversation could not be saved");
         }
+      if (carried && reservation) {
+        reservation.finish(id);
+        reservation = undefined;
+        if (!this.deps.links?.active(carried.id)) {
+          await this.stopRun(id);
+          throw new AgentError(409, "The shared link this task works for has ended.");
+        }
+      }
       return session;
+    } catch (error) {
+      reservation?.finish();
+      throw error;
     } finally {
       admittedNext();
+    }
+  }
+  // The shared link a task works for, from the task while it runs or from its record after.
+  #linkOf(sessionId: string | undefined): { id: string; apps: boolean } | undefined {
+    if (!sessionId) return undefined;
+    const running = this.sessions.get(sessionId);
+    if (running)
+      return running.link !== undefined && running.guest
+        ? { id: running.link, apps: running.guest.apps }
+        : undefined;
+    try {
+      return this.deps.conversations?.link?.(sessionId);
+    } catch {
+      return undefined;
     }
   }
   // What a task on these settings runs with, checked against what its plan or key offers now.
@@ -1312,8 +1375,6 @@ export class AgentRunner {
       const next = await this.start(session.cellId, first.text, undefined, {
         continues: session.id,
         ...(first.turn ? { model: first.turn.ref } : {}),
-        ...(first.sender ? { sender: first.sender } : {}),
-        ...(session.guest ? { guest: session.guest } : {}),
       });
       for (const message of rest) {
         const turn = message.turn && (await this.messageTurn(next.id, message.turn.ref));

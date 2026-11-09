@@ -521,6 +521,10 @@ const systemClock = {
 };
 const offerScanner = new TaskScanner(eventLog);
 agent = createAgent({
+  links: {
+    reserve: (id) => remoteAccess.links.reserve(id),
+    active: (id) => remoteAccess.links.active(id),
+  },
   dockerDown: () => runtimeStartup.snapshot().then(({ docker }) => docker === "unavailable"),
   previewOffers: (id, reply) =>
     turnOffers(
