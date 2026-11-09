@@ -178,7 +178,7 @@
   top: 50%;
   left: 50%;
   border-radius: var(--radius-full);
-  background-image: radial-gradient(circle at 35% 30%, var(--dot-body) 45%, var(--color-fg-3));
+  background-image: radial-gradient(circle at 35% 30%, var(--dot-body) 30%, var(--color-fg-2));
   opacity: 0;
 }
 
