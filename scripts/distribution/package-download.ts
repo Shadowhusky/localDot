@@ -16,8 +16,9 @@ export class PackageProblem extends Error {
 }
 
 const STALL_MS = 30_000;
-// Tries in a row that get no further. Any try that does starts the count again.
+// Tries in a row that get next to nowhere. One that really gets further starts the count again.
 const ATTEMPTS = 4;
+const REAL_PROGRESS = 256 * 1024;
 const WAIT_MS = 2_000;
 
 export interface PackageDownload {
@@ -39,6 +40,7 @@ export interface PackageDownload {
   freeBytes?: (path: string) => number;
   stallMs?: number;
   attempts?: number;
+  realProgress?: number;
   waitMs?: number;
 }
 
@@ -146,7 +148,7 @@ export async function downloadPackage(input: PackageDownload): Promise<void> {
       wholeAgain = true;
       continue;
     }
-    fruitless = after > before ? 0 : fruitless + 1;
+    fruitless = after - before >= (input.realProgress ?? REAL_PROGRESS) ? 0 : fruitless + 1;
     if (fruitless >= attempts)
       throw failure instanceof PackageProblem
         ? failure

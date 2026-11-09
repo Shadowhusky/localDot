@@ -210,11 +210,37 @@ it("keeps trying while it gets anywhere, and gives up on a dead connection", asy
       to: again.to,
       partials: again.partials,
       fetch: flaky,
+      realProgress: 1,
       signal: new AbortController().signal,
       report: () => {},
     }),
   ).resolves.toBeUndefined();
   expect(flaky.mock.calls.length).toBeGreaterThan(4);
+});
+it("gives up on a connection that only ever crawls a little further before it stalls", async () => {
+  const f = fixture();
+  const crumb = vi
+    .fn()
+    .mockImplementation(async (_url: string, init: { headers: { range?: string } }) => {
+      const from = Number(init.headers.range?.match(/\d+/)?.[0] ?? 0);
+      return answer(
+        stream(BYTES.subarray(from, from + 1024), new Error("reset")),
+        from ? 206 : 200,
+        from ? `bytes ${from}-${BYTES.length - 1}/${BYTES.length}` : undefined,
+      );
+    });
+  await expect(
+    downloadPackage({
+      ...artifact,
+      ...OPTIONS,
+      to: f.to,
+      partials: f.partials,
+      fetch: crumb,
+      signal: new AbortController().signal,
+      report: () => {},
+    }),
+  ).rejects.toMatchObject({ problem: "network" });
+  expect(crumb).toHaveBeenCalledTimes(4);
 });
 it("says the disk is full when it is", async () => {
   const f = fixture();
