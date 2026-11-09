@@ -1997,6 +1997,8 @@ swap_begin() {
     sleep 1
     [ -f "$journal" ] || exit 0
     UPDATE_PROBLEM=interrupted
+    # The lock names the dead installer, which would let another one start on top of this.
+    sh -c 'echo $PPID' >"$PREFIX/.package-install.lock/pid" 2>/dev/null
     recover_package_swap
     if [ "${PACKAGE_RESTORED:-0}" = 1 ]; then update_stage failed true; else update_stage failed false; fi
     rm -f "$PREFIX/.package-install.lock/pid"
@@ -2090,6 +2092,7 @@ activate_package() {
   else mv "$PREFIX/bin/keyd.new" "$PREFIX/bin/keyd"; KEYD_CHANGED=1; fi
   configure_remote_access
   write_services
+  [ "$KEYD_CHANGED" != 1 ] || KEYD_STOPPED=1
   install_command
   update_stage start
   start_services "$KEYD_CHANGED" "$DAEMON_CHANGED"

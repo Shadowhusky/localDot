@@ -275,6 +275,12 @@ for (const { name, choice } of [
       ).toBeVisible();
       await shot(page, ui, "updated");
       expect(daemon.updates).toBe(1);
+      await page.getByRole("button", { name: "What's new", exact: true }).click();
+      await expect(
+        page
+          .getByRole("region", { name: `What's new in ${NEW}` })
+          .getByText("installing one only restarts localDot", { exact: false }),
+      ).toBeVisible();
     });
 
     test("a failed install says what happened and retries on one press", async ({ page, ui }) => {
