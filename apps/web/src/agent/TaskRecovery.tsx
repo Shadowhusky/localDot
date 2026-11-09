@@ -83,6 +83,11 @@ function knownReason(
       title: "Sign in to Claude Code again",
       text: "Claude Code on this Mac isn't signed in. Run claude auth login in Terminal (its setup shows the command too), then continue this task.",
     };
+  if (reason === STALL.fixedElsewhere)
+    return {
+      title: "That's fixed now",
+      text: "It was fixed outside this task, so I stayed stopped. Continue, and I'll pick up where I stopped.",
+    };
   if (reason === STALL.keysLocked)
     return {
       title: "Your saved keys are unlocked",

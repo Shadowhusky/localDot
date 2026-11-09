@@ -19,6 +19,8 @@ export const STALL = {
   keysLocked: "keys locked",
   // Docker stopped and took the brain with it; the task goes on once it is back.
   runtime: "docker unavailable",
+  // Its card was fixed from somewhere else, which restarts nothing: Continue or a message does.
+  fixedElsewhere: "fixed elsewhere",
 } as const;
 
 export const PLAN_LIMITS = [

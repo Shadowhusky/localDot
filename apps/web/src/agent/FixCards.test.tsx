@@ -95,6 +95,70 @@ const card = (blocker: Blocker, extra: Partial<AgentBlocker> = {}): AgentBlocker
 const show = (blocker: Blocker, deps: FixDeps, extra: Partial<AgentBlocker> = {}) =>
   render(<FixCards blockers={[card(blocker, extra)]} deps={deps} />);
 
+describe("a fix through the card", () => {
+  const USE = `/api/agent/sessions/${SESSION}/blockers/${ID}/use`;
+  // The daemon hears before the fix starts, so the fix that follows counts as this card's.
+  const heardFirst = (post: ReturnType<typeof setup>["post"], fix: unknown) => {
+    expect(post).toHaveBeenCalledWith(USE);
+    const said = post.mock.invocationCallOrder[post.mock.calls.findIndex(([p]) => p === USE)];
+    expect(said).toBeLessThan(
+      (fix as { mock: { invocationCallOrder: number[] } }).mock.invocationCallOrder[0] ?? 0,
+    );
+  };
+
+  it("unlocking", async () => {
+    const { deps, post, keys } = setup();
+    show({ kind: "keys_locked" }, deps);
+    const region = screen.getByRole("region", { name: "Unlock your saved keys" });
+    fireEvent.change(within(region).getByLabelText("Passphrase"), {
+      target: { value: "correct horse battery" },
+    });
+    fireEvent.submit(within(region).getByRole("form", { name: "Unlock saved keys" }));
+    await waitFor(() => expect(keys.unlock).toHaveBeenCalled());
+    heardFirst(post, keys.unlock);
+    expect(JSON.stringify(post.mock.calls)).not.toContain("correct horse");
+  });
+
+  it("still unlocks when the daemon can't be told", async () => {
+    const { deps, post, keys } = setup();
+    post.mockRejectedValueOnce(new Error("offline"));
+    show({ kind: "keys_locked" }, deps);
+    const region = screen.getByRole("region", { name: "Unlock your saved keys" });
+    fireEvent.change(within(region).getByLabelText("Passphrase"), {
+      target: { value: "correct horse battery" },
+    });
+    fireEvent.submit(within(region).getByRole("form", { name: "Unlock saved keys" }));
+    await waitFor(() => expect(keys.unlock).toHaveBeenCalled());
+  });
+
+  it("turning on the computer", async () => {
+    const { deps, post } = setup();
+    show({ kind: "computer", state: "stopped" }, deps);
+    fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
+    await waitFor(() => expect(deps.computer.run).toHaveBeenCalledWith("start"));
+    heardFirst(post, deps.computer.run);
+  });
+
+  it("starting Docker", async () => {
+    const { deps, post } = setup();
+    post.mockImplementation(async (path: string) =>
+      path === "/api/runtime/start" ? ({ started: true } as never) : (undefined as never),
+    );
+    show({ kind: "runtime" }, deps);
+    fireEvent.click(screen.getByRole("button", { name: "Start Docker" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/api/runtime/start"));
+    expect(post.mock.calls.map(([path]) => path)).toEqual([USE, "/api/runtime/start"]);
+  });
+
+  it("opening Keys for a key changed outside localDot", async () => {
+    const { deps, post } = setup({}, { keys: [{ ...OPENAI, rebound: true }] });
+    show({ kind: "key", id: "openai", problem: "rebound" }, deps);
+    fireEvent.click(screen.getByRole("button", { name: "Open Keys" }));
+    await waitFor(() => expect(deps.onOpenKeys).toHaveBeenCalled());
+    expect(post).toHaveBeenCalledWith(USE);
+  });
+});
+
 describe("a card for each kind", () => {
   it("unlocks saved keys right in the conversation", async () => {
     const { deps, keys } = setup();
@@ -144,7 +208,7 @@ describe("a card for each kind", () => {
     fireEvent.submit(within(region).getByRole("form", { name: "Re-enter openai" }));
     await waitFor(() => expect(keys.save).toHaveBeenCalledOnce());
     expect(vi.mocked(keys.save).mock.calls[0]?.[0]).toMatchObject({ id: "openai", kind: "llm" });
-    expect(post).not.toHaveBeenCalled();
+    expect(post.mock.calls).toEqual([[`/api/agent/sessions/${SESSION}/blockers/${ID}/use`]]);
   });
 
   it("re-enters a key that can't be used as stored", () => {
@@ -204,11 +268,11 @@ describe("a card for each kind", () => {
     expect(screen.getByRole("button", { name: /Trying again/ })).toBeTruthy();
   });
 
-  it("offers Start and Resume for the computer, by what it is", () => {
+  it("offers Start and Resume for the computer, by what it is", async () => {
     const { deps } = setup();
     const { unmount } = show({ kind: "computer", state: "stopped" }, deps);
     fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
-    expect(deps.computer.run).toHaveBeenCalledWith("start");
+    await waitFor(() => expect(deps.computer.run).toHaveBeenCalledWith("start"));
     unmount();
     const resuming = setup({
       computer: { action: { kind: "resume", enabled: true }, run: vi.fn() },
@@ -216,17 +280,20 @@ describe("a card for each kind", () => {
     show({ kind: "computer", state: "paused" }, resuming.deps);
     expect(screen.getByRole("region", { name: "Your computer is paused" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-    expect(resuming.deps.computer.run).toHaveBeenCalledWith("resume");
+    await waitFor(() => expect(resuming.deps.computer.run).toHaveBeenCalledWith("resume"));
   });
 
   it("starts Docker, and says what to do when it can't from here", async () => {
     const { deps, post } = setup();
-    post.mockResolvedValueOnce({ started: false } as never);
+    let started = false;
+    post.mockImplementation(async (path: string) =>
+      path === "/api/runtime/start" ? ({ started } as never) : (undefined as never),
+    );
     show({ kind: "runtime" }, deps);
     fireEvent.click(screen.getByRole("button", { name: "Start Docker" }));
     await screen.findByText(/couldn't start it from here/);
     expect(post).toHaveBeenCalledWith("/api/runtime/start");
-    post.mockResolvedValueOnce({ started: true } as never);
+    started = true;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await screen.findByText(/Docker is starting/);
     expect(deps.runtimeChanged).toHaveBeenCalled();

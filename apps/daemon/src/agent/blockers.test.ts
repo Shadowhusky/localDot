@@ -1,7 +1,7 @@
-import type { Blocker, LocalDotEvent } from "@localdot/protocol";
+import { type Blocker, type LocalDotEvent, STALL } from "@localdot/protocol";
 import { KEYS_LOCKED_NOTE, KEYS_UNLOCKED_NOTE } from "@localdot/protocol/guidance";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RAISE_AGAIN_MS } from "./blockers.ts";
+import { CARD_IN_USE_MS, RAISE_AGAIN_MS } from "./blockers.ts";
 import { toolHarness } from "./testing/harness.ts";
 import type { ToolDeps } from "./tools/deps.ts";
 
@@ -32,6 +32,10 @@ const said = (body: { content: { text?: string }[] }) =>
 const inbox = async (session: ReturnType<typeof setup>["session"], after: number) =>
   (await session.inbox(after, 0)).items.map((item) => item.text);
 
+// The user starts the fix from the task's own card.
+const usesCards = (session: ReturnType<typeof setup>["session"]) => {
+  for (const open of session.openBlockers) expect(session.useBlocker(open.blockerId)).toBe(true);
+};
 const later = (ms: number) => {
   const now = Date.now() + ms;
   vi.spyOn(Date, "now").mockReturnValue(now);
@@ -72,6 +76,7 @@ describe("a blocker on a task", () => {
     expect(session.inboxSequence).toBe(start + 1);
     expect((await inbox(session, start))[0]).toContain("the key openai");
     const told = session.inboxSequence;
+    usesCards(session);
     expect(session.clearBlockers((blocker) => blocker.kind === "key")).toHaveLength(1);
     expect(clears(events())).toEqual([
       { blockerId: raises(events())[0]?.blockerId, outcome: "fixed" },
@@ -211,6 +216,108 @@ describe("a blocker on a task", () => {
   });
 });
 
+describe("who a fix wakes", () => {
+  it("leaves a task at rest alone when its card is fixed elsewhere: dot hears with the next word", async () => {
+    const { session } = setup();
+    session.lockKeys();
+    session.setStatus("idle");
+    const told = session.inboxSequence;
+    const woke = session.waitForUser(30);
+    session.keysUnlocked();
+    expect(await woke).toBe(false);
+    expect(await inbox(session, told)).toEqual([KEYS_UNLOCKED_NOTE]);
+  });
+
+  it("wakes a task at rest when its own card fixed it, one that read the web as well", async () => {
+    const { session } = setup();
+    session.tainted = true;
+    session.lockKeys();
+    session.setStatus("idle");
+    usesCards(session);
+    const woke = session.waitForUser(2000);
+    session.keysUnlocked();
+    expect(await woke).toBe(true);
+  });
+
+  it("doesn't count a card the user tried long ago", async () => {
+    const { session } = setup();
+    session.lockKeys();
+    session.setStatus("idle");
+    usesCards(session);
+    later(CARD_IN_USE_MS);
+    session.keysUnlocked();
+    vi.restoreAllMocks();
+    expect(await session.waitForUser(30)).toBe(false);
+  });
+
+  it("ends dot's wait when its own card fixed it", async () => {
+    const { call, session, tools } = setup();
+    tools.keysLocked = () => true;
+    const reply = call("request_fix", { kind: "keys_locked" });
+    await until(() => session.status === "waiting_user");
+    usesCards(session);
+    session.keysUnlocked();
+    const { body } = await reply;
+    expect(body.ok).toBe(true);
+    expect(said(body)).toBe(KEYS_UNLOCKED_NOTE);
+  });
+
+  it("holds dot's wait when its card is fixed elsewhere, until the user's next word", async () => {
+    for (const word of ["message", "continue"] as const) {
+      const { call, session, tools, events } = setup();
+      tools.keysLocked = () => true;
+      let done = false;
+      const reply = call("request_fix", { kind: "keys_locked" }).then((result) => {
+        done = true;
+        return result;
+      });
+      await until(() => session.status === "waiting_user");
+      session.keysUnlocked();
+      await until(() => session.status === "paused");
+      for (let i = 0; i < 20; i++) await new Promise<void>((r) => setImmediate(r));
+      expect(done).toBe(false);
+      expect(session.openBlockers).toEqual([]);
+      const states = events().flatMap((event) =>
+        event.type === "agent.state" ? [event.data.reason] : [],
+      );
+      expect(states.at(-1)).toBe(STALL.fixedElsewhere);
+      if (word === "message") session.moveOn("carry on", undefined);
+      else session.post("resume", "");
+      const { body } = await reply;
+      expect(said(body)).toBe(KEYS_UNLOCKED_NOTE);
+      expect(session.status).toBe("running");
+    }
+  });
+
+  it("gives up holding dot's wait with its own words when nobody comes back", async () => {
+    const { call, session, tools } = setup({ askTimeoutMs: 30 });
+    tools.keysLocked = () => true;
+    const reply = call("request_fix", { kind: "keys_locked" });
+    await until(() => session.status === "waiting_user");
+    session.keysUnlocked();
+    const { body } = await reply;
+    expect(body.ok).toBe(false);
+    expect(said(body)).toMatch(/fixed outside this task/);
+    expect(said(body)).not.toMatch(/card stays up/);
+  });
+
+  it("a task stalled on a card fixed elsewhere waits, and says what moves it on", async () => {
+    const { session, events } = setup();
+    session.setStatus("paused");
+    session.lockKeys(false);
+    const seq = session.inboxSequence;
+    session.keysUnlocked();
+    const states = events().flatMap((event) =>
+      event.type === "agent.state" ? [event.data.reason] : [],
+    );
+    expect(states.at(-1)).toBe(STALL.fixedElsewhere);
+    expect(session.inboxSequence).toBe(seq);
+    expect(session.moveOn("carry on", undefined)).toBe(true);
+    const kinds = (await session.inbox(seq, 0)).items.map((item) => item.kind);
+    expect(kinds).toEqual(["steer", "resume"]);
+  });
+});
+
 describe("request_fix: a card on dot's say-so", () => {
   it("shows no card when the keys aren't locked, whatever a page told dot", async () => {
     const { call, events, tools } = setup();
@@ -242,6 +349,7 @@ describe("request_fix: a card on dot's say-so", () => {
     });
     expect(session.status).toBe("waiting_user");
     expect(JSON.stringify(events())).not.toContain("CANARY");
+    usesCards(session);
     session.keysUnlocked();
     const { body } = await reply;
     expect(body.ok).toBe(true);
@@ -256,6 +364,7 @@ describe("request_fix: a card on dot's say-so", () => {
     const reply = call("request_fix", { kind: "keys_locked" });
     await until(() => session.status === "waiting_user");
     expect(raises(events())).toHaveLength(1);
+    usesCards(session);
     session.keysUnlocked();
     expect((await reply).body.ok).toBe(true);
   });
@@ -305,6 +414,7 @@ describe("request_fix: a card on dot's say-so", () => {
     });
     const reply = call("request_fix", { kind: "key", key_id: "openai" });
     await until(() => session.status === "waiting_user");
+    usesCards(session);
     session.clearBlockers((blocker) => blocker.kind === "key");
     expect((await reply).body.ok).toBe(true);
     tools.credentials = service(200) as never;
@@ -330,6 +440,7 @@ describe("request_fix: a card on dot's say-so", () => {
     ] as const) {
       const reply = call("request_fix", { kind: "key", key_id: id });
       await until(() => raises(events()).length === count);
+      usesCards(session);
       session.clearBlockers(() => true);
       await reply;
     }
@@ -355,6 +466,7 @@ describe("request_fix: a card on dot's say-so", () => {
     const reply = call("request_fix", { kind: "app", app: "github" });
     await until(() => raises(events()).length === 1);
     expect(raises(events())[0]?.blocker).toEqual(APP);
+    usesCards(session);
     session.clearBlockers((blocker) => blocker.kind === "app");
     expect((await reply).body.ok).toBe(true);
   });
@@ -369,6 +481,7 @@ describe("request_fix: a card on dot's say-so", () => {
     const reply = call("request_fix", { kind: "computer" });
     await until(() => raises(events()).length === 1);
     expect(raises(events())[0]?.blocker).toEqual({ kind: "computer", state: "paused" });
+    usesCards(session);
     session.clearBlockers((blocker) => blocker.kind === "computer");
     expect((await reply).body.ok).toBe(true);
   });
@@ -382,6 +495,7 @@ describe("request_fix: a card on dot's say-so", () => {
     tools.runtimeDown = async () => true;
     const reply = call("request_fix", { kind: "runtime" });
     await until(() => raises(events()).length === 1);
+    usesCards(session);
     session.clearBlockers((blocker) => blocker.kind === "runtime");
     expect((await reply).body.ok).toBe(true);
   });
@@ -412,6 +526,7 @@ describe("request_fix: a card on dot's say-so", () => {
     const reply = call("request_fix", { kind: "keys_locked" });
     await until(() => session.status === "waiting_user");
     const seq = session.inboxSequence;
+    usesCards(session);
     session.keysUnlocked();
     await reply;
     expect(session.inboxSequence).toBe(seq);
@@ -440,6 +555,7 @@ describe("request_fix: a card on dot's say-so", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(session.openBlockers).toHaveLength(1);
     expect(session.status).toBe("waiting_user");
+    usesCards(session);
     session.keysUnlocked();
     expect((await reply).body.ok).toBe(true);
   });
@@ -471,6 +587,7 @@ describe("ask_user can't stand in for a card", () => {
     expect(events().some((event) => event.type === "ask.request")).toBe(false);
     expect(raises(events())[0]?.blocker).toEqual({ kind: "keys_locked" });
     expect(JSON.stringify(events())).not.toContain("tap Done");
+    usesCards(session);
     session.keysUnlocked();
     const { body } = await reply;
     expect(body.ok).toBe(true);
@@ -553,6 +670,7 @@ describe("ask_user can't stand in for a card", () => {
     await until(() => raises(events()).length === 1);
     expect(events().some((event) => event.type === "ask.request")).toBe(false);
     expect(raises(events())[0]?.blocker).toEqual({ kind: "keys_locked" });
+    usesCards(session);
     session.keysUnlocked();
     expect((await reply).body.ok).toBe(true);
   });

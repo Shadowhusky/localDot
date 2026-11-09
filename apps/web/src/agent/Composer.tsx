@@ -1238,9 +1238,11 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     mode === "new" || takeover || props.waitingOn
       ? undefined
       : props.agent.snapshot?.status === "paused"
-        ? TRIES_AGAIN.has(props.agent.model.state?.reason)
-          ? "Sending tries the model again"
-          : "Sending won't resume the task"
+        ? props.agent.model.state?.reason === STALL.fixedElsewhere
+          ? "Sending carries on from here"
+          : TRIES_AGAIN.has(props.agent.model.state?.reason)
+            ? "Sending tries the model again"
+            : "Sending won't resume the task"
         : undefined;
   const notices = [
     problem && { text: problem, alert: true },

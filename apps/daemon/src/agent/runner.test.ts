@@ -30,6 +30,8 @@ import {
   AgentError,
   AgentRunner,
   type AgentRunnerDeps,
+  BRAIN_DONE,
+  BRAIN_GAVE_UP,
   computerDown,
   SIGN_IN_BROWSER_WAIT_MS,
 } from "./runner.ts";
@@ -2081,6 +2083,7 @@ describe("ChatGPT runner lifecycle", () => {
     expect(s.inboxSequence).toBe(seq + 1);
     await new Promise<void>((r) => setImmediate(r));
     expect(f.run).toHaveBeenCalledTimes(1);
+    s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
     await f.runner.keydChanged(open, locked);
     expect(locks()).toEqual(["blocker.raise", "blocker.clear"]);
     await until(() => f.run.mock.calls.length === 2);
@@ -2117,6 +2120,7 @@ describe("ChatGPT runner lifecycle", () => {
     s.append("agent.state", { state: "paused", reason: "keys locked" });
     expect(s.keysLocked).toBe(true);
     const seq = s.inboxSequence;
+    s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
     await f.runner.keydChanged(
       { ...locked, vault: { backend: "file", state: "ready", key: "passphrase" } },
       locked,
@@ -2142,6 +2146,7 @@ describe("ChatGPT runner lifecycle", () => {
     s.setStatus("paused");
     s.append("agent.state", { state: "paused", reason: "keys locked" });
     const told = s.inboxSequence;
+    s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
     await f.runner.keydChanged(
       { ...locked, vault: { backend: "file", state: "ready", key: "passphrase" } },
       locked,
@@ -2212,6 +2217,7 @@ describe("ChatGPT runner lifecycle", () => {
       await f.runner.keyChanged("gh");
       expect(s.openBlockers).toHaveLength(1);
       f.secrets.mockResolvedValue([{ id: "gh", kind: "http" }] as never);
+      s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
       await f.runner.keyChanged("gh");
       expect(blockers(f, s.id).at(-1)).toBe("fixed");
       // Only the Resume: the model retries the call that met the refusal.
@@ -2250,6 +2256,71 @@ describe("ChatGPT runner lifecycle", () => {
       const locked = { ...open, vault: { ...vault, state: "locked" } };
       await f.runner.keydChanged(locked as never, open as never);
       expect(blockers(f, s.id)).toEqual([{ kind: "keys_locked" }]);
+    });
+
+    it("leaves a stalled task stopped when its key is saved elsewhere", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http", reenter: true }] as never);
+      s.append("agent.state", { state: "paused", reason: "key needs re-entering", detail: "gh" });
+      await until(() => s.openBlockers.length === 1);
+      const seq = s.inboxSequence;
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http" }] as never);
+      await f.runner.keyChanged("gh");
+      expect(blockers(f, s.id).at(-1)).toBe("fixed");
+      expect(s.inboxSequence).toBe(seq);
+      expect(s.status).toBe("paused");
+    });
+
+    it("leaves a task stalled on locked keys stopped when they are unlocked elsewhere", async () => {
+      const f = setup();
+      const vault = { backend: "file", key: "passphrase" } as const;
+      const locked = { online: true, bootId: "fixture-boot", vault: { ...vault, state: "locked" } };
+      const open = { ...locked, vault: { ...vault, state: "ready" } };
+      await f.runner.keydChanged(locked as never, open as never);
+      const s = await working(f);
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "keys locked" });
+      const seq = s.inboxSequence;
+      await f.runner.keydChanged(open as never, locked as never);
+      expect(s.openBlockers).toEqual([]);
+      expect(s.inboxSequence).toBe(seq);
+      expect(s.status).toBe("paused");
+    });
+
+    it("goes on by itself when the task's own card unlocked the keys, whatever it has read", async () => {
+      const f = setup();
+      const vault = { backend: "file", key: "passphrase" } as const;
+      const locked = { online: true, bootId: "fixture-boot", vault: { ...vault, state: "locked" } };
+      const open = { ...locked, vault: { ...vault, state: "ready" } };
+      await f.runner.keydChanged(locked as never, open as never);
+      const s = await working(f);
+      s.tainted = true;
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "keys locked" });
+      s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
+      const seq = s.inboxSequence;
+      await f.runner.keydChanged(open as never, locked as never);
+      expect(s.inboxSequence).toBe(seq + 1);
+    });
+
+    it("gives no extra time to a card on a task that ended blocked or gave up", async () => {
+      for (const end of ["blocked", "gave up"] as const) {
+        const f = setup(5);
+        f.run.mockImplementationOnce(async (session) => {
+          const generation = session.beginBrain();
+          session.setStatus("running");
+          session.raiseBlocker({ kind: "key", id: "gh", problem: "rejected" });
+          if (end === "blocked")
+            session.append("task.result", { outcome: "blocked", summary: "Blocked", files: [] });
+          session.retireBrain(generation);
+          return end === "blocked" ? BRAIN_DONE : BRAIN_GAVE_UP;
+        });
+        const s = await f.runner.start(f.cellId, "Fixture task");
+        await until(() => f.log.read(s.id).some((event) => event.type === "session.end"));
+        expect(f.run).toHaveBeenCalledTimes(1);
+      }
     });
 
     it("a removed key clears nothing", async () => {
@@ -2388,6 +2459,7 @@ describe("ChatGPT runner lifecycle", () => {
       expect(s.status).toBe("paused");
       expect(f.sleep).not.toHaveBeenCalled();
       expect(f.run).toHaveBeenCalledTimes(1);
+      s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
       down = false;
       await until(() => s.openBlockers.length === 0);
       await until(() => f.run.mock.calls.length === 2);
@@ -2509,6 +2581,7 @@ describe("ChatGPT runner lifecycle", () => {
       await until(() => s.status === "idle");
       await new Promise<void>((r) => setTimeout(r, 40));
       expect(s.stopped).toBe(false);
+      s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
       await f.runner.keydChanged(
         { ...locked, vault: { ...locked.vault, state: "ready" as const } },
         locked,

@@ -11,6 +11,12 @@ export interface ClearOptions {
   movedTo?: EventOf<"blocker.clear">["data"]["movedTo"];
   // worked: a call through it went through, which says nothing of what the user did.
   outcome?: "fixed" | "worked";
+  // The card itself did this, as its model choice does.
+  byCard?: boolean;
+}
+export interface ClearedBlocker extends OpenBlocker {
+  // Fixed through this task's own card. Only that carries the task on by itself.
+  readonly ownCard: boolean;
 }
 export interface RaiseOptions {
   // Who noticed: localDot from the failure, or dot asking for it.
@@ -22,6 +28,8 @@ export interface RaiseOptions {
 }
 
 export const RAISE_AGAIN_MS = 2 * 60_000;
+// How long after the user starts a fix from a card a fix counts as that card's.
+export const CARD_IN_USE_MS = 30 * 60_000;
 
 // One task's open blockers: one card per thing, for the journal to tell every viewer about, and
 // what dot is told as each is raised and goes.
@@ -34,6 +42,9 @@ export class BlockerDesk {
   // A card that ended with nothing fixed may come back once, if dot still needs it. After that only
   // after a while, longer each time, so no run of failures or asking becomes a run of notifications.
   readonly #unfixed = new Map<string, { times: number; at: number }>();
+  // Cards the user has started a fix from, and until when that counts.
+  readonly #inUse = new Map<string, number>();
+  readonly #fixedElsewhere = new Set<string>();
 
   constructor(
     private readonly port: {
@@ -81,6 +92,15 @@ export class BlockerDesk {
     }
     return open;
   }
+  // The user started a fix from this task's own card. A fix that follows wakes the task.
+  use(blockerId: string): boolean {
+    if (!this.isOpen(blockerId)) return false;
+    this.#inUse.set(blockerId, Date.now() + CARD_IN_USE_MS);
+    return true;
+  }
+  fixedElsewhere(blockerId: string): boolean {
+    return this.#fixedElsewhere.has(blockerId);
+  }
   // Dot is waiting on it itself, so its call's own result says when it ends.
   join(blockerId: string): void {
     for (const [subject, open] of this.#open)
@@ -94,11 +114,12 @@ export class BlockerDesk {
   }
   clear(
     matches: (blocker: Blocker) => boolean,
-    { movedTo, outcome = "fixed" }: ClearOptions = {},
-  ): OpenBlocker[] {
-    const cleared: OpenBlocker[] = [];
+    { movedTo, outcome = "fixed", byCard = false }: ClearOptions = {},
+  ): ClearedBlocker[] {
+    const cleared: ClearedBlocker[] = [];
     for (const [subject, open] of [...this.#open]) {
       if (!matches(open.blocker)) continue;
+      const ownCard = byCard || (this.#inUse.get(open.blockerId) ?? 0) > Date.now();
       this.#open.delete(subject);
       this.#end(subject, open, outcome);
       this.port.cleared({
@@ -106,9 +127,11 @@ export class BlockerDesk {
         outcome,
         ...(movedTo ? { movedTo } : {}),
       });
-      cleared.push(open);
+      if (outcome === "fixed" && !ownCard) this.#fixedElsewhere.add(open.blockerId);
+      cleared.push({ ...open, ownCard });
+      // Fixed from elsewhere, it restarts nothing: dot hears with the user's next word.
       const told = this.#told.delete(subject);
-      if (told && outcome === "fixed") this.port.tell(blockerNote(open.blocker, "fixed"), true);
+      if (told && outcome === "fixed") this.port.tell(blockerNote(open.blocker, "fixed"), ownCard);
     }
     if (cleared.length) this.port.changed();
     return cleared;
@@ -157,6 +180,7 @@ export class BlockerDesk {
   }
   #end(subject: string, { blockerId }: OpenBlocker, outcome: BlockerOutcome): void {
     this.#ended.set(blockerId, outcome);
+    this.#inUse.delete(blockerId);
     if (outcome === "fixed" || outcome === "moot") this.#unfixed.delete(subject);
     else
       this.#unfixed.set(subject, {

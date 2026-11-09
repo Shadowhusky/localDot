@@ -616,6 +616,16 @@ describe("agent user routes", () => {
     );
     expect(f.session.raiseBlocker(key)).toBeDefined();
   });
+  it("hears when the owner starts a fix from a card, for a card that is up", async () => {
+    const f = await setup();
+    const open = f.session.raiseBlocker({ kind: "keys_locked" });
+    const use = vi.spyOn(f.session, "useBlocker");
+    expect((await f.send("POST", endpoint(`blockers/${open?.blockerId}/use`))).status).toBe(204);
+    expect(use).toHaveBeenCalledWith(open?.blockerId);
+    expect((await f.send("POST", endpoint("blockers/01M6R97SHHND5784EZZXSYSBGD/use"))).status).toBe(
+      409,
+    );
+  });
   it("a shared link's guest gains nothing from a card", async () => {
     const f = await setup();
     const retryOnModel = vi.fn(async () => {});
@@ -635,6 +645,7 @@ describe("agent user routes", () => {
           : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
       });
     expect((await post("dismiss")).status).toBe(403);
+    expect((await post("use")).status).toBe(403);
     expect(f.session.openBlockers).toHaveLength(1);
     const model = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
     expect((await post("model", { model })).status).toBe(403);

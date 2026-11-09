@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { STALL } from "@localdot/protocol";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
@@ -147,6 +148,17 @@ it("works out the new limit from a step or an amount", () => {
     expect(typeof raiseChoice("other", custom, 5)).toBe("string");
 });
 
+it("says a stopped task's card was fixed elsewhere, and offers to go on", () => {
+  render(
+    <TaskRecovery
+      agent={agentWith(STALL.fixedElsewhere)}
+      controls={{ ...controls, canResumeTask: true }}
+      onSettings={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "That's fixed now" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
+});
 it("starts from the first step that covers a refusal that arrives after the card", () => {
   const agent = budgetAgent();
   const later = { ...agent, model: { ...agent.model, budget: null } };

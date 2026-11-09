@@ -177,6 +177,13 @@ function NotNow({ open, deps }: { open: AgentBlocker; deps: FixDeps }) {
 
 export const dismissBlocker = (api: ApiClient, sessionId: string, blockerId: string) =>
   api.post(`/api/agent/sessions/${sessionId}/blockers/${blockerId}/dismiss`);
+// Said before a fix starts, so that the fix is known as this card's and the task carries on. It
+// holds nothing typed. Should it not arrive, the fix still goes ahead and dot waits for a word.
+const usingCard = async (deps: FixDeps, { blockerId }: AgentBlocker) => {
+  await deps.api
+    .post(`/api/agent/sessions/${deps.sessionId}/blockers/${blockerId}/use`)
+    .catch(() => undefined);
+};
 
 function KeysFix({ open, deps }: { open: BlockerOf<"keys_locked">; deps: FixDeps }) {
   const setup = deps.keys.health?.vault?.state === "setup";
@@ -192,7 +199,10 @@ function KeysFix({ open, deps }: { open: BlockerOf<"keys_locked">; deps: FixDeps
       {unlock && (
         <UnlockKeys
           setup={setup}
-          unlock={unlock}
+          unlock={async (passphrase) => {
+            await usingCard(deps, open);
+            return unlock(passphrase);
+          }}
           label={setup ? "Choose a passphrase" : "Unlock saved keys"}
           actions={<NotNow open={open} deps={deps} />}
         />
@@ -223,7 +233,10 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
           <Button
             variant="primary"
             icon="key-round"
-            onClick={(event) => deps.onOpenKeys(event.currentTarget)}
+            onClick={(event) => {
+              void usingCard(deps, open);
+              deps.onOpenKeys(event.currentTarget);
+            }}
           >
             Open Keys
           </Button>
@@ -253,7 +266,10 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
         <KeyForm
           active
           reenter={record}
-          save={deps.keys.save}
+          save={async (...entered) => {
+            await usingCard(deps, open);
+            return deps.keys.save(...entered);
+          }}
           busy={deps.keys.busy}
           unavailable={noSaving(deps.keys.health)}
           actions={way}
@@ -295,7 +311,11 @@ function AppFix({ open, deps }: { open: BlockerOf<"app">; deps: FixDeps }) {
         </p>
       )}
       <div className="thread-recovery-actions">
-        <Button variant="primary" busy={sign.starting} onClick={() => void sign.connect()}>
+        <Button
+          variant="primary"
+          busy={sign.starting}
+          onClick={() => void usingCard(deps, open).then(() => sign.connect())}
+        >
           {sign.waiting ? "Open again" : "Connect"}
         </Button>
         <NotNow open={open} deps={deps} />
@@ -427,7 +447,9 @@ function ComputerFix({ open, deps }: { open: BlockerOf<"computer">; deps: FixDep
           icon="power"
           busy={!offered || !!offered.busy}
           disabledReason={!offered || offered.enabled ? undefined : "Wait a moment"}
-          onClick={() => offered && run(offered.kind)}
+          onClick={() => {
+            if (offered) void usingCard(deps, open).then(() => run(offered.kind));
+          }}
         >
           {!offered
             ? "Turning on…"
@@ -448,6 +470,7 @@ function RuntimeFix({ open, deps }: { open: BlockerOf<"runtime">; deps: FixDeps 
   const start = async () => {
     setState("starting");
     try {
+      await usingCard(deps, open);
       const { started } = await deps.api.post<{ started: boolean }>("/api/runtime/start");
       setState(started ? "waiting" : "manual");
       deps.runtimeChanged();

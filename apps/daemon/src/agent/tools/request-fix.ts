@@ -8,6 +8,8 @@ const STILL_OPEN =
   "This isn't fixed yet, and localDot's card stays up. Carry on with what doesn't need it, or end your turn and say what is left: you'll be told once it is fixed. Don't raise it again or ask the user about it.";
 const IT_WORKED =
   "A call with it just went through, so localDot's card has gone. Carry on with the task.";
+const FIXED_UNHEARD =
+  "This was fixed outside this task, and the user hasn't said to go on. End your turn and say what is left: they can carry it on from here.";
 const ASKED_LATELY =
   "localDot asked the user about this a moment ago, so it doesn't ask again yet. Carry on with what doesn't need it, or finish and say what is left.";
 export const KEYS_NOT_LOCKED =
@@ -107,6 +109,8 @@ export async function waitForFix(
       return { ok: true, content: [text(movedOnFix(ctx.session))] };
     case "worked":
       return { ok: true, content: [text(IT_WORKED)] };
+    case "unheard":
+      return { ok: false, content: [text(FIXED_UNHEARD)] };
     case "fixed":
     case "moot":
       return { ok: true, content: [text(blockerNote(blocker, "fixed"))] };
