@@ -1248,11 +1248,14 @@
   margin-block-start: calc(var(--spacing) * 5);
   min-width: 0;
 }
+/* A row's button reaches 7 px past its edge for the pointer, which is scrollable overflow: the list
+   gives it the room, and lines up with the page as before. */
 .share-link-list {
   max-block-size: min(24rem, 50dvh);
-  overflow: auto;
+  margin-inline: calc(var(--spacing) * -2);
+  overflow: hidden auto;
   overscroll-behavior: contain;
-  padding-block: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 2);
 }
 .share-link-row {
   display: flex;

@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { ActivityDetail } from "../agent/ActivityDetails.tsx";
-import { ActivityRow, PlainSteps, reveal, revealOpened } from "../agent/ActivityRow.tsx";
+import { ActivityRow, PlainSteps, reveal } from "../agent/ActivityRow.tsx";
 import {
   type ActivityEntry,
   type ActivityFilter,
@@ -34,7 +34,7 @@ import { ResearchSources } from "../agent/ResearchSources.tsx";
 import { StepPreviewScope } from "../agent/StepPreview.tsx";
 import { SubagentList } from "../agent/SubagentList.tsx";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
-import { useFollowScroll } from "../agent/useFollowScroll.ts";
+import { REVEAL_MARGIN, useFollowScroll } from "../agent/useFollowScroll.ts";
 import { useStepHistory } from "../agent/useStepHistory.ts";
 import { RunPicturesScope } from "../agent/WorkPictures.tsx";
 import { BrowserDownloads } from "../browser/BrowserDownloads.tsx";
@@ -345,7 +345,8 @@ export function ActivityRail({
     if (!replay || !currentKey) return;
     const index = display.findIndex((item) => item.key === currentKey);
     if (index >= 0) virtual.scrollTo(index);
-    reveal(timeline.current?.querySelector("[data-current]") ?? null);
+    // Its head: a step opened here is brought into view as it opens, by what opened it.
+    reveal(timeline.current?.querySelector("[data-current] .activity-row-head") ?? null);
   }, [replay, currentKey, display, virtual.scrollTo]);
 
   const older = () => {
@@ -378,7 +379,7 @@ export function ActivityRail({
     if (row instanceof HTMLElement) follow.anchorTo(row);
     const next = openKey === key ? null : key;
     setOpened(next ? { owner, key: next } : null);
-    if (next) revealOpened(row);
+    if (next && row instanceof HTMLElement) follow.show(row, REVEAL_MARGIN);
   };
   const toggle = (entry: ActivityEntry, trigger: HTMLButtonElement) => {
     toggleKey(entry.key, trigger);

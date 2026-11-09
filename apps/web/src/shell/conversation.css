@@ -2038,6 +2038,7 @@
 /* A long placeholder must not grow an empty, narrow composer into a column.
    Actual messages retain their normal multiline wrapping. */
 .composer-field:placeholder-shown {
+  overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
