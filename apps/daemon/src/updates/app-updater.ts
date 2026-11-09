@@ -87,7 +87,11 @@ function installProgress(version: string, stage: UpdateInstallStage): AppUpdateP
     case "done":
       return { step: "restart", value: 0.99, detail: `Checking localDot ${name}` };
     default:
-      return { step: "install", value: READY_SHARE, detail: `Getting ready to install localDot ${name}` };
+      return {
+        step: "install",
+        value: READY_SHARE,
+        detail: `Getting ready to install localDot ${name}`,
+      };
   }
 }
 
@@ -194,7 +198,13 @@ export class AppUpdater {
       return;
     }
     const name = shown(version);
-    if (state?.problem === "interrupted")
+    const stoppedAt = state?.stage;
+    if (stoppedAt && UNTOUCHED.includes(stoppedAt)) {
+      this.#error = `The update to localDot ${name} was interrupted, so nothing has changed.`;
+      this.#progress = { step: "install", value: null, detail: null };
+      return;
+    }
+    if (state?.problem === "interrupted" || (stoppedAt && stoppedAt !== "failed"))
       this.#error = `The update to localDot ${name} was interrupted, so your previous version was restored.`;
     else if (state?.problem === "checks")
       this.#error = `localDot ${name} started but failed its checks, so your previous version was restored.`;

@@ -1982,9 +1982,9 @@ pull_package_image() {
 # undone: by the watcher beside it, or else on the next localdot up or install. A daemon that comes
 # up in the meantime clears it, since it has no need of undoing.
 swap_begin() {
-  printf '%s\n' "$PACKAGE_ROLLBACK" >"$PREFIX/.package-swap.new"
-  mv -f "$PREFIX/.package-swap.new" "$PREFIX/.package-swap"
   local installer=$$ journal=$PREFIX/.package-swap
+  printf '%s\n' "$PACKAGE_ROLLBACK" >"$journal.new"
+  mv -f "$journal.new" "$journal"
   (
     trap - EXIT
     trap '' HUP INT TERM
@@ -1999,6 +1999,9 @@ swap_begin() {
     rm -f "$PREFIX/.package-install.lock/pid"
     rmdir "$PREFIX/.package-install.lock" 2>/dev/null || true
   ) </dev/null &
+  # The watcher's own pid, so a daemon can tell an undoing still to come from one that never will.
+  printf '%s\n%s\n' "$PACKAGE_ROLLBACK" "$!" >"$journal.new"
+  mv -f "$journal.new" "$journal"
 }
 
 swap_end() { rm -f "$PREFIX/.package-swap"; }
@@ -2006,7 +2009,7 @@ swap_end() { rm -f "$PREFIX/.package-swap"; }
 recover_package_swap() {
   local journal=$PREFIX/.package-swap rollback
   [ -f "$journal" ] || return 0
-  rollback=$(cat "$journal")
+  IFS= read -r rollback <"$journal" || true
   case "$rollback" in
   "$RUNTIME"/.rollback.*) ;;
   *)

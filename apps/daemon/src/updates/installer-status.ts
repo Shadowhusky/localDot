@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { UpdateInstallStatus } from "../../../../packages/protocol/src/app-update.ts";
@@ -17,8 +18,19 @@ function alive(pid: number) {
   }
 }
 
+// A killed installer's swap is undone by the watcher it left, whose pid is on the journal's 2nd line.
+function watcherAlive(journal: string | undefined) {
+  if (!journal) return false;
+  try {
+    const pid = Number(readFileSync(journal, "utf8").split("\n")[1]);
+    return Number.isInteger(pid) && pid > 0 && alive(pid);
+  } catch {
+    return false;
+  }
+}
+
 /** The status file an installer keeps. It runs detached, in its own process group. */
-export function installerStatus(home: string) {
+export function installerStatus(home: string, swapJournal?: string) {
   const file = installerStatusFile(home);
   let pid: number | undefined;
   return {
@@ -32,7 +44,7 @@ export function installerStatus(home: string) {
           stage: status.stage,
           problem: status.problem,
           restored: status.restored,
-          running: !TERMINAL.has(status.stage) && alive(status.pid),
+          running: !TERMINAL.has(status.stage) && (alive(status.pid) || watcherAlive(swapJournal)),
         };
       } catch {
         return null;

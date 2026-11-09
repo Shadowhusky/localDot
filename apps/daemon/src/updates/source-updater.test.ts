@@ -134,7 +134,9 @@ it("logs a source update and hands the installer a status file", async () => {
   await updater.check();
   await updater.install();
   await vi.waitFor(() => expect(f.spawn).toHaveBeenCalled());
-  const options = (f.spawn.mock.calls[0] as unknown as [string, string[], Record<string, never>])[2] as unknown as {
+  const options = (
+    f.spawn.mock.calls[0] as unknown as [string, string[], Record<string, never>]
+  )[2] as unknown as {
     stdio: unknown[];
     env: Record<string, string>;
   };
@@ -142,7 +144,12 @@ it("logs a source update and hands the installer a status file", async () => {
   expect(options.stdio[1]).toEqual(expect.any(Number));
 });
 it("says a bare source checkout runs from source, and a damaged install apart", async () => {
-  const bare = await sourceAppUpdater("/home", undefined, () => null, () => {});
+  const bare = await sourceAppUpdater(
+    "/home",
+    undefined,
+    () => null,
+    () => {},
+  );
   expect((await bare.status()).unsupported).toBe("source-checkout");
   const f = await fixture();
   await rm(join(f.prefix, "install.env"));

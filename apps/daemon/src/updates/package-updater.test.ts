@@ -331,7 +331,10 @@ it("hands the installer a status file, and reads back what it recorded", async (
   ];
   const file = options.env.LOCALDOT_UPDATE_STATUS ?? "";
   expect(file.startsWith(f.home)).toBe(true);
-  await writeFile(file, JSON.stringify({ v: 1, pid: process.pid, stage: "verify", restored: false }));
+  await writeFile(
+    file,
+    JSON.stringify({ v: 1, pid: process.pid, stage: "verify", restored: false }),
+  );
   await vi.waitFor(
     async () =>
       expect((await updater.status()).progress?.detail).toBe("Checking the download once more"),
@@ -350,9 +353,11 @@ it("downloads into a place of this dot's own, so dots sharing an installation ca
   const f = await fixture();
   const updater = await f.create();
   await updater.check();
-  const [, , options] = f.spawn.mock.calls.find(
-    ([, args]) => args[1] === "prepare",
-  ) as unknown as [string, string[], { env: Record<string, string> }];
+  const [, , options] = f.spawn.mock.calls.find(([, args]) => args[1] === "prepare") as unknown as [
+    string,
+    string[],
+    { env: Record<string, string> },
+  ];
   expect(options.env.LOCALDOT_DOWNLOAD_DIR?.startsWith(f.home)).toBe(true);
 });
 it("clears downloads a crash left behind, but never another dot's fresh one", async () => {
@@ -405,5 +410,37 @@ it("forgets a swap the installer can no longer finish once a daemon runs", async
   const f = await fixture();
   await writeFile(join(f.prefix, ".package-swap"), "/gone\n");
   await f.create();
+  await expect(stat(join(f.prefix, ".package-swap"))).rejects.toThrow();
+});
+it("holds its verdict while a killed installer's swap is still being undone", async () => {
+  const f = await fixture();
+  await (await f.create()).check();
+  const record = JSON.parse(await readFile(join(f.home, "prepared-package-update.json"), "utf8"));
+  await writeFile(
+    join(f.prefix, "app/package-release.json"),
+    JSON.stringify({
+      version: record.version,
+      channel: "https://downloads.localdot.dev/channels/releases.json",
+    }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(f.home, "app-update-attempt.json"),
+    JSON.stringify({ v: 1, version: record.version }),
+    { mode: 0o600 },
+  );
+  const dead = 2 ** 22 + 1;
+  await writeFile(
+    join(f.home, "app-update-install.json"),
+    JSON.stringify({ v: 1, pid: dead, stage: "start", restored: false }),
+  );
+  await writeFile(join(f.prefix, ".package-swap"), `/rollback\n${process.pid}\n`);
+  const updated = await f.create();
+  expect(await updated.status()).toMatchObject({ phase: "installing" });
+  expect((await stat(join(f.prefix, ".package-swap"))).isFile()).toBe(true);
+  await updated.close();
+  await writeFile(join(f.prefix, ".package-swap"), `/rollback\n${dead}\n`);
+  const after = await f.create();
+  expect((await after.status()).phase).not.toBe("installing");
   await expect(stat(join(f.prefix, ".package-swap"))).rejects.toThrow();
 });

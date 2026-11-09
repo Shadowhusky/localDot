@@ -80,7 +80,13 @@ run_package_install
   // In the background, as far as a swap that won't end by itself, to be killed.
   const start = (fail: string) =>
     spawn("/bin/bash", ["-c", setup], { env: environment(fail, true), stdio: "ignore" });
-  return { root, run, start, setup, read: (path: string) => readFileSync(join(root, path), "utf8").trim() };
+  return {
+    root,
+    run,
+    start,
+    setup,
+    read: (path: string) => readFileSync(join(root, path), "utf8").trim(),
+  };
 }
 it("downloads before stopping services and retains the previous app without touching computer data", () => {
   const f = fixture();
@@ -277,7 +283,10 @@ it("records how an update from the app gets on, for whichever daemon reads it ne
 it("records a failure before the swap as nothing changed, and one after it as restored", () => {
   const before = fixture();
   expect(before.run("download", true)).not.toBe(0);
-  expect(JSON.parse(before.read("status.json"))).toMatchObject({ stage: "failed", restored: false });
+  expect(JSON.parse(before.read("status.json"))).toMatchObject({
+    stage: "failed",
+    restored: false,
+  });
   const after = fixture();
   expect(after.run("startup", true)).not.toBe(0);
   expect(JSON.parse(after.read("status.json"))).toMatchObject({
@@ -305,7 +314,7 @@ it("puts the previous version back when the installer is killed part-way through
   const f = fixture();
   const installer = f.start("hang");
   await vi.waitFor(() => expect(f.read("order")).toContain("start candidate"), { timeout: 10_000 });
-  expect(existsSync(join(f.root, ".package-swap"))).toBe(true);
+  expect(f.read(".package-swap").split("\n")).toHaveLength(2);
   installer.kill("SIGKILL");
   await vi.waitFor(() => expect(f.read("order")).toContain("start previous"), { timeout: 10_000 });
   await vi.waitFor(
@@ -418,7 +427,9 @@ it.each([
   mkdirSync(join(f.root, "app", "dist"));
   writeFileSync(join(f.root, "app", "dist", "package-bootstrap.mjs"), "pinned verifier");
   mkdirSync(join(f.root, "node", "bin"), { recursive: true });
-  writeFileSync(join(f.root, "node", "bin", "node"), `#!/bin/bash\nexit ${code}\n`, { mode: 0o700 });
+  writeFileSync(join(f.root, "node", "bin", "node"), `#!/bin/bash\nexit ${code}\n`, {
+    mode: 0o700,
+  });
   const script = `source "$INSTALLER"
 PREFIX=$TEST_ROOT APP=$TEST_ROOT/app RUNTIME=$TEST_ROOT/runtime NODE_DIR=$TEST_ROOT/node
 OPT_PACKAGE_VERSION="" PACKAGE_BOOTSTRAP_SHA256=$PIN NODE_PLATFORM=darwin-arm64
@@ -479,7 +490,9 @@ die "The build failed"`;
   ).toThrow();
   expect(f.read("order").split("\n")).toEqual([
     "stop",
-    "checkout -C " + join(f.root, "app") + " -c advice.detachedHead=false checkout --quiet --detach aaaa",
+    "checkout -C " +
+      join(f.root, "app") +
+      " -c advice.detachedHead=false checkout --quiet --detach aaaa",
     "build",
     "start 1 1",
     "state",

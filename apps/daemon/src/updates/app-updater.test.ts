@@ -174,11 +174,11 @@ it("reports one bar that never falls, then Ready to install, and keeps the step 
   }
   expect(seen).toEqual([
     { step: "download", value: null, detail: "Downloading" },
-    { step: "download", value: 0.033, detail: "Downloading · 212 of 640 MB" },
-    { step: "download", value: 0.1, detail: "Downloading · 640 of 640 MB" },
+    { step: "download", value: 0.033, detail: "Downloading · 33% · 212 of 640 MB" },
+    { step: "download", value: 0.1, detail: "Downloading · 100% · 640 of 640 MB" },
     { step: "verify", value: 0.1, detail: "Checking the download" },
-    { step: "images", value: 0.55, detail: "Preparing the computer · 1.4 of 3.1 GB" },
-    { step: "images", value: 0.55, detail: "Preparing the computer · 1.5 of 3.1 GB" },
+    { step: "images", value: 0.55, detail: "Preparing the computer · 50% · 1.4 of 3.1 GB" },
+    { step: "images", value: 0.55, detail: "Preparing the computer · 25% · 1.5 of 3.1 GB" },
   ]);
   f.host.prepared.mockResolvedValue(true);
   finish();
@@ -378,7 +378,12 @@ it("says what stopped the installer, from what it recorded, and offers the downl
   const f = fixture();
   await f.updater.check();
   f.host.install.mockImplementation(async () => {
-    f.host.installer.state = { stage: "failed", problem: "docker", restored: false, running: false };
+    f.host.installer.state = {
+      stage: "failed",
+      problem: "docker",
+      restored: false,
+      running: false,
+    };
     throw new Error("exit 1");
   });
   await f.updater.update();
@@ -548,6 +553,17 @@ it("says an interrupted update was interrupted, not that the version didn't star
   expect((await f.restart().status()).error).toBe(
     "The update to localDot 1.1.0 was interrupted, so your previous version was restored.",
   );
+});
+it("says an installer that died before touching anything changed nothing", async () => {
+  const f = fixture();
+  await f.updater.check();
+  await f.host.attempts.save({ v: 1, version: "1.1.0" });
+  f.host.installer.state = { stage: "verify", restored: false, running: false };
+  expect(await f.restart().status()).toMatchObject({
+    phase: "ready",
+    error: "The update to localDot 1.1.0 was interrupted, so nothing has changed.",
+    progress: { step: "install" },
+  });
 });
 it("development builds perform no checks or downloads", async () => {
   const updater = new AppUpdater(null);

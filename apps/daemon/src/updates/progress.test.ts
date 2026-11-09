@@ -37,14 +37,18 @@ it("maps steps onto one bar that never falls or loses its length", () => {
   let progress = progressAfter(null, { step: "download" });
   expect(progress).toEqual({ step: "download", value: null, detail: "Downloading" });
   progress = progressAfter(progress, { step: "download", done: 50e6, total: 100e6 });
-  expect(progress).toEqual({ step: "download", value: 0.05, detail: "Downloading · 50 of 100 MB" });
+  expect(progress).toEqual({
+    step: "download",
+    value: 0.05,
+    detail: "Downloading · 50% · 50 of 100 MB",
+  });
   progress = progressAfter(progress, { step: "download" });
   expect(progress.value).toBe(0.05);
   progress = progressAfter(progress, { step: "images", share: 1, done: 2.5e9, total: 2.5e9 });
   expect(progress).toEqual({
     step: "images",
     value: 0.95,
-    detail: "Preparing the computer · 2.5 of 2.5 GB",
+    detail: "Preparing the computer · 100% · 2.5 of 2.5 GB",
   });
   expect(progressAfter(progress, { step: "verify" }).value).toBe(0.95);
 });
@@ -156,10 +160,13 @@ it("ends a preparation that has gone silent, and says it stalled", async () => {
 it("guards work that reports as it goes, and names the stall when it stops", async () => {
   vi.useFakeTimers();
   try {
-    const work = stallGuard(new AbortController().signal, 1000, (signal) =>
-      new Promise<void>((_resolve, reject) => {
-        signal.addEventListener("abort", () => reject(signal.reason));
-      }),
+    const work = stallGuard(
+      new AbortController().signal,
+      1000,
+      (signal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason));
+        }),
     );
     const failure = work.catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(1001);

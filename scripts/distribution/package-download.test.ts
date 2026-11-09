@@ -53,7 +53,11 @@ it("resumes from what it has after the connection drops, and checks the whole fi
     .fn()
     .mockResolvedValueOnce(answer(stream(BYTES.subarray(0, half), new Error("reset"))))
     .mockResolvedValueOnce(
-      answer(stream(BYTES.subarray(half)), 206, `bytes ${half}-${BYTES.length - 1}/${BYTES.length}`),
+      answer(
+        stream(BYTES.subarray(half)),
+        206,
+        `bytes ${half}-${BYTES.length - 1}/${BYTES.length}`,
+      ),
     );
   await downloadPackage({
     ...artifact,
@@ -80,7 +84,11 @@ it("carries on from an earlier run's partial file, as after a daemon crash", asy
   const fetchFile = vi
     .fn()
     .mockResolvedValue(
-      answer(stream(BYTES.subarray(half)), 206, `bytes ${half}-${BYTES.length - 1}/${BYTES.length}`),
+      answer(
+        stream(BYTES.subarray(half)),
+        206,
+        `bytes ${half}-${BYTES.length - 1}/${BYTES.length}`,
+      ),
     );
   await downloadPackage({
     ...artifact,
@@ -150,16 +158,15 @@ it("stops a download that has gone quiet, and names the stall", async () => {
     partials: f.partials,
     stallMs: 20,
     attempts: 2,
-    fetch: vi.fn().mockImplementation(
-      async (_url: string, init: { signal: AbortSignal }) =>
-        answer(
-          new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(BYTES.subarray(0, 10));
-              init.signal.addEventListener("abort", () => controller.error(init.signal.reason));
-            },
-          }),
-        ),
+    fetch: vi.fn().mockImplementation(async (_url: string, init: { signal: AbortSignal }) =>
+      answer(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(BYTES.subarray(0, 10));
+            init.signal.addEventListener("abort", () => controller.error(init.signal.reason));
+          },
+        }),
+      ),
     ),
     signal: new AbortController().signal,
     report: () => {},
@@ -183,16 +190,18 @@ it("keeps trying while it gets anywhere, and gives up on a dead connection", asy
   ).rejects.toMatchObject({ problem: "network" });
   expect(dead).toHaveBeenCalledTimes(4);
   const slice = BYTES.length / 8;
-  const flaky = vi.fn().mockImplementation(async (_url: string, init: { headers: { range?: string } }) => {
-    const from = Number(init.headers.range?.match(/\d+/)?.[0] ?? 0);
-    return from
-      ? answer(
-          stream(BYTES.subarray(from, from + slice), new Error("reset")),
-          206,
-          `bytes ${from}-${BYTES.length - 1}/${BYTES.length}`,
-        )
-      : answer(stream(BYTES.subarray(0, slice), new Error("reset")));
-  });
+  const flaky = vi
+    .fn()
+    .mockImplementation(async (_url: string, init: { headers: { range?: string } }) => {
+      const from = Number(init.headers.range?.match(/\d+/)?.[0] ?? 0);
+      return from
+        ? answer(
+            stream(BYTES.subarray(from, from + slice), new Error("reset")),
+            206,
+            `bytes ${from}-${BYTES.length - 1}/${BYTES.length}`,
+          )
+        : answer(stream(BYTES.subarray(0, slice), new Error("reset")));
+    });
   const again = fixture();
   await expect(
     downloadPackage({

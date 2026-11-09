@@ -17,8 +17,15 @@ import { withPreparedRelease } from "./prepare-release.ts";
 import { privateRecordStore } from "./private-record.ts";
 import { readInstalledLockHelper, readInstalledRelease } from "./promote-release.ts";
 import { serviceJournalStore } from "./service-journal.ts";
+import { SetupFailure } from "./setup-failure.ts";
 import { updateJournalStore } from "./update-journal.ts";
 
+const IMAGE_PROBLEMS = {
+  "network-unavailable": "network",
+  "storage-read-only": "disk",
+  "permission-denied": "docker",
+  "docker-unavailable": "docker",
+} as const;
 export const preparedAppUpdateStore = (state: string) =>
   privateRecordStore(state, "prepared-app-update.json", PreparedAppUpdate);
 export const appUpdateRecordStore = (state: string) =>
@@ -73,7 +80,10 @@ export async function prepareBackgroundUpdate(
     });
     io.out("Update downloaded and verified. It will not interrupt the running app.");
     return 0;
-  } catch {
+  } catch (error) {
+    if (error instanceof SetupFailure && error.code !== "storage-full")
+      progress({ step: "images", problem: IMAGE_PROBLEMS[error.code] });
+    else if (error instanceof SetupFailure) progress({ step: "images", problem: "disk" });
     io.err("The update couldn't be prepared. Your current app has not been changed.");
     return input.signal.aborted ? 130 : 1;
   }

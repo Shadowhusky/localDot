@@ -20,6 +20,7 @@ const REASONS: Partial<Record<UpdateProblem, string>> = {
   docker: "Docker isn't running. Start it and try again.",
   verify: "The download didn't match its signed release.",
   busy: "Another update is already running. Wait for it to finish.",
+  channel: "A newer version came out a moment ago. Try again to get it.",
 };
 
 /** A failed update step that knows what went wrong. */
@@ -42,10 +43,12 @@ function amount(done: number, total: number) {
 }
 
 function detail(line: UpdateProgressLine) {
+  const share = line.share ?? (line.total ? Math.min(1, (line.done ?? 0) / line.total) : undefined);
+  const percent = share !== undefined ? ` · ${Math.floor(share * 100)}%` : "";
   const bytes =
     line.total && line.done !== undefined
-      ? ` · ${amount(Math.min(line.done, line.total), line.total)}`
-      : "";
+      ? `${percent} · ${amount(Math.min(line.done, line.total), line.total)}`
+      : percent;
   if (line.step === "download") return `Downloading${bytes}`;
   if (line.step === "verify") return "Checking the download";
   return `Preparing the computer${bytes}`;

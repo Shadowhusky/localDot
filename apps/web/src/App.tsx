@@ -156,6 +156,7 @@ import {
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { nextChange, SessionNowContext, useNowMs } from "./session/useNowMs.ts";
 import { useSeenReporting } from "./session/useSeenReporting.ts";
+import { AppUpdateOverlay } from "./settings/AppUpdateSettings.tsx";
 import { autoDotReason } from "./settings/AutoDot.tsx";
 import { matchingKeys } from "./settings/choices.ts";
 import { subscription } from "./settings/chooser.ts";
@@ -2617,6 +2618,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 notices={<SafetyNotes safety={safety} agent={agent} visible={sheetsClosed} />}
               />
               <Toaster anchor={toastAnchor} />
+              <AppUpdateOverlay update={appUpdate} />
               {/* A phone has no top bar: New conversation waits in the top corner, beside the
                   island, whenever there is something to start afresh from, and the conversations
                   in the other, lit when one of them needs the user. */}
@@ -3311,6 +3313,7 @@ function Theatre({ api }: { api: ApiClient }) {
             <SafetyNotes safety={safety} agent={agent} visible={sheetsClosed} />
           </div>
           <Toaster anchor={toastAnchor} />
+          <AppUpdateOverlay update={appUpdate} />
           <PhoneBanner
             latest={attention.latest}
             viewing={viewing}

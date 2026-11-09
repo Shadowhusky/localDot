@@ -97,7 +97,8 @@ export async function packageAppUpdater(
       })
       .nullable();
     const prepared = privateRecordStore(home, "prepared-package-update.json", Prepared);
-    const installer = installerStatus(home);
+    const swapJournal = join(prefix, ".package-swap");
+    const installer = installerStatus(home, swapJournal);
     const attempts = privateRecordStore(
       home,
       "app-update-attempt.json",
@@ -124,7 +125,7 @@ export async function packageAppUpdater(
     if (!state?.running) {
       await removeInstalled();
       // A daemon is running, so a swap the installer never got to finish needs no undoing.
-      await rm(join(prefix, ".package-swap"), { force: true }).catch(() => {});
+      await rm(swapJournal, { force: true }).catch(() => {});
     }
     await removeAbandoned(downloads, (await prepared.read())?.directory);
     const preparedDirectory = async (version: string) => {
@@ -241,7 +242,8 @@ export async function packageAppUpdater(
               );
             } catch (error) {
               if (!(error instanceof SetupFailure)) throw error;
-              if (error.code !== "storage-full") throw new UpdateFailure(IMAGE_PROBLEMS[error.code]);
+              if (error.code !== "storage-full")
+                throw new UpdateFailure(IMAGE_PROBLEMS[error.code]);
               imagesDeferred = true;
             }
           }
