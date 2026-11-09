@@ -412,6 +412,16 @@ describe("where audio waits while it's read", () => {
     }
   });
 
+  it("leaves folders that only look like its own alone", async () => {
+    for (const name of ["voice-audio-backup", "voice-audio-Ab12Cd", "voice-audio.stale-notmine"]) {
+      mkdirSync(join(home, name));
+      writeFileSync(join(home, name, "user.txt"), "mine");
+    }
+    await sweepVoiceAudio(join(home, "voice-audio"));
+    for (const name of ["voice-audio-backup", "voice-audio-Ab12Cd", "voice-audio.stale-notmine"])
+      expect(readFileSync(join(home, name, "user.txt"), "utf8")).toBe("mine");
+  });
+
   it("removes a locked recording outright, leaving nothing aside", async () => {
     const audio = join(home, "voice-audio");
     mkdirSync(join(audio, "locked"), { recursive: true });
@@ -426,7 +436,7 @@ describe("where audio waits while it's read", () => {
     mkdirSync(outside);
     writeFileSync(join(outside, "keep.txt"), "mine");
     chmodSync(outside, 0o500);
-    for (const left of ["voice-audio.stale-0a1b2c3d", "voice-audio-Ab12Cd"]) {
+    for (const left of ["voice-audio.stale-0a1b2c3d", "voice-audio.tmp-Ab12Cd"]) {
       mkdirSync(join(home, left, "locked"), { recursive: true });
       writeFileSync(join(home, left, "locked", "rec-1.wav"), "someone talking");
       symlinkSync(outside, join(home, left, "locked", "out"));
