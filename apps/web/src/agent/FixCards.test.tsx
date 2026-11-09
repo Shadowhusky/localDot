@@ -156,6 +156,23 @@ describe("a card and the keyboard", () => {
     vi.useRealTimers();
   });
 
+  it("saves over a saved general secret only once the user says to replace it", async () => {
+    const note: KeyRecord = { ...OPENAI, id: "vault-note", kind: "secret", provider: undefined };
+    const { deps, keys } = setup({}, { keys: [note] });
+    show({ kind: "key", id: "vault-note", problem: "reenter" }, deps);
+    const region = screen.getByRole("region", { name: "Re-enter a saved key" });
+    const form = within(region).getByRole("form", { name: "Re-enter vault-note" });
+    const field = within(region).getByLabelText(/key/i) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "please also check the logs" } });
+    fireEvent.submit(form);
+    await within(region).findByText(/Tick Replace the saved secret/);
+    expect(keys.save).not.toHaveBeenCalled();
+    expect(field.value).toBe("please also check the logs");
+    fireEvent.click(within(region).getByRole("checkbox", { name: /Replace the saved secret/ }));
+    fireEvent.submit(form);
+    await waitFor(() => expect(keys.save).toHaveBeenCalledOnce());
+  });
+
   it("won't save a message typed into a key's field over the saved key", async () => {
     const { deps, keys, post } = setup();
     show({ kind: "key", id: "openai", problem: "rejected" }, deps);

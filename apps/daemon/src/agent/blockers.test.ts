@@ -993,6 +993,92 @@ describe("ask_user can't stand in for a card", () => {
         fields: [{ id: "v", kind: "text", label: "Value", hint: "Not your PIN but your password" }],
       },
       { question: "Sign in", fields: [{ id: "v", kind: "text", label: "Password, not a PIN" }] },
+      {
+        question: "One more detail",
+        fields: [{ id: "v", kind: "text", label: "Not a PIN, your password" }],
+      },
+      {
+        question: "One more detail",
+        fields: [
+          {
+            id: "v",
+            kind: "text",
+            label: "Value",
+            hint: "not the PIN or the password for your bank",
+          },
+        ],
+      },
+      {
+        question: "Security",
+        fields: [{ id: "v", kind: "text", label: "No PIN nor your password" }],
+      },
+      { question: "Never a PIN, your password, please type it below" },
+      {
+        question: "Bitte gib dein Passwort ein",
+        fields: [{ id: "v", kind: "text", label: "Wert" }],
+      },
+      { question: "Anmelden", fields: [{ id: "v", kind: "text", label: "Kennwort" }] },
+      { question: "Digite sua senha", fields: [{ id: "v", kind: "text", label: "Valor" }] },
+      { question: "Введите пароль", fields: [{ id: "v", kind: "text", label: "Значение" }] },
+      { question: "Вход", fields: [{ id: "v", kind: "text", label: "Пароль" }] },
+      { question: "비밀번호를 입력하세요", fields: [{ id: "v", kind: "text", label: "값" }] },
+      {
+        question: "Inserisci la parola d'ordine",
+        fields: [{ id: "v", kind: "text", label: "Valore" }],
+      },
+      { question: "暗証番号を入力してください" },
+      {
+        question: "Enter your pass for the site",
+        fields: [{ id: "v", kind: "text", label: "Your pass" }],
+      },
+      {
+        question: "What's the login code we texted you?",
+        fields: [{ id: "v", kind: "text", label: "Login code" }],
+      },
+      {
+        question: "Type the 6-digit one-time code",
+        fields: [{ id: "v", kind: "number", label: "Code" }],
+      },
+      {
+        question: "Your card number to pay",
+        fields: [{ id: "v", kind: "number", label: "Card number" }],
+      },
+      { question: "Checkout", fields: [{ id: "v", kind: "text", label: "CVV" }] },
+      {
+        question: "Your social security number",
+        fields: [{ id: "v", kind: "text", label: "SSN" }],
+      },
+      { question: "Ваш пароль?" },
+      {
+        question: "One more detail",
+        fields: [{ id: "not_your", kind: "text", label: "Password" }],
+      },
+      { question: "One more detail", fields: [{ id: "no", kind: "text", label: "Bank password" }] },
+      {
+        question: "One more detail",
+        fields: [
+          { id: "v", kind: "text", label: "Answer, or not", hint: "password for your bank" },
+        ],
+      },
+      {
+        question: "One more detail",
+        fields: [{ id: "v", kind: "text", label: "Not\nyour password" }],
+      },
+      { question: "Not\nyour password" },
+      { question: "Thanks!\nYour PIN?" },
+      { question: "Voer je wachtwoord in" },
+      { question: "Gegevens", fields: [{ id: "v", kind: "text", label: "Wachtwoord" }] },
+      { question: "Podaj hasło" },
+      { question: "Dane", fields: [{ id: "v", kind: "text", label: "Hasło" }] },
+      { question: "Şifrenizi girin" },
+      { question: "Bilgi", fields: [{ id: "v", kind: "text", label: "Şifre" }] },
+      { question: "Nhập mật khẩu" },
+      { question: "Thông tin", fields: [{ id: "v", kind: "text", label: "Mật khẩu" }] },
+      { question: "أدخل كلمة المرور" },
+      { question: "معلومات", fields: [{ id: "v", kind: "text", label: "كلمة المرور" }] },
+      { question: "पासवर्ड दर्ज करें" },
+      { question: "जानकारी", fields: [{ id: "v", kind: "text", label: "पासवर्ड" }] },
+      { question: "Your password, please" },
       { question: "Connexion", fields: [{ id: "v", kind: "text", label: "Mot de passe" }] },
       {
         question: "What is your example.com password?",
@@ -1023,6 +1109,30 @@ describe("ask_user can't stand in for a card", () => {
       },
       { question: "Which two-factor code app do you use?", options: ["Authy", "1Password"] },
       { question: "Pin this note to the top?", options: ["Yes", "No"] },
+      { question: "Which boarding pass should I download?", options: ["Outbound", "Return"] },
+      { question: "Pin, star or archive this?", options: ["Pin", "Star", "Archive"] },
+      {
+        question: "Which network?",
+        fields: [
+          {
+            id: "v",
+            kind: "text",
+            label: "Network name",
+            hint: "Not the Wi-Fi password, just its name",
+          },
+        ],
+      },
+      { question: "Did the day pass arrive?", options: ["Yes", "No"] },
+      {
+        question: "Which tracking number?",
+        fields: [{ id: "v", kind: "text", label: "Tracking number", hint: "Not a card number." }],
+      },
+      {
+        question: "What's the access code for the building?",
+        fields: [
+          { id: "v", kind: "text", label: "Door", hint: "No PIN or password, just the door" },
+        ],
+      },
       {
         question: "What client ID should it use?",
         fields: [

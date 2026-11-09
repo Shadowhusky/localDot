@@ -222,11 +222,15 @@ export function valueProblem(
     return "A key has no spaces. Paste the key itself.";
   if (shape.replacing && value.split(" ").length > 2)
     return "That reads like a message, not a key. Paste the key itself.";
-  if (shape.replacing && kind === "llm" && shape.provider) {
-    const fits = fitsProviderKey(shape.provider, value);
-    if (fits === false)
-      return `That doesn't look like ${PROVIDER_NAMES[shape.provider as Provider] ?? "this provider"}'s key. Paste the key itself.`;
-  }
+  if (!shape.replacing) return undefined;
+  const fits =
+    kind === "llm" && shape.provider ? fitsProviderKey(shape.provider, value) : undefined;
+  if (fits === false)
+    return `That doesn't look like ${PROVIDER_NAMES[shape.provider as Provider] ?? "this provider"}'s key. Paste the key itself.`;
+  // A key or token nearly always has a digit, and a typed word or two almost never does. A raw header
+  // may start with its scheme ("Token …"): the digit is looked for after it.
+  if (fits !== true && !/\d/.test(value.split(" ").at(-1) ?? ""))
+    return "That doesn't look like a key: keys have digits in them. Paste the key itself.";
   return undefined;
 }
 

@@ -268,6 +268,7 @@ const ComposerField = memo(function ComposerField({
   describedBy,
   menu,
   active,
+  limit,
   events,
 }: {
   label: string;
@@ -279,6 +280,8 @@ const ComposerField = memo(function ComposerField({
   // The command list the field drives, and its row in reach of Enter.
   menu?: string;
   active?: string;
+  // Typing stops here, rather than the words moving out to a file.
+  limit?: number;
   events: FieldEvents;
 }) {
   return (
@@ -296,6 +299,7 @@ const ComposerField = memo(function ComposerField({
       aria-autocomplete="list"
       aria-controls={menu}
       aria-activedescendant={active}
+      maxLength={limit}
       {...events}
     />
   );
@@ -497,7 +501,11 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   // Returns whether it was turned away: long text would be uploaded at once, before any send.
   const addLongText = (text: string, kind: LongText) => {
     if (secretNow.current && !sendConfirmed.current) {
-      setProblem("Long text isn't taken while a field for a secret is up. Nothing was kept.");
+      setProblem(
+        kind === "pasted"
+          ? "Long text isn't taken while a field for a secret is up. Nothing was pasted."
+          : "Long text isn't taken while a field for a secret is up. The message stops here.",
+      );
       return true;
     }
     const { clean, removed } = withoutKeyLike(text);
@@ -581,7 +589,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   const moveToFile = (input: HTMLTextAreaElement) => {
     if (input.value.length <= KEY_SCAN_CHARS) guardOwner.current.check(input);
     const refused = addLongText(input.value, "typed");
-    input.value = "";
+    // Turned away, the words stay, up to where the box stops taking more.
+    input.value = refused ? input.value.slice(0, TEXT_BOUND) : "";
     revision.current += 1;
     keepDraft("");
     measure(input);
@@ -1456,6 +1465,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           listening={talking}
           describedBy={guard.notice ? keyNotice : undefined}
           menu={commands.field["aria-controls"]}
+          limit={secretWait && !sendConfirmed.current ? TEXT_BOUND : undefined}
           active={commands.field["aria-activedescendant"]}
           events={events}
         />

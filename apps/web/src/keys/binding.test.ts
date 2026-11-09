@@ -225,8 +225,27 @@ describe("valueProblem for words that aren't a key", () => {
       valueProblem("please also check logs", "http", { format: "raw", replacing: true }),
     ).toBeDefined();
     expect(
-      valueProblem("Token abcdefgh", "http", { format: "raw", replacing: true }),
+      valueProblem("Token abcd1234", "http", { format: "raw", replacing: true }),
     ).toBeUndefined();
+  });
+  it("over a saved key, takes only what looks like a token", () => {
+    const over = (format?: string) => ({ ...(format ? { format } : {}), replacing: true });
+    for (const [value, kind, format] of [
+      ["pleasecheckthelogs", "http", "bearer"],
+      ["yes-go-ahead", "http", "raw"],
+      ["checklogs please", "http", "raw"],
+      ["thanks-dot!", "http", "basic-user"],
+      ["just-a-word", "llm", undefined],
+    ] as const)
+      expect(valueProblem(value, kind, over(format)), value).toBeDefined();
+    expect(valueProblem(`tok_${"a1".repeat(10)}`, "http", over("bearer"))).toBeUndefined();
+    expect(valueProblem(`Token ${"a1".repeat(10)}`, "http", over("raw"))).toBeUndefined();
+    expect(valueProblem("pleasecheckthelogs", "http", { format: "bearer" })).toBeUndefined();
+  });
+  it("over a saved DeepSeek key, takes only what looks like one", () => {
+    const over = { provider: "deepseek", replacing: true };
+    expect(valueProblem("thanks-dot!", "llm", over)).toMatch(/DeepSeek/);
+    expect(valueProblem(`sk-${"0a1b".repeat(8)}`, "llm", over)).toBeUndefined();
   });
   it("over a saved model key, takes only what looks like that provider's key", () => {
     const over = { provider: "anthropic", replacing: true };
@@ -236,7 +255,7 @@ describe("valueProblem for words that aren't a key", () => {
       valueProblem("not-an-anthropic-key-value", "llm", { provider: "anthropic" }),
     ).toBeUndefined();
     expect(
-      valueProblem("anything-goes-here", "llm", { provider: "mistral", replacing: true }),
+      valueProblem("any7thing-goes-here", "llm", { provider: "mistral", replacing: true }),
     ).toBeUndefined();
   });
 });

@@ -147,7 +147,7 @@ describe("a key to enter again", () => {
     expect(within(form).queryByLabelText(LABEL)).toBeNull();
     expect(within(form).queryByLabelText("Hosts")).toBeNull();
     expect(within(form).queryByRole("radio", { name: "Custom API" })).toBeNull();
-    type("Key", " sk-forecast-again ");
+    type("Key", " sk-forecast-again2 ");
     fireEvent.click(saveButton());
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(save).toHaveBeenCalledWith(
@@ -160,7 +160,7 @@ describe("a key to enter again", () => {
         methods: ["GET"],
         paths: ["/v1/forecast"],
       },
-      "sk-forecast-again",
+      "sk-forecast-again2",
     );
     await waitFor(() =>
       expect(screen.queryByRole("form", { name: "Re-enter forecast" })).toBeNull(),
@@ -430,6 +430,40 @@ describe("Keys", () => {
     expect(screen.getByText("Saving replaces the key with this ID.")).toBeTruthy();
   });
 
+  it("replaces a saved key under the same ID only once the user ticks to", async () => {
+    const save = vi.fn(async () => ({ restart: false }));
+    render(<KeyForm active save={save} taken={["weather"]} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Custom API" }));
+    type("Hosts", "api.weather.example");
+    type(LABEL, "weather");
+    type("Key", "wx_1234567890abcdef");
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form"));
+    });
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByText(/Tick Replace the saved key/)).toBeTruthy();
+    expect(field("Key").value).toBe("wx_1234567890abcdef");
+    fireEvent.click(screen.getByRole("checkbox", { name: /Replace the saved key with this ID/ }));
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form"));
+    });
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it("asks no tick for a new ID", async () => {
+    const save = vi.fn(async () => ({ restart: false }));
+    render(<KeyForm active save={save} taken={["weather"]} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Custom API" }));
+    type("Hosts", "api.weather.example");
+    type(LABEL, "weather-two");
+    type("Key", "wx_1234567890abcdef");
+    expect(screen.queryByRole("checkbox", { name: /Replace the saved/ })).toBeNull();
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form"));
+    });
+    expect(save).toHaveBeenCalledOnce();
+  });
+
   it("shows what to fix in the other fields as the key field takes focus", () => {
     render(<KeyForm active save={async () => ({ restart: false })} />);
     chooseProvider("openai-compatible");
@@ -588,6 +622,8 @@ describe("Keys", () => {
     openForm();
     type(LABEL, "weather");
     type("Key", "fake-private-value");
+    // The key under that ID is replaced, as the user says.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Replace the saved key with this ID" }));
     fireEvent.submit(screen.getByRole("form"));
     fireEvent.submit(screen.getByRole("form"));
     expect(saved).toHaveBeenCalledOnce();

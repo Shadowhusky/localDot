@@ -17,6 +17,7 @@ import {
   useState,
 } from "react";
 import { Button } from "../ui/Button.tsx";
+import { Checkbox } from "../ui/Checkbox.tsx";
 import { Combobox } from "../ui/Combobox.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -142,6 +143,9 @@ export function KeyForm({
   const paired = !useMediaQuery(PHONE);
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [tried, setTried] = useState(false);
+  // A general secret has no shape to tell it from typed words, and a new key under a saved one's ID
+  // takes its place: either is said in so many words first.
+  const [replacing, setReplacing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
@@ -165,6 +169,14 @@ export function KeyForm({
   const locked = Boolean(unavailable) || busy;
   const report = () => holding.current?.(!!valueRef.current?.value);
   const general = (reenter?.kind ?? draft.kind) === "secret";
+  const overwrites = !reenter && taken.includes(draft.id.trim());
+  const asksToReplace = (!!reenter && general) || overwrites;
+  const replaceWords = overwrites
+    ? "Replace the saved key with this ID"
+    : "Replace the saved secret";
+  // A tick is for the key it was given beside.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the ID is what the tick was for
+  useEffect(() => setReplacing(false), [draft.id]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -373,6 +385,11 @@ export function KeyForm({
     }
     setTried(true);
     setSaved(null);
+    if (asksToReplace && !replacing) {
+      setProblem({ field: "value", message: `Tick ${replaceWords}, then save.` });
+      reveal();
+      return;
+    }
     const value = general ? input.value : input.value.trim();
     // Clear before any callback, including one that throws synchronously.
     input.value = "";
@@ -663,6 +680,17 @@ export function KeyForm({
           />
         )}
       </Field>
+      {asksToReplace && (
+        <Checkbox
+          label={replaceWords}
+          description="What you typed above takes its place."
+          checked={replacing}
+          onCheckedChange={(on) => {
+            setReplacing(on);
+            if (on && problem?.field === "value") setProblem(null);
+          }}
+        />
+      )}
       <div className="keys-form-actions">
         <div id={statusId} className="keys-form-status">
           {shown?.field === "form" ? (
