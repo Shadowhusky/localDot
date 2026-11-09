@@ -103,7 +103,7 @@ async function sizeOf(url, tries = 3) {
   }
 }
 
-async function check(catalog, full) {
+export async function check(catalog, full) {
   const problems = catalogProblems(catalog);
   for (const { name, bundle } of bundlesOf(catalog)) {
     for (const source of bundle.sources) {
@@ -130,7 +130,7 @@ async function check(catalog, full) {
   return problems;
 }
 
-async function mirror(catalog, out) {
+export async function mirror(catalog, out) {
   if (existsSync(out)) throw new Error(`${out} already exists`);
   await mkdir(out, { recursive: true });
   const entries = {};

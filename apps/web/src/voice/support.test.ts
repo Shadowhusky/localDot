@@ -3,7 +3,13 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../lib/api.ts";
-import { browserSpeech, macSpeech, useVoiceSupport, voiceRoute } from "./support.ts";
+import {
+  browserSpeech,
+  macSpeech,
+  refreshVoiceSupport,
+  useVoiceSupport,
+  voiceRoute,
+} from "./support.ts";
 import { routeBlocked, routeLabel } from "./words.ts";
 
 const brands = (...names: string[]) =>
@@ -112,6 +118,18 @@ it("explains insecure remote links before attempting to open the microphone", ()
     why: "insecure",
   });
   vi.unstubAllGlobals();
+});
+
+it("uses a model as soon as its install finishes, with no reload", async () => {
+  let available = false;
+  const api = {
+    get: vi.fn(async () => ({ onMac: { available, englishOnly: false, languages: ["zh", "en"] } })),
+  } as unknown as ApiClient;
+  const view = renderHook(() => useVoiceSupport(api, "zh-CN"));
+  await waitFor(() => expect(view.result.current.support?.mac).toBeNull());
+  available = true;
+  act(() => refreshVoiceSupport());
+  await waitFor(() => expect(view.result.current.support?.mac).toEqual(["zh", "en"]));
 });
 
 it("refreshes a newly available local engine on return to the app", async () => {
