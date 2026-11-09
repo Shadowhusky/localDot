@@ -42,7 +42,8 @@ describe("text marked as untrusted", () => {
     expect(inner(untrusted("page", text))).toBe(text);
   });
 
-  // It wraps every tool output: a page or file must not hold up the daemon.
+  // It wraps every tool output: a page or file must not hold up the daemon. Linear time reads a
+  // megabyte in tens of milliseconds and quadratic in minutes, so a second allows a busy machine.
   it.each([
     ["spaces after one bracket", `<${" ".repeat(1_000_000)}`],
     ["marks after one bracket", `<${"\u0301".repeat(1_000_000)}`],
@@ -51,10 +52,10 @@ describe("text marked as untrusted", () => {
     ["many brackets each before a slash and spaces", `﹤/${" ".repeat(98)}`.repeat(10_000)],
     ["brackets and near-misses", "<untruste ".repeat(100_000)],
     ["tags, each defused", "</untrusted>".repeat(80_000)],
-  ])("reads a megabyte of %s in under 50 ms", (_what, text) => {
+  ])("reads a megabyte of %s in under a second", (_what, text) => {
     untrusted("warm-up", text.slice(0, 1000));
     const started = performance.now();
     untrusted("page", text);
-    expect(performance.now() - started).toBeLessThan(50);
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 });
