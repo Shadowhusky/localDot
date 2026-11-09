@@ -21,6 +21,8 @@ const schema = z.strictObject({
   v: z.literal(1),
   id,
   parentCellId: id,
+  // A conversation's own browser, on a profile slot of its own; absent for the computer's main one.
+  slot: id.optional(),
   owner: z.string().uuid(),
   prefix: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*-$/u),
   createdAt: z.string().datetime(),
@@ -38,6 +40,10 @@ const schema = z.strictObject({
 });
 
 export type BrowserLedger = z.infer<typeof schema>;
+
+// What the daemon calls a browser by: its computer's id for the main browser, else its slot's.
+export const browserKey = (record: Pick<BrowserLedger, "parentCellId" | "slot">): string =>
+  record.slot ?? record.parentCellId;
 export class BrowserLifecycleError extends Error {
   constructor(message = "Browser lifecycle could not be confirmed") {
     super(message);
@@ -72,6 +78,8 @@ export class BrowserLedgerStore {
     if (
       record.id !== expected ||
       record.id === record.parentCellId ||
+      record.slot === record.parentCellId ||
+      record.slot === record.id ||
       record.tokens.browserd === record.tokens.stream ||
       record.keydPort < this.ports.from ||
       record.keydPort > this.ports.to
@@ -109,28 +117,40 @@ export class BrowserLedgerStore {
       if (!record) throw new BrowserLifecycleError();
       result.push(record);
     }
-    const parents = new Set<string>();
+    const keys = new Set<string>();
     for (const record of result) {
-      if (parents.has(record.parentCellId))
+      if (keys.has(browserKey(record)))
         throw new BrowserLifecycleError("Browser recovery association is ambiguous");
-      parents.add(record.parentCellId);
+      keys.add(browserKey(record));
     }
     return result;
   }
 
+  // The computer's main browser.
   forParent(parent: string): BrowserLedger | undefined {
+    return this.forKey(parent);
+  }
+
+  forKey(key: string): BrowserLedger | undefined {
+    if (!ULID_PATTERN.test(key)) throw new BrowserLifecycleError();
+    return this.list().find((record) => browserKey(record) === key);
+  }
+
+  // The conversation browsers of a computer.
+  slotsOf(parent: string): BrowserLedger[] {
     if (!ULID_PATTERN.test(parent)) throw new BrowserLifecycleError();
-    return this.list().find((record) => record.parentCellId === parent);
+    return this.list().filter((record) => record.parentCellId === parent && record.slot);
   }
 
   save(value: BrowserLedger): void {
     const record = this.#decode(value, value.id);
     const previous = this.get(record.id);
-    const parent = this.forParent(record.parentCellId);
+    const holder = this.forKey(browserKey(record));
     if (
-      (parent && parent.id !== record.id) ||
+      (holder && holder.id !== record.id) ||
       (previous &&
         (previous.parentCellId !== record.parentCellId ||
+          previous.slot !== record.slot ||
           previous.owner !== record.owner ||
           previous.prefix !== record.prefix ||
           previous.createdAt !== record.createdAt))

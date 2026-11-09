@@ -71,7 +71,10 @@ export class BrowserDocker {
           IPAM: {
             Config: [
               {
-                Subnet: `172.${30 + this.networks.size}.0.0/16`,
+                Subnet:
+                  this.networks.size < 2
+                    ? `172.${30 + this.networks.size}.0.0/16`
+                    : `10.${this.networks.size}.0.0/16`,
                 ...(data.Internal ? {} : { Gateway: "172.31.0.1" }),
               },
             ],
@@ -129,6 +132,11 @@ export class BrowserDocker {
     if (method === "GET") return value;
     if (method === "DELETE") {
       table.delete(kind === "volumes" ? value.Name : value.Id);
+      return undefined;
+    }
+    if (kind === "containers" && (action === "pause" || action === "unpause")) {
+      if (!value.State.Running) throw new DockerError(409, "not running", path);
+      value.State.Paused = action === "pause";
       return undefined;
     }
     if (kind === "containers" && action === "stop") {
