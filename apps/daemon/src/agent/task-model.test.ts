@@ -294,8 +294,9 @@ describe("a message's model", () => {
 
   it("the model card moves a stalled task to the chosen model, in place, with its history", async () => {
     const f = setup();
+    f.hold(true);
     const session = await f.runner.start(f.cellId, "First");
-    await idle(session);
+    await until(() => f.boots.length === 1);
     session.setStatus("paused");
     session.append("agent.state", { state: "paused", reason: "model refused", detail: "400: No" });
     expect(session.openBlockers).toHaveLength(1);
@@ -305,6 +306,8 @@ describe("a message's model", () => {
       outcome: "fixed",
       movedTo: { provider: OPUS.provider, model: OPUS.model },
     });
+    await until(() => f.boots.length === 2);
+    expect(f.boots[1]).toEqual({ main: OPUS.model, resume: true });
     expect(f.runner.get(session.id)).toBe(session);
     expect(session.stopped).toBe(false);
   });

@@ -2384,6 +2384,37 @@ describe("ChatGPT runner lifecycle", () => {
       expect(blockers(f, s.id)).toEqual([]);
     });
 
+    it("takes its card down when dot says it finished without it", async () => {
+      const f = setup();
+      f.run.mockImplementationOnce(async (session) => {
+        const generation = session.beginBrain();
+        session.setStatus("running");
+        session.raiseBlocker({ kind: "key", id: "gh", problem: "rejected" });
+        session.append("task.result", { outcome: "complete", summary: "Done anyway", files: [] });
+        session.retireBrain(generation);
+        return 0;
+      });
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.status === "idle");
+      expect(s.openBlockers).toEqual([]);
+      expect(blockers(f, s.id).at(-1)).toBe("moot");
+    });
+
+    it("keeps its card up when dot says it is blocked, to carry on once it's fixed", async () => {
+      const f = setup();
+      f.run.mockImplementationOnce(async (session) => {
+        const generation = session.beginBrain();
+        session.setStatus("running");
+        session.raiseBlocker({ kind: "key", id: "gh", problem: "rejected" });
+        session.append("task.result", { outcome: "blocked", summary: "Needs the key", files: [] });
+        session.retireBrain(generation);
+        return 0;
+      });
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.status === "idle");
+      expect(s.openBlockers).toHaveLength(1);
+    });
+
     it("waits past its idle time while a card is up, then goes on when it's fixed", async () => {
       const f = setup(5);
       const locked = {

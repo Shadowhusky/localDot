@@ -3905,7 +3905,8 @@
               "type": "string",
               "enum": [
                 "fixed",
-                "dismissed"
+                "dismissed",
+                "moot"
               ]
             },
             "movedTo": {

@@ -58,7 +58,10 @@ export async function connectorTool(
     const ended = outcome.signInEnded && hub.ended(entry.connectorId);
     if (ended) ctx.session.raiseBlocker({ kind: "app", ...ended });
     else if (deps.keysLocked?.()) ctx.session.lockKeys();
-  }
+  } else
+    ctx.session.clearBlockers(
+      (blocker) => blocker.kind === "app" && blocker.connector === entry.connectorId,
+    );
   const said = outcome.text || (outcome.ok ? "(The app returned nothing.)" : "The call failed.");
   ctx.session.tainted = true;
   if (outcome.text) ctx.session.taint.add("app", entry.host ?? entry.app, outcome.text);

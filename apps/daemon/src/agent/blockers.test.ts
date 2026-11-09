@@ -121,6 +121,16 @@ describe("a blocker on a task", () => {
     expect(raises(events()).map((data) => data.required)).toEqual([undefined, true]);
   });
 
+  it("asks nothing once dot says it finished without it", async () => {
+    const { session, events } = setup();
+    session.raiseBlocker(KEY);
+    const seq = session.inboxSequence;
+    session.withdrawBlockers();
+    expect(session.openBlockers).toEqual([]);
+    expect(clears(events())[0]).toMatchObject({ outcome: "moot" });
+    expect(session.inboxSequence).toBe(seq);
+  });
+
   it("a stopped task raises nothing", () => {
     const { session, events } = setup();
     session.stop();
@@ -524,6 +534,16 @@ describe("failures localDot recognises by itself", () => {
     ]);
   });
 
+  it("the same key answering takes its card down", async () => {
+    const { call, session, tools } = setup();
+    tools.credentials = service({ status: 401 });
+    await call("api_request", request);
+    expect(session.openBlockers).toHaveLength(1);
+    tools.credentials = service({ status: 200 });
+    await call("api_request", request);
+    expect(session.openBlockers).toEqual([]);
+  });
+
   it("any other refusal is the task's to read", async () => {
     const { call, events, tools } = setup();
     for (const status of [200, 403, 404, 429, 500]) {
@@ -601,6 +621,14 @@ describe("failures localDot recognises by itself", () => {
       h.tools.keysLocked = () => true;
       await call(h, { ok: false, text: "The app refused." });
       expect(raises(h.events()).map((data) => data.blocker)).toEqual([{ kind: "keys_locked" }]);
+    });
+
+    it("takes the app's card down when a call to it works again", async () => {
+      const h = setup();
+      await call(h, { ok: false, text: "Its sign-in has ended.", signInEnded: true });
+      expect(h.session.openBlockers).toHaveLength(1);
+      await call(h, { ok: true, text: "Done" });
+      expect(h.session.openBlockers).toEqual([]);
     });
 
     it("raises nothing for the app's own error, or a call that worked", async () => {

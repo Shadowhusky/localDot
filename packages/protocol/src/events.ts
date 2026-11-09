@@ -361,13 +361,13 @@ export const BlockerRaise = event(
     required: z.literal(true).optional(),
   }),
 );
-// It was fixed, or the user said not now, on any device. A task that ended with one open needs no
-// event: its card is history once the task is over.
+// It was fixed, the user said not now, or dot finished without it (moot), on any device. A task that
+// ended with one open needs no event: its card is history once the task is over.
 export const BlockerClear = event(
   "blocker.clear",
   z.strictObject({
     blockerId: z.string().regex(ULID_PATTERN),
-    outcome: z.enum(["fixed", "dismissed"]),
+    outcome: z.enum(["fixed", "dismissed", "moot"]),
     // A model's: the one the task moved to, when it moved.
     movedTo: MessageModel.pick({ provider: true, model: true }).optional(),
   }),

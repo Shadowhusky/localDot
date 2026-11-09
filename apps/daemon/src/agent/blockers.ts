@@ -102,6 +102,15 @@ export class BlockerDesk {
     if (cleared.length) this.port.changed();
     return cleared;
   }
+  // dot finished without them: nothing waits on the user any more, and nobody needs telling.
+  withdraw(): void {
+    for (const [subject, open] of [...this.#open]) {
+      this.#open.delete(subject);
+      this.#told.delete(subject);
+      this.#ended.set(open.blockerId, "moot");
+      this.port.cleared({ blockerId: open.blockerId, outcome: "moot" });
+    }
+  }
   dismiss(blockerId: string): boolean {
     for (const [subject, open] of this.#open) {
       if (open.blockerId !== blockerId) continue;

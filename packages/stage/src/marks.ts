@@ -103,10 +103,12 @@ export function markOf(e: LocalDotEvent): TimelineMark | null {
     case "blocker.raise":
       return mark("event", blockerLine(e.data.blocker, "open"), "attention");
     case "blocker.clear":
-      return mark(
-        "event",
-        e.data.outcome === "fixed" ? "Fixed from the conversation" : "You said not now",
-      );
+      return e.data.outcome === "moot"
+        ? null
+        : mark(
+            "event",
+            e.data.outcome === "fixed" ? "Fixed from the conversation" : "You said not now",
+          );
     case "key.use":
       return mark(
         "key",

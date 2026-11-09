@@ -1345,6 +1345,9 @@ export class AgentSession {
   dismissBlocker(blockerId: string): boolean {
     return !this.stopped && this.#blockers.dismiss(blockerId);
   }
+  withdrawBlockers(): void {
+    if (!this.stopped) this.#blockers.withdraw();
+  }
   // The task itself waits, with no call of dot's under way.
   async waitForBlockerToGo({ blockerId }: OpenBlocker): Promise<void> {
     while (this.#blockers.isOpen(blockerId) && !this.stopped)

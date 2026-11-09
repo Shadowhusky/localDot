@@ -623,7 +623,7 @@ export class AgentRunner {
   // asked something, and one Stop ended has gone already.
   cellChanged(cell: CellSummary): void {
     const down = computerDown(cell);
-    for (const id of this.deps.live.sessionsOn?.(cell.id) ?? []) {
+    for (const id of this.deps.live.sessionsOn(cell.id)) {
       const rt = this.#runtime.get(id);
       if (!rt || rt.session.stopped) continue;
       if (computerUp(cell)) rt.session.clearBlockers((blocker) => blocker.kind === "computer");
@@ -2471,6 +2471,8 @@ export class AgentRunner {
                   : { state: "idle", reason: "gave up" },
           );
           session.setStatus("idle");
+          // dot says it got there: what it might have needed on the way asks nothing now.
+          if (rt.completion === "complete") session.withdrawBlockers();
           const idleWait = new AbortController();
           rt.idleWait = idleWait;
           try {

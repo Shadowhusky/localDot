@@ -86,12 +86,13 @@ function FixCard({ open, deps }: { open: AgentBlocker; deps: FixDeps }) {
 export function FixLine({ blocker, names }: { blocker: AgentBlocker; names?: ModelNames }) {
   const moved = blocker.cleared?.movedTo;
   const time = blocker.cleared?.time ?? blocker.time;
+  const outcome = blocker.cleared?.outcome;
   return (
     <p className="thread-divider">
       <span>
         {blockerLine(
           blocker.blocker,
-          blocker.cleared?.outcome ?? "open",
+          !outcome || outcome === "moot" ? "open" : outcome,
           moved && (names?.name(moved.provider, moved.model) ?? moved.model),
         )}
         {time !== undefined && <time className="num"> · {timeLabel(time)}</time>}
