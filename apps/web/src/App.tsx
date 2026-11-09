@@ -231,7 +231,7 @@ import {
 import { PhoneStack } from "./shell/PhoneStack.tsx";
 import { PANEL_NAME } from "./shell/panel-name.ts";
 import { type RailView, usePanelPreferences } from "./shell/panel-preferences.ts";
-import { CHAT_WIDTH, SESSIONS_WIDTH } from "./shell/panel-width.ts";
+import { CHAT_WIDTH, SESSIONS_FOLDED, SESSIONS_WIDTH } from "./shell/panel-width.ts";
 import { usePhoneConversation } from "./shell/phone-conversation.ts";
 import { Flyer } from "./shell/phone-flyer.ts";
 import { parsePhoneRoute, usePhoneAddress, usePhoneRoute } from "./shell/phone-route.ts";
@@ -3490,6 +3490,8 @@ function Theatre({ api }: { api: ApiClient }) {
                   property="--sessions-w"
                   label="Conversations width"
                   side="right"
+                  beside={chatVisible ? CHAT_WIDTH : 0}
+                  first
                   className="rail-resize-sessions"
                 />
               )}
@@ -3513,6 +3515,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   panel={CHAT_WIDTH}
                   property="--rail-w"
                   label="Conversation width"
+                  beside={railShown ? (railExpanded ? SESSIONS_WIDTH : SESSIONS_FOLDED) : 0}
                   className="rail-resize-chat"
                 />
               )}

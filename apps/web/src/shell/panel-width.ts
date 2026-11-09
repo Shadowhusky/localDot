@@ -3,20 +3,22 @@ export interface PanelWidth {
   key: string;
   initial: number;
   min: number;
-  max: number;
+  // A panel that only needs so much says so; any other grows as far as the page has room.
+  max?: number;
   // What the rest of the page keeps beside the panel, so the stage never gets squeezed out.
   reserve: number;
-  // What the other panel that can be resized holds now, on top of that.
-  beside?(): number;
 }
+
+// The stage's column at its narrowest, 520 px: its picture as wide as the island and the decision
+// that grows out of it (480 px), inside the gutters, with the top bar still in one line. Beside it
+// the page's inset, and the gap a wide screen puts between the columns.
+const STAGE_ROOM = 536;
 
 export const CHAT_WIDTH: PanelWidth = {
   key: "localdot.width.chat",
   initial: 368,
   min: 320,
-  max: 640,
-  reserve: 344,
-  beside: () => readWidth(SESSIONS_WIDTH),
+  reserve: STAGE_ROOM,
 };
 
 // The conversations rail, expanded.
@@ -25,24 +27,22 @@ export const SESSIONS_WIDTH: PanelWidth = {
   initial: 256,
   min: 208,
   max: 420,
-  reserve: 472,
-  beside: () => readWidth(CHAT_WIDTH),
+  reserve: STAGE_ROOM,
 };
 
-export const ACTIVITY_WIDTH: PanelWidth = {
-  key: "localdot.width.activity",
-  initial: 320,
-  min: 280,
-  max: 520,
-  reserve: 1200,
-};
+// The conversations rail's room when it shows only its marks.
+export const SESSIONS_FOLDED = 56;
 
-export function widthLimits(panel: PanelWidth, viewport: number): { min: number; max: number } {
+export function widthLimits(
+  panel: PanelWidth,
+  viewport: number,
+  beside = 0,
+): { min: number; max: number } {
   return {
     min: panel.min,
     max: Math.max(
       panel.min,
-      Math.min(panel.max, viewport - panel.reserve - (panel.beside?.() ?? 0)),
+      Math.min(panel.max ?? Number.POSITIVE_INFINITY, viewport - panel.reserve - beside),
     ),
   };
 }
@@ -58,6 +58,13 @@ export function readWidth(panel: PanelWidth): number {
     return panel.initial;
   }
 }
+
+// What a handle holds its panel at now, which a smaller window can keep under what is saved.
+const held = new Map<PanelWidth, number>();
+
+export const holdWidth = (panel: PanelWidth, width: number) => held.set(panel, width);
+export const releaseWidth = (panel: PanelWidth) => held.delete(panel);
+export const shownWidth = (panel: PanelWidth) => held.get(panel) ?? readWidth(panel);
 
 export function saveWidth(panel: PanelWidth, width: number): void {
   try {

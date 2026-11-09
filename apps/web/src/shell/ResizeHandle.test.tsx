@@ -70,12 +70,60 @@ describe("ResizeHandle", () => {
     expect(readWidth(PANEL)).toBe(360);
   });
 
-  it("leaves the stage its room beside the other panel", () => {
-    const other: PanelWidth = { key: "test.other", initial: 400, min: 100, max: 900, reserve: 0 };
-    const panel = { ...PANEL, max: 800, reserve: 300, beside: () => readWidth(other) };
-    expect(widthLimits(panel, 1200).max).toBe(500);
-    saveWidth(other, 700);
-    expect(widthLimits(panel, 1200).max).toBe(200);
+  it("leaves the stage its room beside what else is on the page, with no cap of its own", () => {
+    const panel = { key: "test.open", initial: 300, min: 200, reserve: 300 };
+    expect(widthLimits(panel, 1200).max).toBe(900);
+    expect(widthLimits(panel, 1200, 56).max).toBe(844);
+    expect(widthLimits(panel, 2560, 56).max).toBe(2204);
+    expect(widthLimits(panel, 400).max).toBe(200);
+    expect(widthLimits({ ...panel, max: 420 }, 2560).max).toBe(420);
+  });
+
+  it("makes room when what shares the page opens, and takes it back when it closes", () => {
+    const other: PanelWidth = { key: "test.other", initial: 256, min: 100, reserve: 0 };
+    vi.stubGlobal("innerWidth", 1000);
+    const panel = { ...PANEL, max: undefined, reserve: 300 };
+    saveWidth(panel, 640);
+    const page = (beside: PanelWidth | number) => (
+      <ResizeHandle panel={panel} property="--panel-w" label="Panel width" beside={beside} />
+    );
+    const view = render(page(56));
+    expect(handle().getAttribute("aria-valuenow")).toBe("640");
+    expect(handle().getAttribute("aria-valuemax")).toBe("644");
+    view.rerender(page(other));
+    expect(handle().getAttribute("aria-valuenow")).toBe("444");
+    expect(handle().getAttribute("aria-valuemax")).toBe("444");
+    expect(readWidth(panel)).toBe(640);
+    view.rerender(page(56));
+    expect(handle().getAttribute("aria-valuenow")).toBe("640");
+  });
+
+  it("reads what the other panel is held at, not what it has saved", () => {
+    vi.stubGlobal("innerWidth", 1000);
+    const other: PanelWidth = { key: "test.other", initial: 256, min: 100, reserve: 600 };
+    saveWidth(other, 500);
+    const panel = { ...PANEL, max: undefined, reserve: 300 };
+    render(
+      <>
+        <ResizeHandle panel={other} property="--other-w" label="Other width" />
+        <ResizeHandle panel={panel} property="--panel-w" label="Panel width" beside={other} />
+      </>,
+    );
+    expect(screen.getByRole("separator", { name: "Other width" }).ariaValueNow).toBe("400");
+    expect(handle().getAttribute("aria-valuemax")).toBe("300");
+  });
+
+  it("saves nothing for a press that moved nothing", () => {
+    vi.stubGlobal("innerWidth", 1000);
+    saveWidth(PANEL, 460);
+    render(
+      <ResizeHandle panel={{ ...PANEL, reserve: 600 }} property="--panel-w" label="Panel width" />,
+    );
+    const edge = handle();
+    expect(edge.getAttribute("aria-valuenow")).toBe("400");
+    fireEvent.pointerDown(edge, { button: 0, pointerId: 1, clientX: 300 });
+    fireEvent.pointerUp(edge, { pointerId: 1, clientX: 300 });
+    expect(readWidth(PANEL)).toBe(460);
   });
 
   it("follows the pointer from where it was grabbed, gives softly past a limit and settles inside it", () => {
