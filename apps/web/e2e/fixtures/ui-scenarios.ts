@@ -63,6 +63,10 @@ export const UI_SCENARIOS = {
     about: "dot is working in a conversation of three, with past conversations from the fortnight",
     boot: { QA_EARLIER: "2", QA_PAST: "1" },
   },
+  "shared-links": {
+    about: "The conversations scenario, where the owner can share links for guests to sign in with",
+    boot: { QA_PHASE: "finished", QA_EARLIER: "2", QA_PAST: "1", QA_LINKS: "1" },
+  },
   "chatgpt-plan": {
     about: "The main model runs on a signed-in ChatGPT plan; the computer is on with no task",
     boot: { QA_SESSION: "0", QA_SETTINGS: "chatgpt", QA_CHATGPT: "signed_in" },

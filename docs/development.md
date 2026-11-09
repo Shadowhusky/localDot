@@ -425,7 +425,7 @@ Authorization header and JSON request bodies:
   A conversation with a task under way can't be archived (409). Each change goes to every open
   app as a `conversation.organized` event on `/api/events`. `GET /api/conversations` leaves the
   archived ones out, keeps those pinned before the rest are counted, and says how many are
-  archived (`archivedCount`); `?archived=1` lists them. Shared links can't organize or delete. Each
+  archived (`archivedCount`); `?archived=1` lists them. Shared links can't list, organize or delete. Each
   entry names its `firstTask` and the dot its latest task works as (`persona`: the runner's while it
   runs, then the one its `session.end` names), from which the app draws its look when the user
   hasn't chosen one (`look`). A live task's `live` status names its dot too, so a switch reaches

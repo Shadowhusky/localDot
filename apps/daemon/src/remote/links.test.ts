@@ -161,7 +161,7 @@ it("enforces replay permission and action ownership separately", () => {
   const issued = links.create(options);
   const row = links.authenticate(issued.token)!;
   expect(links.permits(row, "GET", `/api/sessions/${id}/recording/video.mp4`)).toBe(false);
-  expect(links.permits(row, "GET", `/api/sessions/${id}/clock`)).toBe(true);
+  expect(links.permits(row, "GET", `/api/sessions/${id}/clock`)).toBe(false);
   expect(links.permits(row, "GET", "/api/clock")).toBe(true);
   expect(links.permits(row, "POST", "/api/clock")).toBe(false);
   expect(links.permits(row, "POST", `/api/agent/sessions/${id}/messages`)).toBe(false);
@@ -180,6 +180,97 @@ it("enforces replay permission and action ownership separately", () => {
   ).toBe(true);
   links.revoke(row.id);
   expect(links.permits(row, "GET", "/api/cells")).toBe(false);
+});
+const LIVE = ["events", "history", "stream", "clock"] as const;
+const RECORDING = [
+  "card",
+  "recording",
+  "recording/video.mp4",
+  "manifest",
+  "fragments/0",
+  "frames/01JXYZ0000000000000000FRAM",
+  "thumbs/01JXYZ0000000000000000FRAM",
+  "thumbnail",
+  "summary",
+  "events",
+  "history",
+  "replay",
+] as const;
+const SETTINGS = [
+  {},
+  { replay: true },
+  { settings: true },
+  { chooseModel: true, models: [options.model] },
+  { replay: true, settings: true, chooseModel: true, models: [options.model] },
+];
+const signIn = (links: RemoteLinks, setting: object = {}) => {
+  const row = links.authenticate(links.create({ ...options, ...setting }).token);
+  if (!row) throw new Error("the link did not authenticate");
+  return row;
+};
+it.each(SETTINGS)("reads only its own tasks and the conversation on show (%o)", (setting) => {
+  const { links } = make();
+  const row = signIn(links, setting);
+  const own = ulid(),
+    earlier = ulid(),
+    shown = ulid(),
+    other = ulid();
+  links.reserve(row.id).finish(own);
+  links.showing(() => [earlier, shown]);
+  for (const method of ["GET", "HEAD"]) {
+    for (const id of [own, earlier, shown]) {
+      expect(links.permits(row, method, `/api/agent/sessions/${id}`)).toBe(true);
+      for (const part of LIVE)
+        expect(links.permits(row, method, `/api/sessions/${id}/${part}`), part).toBe(true);
+    }
+    expect(links.permits(row, method, `/api/agent/sessions/${other}`)).toBe(false);
+    for (const part of ["stream", "clock"])
+      expect(links.permits(row, method, `/api/sessions/${other}/${part}`), part).toBe(false);
+    for (const part of RECORDING)
+      expect(links.permits(row, method, `/api/sessions/${other}/${part}`), part).toBe(!!row.replay);
+    expect(links.permits(row, method, "/api/conversation")).toBe(true);
+    expect(links.permits(row, method, "/api/conversations")).toBe(false);
+  }
+  for (const path of [`/api/agent/sessions/${shown}/messages`, `/api/agent/sessions/${shown}/stop`])
+    expect(links.permits(row, "POST", path), path).toBe(false);
+  links.showing(() => []);
+  expect(links.permits(row, "GET", `/api/sessions/${shown}/stream`)).toBe(false);
+  expect(links.permits(row, "GET", `/api/sessions/${own}/stream`)).toBe(true);
+  links.showing(() => {
+    throw new Error("the conversation could not be read");
+  });
+  expect(links.permits(row, "GET", `/api/sessions/${shown}/stream`)).toBe(false);
+  expect(links.permits(row, "GET", `/api/sessions/${own}/stream`)).toBe(true);
+});
+it("keeps a link without Replay away from every recording, its own task's too", () => {
+  const { links } = make();
+  const row = signIn(links);
+  const own = ulid();
+  links.reserve(row.id).finish(own);
+  links.showing(() => [own]);
+  for (const part of RECORDING.filter((part) => part !== "events" && part !== "history"))
+    expect(links.permits(row, "GET", `/api/sessions/${own}/${part}`), part).toBe(false);
+  expect(links.permits(row, "GET", "/api/sessions")).toBe(false);
+  expect(links.permits(row, "GET", "/api/session-index")).toBe(false);
+});
+it("answers for the task in every path that names one, whichever rule lets the path through", () => {
+  const { links } = make();
+  const row = signIn(links, { settings: true, chooseModel: true, models: [options.model] });
+  const other = ulid();
+  const named = [
+    ...LIVE.map((part) => `/api/sessions/${other}/${part}`),
+    ...RECORDING.map((part) => `/api/sessions/${other}/${part}`),
+    `/api/agent/sessions/${other}`,
+    ...["messages", "stop", "answer", "model", "files/report.pdf", "conversation-files"].map(
+      (part) => `/api/agent/sessions/${other}/${part}`,
+    ),
+    `/api/conversations/${other}`,
+    `/api/conversations/${other}/latest`,
+    `/api/sessions/${other.toLowerCase()}/events`,
+  ];
+  for (const path of named)
+    for (const method of ["GET", "HEAD", "POST", "PUT", "DELETE"])
+      expect(links.permits(row, method, path), `${method} ${path}`).toBe(false);
 });
 it("never lets a link read files on the computer, even of a task it started", () => {
   const { links } = make();

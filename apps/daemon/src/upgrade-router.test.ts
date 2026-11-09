@@ -188,6 +188,7 @@ it("names none of the owner's keys to a guest's live feed", async () => {
       },
     });
   raise("private-early");
+  links.showing(() => [id]);
   const port = await freePort();
   const server = serve({ fetch: new Hono().fetch, hostname: "127.0.0.1", port });
   attachUpgradeRouter(
@@ -222,6 +223,59 @@ it("names none of the owner's keys to a guest's live feed", async () => {
     owner.socket.close();
     server.close();
     eventLog.close();
+    links.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+it("opens a task's live feed to a link only for its own task or the one the owner's app shows", async () => {
+  const home = mkdtempSync("/tmp/localdot-guest-ws-");
+  const links = new RemoteLinks(home);
+  const issued = links.create({
+    label: "Guest",
+    expiresInHours: null,
+    maxTasks: 1,
+    model: { provider: "openai", model: "gpt-6.1-sol" },
+  });
+  const own = "01JXYZ0000000000000000AAA1",
+    shown = "01JXYZ0000000000000000BBB2",
+    theirs = "01JXYZ0000000000000000CCC3";
+  links.reserve(issued.grant.id).finish(own);
+  let showing: string | null = null;
+  const { route, opened } = spyRoute(/^\/api\/sessions\/([^/]+)\/stream$/, ["id"], "token");
+  const port = await freePort();
+  const server = serve({ fetch: new Hono().fetch, hostname: "127.0.0.1", port });
+  attachUpgradeRouter(
+    server as Server,
+    { port, token: TOKEN, guests: { links, authenticate: (token) => links.authenticate(token) } },
+    [route],
+  );
+  await new Promise((resolve) => server.once("listening", resolve));
+  const guest = `Sec-WebSocket-Protocol: localdot.v1, ${WS_TOKEN_PREFIX}${issued.token}`;
+  try {
+    expect(await upgrade(port, `/api/sessions/${theirs}/stream`, [guest])).toBe(
+      "HTTP/1.1 403 Forbidden",
+    );
+    expect(await upgrade(port, `/api/sessions/${theirs.toLowerCase()}/stream`, [guest])).toBe(
+      "HTTP/1.1 403 Forbidden",
+    );
+    expect(await upgrade(port, `/api/sessions/${shown}/stream`, [guest])).toBe(
+      "HTTP/1.1 403 Forbidden",
+    );
+    expect(opened).toEqual([]);
+    expect(await upgrade(port, `/api/sessions/${own}/stream?fromSeq=4`, [guest])).toBe(OPENED);
+    links.showing(() => (showing ? [showing] : []));
+    showing = shown;
+    expect(await upgrade(port, `/api/sessions/${shown}/stream`, [guest])).toBe(OPENED);
+    showing = null;
+    expect(await upgrade(port, `/api/sessions/${shown}/stream`, [guest])).toBe(
+      "HTTP/1.1 403 Forbidden",
+    );
+    expect(await upgrade(port, `/api/sessions/${theirs}/stream`, [TOKEN_PROTOCOL])).toBe(OPENED);
+    expect(opened).toEqual([{ id: own }, { id: shown }, { id: theirs }]);
+  } finally {
+    server.close();
+    links.close();
     rmSync(home, { recursive: true, force: true });
   }
 });

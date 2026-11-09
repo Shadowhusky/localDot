@@ -26,6 +26,9 @@ const Grant = ShareOptions.omit({ expiresInHours: true }).extend({
 });
 export type RemoteGrant = z.infer<typeof Grant>;
 const digest = (token: string) => createHash("sha256").update(token).digest("hex");
+const TASK = /^\/api\/(?:agent\/)?(?:sessions|conversations)\/([^/]*)/;
+const RECORDINGS =
+  /^\/api\/sessions(?:\/[0-9A-Z]{26}(?:\/(?:card|recording|manifest|fragments|frames|thumbs|thumbnail|summary|events|history|replay)(?:\/[a-zA-Z0-9._-]+)*)?)?$/;
 export const publicGrant = ({ digest: _secret, sessions: _sessions, ...grant }: RemoteGrant) =>
   grant;
 declare module "hono" {
@@ -43,6 +46,7 @@ export class RemoteLinks {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private file: string;
   private unreadable = false;
+  private shown: () => readonly string[] = () => [];
   constructor(
     home: string,
     private now = Date.now,
@@ -175,35 +179,42 @@ export class RemoteLinks {
   owns(id: string, session: string) {
     return !!this.active(id)?.sessions.includes(session);
   }
-  // A small explicit allowlist: new owner endpoints stay private by default.
-  permits(row: RemoteGrant, method: string, path: string): boolean {
-    if (!this.active(row.id)) return false;
-    if (method === "GET" || method === "HEAD") {
-      if (
-        /^\/api\/(whoami|clock|remote-session|cells|runtime|conversation|conversations)$/.test(path)
-      )
-        return true;
-      if (/^\/api\/cells\/[0-9A-Z]{26}(?:\/(?:live|status))?$/.test(path)) return true;
-      if (/^\/api\/browsers\/[0-9A-Z]{26}(?:\/status)?$/.test(path)) return true;
-      if (/^\/api\/agent\/sessions\/[0-9A-Z]{26}$/.test(path)) return true;
-      if (/^\/api\/sessions\/[0-9A-Z]{26}\/(?:events|history|stream|clock)$/.test(path))
-        return true;
-      if (
-        row.replay &&
-        /^\/api\/sessions(?:\/[0-9A-Z]{26}(?:\/(?:card|recording|manifest|fragments|frames|thumbs|thumbnail|summary|events|history|replay)(?:\/[a-zA-Z0-9._-]+)*)?)?$/.test(
-          path,
-        )
-      )
-        return true;
-      if (row.replay && path === "/api/session-index") return true;
+  // The tasks of the conversation the owner's app shows, which every link shares.
+  showing(tasks: () => readonly string[]) {
+    this.shown = tasks;
+  }
+  sees(id: string, session: string) {
+    if (this.owns(id, session)) return true;
+    try {
+      return !!this.active(id) && this.shown().includes(session);
+    } catch {
       return false;
     }
+  }
+  // A small explicit allowlist: new owner endpoints stay private by default. A path that names a
+  // task answers for that task, whichever rule lets it through: a link changes only its own tasks
+  // and reads those and the conversation the owner's app shows. Replay adds every task's recording.
+  permits(row: RemoteGrant, method: string, path: string): boolean {
+    if (!this.active(row.id)) return false;
+    const task = TASK.exec(path)?.[1];
+    if (method === "GET" || method === "HEAD") {
+      if (row.replay && (RECORDINGS.test(path) || path === "/api/session-index")) return true;
+      if (task !== undefined && !this.sees(row.id, task)) return false;
+      return (
+        /^\/api\/(whoami|clock|remote-session|cells|runtime|conversation)$/.test(path) ||
+        /^\/api\/cells\/[0-9A-Z]{26}(?:\/(?:live|status))?$/.test(path) ||
+        /^\/api\/browsers\/[0-9A-Z]{26}(?:\/status)?$/.test(path) ||
+        /^\/api\/agent\/sessions\/[0-9A-Z]{26}$/.test(path) ||
+        /^\/api\/sessions\/[0-9A-Z]{26}\/(?:events|history|stream|clock)$/.test(path)
+      );
+    }
     if (method !== "POST") return false;
+    if (task !== undefined && !this.owns(row.id, task)) return false;
     if (path === "/api/remote-session/model") return row.chooseModel;
-    if (/^\/api\/cells\/[0-9A-Z]{26}\/(?:agent|stream-ticket|browser-stream-ticket)$/.test(path))
-      return true;
-    if (path === "/api/conversation/new") return true;
-    const session = /^\/api\/agent\/sessions\/([0-9A-Z]{26})\/(?:messages|stop|answer)$/.exec(path);
-    return !!session && this.owns(row.id, session[1] ?? "");
+    return (
+      /^\/api\/cells\/[0-9A-Z]{26}\/(?:agent|stream-ticket|browser-stream-ticket)$/.test(path) ||
+      path === "/api/conversation/new" ||
+      /^\/api\/agent\/sessions\/[0-9A-Z]{26}\/(?:messages|stop|answer)$/.test(path)
+    );
   }
 }
