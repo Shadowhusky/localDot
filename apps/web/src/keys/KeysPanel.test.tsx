@@ -430,6 +430,51 @@ describe("Keys", () => {
     expect(screen.getByText("Saving replaces the key with this ID.")).toBeTruthy();
   });
 
+  it("asks only for the key of the provider it was set up for, under a name of its own", async () => {
+    const save = vi.fn(async () => ({ restart: false }));
+    const together = {
+      requestId: 1,
+      provider: "openai-compatible" as const,
+      baseURL: "https://api.together.xyz/v1",
+    };
+    const { rerender } = render(
+      <KeyForm active keyOnly preset={together} save={save} taken={["openai-compatible"]} />,
+    );
+    for (const gone of [LABEL, "Name", "Base URL", "Service (optional)"])
+      expect(screen.queryByLabelText(gone)).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Kind of key" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Provider" })).toBeNull();
+    type("Key", "together-key-1234");
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form"));
+    });
+    expect(save).toHaveBeenLastCalledWith(
+      {
+        id: "openai-compatible-2",
+        kind: "llm",
+        provider: "openai-compatible",
+        baseURL: "https://api.together.xyz/v1",
+      },
+      "together-key-1234",
+    );
+    // An endpoint of the user's own asks where it is.
+    rerender(
+      <KeyForm
+        active
+        keyOnly
+        preset={{ requestId: 2, provider: "anthropic-compatible" }}
+        save={save}
+      />,
+    );
+    type("Base URL", "https://claude.example");
+    type("Key", "words with spaces");
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form"));
+    });
+    expect(screen.getByText("A key has no spaces. Paste the key itself.")).toBeTruthy();
+    expect(save).toHaveBeenCalledOnce();
+  });
+
   it("replaces a saved key under the same ID only once the user ticks to", async () => {
     const save = vi.fn(async () => ({ restart: false }));
     render(<KeyForm active save={save} taken={["weather"]} />);
