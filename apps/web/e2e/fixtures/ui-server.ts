@@ -3928,6 +3928,11 @@ function fix(kind: string): string | undefined {
     case "runtime":
       session.raiseBlocker({ kind: "runtime" });
       return;
+    case "runtime-stalled":
+      session.setStatus("paused");
+      session.append("agent.state", { state: "paused", reason: STALL.runtime });
+      session.raiseBlocker({ kind: "runtime" }, STALLED_CARD);
+      return;
     default:
       return "unknown card";
   }

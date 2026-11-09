@@ -314,6 +314,22 @@ for (const view of VIEWS)
     });
   });
 
+test("a card fixed elsewhere leaves a stopped task stopped, saying what moves it on", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("running");
+  await qa(page, fixture, "fix/runtime-stalled");
+  const rail = await chatRail(page);
+  await expect(rail.getByRole("region", { name: "Docker isn't running" })).toBeVisible();
+  await qa(page, fixture, "fix-docker-up");
+  await leavesALine(rail, "Docker is running again");
+  const recovery = rail.getByRole("region", { name: "Task recovery" });
+  await expect(recovery.getByRole("heading", { name: "That's fixed now" })).toBeVisible();
+  await recovery.getByRole("button", { name: "Continue" }).click();
+  await expect(recovery).toHaveCount(0);
+});
+
 test("a message closes the card on every device", async ({ page, ui, context }) => {
   await ui.open("fix-runtime");
   const other = await context.newPage();
