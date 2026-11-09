@@ -18,6 +18,39 @@ import { readLog, readTaskLog, searchLog, type TaskLog } from "./log.ts";
 
 const TOOL_CHARS = 12_000;
 const LINKS_KEPT = 100;
+// What, once read, holds every search to the user's own words: what the task did, its computer's
+// files and screen, earlier conversations, and any picture.
+const PRIVATE_READS = new Set<string>([
+  "search_log",
+  "read_log",
+  "look_at_screen",
+  "list_files",
+  "read_file",
+  "task_files",
+  "recall",
+]);
+// The words a search may add to the user's own once something private was read: general enough
+// to say nothing of what was read, and few.
+const GENERAL_WORDS = new Set(
+  (
+    "a an the of for in on at to from by with and or not is are was were be does do did can how " +
+    "what when where which who why vs versus meaning mean means definition define explained " +
+    "explain example examples official docs documentation guide tutorial manual help support " +
+    "fix error errors issue issues bug latest news today current release notes changelog version " +
+    "download install price prices cost review reviews best compare comparison status open hours " +
+    "near english translate translation wiki wikipedia"
+  ).split(" "),
+);
+const GENERAL_KEPT = 3;
+const PRIVATE_SEARCH = `This question has read private material, so a web search may only use the words of the user's question and up to ${GENERAL_KEPT} general words such as "meaning" or "latest". Answer from what you found, and say what the user could put in their question to have it searched.`;
+// Digits as numbers, whatever separates them: "99-1234", "99 1234" and "99_1234" read alike.
+const plain = (text: string) => text.normalize("NFKC").replace(/(\d)[^\p{L}\p{N}]+(?=\d)/gu, "$1");
+// A text's numbers: each group as written, and each run once separators are taken out.
+const numbers = (text: string) =>
+  new Set([
+    ...(text.normalize("NFKC").match(/\d{3,}/g) ?? []),
+    ...(plain(text).match(/\d{3,}/g) ?? []),
+  ]);
 const FILE_BYTES = 32 * 1024;
 const SEARCH_HITS = 12;
 const WEB_HITS = 6;
@@ -229,6 +262,10 @@ export class SideToolbox {
   // out. Words of the user's own question are theirs to search for.
   readonly #seen = new TaskTaint();
   readonly #asked: ReadonlySet<string>;
+  readonly #askedNumbers: ReadonlySet<string>;
+  readonly #numbers = new Set<string>();
+  // Something private was read: searches keep to the user's words from then on.
+  #private = false;
   constructor(
     private readonly readers: SideReaders,
     question: string,
@@ -238,7 +275,8 @@ export class SideToolbox {
     opening = "",
   ) {
     this.#addresses = new Set(typedAddresses(question));
-    this.#asked = new Set(words(question));
+    this.#asked = new Set(words(plain(question)));
+    this.#askedNumbers = numbers(question);
     this.#remember(opening);
   }
   // The addresses an answer may link to: the user's own, and its searches' results.
@@ -286,6 +324,7 @@ export class SideToolbox {
     if (name === "finish") return this.#finish(input.data as z.infer<typeof Finish>);
     try {
       const result = await this.#read(name, input.data, signal);
+      if (result.ok && (PRIVATE_READS.has(name) || result.images?.length)) this.#private = true;
       this.#trail.push(this.#trailLine(name, input.data, result));
       return result;
     } catch (error) {
@@ -312,12 +351,23 @@ export class SideToolbox {
     return this.readers.redact(redactForIndex(text));
   }
   #remember(text: string): void {
-    if (text) this.#seen.add("recall", "side question", text);
+    if (!text) return;
+    this.#seen.add("recall", "side question", plain(text));
+    for (const number of numbers(text)) this.#numbers.add(number);
   }
-  // Whether a search would carry what was read: its words left once the question's are taken out.
+  // Whether a search would carry what was read word for word, or a number of it however written:
+  // what is left of it once the question's own words and numbers are taken out.
   #carries(query: string): boolean {
-    const own = words(query).filter((word) => !this.#asked.has(word));
-    return own.length > 0 && this.#seen.overlap(own.join(" ")).overlaps;
+    const own = words(plain(query)).filter((word) => !this.#asked.has(word));
+    if (own.length && this.#seen.overlap(own.join(" ")).overlaps) return true;
+    return [...numbers(query)].some(
+      (number) => this.#numbers.has(number) && !this.#askedNumbers.has(number),
+    );
+  }
+  // Once something private was read, a search is the user's words and a few general ones.
+  #ownWords(query: string): boolean {
+    const added = words(plain(query)).filter((word) => !this.#asked.has(word));
+    return added.length <= GENERAL_KEPT && added.every((word) => GENERAL_WORDS.has(word));
   }
   #data(source: string, text: string, images?: readonly SideImage[]): SideResult {
     const clean = this.#clean(text);
@@ -536,6 +586,7 @@ export class SideToolbox {
     if (!query) return refused("Nothing is left to search for without the engine commands.");
     if (this.#clean(query) !== query)
       return refused("That search would carry something secret, so it wasn't sent.");
+    if (this.#private && !this.#ownWords(query)) return refused(PRIVATE_SEARCH);
     if (this.#carries(query))
       return refused(
         "That search would carry what was read for this question, so it wasn't sent. Words from the user's question can be searched for: tell the user to ask with what they want searched.",

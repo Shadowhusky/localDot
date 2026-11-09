@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TOOL_NAMES, ulid } from "@localdot/protocol";
+import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventLog } from "../../event-log.ts";
 import { redactor } from "../redact.ts";
@@ -1014,57 +1015,183 @@ describe("what a page can make it do", () => {
   });
   const searched = (asked: URL[]) => asked.map((url) => url.searchParams.get("q"));
 
-  it("won't search with what it read, but searches the user's own words", async () => {
-    const f = fixture();
+  const FILE =
+    "Settlement account 99-1234 for Jane Doe, agreed in the mediation session, ref QX-7781";
+  const reading = (content = FILE) => ({
+    readFile: async (path: string) => ({
+      path,
+      content,
+      bytes: content.length,
+      truncated: false,
+      binary: false,
+    }),
+    listDir: vi.fn(),
+    fetchFile: vi.fn(),
+  });
+  // Every query is sent or refused; nothing refused reaches an engine.
+  async function searches(
+    f: Fixture,
+    queries: readonly string[],
+    {
+      before = [],
+      question = "What is QX-7781?",
+      prompt,
+      more = {},
+    }: {
+      before?: readonly [string, unknown][];
+      question?: string;
+      prompt?: string;
+      more?: Partial<SideReaders>;
+    } = {},
+  ) {
     const asked: URL[] = [];
-    const desktop = {
-      readFile: async (path: string) => ({
-        path,
-        content:
-          "Settlement account 99-1234 for J. Doe, agreed in the mediation session, ref QX-7781",
-        bytes: 84,
-        truncated: false,
-        binary: false,
-      }),
-      listDir: vi.fn(),
-      fetchFile: vi.fn(),
-    };
-    const replies: Record<string, SideResultLike> = {};
+    const replies = new Map<string, SideResultLike>();
     await ask(
       f,
       [
         model("m", "main", async (go) => {
-          await go.tools.call("read_file", { path: "~/divorce.txt" }, go.signal);
-          for (const query of [
-            "Settlement account 99-1234 J. Doe",
-            "99-1234",
-            "agreed in the mediation session",
-            "PIN 4417-9921",
-            "what is QX-7781 used for",
-            "how do settlement accounts work",
-          ])
-            replies[query] = await go.tools.call("web_search", { query }, go.signal);
+          for (const [name, input] of before) await go.tools.call(name, input, go.signal);
+          for (const query of queries)
+            replies.set(query, await go.tools.call("web_search", { query }, go.signal));
           await finish(go, "found", "Done.");
         }),
       ],
       {
-        readers: readers(f, { web: engine(asked), desktop: () => desktop as never }),
-        question: "What is QX-7781 used for?",
-        prompt:
-          "<record>\nThe user: my PIN 4417-9921 is new\n</record>\n\nSide question: What is QX-7781 used for?",
-        limits: { calls: 20 },
+        readers: readers(f, { web: engine(asked), desktop: () => reading() as never, ...more }),
+        question,
+        prompt: prompt ?? `<record>\nThe user: hello\n</record>\n\nSide question: ${question}`,
+        limits: { calls: 60 },
       },
     );
-    for (const query of [
-      "Settlement account 99-1234 J. Doe",
-      "99-1234",
+    const sent = searched(asked);
+    return {
+      sent: (query: string) => replies.get(query)?.ok === true,
+      said: (query: string) => replies.get(query)?.text ?? "",
+      carried: (needle: string) => sent.some((q) => q?.toLowerCase().includes(needle)),
+    };
+  }
+
+  it("once it has read a file, searches only the user's words and a few general ones", async () => {
+    const f = fixture();
+    const leaks = [
+      "Settlement account 99-1234 Jane Doe",
+      "settlement account 99 1234",
+      "99_1234",
+      "4321-99",
+      "OTktMTIzNA==",
+      "Jane Doe",
+      "acct for the Doe family settlement",
+      "please note settlement account 99-1234 for Jane Doe lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod",
       "agreed in the mediation session",
-      "PIN 4417-9921",
-    ])
-      expect(replies[query]?.text).toContain("wasn't sent");
-    expect(replies["what is QX-7781 used for"]?.ok).toBe(true);
-    expect(replies["how do settlement accounts work"]?.ok).toBe(true);
-    expect(searched(asked).some((q) => q?.includes("99-1234") || q?.includes("4417"))).toBe(false);
+      "how do settlement accounts work",
+      "QX-7781 settlement",
+      "QX-7781 latest news release notes",
+      "QX-7781 the the the the",
+      "QX-7781 Јane Dое",
+      "QX-7781 ９９-１２３４",
+      "QX-7781 99\u200b1234",
+    ];
+    const r = await searches(f, [...leaks, "QX-7781 meaning", "what is QX-7781 latest news"], {
+      before: [["read_file", { path: "~/divorce.txt" }]],
+    });
+    for (const query of leaks) expect(r.sent(query), query).toBe(false);
+    expect(r.said("Jane Doe")).toContain("words of the user's question");
+    expect(r.sent("QX-7781 meaning")).toBe(true);
+    expect(r.sent("what is QX-7781 latest news")).toBe(true);
+    for (const needle of ["1234", "4321", "doe", "settlement", "otkt", "mediation"])
+      expect(r.carried(needle), needle).toBe(false);
+  });
+
+  it.each([
+    ["the task's log", ["read_log", {}]],
+    ["the screen", ["look_at_screen", {}]],
+    ["earlier conversations", ["recall", { query: "trip" }]],
+    ["the handed-over files", ["task_files", {}]],
+    ["a folder", ["list_files", { path: "~" }]],
+  ] as const)("is held to the user's words once it has read %s", async (_what, read) => {
+    const f = fixture();
+    f.say("message.assistant", { messageId: ulid(), text: "Working on it" });
+    f.say("observe", { frameId: ulid(), width: 1280, height: 800 });
+    const r = await searches(f, ["lisbon flights"], {
+      before: [read as [string, unknown]],
+      more: {
+        frame: async () => ({ png: Buffer.from("x"), ageMs: 1000 }),
+        recall: () => [{ title: "Trip", day: "2026-10-01", kind: "summary", snippet: "Lisbon" }],
+        handedFiles: async () => [],
+        desktop: () =>
+          ({
+            ...reading(),
+            listDir: async () => ({ path: "~", entries: [], truncated: false }),
+          }) as never,
+      },
+    });
+    expect(r.sent("lisbon flights")).toBe(false);
+  });
+
+  it("is held to the user's words once it has seen a picture from the web", async () => {
+    const f = fixture();
+    const picture = await sharp({
+      create: { width: 8, height: 8, channels: 3, background: "#fff" },
+    })
+      .png()
+      .toBuffer();
+    const asked: URL[] = [];
+    const web: WebAccess = {
+      get: async (url) => {
+        asked.push(url);
+        return url.hostname === "example.org"
+          ? { url, status: 200, contentType: "image/png", body: picture, truncated: false }
+          : {
+              url,
+              status: 200,
+              contentType: "text/html",
+              body: Buffer.from(DDG("https://example.org/page")),
+              truncated: false,
+            };
+      },
+    };
+    const r = await searches(f, ["lisbon flights"], {
+      question: "What is in https://example.org/p.png?",
+      before: [["web_fetch", { url: "https://example.org/p.png" }]],
+      more: { web },
+    });
+    expect(r.sent("lisbon flights")).toBe(false);
+  });
+
+  it("before it reads anything private, keeps out the record's numbers however they're written", async () => {
+    const f = fixture();
+    const prompt =
+      "<record>\nThe user: my card is 4417 9921 0000 1111, and the booking is for Jane Doe\n</record>\n\nSide question: Is 55 66 77 valid?";
+    const r = await searches(
+      f,
+      [
+        "card 4417-9921-0000-1111",
+        "4417992100001111",
+        "4417_9921",
+        "card ４４１７ ９９２１",
+        "card 4417\u200b9921",
+        "how do mortgages work",
+        "55-66-77 valid",
+      ],
+      { prompt, question: "Is 55 66 77 valid?" },
+    );
+    expect(r.sent("card 4417-9921-0000-1111")).toBe(false);
+    expect(r.sent("4417992100001111")).toBe(false);
+    expect(r.sent("4417_9921")).toBe(false);
+    expect(r.sent("card ４４１７ ９９２１")).toBe(false);
+    expect(r.sent("card 4417\u200b9921")).toBe(false);
+    expect(r.sent("how do mortgages work")).toBe(true);
+    // The user's own number, however they wrote it.
+    expect(r.sent("55-66-77 valid")).toBe(true);
+  });
+
+  it("isn't held back by a public web page it read", async () => {
+    const f = fixture();
+    const r = await searches(f, ["lisbon flights"], {
+      question: "What does https://example.org/page say?",
+      before: [["web_fetch", { url: "https://example.org/page" }]],
+    });
+    expect(r.sent("lisbon flights")).toBe(true);
   });
 
   it("takes bangs and backslashes out, so no engine sends the search on", async () => {
@@ -1106,8 +1233,8 @@ describe("what a page can make it do", () => {
       f,
       [
         model("m", "main", async (go) => {
-          await go.tools.call("read_file", { path: "a" }, go.signal);
           await go.tools.call("web_search", { query: "lisbon flights" }, go.signal);
+          await go.tools.call("read_file", { path: "a" }, go.signal);
           await finish(go, "found", "Done.");
         }),
       ],

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { ulid } from "@localdot/protocol";
 import { modelControls } from "@localdot/providers";
 import type { fetch as undiciFetch } from "undici";
@@ -26,7 +27,11 @@ export interface QuickModelDeps {
   // A keyd listener port no computer or brain uses, and its return.
   ports: { reserve(): number; release(port: number): void };
   fetch?: typeof undiciFetch;
+  // How long a closing listener waits for keyd to settle a call still in flight.
+  settleMs?: number;
 }
+const SETTLE_MS = 2000;
+const SETTLE_POLL_MS = 25;
 
 // One short answer from a task's model before its brain starts, at the model's least thinking.
 // The call goes through a listener of the daemon's own that holds only that model's key, priced as
@@ -94,7 +99,15 @@ export class QuickModel {
     const close = async (): Promise<number | undefined> => {
       let spent: number | undefined;
       if (opened) {
-        // What keyd counted, read while it still holds the task.
+        // What keyd counted, read while it still holds the task, once no call is in flight: one cut
+        // short is settled only when its request ends.
+        const until = Date.now() + (this.deps.settleMs ?? SETTLE_MS);
+        for (;;) {
+          const admission = await keyd.modelAdmission(cellId).catch(() => undefined);
+          if (!admission || admission.taskId !== taskId || !admission.active) break;
+          if (Date.now() >= until) break;
+          await delay(SETTLE_POLL_MS);
+        }
         const info = await keyd.cell(cellId).catch(() => undefined);
         if (taskId && info?.task?.id === taskId) spent = info.task.spentUSD;
         await keyd.endTask(cellId).catch(() => {});

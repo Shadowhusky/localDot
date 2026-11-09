@@ -5,6 +5,28 @@ import { MARKDOWN_LIMITS, markdownToPlain, parseMarkdown, safeMarkdownLink } fro
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 
 afterEach(cleanup);
+describe("a rule for which links open", () => {
+  const hrefs = (root: Element) =>
+    [...root.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+  const TEXT = "[a](https://example.org/x#frag) and https://other.example/y";
+  it("opens every link as written when no rule is given", () => {
+    const { container } = render(<SafeMarkdown text={TEXT} />);
+    expect(hrefs(container)).toEqual(["https://example.org/x#frag", "https://other.example/y"]);
+  });
+  it("opens the address the rule gives, and shows the rest as text", () => {
+    const { container } = render(
+      <SafeMarkdown
+        text={TEXT}
+        links={(href) =>
+          href.startsWith("https://example.org/") ? "https://example.org/x" : undefined
+        }
+      />,
+    );
+    expect(hrefs(container)).toEqual(["https://example.org/x"]);
+    expect(container.textContent).toContain("https://other.example/y");
+  });
+});
+
 describe("bounded explicit Markdown display", () => {
   it("renders paragraphs, emphasis, lists, inline code and fenced code as ordinary text nodes", () => {
     const { container } = render(

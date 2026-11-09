@@ -401,37 +401,53 @@ ends with what it found and says so.
 Only the models the user chose for the task answer: its main model and, where the task uses them, its
 fast and local models, as its next message would run on them. The user already showed the task to
 each, so going from one to another takes nothing anywhere new. No other model, even one set up in
-Settings, is asked: that would take the task's record to a provider, or from a local model to the
-cloud, without the user choosing it. A task none of whose models can answer says why instead.
+Settings, is asked: that would take the task's record to a provider without the user choosing it. A
+task whose main model is local (LM Studio or Ollama) stays on this Mac: only its local models answer,
+and a fast model in the cloud is left out. A custom endpoint counts as the cloud here, as it does for
+the local role, even when it is on this Mac. A task none of whose models can answer says why instead.
 
 - **Claude Code:** a process of its own with no built-in tools, whose MCP server serves only the side
-  tools (`claude-code/side.ts`). A tool outside them is refused, and using one ends that model's go.
+  tools (`claude-code/side.ts`). It must start by naming its tools in the expected shape, all of them
+  side tools; a start that can't be read, a system message, reply or result before it, or a tool
+  outside them ends that model's go. dot's own Claude Code treats a start whose tools it can't read
+  as offering a tool it can't name, and stops the task.
 - **ChatGPT plan:** never asked. Every Codex turn is a fresh process that holds the account's
   credentials, so one here could keep dot's next turn waiting. A ChatGPT task has no other model of
   its own, so it says it can't take a side question.
 
 **Limits**, for both models together (`SIDE_LIMITS`): 120 seconds, 75 of them for any one model, 8
 reads per model, and $0.25, or 300,000 tokens on a plan, where no money is counted. keyd holds the
-money limit too: each model's listener gets only what is left, and when it closes, what keyd counted
-on it replaces the replies' own count if that is more, which covers a reply that gave no usage and a
-call cut short. Near a limit a model is offered only `finish`, so it ends by saying what it found.
+money limit too: each model's listener gets only what is left, and when it closes, once keyd shows no
+call in flight on it (at most 2 seconds), what keyd counted on it replaces the replies' own count if
+that is more, which covers a reply that gave no usage and a call cut short. Near a limit a model is
+offered only `finish`, so it ends by saying what it found.
 
-**Web.** Nothing the side agent reads leaves it, since nobody can be asked here, as dot's purpose check
-can ask:
+**Web.** Nobody can be asked here, as dot's purpose check can ask, so the web tools are held to what
+the user wrote:
 
 - `web_fetch` opens only an address in the user's question or in this question's own search results,
   never one a page named or the model composed.
-- A `web_search` is refused when it carries what the question was given or read: the record and every
-  tool result are kept as `TaskTaint` fingerprints, never as text, and a query is checked against them
-  once the words of the user's own question are taken out. So a user can have something searched by
-  writing it in their question. A query the redactor changes isn't sent either.
+- Once the question has read anything private (the task's log, the computer's files or folders, the
+  files dot handed over, earlier conversations, the screen, or any picture), a `web_search` may only
+  be made of the words of the user's question and up to three general words from a fixed list
+  ("meaning", "latest" and the like). Nothing read can be added, however it is written. The refusal
+  tells the model to answer from what it found. The model still chooses which allowed words to send
+  and in what order, a narrow channel of a few bits per search.
+- Before that, when it has read only the opening record and public pages, a search is refused if it
+  repeats words or three-word runs of what was read (`TaskTaint` fingerprints, never the text), or a
+  number from it, however the digits are separated. Words and numbers of the user's own question
+  don't count. This catches a copy, not a paraphrase: a line of the record reworded, or a number
+  reversed or encoded, still goes out. A query the redactor changes isn't sent either.
 - A search's `!bang` and `\` commands are taken out, and every search, dot's too, stays on its engine's
   site (`WebGet.within`): a redirect elsewhere isn't followed, and a page from elsewhere gives no
   results, nor addresses `web_fetch` may open.
-- In the answer, only those same addresses are links. Any other shows as text with its site, as its
-  address may carry what was read.
+- In the answer, only those same addresses are links, and a link opens the address as it was found,
+  not as the model wrote it: a fragment, query or other spelling it added doesn't go with it. Any other
+  address shows as text, as it may carry what was read.
 
 Both tools go through the same keyd web cell as dot's, so the same egress rules hold.
 
 **The record** it opens with is what was said in the task and its plan, without messages the user
 took back, inside `<untrusted>` blocks: a line in it can't end the block or ask a question of its own.
+`untrusted()` defuses a tag written with look-alike brackets, slashes or letters, or with invisible
+characters or marks inside, for dot's tools as well.

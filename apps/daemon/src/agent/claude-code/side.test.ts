@@ -12,7 +12,10 @@ const finishTool = `mcp__${SIDE_SERVER}__finish`;
 
 // A plan's Claude Code, as far as a side question can tell: `script` plays its messages, and may
 // use the MCP server it was given as Claude Code itself would.
-function fake(script: (options: Options, client: Client) => AsyncGenerator<unknown>) {
+function fake(
+  script: (options: Options, client: Client) => AsyncGenerator<unknown>,
+  { init = true }: { init?: boolean } = {},
+) {
   const seen: { prompt: string; options: Options }[] = [];
   const closed = vi.fn();
   return {
@@ -31,6 +34,7 @@ function fake(script: (options: Options, client: Client) => AsyncGenerator<unkno
           await server.instance.connect(theirs);
           const client = new Client({ name: "claude", version: "1" });
           await client.connect(ours);
+          if (init) yield { type: "system", subtype: "init", tools: SIDE_TOOLS };
           yield* script(options, client);
         };
         return Object.assign(run(), { close: closed });
@@ -107,6 +111,44 @@ describe("a side question on Claude Code", () => {
       { status: "found", answer: "Yes." },
       expect.anything(),
     );
+  });
+
+  it.each([
+    ["tools given as objects", { type: "system", subtype: "init", tools: [{ name: "Read" }] }],
+    ["no tools field", { type: "system", subtype: "init" }],
+    ["a renamed field", { type: "system", subtype: "init", tool_names: ["Read"] }],
+    ["another message first", { type: "system", subtype: "status" }],
+    ["no start at all", { type: "assistant", message: { id: "m", content: [] } }],
+  ])("gives up when its start isn't exactly as expected: %s", async (_why, first) => {
+    const f = fake(
+      async function* (_options, client) {
+        yield first;
+        yield { type: "system", subtype: "init", tools: SIDE_TOOLS };
+        await client.callTool({ name: "finish", arguments: { status: "found", answer: "x" } });
+        yield { type: "result", subtype: "success", is_error: false, result: "x" };
+      },
+      { init: false },
+    );
+    const asked = go();
+    await expect(
+      claudeCodeSideModel(f.deps, { model: "haiku" }, "fast").run(asked.go),
+    ).rejects.toBeInstanceOf(ModelAnswerError);
+    expect(asked.call).not.toHaveBeenCalled();
+  });
+
+  it("lets a message that says nothing about tools come before its start", async () => {
+    const f = fake(
+      async function* (_options, client) {
+        yield { type: "rate_limit_event", rate_limit_info: { status: "allowed" } };
+        yield { type: "system", subtype: "init", tools: SIDE_TOOLS };
+        await client.callTool({ name: "finish", arguments: { status: "found", answer: "x" } });
+        yield { type: "result", subtype: "success", is_error: false, result: "x" };
+      },
+      { init: false },
+    );
+    const asked = go();
+    await claudeCodeSideModel(f.deps, { model: "haiku" }, "fast").run(asked.go);
+    expect(asked.call).toHaveBeenCalledOnce();
   });
 
   it("gives up on a process whose start offers a tool of its own", async () => {

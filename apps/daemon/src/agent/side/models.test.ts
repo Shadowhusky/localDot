@@ -44,12 +44,31 @@ describe("who a side question may go to", () => {
     expect(names(local)).toEqual(["main:lmstudio"]);
   });
 
-  it("goes from the fast model to the main one the user chose for this task, whoever runs them", () => {
-    const both = sideModels(
+  it("keeps a task whose main model is local on local models, leaving out a cloud fast model", () => {
+    const local = sideModels(
       { kind: "api", roles: [role("main", LOCAL), role("fast", CLOUD)] },
       { api, plan },
     );
-    expect(names(both)).toEqual(["fast:anthropic", "main:lmstudio"]);
+    expect(names(local)).toEqual(["main:lmstudio"]);
+  });
+
+  it("goes from the fast model to the main one the user chose for this task", () => {
+    const both = sideModels(
+      {
+        kind: "api",
+        roles: [role("main", CLOUD), role("fast", { ...CLOUD, model: "claude-sonnet-5-5" })],
+      },
+      { api, plan },
+    );
+    expect(names(both)).toEqual(["fast:anthropic", "main:anthropic"]);
+  });
+
+  it("lets a task in the cloud use a local fast model", () => {
+    const models = sideModels(
+      { kind: "api", roles: [role("main", CLOUD), role("fast", LOCAL)] },
+      { api, plan },
+    );
+    expect(names(models)).toEqual(["fast:lmstudio", "main:anthropic"]);
   });
 
   it("ends with the task's own local model, which takes nothing off this Mac", () => {

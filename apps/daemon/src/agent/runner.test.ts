@@ -1622,6 +1622,50 @@ describe("Claude Code (your plan)", () => {
     session.stop();
     await f.live.settled(session.id);
   });
+  it("keeps an ended task on a local model away from the cloud fast model in Settings", async () => {
+    const f = setup();
+    f.setSettings({
+      main: { provider: "ollama", model: "llama3.2" },
+      fast: { provider: "anthropic", model: "claude-haiku-4-5-20251001", key: "anthropic" },
+      taskBudgetUSD: 5,
+    } as AgentSettings);
+    f.secrets.mockResolvedValue([
+      {
+        id: "anthropic",
+        kind: "llm",
+        provider: "anthropic",
+        createdAt: "2026-10-03T00:00:00Z",
+        updatedAt: "2026-10-03T00:00:00Z",
+      },
+    ]);
+    const asked: string[] = [];
+    f.deps.side = {
+      ...sideDeps(undefined),
+      api: ((role: { providerId: string; model: { id: string } }, side: SideModel["role"]) => {
+        asked.push(`${side}:${role.providerId}`);
+        return {
+          provider: role.providerId,
+          model: role.model.id,
+          role: side,
+          tools: true,
+          images: false,
+          run: async (go: SideGo) => {
+            await go.tools.call("finish", { status: "found", answer: "x" }, go.signal);
+          },
+        };
+      }) as never,
+    };
+    const id = f.log.createSession("Summarise my private notes");
+    f.log.append(id, {
+      type: "message.user",
+      agent: "main",
+      data: { messageId: ulid(), text: "Summarise my private notes", kind: "task" },
+    } as never);
+    await expect(
+      f.runner.sideAnswer(id, "What did it find?", new AbortController().signal),
+    ).resolves.toMatchObject({ provider: "ollama" });
+    expect(asked).toEqual(["main:ollama"]);
+  });
   it("says why when none of the task's models can use tools, and asks none of them", async () => {
     const f = claudeSetup();
     f.secrets.mockResolvedValue([]);

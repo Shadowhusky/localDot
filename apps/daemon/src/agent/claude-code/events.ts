@@ -219,6 +219,9 @@ export class ClaudeCodeEventMapper {
     if (type === "system") {
       const init = Init.safeParse(message);
       if (init.success) return [this.#init(init.data)];
+      // A start whose tools can't be read may offer any tool.
+      if ((message as { subtype?: unknown }).subtype === "init")
+        return [{ kind: "offered", tools: [], unnamed: true }];
       const retry = Retry.safeParse(message);
       if (retry.success)
         this.#sink.append("model.retry", {
