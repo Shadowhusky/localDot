@@ -77,7 +77,7 @@ test("Export's presets", async ({ page, ui }) => {
   expect(await ringFaultsInEach(page, rowsIn(panel), "export")).toEqual([]);
 });
 
-for (const step of ["thinks", "permissions", "browser"])
+for (const step of ["thinks", "permissions", "browser", "speech"])
   test(`first run's ${step} choices`, async ({ page, ui }) => {
     await page.addInitScript(
       (at) => localStorage.setItem("localdot.onboarding.v1", JSON.stringify({ step: at })),
