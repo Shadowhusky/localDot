@@ -108,20 +108,50 @@ const LAYER: Record<Wearable, number> = {
 export const wornInOrder = (list: readonly Wearable[]): Wearable[] =>
   [...list].sort((a, b) => LAYER[a] - LAYER[b]);
 
+// Eyewear is drawn round the eye's true size, so behind it the eye keeps that size and doesn't grow
+// to read when small or to show surprise.
+const EYEWEAR: ReadonlySet<Wearable> = new Set([
+  "sunglasses",
+  "round-glasses",
+  "monocle",
+  "heart-glasses",
+]);
+
+export const eyeScaleLimit = (list: readonly Wearable[]) =>
+  list.some((name) => EYEWEAR.has(name)) ? 1 : Number.POSITIVE_INFINITY;
+
 // The wearables are rendered under the neutral light; the dim plate keeps this much of it.
 const DIM_LIGHT = 0.3;
+
+// What of a pose places a plate.
+export type FaceTurn = Pick<DotPose, "gaze" | "roll">;
 
 interface Worn {
   name: Wearable;
   img: HTMLImageElement;
-  face: Place | undefined;
-  head: Mount | undefined;
   transform: string;
   filter: string;
 }
 
 const num = (v: number, digits: number) => (Math.abs(v) < 10 ** -digits ? "0" : v.toFixed(digits));
-const origin = ([x, y]: Place) => `${((32 + x) / 64) * 100}% ${((32 + y) / 64) * 100}%`;
+
+// The point a plate turns about, in frame units from the body's centre; clothes turn about the centre.
+export const platePivot = (name: Wearable): Place => FACE[name] ?? HEAD[name]?.pivot ?? [0, 0];
+
+export function plateOrigin(name: Wearable): string {
+  const [x, y] = platePivot(name);
+  return `${((32 + x) / 64) * 100}% ${((32 + y) / 64) * 100}%`;
+}
+
+// How a plate sits in a pose; k is CSS px per frame unit.
+export function plateTransform(name: Wearable, p: FaceTurn, k: number): string {
+  const face = FACE[name];
+  if (face) return onFace(face, p, k);
+  const head = HEAD[name];
+  if (head) return onHead(head, p, k);
+  const roll = num(p.roll, 2);
+  return roll === "0" ? "" : `rotate(${roll}deg)`;
+}
 
 // What a DotView wears: a Blender plate per wearable over the body plates and the face, inside the
 // body so it hops, squashes and breathes with it.
@@ -130,6 +160,8 @@ export class Wardrobe {
   private next: Worn[] = [];
   private key = "";
   private size = 0;
+  // The most the eyes may scale in what is on now.
+  eyeLimit = Number.POSITIVE_INFINITY;
 
   constructor(private readonly body: HTMLElement) {}
 
@@ -171,6 +203,7 @@ export class Wardrobe {
       afterMotion([img], () => img.remove(), false);
     }
     this.worn = next;
+    this.eyeLimit = eyeScaleLimit(next.map((item) => item.name));
   }
 
   private putOn(name: Wearable, animate: boolean): Worn {
@@ -183,11 +216,8 @@ export class Wardrobe {
     img.sizes = `${this.size}px`;
     img.srcset = WEAR_PLATES[name];
     if (animate) img.dataset.arriving = "";
-    const face = FACE[name];
-    const head = HEAD[name];
-    const pivot = face ?? head?.pivot;
-    if (pivot) img.style.transformOrigin = origin(pivot);
-    return { name, img, face, head, transform: "", filter: "" };
+    img.style.transformOrigin = plateOrigin(name);
+    return { name, img, transform: "", filter: "" };
   }
 
   setSize(size: number): void {
@@ -199,15 +229,8 @@ export class Wardrobe {
   render(p: DotPose, k: number): void {
     const filter =
       p.plate.dim > 0.001 ? `brightness(${(1 - (1 - DIM_LIGHT) * p.plate.dim).toFixed(3)})` : "";
-    const roll = num(p.roll, 2);
     for (const item of this.worn) {
-      const transform = item.face
-        ? onFace(item.face, p, k)
-        : item.head
-          ? onHead(item.head, p, k)
-          : roll === "0"
-            ? ""
-            : `rotate(${roll}deg)`;
+      const transform = plateTransform(item.name, p, k);
       if (transform !== item.transform) {
         item.transform = transform;
         item.img.style.transform = transform;
@@ -222,7 +245,7 @@ export class Wardrobe {
 
 // A wearable on the face moves as an eye does: the turned sphere carries its anchor, and the
 // sphere's slope there foreshortens it.
-export function onFace(anchor: Place, p: DotPose, k: number): string {
+export function onFace(anchor: Place, p: FaceTurn, k: number): string {
   const f = eyeFrame(anchor, p.gaze.x, p.gaze.y, p.roll);
   const dx = num((f.cx - anchor[0]) * k, 2);
   const dy = num((f.cy - anchor[1]) * k, 2);
@@ -232,7 +255,7 @@ export function onFace(anchor: Place, p: DotPose, k: number): string {
 // A wearable on the head takes its share of the turn at its pivot: the turned sphere carries the
 // pivot, and the sphere's slope there tilts and foreshortens the plate, never by more than STRETCH.
 // Then it rolls with the face about the body's centre. Its transform-origin is the pivot.
-export function onHead({ pivot, follow }: Mount, p: DotPose, k: number): string {
+export function onHead({ pivot, follow }: Mount, p: FaceTurn, k: number): string {
   const [px, py] = pivot;
   const [wx, wy] = follow;
   const f = eyeFrame(pivot, p.gaze.x, p.gaze.y, 0);

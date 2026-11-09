@@ -1,7 +1,10 @@
 import { seedDraw, type Wearable } from "@localdot/protocol";
 import { type CSSProperties, memo, useEffect, useState } from "react";
+import { EYE_ANCHORS, eyeFrame } from "./engine/sphere.ts";
 import { BODY_PLATES, platesIn, WEAR_PLATES, whenPlatesIn } from "./plates.ts";
-import { wornInOrder } from "./render/wearables.ts";
+import { EYE_H, EYE_W } from "./render/eye-geometry.ts";
+import { LOD_DETAIL, lodFor } from "./render/lod.ts";
+import { eyeScaleLimit, plateOrigin, plateTransform, wornInOrder } from "./render/wearables.ts";
 import "./dot.css";
 
 export interface DotAvatarProps {
@@ -12,18 +15,17 @@ export interface DotAvatarProps {
   seed?: string;
 }
 
-const EYE_W = 6.8;
-const EYE_H = 12.5;
-
-function Eye({ x, y }: { x: number; y: number }) {
+function Eye({ x, y, scale }: { x: number; y: number; scale: number }) {
+  const width = EYE_W * scale;
+  const height = EYE_H * scale;
   return (
     <rect
       className="dot-eye"
-      x={x - EYE_W / 2}
-      y={y - EYE_H / 2}
-      width={EYE_W}
-      height={EYE_H}
-      rx={EYE_W / 2}
+      x={32 + x - width / 2}
+      y={32 + y - height / 2}
+      width={width}
+      height={height}
+      rx={width / 2}
     />
   );
 }
@@ -54,8 +56,11 @@ function useLoadedLook(wearables: readonly Wearable[], size: number) {
 // canvas behind it, so a long list costs a few elements a row and each plate is fetched once.
 export const DotAvatar = memo(function DotAvatar({ size, wearables, seed = "" }: DotAvatarProps) {
   const look = useLoadedLook(wearables, size);
-  const gx = (seedDraw(seed, "look-x") - 0.5) * 3;
-  const gy = (seedDraw(seed, "look-y") - 0.5) * 1.6;
+  const gaze = {
+    x: (seedDraw(seed, "look-x") - 0.5) * 3,
+    y: (seedDraw(seed, "look-y") - 0.5) * 1.6,
+  };
+  const scale = Math.min(LOD_DETAIL[lodFor(size)].eyeScale, eyeScaleLimit(look ?? []));
   const px = `${size}px`;
   return (
     <span
@@ -75,8 +80,10 @@ export const DotAvatar = memo(function DotAvatar({ size, wearables, seed = "" }:
         />
       )}
       <svg className="dot-face" viewBox="0 0 64 64" aria-hidden="true">
-        <Eye x={26.5 + gx} y={27.5 + gy} />
-        <Eye x={37.5 + gx} y={27.5 + gy} />
+        {EYE_ANCHORS.map((anchor) => {
+          const { cx, cy } = eyeFrame(anchor, gaze.x, gaze.y, 0);
+          return <Eye key={anchor[0]} x={cx} y={cy} scale={scale} />;
+        })}
       </svg>
       {look &&
         wornInOrder(look).map((name) => (
@@ -89,6 +96,10 @@ export const DotAvatar = memo(function DotAvatar({ size, wearables, seed = "" }:
             data-wear={name}
             sizes={px}
             srcSet={WEAR_PLATES[name]}
+            style={{
+              transformOrigin: plateOrigin(name),
+              transform: plateTransform(name, { gaze, roll: 0 }, size / 64),
+            }}
           />
         ))}
     </span>

@@ -11,7 +11,7 @@
   flex: none;
   width: var(--dot-size);
   height: var(--dot-size);
-  contain: layout paint;
+  contain: layout;
   user-select: none;
   pointer-events: none;
 }
@@ -24,6 +24,7 @@
   flex: none;
   width: var(--dot-size);
   height: var(--dot-size);
+  contain: layout;
   user-select: none;
   pointer-events: none;
 }

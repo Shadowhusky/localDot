@@ -2,6 +2,10 @@ import type { EyePose } from "../engine/engine.ts";
 import { clamp, smoothstep } from "../engine/math.ts";
 import type { LodDetail } from "./lod.ts";
 
+// The eye's size at scale 1, in frame units.
+export const EYE_W = 5.4;
+export const EYE_H = 10;
+
 export interface Arc {
   // Half the arc's width, the height of its ends and of its control point, and its stroke.
   aw: number;
@@ -33,7 +37,12 @@ export interface EyeGeometry {
   closed: Arc;
 }
 
-export function eyeGeometry(s: EyePose, d: LodDetail, devPerUnit: number): EyeGeometry {
+export function eyeGeometry(
+  s: EyePose,
+  d: LodDetail,
+  devPerUnit: number,
+  maxScale = Number.POSITIVE_INFINITY,
+): EyeGeometry {
   const f = s.frame;
   let ex = 32 + f.cx;
   let ey = 32 + f.cy;
@@ -41,9 +50,9 @@ export function eyeGeometry(s: EyePose, d: LodDetail, devPerUnit: number): EyeGe
     ex = Math.round(ex * devPerUnit * 2) / (devPerUnit * 2);
     ey = Math.round(ey * devPerUnit * 2) / (devPerUnit * 2);
   }
-  const scale = s.scale * d.eyeScale;
-  const w = 5.4 * scale;
-  const h = 10 * scale * s.sy;
+  const scale = Math.min(s.scale * d.eyeScale, maxScale);
+  const w = EYE_W * scale;
+  const h = EYE_H * scale * s.sy;
   const hw = w / 2;
   const hh = h / 2;
   const { happy, closed } = s;

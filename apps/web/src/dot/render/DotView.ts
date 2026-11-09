@@ -507,7 +507,7 @@ export class DotView implements Frameable {
 
   private renderEye(e: Eye, s: EyePose, devPerUnit: number): void {
     const c = e.cache;
-    const g = eyeGeometry(s, this.detail, devPerUnit);
+    const g = eyeGeometry(s, this.detail, devPerUnit, this.wardrobe.eyeLimit);
     this.attr(
       e.g,
       c,
