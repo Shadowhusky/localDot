@@ -66,6 +66,10 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   own browser streams, and `POST /__qa/screen` back to the desktop; `POST /__qa/browser/restart?ms=`
   starts the browser again in place. `POST /__qa/picture/drop` and `/resume` (`?screen=desktop` or
   `browser`, else both) take a screen's picture away and bring it back, as a lost stream does.
+  `POST /__qa/stream-stall?stage=` stalls a screen's next connections: `ticket` and `page` refuse the
+  next `?times=`, while `socket`, `refused`, `frame` and `track` stop the next client loads where
+  Selkies' client would sit, `slow&ms=` takes a step each `ms`, and `none` clears them.
+  `POST /__qa/daemon/restart?ms=` ends every ticket and socket and answers nothing for `ms`.
   `POST /__qa/desktop/home` empties the desktop to its home screen, as when the last task worked only
   in the web browser, and `/__qa/desktop/window` puts the spreadsheet window back. The fake
   desktopd's window stack follows: the spreadsheet window, maximised, covers the dock.

@@ -298,10 +298,23 @@ const SETTINGS: Record<string, AgentSettings> = {
 // A screen's client repaints one still frame, so the picture is steady while the stream stays
 // live. It asks the fixture whether its screen's picture is dropped (POST /__qa/picture/drop): then
 // its video goes, as Selkies' does while it reconnects, and comes back with a new track on resume.
-// It takes focus for its input as it starts, as Selkies' attach does.
+// It takes focus for its input as it starts, as Selkies' attach does. A load the fixture was told to
+// stall (POST /__qa/stream-stall) stops where Selkies' client would: `socket` with its socket never
+// open and the track WebKit's client makes as it starts, `refused` with its socket shut, `frame` with
+// its socket open and that track silent, `track` with its socket open and no track yet, as Chromium's
+// client until its first frame. `slow` gets there, a step each ?ms=.
 const clientJs = (paint: string) => `
 const keys=document.createElement('input');document.body.append(keys);keys.focus({preventScroll:true});
+const stalled=(stall)=>{
+  const transport={readyState:stall==='refused'?3:stall==='socket'||stall.startsWith('slow')?0:1,send(){},close(){this.readyState=3}};
+  window.selkiesTransport=transport;window.videoChunksReceived=0;
+  if(stall==='track'||stall.startsWith('slow'))return transport;
+  const silent=document.createElement('canvas');silent.width=64;silent.height=64;
+  video.srcObject=silent.captureStream(0);video.play().catch(()=>{});
+  return transport;
+};
 let seen={};
+window.videoChunksReceived=0;
 const canvas=document.createElement('canvas');canvas.width=2560;canvas.height=1600;
 const ctx=canvas.getContext('2d');${paint}
 const screen=location.pathname.includes('/browser/')?'browser':'desktop';
@@ -313,7 +326,14 @@ const show=(down)=>{
   video.srcObject=canvas.captureStream(10);video.play().catch(()=>{});
 };
 const ask=()=>fetch('/__qa/picture',{cache:'no-store'}).then((r)=>r.json()).then((s)=>{seen=s;show(s[screen])}).catch(()=>{});
-ask();setInterval(ask,1000);
+setInterval(()=>{if(video?.srcObject&&!window.fixtureStall)window.videoChunksReceived++},100);
+const stall=window.fixtureStall;
+if(stall&&!stall.startsWith('slow'))stalled(stall);
+else if(stall){
+  const step=Number(stall.slice(5));const transport=stalled(stall);
+  setTimeout(()=>{transport.readyState=1},step);
+  setTimeout(()=>{ask();setInterval(ask,1000)},step*2);
+}else{ask();setInterval(ask,1000);}
 `;
 // The desktop shows the last task's window, or (POST /__qa/desktop/home) its empty home screen,
 // with its dock as Plank draws it at 2x (cells/desktop's localdot-glass): a shelf from 774 to 1786
@@ -384,6 +404,14 @@ function runBrowser(on: boolean): void {
 }
 // Which screens' pictures are dropped (POST /__qa/picture/drop).
 const pictureDown = { desktop: false, browser: false };
+// What the next ticket requests, client pages and client loads of a screen meet
+// (POST /__qa/stream-stall), and when a restarting daemon answers again (POST /__qa/daemon/restart).
+const stalls = {
+  ticket: { desktop: 0, browser: 0 },
+  page: { desktop: 0, browser: 0 },
+  client: { desktop: [] as string[], browser: [] as string[] },
+};
+let daemonBackAt = 0;
 let desktopHome = false;
 const live = new LiveSessions();
 const frames = new FrameStore(HOME);
@@ -2483,11 +2511,25 @@ const server: Server = createServer(
       return request.headers.get("cookie")?.includes("relay-access=fixture-only")
         ? Response.json({ token: TOKEN })
         : new Response("Unauthorized", { status: 401 });
+    if (Date.now() < daemonBackAt && !/^\/(__qa\/|owned-)/.test(url.pathname))
+      return new Response("restarting", { status: 503 });
+    const ticket = /\/(browser-)?stream-ticket$/.exec(url.pathname);
+    if (ticket && request.method === "POST") {
+      const screen = ticket[1] ? "browser" : "desktop";
+      if (stalls.ticket[screen] > 0) {
+        stalls.ticket[screen]--;
+        return new Response("not ready", { status: 503 });
+      }
+    }
     return app?.fetch(request, env) ?? new Response("starting", { status: 503 });
   }),
 );
 const upgraded = new Set<Duplex>();
 server.on("upgrade", (_req, peer) => {
+  if (Date.now() < daemonBackAt) {
+    peer.destroy();
+    return;
+  }
   upgraded.add(peer);
   peer.once("close", () => upgraded.delete(peer));
 });
@@ -3004,31 +3046,44 @@ routes.delete("/api/keys/:id", (c) => {
   keys = keys.filter((k) => k.id !== c.req.param("id"));
   return c.body(null, 204);
 });
+// A client page: a page the fixture was told to fail answers 503 first.
+const clientPage = (
+  cell: string | undefined,
+  ticket: string | undefined,
+  screen: "desktop" | "browser",
+  script: string,
+) => {
+  if (!ticket || tickets.resolve(ticket) !== cell)
+    return new Response("unknown ticket", { status: 404 });
+  if (stalls.page[screen] > 0) {
+    stalls.page[screen]--;
+    return new Response("not ready", { status: 503 });
+  }
+  return new Response(
+    `<!doctype html><video id="videoStream" autoplay muted></video><script src="${script}"></script>`,
+    { headers: { "content-type": "text/html" } },
+  );
+};
+const clientScript = (screen: "desktop" | "browser", js: string) =>
+  new Response(
+    `window.fixtureStall=${JSON.stringify(stalls.client[screen].shift() ?? null)};${js}`,
+    {
+      headers: { "content-type": "text/javascript" },
+    },
+  );
 routes.get("/cells/:cell/desktop/:ticket/", (c) =>
-  tickets.resolve(c.req.param("ticket")) === c.req.param("cell")
-    ? c.html(
-        '<!doctype html><video id="videoStream" autoplay muted></video><script src="/owned-preview.js"></script>',
-      )
-    : c.text("unknown ticket", 404),
+  clientPage(c.req.param("cell"), c.req.param("ticket"), "desktop", "/owned-preview.js"),
 );
-routes.get("/owned-preview.js", (c) =>
-  c.body(DESKTOP_JS, 200, { "content-type": "text/javascript" }),
-);
+routes.get("/owned-preview.js", () => clientScript("desktop", DESKTOP_JS));
 browserViewerApi(routes, {
   cells: browserStreams,
   tickets,
   vendorDir: fileURLToPath(new URL("../../vendor/selkies", import.meta.url)),
 });
 routes.get("/cells/:cell/browser/:ticket/", (c) =>
-  tickets.resolve(c.req.param("ticket")) === c.req.param("cell")
-    ? c.html(
-        '<!doctype html><video id="videoStream" autoplay muted></video><script src="/owned-browser.js"></script>',
-      )
-    : c.text("unknown ticket", 404),
+  clientPage(c.req.param("cell"), c.req.param("ticket"), "browser", "/owned-browser.js"),
 );
-routes.get("/owned-browser.js", (c) =>
-  c.body(BROWSER_JS, 200, { "content-type": "text/javascript" }),
-);
+routes.get("/owned-browser.js", () => clientScript("browser", BROWSER_JS));
 routes.get("/__qa/picture", (c) => c.json({ ...pictureDown, home: desktopHome }));
 routes.get("/owned-desktop.webp", (c) =>
   c.body(readFileSync(env.QA_PICTURE ?? join(ASSETS, "frame-1.webp")), 200, {
@@ -4142,6 +4197,32 @@ routes.post("/__qa/picture/:state", (c) => {
   for (const name of ["desktop", "browser"] as const)
     if (!screen || screen === name) pictureDown[name] = state === "drop";
   return c.json(pictureDown);
+});
+// A screen's next connections stall: ?stage=ticket or page refuses the next ?times=, and socket,
+// refused, frame, track or slow (with ?ms=) stops the next ?times= client loads where it says.
+// ?stage=none clears them.
+routes.post("/__qa/stream-stall", (c) => {
+  const screen = c.req.query("screen") === "browser" ? "browser" : "desktop";
+  const stage = c.req.query("stage") ?? "none";
+  const times = Number(c.req.query("times") ?? 1);
+  if (stage === "none") {
+    stalls.ticket[screen] = stalls.page[screen] = 0;
+    stalls.client[screen] = [];
+  } else if (stage === "ticket" || stage === "page") stalls[stage][screen] = times;
+  else if (["socket", "refused", "frame", "track", "slow"].includes(stage))
+    stalls.client[screen] = Array.from({ length: times }, () =>
+      stage === "slow" ? `slow:${c.req.query("ms") ?? 2000}` : stage,
+    );
+  else return c.text("no such stage", 400);
+  return c.json(stalls);
+});
+// The daemon restarts under the page: its tickets and sockets end, and it answers nothing for ?ms=.
+routes.post("/__qa/daemon/restart", (c) => {
+  tickets.revoke(cellId);
+  tickets.revoke(browserCellId);
+  daemonBackAt = Date.now() + Number(c.req.query("ms") ?? 0);
+  for (const peer of upgraded) peer.destroy();
+  return c.json({ ok: true });
 });
 routes.post("/__qa/desktop/:shows", (c) => {
   const shows = c.req.param("shows");
