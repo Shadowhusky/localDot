@@ -9,6 +9,7 @@ import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import type { IconName } from "../ui/icons.ts";
+import { fileConversations } from "./conversation-leave.ts";
 
 // Pressed with Cmd or Ctrl, a row starts selecting rather than opening.
 export const adds = (event: { metaKey: boolean; ctrlKey: boolean }) =>
@@ -69,10 +70,9 @@ export function SelectionActions({
   const conversations = (k: number) => count(k, "conversation", "conversations");
   const file = async (change: Organize, done: string, undone: string) => {
     setBusy(true);
-    const refused = await organizeConversations(
-      api,
-      picked.map((row) => row.entry.sessionId),
-      change,
+    const ids = picked.map((row) => row.entry.sessionId);
+    const refused = await new Promise<number>((settled) =>
+      fileConversations(ids, change, () => settled(organizeConversations(api, ids, change))),
     );
     setBusy(false);
     if (refused > 0)

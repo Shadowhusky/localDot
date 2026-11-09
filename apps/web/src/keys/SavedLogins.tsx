@@ -14,6 +14,7 @@ import { ChooseFileButton } from "../ui/FileButton.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, Monogram } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { foldAway } from "../ui/leave.ts";
 import { MiddleTruncate } from "../ui/MiddleTruncate.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { Skeleton } from "../ui/Skeleton.tsx";
@@ -156,7 +157,7 @@ export function SavedLogins({
                     setSaved(null);
                     setForm(login);
                   }}
-                  remove={() => view.remove(login.origin)}
+                  remove={(leave) => view.remove(login.origin, leave)}
                 />
               ))}
             </ul>
@@ -194,8 +195,9 @@ function LoginRow({
   phone: boolean;
   unavailable?: string;
   edit(): void;
-  remove(): Promise<void>;
+  remove(leave: () => Promise<void>): Promise<void>;
 }) {
+  const row = useRef<HTMLLIElement>(null);
   const [armed, setArmed] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const site = hostOf(login.origin);
@@ -205,7 +207,7 @@ function LoginRow({
     return () => clearTimeout(timer);
   }, [armed]);
   return (
-    <li className="keys-row" data-armed={armed ? "" : undefined}>
+    <li ref={row} className="keys-row" data-armed={armed ? "" : undefined}>
       <GroupRow
         className="keys-row-inner"
         leading={<Monogram>{site.charAt(0).toUpperCase()}</Monogram>}
@@ -241,7 +243,7 @@ function LoginRow({
                   return;
                 }
                 setArmed(false);
-                remove().catch((err: unknown) =>
+                remove(() => foldAway(row.current)).catch((err: unknown) =>
                   setProblem(loginProblem(err, "Couldn't remove that login. Try again.")),
                 );
               }}

@@ -48,6 +48,7 @@ import { useHandler } from "../ui/useHandler.ts";
 import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { ConversationMenu } from "./ConversationMenu.tsx";
 import { adds, SelectAll, SelectionActions } from "./ConversationSelection.tsx";
+import { fileConversations } from "./conversation-leave.ts";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import type { Layout } from "./layout.ts";
 import { RailSearch } from "./RailSearch.tsx";
@@ -324,7 +325,7 @@ export const SessionRail = memo(function SessionRail({
     event.preventDefault();
     if (selection.selecting) return;
     const item =
-      target?.closest<HTMLElement>("[data-flip]") ??
+      target?.closest<HTMLElement>(".sessions-item") ??
       rowLevelWith(event.currentTarget, event.clientY);
     const row = listed.find((each) => each.entry.sessionId === item?.dataset.flip);
     const trigger = row && buttons.current.get(row.entry.sessionId);
@@ -547,7 +548,12 @@ export const SessionRail = memo(function SessionRail({
           setEditing(action.entry.sessionId);
         }}
         onOrganize={(change) => {
-          if (action) void organize(action, change);
+          if (action)
+            fileConversations(
+              [action.entry.sessionId],
+              change,
+              () => void organize(action, change),
+            );
         }}
         onLook={(entry, look) => {
           organizeConversation(api, entry.sessionId, { look }).catch(() =>
@@ -567,10 +573,8 @@ export const SessionRail = memo(function SessionRail({
         conversations={deleting}
         anchor={actionAnchor}
         onClose={() => setDeleting(null)}
-        onDeleted={(sessions) => {
-          onDeleted?.(sessions);
-          selection.drop(sessions);
-        }}
+        onDeleted={onDeleted}
+        onRowsGone={selection.drop}
       />
     </nav>
   );
@@ -594,6 +598,7 @@ function ArchivedGroup({
         variant="quiet"
         size="sm"
         className="sessions-archived"
+        data-flip="archived"
         aria-expanded={open}
         aria-controls={id}
         onClick={onToggle}
@@ -621,7 +626,12 @@ function RailGroup({
   const id = useId();
   return (
     <div>
-      <div id={id} className="sessions-group-label" data-hidden={expanded ? undefined : ""}>
+      <div
+        id={id}
+        className="sessions-group-label"
+        data-flip={`group ${label}`}
+        data-hidden={expanded ? undefined : ""}
+      >
         <span className="sessions-group-name">{label}</span>
       </div>
       <ul className="sessions-list" aria-labelledby={id}>
@@ -716,6 +726,7 @@ function RailRow({
     <li
       className="sessions-item"
       data-flip={row.entry.sessionId}
+      data-conversation={row.entry.sessionId}
       data-current={current || undefined}
       data-menu={menuOpen || undefined}
     >

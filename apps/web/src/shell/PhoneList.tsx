@@ -55,6 +55,7 @@ import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { ConversationMenu } from "./ConversationMenu.tsx";
 import { ConversationPeek, type Peek } from "./ConversationPeek.tsx";
 import { adds, SelectAll, SelectionActions } from "./ConversationSelection.tsx";
+import { fileConversations } from "./conversation-leave.ts";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import { useConversationSelection } from "./useConversationSelection.ts";
 import "../ui/conversations-layout.css";
@@ -148,7 +149,13 @@ function RailItem({
     });
   }, []);
   return (
-    <li ref={host} className="phone-rail-item" data-holding={holding || undefined}>
+    <li
+      ref={host}
+      className="phone-rail-item"
+      data-flip={row.entry.sessionId}
+      data-conversation={row.entry.sessionId}
+      data-holding={holding || undefined}
+    >
       <Button
         variant="quiet"
         className="phone-rail-button"
@@ -240,7 +247,7 @@ export function PhoneList({
     [attention],
   );
   const body = useRef<HTMLDivElement>(null);
-  useFlip(body, rows.map((row) => row.entry.sessionId).join(" "));
+  useFlip(body, [...pinned, ...rows].map((row) => row.entry.sessionId).join(" "));
 
   const running = (row: ConversationRow) =>
     row.active || !!row.entry.live || row.entry.sessions.includes(facts.live ?? "");
@@ -655,7 +662,11 @@ export function PhoneList({
           )}
           {content}
           {!selection.selecting && (
-            <div className="conversations-foot" data-loading={recent.loading || undefined}>
+            <div
+              className="conversations-foot"
+              data-flip="foot"
+              data-loading={recent.loading || undefined}
+            >
               {view === "archived" ? (
                 <Button
                   variant="quiet"
@@ -723,7 +734,12 @@ export function PhoneList({
             setRenaming({ id: action.entry.sessionId, name: action.title, was: action.title });
         }}
         onOrganize={(change) => {
-          if (action) void organize(action, change);
+          if (action)
+            fileConversations(
+              [action.entry.sessionId],
+              change,
+              () => void organize(action, change),
+            );
         }}
         onLook={(entry, look) => {
           organizeConversation(api, entry.sessionId, { look }).catch(() =>
@@ -752,10 +768,8 @@ export function PhoneList({
         conversations={deleting}
         anchor={actionAnchor}
         onClose={() => setDeleting(null)}
-        onDeleted={(sessions) => {
-          onDeleted?.(sessions);
-          selection.drop(sessions);
-        }}
+        onDeleted={onDeleted}
+        onRowsGone={selection.drop}
       />
     </section>
   );
