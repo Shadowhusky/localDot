@@ -522,7 +522,10 @@ async function updateCell(id: string): Promise<void> {
   if (!c?.updateAvailable) throw new ComputerUpdateRefused("Your computer is up to date.");
   const { updateAvailable: _available, updateFailure: _failure, ...rest } = c;
   if (updateRefusal) throw new ComputerUpdateRefused(updateRefusal);
-  if (holdUpdate) return;
+  if (holdUpdate) {
+    cells.emit({ ...rest, updating: true });
+    return;
+  }
   cells.emit({
     ...rest,
     state: "stopping",
@@ -4038,7 +4041,7 @@ routes.post("/__qa/update/step", (c) => {
                 : stage === "start"
                   ? ("ready" as const)
                   : ("install" as const),
-            startedAt: 1,
+            startedAt: Date.now() - started,
             elapsedMs: started,
             expectedMs: 40_000,
           },

@@ -100,8 +100,8 @@ for (const { name, choice } of [
       await closeSettings(page);
       if (!isPhone(page)) {
         const curtain = page.getByRole("region", { name: "Updating your computer" });
-        await expect(curtain.getByText(/Step 5 of 6/)).toBeVisible();
-        await expect(curtain.getByText(/Your files and sign-ins stay/)).toBeVisible();
+        await expect(curtain.locator(".curtain-sub")).toContainText("Step 5 of 6");
+        await expect(curtain.locator(".curtain-sub")).toContainText("Your files and sign-ins stay");
         await shot(page, ui, "curtain");
       }
 
@@ -154,7 +154,7 @@ for (const { name, choice } of [
       });
       if (!isPhone(page)) {
         const curtain = page.getByRole("region", { name: "Your computer wasn't updated" });
-        await expect(curtain.getByText(/as soon as Docker answers/)).toBeVisible();
+        await expect(curtain.locator(".curtain-sub")).toContainText("as soon as Docker answers");
         await expect(curtain.getByRole("button", { name: "Turn on" })).toBeVisible();
       }
       await expect(notices(page).getByText("Your computer wasn't updated")).toBeVisible();
