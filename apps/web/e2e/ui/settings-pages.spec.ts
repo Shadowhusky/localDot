@@ -1,7 +1,7 @@
 import { openSettings, roleCard } from "../settings-ui.ts";
 import { expect, isPhone, runAt, test } from "./harness.ts";
 
-runAt("c14", "c39", "w39");
+runAt("c14", "c39", "w14", "w39");
 test("settings pages show only their own content and invalid drafts reveal a field without a discard dialog", async ({
   page,
   ui,
@@ -79,7 +79,7 @@ test("owner creates a permanent limited link and revokes it from the same page",
     payload = route.request().postDataJSON();
     const link = {
       ...payload,
-      id: "fixture-link",
+      id: `fixture-link-${links.length}`,
       expiresAt: null,
       tasks: 0,
       revoked: false,
@@ -88,7 +88,7 @@ test("owner creates a permanent limited link and revokes it from the same page",
     links.push(link);
     return route.fulfill({ status: 201, json: link });
   });
-  await page.route("**/api/remote-access/links/fixture-link", (route) =>
+  await page.route("**/api/remote-access/links/fixture-link-*", (route) =>
     route.fulfill({ status: 204 }),
   );
   await ui.open("ready");
@@ -102,6 +102,15 @@ test("owner creates a permanent limited link and revokes it from the same page",
   await group.getByRole("combobox", { name: "Expires", exact: true }).click();
   await page.getByRole("option", { name: "Never · until revoked", exact: true }).click();
   await group.getByRole("spinbutton", { name: "Task limit", exact: true }).fill("3");
+  const replay = group.getByRole("switch", { name: "Allow replays", exact: true });
+  await expect(replay).toHaveAccessibleDescription(
+    "Every task's full record: what was said, dot's thinking and its files, archived ones too.",
+  );
+  const apps = group.getByRole("switch", { name: "Use your apps, keys and browser", exact: true });
+  await expect(apps).not.toBeChecked();
+  await expect(apps).toHaveAccessibleDescription(
+    "Their tasks can use your connected apps, saved keys and the web browser you're signed in to.",
+  );
   await group.getByRole("button", { name: "Create shared link", exact: true }).click();
   await expect(group.getByRole("textbox", { name: "New shared link", exact: true })).toBeVisible();
   expect(payload).toMatchObject({
@@ -111,8 +120,19 @@ test("owner creates a permanent limited link and revokes it from the same page",
     chooseModel: false,
     replay: false,
     settings: false,
+    apps: false,
   });
-  await group.getByRole("button", { name: /Revoke/ }).click();
+  await group.getByRole("textbox", { name: "Link name", exact: true }).fill("Sam");
+  await apps.click();
+  await group.getByRole("button", { name: "Create shared link", exact: true }).click();
+  await expect.poll(() => payload?.label).toBe("Sam");
+  expect(payload).toMatchObject({ apps: true });
+  const rows = group.getByRole("region", { name: "Existing shared links", exact: true });
+  await expect(rows.getByText(/Your apps, keys and browser/)).toHaveCount(1);
+  await group
+    .getByRole("button", { name: /Revoke/ })
+    .first()
+    .click();
   await expect(group.getByText(/^Revoked ·/)).toBeVisible();
   await expect(group.getByRole("textbox", { name: "New shared link", exact: true })).toHaveCount(0);
   const visible = await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth + 1);

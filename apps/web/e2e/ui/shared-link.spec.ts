@@ -2,12 +2,13 @@ import type { Page } from "@playwright/test";
 import { TOKEN, type UiFixture } from "../fixtures/start-ui-fixture.ts";
 import { expect, isPhone, runAt, test } from "./harness.ts";
 
-runAt("c14", "c39", "w39");
+runAt("c14", "c39", "w14", "w39");
 
 const OTHER_MODEL = { provider: "openai", model: "gpt-6.1-sol" };
 const LINKS = {
   "Replay off": {},
   "Replay on": { replay: true },
+  "the owner's apps, keys and browser": { apps: true },
   "chat settings and model switching": {
     settings: true,
     chooseModel: true,
