@@ -891,7 +891,7 @@ describe("what a page can make it do", () => {
     });
     await ask(f, [obedient], { readers: readers(f, { web, desktop: () => desktop as never }) });
     // The page can't close the block that marks it as data.
-    expect(read).toContain("‹/untrusted");
+    expect(read).toContain("[/untrusted");
     expect(read.match(/<\/untrusted>/g)).toHaveLength(1);
     for (const reply of Object.values(replies)) expect(reply).toContain("can only read");
     expect(web.get).not.toHaveBeenCalled();

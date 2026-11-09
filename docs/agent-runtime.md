@@ -402,11 +402,9 @@ Only the models the user chose for the task answer: its main model and, where th
 fast and local models, as its next message would run on them. The user already showed the task to
 each, so going from one to another takes nothing anywhere new. No other model, even one set up in
 Settings, is asked: that would take the task's record to a provider without the user choosing it. A
-task whose main model is local stays on this Mac: only its local models answer, and a fast model in
-the cloud is left out. Local is LM Studio, Ollama, or a custom endpoint whose key is bound to a loopback
-or private address (127/8, 10/8, 172.16/12, 192.168/16, ::1, fc00::/7, `localhost`, `.local`). A
-custom main model whose address can't be read counts as local, and a custom fast model then as the
-cloud. A task none of whose models can answer says why instead.
+task whose main model is local (LM Studio or Ollama) stays on this Mac: only its local models answer,
+and a fast model in the cloud is left out. A custom endpoint is never local: keyd binds its key only to
+a public name. A task none of whose models can answer says why instead.
 
 - **Claude Code:** a process of its own with no built-in tools, whose MCP server serves only the side
   tools (`claude-code/side.ts`). It must start by naming its tools in the expected shape, all of them

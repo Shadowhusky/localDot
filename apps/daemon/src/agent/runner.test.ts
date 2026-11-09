@@ -1666,59 +1666,6 @@ describe("Claude Code (your plan)", () => {
     ).resolves.toMatchObject({ provider: "ollama" });
     expect(asked).toEqual(["main:ollama"]);
   });
-  it.each([
-    ["on this Mac", "http://127.0.0.1:8080/v1", ["main:openai-compatible"]],
-    ["in the cloud", "https://llm.example.com/v1", ["fast:anthropic", "main:openai-compatible"]],
-  ])("reads a custom endpoint's address from its key: %s", async (_where, baseURL, expected) => {
-    const f = setup();
-    const at = "2026-10-03T00:00:00Z";
-    f.setSettings({
-      main: {
-        provider: "openai-compatible",
-        model: "llama-local",
-        key: "box",
-        price: { inputUSDPerMTok: 1, outputUSDPerMTok: 1 },
-      },
-      fast: { provider: "anthropic", model: "claude-haiku-4-5-20251001", key: "anthropic" },
-      taskBudgetUSD: 5,
-    } as AgentSettings);
-    f.secrets.mockResolvedValue([
-      { id: "anthropic", kind: "llm", provider: "anthropic", createdAt: at, updatedAt: at },
-      {
-        id: "box",
-        kind: "llm",
-        provider: "openai-compatible",
-        baseURL,
-        createdAt: at,
-        updatedAt: at,
-      },
-    ] as KeydRecord[]);
-    const asked: string[] = [];
-    f.deps.side = {
-      ...sideDeps(undefined),
-      api: ((role: { providerId: string; model: { id: string } }, side: SideModel["role"]) => {
-        asked.push(`${side}:${role.providerId}`);
-        return {
-          provider: role.providerId,
-          model: role.model.id,
-          role: side,
-          tools: true,
-          images: false,
-          run: async (go: SideGo) => {
-            await go.tools.call("finish", { status: "found", answer: "x" }, go.signal);
-          },
-        };
-      }) as never,
-    };
-    const id = f.log.createSession("Summarise my notes");
-    f.log.append(id, {
-      type: "message.user",
-      agent: "main",
-      data: { messageId: ulid(), text: "Summarise my notes", kind: "task" },
-    } as never);
-    await f.runner.sideAnswer(id, "What did it find?", new AbortController().signal);
-    expect(asked).toEqual(expected);
-  });
   it("says why when none of the task's models can use tools, and asks none of them", async () => {
     const f = claudeSetup();
     f.secrets.mockResolvedValue([]);

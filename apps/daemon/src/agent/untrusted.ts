@@ -3,7 +3,7 @@
 // Focus 1). The text cannot close the block early: every tag that reads as "<untrusted" or
 // "</untrusted" is defused first, whatever its case or spacing, and whether it is written with a
 // look-alike bracket, slash or letters (full-width, small, angle, modifier) or with invisible
-// characters or marks inside.
+// characters or marks inside. A defused tag starts with "[", which nothing reads as a tag.
 const OPEN = /[<\uFF1C\uFE64\u2039\u3008\u27E8\u2329\u02C2\u1438]/g;
 const SLASH = /[/\uFF0F\u2044\u2215\u29F8]/y;
 const GAP = /[\s\p{Cf}\p{Mn}]*/uy;
@@ -32,7 +32,7 @@ export function untrusted(source: string, text: string): string {
       .normalize("NFKC")
       .toLowerCase();
     if (!read.startsWith("untrusted")) continue;
-    body += `${text.slice(from, found.index)}\u2039${slash ? "/" : ""}${read}`;
+    body += `${text.slice(from, found.index)}[${slash ? "/" : ""}${read}`;
     from = end;
     OPEN.lastIndex = end;
   }

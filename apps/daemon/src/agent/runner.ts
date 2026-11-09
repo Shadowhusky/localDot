@@ -45,7 +45,6 @@ import {
   type Catalog,
   modelControls,
   modelOptionsProblem,
-  providerById,
   sameModelOptions,
 } from "@localdot/providers";
 import type { CellSummary } from "../cells/types.ts";
@@ -1424,15 +1423,9 @@ export class AgentRunner {
         problem = error;
         return { kind: "none" as const };
       }));
-    // A custom endpoint is local when its key's address is on this Mac or the user's network.
-    const custom =
-      selection.kind === "api" &&
-      selection.roles.some((role) => providerById(role.providerId)?.custom);
-    const keys = custom ? await this.deps.keyd.secrets().catch(() => undefined) : undefined;
     const models = sideModels(selection, {
       api: side.api,
       ...(side.plan ? { plan: side.plan } : {}),
-      endpointOf: (role) => keys?.find((key) => key.id === role.keyId)?.baseURL,
     });
     if (!models.length) throw problem ?? new SideQuestionError(409, "no-spare-model");
     if (!models.some((model) => model.tools)) throw new SideQuestionError(409, "no-tool-model");
