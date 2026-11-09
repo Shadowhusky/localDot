@@ -19,6 +19,8 @@ export const STALL = {
   keysLocked: "keys locked",
   // Docker stopped and took the brain with it; the task goes on once it is back.
   runtime: "docker unavailable",
+  // Its card was fixed from somewhere else, which restarts nothing: Continue or a message does.
+  fixedElsewhere: "fixed elsewhere",
 } as const;
 
 export const PLAN_LIMITS = [
@@ -106,13 +108,14 @@ const INSTEAD = "you sent a message instead";
 // How a card reads once it is history, in the thread and in Replay.
 export function blockerLine(
   blocker: Blocker,
-  outcome: "fixed" | "dismissed" | "moved_on" | "open",
+  outcome: "fixed" | "worked" | "dismissed" | "moved_on" | "open",
   movedTo?: string,
 ): string {
   switch (blocker.kind) {
     case "keys_locked":
       return {
         fixed: "Keys unlocked",
+        worked: "Keys unlocked",
         dismissed: "You left your keys locked",
         moved_on: `Not unlocked: ${INSTEAD}`,
         open: "Saved keys were locked",
@@ -120,6 +123,7 @@ export function blockerLine(
     case "key":
       return {
         fixed: `${blocker.id} key saved`,
+        worked: `The ${blocker.id} key worked`,
         dismissed: `You left the ${blocker.id} key for now`,
         moved_on: `The ${blocker.id} key not saved: ${INSTEAD}`,
         open: `The ${blocker.id} key needed your attention`,
@@ -127,6 +131,7 @@ export function blockerLine(
     case "app":
       return {
         fixed: `${blocker.name} connected`,
+        worked: `${blocker.name} worked again`,
         dismissed: `You left ${blocker.name} for now`,
         moved_on: `${blocker.name} not connected: ${INSTEAD}`,
         open: `${blocker.name} needed signing in`,
@@ -134,6 +139,7 @@ export function blockerLine(
     case "model":
       return {
         fixed: movedTo ? `Switched to ${movedTo}` : "The model answered again",
+        worked: "The model answered again",
         dismissed: "You left the model for now",
         moved_on: `Model not changed: ${INSTEAD}`,
         open: "The model couldn't go on",
@@ -141,6 +147,7 @@ export function blockerLine(
     case "computer":
       return {
         fixed: "Your computer is back on",
+        worked: "Your computer is back on",
         dismissed: "You left your computer off",
         moved_on: `Your computer not turned on: ${INSTEAD}`,
         open: blocker.state === "paused" ? "Your computer was paused" : "Your computer was off",
@@ -148,6 +155,7 @@ export function blockerLine(
     case "runtime":
       return {
         fixed: "Docker is running again",
+        worked: "Docker is running again",
         dismissed: "You left Docker off",
         moved_on: `Docker not started: ${INSTEAD}`,
         open: "Docker wasn't running",

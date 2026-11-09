@@ -30,6 +30,7 @@ import {
   isOwnWords,
   MAX_SUBAGENT_BRIEFS,
   SessionRun,
+  STALL,
   type TranscriptAppend,
   ulid,
 } from "@localdot/protocol";
@@ -41,6 +42,8 @@ import type { GuiAction, NativeActionIdentity } from "../gateway/gateway.ts";
 import {
   BlockerDesk,
   type BlockerOutcome,
+  type ClearedBlocker,
+  type ClearOptions,
   type OpenBlocker,
   type RaiseOptions,
 } from "./blockers.ts";
@@ -377,6 +380,10 @@ export class AgentSession {
   });
   // dot's own request_fix calls waiting on a card.
   #fixWaits = 0;
+  readonly #refusedKeys = new Set<string>();
+  // A stall whose card was fixed from elsewhere: Continue or a message moves it on, nothing else.
+  #heldAfterFix = false;
+  #waitsEnded = 0;
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
   readonly #manual = new Map<ManualLease, ManualCall>();
@@ -1158,7 +1165,7 @@ export class AgentSession {
     this.#senders.set(messageId, sender ?? null);
   }
   post(kind: InboxItem["kind"], text: string, sender?: string, turn?: MessageTurn): InboxItem {
-    if (kind !== "resume") this.#blockers.userSpoke();
+    if (kind === "resume") this.#heldAfterFix = false;
     const messageId = ulid();
     // Known as the user's before it lands, so a wait it ends hears it as theirs.
     if (kind !== "resume") this.#senders.set(messageId, sender ?? null);
@@ -1207,7 +1214,7 @@ export class AgentSession {
   // on none of them: a card it wasn't waiting on still closes, and the message goes its usual way.
   moveOn(text: string, sender?: string, turn?: MessageTurn): boolean {
     if (this.stopped) throw new SessionStoppedError();
-    const stalled = this.#stalledOnCard;
+    const stalled = this.#stalledOnCard || this.#heldAfterFix;
     if (!this.#ask && !this.pendingApproval && !stalled && !this.#fixWaits) {
       this.#blockers.moveOn();
       return false;
@@ -1233,6 +1240,8 @@ export class AgentSession {
   }
   #endWait(waits: boolean): boolean {
     this.messageWaits = waits;
+    this.#waitsEnded++;
+    this.#heldAfterFix = false;
     const onCard = this.#stalledOnCard || this.#fixWaits > 0;
     this.#blockers.moveOn();
     const asked = this.#ask?.finish({ by: "message" }) ?? false;
@@ -1250,7 +1259,6 @@ export class AgentSession {
   // Hold follow-ups outside the model inbox until its current task finishes. A queued
   // message can therefore be promoted without racing the model's inbox cursor.
   enqueue(text: string, sender?: string, turn?: MessageTurn): void {
-    this.#blockers.userSpoke();
     if (this.stopped) throw new SessionStoppedError();
     if (this.status === "idle" && !turn?.handOver && !this.#queued.size) {
       this.post("followup", text, sender, turn);
@@ -1390,35 +1398,87 @@ export class AgentSession {
   lockKeys(tell = true): void {
     this.raiseBlocker({ kind: "keys_locked" }, tell ? {} : { required: true, tell: false });
   }
-  // The vault opened: the card goes, and dot, if it was told, hears it, even from a turn it had
-  // ended.
-  keysUnlocked(): void {
-    this.clearBlockers((blocker) => blocker.kind === "keys_locked");
+  // The vault opened: the card goes, and dot, if it was told, hears it: at once if this task's own
+  // card opened it, otherwise with the user's next word.
+  keysUnlocked(): readonly ClearedBlocker[] {
+    return this.clearBlockers((blocker) => blocker.kind === "keys_locked");
   }
   get openBlockers(): readonly OpenBlocker[] {
     return this.#blockers.open;
   }
   // Undefined once the task has stopped, or while the user's Not now holds.
   raiseBlocker(blocker: Blocker, options?: RaiseOptions): OpenBlocker | undefined {
+    if (blocker.kind === "key" && options?.by !== "dot") this.#refusedKeys.add(blocker.id);
     return this.stopped ? undefined : this.#blockers.raise(blocker, options);
+  }
+  // Whether localDot has seen this key refused in this task: what dot's own word for it is checked by.
+  keyRefused(id: string): boolean {
+    return this.#refusedKeys.has(id);
+  }
+  // A call with the key went through. That says nothing of what the user did, so dot, whose own call
+  // it was, hears nothing, and the card leaves a line saying only that.
+  keyWorked(id: string): void {
+    this.#refusedKeys.delete(id);
+    this.clearBlockers((blocker) => blocker.kind === "key" && blocker.id === id, {
+      outcome: "worked",
+    });
   }
   clearBlockers(
     matches: (blocker: Blocker) => boolean,
-    movedTo?: EventOf<"blocker.clear">["data"]["movedTo"],
-  ): readonly OpenBlocker[] {
-    return this.stopped ? [] : this.#blockers.clear(matches, movedTo);
+    options?: ClearOptions,
+  ): readonly ClearedBlocker[] {
+    if (this.stopped) return [];
+    const cleared = this.#blockers.clear(matches, options);
+    if (options?.outcome !== "worked" && cleared.some((one) => one.required && !one.ownCard)) {
+      this.#heldAfterFix = true;
+      this.#publishState("paused", STALL.fixedElsewhere);
+    }
+    return cleared;
+  }
+  useBlocker(blockerId: string): boolean {
+    return !this.stopped && this.#blockers.use(blockerId);
   }
   dismissBlocker(blockerId: string): boolean {
     return !this.stopped && this.#blockers.dismiss(blockerId);
+  }
+  blockerDeclined(blocker: Blocker): boolean {
+    return this.#blockers.declined(blocker);
+  }
+  // Not now is the owner's to lift: a guest's message or a routine's follow-up doesn't.
+  ownerSpoke(): void {
+    this.#blockers.ownerSpoke();
   }
   withdrawBlockers(): void {
     if (!this.stopped) this.#blockers.withdraw();
   }
   // The task itself waits, with no call of dot's under way.
   async waitForBlockerToGo({ blockerId }: OpenBlocker): Promise<void> {
+    const from = this.#seq;
     while (this.#blockers.isOpen(blockerId) && !this.stopped)
       await this.#changed(25_000, this.abort.signal);
     this.abort.signal.throwIfAborted();
+    if (this.#blockers.fixedElsewhere(blockerId) && !this.stopped)
+      await this.#untilSpoken(from, Number.POSITIVE_INFINITY, this.abort.signal);
+  }
+  // Fixed from elsewhere, so nothing restarts dot by itself: Continue or the user's next word does.
+  async #untilSpoken(
+    from: number,
+    deadline: number,
+    signal: AbortSignal,
+  ): Promise<"spoken" | "pause" | "timeout"> {
+    const ended = this.#waitsEnded;
+    for (;;) {
+      signal.throwIfAborted();
+      if (this.safetyPause) return "pause";
+      if (
+        ended !== this.#waitsEnded ||
+        this.#inbox.some((item) => item.seq > from && !this.#notes.has(item.seq))
+      )
+        return "spoken";
+      const left = deadline - Date.now();
+      if (left <= 0) return "timeout";
+      await this.#changed(Math.min(left, 25_000), signal);
+    }
   }
   // dot's call waits here for the card to go, as a question waits for its answer. The card stays up
   // after a timeout or a Pause.
@@ -1426,9 +1486,10 @@ export class AgentSession {
     { blockerId }: OpenBlocker,
     timeoutMs: number,
     signal: AbortSignal,
-  ): Promise<BlockerOutcome | "timeout" | "pause"> {
+  ): Promise<BlockerOutcome | "timeout" | "pause" | "unheard"> {
     this.#blockers.join(blockerId);
     const deadline = Date.now() + timeoutMs;
+    const from = this.#seq;
     this.#fixWaits++;
     if (!this.safetyPause) {
       this.setStatus("waiting_user");
@@ -1442,7 +1503,12 @@ export class AgentSession {
         if (left <= 0) return "timeout";
         await this.#changed(left, signal);
       }
-      return this.#blockers.outcome(blockerId) ?? "fixed";
+      const outcome = this.#blockers.outcome(blockerId) ?? "fixed";
+      if (!this.#blockers.fixedElsewhere(blockerId)) return outcome;
+      this.setStatus("paused");
+      this.#publishState("paused", STALL.fixedElsewhere);
+      const heard = await this.#untilSpoken(from, deadline, signal);
+      return heard === "spoken" ? outcome : heard === "pause" ? "pause" : "unheard";
     } finally {
       this.#fixWaits--;
       this.#blockers.leave(blockerId);
@@ -1605,7 +1671,11 @@ export class AgentSession {
     this.check(generation, signal, true);
     if (!Number.isSafeInteger(after) || after < 0 || after > this.#seq)
       throw new Error("invalid inbox cursor");
-    const ready = () => this.#inbox.filter((i) => i.seq > after);
+    // A stopped brain goes on at anything it reads, so localDot's own words wait for the user's.
+    const ready = () => {
+      const items = this.#inbox.filter((i) => i.seq > after);
+      return this.status === "paused" && items.every((i) => this.#notes.has(i.seq)) ? [] : items;
+    };
     const combined = AbortSignal.any([
       this.abort.signal,
       generation.signal,

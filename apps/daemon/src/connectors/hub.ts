@@ -414,15 +414,16 @@ export class ConnectorHub {
     };
   }
 
-  // The app dot means by this id or name, when Connect is what stands between it and the task, as
-  // localDot itself names it.
+  // The app dot means by this id or name, as localDot itself names it, when its sign-in has been
+  // seen to end. An app never signed in has nothing that ended: credentials action connect offers it.
   ended(app: string): { connector: string; name: string; host: string } | undefined {
     const wanted = app.trim().toLowerCase();
     const config = this.configs().find(
       (one) => one.id === wanted || one.catalog === wanted || one.name.toLowerCase() === wanted,
     );
     if (config?.server.kind !== "remote" || config.server.auth.kind !== "oauth") return undefined;
-    if (this.isConnected(config.id)) return undefined;
+    if (!config.server.auth.secret || this.#live.get(config.id)?.status !== "needs_sign_in")
+      return undefined;
     return {
       connector: config.id,
       name: clipText(config.name, 40),

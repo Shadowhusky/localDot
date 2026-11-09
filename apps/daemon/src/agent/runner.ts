@@ -150,7 +150,7 @@ const ANSWERED: ReadonlySet<string> = new Set([
 const DOCKER_CHECK_MS = 5000;
 // What a task the user carried on after a move to another kind of model starts with.
 const CARRY_ON = "Continue where you left off.";
-// A task's card waits this long at most for the user once the task itself has nothing left to do.
+// A card waits this long at most for the user once dot has ended its turn on it.
 const CARD_WAIT_MS = 4 * 60 * 60_000;
 const CARD_STATES = new Set<CellSummary["state"]>(["stopped", "failed"]);
 // What a Start or Resume would bring back; nothing the computer is doing by itself, or that a
@@ -551,9 +551,13 @@ export class AgentRunner {
           }
         } else if (event.data.reason === STALL.keysLocked) {
           rt.pause = "keys";
-          rt.session.lockKeys(false);
+          // The brain's word came from a model call's reply: keyd's own health says if it is so.
+          if (vaultLocked(this.#health)) rt.session.lockKeys(false);
         } else if (event.data.reason === STALL.runtime) rt.pause = "runtime";
-        else if (!SESSION_PAUSES.has(event.data.reason))
+        else if (
+          !SESSION_PAUSES.has(event.data.reason) &&
+          event.data.reason !== STALL.fixedElsewhere
+        )
           rt.pause =
             event.data.reason === "budget" ? "budget" : this.#health.online ? "model" : "keyd";
       } else if (["thinking", "acting", "observing"].includes(event.data.state)) {
@@ -576,11 +580,8 @@ export class AgentRunner {
     };
     if (reason === STALL.keyReenter || reason === STALL.keyRebound) {
       if (!detail || !SECRET_ID_PATTERN.test(detail)) return false;
-      return raise({
-        kind: "key",
-        id: detail,
-        problem: reason === STALL.keyReenter ? "reenter" : "rebound",
-      });
+      void this.#stallOnKey(rt, detail, reason === STALL.keyReenter ? "reenter" : "rebound");
+      return true;
     }
     if (reason === STALL.modelRefused && detail?.startsWith("401:")) {
       const main =
@@ -593,12 +594,21 @@ export class AgentRunner {
     if (!block) return false;
     return raise({ kind: "model", reason: block, ...(detail ? { detail } : {}) });
   }
+  // The brain's word for this came from a model call's reply, so it is checked with keyd itself.
+  async #stallOnKey(rt: Runtime, id: string, problem: "reenter" | "rebound"): Promise<void> {
+    const key = (await this.deps.keyd.secrets().catch(() => [])).find((k) => k.id === id);
+    if (!key?.[problem] || rt.session.status !== "paused") return;
+    rt.session.raiseBlocker({ kind: "key", id, problem }, { required: true, tell: false });
+    rt.stalled = `key:${id}`;
+  }
   // The model's own answer is what proves a retry worked: a card holds through a try that fails.
   #modelAnswered(rt: Runtime): void {
     if (!rt.stalled) return;
     const subject = rt.stalled;
     rt.stalled = undefined;
-    rt.session.clearBlockers((blocker) => blockerSubject(blocker) === subject);
+    rt.session.clearBlockers((blocker) => blockerSubject(blocker) === subject, {
+      outcome: "worked",
+    });
   }
   // A key refused for a reason of its own: one keyd says the user must enter again or deal with.
   async #refusedKey(rt: Runtime, secretId: string): Promise<void> {
@@ -610,7 +620,8 @@ export class AgentRunner {
         problem: key.rebound ? "rebound" : "reenter",
       });
   }
-  // A key was saved or a sign-in finished, on any device: what waited on it goes on by itself.
+  // A key was saved or a sign-in finished, on any device: what waited on it goes on by itself if the
+  // fix came through its own card.
   async keyChanged(secretId: string): Promise<void> {
     const keys = await this.deps.keyd.secrets().catch(() => []);
     const usable = keys.some((key) => key.id === secretId && !key.reenter && !key.rebound);
@@ -626,7 +637,7 @@ export class AgentRunner {
       );
       if (rt.stalled === `key:${secretId}`) rt.stalled = undefined;
       if (
-        cleared.some((open) => open.required) &&
+        cleared.some((open) => open.required && open.ownCard) &&
         rt.pause === "model" &&
         session.status === "paused" &&
         !session.controlHeld
@@ -690,8 +701,8 @@ export class AgentRunner {
     const stalled = rt.stalled;
     rt.stalled = undefined;
     const cleared = session.clearBlockers((blocker) => blockerSubject(blocker) === stalled, {
-      provider: ref.provider,
-      model: ref.model,
+      movedTo: { provider: ref.provider, model: ref.model },
+      byCard: true,
     });
     if (turn.handOver) {
       try {
@@ -2189,10 +2200,11 @@ export class AgentRunner {
         rt.pause = undefined;
         session.post("resume", "");
       } else if (!now.online && rt.pause === "model") rt.pause = "keyd";
+      if (vaultLocked(now) && rt.pause === "keys" && !session.keysLocked) session.lockKeys(false);
       if (now.online && !vaultLocked(now) && session.keysLocked) {
-        // dot hears the keys are open; a model that stopped on its own key also resumes.
-        session.keysUnlocked();
-        if (rt.pause === "keys" && session.status === "paused" && !session.controlHeld) {
+        // Only this task's own card carries it on. Keys opened elsewhere leave a stopped task stopped.
+        const ownCard = session.keysUnlocked().some((open) => open.ownCard);
+        if (ownCard && rt.pause === "keys" && session.status === "paused" && !session.controlHeld) {
           rt.pause = undefined;
           session.post("resume", "");
         }
@@ -2534,8 +2546,9 @@ export class AgentRunner {
               await session.waitForControl(idleWait.signal);
               asked = await session.waitForUser(idleMs, idleWait.signal);
             }
-            // A card still up waits a good while longer: fixing it carries on from here.
-            if (!asked && session.openBlockers.length)
+            // dot ended its turn on a card: fixing that card carries on from here. A task that ended
+            // blocked or gave up has said what is left, and gets no longer than any other.
+            if (!asked && complete && session.openBlockers.length)
               asked = await session.waitForUser(CARD_WAIT_MS, idleWait.signal);
             if (!asked) break;
           } catch (error) {

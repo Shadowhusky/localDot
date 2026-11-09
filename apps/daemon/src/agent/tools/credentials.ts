@@ -3,12 +3,15 @@ import {
   type CredentialsInput,
   credentialBinding,
   KEYD_VAULT_LOCKED,
+  type KeydRecord,
   KeyMetadata,
   sameCredential,
   type ToolResult,
 } from "@localdot/protocol";
 import { SERVICE_BYTES, ServiceKeyProblem } from "../../keyd/service-keys.ts";
+import { authorizePrepared } from "../safety/authorize.ts";
 import { untrusted } from "../untrusted.ts";
+import { claimsLocalDot, plainWords } from "./card-words.ts";
 import {
   append,
   fail,
@@ -17,8 +20,11 @@ import {
   type ToolDeps,
   text,
 } from "./deps.ts";
+import { keysCardInstead } from "./request-fix.ts";
 
 const TOOL_LISTING_MS = 20_000;
+const NOT_LOCALDOTS =
+  "localDot has no key of its own to add, and never asks for one here. Name the key and its service for the real service it is for.";
 
 export async function credentialsTool(
   deps: ToolDeps,
@@ -53,6 +59,18 @@ export async function credentialsTool(
       ],
     };
   }
+  const shown = [
+    input.key_id,
+    input.label,
+    input.service,
+    input.description,
+    input.base_url,
+    input.header,
+    ...(input.hosts ?? []),
+  ].join("\n");
+  const card = await keysCardInstead(deps, ctx, shown);
+  if (card) return card;
+  if (claimsLocalDot(plainWords(shown))) return fail(NOT_LOCALDOTS);
   let binding: ReturnType<typeof credentialBinding>;
   try {
     binding = credentialBinding(input);
@@ -64,9 +82,11 @@ export async function credentialsTool(
   const metadata = KeyMetadata.parse({
     label: input.label ?? input.key_id,
     service: input.service ?? input.provider,
-    description: input.description,
+    // What a task has read can write this, so a task that has read anything gets no words of its own.
+    description: ctx.session.tainted ? undefined : input.description,
   });
-  const existing = (await deps.credentials.list()).find((key) => key.id === binding.id);
+  const saved = await deps.credentials.list();
+  const existing = saved.find((key) => key.id === binding.id);
   ctx.check();
   if (existing && sameCredential(existing, binding))
     return {
@@ -81,6 +101,10 @@ export async function credentialsTool(
     return fail(
       "That key name is already used for a different credential. Select the matching saved key or a new name; do not overwrite it.",
     );
+  if (ctx.session.tainted) {
+    const refused = await newPlaceRefused(ctx, binding, saved);
+    if (refused) return refused;
+  }
   const answer = await ctx.session.askFields(
     {
       question: ctx.redact(
@@ -119,9 +143,9 @@ export async function credentialsTool(
         ),
       ],
     };
-  const saved = (await deps.credentials.list()).find((key) => sameCredential(key, binding));
+  const added = (await deps.credentials.list()).find((key) => sameCredential(key, binding));
   ctx.check();
-  return saved
+  return added
     ? {
         ok: true,
         content: [
@@ -131,6 +155,58 @@ export async function credentialsTool(
         ],
       }
     : fail("The saved key could not be verified. Check credentials/list before continuing.");
+}
+
+const hostOf = (address: string) => {
+  try {
+    return new URL(address).host;
+  } catch {
+    return address;
+  }
+};
+type Place = Pick<KeydRecord, "hosts" | "baseURL">;
+const placesOf = ({ hosts, baseURL }: Place) => [
+  ...(hosts ?? []),
+  ...(baseURL ? [hostOf(baseURL)] : []),
+];
+
+// A task that has read outside words could be sending a key the user types to whoever wrote them, so
+// a place no saved key goes to already waits for the user's OK.
+async function newPlaceRefused(
+  ctx: ToolCallContext,
+  binding: ReturnType<typeof credentialBinding>,
+  saved: readonly Place[],
+): Promise<ToolResult | undefined> {
+  const known = new Set(saved.flatMap(placesOf));
+  const fresh = placesOf(binding as Place).filter((place) => !known.has(place));
+  if (!fresh.length) return undefined;
+  const permit = await authorizePrepared(ctx, {
+    tool: "credentials",
+    input: { key: binding.id, goes_to: fresh },
+    target: null,
+    facts: {
+      operation: "connector",
+      connector: {
+        app: "Keys",
+        tool: "Add a key",
+        exposed: "keys__add",
+        actionClass: "network",
+        asks: true,
+        host: fresh[0] ?? "",
+        card: {
+          title: "Send a new key to a new place",
+          why: "This task has read things from outside, which can steer it. Check you expected a key to go here before you add one.",
+        },
+      },
+    },
+    revalidate: async () => true,
+  });
+  ctx.check();
+  return permit
+    ? undefined
+    : fail(
+        `The user didn't OK a key going to ${fresh.join(", ")}. Respect this choice; do not ask again unless the user requests it. Explain what remains blocked.`,
+      );
 }
 
 // Offers the user a card to connect an app, listed or already theirs: the card opens the sign-in and
@@ -258,8 +334,7 @@ export async function apiRequestTool(
   else if (reply.status === 401 && !reply.keydReason)
     ctx.session.raiseBlocker({ kind: "key", id: input.key_id, problem: "rejected" });
   const ok = reply.status >= 200 && reply.status < 300;
-  if (ok)
-    ctx.session.clearBlockers((blocker) => blocker.kind === "key" && blocker.id === input.key_id);
+  if (ok) ctx.session.keyWorked(input.key_id);
   let path: string | undefined;
   if (input.output_path && !reply.truncated) {
     try {

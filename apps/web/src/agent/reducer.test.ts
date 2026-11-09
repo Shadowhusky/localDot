@@ -27,6 +27,20 @@ describe("bounded agent projection", () => {
     blocker: { kind: "keys_locked" },
     by: "localdot",
   });
+  it("keeps only the latest cards of a task, however many are raised", () => {
+    let model = emptyAgentModel();
+    for (let seq = 0; seq < L.blockers + 8; seq++)
+      model = projectAgentEvent(
+        model,
+        ev(seq, "blocker.raise", {
+          blockerId: id(40000 + seq),
+          blocker: { kind: "keys_locked" },
+          by: "dot",
+        }),
+      );
+    expect(model.blockers.size).toBe(L.blockers);
+    expect(model.historyTruncated).toBe(true);
+  });
   it("holds a card up from when it is raised until any device's fix clears it", () => {
     const up = reduce([raised]);
     expect(openBlockers(up).map((open) => open.blockerId)).toEqual([card]);

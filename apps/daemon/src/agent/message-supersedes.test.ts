@@ -629,6 +629,7 @@ describe("a message while a card in the conversation is up", () => {
     const again = f.call("request_fix", { kind: "keys_locked" });
     await until(() => f.session.openBlockers.length === 1);
     expect(raises(f)).toHaveLength(2);
+    for (const open of f.session.openBlockers) f.session.useBlocker(open.blockerId);
     f.session.keysUnlocked();
     expect((await again).result.ok).toBe(true);
   });
@@ -685,6 +686,7 @@ describe("a message while a card in the conversation is up", () => {
     expect((await f.say(USER_WORDS)).status).not.toBe(500);
     expect(f.session.openBlockers).toHaveLength(1);
     expect(clears(f)).toEqual([]);
+    for (const open of f.session.openBlockers) f.session.useBlocker(open.blockerId);
     f.session.keysUnlocked();
     expect((await waiting).result.ok).toBe(true);
   });

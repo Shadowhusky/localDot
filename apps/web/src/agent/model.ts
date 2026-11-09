@@ -23,6 +23,7 @@ export const AGENT_LIMITS = Object.freeze({
   questions: 64,
   takeovers: 64,
   unapproved: 64,
+  blockers: 64,
   results: 64,
   routineProposals: 16,
   dots: 16,

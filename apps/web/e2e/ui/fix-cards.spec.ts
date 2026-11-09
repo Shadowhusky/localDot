@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { TOKEN, type UiFixture } from "../fixtures/start-ui-fixture.ts";
-import { chooseView, expect, runAt, test } from "./harness.ts";
+import { chooseView, composer, expect, isPhone, runAt, test } from "./harness.ts";
 
 // What stops dot, fixed where dot said so: localDot's own card for each kind, in Chat and Studio, at
 // desktop and phone widths, in light and dark. The routes behind them are the daemon's own.
@@ -109,7 +109,7 @@ for (const view of VIEWS)
       await qa(page, fixture, "reenter");
       await qa(page, fixture, "stall/key-reenter");
       const rail = await chatRail(page);
-      const card = rail.getByRole("region", { name: /Re-enter your/ });
+      const card = rail.getByRole("region", { name: /Re-enter a saved key/ });
       await expect(card).toBeVisible();
       await expect(card.getByRole("button", { name: "Not now" })).toHaveCount(0);
       await card.getByRole("textbox").first().fill(KEY_VALUE);
@@ -155,7 +155,8 @@ for (const view of VIEWS)
       const rail = await chatRail(page);
       const card = rail.getByRole("region", { name: /could not process/ });
       await expect(card).toBeVisible();
-      await expect(card).toContainText("The provider said: 400");
+      await expect(card.getByRole("blockquote")).toContainText("From the provider, not localDot");
+      await expect(card.getByRole("blockquote")).toContainText("400");
       await expect(card).not.toContainText(/settings/i);
       await expect(card.getByRole("button", { name: "Not now" })).toHaveCount(0);
       await pictured(page, card, "model", ui);
@@ -239,6 +240,8 @@ for (const view of VIEWS)
 // A message moves on from a card as from any other wait of dot's.
 const box = (rail: Locator) => rail.getByRole("form", { name: "Message dot" });
 const SAID = "Forget that, book the train instead";
+const PRIVATE_HINT = "Sending moves on without fixing this. Messages aren't kept secret";
+const SEND_HELD = "Send as a message — dot will read this";
 async function moveOn(rail: Locator, hint: string) {
   const form = box(rail);
   const field = form.getByRole("textbox", { name: "Message", exact: true });
@@ -246,8 +249,8 @@ async function moveOn(rail: Locator, hint: string) {
   await field.fill(SAID);
   await expect(form.getByText(hint)).toBeVisible();
   await form.getByRole("button", { name: "Send now" }).click();
+  if (hint === PRIVATE_HINT) await form.getByRole("button", { name: SEND_HELD }).click();
 }
-const PRIVATE_HINT = "Sending moves on without fixing this. Messages aren't kept secret";
 const HINT = "Sending moves on without fixing this";
 
 for (const view of VIEWS)
@@ -265,7 +268,11 @@ for (const view of VIEWS)
       await expect(rail.getByRole("article", { name: "You", exact: true }).last()).toContainText(
         SAID,
       );
-      await expect(rail.getByText("I read your message and moved on")).toBeVisible();
+      await expect(
+        rail
+          .getByRole("region", { name: "Conversation history" })
+          .getByText("I read your message and moved on"),
+      ).toBeVisible();
       await holdsNoSecret(page, fixture, PASSPHRASE);
     });
 
@@ -293,7 +300,11 @@ for (const view of VIEWS)
           .getByRole("article", { name: "You", exact: true })
           .getByText("dot stopped waiting to read this"),
       ).toBeVisible();
-      await expect(rail.getByText("I read your message and moved on")).toBeVisible();
+      await expect(
+        rail
+          .getByRole("region", { name: "Conversation history" })
+          .getByText("I read your message and moved on"),
+      ).toBeVisible();
     });
 
     test("resumes nothing when what the card waited on is fixed afterwards", async ({
@@ -310,6 +321,25 @@ for (const view of VIEWS)
       await expect(rail.getByText("Docker is running again")).toHaveCount(0);
     });
   });
+
+test("a card fixed elsewhere leaves a stopped task stopped, saying what moves it on", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("running");
+  await qa(page, fixture, "fix/runtime-stalled");
+  const rail = await chatRail(page);
+  await expect(rail.getByRole("region", { name: "Docker isn't running" })).toBeVisible();
+  await qa(page, fixture, "fix-docker-up");
+  await leavesALine(rail, "Docker is running again");
+  const recovery = rail.getByRole("region", { name: "Task recovery" });
+  await expect(recovery.getByRole("heading", { name: "That's fixed now" })).toBeVisible();
+  const resumed = page.waitForResponse(
+    (reply) => reply.url().endsWith("/resume") && reply.request().method() === "POST",
+  );
+  await recovery.getByRole("button", { name: "Continue" }).click();
+  expect((await resumed).status()).toBe(204);
+});
 
 test("a message closes the card on every device", async ({ page, ui, context }) => {
   await ui.open("fix-runtime");
@@ -450,3 +480,121 @@ for (const scenario of ["fix-computer", "fix-runtime", "fix-app"] as const)
     const over = await card.evaluate((element) => element.scrollWidth - element.clientWidth);
     expect(over).toBeLessThanOrEqual(0);
   });
+
+// What is typed in the message box while a secret field is up may be the secret: on any device it
+// takes one more step to send, and none of it is kept.
+test.describe("a secret and the message box", () => {
+  const SECRET = "correct horse battery staple";
+  const DRAFT = "localdot.composer-draft.v1";
+  const auth = { authorization: `Bearer ${TOKEN}` };
+  const logged = async (page: Page, origin: string) => {
+    const tasks = (await (
+      await page.request.get(`${origin}/api/sessions`, { headers: auth })
+    ).json()) as { id: string }[];
+    const logs = await Promise.all(
+      tasks.map(async ({ id }) =>
+        (await page.request.get(`${origin}/api/sessions/${id}/events`, { headers: auth })).text(),
+      ),
+    );
+    return logs.join("\n");
+  };
+  const messageBox = async (page: Page) =>
+    (await composer(page)).getByRole("textbox", { name: "Message", exact: true });
+  // Return on a phone starts a new line; Send is what sends there.
+  const trySending = async (page: Page) => {
+    if (await isPhone(page))
+      await (await composer(page)).getByRole("button", { name: "Send now" }).click();
+    else await page.keyboard.press("Enter");
+  };
+  const held = async (page: Page) =>
+    (await composer(page)).getByRole("button", { name: SEND_HELD });
+
+  test("a card takes the keys from an empty box, so the passphrase goes to it", async ({
+    page,
+    ui,
+  }) => {
+    const fixture = await ui.open("running");
+    const box = await messageBox(page);
+    await box.click();
+    await box.fill("please carry on");
+    // A message can't go until the page has caught up with the task, and stays in the box till then.
+    await expect(async () => {
+      await trySending(page);
+      await expect(box).toHaveValue("", { timeout: 2000 });
+    }).toPass();
+    await box.focus();
+    await page.request.post(`${fixture.origin}/__qa/keys-locked`);
+    const card = page.getByRole("region", { name: "Unlock your saved keys" });
+    await expect(card.getByLabel("Passphrase")).toBeFocused();
+    await page.keyboard.type(SECRET);
+    await expect(box).toHaveValue("");
+    await expect(card.getByLabel("Passphrase")).toHaveValue(SECRET);
+    expect(await logged(page, fixture.origin)).not.toContain(SECRET);
+  });
+
+  test("a secret question's form takes the keys from an empty box", async ({ page, ui }) => {
+    const fixture = await ui.open("running");
+    const box = await messageBox(page);
+    await box.focus();
+    await page.request.post(`${fixture.origin}/__qa/ask?fields=login`);
+    await expect(page.locator("form.ask input").first()).toBeFocused();
+  });
+
+  test("words already in the box keep the keys, and still don't go on Enter", async ({
+    page,
+    ui,
+  }) => {
+    const fixture = await ui.open("running");
+    const box = await messageBox(page);
+    await box.click();
+    await page.keyboard.type("half a thought");
+    await page.request.post(`${fixture.origin}/__qa/keys-locked`);
+    await expect(page.getByRole("region", { name: "Unlock your saved keys" })).toBeVisible();
+    await expect(box).toBeFocused();
+    await trySending(page);
+    await expect(await held(page)).toBeVisible();
+    expect(await logged(page, fixture.origin)).not.toContain("half a thought");
+  });
+
+  for (const [name, start] of [
+    ["the unlock card", "keys-locked"],
+    ["a password on a login form", "login"],
+  ] as const)
+    test(`typed in the box during ${name}, it goes nowhere without the extra step`, async ({
+      page,
+      ui,
+    }) => {
+      const fixture = await ui.open(start === "login" ? "running" : start);
+      if (start === "login") await page.request.post(`${fixture.origin}/__qa/ask?fields=login`);
+      await expect(page.locator('form.ask, [data-fix="keys_locked"]').first()).toBeVisible();
+      const box = await messageBox(page);
+      await box.click();
+      await box.pressSequentially(SECRET);
+      await trySending(page);
+      await trySending(page);
+      await expect(await held(page)).toBeVisible();
+      await expect(await held(page)).not.toBeFocused();
+      await page.waitForTimeout(600);
+      expect(await logged(page, fixture.origin)).not.toContain(SECRET);
+      await box.blur();
+      expect(await page.evaluate((key) => localStorage.getItem(key), DRAFT)).toBeNull();
+      await ui.settle();
+      await page.screenshot({
+        path: test.info().outputPath(`held-${start}.png`),
+      });
+      await (await held(page)).click();
+      await expect.poll(() => logged(page, fixture.origin)).toContain(`"text":"${SECRET}"`);
+    });
+
+  test("nothing typed during the wait outlives a reload", async ({ page, ui }) => {
+    await ui.open("keys-locked");
+    await expect(page.getByRole("region", { name: "Unlock your saved keys" })).toBeVisible();
+    const box = await messageBox(page);
+    await box.click();
+    await box.pressSequentially(SECRET);
+    await page.waitForTimeout(600);
+    await page.reload();
+    await expect(page.getByRole("region", { name: "Unlock your saved keys" })).toBeVisible();
+    await expect(await messageBox(page)).toHaveValue("");
+  });
+});

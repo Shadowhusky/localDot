@@ -1,11 +1,18 @@
 import type { Blocker, RequestFixInput, ToolResult } from "@localdot/protocol";
 import { blockerNote } from "@localdot/protocol/guidance";
 import type { OpenBlocker, RaiseOptions } from "../blockers.ts";
+import { aimsAtKeys, namesItsSecret, plainWords } from "./card-words.ts";
 import { fail, movedOnFix, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const ASK_WINDOW_MS = 30 * 60_000;
 const STILL_OPEN =
   "This isn't fixed yet, and localDot's card stays up. Carry on with what doesn't need it, or end your turn and say what is left: you'll be told once it is fixed. Don't raise it again or ask the user about it.";
+const IT_WORKED =
+  "A call with it just went through, so localDot's card has gone. Carry on with the task.";
+const FIXED_UNHEARD =
+  "This was fixed outside this task, and the user hasn't said to go on. End your turn and say what is left: they can carry it on from here.";
+const ASKED_LATELY =
+  "localDot asked the user about this a moment ago, so it doesn't ask again yet. Carry on with what doesn't need it, or finish and say what is left.";
 export const KEYS_NOT_LOCKED =
   "Saved keys aren't locked, so localDot shows no card. If something still fails, the cause is something else: don't ask the user to unlock anything or for a passphrase.";
 
@@ -33,11 +40,16 @@ async function realBlocker(
       const key = keys?.find((one) => one.id === input.key_id);
       if (!key)
         return `No saved key is named ${input.key_id}. For a key that doesn't exist yet, use credentials action request.`;
-      return {
-        kind: "key",
-        id: key.id,
-        problem: key.rebound ? "rebound" : key.reenter ? "reenter" : "rejected",
-      };
+      const problem = key.rebound
+        ? "rebound"
+        : key.reenter
+          ? "reenter"
+          : ctx.session.keyRefused(key.id)
+            ? "rejected"
+            : undefined;
+      return problem
+        ? { kind: "key", id: key.id, problem }
+        : `The key ${key.id} hasn't been refused in this task, so localDot shows no card. Call api_request with it first, and read what the service answers.`;
     }
     case "app": {
       const app = input.app ? deps.connectors?.ended(input.app) : undefined;
@@ -68,7 +80,15 @@ export async function waitForFix(
     ...options,
     tell: false,
   });
-  if (!open) return { ok: true, content: [text(blockerNote(blocker, "dismissed"))] };
+  if (!open)
+    return {
+      ok: true,
+      content: [
+        text(
+          ctx.session.blockerDeclined(blocker) ? blockerNote(blocker, "dismissed") : ASKED_LATELY,
+        ),
+      ],
+    };
   const ended = await ctx.session.waitForBlocker(
     open,
     deps.askTimeoutMs ?? ctx.session.approvalWindowMs ?? ASK_WINDOW_MS,
@@ -88,10 +108,30 @@ export async function waitForFix(
       return { ok: true, content: [text(blockerNote(blocker, "dismissed"))] };
     case "moved_on":
       return { ok: true, content: [text(movedOnFix(ctx.session))] };
+    case "worked":
+      return { ok: true, content: [text(IT_WORKED)] };
+    case "unheard":
+      return { ok: false, content: [text(FIXED_UNHEARD)] };
     case "fixed":
     case "moot":
       return { ok: true, content: [text(blockerNote(blocker, "fixed"))] };
   }
+}
+
+// Words of dot's that would stand in for localDot's own card get the real card when the keys are
+// locked, and a refusal otherwise.
+export async function keysCardInstead(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+  words: string,
+): Promise<ToolResult | undefined> {
+  const said = plainWords(words);
+  const locked = deps.keysLocked?.();
+  if (aimsAtKeys(said))
+    return locked ? waitForFix(deps, ctx, { kind: "keys_locked" }) : fail(KEYS_NOT_LOCKED);
+  // While the vault is locked, any passphrase asked for through dot could be its own.
+  if (locked && namesItsSecret(said)) return waitForFix(deps, ctx, { kind: "keys_locked" });
+  return undefined;
 }
 
 export async function requestFixTool(

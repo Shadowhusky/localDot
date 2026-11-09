@@ -2,6 +2,7 @@ import type { Server } from "node:http";
 import { type LocalDotEvent, ULID_PATTERN } from "@localdot/protocol";
 import type { WebSocket } from "ws";
 import type { EventLog } from "./event-log.ts";
+import { forGuest } from "./remote/guest-events.ts";
 import {
   attachUpgradeRouter,
   refuse,
@@ -24,7 +25,7 @@ export function sessionStreamRoute(eventLog: EventLog): UpgradeRoute {
     pattern: /^\/api\/sessions\/([^/]+)\/stream$/,
     params: ["id"],
     auth: "token",
-    open({ req, socket, head, url, params }) {
+    open({ req, socket, head, url, params, guest }) {
       const sessionId = params.id ?? "";
       if (!ULID_PATTERN.test(sessionId)) {
         refuse(socket, "403 Forbidden");
@@ -35,7 +36,9 @@ export function sessionStreamRoute(eventLog: EventLog): UpgradeRoute {
         return;
       }
       const fromSeq = Math.max(0, Number(url.searchParams.get("fromSeq")) || 0);
-      wss.handleUpgrade(req, socket, head, (ws) => streamSession(ws, eventLog, sessionId, fromSeq));
+      wss.handleUpgrade(req, socket, head, (ws) =>
+        streamSession(ws, eventLog, sessionId, fromSeq, guest),
+      );
     },
   };
 }
@@ -52,13 +55,14 @@ function streamSession(
   eventLog: EventLog,
   sessionId: string,
   fromSeq: number,
+  guest: boolean,
 ): void {
   // ws closes the connection itself after a protocol error; an unhandled 'error' would crash the daemon.
   ws.on("error", () => {});
   let nextSeq = fromSeq;
   const send = (event: LocalDotEvent) => {
     if (event.seq < nextSeq) return;
-    ws.send(JSON.stringify(event));
+    ws.send(JSON.stringify(guest ? forGuest(event) : event));
     nextSeq = event.seq + 1;
   };
   try {

@@ -2227,8 +2227,7 @@ const agent: AgentRoutesDeps = {
       conversations.chooseModel(conversations.latest(id), ref);
       effects.push(`model:${ref.model}`);
       session.clearBlockers((blocker) => blocker.kind === "model" || blocker.kind === "key", {
-        provider: ref.provider,
-        model: ref.model,
+        movedTo: { provider: ref.provider, model: ref.model },
       });
       session.setStatus("running");
       session.append("agent.state", { state: "thinking" });
@@ -3997,6 +3996,11 @@ function fix(kind: string): string | undefined {
       return;
     case "runtime":
       session.raiseBlocker({ kind: "runtime" });
+      return;
+    case "runtime-stalled":
+      session.setStatus("paused");
+      session.append("agent.state", { state: "paused", reason: STALL.runtime });
+      session.raiseBlocker({ kind: "runtime" }, STALLED_CARD);
       return;
     default:
       return "unknown card";

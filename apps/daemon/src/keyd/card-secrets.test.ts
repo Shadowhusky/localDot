@@ -125,6 +125,7 @@ it("what dot sends with request_fix goes nowhere", async () => {
     for (let i = 0; i < 2000 && !h.session.openBlockers.length; i++)
       await new Promise<void>((resolve) => setImmediate(resolve));
     expect(h.session.openBlockers).toHaveLength(1);
+    h.session.useBlocker(h.session.openBlockers[0]?.blockerId ?? "");
     h.session.keysUnlocked();
     const { body } = await reply;
     const everything = JSON.stringify([h.events(), body]);

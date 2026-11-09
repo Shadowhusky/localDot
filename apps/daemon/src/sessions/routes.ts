@@ -54,7 +54,7 @@ export function eventStreamResponse(
   file: string,
   fromSeq: number,
   signal: AbortSignal,
-  options?: { shown?: boolean },
+  options?: Parameters<typeof streamEventLines>[2],
 ): Response {
   const lines = streamEventLines(file, fromSeq, options);
   const encoder = new TextEncoder();

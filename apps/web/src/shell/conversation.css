@@ -1305,6 +1305,18 @@
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
 
+.thread-fix-name {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.thread-fix-quoted {
+  margin: 0;
+  padding-left: calc(var(--spacing) * 3);
+  border-left: 2px solid var(--color-hairline);
+  overflow-wrap: anywhere;
+}
+
 .thread-fix .keys-unlock-form,
 .thread-fix .keys-form {
   min-width: 0;
@@ -1855,6 +1867,13 @@
   color: var(--color-fg-1);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   text-wrap: pretty;
+}
+
+.composer-held {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding-bottom: calc(var(--spacing) * 2);
 }
 
 .composer-files .file-chips-block {

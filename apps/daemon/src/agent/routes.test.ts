@@ -594,6 +594,38 @@ describe("agent user routes", () => {
         .status,
     ).toBe(409);
   });
+  it("only the owner's own message lifts their Not now on a card", async () => {
+    const f = await setup();
+    const key = { kind: "key", id: "openai", problem: "rejected" } as const;
+    f.session.dismissBlocker(f.session.raiseBlocker(key)?.blockerId ?? "");
+    const guest = new Hono();
+    guest.use("*", async (c, next) => {
+      c.set("remoteGrant", { id: "guest" } as never);
+      await next();
+    });
+    agentRoutes(guest, f.deps);
+    const said = await guest.request(`http://127.0.0.1:4747${endpoint("messages")}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "steer", text: "hello" }),
+    });
+    expect(said.status).toBe(202);
+    expect(f.session.raiseBlocker(key)).toBeUndefined();
+    expect((await f.send("POST", endpoint("messages"), { kind: "steer", text: "hi" })).status).toBe(
+      202,
+    );
+    expect(f.session.raiseBlocker(key)).toBeDefined();
+  });
+  it("hears when the owner starts a fix from a card, for a card that is up", async () => {
+    const f = await setup();
+    const open = f.session.raiseBlocker({ kind: "keys_locked" });
+    const use = vi.spyOn(f.session, "useBlocker");
+    expect((await f.send("POST", endpoint(`blockers/${open?.blockerId}/use`))).status).toBe(204);
+    expect(use).toHaveBeenCalledWith(open?.blockerId);
+    expect((await f.send("POST", endpoint("blockers/01M6R97SHHND5784EZZXSYSBGD/use"))).status).toBe(
+      409,
+    );
+  });
   it("a shared link's guest gains nothing from a card", async () => {
     const f = await setup();
     const retryOnModel = vi.fn(async () => {});
@@ -613,6 +645,7 @@ describe("agent user routes", () => {
           : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
       });
     expect((await post("dismiss")).status).toBe(403);
+    expect((await post("use")).status).toBe(403);
     expect(f.session.openBlockers).toHaveLength(1);
     const model = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
     expect((await post("model", { model })).status).toBe(403);
@@ -2007,10 +2040,11 @@ describe("shared-link task enforcement", () => {
     });
     const stopRun = vi.fn(async (_id: string) => true);
     f.deps.runner.stopRun = stopRun;
+    const eventLog = new EventLog(f.home);
     const app = createApp({
       token: "o".repeat(43),
       port: 4750,
-      eventLog: new EventLog(f.home),
+      eventLog,
       agent: f.deps,
       remoteAccess: {
         links,
@@ -2023,8 +2057,53 @@ describe("shared-link task enforcement", () => {
         headers: { authorization: `Bearer ${issued.token}`, "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-    return { ...f, links, model, issued, send, stopRun };
+    return { ...f, app, eventLog, ownerToken: "o".repeat(43), links, model, issued, send, stopRun };
   }
+  it("names none of the owner's keys to a shared link's guest, whichever way the log is read", async () => {
+    const f = await guest();
+    const task = f.eventLog.createSession("task");
+    f.eventLog.append(task, {
+      type: "blocker.raise",
+      agent: "main",
+      data: {
+        blockerId: ulid(),
+        blocker: { kind: "key", id: "private-stripe", problem: "rejected" },
+        by: "localdot",
+      },
+    });
+    f.eventLog.append(task, {
+      type: "key.use",
+      agent: "keyd",
+      data: {
+        secretId: "private-github",
+        host: "api.example",
+        method: "GET",
+        path: "/",
+        decision: "allow",
+      },
+    });
+    const read = async (token: string, path: string, accept?: string) => {
+      const reply = await f.app.request(`http://127.0.0.1:4750${path}`, {
+        headers: { authorization: `Bearer ${token}`, ...(accept ? { accept } : {}) },
+      });
+      expect(reply.status).toBe(200);
+      return reply.text();
+    };
+    for (const [path, accept] of [
+      [`/api/sessions/${task}/events`, undefined],
+      [`/api/sessions/${task}/events`, "application/x-ndjson"],
+      [`/api/sessions/${task}/history`, undefined],
+    ] as const) {
+      const shown = await read(f.issued.token, path, accept);
+      expect(shown).toContain("blocker.raise");
+      expect(shown).toContain("key.use");
+      expect(shown).not.toContain("private-stripe");
+      expect(shown).not.toContain("private-github");
+      const owned = await read(f.ownerToken, path, accept);
+      expect(owned).toContain("private-stripe");
+      expect(owned).toContain("private-github");
+    }
+  });
   it("pins the owner's model and minimum budget, atomically counts successful tasks, and blocks owner session mutations", async () => {
     const f = await guest();
     f.settings.put({ taskBudgetUSD: 1 });

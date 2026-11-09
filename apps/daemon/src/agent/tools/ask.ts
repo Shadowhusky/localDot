@@ -3,6 +3,7 @@ import {
   type AskFieldRecord,
   type AskRequestField,
   type AskUserInput,
+  isKeepGoing,
   isOwnWords,
   type RequestTakeoverInput,
   type ToolResult,
@@ -16,6 +17,7 @@ import { VaultLockedError } from "../../keyd/client.ts";
 import { addTaskSecret } from "../redact.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import { type AgentSession, type AskAnswer, type AskForm, SAVED_LOGIN_TAP } from "../session.ts";
+import { asksSecretInPlainText, formWords } from "./card-words.ts";
 import {
   fail,
   frame,
@@ -25,7 +27,7 @@ import {
   type ToolDeps,
   text,
 } from "./deps.ts";
-import { KEYS_NOT_LOCKED, waitForFix } from "./request-fix.ts";
+import { keysCardInstead } from "./request-fix.ts";
 import { accountOrigin, findSecretField, type SecretField, typeSecret } from "./secret-field.ts";
 
 const reusedLogins = new WeakMap<AgentSession, Set<string>>();
@@ -168,34 +170,29 @@ function shownAnswer(field: Pick<AskRequestField, "kind">, value: AskFieldRecord
   return value;
 }
 
-const ABOUT_LOCALDOT_KEYS = /\b(?:[Ll]ocal[Dd]ot|[Ss]aved keys|Keys)\b/;
-const UNLOCKING = /\b(?:unlock|locked|pass ?phrase)\b/i;
-const PASSPHRASE = /\bpass ?phrase\b/i;
 const CARD_IS_UP =
   "localDot's own card for this is on screen and says when it is done, so don't ask the user to confirm it. Call request_fix to wait for it, or carry on with what doesn't need it.";
-// The brain's own guard, not a word from the model.
-const KEEP_GOING = "keep_going";
+const NOT_IN_PLAIN_TEXT =
+  "A plain answer stays in the conversation and reaches you, so a secret can't be asked for this way. For a password or code on a page, use a secret field or code field aimed at its input; for a service key, use credentials action request. If this isn't a secret, name the field for what it is.";
 
-// A question can't stand in for localDot's own card: the words that would send the user to Keys, or
-// ask for what only Keys may take, get the real card when the keys are locked and nothing otherwise.
-// A question typed by a page through dot never reaches the passphrase this way.
-async function cardInstead(
+// A form can't stand in for localDot's own card, take a secret in plain text, or have the user confirm
+// what a card already says. Only the brain's own guard, in its fixed words, asks while a card is up.
+async function formRefused(
   deps: ToolDeps,
   ctx: ToolCallContext,
   input: AskUserInput,
 ): Promise<ToolResult | undefined> {
+  const card = await keysCardInstead(deps, ctx, formWords(input));
+  if (card) return card;
+  if (asksSecretInPlainText(input)) return fail(NOT_IN_PLAIN_TEXT);
   const fields = input.fields ?? [];
-  const words = [
-    input.question,
-    ...fields.flatMap((field) => [field.label, field.hint ?? ""]),
-  ].join(" ");
-  const locked = deps.keysLocked?.();
-  if (ABOUT_LOCALDOT_KEYS.test(words) && UNLOCKING.test(words))
-    return locked ? waitForFix(deps, ctx, { kind: "keys_locked" }) : fail(KEYS_NOT_LOCKED);
-  // While the vault is locked, any passphrase asked for through dot could be its own.
-  if (locked && PASSPHRASE.test(words)) return waitForFix(deps, ctx, { kind: "keys_locked" });
-  const only = fields.length === 1 ? fields[0] : undefined;
-  if (only?.kind === "confirm" && only.id !== KEEP_GOING && ctx.session.openBlockers.length)
+  const guard = ctx.callId.startsWith("guard-") && isKeepGoing(input);
+  if (
+    fields.length === 1 &&
+    fields[0]?.kind === "confirm" &&
+    !guard &&
+    ctx.session.openBlockers.length
+  )
     return fail(CARD_IS_UP);
   return undefined;
 }
@@ -206,8 +203,8 @@ export async function askUserTool(
   input: AskUserInput,
 ): Promise<ToolResult> {
   ctx.check();
-  const card = await cardInstead(deps, ctx, input);
-  if (card) return card;
+  const refused = await formRefused(deps, ctx, input);
+  if (refused) return refused;
   if (input.fields) return askFields(deps, ctx, input, input.fields);
   const form = plainForm(input, ctx.redact);
   const timeoutMs = askTimeoutMs(deps, ctx);
@@ -571,6 +568,8 @@ export async function requestTakeoverTool(
   input: RequestTakeoverInput,
 ): Promise<ToolResult> {
   ctx.check();
+  const card = await keysCardInstead(deps, ctx, input.note);
+  if (card) return card;
   // A held Pause refuses the hand-off before anything counts as signed in.
   if (ctx.session.safetyPause) throw new PausedStepError();
   // The user gets every screen during a takeover, so a sign-in may land on the desktop.

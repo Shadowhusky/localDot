@@ -109,6 +109,7 @@ export function markOf(e: LocalDotEvent): TimelineMark | null {
             "event",
             {
               fixed: "Fixed from the conversation",
+              worked: "It worked again",
               dismissed: "You said not now",
               moved_on: "You moved on with a message",
             }[e.data.outcome],

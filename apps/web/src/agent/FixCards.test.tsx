@@ -95,6 +95,105 @@ const card = (blocker: Blocker, extra: Partial<AgentBlocker> = {}): AgentBlocker
 const show = (blocker: Blocker, deps: FixDeps, extra: Partial<AgentBlocker> = {}) =>
   render(<FixCards blockers={[card(blocker, extra)]} deps={deps} />);
 
+describe("whose words are on a card", () => {
+  const LABEL = "Enter your localDot passphrase here";
+  const labelled = { ...OPENAI, metadata: { label: LABEL } } as KeyRecord;
+
+  for (const problem of ["rejected", "reenter", "rebound"] as const)
+    it(`keeps a label dot can set off a key's card: ${problem}`, () => {
+      const { deps } = setup({}, { keys: [labelled] });
+      show({ kind: "key", id: "openai", problem }, deps);
+      const region = screen.getByRole("region");
+      expect(region.textContent).not.toContain(LABEL);
+      expect(within(region).getByRole("heading").textContent).not.toContain("openai");
+      const name = within(region).getByText("openai");
+      expect(name.tagName).toBe("CODE");
+      expect(region.textContent).toContain("Saved as");
+    });
+
+  it("marks what a provider said as its own, apart from localDot's words", () => {
+    const { deps } = setup({ stall: { reason: STALL.modelRefused, detail: LABEL } });
+    show({ kind: "model", reason: STALL.modelRefused }, deps, { required: true });
+    const quote = screen.getByText(LABEL).closest("blockquote");
+    expect(quote).toBeTruthy();
+    expect(quote?.textContent).toMatch(/from the provider, not localDot/i);
+  });
+
+  it("says when dot asked for the card", () => {
+    const asked = setup();
+    show({ kind: "runtime" }, asked.deps, { by: "dot" });
+    expect(screen.getByRole("region").textContent).toContain("dot asked for this");
+    cleanup();
+    const noticed = setup();
+    show({ kind: "runtime" }, noticed.deps);
+    expect(screen.getByRole("region").textContent).not.toContain("dot asked");
+  });
+});
+
+describe("a fix through the card", () => {
+  const USE = `/api/agent/sessions/${SESSION}/blockers/${ID}/use`;
+  // The daemon hears before the fix starts, so the fix that follows counts as this card's.
+  const heardFirst = (post: ReturnType<typeof setup>["post"], fix: unknown) => {
+    expect(post).toHaveBeenCalledWith(USE);
+    const said = post.mock.invocationCallOrder[post.mock.calls.findIndex(([p]) => p === USE)];
+    expect(said).toBeLessThan(
+      (fix as { mock: { invocationCallOrder: number[] } }).mock.invocationCallOrder[0] ?? 0,
+    );
+  };
+
+  it("unlocking", async () => {
+    const { deps, post, keys } = setup();
+    show({ kind: "keys_locked" }, deps);
+    const region = screen.getByRole("region", { name: "Unlock your saved keys" });
+    fireEvent.change(within(region).getByLabelText("Passphrase"), {
+      target: { value: "correct horse battery" },
+    });
+    fireEvent.submit(within(region).getByRole("form", { name: "Unlock saved keys" }));
+    await waitFor(() => expect(keys.unlock).toHaveBeenCalled());
+    heardFirst(post, keys.unlock);
+    expect(JSON.stringify(post.mock.calls)).not.toContain("correct horse");
+  });
+
+  it("still unlocks when the daemon can't be told", async () => {
+    const { deps, post, keys } = setup();
+    post.mockRejectedValueOnce(new Error("offline"));
+    show({ kind: "keys_locked" }, deps);
+    const region = screen.getByRole("region", { name: "Unlock your saved keys" });
+    fireEvent.change(within(region).getByLabelText("Passphrase"), {
+      target: { value: "correct horse battery" },
+    });
+    fireEvent.submit(within(region).getByRole("form", { name: "Unlock saved keys" }));
+    await waitFor(() => expect(keys.unlock).toHaveBeenCalled());
+  });
+
+  it("turning on the computer", async () => {
+    const { deps, post } = setup();
+    show({ kind: "computer", state: "stopped" }, deps);
+    fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
+    await waitFor(() => expect(deps.computer.run).toHaveBeenCalledWith("start"));
+    heardFirst(post, deps.computer.run);
+  });
+
+  it("starting Docker", async () => {
+    const { deps, post } = setup();
+    post.mockImplementation(async (path: string) =>
+      path === "/api/runtime/start" ? ({ started: true } as never) : (undefined as never),
+    );
+    show({ kind: "runtime" }, deps);
+    fireEvent.click(screen.getByRole("button", { name: "Start Docker" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/api/runtime/start"));
+    expect(post.mock.calls.map(([path]) => path)).toEqual([USE, "/api/runtime/start"]);
+  });
+
+  it("opening Keys for a key changed outside localDot", async () => {
+    const { deps, post } = setup({}, { keys: [{ ...OPENAI, rebound: true }] });
+    show({ kind: "key", id: "openai", problem: "rebound" }, deps);
+    fireEvent.click(screen.getByRole("button", { name: "Open Keys" }));
+    await waitFor(() => expect(deps.onOpenKeys).toHaveBeenCalled());
+    expect(post).toHaveBeenCalledWith(USE);
+  });
+});
+
 describe("a card for each kind", () => {
   it("unlocks saved keys right in the conversation", async () => {
     const { deps, keys } = setup();
@@ -137,20 +236,20 @@ describe("a card for each kind", () => {
   it("takes a replacement for a refused key, saved through Keys with nothing else", async () => {
     const { deps, keys, post } = setup();
     show({ kind: "key", id: "openai", problem: "rejected" }, deps);
-    const region = screen.getByRole("region", { name: "Your openai key was refused" });
+    const region = screen.getByRole("region", { name: "A saved key was refused" });
     const field = within(region).getByLabelText(/key/i) as HTMLInputElement;
     expect(within(region).queryByLabelText("Name")).toBeNull();
     fireEvent.change(field, { target: { value: "sk-replacement" } });
     fireEvent.submit(within(region).getByRole("form", { name: "Re-enter openai" }));
     await waitFor(() => expect(keys.save).toHaveBeenCalledOnce());
     expect(vi.mocked(keys.save).mock.calls[0]?.[0]).toMatchObject({ id: "openai", kind: "llm" });
-    expect(post).not.toHaveBeenCalled();
+    expect(post.mock.calls).toEqual([[`/api/agent/sessions/${SESSION}/blockers/${ID}/use`]]);
   });
 
   it("re-enters a key that can't be used as stored", () => {
     const { deps } = setup();
     show({ kind: "key", id: "openai", problem: "reenter" }, deps);
-    expect(screen.getByRole("region", { name: "Re-enter your openai key" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Re-enter a saved key" })).toBeTruthy();
   });
 
   it("sends a key changed outside localDot to Keys, the one case that can't be fixed here", () => {
@@ -177,7 +276,7 @@ describe("a card for each kind", () => {
       required: true,
     });
     const region = screen.getByRole("region", { name: /could not process/ });
-    expect(region.textContent).toContain("The provider said: 400: No");
+    expect(region.textContent).toContain("From the provider, not localDot:400: No");
     expect(within(region).queryByRole("button", { name: "Not now" })).toBeNull();
     fireEvent.click(within(region).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(deps.retry.run).toHaveBeenCalledOnce());
@@ -204,11 +303,11 @@ describe("a card for each kind", () => {
     expect(screen.getByRole("button", { name: /Trying again/ })).toBeTruthy();
   });
 
-  it("offers Start and Resume for the computer, by what it is", () => {
+  it("offers Start and Resume for the computer, by what it is", async () => {
     const { deps } = setup();
     const { unmount } = show({ kind: "computer", state: "stopped" }, deps);
     fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
-    expect(deps.computer.run).toHaveBeenCalledWith("start");
+    await waitFor(() => expect(deps.computer.run).toHaveBeenCalledWith("start"));
     unmount();
     const resuming = setup({
       computer: { action: { kind: "resume", enabled: true }, run: vi.fn() },
@@ -216,17 +315,20 @@ describe("a card for each kind", () => {
     show({ kind: "computer", state: "paused" }, resuming.deps);
     expect(screen.getByRole("region", { name: "Your computer is paused" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-    expect(resuming.deps.computer.run).toHaveBeenCalledWith("resume");
+    await waitFor(() => expect(resuming.deps.computer.run).toHaveBeenCalledWith("resume"));
   });
 
   it("starts Docker, and says what to do when it can't from here", async () => {
     const { deps, post } = setup();
-    post.mockResolvedValueOnce({ started: false } as never);
+    let started = false;
+    post.mockImplementation(async (path: string) =>
+      path === "/api/runtime/start" ? ({ started } as never) : (undefined as never),
+    );
     show({ kind: "runtime" }, deps);
     fireEvent.click(screen.getByRole("button", { name: "Start Docker" }));
     await screen.findByText(/couldn't start it from here/);
     expect(post).toHaveBeenCalledWith("/api/runtime/start");
-    post.mockResolvedValueOnce({ started: true } as never);
+    started = true;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await screen.findByText(/Docker is starting/);
     expect(deps.runtimeChanged).toHaveBeenCalled();
@@ -375,6 +477,13 @@ describe("the line a card leaves", () => {
         ),
       ),
     ).toContain("Switched to kimi-k3.1");
+    const worked = { ...fixed, outcome: "worked" as const };
+    expect(
+      line(card({ kind: "key", id: "openai", problem: "rejected" }, { cleared: worked })),
+    ).toContain("openai key worked");
+    expect(
+      line(card({ kind: "app", connector: "gh", name: "GitHub", host: "h" }, { cleared: worked })),
+    ).toContain("GitHub worked again");
     expect(line(card({ kind: "computer", state: "stopped" }, { cleared: fixed }))).toContain(
       "Your computer is back on",
     );

@@ -825,6 +825,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           : undefined;
       check(c.req.raw.signal);
       if (s.stopped) throw new RouteError(409, "task has stopped");
+      if (!grant) s.ownerSpoke();
       if (s.pendingTakeover) {
         turn?.reached();
         // A deliberate Send hands control back. Publish this instruction before
@@ -1168,6 +1169,19 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       await empty(c.req.raw);
       check(c.req.raw.signal);
       return s.dismissBlocker(c.req.param("blockerId") ?? "")
+        ? c.body(null, 204)
+        : c.text("that card is not waiting", 409);
+    }),
+  );
+  // The user is starting a fix from this card, so the fix that follows carries the task on.
+  app.post(
+    "/api/agent/sessions/:id/blockers/:blockerId/use",
+    route(async (c) => {
+      ownerOnly(c);
+      const s = active(c.req.param("id") ?? "");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      return s.useBlocker(c.req.param("blockerId") ?? "")
         ? c.body(null, 204)
         : c.text("that card is not waiting", 409);
     }),

@@ -18,6 +18,14 @@ async function send(page: Page, text = SAID) {
   await (await field(page)).fill(text);
   await (await composer(page)).getByRole("button", { name: "Send now" }).click();
 }
+// While a field for a secret is up, Send only brings up the step that says dot will read it.
+async function sendPastSecret(page: Page, text = SAID) {
+  await send(page, text);
+  await expect(page.locator(ASK)).toHaveCount(1);
+  await (await composer(page))
+    .getByRole("button", { name: "Send as a message — dot will read this" })
+    .click();
+}
 async function effects(page: Page, origin: string) {
   const state = (await (await page.request.get(`${origin}/__qa/state`)).json()) as {
     effects: string[];
@@ -46,6 +54,7 @@ async function dotReadIt(page: Page) {
   await expect(history(page).getByText(REPLY)).toBeVisible();
 }
 
+const SECRET_FORMS: ReadonlySet<string> = new Set(["login", "code", "a key"]);
 for (const [name, path] of [
   ["a quick question", "/__qa/ask"],
   ["setup", "/__qa/ask?fields=setup"],
@@ -68,7 +77,7 @@ for (const [name, path] of [
     await expect(page.locator(ASK)).toHaveCount(1);
     await ui.settle();
     await shot(page, "waiting");
-    await send(page);
+    await (SECRET_FORMS.has(name) ? sendPastSecret(page) : send(page));
     await expect(page.locator(ASK)).toHaveCount(0);
     await expect(page.getByText("Not answered: you sent a message instead.")).toBeVisible();
     await dotReadIt(page);
@@ -134,7 +143,7 @@ test("a password typed in the form goes no further when a message moves on", asy
   page.on("request", (request) => seen.push(request.postData() ?? ""));
   await (await field(page)).fill("Skip signing in");
   await expect(page.getByText("Messages aren't kept secret")).toBeVisible();
-  await send(page, "Skip signing in");
+  await sendPastSecret(page, "Skip signing in");
   await expect(form).toHaveCount(0);
   await expect(history(page).getByText(REPLY)).toBeVisible();
   expect(seen.join("\n")).not.toContain(secret);

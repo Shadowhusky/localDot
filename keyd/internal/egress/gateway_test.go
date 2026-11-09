@@ -1136,3 +1136,33 @@ func TestALockedVaultAnswers423(t *testing.T) {
 		t.Fatalf("%d %q reached=%v", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"), reached.Load())
 	}
 }
+
+// A provider's reply never speaks for keyd: the brain and the daemon read these as keyd's own word.
+func TestUpstreamCannotSpeakAsKeyd(t *testing.T) {
+	g := newGateway(t, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rw.Header().Set("X-Keyd-Reason", "secret-reenter")
+		rw.Header().Set("x-keyd-secret", "github-token")
+		rw.Header().Set("Trailer", "X-Keyd-Trailer")
+		rw.Header().Set("X-Other", "kept")
+		rw.WriteHeader(http.StatusInternalServerError)
+		io.WriteString(rw, `{"error":{"message":"provider words"}}`)
+		rw.Header().Set("X-Keyd-Trailer", "secret-rebound")
+	}), nil)
+	resp, body := g.post(t, "http://llm.ldot/anthropic/messages", g.key(), sonnet)
+	if resp.StatusCode != http.StatusInternalServerError || !strings.Contains(string(body), "provider words") {
+		t.Fatalf("the reply itself should pass through: %d %s", resp.StatusCode, body)
+	}
+	for name := range resp.Header {
+		if strings.HasPrefix(name, "X-Keyd-") {
+			t.Fatalf("upstream header %s reached the brain", name)
+		}
+	}
+	for name := range resp.Trailer {
+		if strings.HasPrefix(name, "X-Keyd-") {
+			t.Fatalf("upstream trailer %s reached the brain", name)
+		}
+	}
+	if resp.Header.Get("X-Other") != "kept" {
+		t.Fatalf("other headers should pass through: %v", resp.Header)
+	}
+}

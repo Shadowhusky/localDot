@@ -84,7 +84,7 @@ describe("blocker events", () => {
       });
       expect(raised.type).toBe("blocker.raise");
     }
-    for (const outcome of ["fixed", "dismissed", "moot", "moved_on"] as const)
+    for (const outcome of ["fixed", "worked", "dismissed", "moot", "moved_on"] as const)
       expect(
         parseEvent({
           ...envelope,

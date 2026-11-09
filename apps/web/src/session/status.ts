@@ -250,6 +250,11 @@ const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> 
     label: "Docker isn't running",
     caption: "Docker isn't running. Start it in the chat and I'll carry on.",
   },
+  [STALL.fixedElsewhere]: {
+    row: "recovery",
+    label: "Waiting for you",
+    caption: "That's fixed now. Continue, or send a message, and I'll carry on.",
+  },
 };
 
 // A wait for the user counts from dot's request, so the island shows how long dot has waited.
