@@ -1,8 +1,20 @@
 import { execFile as nodeExecFile } from "node:child_process";
-import { readdirSync, statSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { constants, readdirSync, statSync } from "node:fs";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, dirname, join, sep } from "node:path";
 import { speechChunks } from "./speech-chunks.ts";
 
 // A speech-to-text model the person installed themselves, run by whisper.cpp's command line.
@@ -122,12 +134,82 @@ const NOISE = /^[[(].*[\])]$/;
 const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}　-〿＀-￯]/u;
 
 // Where recordings wait while they're read: a private folder under localDot's home, emptied at
-// start-up, so audio never outlives a daemon that stopped mid-way.
-export async function sweepVoiceAudio(dir: string) {
-  await rm(dir, { recursive: true, force: true });
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  await chmod(dir, 0o700);
+// start-up, so audio never outlives a daemon that stopped mid-way. Never stops the daemon starting:
+// what can't be removed is moved aside, and failing that a fresh folder beside it is used. Both get
+// names only this makes, and every start tries again to remove them.
+export async function sweepVoiceAudio(dir: string): Promise<string> {
+  const parent = dirname(dir);
+  const name = basename(dir);
+  for (const entry of await readdir(parent).catch(() => []))
+    if (entry.startsWith(`${name}.`) && LEFT_ASIDE.test(entry.slice(name.length)))
+      await removeAll(join(parent, entry)).catch((error: unknown) =>
+        console.error(`old recordings in ${entry} couldn't be removed (${codeOf(error)})`),
+      );
+  const fresh = async (path: string) => {
+    await mkdir(path, { recursive: true, mode: 0o700 });
+    await chmod(path, 0o700);
+    const found = await lstat(path);
+    if (!found.isDirectory()) throw new Error("not a folder");
+    return path;
+  };
+  try {
+    await removeAll(dir);
+    return await fresh(dir);
+  } catch (error) {
+    console.error(`old recordings couldn't be removed (${codeOf(error)})`);
+  }
+  try {
+    await rename(dir, `${dir}.stale-${randomBytes(4).toString("hex")}`);
+    return await fresh(dir);
+  } catch {
+    return await mkdtemp(`${dir}.tmp-`).catch(() => dir);
+  }
 }
+
+const LEFT_ASIDE = /^\.(?:stale-[0-9a-f]{8}|tmp-[A-Za-z0-9]{6})$/;
+
+async function removeAll(path: string) {
+  await unlockTree(path).catch(() => {});
+  await rm(path, { recursive: true, force: true });
+}
+
+const FOLDER = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+
+// Gives our own locked folders their write permission back, so they can still be emptied. Each is
+// changed through a handle opened without following a link, and only once the handle is seen to be
+// the folder at a real path inside `top`. Node can't list a folder through a handle, so a folder
+// swapped for a link part-way may still be listed, but nothing outside is ever changed.
+async function unlockTree(top: string) {
+  const home = await realpath(dirname(top));
+  const inside = await unlock(top, home);
+  if (!inside) return;
+  const walk = async (dir: string) => {
+    for (const entry of await readdir(dir).catch(() => [])) {
+      const path = join(dir, entry);
+      if (await unlock(path, inside)) await walk(path);
+    }
+  };
+  await walk(top);
+}
+
+// The folder's real path once it's unlocked, or null when it isn't a folder of ours to change.
+async function unlock(path: string, inside: string): Promise<string | null> {
+  const handle = await open(path, FOLDER).catch(() => null);
+  if (!handle) return null;
+  try {
+    const real = await realpath(path).catch(() => null);
+    if (!real?.startsWith(`${inside}${sep}`)) return null;
+    const [held, there] = await Promise.all([handle.stat(), lstat(real).catch(() => null)]);
+    if (!there?.isDirectory() || held.ino !== there.ino || held.dev !== there.dev) return null;
+    await handle.chmod(0o700);
+    return real;
+  } finally {
+    await handle.close();
+  }
+}
+
+const codeOf = (error: unknown) =>
+  error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
 
 export function speechTranscriber(
   model: SpeechModel,

@@ -841,8 +841,7 @@ const appUpdater = serviceIdentity
   : await sourceAppUpdater(home, process.env.LOCALDOT_INSTALL_PREFIX, installWait, installSettled);
 appUpdater.start();
 shutdown.unshift({ name: "app updater", stop: () => appUpdater.close() });
-const voiceAudio = join(home, "voice-audio");
-await sweepVoiceAudio(voiceAudio);
+const voiceAudio = await sweepVoiceAudio(join(home, "voice-audio"));
 const speechInstaller = new SpeechInstaller({
   home,
   catalog: SPEECH_CATALOG,

@@ -1,10 +1,15 @@
+import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -387,6 +392,96 @@ describe("where audio waits while it's read", () => {
     expect(wav.startsWith(`${audio}/`)).toBe(true);
     expect(statSync(audio).mode & 0o777).toBe(0o700);
     expect(readdirSync(audio)).toEqual([]);
+  });
+
+  it("never stops the daemon starting when something in it can't be removed", async () => {
+    const audio = join(home, "voice-audio");
+    mkdirSync(join(audio, "locked"), { recursive: true });
+    writeFileSync(join(audio, "locked", "speech-0.wav"), "someone talking");
+    chmodSync(join(audio, "locked"), 0o500);
+    try {
+      const use = await sweepVoiceAudio(audio);
+      expect(statSync(use).isDirectory()).toBe(true);
+      expect(lstatSync(use).isSymbolicLink()).toBe(false);
+      expect(statSync(use).mode & 0o777).toBe(0o700);
+      expect(readdirSync(use)).toEqual([]);
+    } finally {
+      for (const name of readdirSync(home))
+        for (const inner of [join(home, name, "locked")])
+          if (existsSync(inner)) chmodSync(inner, 0o700);
+    }
+  });
+
+  it("leaves folders that only look like its own alone", async () => {
+    for (const name of ["voice-audio-backup", "voice-audio-Ab12Cd", "voice-audio.stale-notmine"]) {
+      mkdirSync(join(home, name));
+      writeFileSync(join(home, name, "user.txt"), "mine");
+    }
+    await sweepVoiceAudio(join(home, "voice-audio"));
+    for (const name of ["voice-audio-backup", "voice-audio-Ab12Cd", "voice-audio.stale-notmine"])
+      expect(readFileSync(join(home, name, "user.txt"), "utf8")).toBe("mine");
+  });
+
+  it("removes a locked recording outright, leaving nothing aside", async () => {
+    const audio = join(home, "voice-audio");
+    mkdirSync(join(audio, "locked"), { recursive: true });
+    writeFileSync(join(audio, "locked", "rec-1.wav"), "someone talking");
+    chmodSync(join(audio, "locked"), 0o500);
+    await sweepVoiceAudio(audio);
+    expect(readdirSync(home)).toEqual(["voice-audio"]);
+  });
+
+  it("clears folders earlier starts left aside, without following a link out of them", async () => {
+    const outside = join(home, "outside");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "keep.txt"), "mine");
+    chmodSync(outside, 0o500);
+    for (const left of ["voice-audio.stale-0a1b2c3d", "voice-audio.tmp-Ab12Cd"]) {
+      mkdirSync(join(home, left, "locked"), { recursive: true });
+      writeFileSync(join(home, left, "locked", "rec-1.wav"), "someone talking");
+      symlinkSync(outside, join(home, left, "locked", "out"));
+      chmodSync(join(home, left, "locked"), 0o500);
+      chmodSync(join(home, left), 0o500);
+    }
+    try {
+      await sweepVoiceAudio(join(home, "voice-audio"));
+      expect(readdirSync(home).sort()).toEqual(["outside", "voice-audio"]);
+      expect(readFileSync(join(outside, "keep.txt"), "utf8")).toBe("mine");
+      expect(statSync(outside).mode & 0o777).toBe(0o500);
+    } finally {
+      chmodSync(outside, 0o700);
+    }
+  });
+
+  it.runIf(process.platform === "darwin")(
+    "says what still can't be removed, and carries on",
+    async () => {
+      const audio = join(home, "voice-audio");
+      const stuck = join(home, "voice-audio.stale-0a1b2c3d", "rec-1.wav");
+      mkdirSync(join(home, "voice-audio.stale-0a1b2c3d"));
+      writeFileSync(stuck, "someone talking");
+      execFileSync("chflags", ["uchg", stuck]);
+      const said = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const use = await sweepVoiceAudio(audio);
+        expect(readdirSync(use)).toEqual([]);
+        expect(said.mock.calls.flat().join(" ")).toMatch(/couldn't be removed/);
+      } finally {
+        said.mockRestore();
+        execFileSync("chflags", ["nouchg", stuck]);
+      }
+    },
+  );
+
+  it("removes a link in its place, never what it points to", async () => {
+    const target = join(home, "elsewhere");
+    mkdirSync(target);
+    writeFileSync(join(target, "keep.txt"), "mine");
+    const audio = join(home, "voice-audio");
+    symlinkSync(target, audio);
+    const use = await sweepVoiceAudio(audio);
+    expect(readFileSync(join(target, "keep.txt"), "utf8")).toBe("mine");
+    expect(lstatSync(use).isDirectory()).toBe(true);
   });
 
   it("is emptied at start-up of anything a stopped localDot left behind", async () => {

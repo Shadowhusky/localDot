@@ -10,6 +10,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -272,7 +273,8 @@ describe("installing speech", { timeout: 30_000 }, () => {
     await settled(speech);
     writeFileSync(join(speechDir(), "models", "light", "model.onnx"), "something else");
     expect(speech.model()).toBeNull();
-    expect(speech.status().installed).toMatchObject({ damaged: true });
+    // Its hash is checked again before it's called changed.
+    await vi.waitFor(() => expect(speech.status().installed).toMatchObject({ damaged: true }));
   });
 
   it("falls back to the next source and uses it", async () => {
@@ -640,6 +642,124 @@ describe("what runs beside the program", { timeout: 30_000 }, () => {
     expect(existsSync(join(engineDir(), "bin", "libonnx.dylib"))).toBe(false);
     expect(existsSync(join(speechDir(), "sherpa_onnx", "lib"))).toBe(false);
     expect(speech.model()).not.toBeNull();
+  });
+});
+
+describe("what the re-check found", { timeout: 30_000 }, () => {
+  it("uses a file again once its hash still matches after something only touched it", async () => {
+    const speech = installer();
+    await speech.ready;
+    speech.start("light");
+    await settled(speech);
+    chmodSync(join(speechDir(), "models", "light", "tokens.txt"), 0o600);
+    expect(speech.model()).toBeNull();
+    await vi.waitFor(() => expect(speech.model()).not.toBeNull());
+    expect(speech.status().installed).toMatchObject({ damaged: false });
+  });
+
+  const installed = async (tier = "light") => {
+    const speech = installer();
+    await speech.ready;
+    speech.start(tier);
+    await settled(speech);
+    expect(speech.model()).not.toBeNull();
+    return speech;
+  };
+  const outside = () => join(dir, "outside");
+
+  it("won't run when a folder on the way to the program or model is a link", async () => {
+    for (const folder of ["engine", "models", "engine/1.0.0", "models/light"]) {
+      rmSync(speechDir(), { recursive: true, force: true });
+      rmSync(outside(), { recursive: true, force: true });
+      const speech = await installed();
+      mkdirSync(outside(), { recursive: true });
+      renameSync(join(speechDir(), folder), join(outside(), "moved"));
+      symlinkSync(join(outside(), "moved"), join(speechDir(), folder));
+      expect(speech.model(), folder).toBeNull();
+      await speech.close();
+      const fresh = installer();
+      await fresh.ready;
+      expect(fresh.model(), `${folder} after a restart`).toBeNull();
+    }
+  });
+
+  it("won't run when speech/ itself is a link", async () => {
+    await installed();
+    mkdirSync(outside(), { recursive: true });
+    renameSync(speechDir(), join(outside(), "speech"));
+    symlinkSync(join(outside(), "speech"), speechDir());
+    const fresh = installer();
+    await fresh.ready;
+    expect(fresh.model()).toBeNull();
+  });
+
+  it("checks a program edited in place again, even with its size, inode and time put back", async () => {
+    const speech = await installed();
+    const bin = join(speechDir(), "engine", "1.0.0", "bin", "engine");
+    const before = statSync(bin, { bigint: true });
+    writeFileSync(bin, "#!/bin/sx\n");
+    execFileSync("python3", [
+      "-I",
+      "-c",
+      "import os,sys; os.utime(sys.argv[1], ns=(int(sys.argv[2]), int(sys.argv[3])))",
+      bin,
+      String(before.atimeNs),
+      String(before.mtimeNs),
+    ]);
+    const after = statSync(bin, { bigint: true });
+    expect([after.size, after.ino, after.mtimeNs]).toEqual([
+      before.size,
+      before.ino,
+      before.mtimeNs,
+    ]);
+    expect(speech.model()).toBeNull();
+    await vi.waitFor(() =>
+      expect(speech.status().installed).toMatchObject({ damaged: true, reason: "changed" }),
+    );
+  });
+
+  it("checks the program again just before its first run", async () => {
+    await installed("light");
+    // A short stall limit, so the held download gives up and asks again once it's let go.
+    const speech = installer({ stallMs: 300 });
+    await speech.ready;
+    hang.add(pinned.tiers[1]?.sources[0]?.url ?? "");
+    const seen: string[] = [];
+    run = async (binary) => {
+      seen.push(readdirSync(join(binary, "..")).join(","));
+      return '{"text": ""}';
+    };
+    speech.start("languages");
+    await vi.waitFor(() => expect(speech.status().job?.stage).toBe("model"), { timeout: 25_000 });
+    writeFileSync(join(speechDir(), "engine", "1.0.0", "bin", "libonnx.dylib"), "planted");
+    hang.clear();
+    await settled(speech);
+    expect(seen).toEqual([]);
+    expect(speech.status().job).toMatchObject({ state: "failed", problem: "verify" });
+    speech.start("languages");
+    await settled(speech);
+    expect(seen).toEqual(["engine"]);
+    expect(speech.model()).not.toBeNull();
+  });
+
+  it("deletes nothing when cancelling while speech/ is a link", async () => {
+    const target = join(dir, "projects");
+    mkdirSync(join(target, "partial"), { recursive: true });
+    mkdirSync(join(target, "engine", "keep"), { recursive: true });
+    writeFileSync(join(target, "partial", "user-file.txt"), "mine");
+    writeFileSync(join(target, "engine", "keep", "user.txt"), "mine");
+    writeFileSync(
+      join(target, "installing.json"),
+      JSON.stringify({ tier: "light", stage: "model" }),
+    );
+    symlinkSync(target, speechDir());
+    const speech = installer();
+    await speech.ready;
+    expect(speech.status().job).toMatchObject({ problem: "interrupted" });
+    await speech.cancel();
+    expect(readFileSync(join(target, "partial", "user-file.txt"), "utf8")).toBe("mine");
+    expect(readFileSync(join(target, "engine", "keep", "user.txt"), "utf8")).toBe("mine");
+    expect(existsSync(join(target, "installing.json"))).toBe(true);
   });
 });
 

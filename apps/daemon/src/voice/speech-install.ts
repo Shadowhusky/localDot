@@ -41,6 +41,27 @@ import {
 } from "./speech-download.ts";
 import { type SpeechHost, speechThreads, tierFit, tierSpeed } from "./speech-fit.ts";
 
+// What identifies a file since its hash was checked. ctime moves on any change to it, even one that
+// puts its size, inode and modification time back.
+interface FileIdentity {
+  path: string;
+  size: bigint;
+  ino: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+}
+
+const identityOf = (
+  path: string,
+  found: { size: bigint; ino: bigint; mtimeNs: bigint; ctimeNs: bigint },
+) => ({
+  path,
+  size: found.size,
+  ino: found.ino,
+  mtimeNs: found.mtimeNs,
+  ctimeNs: found.ctimeNs,
+});
+
 export class SpeechInstallRefused extends Error {
   constructor(message: string) {
     super(message);
@@ -197,6 +218,20 @@ function holdsExactly(dir: string, files: Record<string, SpeechFilePin>): boolea
 
 const within = (dir: string, path: string) => path === dir || path.startsWith(`${dir}${sep}`);
 
+// Each folder from `base` down through `parts` is a real folder, none of them a link.
+function realFolders(base: string, parts: readonly string[]): boolean {
+  let at = base;
+  for (const part of ["", ...parts]) {
+    at = part ? join(at, part) : at;
+    try {
+      if (!lstatSync(at).isDirectory()) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Bytes of the plain files under a folder, links not followed.
 function treeBytes(dir: string): number {
   try {
@@ -235,7 +270,8 @@ export class SpeechInstaller {
   readonly ready: Promise<void>;
   #installed: Installed | null = null;
   // The installed files passed their hashes in this run, with what identifies each since.
-  #verified: { path: string; size: number; mtimeMs: number; ino: number }[] | null = null;
+  #verified: FileIdentity[] | null = null;
+  #rechecking: Promise<void> | null = null;
   #damaged: "changed" | "outdated" | null = null;
   #job: SpeechInstallJob | null = null;
   #abort: AbortController | null = null;
@@ -333,7 +369,8 @@ export class SpeechInstaller {
   }
 
   // The library folders the program searches first that lie outside its own folder, where nothing
-  // may be. Inside it, holdsExactly already allows only the pinned files.
+  // may be. Inside it, holdsExactly already allows only the pinned files. The loader works them out
+  // from the program's real path, which realFolders keeps the same as this one.
   #outsideLibraryPaths(engine: SpeechEngineTarget) {
     const programDir = dirname(join(this.#engineDir, this.options.catalog.engine.binary));
     return engine.libraryPaths
@@ -341,12 +378,16 @@ export class SpeechInstaller {
       .filter((path) => !within(this.#engineDir, path));
   }
 
-  // Exactly the pinned files where the program and model are, and nothing where it looks for
-  // libraries, every time before it runs.
-  #layoutHolds(current: { tier: SpeechTierSpec; engine: SpeechEngineTarget }) {
-    if (!holdsExactly(this.#engineDir, current.engine.files)) return false;
-    if (!holdsExactly(this.#modelDir(current.tier.id), current.tier.files)) return false;
-    return this.#outsideLibraryPaths(current.engine).every((path) => {
+  // The program's folder: every folder on the way to it real, exactly the pinned files in it, and
+  // nothing where it looks for libraries.
+  #engineHolds(engine: SpeechEngineTarget) {
+    const version = this.options.catalog.engine.version;
+    const programDir = dirname(this.options.catalog.engine.binary)
+      .split("/")
+      .filter((p) => p !== ".");
+    if (!realFolders(this.#root, ["engine", version, ...programDir])) return false;
+    if (!holdsExactly(this.#engineDir, engine.files)) return false;
+    return this.#outsideLibraryPaths(engine).every((path) => {
       try {
         lstatSync(path);
         return false;
@@ -356,6 +397,15 @@ export class SpeechInstaller {
     });
   }
 
+  // Checked every time before it runs.
+  #layoutHolds(current: { tier: SpeechTierSpec; engine: SpeechEngineTarget }) {
+    return (
+      this.#engineHolds(current.engine) &&
+      realFolders(this.#root, ["models", current.tier.id]) &&
+      holdsExactly(this.#modelDir(current.tier.id), current.tier.files)
+    );
+  }
+
   async #verifyInstalled() {
     const current = this.#current();
     this.#verified = null;
@@ -363,15 +413,19 @@ export class SpeechInstaller {
       this.#damaged = this.#installed ? "outdated" : null;
       return;
     }
-    const seen: { path: string; size: number; mtimeMs: number; ino: number }[] = [];
+    const seen: FileIdentity[] = [];
     for (const { path, pin } of this.#filesOf(current)) {
       try {
-        const found = await lstat(path);
-        if (!found.isFile() || found.size !== pin.bytes || (await sha256Of(path)) !== pin.sha256) {
+        const found = await lstat(path, { bigint: true });
+        if (
+          !found.isFile() ||
+          found.size !== BigInt(pin.bytes) ||
+          (await sha256Of(path)) !== pin.sha256
+        ) {
           this.#damaged = "changed";
           return;
         }
-        seen.push({ path, size: found.size, mtimeMs: found.mtimeMs, ino: found.ino });
+        seen.push(identityOf(path, found));
       } catch {
         this.#damaged = "changed";
         return;
@@ -385,21 +439,33 @@ export class SpeechInstaller {
     this.#verified = seen;
   }
 
-  // The hashes were checked at start-up and after installing. A file touched since, or anything
-  // added beside them, stops them being run.
+  // The hashes were checked at start-up and after installing. Anything added beside them stops them
+  // being run; a file touched since stops them until its hash is checked again.
   #stillVerified(current: { tier: SpeechTierSpec; engine: SpeechEngineTarget }) {
     if (!this.#verified) return false;
-    const same = this.#verified.every(({ path, size, mtimeMs, ino }) => {
+    const same = this.#verified.every((was) => {
       try {
-        const found = lstatSync(path);
+        const found = lstatSync(was.path, { bigint: true });
+        const now = identityOf(was.path, found);
         return (
-          found.isFile() && found.size === size && found.mtimeMs === mtimeMs && found.ino === ino
+          found.isFile() &&
+          now.size === was.size &&
+          now.ino === was.ino &&
+          now.mtimeNs === was.mtimeNs &&
+          now.ctimeNs === was.ctimeNs
         );
       } catch {
         return false;
       }
     });
-    if (same && this.#layoutHolds(current)) return true;
+    if (!same) {
+      this.#verified = null;
+      this.#rechecking ??= this.#verifyInstalled().finally(() => {
+        this.#rechecking = null;
+      });
+      return false;
+    }
+    if (this.#layoutHolds(current)) return true;
     this.#verified = null;
     this.#damaged = "changed";
     return false;
@@ -424,8 +490,13 @@ export class SpeechInstaller {
     ];
   }
 
-  // Refuses any path that resolves outside <home>/speech, links included.
+  // Refuses any path that resolves outside <home>/speech, links included, and anything at all while
+  // <home>/speech is itself a link.
   async #removeInside(target: string) {
+    const found = await lstat(this.#root).catch(() => null);
+    if (!found) return;
+    if (!found.isDirectory())
+      throw new Error("refused to remove inside a speech folder that's a link");
     const root = await realpath(this.#root).catch(() => null);
     const parent = await realpath(dirname(target)).catch(() => null);
     if (!root || !parent) return;
@@ -611,6 +682,17 @@ export class SpeechInstaller {
       const record: Installed = { tier: tier.id, engineVersion: version };
       const binary = join(engineDir, this.options.catalog.engine.binary);
       await chmod(binary, 0o700);
+      // The program may have been reused from before the download, so it's checked again right
+      // before it first runs.
+      if (
+        !(await this.#bundleMatches(engineDir, engine)) ||
+        !holdsExactly(stagedModel, tier.files) ||
+        !this.#engineHolds(engine)
+      )
+        throw new InstallStep(
+          "verify",
+          "Something changed beside the speech program while it installed, so it wasn't run. Retry to install it afresh.",
+        );
       await this.#tryOnce(binary, stagedModel, tier, signal);
       signal.throwIfAborted();
       await this.#commit(stagedModel, modelDir);
