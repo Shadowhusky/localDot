@@ -60,7 +60,7 @@ const STATUS: Record<
   "fix-key": { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
   "fix-app": { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
   "fix-model": { shape: "task", control: /^Stop$/, label: "Provider request failed" },
-  "fix-computer": { shape: "computer", control: /^Turn on$/, label: "Stopped" },
+  "fix-computer": { shape: "hidden", label: "Stopped", curtain: "Turn on" },
   "fix-computer-paused": { shape: "computer", control: /^Resume$/, label: "Paused" },
   "fix-runtime": {
     shape: "task",
