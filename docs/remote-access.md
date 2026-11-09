@@ -179,6 +179,7 @@ A task started through a link (and any task its conversation moves to for anothe
 | | Every link | With **Use your apps, keys and browser** |
 | --- | --- | --- |
 | The computer: screen, shell, files, desktop Chromium, page reading, web search and fetch, plan, questions, takeover, fix-it cards for the computer or Docker, research | Yes | Yes |
+| Sign-ins saved on the computer itself, in its home folder: `gh auth`, git credentials, cloud and other command-line tools, and anything else an earlier task left there | **Yes** | Yes |
 | The conversation it continues: what was said in it | Yes | Yes |
 | The owner's memory (USER.md, MEMORY.md, past lessons) in its prompt, and memory recall | No | No |
 | Recent activity: the owner's last tasks | No | No |
@@ -190,7 +191,7 @@ A task started through a link (and any task its conversation moves to for anothe
 | Saving what the guest types as a sign-in, or changing one of the owner's | No | No |
 | The web browser that keeps the owner's sign-ins: `switch_screen`, `browser_upload`, and public pages through `browser_navigate` | No: pages open in the desktop's Chromium, which keeps no sign-ins | Yes |
 
-The web browser counts as the owner's accounts because it is signed in as them: a page there acts as the owner just as a connected app does. Every link is off by default, links made before this setting included; the owner picks it when making the link. Links can't be edited: make a new one and revoke the old. Each link's row in Settings says when it has the owner's apps, keys and browser.
+The computer is shared, and so is its home folder (`/config`, kept across restarts): whatever the owner or an earlier task signed in to there, a link's task can use from its shell, whatever the link allows. Sign out of command-line tools on the computer before sharing a link, or don't share one. The web browser counts as the owner's accounts because it is signed in as them: a page there acts as the owner just as a connected app does. Every link is off by default, links made before this setting included; the owner picks it when making the link. Links can't be edited: make a new one and revoke the old. Each link's row in Settings says when it has the owner's apps, keys and browser.
 
 The guest page has no side questions (`/btw`): a link is refused `/api/agent/sessions/<id>/side-question`, even on its own task.
 
