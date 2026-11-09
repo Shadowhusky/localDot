@@ -1305,6 +1305,18 @@
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
 
+.thread-fix code {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.thread-fix-quoted {
+  margin: 0;
+  padding-left: calc(var(--spacing) * 3);
+  border-left: 2px solid var(--color-hairline);
+  overflow-wrap: anywhere;
+}
+
 .thread-fix .keys-unlock-form,
 .thread-fix .keys-form {
   min-width: 0;

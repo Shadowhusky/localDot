@@ -15,9 +15,13 @@ import {
   EARLIER_CHARS,
   earlierRecord,
   isToolName,
+  KEEP_GOING_DECLINE,
+  KEEP_GOING_FIELD,
+  KEEP_GOING_SUBMIT,
   KEYD_REBOUND,
   KEYD_REENTER,
   KEYD_VAULT_LOCKED,
+  keepGoingQuestion,
   RESUME_WAIT_REASON,
   SECRET_ID_PATTERN,
   STALL,
@@ -509,24 +513,14 @@ export class Agent {
         await this.#waitSafety(requestSignal);
         const limits = boot.limits;
         if (limits.maxTurns !== undefined && this.#turns >= limits.maxTurns) {
-          if (
-            !(await this.#keepGoing(
-              `This task has taken ${this.#turns} steps. Keep going?`,
-              requestSignal,
-            ))
-          ) {
+          if (!(await this.#keepGoing(keepGoingQuestion.steps(this.#turns), requestSignal))) {
             outcome = "gave_up";
             return undefined;
           }
           this.#turns = 0;
         }
         if (limits.maxFailedCalls !== undefined && this.#failed >= limits.maxFailedCalls) {
-          if (
-            !(await this.#keepGoing(
-              `My last ${this.#failed} actions failed. Keep trying?`,
-              requestSignal,
-            ))
-          ) {
+          if (!(await this.#keepGoing(keepGoingQuestion.failures(this.#failed), requestSignal))) {
             outcome = "gave_up";
             return undefined;
           }
@@ -748,9 +742,9 @@ export class Agent {
         callId("guard"),
         {
           question,
-          fields: [{ id: "keep_going", kind: "confirm", label: "Keep going" }],
-          submit: "Keep going",
-          decline: "Stop here",
+          fields: [KEEP_GOING_FIELD],
+          submit: KEEP_GOING_SUBMIT,
+          decline: KEEP_GOING_DECLINE,
         },
         signal,
       );

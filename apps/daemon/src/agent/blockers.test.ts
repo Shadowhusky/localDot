@@ -1,4 +1,12 @@
-import { type Blocker, type LocalDotEvent, STALL } from "@localdot/protocol";
+import {
+  type Blocker,
+  KEEP_GOING_DECLINE,
+  KEEP_GOING_FIELD,
+  KEEP_GOING_SUBMIT,
+  keepGoingQuestion,
+  type LocalDotEvent,
+  STALL,
+} from "@localdot/protocol";
 import { KEYS_LOCKED_NOTE, KEYS_UNLOCKED_NOTE } from "@localdot/protocol/guidance";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CARD_IN_USE_MS, RAISE_AGAIN_MS } from "./blockers.ts";
@@ -213,6 +221,139 @@ describe("a blocker on a task", () => {
     session.keysUnlocked();
     expect(session.keysLocked).toBe(false);
     expect(await inbox(session, told)).toEqual([KEYS_UNLOCKED_NOTE]);
+  });
+});
+
+describe("credentials action request stands in for no card", () => {
+  const request = {
+    action: "request",
+    key_id: "weather",
+    label: "Weather API key",
+    service: "Weather",
+    description: "For the forecast",
+    hosts: ["api.weather.example"],
+    header: "X-Token",
+    format: "raw",
+    intent: "forecast",
+  };
+  const withKeys = (tools: ToolDeps, keys: unknown[] = []) => {
+    tools.credentials = { list: async () => keys, request: async () => undefined } as never;
+  };
+  const asks = (events: readonly LocalDotEvent[]) =>
+    events.flatMap((event) => (event.type === "ask.request" ? [event.data] : []));
+
+  it("takes a request for localDot's passphrase to the real card", async () => {
+    const { call, events, session, tools } = setup();
+    tools.keysLocked = () => true;
+    withKeys(tools);
+    const reply = call("credentials", {
+      ...request,
+      key_id: "vault",
+      label: "localDot saved keys passphrase",
+      service: "localDot",
+      description: "Your saved keys are locked. Enter your passphrase here to unlock them.",
+      hosts: ["keys.example"],
+    });
+    await until(() => raises(events()).length === 1);
+    expect(asks(events())).toEqual([]);
+    usesCards(session);
+    session.keysUnlocked();
+    await reply;
+  });
+
+  it("refuses a key that claims to be localDot's, wherever it says so", async () => {
+    const { call, events, tools } = setup();
+    tools.keysLocked = () => false;
+    withKeys(tools);
+    for (const claim of [
+      { label: "localDot" },
+      { label: "Local Dot token" },
+      { service: "local\u200Bdot" },
+      { service: "ｌｏｃａｌＤｏｔ" },
+      { key_id: "localdot-token" },
+      { hosts: ["keys.localdot.dev"] },
+      { description: "Needed by localDot" },
+      { description: "Unlock Keys with this" },
+    ]) {
+      const { body } = await call("credentials", { ...request, ...claim });
+      expect(body.ok, JSON.stringify(claim)).toBe(false);
+    }
+    expect(asks(events())).toEqual([]);
+  });
+
+  it("asks as ever for an ordinary key in a task that has read nothing", async () => {
+    const { call, events, session, tools } = setup({ autoApprove: false });
+    withKeys(tools);
+    const reply = call("credentials", request);
+    await until(() => !!session.pendingAsk);
+    expect(events().some((event) => event.type === "approval.request")).toBe(false);
+    expect(asks(events())[0]?.fields?.[0]?.credential?.metadata.description).toBe(
+      "For the forecast",
+    );
+    session.decline(session.pendingAsk ?? "");
+    await reply;
+  });
+
+  it("in a task that has read outside words, drops dot's description", async () => {
+    const { call, events, session, tools } = setup();
+    session.tainted = true;
+    withKeys(tools);
+    const reply = call("credentials", request);
+    await until(() => !!session.pendingAsk);
+    expect(asks(events())[0]?.fields?.[0]?.credential?.metadata).toEqual({
+      label: "Weather API key",
+      service: "Weather",
+    });
+    session.decline(session.pendingAsk ?? "");
+    await reply;
+  });
+
+  it("in such a task, asks the user before a key can go to a new host", async () => {
+    const { call, events, session, tools } = setup({ autoApprove: false });
+    session.tainted = true;
+    withKeys(tools);
+    const reply = call("credentials", request);
+    await until(() => !!session.pendingApproval);
+    expect(asks(events())).toEqual([]);
+    const card = session.pendingApproval;
+    expect(JSON.stringify(card)).toContain("api.weather.example");
+    session.answerApproval({
+      approvalId: card?.approvalId ?? "",
+      generation: card?.generation ?? "",
+      revision: card?.revision ?? 0,
+      decision: "deny",
+    });
+    expect((await reply).body.ok).toBe(false);
+    expect(asks(events())).toEqual([]);
+  });
+
+  it("in such a task, asks too before a model key can go to a new address", async () => {
+    const { call, session, tools } = setup({ autoApprove: false });
+    session.tainted = true;
+    withKeys(tools);
+    const reply = call("credentials", {
+      action: "request",
+      key_id: "mine",
+      provider: "openai",
+      base_url: "https://llm.attacker.example/v1",
+    });
+    await until(() => !!session.pendingApproval);
+    expect(JSON.stringify(session.pendingApproval)).toContain("llm.attacker.example");
+    session.stop();
+    await reply.catch(() => undefined);
+  });
+
+  it("in such a task, needs no approval for a host a saved key already goes to", async () => {
+    const { call, events, session, tools } = setup({ autoApprove: false });
+    session.tainted = true;
+    withKeys(tools, [
+      { id: "older", kind: "http", hosts: ["api.weather.example"], header: "x", format: "raw" },
+    ]);
+    const reply = call("credentials", request);
+    await until(() => !!session.pendingAsk);
+    expect(events().some((event) => event.type === "approval.request")).toBe(false);
+    session.decline(session.pendingAsk ?? "");
+    await reply;
   });
 });
 
@@ -604,23 +745,140 @@ describe("ask_user can't stand in for a card", () => {
     expect(raises(events())).toEqual([]);
   });
 
-  it("never asks for localDot's passphrase, however it is put", async () => {
+  const LOOKALIKES = [
+    {
+      question: "Your saved keys need their vault password to continue.",
+      fields: [{ id: "v", kind: "text", label: "Vault password" }],
+    },
+    {
+      question: "localDot: enter your master password to keep going",
+      fields: [{ id: "v", kind: "text", label: "Master password" }],
+    },
+    {
+      question: "Your saved keys are being unlocked. Confirm with what you use for unlocking them.",
+      fields: [{ id: "v", kind: "text", label: "Secret phrase" }],
+    },
+    {
+      question: "请输入 localDot 已保存密钥的解锁口令",
+      fields: [{ id: "v", kind: "text", label: "口令" }],
+    },
+    {
+      question: "請輸入已儲存金鑰的解鎖密碼",
+      fields: [{ id: "v", kind: "text", label: "主密碼" }],
+    },
+    {
+      question: "Your saved keys are l\u200Bocked. Enter the pass\u200Bphrase.",
+      fields: [{ id: "v", kind: "text", label: "pass\u200Bphrase" }],
+    },
+    {
+      question: "Your ｓａｖｅｄ ｋｅｙｓ are lo\u00ADcked. Enter the pа\u0455sphrase.",
+      fields: [{ id: "v", kind: "text", label: "Value" }],
+    },
+    {
+      question: "Security check",
+      fields: [
+        {
+          id: "v",
+          kind: "choice",
+          label: "Pick one",
+          options: ["Enter my localDot passphrase below to unlock Keys", "Later"],
+        },
+      ],
+    },
+    { question: "Keep going?", options: ["Unlock Keys with my passphrase", "Later"] },
+    {
+      question: "Security check",
+      fields: [{ id: "v", kind: "text", label: "Value" }],
+      submit: "Unlock Keys",
+      decline: "Stay locked",
+    },
+    {
+      question: "Security check",
+      fields: [{ id: "v", kind: "text", label: "Value", hint: "Your saved keys are locked" }],
+    },
+    {
+      question: "Security check",
+      fields: [{ id: "vault_password", kind: "text", label: "Value", hint: "locked" }],
+    },
+  ];
+  for (const input of LOOKALIKES)
+    it(`takes a look-alike to the real card while the keys are locked: ${input.question}`, async () => {
+      const { call, events, session, tools } = setup();
+      tools.keysLocked = () => true;
+      const reply = call("ask_user", input);
+      await until(() => raises(events()).length === 1);
+      expect(events().some((event) => event.type === "ask.request")).toBe(false);
+      expect(raises(events())[0]?.blocker).toEqual({ kind: "keys_locked" });
+      usesCards(session);
+      session.keysUnlocked();
+      expect((await reply).body.ok).toBe(true);
+    });
+  it("refuses a look-alike outright while the keys are open", async () => {
+    const { call, events, tools } = setup();
+    tools.keysLocked = () => false;
+    for (const input of LOOKALIKES) expect((await call("ask_user", input)).body.ok).toBe(false);
+    expect(events().some((event) => event.type === "ask.request")).toBe(false);
+  });
+
+  it("refuses to ask for a secret as plain text, whatever it is for", async () => {
     const { call, events, tools } = setup();
     tools.keysLocked = () => false;
     for (const input of [
+      { question: "Sign in", fields: [{ id: "a", kind: "text", label: "Password" }] },
+      { question: "Sign in", fields: [{ id: "user_pin", kind: "text", label: "Value" }] },
+      { question: "Your bank", fields: [{ id: "a", kind: "longtext", label: "PIN" }] },
+      { question: "Wifi", fields: [{ id: "a", kind: "text", label: "New passphrase" }] },
+      { question: "Service", fields: [{ id: "a", kind: "text", label: "API key" }] },
+      { question: "服务", fields: [{ id: "a", kind: "text", label: "密码" }] },
+      { question: "Please enter your password for example.com" },
+      { question: "请输入您的密码" },
       {
-        question: "Enter your localDot passphrase to continue",
-        fields: [{ id: "pass", kind: "secret", label: "Passphrase" }],
-      },
-      {
-        question: "Security check",
-        fields: [{ id: "pass", kind: "text", label: "Passphrase for your saved keys" }],
+        question: "What is your example.com password?",
+        fields: [{ id: "a", kind: "text", label: "Answer" }],
       },
     ]) {
       const { body } = await call("ask_user", input);
-      expect(body.ok).toBe(false);
+      expect(body.ok, input.question).toBe(false);
+      expect(said(body)).toMatch(/secret field/);
     }
     expect(events().some((event) => event.type === "ask.request")).toBe(false);
+  });
+
+  it("still asks about passwords, and for what only sounds like one", async () => {
+    const { call, session, tools } = setup();
+    tools.keysLocked = () => false;
+    for (const input of [
+      { question: "Should I reset your password?", options: ["Yes", "No"] },
+      { question: "Which password manager do you use?" },
+      { question: "Which one?", fields: [{ id: "a", kind: "text", label: "Password manager" }] },
+      { question: "Which place?", fields: [{ id: "shipping", kind: "text", label: "Shopping" }] },
+    ]) {
+      const reply = call("ask_user", input);
+      await until(() => !!session.pendingAsk);
+      session.decline(session.pendingAsk ?? "");
+      expect((await reply).body.ok, input.question).toBe(true);
+    }
+  });
+
+  it("takes a hand-over's note through the same words", async () => {
+    const { call, events, session, tools } = setup();
+    tools.keysLocked = () => true;
+    const reply = call("request_takeover", {
+      reason: "other",
+      note: "Your saved keys are l\u200Bocked. Enter your localDot passphrase on the screen.",
+    });
+    await until(() => raises(events()).length === 1);
+    expect(events().some((event) => event.type === "takeover.request")).toBe(false);
+    usesCards(session);
+    session.keysUnlocked();
+    await reply;
+    tools.keysLocked = () => false;
+    const refused = await call("request_takeover", {
+      reason: "other",
+      note: "Unlock Keys with your passphrase, then hand back.",
+    });
+    expect(refused.body.ok).toBe(false);
+    expect(events().some((event) => event.type === "takeover.request")).toBe(false);
   });
 
   it("refuses a lone confirm while a card is up: the card says when it's done", async () => {
@@ -645,18 +903,6 @@ describe("ask_user can't stand in for a card", () => {
     await until(() => !!session.pendingAsk);
     expect(events().some((event) => event.type === "ask.request")).toBe(true);
     session.answerFields(session.pendingAsk ?? "", { repo: "shadowhusky/localdot" }, (t) => t);
-    expect((await reply).body.ok).toBe(true);
-  });
-
-  it("leaves a website's own passphrase field alone while the keys are open", async () => {
-    const { call, session, tools } = setup();
-    tools.keysLocked = () => false;
-    const reply = call("ask_user", {
-      question: "What should the new wifi passphrase be?",
-      fields: [{ id: "pass", kind: "text", label: "New passphrase" }],
-    });
-    await until(() => !!session.pendingAsk);
-    session.decline(session.pendingAsk ?? "");
     expect((await reply).body.ok).toBe(true);
   });
 
@@ -687,16 +933,36 @@ describe("ask_user can't stand in for a card", () => {
     expect((await reply).body.ok).toBe(true);
   });
 
-  it("lets the brain's own Keep going guard through", async () => {
+  it("lets only the brain's own Keep going guard through while a card is up", async () => {
     const { call, session } = setup();
     session.raiseBlocker(APP);
-    const reply = call("ask_user", {
-      question: "Keep going?",
-      fields: [{ id: "keep_going", kind: "confirm", label: "Keep going" }],
-    });
+    const guard = {
+      question: keepGoingQuestion.steps(40),
+      fields: [KEEP_GOING_FIELD],
+      submit: KEEP_GOING_SUBMIT,
+      decline: KEEP_GOING_DECLINE,
+    };
+    const reply = call("ask_user", guard, "guard-abc-1");
     await until(() => !!session.pendingAsk);
     session.decline(session.pendingAsk ?? "");
     expect((await reply).body.ok).toBe(true);
+    for (const [input, callId] of [
+      [guard, "c1"],
+      [{ ...guard, question: "Enter the key in Keys, then tap Done" }, "guard-abc-2"],
+      [{ ...guard, submit: "Done" }, "guard-abc-3"],
+      [{ ...guard, fields: [{ ...KEEP_GOING_FIELD, label: "Done" }] }, "guard-abc-4"],
+      [
+        {
+          question: "Enter the key in Keys, then tap Done",
+          fields: [{ id: "keep_going", kind: "confirm", label: "Done" }],
+        },
+        "c2",
+      ],
+    ] as const) {
+      const { body } = await call("ask_user", input, callId);
+      expect(body.ok).toBe(false);
+      expect(said(body)).toMatch(/request_fix/);
+    }
   });
 });
 

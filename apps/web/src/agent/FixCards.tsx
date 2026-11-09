@@ -8,7 +8,7 @@ import {
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { HudActionKind } from "../cells/hud-state.ts";
 import { KeyForm } from "../keys/KeyForm.tsx";
-import { type KeydHealth, type KeyRecord, vaultLocked } from "../keys/keys-api.ts";
+import { type KeydHealth, vaultLocked } from "../keys/keys-api.ts";
 import { UNLOCK_PRIVACY, UnlockKeys } from "../keys/UnlockKeys.tsx";
 import type { KeysController } from "../keys/useKeys.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
@@ -114,11 +114,11 @@ export function FixLine({ blocker, names }: { blocker: AgentBlocker; names?: Mod
 }
 
 function Shell({
-  kind,
+  open,
   title,
   children,
 }: {
-  kind: Blocker["kind"];
+  open: AgentBlocker;
   title: string;
   children: ReactNode;
 }) {
@@ -133,10 +133,15 @@ function Shell({
     card.current?.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true });
   }, [touch]);
   return (
-    <section ref={card} className="thread-recovery thread-fix" aria-labelledby={id} data-fix={kind}>
+    <section
+      ref={card}
+      className="thread-recovery thread-fix"
+      aria-labelledby={id}
+      data-fix={open.blocker.kind}
+    >
       <p className="thread-fix-origin">
         <Icon name="lock" size={12} />
-        <span>localDot</span>
+        <span>localDot{open.by === "dot" && " · dot asked for this"}</span>
       </p>
       <h3 id={id} className="thread-recovery-title">
         {title}
@@ -190,7 +195,7 @@ function KeysFix({ open, deps }: { open: BlockerOf<"keys_locked">; deps: FixDeps
   const { unlock } = deps.keys;
   const title = setup ? "Choose a passphrase for your saved keys" : "Unlock your saved keys";
   return (
-    <Shell kind="keys_locked" title={title}>
+    <Shell open={open} title={title}>
       <p className="thread-recovery-text">
         {setup
           ? "dot needs your saved keys and passwords, and they need a passphrase first. You'll enter it after each restart of the computer running localDot."
@@ -212,23 +217,29 @@ function KeysFix({ open, deps }: { open: BlockerOf<"keys_locked">; deps: FixDeps
   );
 }
 
-const keyName = (record: KeyRecord | undefined, id: string) => record?.metadata?.label || id;
+// A key's id, set apart as a name. Its label stays off the card: dot can write that when it asks for
+// a key, and the card's own words are localDot's.
+const SavedAs = ({ id }: { id: string }) => (
+  <p className="thread-recovery-reason">
+    Saved as <code>{id}</code>
+  </p>
+);
 const noSaving = (health: KeydHealth | null) =>
   health && !health.online ? "Key protection is off, so the key can't be saved." : undefined;
 
 function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
   const { id, problem } = open.blocker;
   const record = deps.keys.keys.find((key) => key.id === id);
-  const name = keyName(record, id);
   // Its destination was changed behind localDot's back, so nothing here can be trusted to re-save
   // it: the key is removed and added again by hand, in Keys.
   if (problem === "rebound" || record?.rebound)
     return (
-      <Shell kind="key" title={`Your ${name} key was changed outside localDot`}>
+      <Shell open={open} title="A saved key was changed outside localDot">
         <p className="thread-recovery-text">
           Where this key is sent was changed outside localDot, so dot won't use it. Remove it and
           add it again; dot carries on by itself.
         </p>
+        <SavedAs id={id} />
         <div className="thread-recovery-actions">
           <Button
             variant="primary"
@@ -254,14 +265,15 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
   );
   return (
     <Shell
-      kind="key"
-      title={problem === "rejected" ? `Your ${name} key was refused` : `Re-enter your ${name} key`}
+      open={open}
+      title={problem === "rejected" ? "A saved key was refused" : "Re-enter a saved key"}
     >
       <p className="thread-recovery-text">
         {problem === "rejected"
           ? "The service didn't accept this key. Enter a new one and dot carries on by itself."
           : "dot can't use this key as it's stored. Enter it again and dot carries on by itself."}
       </p>
+      <SavedAs id={id} />
       {record ? (
         <KeyForm
           active
@@ -289,7 +301,7 @@ function AppFix({ open, deps }: { open: BlockerOf<"app">; deps: FixDeps }) {
   // The daemon hears the sign-in finish by itself and clears the card on every device.
   const sign = useAppConnect({ api: deps.api, connector, onConnected: () => {} });
   return (
-    <Shell kind="app" title={`Connect ${name}`}>
+    <Shell open={open} title={`Connect ${name}`}>
       <p className="thread-recovery-text">
         {sign.waiting
           ? sign.waiting.remote
@@ -393,9 +405,14 @@ function ModelFix({ open, deps }: { open: BlockerOf<"model">; deps: FixDeps }) {
     }
   };
   return (
-    <Shell kind="model" title={words?.title ?? "The model can't go on"}>
+    <Shell open={open} title={words?.title ?? "The model can't go on"}>
       <p className="thread-recovery-text">{text}</p>
-      {detail && <p className="thread-recovery-reason">The provider said: {detail}</p>}
+      {detail && (
+        <blockquote className="thread-fix-quoted">
+          <p className="thread-recovery-reason">From the provider, not localDot:</p>
+          <p className="thread-recovery-reason">{detail}</p>
+        </blockquote>
+      )}
       {deps.planResets && (
         <p className="thread-recovery-reason">
           {deps.planResets.replace(/^Resets/, "Your plan's limit resets")}.
@@ -437,7 +454,7 @@ function ComputerFix({ open, deps }: { open: BlockerOf<"computer">; deps: FixDep
   // A computer on its way back offers to stop instead: it needs nothing from here but time.
   const offered = action && action.kind !== "stop" ? action : undefined;
   return (
-    <Shell kind="computer" title={paused ? "Your computer is paused" : "Your computer is off"}>
+    <Shell open={open} title={paused ? "Your computer is paused" : "Your computer is off"}>
       <p className="thread-recovery-text">
         dot needs it to go on. Turn it back on and dot carries on by itself.
       </p>
@@ -479,7 +496,7 @@ function RuntimeFix({ open, deps }: { open: BlockerOf<"runtime">; deps: FixDeps 
     }
   };
   return (
-    <Shell kind="runtime" title="Docker isn't running">
+    <Shell open={open} title="Docker isn't running">
       <p className="thread-recovery-text">
         {state === "waiting"
           ? "Docker is starting. dot carries on by itself as soon as it's up."

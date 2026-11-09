@@ -740,6 +740,13 @@
   text-wrap: pretty;
 }
 
+.ask-origin {
+  margin: 0;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  text-wrap: pretty;
+}
+
 .ask-actions {
   display: flex;
   flex: none;

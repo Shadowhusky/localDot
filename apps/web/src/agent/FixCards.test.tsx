@@ -95,6 +95,41 @@ const card = (blocker: Blocker, extra: Partial<AgentBlocker> = {}): AgentBlocker
 const show = (blocker: Blocker, deps: FixDeps, extra: Partial<AgentBlocker> = {}) =>
   render(<FixCards blockers={[card(blocker, extra)]} deps={deps} />);
 
+describe("whose words are on a card", () => {
+  const LABEL = "Enter your localDot passphrase here";
+  const labelled = { ...OPENAI, metadata: { label: LABEL } } as KeyRecord;
+
+  for (const problem of ["rejected", "reenter", "rebound"] as const)
+    it(`keeps a label dot can set off a key's card: ${problem}`, () => {
+      const { deps } = setup({}, { keys: [labelled] });
+      show({ kind: "key", id: "openai", problem }, deps);
+      const region = screen.getByRole("region");
+      expect(region.textContent).not.toContain(LABEL);
+      expect(within(region).getByRole("heading").textContent).not.toContain("openai");
+      const name = within(region).getByText("openai");
+      expect(name.tagName).toBe("CODE");
+      expect(region.textContent).toContain("Saved as");
+    });
+
+  it("marks what a provider said as its own, apart from localDot's words", () => {
+    const { deps } = setup({ stall: { reason: STALL.modelRefused, detail: LABEL } });
+    show({ kind: "model", reason: STALL.modelRefused }, deps, { required: true });
+    const quote = screen.getByText(LABEL).closest("blockquote");
+    expect(quote).toBeTruthy();
+    expect(quote?.textContent).toMatch(/from the provider, not localDot/i);
+  });
+
+  it("says when dot asked for the card", () => {
+    const asked = setup();
+    show({ kind: "runtime" }, asked.deps, { by: "dot" });
+    expect(screen.getByRole("region").textContent).toContain("dot asked for this");
+    cleanup();
+    const noticed = setup();
+    show({ kind: "runtime" }, noticed.deps);
+    expect(screen.getByRole("region").textContent).not.toContain("dot asked");
+  });
+});
+
 describe("a fix through the card", () => {
   const USE = `/api/agent/sessions/${SESSION}/blockers/${ID}/use`;
   // The daemon hears before the fix starts, so the fix that follows counts as this card's.
@@ -201,7 +236,7 @@ describe("a card for each kind", () => {
   it("takes a replacement for a refused key, saved through Keys with nothing else", async () => {
     const { deps, keys, post } = setup();
     show({ kind: "key", id: "openai", problem: "rejected" }, deps);
-    const region = screen.getByRole("region", { name: "Your openai key was refused" });
+    const region = screen.getByRole("region", { name: "A saved key was refused" });
     const field = within(region).getByLabelText(/key/i) as HTMLInputElement;
     expect(within(region).queryByLabelText("Name")).toBeNull();
     fireEvent.change(field, { target: { value: "sk-replacement" } });
@@ -214,7 +249,7 @@ describe("a card for each kind", () => {
   it("re-enters a key that can't be used as stored", () => {
     const { deps } = setup();
     show({ kind: "key", id: "openai", problem: "reenter" }, deps);
-    expect(screen.getByRole("region", { name: "Re-enter your openai key" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Re-enter a saved key" })).toBeTruthy();
   });
 
   it("sends a key changed outside localDot to Keys, the one case that can't be fixed here", () => {
@@ -241,7 +276,7 @@ describe("a card for each kind", () => {
       required: true,
     });
     const region = screen.getByRole("region", { name: /could not process/ });
-    expect(region.textContent).toContain("The provider said: 400: No");
+    expect(region.textContent).toContain("From the provider, not localDot:400: No");
     expect(within(region).queryByRole("button", { name: "Not now" })).toBeNull();
     fireEvent.click(within(region).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(deps.retry.run).toHaveBeenCalledOnce());

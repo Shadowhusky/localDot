@@ -260,6 +260,9 @@ function StandardAskForm({
         receive={receiveKey}
         within="answer"
       />
+      {fields.some((field) => TYPED.has(field.kind) || field.kind === "api_key") && (
+        <p className="ask-origin">dot wrote this. localDot never asks for its passphrase here.</p>
+      )}
     </div>
   );
   const foot = (

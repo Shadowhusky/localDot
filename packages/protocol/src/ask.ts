@@ -31,6 +31,40 @@ export const AskFieldId = z.string().regex(ASK_FIELD_ID);
 // this id.
 export const ASK_ANSWER_ID = "answer";
 
+// The brain's own question when a task runs long or keeps failing: words fixed here, so the daemon
+// tells it from anything the model wrote.
+export const keepGoingQuestion = {
+  steps: (count: number) => `This task has taken ${count} steps. Keep going?`,
+  failures: (count: number) => `My last ${count} actions failed. Keep trying?`,
+};
+export const KEEP_GOING_FIELD = { id: "keep_going", kind: "confirm", label: "Keep going" } as const;
+export const KEEP_GOING_SUBMIT = "Keep going";
+export const KEEP_GOING_DECLINE = "Stop here";
+const KEEP_GOING_WORDS =
+  /^(?:This task has taken \d+ steps\. Keep going\?|My last \d+ actions failed\. Keep trying\?)$/;
+export function isKeepGoing(input: {
+  question: string;
+  options?: readonly string[] | undefined;
+  fields?:
+    | readonly { id: string; kind: string; label: string; hint?: string | undefined }[]
+    | undefined;
+  submit?: string | undefined;
+  decline?: string | undefined;
+}): boolean {
+  const [field, ...others] = input.fields ?? [];
+  return (
+    KEEP_GOING_WORDS.test(input.question) &&
+    !input.options &&
+    !others.length &&
+    field?.id === KEEP_GOING_FIELD.id &&
+    field.kind === KEEP_GOING_FIELD.kind &&
+    field.label === KEEP_GOING_FIELD.label &&
+    !field.hint &&
+    input.submit === KEEP_GOING_SUBMIT &&
+    input.decline === KEEP_GOING_DECLINE
+  );
+}
+
 const OWN_WORDS_LIMIT = 2000;
 
 // The user's own words for a choice or multichoice ("Other…"), and on a multichoice the options

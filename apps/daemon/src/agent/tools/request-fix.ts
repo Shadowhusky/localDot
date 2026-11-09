@@ -1,6 +1,7 @@
 import type { Blocker, RequestFixInput, ToolResult } from "@localdot/protocol";
 import { blockerNote } from "@localdot/protocol/guidance";
 import type { OpenBlocker, RaiseOptions } from "../blockers.ts";
+import { aimsAtKeys, namesItsSecret, plainWords } from "./card-words.ts";
 import { fail, movedOnFix, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const ASK_WINDOW_MS = 30 * 60_000;
@@ -115,6 +116,22 @@ export async function waitForFix(
     case "moot":
       return { ok: true, content: [text(blockerNote(blocker, "fixed"))] };
   }
+}
+
+// Words of dot's that would stand in for localDot's own card get the real card when the keys are
+// locked, and a refusal otherwise.
+export async function keysCardInstead(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+  words: string,
+): Promise<ToolResult | undefined> {
+  const said = plainWords(words);
+  const locked = deps.keysLocked?.();
+  if (aimsAtKeys(said))
+    return locked ? waitForFix(deps, ctx, { kind: "keys_locked" }) : fail(KEYS_NOT_LOCKED);
+  // While the vault is locked, any passphrase asked for through dot could be its own.
+  if (locked && namesItsSecret(said)) return waitForFix(deps, ctx, { kind: "keys_locked" });
+  return undefined;
 }
 
 export async function requestFixTool(

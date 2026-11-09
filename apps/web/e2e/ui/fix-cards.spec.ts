@@ -109,7 +109,7 @@ for (const view of VIEWS)
       await qa(page, fixture, "reenter");
       await qa(page, fixture, "stall/key-reenter");
       const rail = await chatRail(page);
-      const card = rail.getByRole("region", { name: /Re-enter your/ });
+      const card = rail.getByRole("region", { name: /Re-enter a saved key/ });
       await expect(card).toBeVisible();
       await expect(card.getByRole("button", { name: "Not now" })).toHaveCount(0);
       await card.getByRole("textbox").first().fill(KEY_VALUE);
@@ -155,7 +155,8 @@ for (const view of VIEWS)
       const rail = await chatRail(page);
       const card = rail.getByRole("region", { name: /could not process/ });
       await expect(card).toBeVisible();
-      await expect(card).toContainText("The provider said: 400");
+      await expect(card.getByRole("blockquote")).toContainText("From the provider, not localDot");
+      await expect(card.getByRole("blockquote")).toContainText("400");
       await expect(card).not.toContainText(/settings/i);
       await expect(card.getByRole("button", { name: "Not now" })).toHaveCount(0);
       await pictured(page, card, "model", ui);
