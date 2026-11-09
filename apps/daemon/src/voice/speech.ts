@@ -1,6 +1,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { speechChunks } from "./speech-chunks.ts";
@@ -122,12 +123,32 @@ const NOISE = /^[[(].*[\])]$/;
 const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}　-〿＀-￯]/u;
 
 // Where recordings wait while they're read: a private folder under localDot's home, emptied at
-// start-up, so audio never outlives a daemon that stopped mid-way.
-export async function sweepVoiceAudio(dir: string) {
-  await rm(dir, { recursive: true, force: true });
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  await chmod(dir, 0o700);
+// start-up, so audio never outlives a daemon that stopped mid-way. Never stops the daemon starting:
+// what can't be removed is moved aside, and failing that a fresh folder beside it is used.
+export async function sweepVoiceAudio(dir: string): Promise<string> {
+  const fresh = async (path: string) => {
+    await mkdir(path, { recursive: true, mode: 0o700 });
+    await chmod(path, 0o700);
+    const found = await lstat(path);
+    if (!found.isDirectory()) throw new Error("not a folder");
+    return path;
+  };
+  try {
+    await rm(dir, { recursive: true, force: true });
+    return await fresh(dir);
+  } catch (error) {
+    console.error(`old recordings couldn't all be removed (${codeOf(error)})`);
+  }
+  try {
+    await rename(dir, `${dir}.stale-${randomBytes(4).toString("hex")}`);
+    return await fresh(dir);
+  } catch {
+    return await mkdtemp(`${dir}-`).catch(() => dir);
+  }
 }
+
+const codeOf = (error: unknown) =>
+  error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
 
 export function speechTranscriber(
   model: SpeechModel,

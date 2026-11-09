@@ -1,10 +1,14 @@
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -387,6 +391,35 @@ describe("where audio waits while it's read", () => {
     expect(wav.startsWith(`${audio}/`)).toBe(true);
     expect(statSync(audio).mode & 0o777).toBe(0o700);
     expect(readdirSync(audio)).toEqual([]);
+  });
+
+  it("never stops the daemon starting when something in it can't be removed", async () => {
+    const audio = join(home, "voice-audio");
+    mkdirSync(join(audio, "locked"), { recursive: true });
+    writeFileSync(join(audio, "locked", "speech-0.wav"), "someone talking");
+    chmodSync(join(audio, "locked"), 0o500);
+    try {
+      const use = await sweepVoiceAudio(audio);
+      expect(statSync(use).isDirectory()).toBe(true);
+      expect(lstatSync(use).isSymbolicLink()).toBe(false);
+      expect(statSync(use).mode & 0o777).toBe(0o700);
+      expect(readdirSync(use)).toEqual([]);
+    } finally {
+      for (const name of readdirSync(home))
+        for (const inner of [join(home, name, "locked")])
+          if (existsSync(inner)) chmodSync(inner, 0o700);
+    }
+  });
+
+  it("removes a link in its place, never what it points to", async () => {
+    const target = join(home, "elsewhere");
+    mkdirSync(target);
+    writeFileSync(join(target, "keep.txt"), "mine");
+    const audio = join(home, "voice-audio");
+    symlinkSync(target, audio);
+    const use = await sweepVoiceAudio(audio);
+    expect(readFileSync(join(target, "keep.txt"), "utf8")).toBe("mine");
+    expect(lstatSync(use).isDirectory()).toBe(true);
   });
 
   it("is emptied at start-up of anything a stopped localDot left behind", async () => {
