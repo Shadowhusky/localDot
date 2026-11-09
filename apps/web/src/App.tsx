@@ -2519,7 +2519,7 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const phoneDock = (
     <>
-      {level < 2 && computerNotice}
+      {level < 2 && !fixes.some((open) => open.blocker.kind === "computer") && computerNotice}
       {handOffNote}
       {approvalView && <div className="phone-decision">{approvalView}</div>}
     </>

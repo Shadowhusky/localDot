@@ -23,6 +23,8 @@ async function pictured(page: Page, card: Locator, name: string, ui: { settle():
     await page.evaluate((value) => {
       document.documentElement.dataset.appearance = value;
     }, look);
+    // The app crossfades between looks.
+    await page.waitForTimeout(600);
     await ui.settle();
     await card.screenshot({ path: info.outputPath(`${name}-${look}.png`) });
   }
@@ -178,6 +180,7 @@ for (const view of VIEWS)
       const current = (await picker.textContent())?.trim() ?? "";
       const other = others.find((name) => !current.includes(name.trim()));
       await page.getByRole("option", { name: other ?? "" }).click();
+      await expect(page.getByRole("option")).toHaveCount(0);
       await pictured(page, card, "model-other", ui);
       await card.getByRole("button", { name: /^Continue with/ }).click();
       await leavesALine(rail, /^Switched to/);
@@ -192,6 +195,7 @@ for (const view of VIEWS)
       const rail = await chatRail(page);
       const card = rail.getByRole("region", { name: "Your computer is off" });
       await expect(card).toBeVisible();
+      await expect(page.locator(".phone-notice")).toHaveCount(0);
       await pictured(page, card, "computer", ui);
       await card.getByRole("button", { name: "Turn on" }).click();
       await leavesALine(rail, "Your computer is back on");
