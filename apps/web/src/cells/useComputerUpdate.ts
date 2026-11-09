@@ -244,7 +244,9 @@ export function useUpdateProgressNotice(
   run.current = update.run;
   const going = !!update.stage;
   const watched = useRef(false);
-  useEffect(() => setGoingLine(update.line ?? ""), [update.line]);
+  useEffect(() => {
+    if (update.line) setGoingLine(update.line);
+  }, [update.line]);
   useEffect(() => {
     if (!going) {
       dismissToast(GOING);
