@@ -7,6 +7,7 @@ import {
   STALL,
   ulidTime,
 } from "@localdot/protocol";
+import { decisionWords } from "../copy/decision.ts";
 import {
   type AgentChild,
   type AgentConnection,
@@ -221,6 +222,23 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           ...(card ? { actionClass: card.actionClass } : {}),
           ...(e.data.note ? { note: e.data.note } : {}),
         },
+        ...(card && e.data.by === "message"
+          ? {
+              unapproved: put(
+                model.unapproved,
+                card.approvalId,
+                {
+                  approvalId: card.approvalId,
+                  title: decisionWords(card).title,
+                  seq: e.seq,
+                  time: ulidTime(e.id),
+                  at: e.t,
+                },
+                L.unapproved,
+              ),
+              historyTruncated: next.historyTruncated || model.unapproved.size >= L.unapproved,
+            }
+          : {}),
       };
       break;
     }

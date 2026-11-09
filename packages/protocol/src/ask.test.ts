@@ -267,6 +267,9 @@ describe("field answers", () => {
       }),
     ).toThrow();
     expect(
+      parseEvent({ ...base, type: "ask.answer", data: { askId: ID, by: "message" } }).type,
+    ).toBe("ask.answer");
+    expect(
       parseEvent({ ...base, type: "ask.answer", data: { askId: ID, declined: true, by: "user" } })
         .type,
     ).toBe("ask.answer");

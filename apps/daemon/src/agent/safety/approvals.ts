@@ -20,7 +20,8 @@ export interface ActionBinding {
   readonly digest: string;
   readonly targetDigest: string;
 }
-export type ApprovalOutcome = "approve" | "deny" | "take_control" | "stale";
+// "message": the user sent a message instead of deciding, which is never a yes.
+export type ApprovalOutcome = "approve" | "deny" | "take_control" | "stale" | "message";
 export interface ApprovalChecks {
   readonly signal: AbortSignal;
   check(binding: ActionBinding): void;
@@ -31,7 +32,7 @@ export interface ApprovalChecks {
 export interface ApprovalResolution {
   approvalId: string;
   decision: "approve" | "deny" | "take_control";
-  by: "user" | "timeout";
+  by: "user" | "timeout" | "message";
   note?: string;
   // The card's own option the user chose, never one the answer described.
   always?: { readonly actionClass: ActionClass; readonly option: PlacedOption };
@@ -122,7 +123,7 @@ export class ApprovalBroker {
         try {
           this.publishResolution({
             approvalId: card.approvalId,
-            decision: result === "stale" ? "deny" : result,
+            decision: result === "stale" || result === "message" ? "deny" : result,
             by,
             ...(result === "stale" ? { note: "Approval cancelled." } : {}),
             ...(always && result === "approve"
@@ -194,6 +195,12 @@ export class ApprovalBroker {
   }
   cancel(sessionId: string): void {
     this.#pending.get(sessionId)?.finish("stale", "timeout");
+  }
+  // The user sent a message instead of deciding. False with no card waiting.
+  moveOn(sessionId: string): boolean {
+    const pending = this.#pending.get(sessionId);
+    pending?.finish("message", "message");
+    return !!pending;
   }
 }
 

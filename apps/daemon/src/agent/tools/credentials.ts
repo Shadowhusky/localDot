@@ -9,7 +9,14 @@ import {
 } from "@localdot/protocol";
 import { SERVICE_BYTES, ServiceKeyProblem } from "../../keyd/service-keys.ts";
 import { untrusted } from "../untrusted.ts";
-import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import {
+  append,
+  fail,
+  movedOnQuestion,
+  type ToolCallContext,
+  type ToolDeps,
+  text,
+} from "./deps.ts";
 
 const TOOL_LISTING_MS = 20_000;
 
@@ -102,6 +109,7 @@ export async function credentialsTool(
   ctx.check();
   if (answer.by === "pause")
     return { ok: false, pause: true, content: [text("Paused while waiting for the key.")] };
+  if (answer.by === "message") return { ok: true, content: [text(movedOnQuestion(ctx.session))] };
   if (answer.by !== "user" || answer.declined)
     return {
       ok: false,
@@ -177,6 +185,7 @@ async function connectApp(
     return { ok: false, pause: true, content: [text("Paused while waiting for the app.")] };
   if (answer.by !== "user" || answer.declined) {
     if (target.added) await hub.remove(target.config.id).catch(() => undefined);
+    if (answer.by === "message") return { ok: true, content: [text(movedOnQuestion(ctx.session))] };
     return {
       ok: false,
       content: [

@@ -16,7 +16,15 @@ import { VaultLockedError } from "../../keyd/client.ts";
 import { addTaskSecret } from "../redact.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import { type AgentSession, type AskAnswer, type AskForm, SAVED_LOGIN_TAP } from "../session.ts";
-import { fail, frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import {
+  fail,
+  frame,
+  MOVED_ON_COMPUTER,
+  movedOnQuestion,
+  type ToolCallContext,
+  type ToolDeps,
+  text,
+} from "./deps.ts";
 import { KEYS_NOT_LOCKED, waitForFix } from "./request-fix.ts";
 import { accountOrigin, findSecretField, type SecretField, typeSecret } from "./secret-field.ts";
 
@@ -56,7 +64,12 @@ function keysLocked(ctx: ToolCallContext): ToolResult {
   );
 }
 
-function unanswered(answer: AskAnswer, timeoutMs: number): ToolResult | undefined {
+function unanswered(
+  session: AgentSession,
+  answer: AskAnswer,
+  timeoutMs: number,
+): ToolResult | undefined {
+  if (answer.by === "message") return { ok: true, content: [text(movedOnQuestion(session))] };
   if (answer.by === "pause")
     return {
       ok: false,
@@ -120,7 +133,7 @@ async function tapToFill(
     ctx.signal,
   );
   ctx.check();
-  const early = unanswered(answer, timeoutMs);
+  const early = unanswered(ctx.session, answer, timeoutMs);
   if (early) return early;
   tapped.add(page);
   return undefined;
@@ -200,7 +213,7 @@ export async function askUserTool(
   const timeoutMs = askTimeoutMs(deps, ctx);
   const answer = await ctx.session.askFields(form, timeoutMs, ctx.step, ctx.generation, ctx.signal);
   ctx.check();
-  const early = unanswered(answer, timeoutMs);
+  const early = unanswered(ctx.session, answer, timeoutMs);
   if (early) return early;
   // Read as the lettered choice dot has always been told, which older brains still look for.
   const given = answer.fields?.[ASK_ANSWER_ID];
@@ -339,7 +352,7 @@ async function askFields(
               ctx.signal,
             );
             ctx.check();
-            const early = unanswered(missing, askTimeoutMs(deps, ctx));
+            const early = unanswered(ctx.session, missing, askTimeoutMs(deps, ctx));
             if (early) return early;
             const account = loginFields[0] && missing.fields?.[loginFields[0].id];
             if (typeof account !== "string") return fail("The account name was not provided.");
@@ -455,7 +468,7 @@ async function askFields(
   const typed = answer.secrets;
   try {
     ctx.check();
-    const early = unanswered(answer, timeoutMs);
+    const early = unanswered(ctx.session, answer, timeoutMs);
     if (early) return early;
     const answers: Record<string, unknown> = {};
     for (const field of fields) {
@@ -586,9 +599,11 @@ export async function requestTakeoverTool(
     content: [
       text(
         ctx.redact(
-          outcome.declined
-            ? `The user said not now: they won't do this on the computer at the moment.${note} Don't hand the screen over again for it right away: find another way, or carry on with the rest and tell them what is left for them.`
-            : `The user handed the screen back.${note}`,
+          outcome.movedOn
+            ? MOVED_ON_COMPUTER
+            : outcome.declined
+              ? `The user said not now: they won't do this on the computer at the moment.${note} Don't hand the screen over again for it right away: find another way, or carry on with the rest and tell them what is left for them.`
+              : `The user handed the screen back.${note}`,
         ),
       ),
       image,

@@ -32,9 +32,9 @@ import { useAside } from "./actions/useAside.ts";
 import { PlainSteps } from "./agent/ActivityRow.tsx";
 import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
 import { useAskDraft } from "./agent/ask-draft.ts";
-import { composerReply } from "./agent/ask-form.ts";
+import { asksPrivate } from "./agent/ask-form.ts";
 import { BrowserSignIn } from "./agent/BrowserSignIn.tsx";
-import { Composer, keepDraftNow, type ReplyOutcome } from "./agent/Composer.tsx";
+import { Composer, type DotWait, keepDraftNow } from "./agent/Composer.tsx";
 import { endTaskRun } from "./agent/control-api.ts";
 import {
   conversationLook,
@@ -1080,13 +1080,6 @@ function Theatre({ api }: { api: ApiClient }) {
     const marks = askMarks?.filter((mark) => mark.screen === shownScreen);
     return manualGeometry && marks?.length ? { screen: manualGeometry, marks } : undefined;
   }, [askMarks, shownScreen, manualGeometry]);
-  const replyAsk = useHandler(async (text: string, attached: boolean): Promise<ReplyOutcome> => {
-    if (!askDraft) return "failed";
-    const plan = composerReply(askDraft.question, text, attached);
-    if (plan.kind === "hold") return { hold: plan.reason };
-    if (!(await answerAsk(plan.request))) return "failed";
-    return plan.kind === "answer" ? "answered" : "declined";
-  });
   const manualLive =
     yours &&
     controls.canInput &&
@@ -1835,6 +1828,16 @@ function Theatre({ api }: { api: ApiClient }) {
       ) : undefined,
     [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey, keys.save, api, stack],
   );
+  // What dot waits on the user for, which any message of theirs moves on from.
+  const dotWait: DotWait | undefined = askDraft
+    ? asksPrivate(askDraft.fields)
+      ? "private"
+      : "question"
+    : stepApproval
+      ? "approval"
+      : takeover && takeover.by !== "user"
+        ? "computer"
+        : undefined;
   // What a task's decision must not stay behind when a notification opens it.
   const uncover = () => {
     selectReplay(null);
@@ -2228,7 +2231,7 @@ function Theatre({ api }: { api: ApiClient }) {
       reason: yours ? handBack.slot.reason : "dot has the computer",
       run: () => void handBack.run(),
     },
-    research: researchWait(agent) ?? (askDraft ? "Answer dot's question first" : undefined),
+    research: researchWait(agent),
     aside,
     newConversation,
     conversations: {
@@ -2554,7 +2557,7 @@ function Theatre({ api }: { api: ApiClient }) {
       }}
       onRename={() => setDetailsOpen(true)}
       researchReason={researchWait(agent)}
-      sendsAfter={taskWorking && !agent.snapshot?.holder}
+      sendsAfter={taskWorking && !agent.snapshot?.holder && !dotWait}
       onSearch={() => openPalette("actions")}
       switchView={switchViewItem}
       newReason={newConversation.reason}
@@ -2993,7 +2996,8 @@ function Theatre({ api }: { api: ApiClient }) {
             onRightClick={(on) => setPointerMode(on ? "right" : "click")}
             handBack={handBack.slot}
             onHandBack={() => void handBack.run()}
-            onFullScreen={fullScreen.enter}
+            // dot waits on this hand-over, so a message comes first: full screen is in the More menu.
+            {...(dotWait ? { message: true } : { onFullScreen: fullScreen.enter })}
           />
         )
       }
@@ -3152,11 +3156,7 @@ function Theatre({ api }: { api: ApiClient }) {
             known={status === "known"}
             pending={pending !== null}
             controlBlocked={
-              controls.fenced ||
-              controls.stopping ||
-              !!cell?.fenced ||
-              !!cell?.replacementPending ||
-              !!safety.approval
+              controls.fenced || controls.stopping || !!cell?.fenced || !!cell?.replacementPending
             }
             agent={agent}
             keysOpen={settings.open}
@@ -3166,7 +3166,7 @@ function Theatre({ api }: { api: ApiClient }) {
             onTaskStarted={session.check}
             layout={sheets ? "pill" : "card"}
             placeholder={stack && level === 2 ? "Steer dot" : undefined}
-            reply={askDraft ? replyAsk : undefined}
+            waitingOn={dotWait}
             modelChanged={modelChanged}
             sendModel={taskModel.ref}
             modelAfter={modelNext && taskModel.ref ? modelLabel : undefined}

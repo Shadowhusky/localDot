@@ -170,6 +170,32 @@ export const USER_SPOKE = "Stopped waiting early: the user sent a new message.";
 const USER_QUEUED =
   "Stopped waiting early: the user queued a message for after this task. Finish what you were waiting for first, unless the message says otherwise.";
 export const woken = (listening: UserListener) => (listening.queued ? USER_QUEUED : USER_SPOKE);
+// What dot hears when the user's message moves on from what it asked of them. The message itself
+// comes on its own, so these never repeat it.
+const NEXT = (ask: string) => `Their message comes next: read it and act on it. ${ask}`;
+const AFTER_THIS_TASK =
+  "Their message is for another model, so it goes on after this task: don't ask again, wrap up what you can and finish.";
+export const movedOnQuestion = (session: AgentSession) =>
+  `The user sent a new message instead of answering, so this question is closed and nothing was entered. ${session.messageWaits ? AFTER_THIS_TASK : NEXT("Ask this again only if you still need the answer.")}`;
+export const movedOnStep = (session: AgentSession) =>
+  `The user sent a new message instead of deciding, so this step was not approved and did not run. ${session.messageWaits ? AFTER_THIS_TASK : NEXT("If you still need this step, ask again: it needs a new approval.")}`;
+export const MOVED_ON_COMPUTER =
+  "The user sent a message, which hands the screen back, so what you asked of them on the computer may not be done. Their message follows as their next message: read it and act on it. Hand the screen over again only if you still need them to.";
+// A step's own words for being refused give way to why; what it did before that, and any screen it
+// came with, stay. Asking again is what the user's choice calls for, so no advice against it.
+export function movedOnResult(session: AgentSession, result: ToolResult): ToolResult {
+  const { recovery: _recovery, cancelled: _cancelled, ...kept } = result;
+  return {
+    ...kept,
+    ok: false,
+    content: [
+      text(movedOnStep(session)),
+      ...result.content.filter(
+        (part) => part.type !== "text" || !/not authorized/i.test(part.text),
+      ),
+    ],
+  };
+}
 // The brain's delegated agents (their calls are named `sub-…`) don't hear the user.
 export const hearsUser = (ctx: ToolCallContext) => !ctx.callId.startsWith("sub-");
 // A wait of dot's that the user's new message ends early, their waits running their course. A wait

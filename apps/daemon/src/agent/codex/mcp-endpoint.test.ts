@@ -175,6 +175,41 @@ const call = (
   args: unknown = { action: "screenshot" },
   id?: number,
 ) => c.request("tools/call", { name, arguments: args }, id);
+describe("a tool call over the socket blocked on the user", () => {
+  it("gets its reply as soon as the user's message moves on", async () => {
+    const h = toolHarness({ autoApprove: false });
+    harnesses.push(h);
+    const f = await fixture(
+      {
+        dispatch: (name, id, args, ctx) =>
+          dispatchTool(
+            { tools: h.tools, policy: actPolicy },
+            h.session,
+            name,
+            id,
+            args,
+            redactor([]),
+            ctx.generation,
+            ctx.signal,
+          ),
+      },
+      true,
+      h.session,
+    );
+    const asking = call(f.c, "ask_user", { question: "Which format?", options: ["PDF", "Word"] });
+    await vi.waitFor(() => expect(h.session.pendingAsk).toBeDefined());
+    expect(h.session.moveOn("Skip the report")).toBe(true);
+    const reply = await asking;
+    expect(JSON.stringify(reply)).toContain("instead of answering");
+    expect(f.retired).toEqual([]);
+    const acting = call(f.c, "shell", { command: "rm -rf build" });
+    await vi.waitFor(() => expect(h.session.pendingApproval).toBeDefined());
+    expect(h.session.moveOn("Don't delete anything")).toBe(true);
+    expect(JSON.stringify(await acting)).toContain("not approved");
+    expect(h.desktop.shellCalls).toEqual([]);
+    expect(f.retired).toEqual([]);
+  });
+});
 describe("private Codex MCP capability", () => {
   it("owns a 128-bit canonical 0700 folder and 0600 socket and cleans that exact directory", async () => {
     const f = await fixture();

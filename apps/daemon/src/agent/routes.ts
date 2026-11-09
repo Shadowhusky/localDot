@@ -828,9 +828,11 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         turn?.reached();
         // A deliberate Send hands control back. Publish this instruction before
         // waking the model, so it cannot resume the old plan ahead of the message.
-        if (!(await s.handback(s.pendingTakeover, text, c.req.raw.signal)))
+        if (!(await s.handback(s.pendingTakeover, text, c.req.raw.signal, false, true)))
           throw new RouteError(409, "The computer is still changing hands. Try sending again.");
       }
+      // A shared link's guest answers for no one: what the owner was asked stays theirs to decide.
+      else if (!grant && s.moveOn(text, undefined, turn)) return c.body(null, 202);
       // A message for another model waits for the task to finish, steered or not: moving dot now
       // would end what it has running.
       else if (parsed.kind === "followup" || turn?.moves()) s.enqueue(text, grant?.id, turn);
@@ -939,7 +941,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const s = active(c.req.param("id") ?? "");
       const messageId = c.req.param("messageId") ?? "";
       if (!ULID_PATTERN.test(messageId)) throw new RouteError(400, "invalid message id");
-      if (!s.steerQueued(messageId)) throw new RouteError(404, "queued message not found");
+      if (!s.steerQueued(messageId, !c.get("remoteGrant")))
+        throw new RouteError(404, "queued message not found");
       return c.body(null, 204);
     }),
   );

@@ -22,6 +22,7 @@ export const AGENT_LIMITS = Object.freeze({
   changes: 128,
   questions: 64,
   takeovers: 64,
+  unapproved: 64,
   results: 64,
   routineProposals: 16,
   dots: 16,
@@ -201,6 +202,14 @@ export interface Reported<T> {
   readonly data: T;
 }
 // The last decision, its note, and the Always allow choice it saved, for the Undo line.
+// A step dot asked the user's OK for, which their message moved on from: it never ran.
+export interface AgentUnapproved {
+  readonly approvalId: string;
+  readonly title: string;
+  readonly seq: number;
+  readonly time: number;
+  readonly at: number;
+}
 export interface ApprovalOutcome {
   readonly approvalId: string;
   readonly decision: EventOf<"approval.resolve">["data"]["decision"];
@@ -244,6 +253,8 @@ export interface AgentModel {
   readonly plan: readonly EventOf<"plan.set">["data"]["items"][number][];
   readonly questions: ReadonlyMap<string, AgentQuestion>;
   readonly takeovers: ReadonlyMap<string, AgentTakeover>;
+  // The steps whose card the user's message moved on from, by approval.
+  readonly unapproved: ReadonlyMap<string, AgentUnapproved>;
   readonly approval?: ApprovalCard | null;
   // A connection's card, which waits for the user beside the task's own decisions.
   readonly connection?: ApprovalCard | null;
@@ -318,6 +329,7 @@ export function emptyAgentModel(): AgentModel {
     subagents: new Map(),
     plan: [],
     questions: new Map(),
+    unapproved: new Map(),
     takeovers: new Map(),
     pendingAsk: null,
     pendingTakeover: null,

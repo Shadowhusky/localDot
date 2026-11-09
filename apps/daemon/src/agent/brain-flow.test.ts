@@ -153,6 +153,28 @@ describe("host brain through the real daemon tool API and model proxy", () => {
     },
   );
 
+  it("reads a message that moved on from dot's question in its very next request", async () => {
+    const f = await fixture([
+      [{ name: "ask_user", input: { question: "Which format?", options: ["PDF", "Word"] } }],
+      [done],
+    ]);
+    const words = "Forget the report, book the train instead";
+    const moved = vi.fn();
+    f.h.eventLog.subscribe((_id, event) => {
+      if (event.type === "ask.request") queueMicrotask(() => moved(f.h.session.moveOn(words)));
+    });
+    expect(await f.run()).toBe("done");
+    expect(moved).toHaveBeenCalledWith(true);
+    expect(f.wire).toHaveLength(2);
+    expect(f.wire[0]?.body).not.toContain(words);
+    expect(f.wire[1]?.body).toContain("instead of answering");
+    expect(f.wire[1]?.body).toContain(words);
+    // It reads as the user's own message, once, and not as an answer to the question.
+    expect(f.wire[1]?.body.split(words)).toHaveLength(2);
+    const answers = f.h.events().filter((e) => e.type === "ask.answer");
+    expect(answers.map((e) => (e.data as { by: string }).by)).toEqual(["message"]);
+  });
+
   it("holds takeover across caller retirement and permits a fresh generation only after hand-back", async () => {
     const f = await fixture([]);
     const api = f.client();

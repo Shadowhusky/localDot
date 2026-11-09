@@ -39,6 +39,7 @@ import {
   fail,
   intentOf,
   listenForUser,
+  movedOnResult,
   type ToolCallContext,
   type ToolDeps,
   text,
@@ -216,9 +217,12 @@ export async function dispatchTool(
         (!isToolName(name) && !session.connectors.get(name))
       )
         return outcome;
+      const result = session.tookMovedOn(callId)
+        ? movedOnResult(session, outcome.result)
+        : outcome.result;
       return {
         ...outcome,
-        result: withRecoveryAdvice(session.workProgress.record(name, queuedInput, outcome.result)),
+        result: withRecoveryAdvice(session.workProgress.record(name, queuedInput, result)),
       };
     };
     const outcome =

@@ -24,14 +24,14 @@ test("thread, done with files", async ({ page, ui }) => {
 test("thread, question", async ({ page, ui }) => {
   await ui.open("ask");
   const rail = await conversation(page);
-  // In the thread beside a wide screen; a phone asks in a sheet, and its message field answers too.
+  // In the thread beside a wide screen; a phone asks in a sheet, its message field below for anything else.
   if (isPhone(page)) {
     await expect(
       page.getByRole("form", { name: "Which report format should I use?" }),
     ).toBeVisible();
     await expect(rail.getByRole("textbox", { name: "Message" })).toHaveAttribute(
       "placeholder",
-      "Answer dot",
+      "Or message dot",
     );
   } else await expect(rail.getByRole("form", { name: "Answer dot" })).toBeVisible();
   await ui.settle();

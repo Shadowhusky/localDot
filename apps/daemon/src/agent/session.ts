@@ -81,7 +81,7 @@ export interface AskAnswer {
   declined?: true;
   // Never journaled: the ask tool types these into their fields and clears them.
   secrets?: SecretAnswers;
-  by: "user" | "timeout" | "stop" | "pause" | "control";
+  by: "user" | "timeout" | "stop" | "pause" | "control" | "message";
 }
 export interface AskForm {
   question: string;
@@ -100,6 +100,8 @@ export interface TakeoverOutcome {
   by: "user" | "stop";
   // The user said "Not now" to dot's hand-off.
   declined?: true;
+  // The user's message ended dot's hand-off, with what they did there unknown.
+  movedOn?: true;
 }
 export interface PlanItem {
   id: string;
@@ -342,6 +344,10 @@ export class AgentSession {
   readonly #turns = new Map<string, MessageTurn>();
   readonly #withdrawn = new Map<string, string>();
   readonly #cancelledQueued = new Set<string>();
+  // The calls whose card the user's message ended, until dot's reply to them says so.
+  readonly #movedOn = new Set<string>();
+  // The message that last ended a wait waits for this task to finish: dot hears to finish for it.
+  messageWaits = false;
   // The user's messages dot has received and not acted on, by id: no words of its own and no tool
   // call since. Stop gives these back.
   readonly #unanswered = new Map<string, string>();
@@ -547,7 +553,16 @@ export class AgentSession {
         throw new SessionStoppedError();
       checks.check(value);
     };
-    return this.#approvals.request(binding, draft, { ...checks, check });
+    return this.#approvals.request(binding, draft, { ...checks, check }).then((outcome) => {
+      if (outcome === "message") this.movedOnFrom(binding.callId);
+      return outcome;
+    });
+  }
+  movedOnFrom(callId: string): void {
+    this.#movedOn.add(callId);
+  }
+  tookMovedOn(callId: string): boolean {
+    return this.#movedOn.delete(callId);
   }
   answerApproval(value: unknown): boolean {
     const generation = this.generation;
@@ -1185,6 +1200,35 @@ export class AgentSession {
     this.#wake();
     return { ...item };
   }
+  // The user's message while dot waits on them moves on from what it waits on: a question closes
+  // unanswered, a step's approval counts as not given, and dot reads the message now, not after the
+  // wait. Moving dot ends what it left running, so a message for another model waits for the task
+  // then, as it does for a model this task can't run. False when dot waits on neither.
+  moveOn(text: string, sender?: string, turn?: MessageTurn): boolean {
+    if (this.stopped) throw new SessionStoppedError();
+    if (!this.#ask && !this.pendingApproval) return false;
+    const waits =
+      !!turn?.handOver ||
+      (!!turn?.moves() && (this.#leftRunning > 0 || this.#delegates.running().length > 0));
+    this.#endWait(waits);
+    if (waits) this.enqueue(text, sender, turn);
+    else this.#endedWait(this.post("steer", text, sender, turn));
+    return true;
+  }
+  #endWait(waits: boolean): boolean {
+    this.messageWaits = waits;
+    const asked = this.#ask?.finish({ by: "message" }) ?? false;
+    return this.#approvals.moveOn(this.id) || asked;
+  }
+  // As for a timed wait: the message shows it ended this wait, and a wait dot starts next runs on.
+  #endedWait(said: InboxItem): void {
+    if (this.#cut >= said.seq) return;
+    this.#cut = said.seq;
+    queueMicrotask(() => {
+      this.#announced = Math.max(this.#announced, said.seq);
+    });
+    this.append("message.delivery", { messageId: said.messageId, state: "woke" });
+  }
   // Hold follow-ups outside the model inbox until its current task finishes. A queued
   // message can therefore be promoted without racing the model's inbox cursor.
   enqueue(text: string, sender?: string, turn?: MessageTurn): void {
@@ -1227,15 +1271,19 @@ export class AgentSession {
     this.#queued.clear();
     return taken;
   }
-  steerQueued(messageId: string): boolean {
+  // `movesOn`: the user sent it now, which ends what dot waits on them for, as any message does.
+  steerQueued(messageId: string, movesOn = false): boolean {
     if (this.stopped) throw new SessionStoppedError();
     const text = this.#queued.get(messageId);
     if (text === undefined) return this.#inbox.some((item) => item.messageId === messageId);
+    const handOver = !!this.#turns.get(messageId)?.handOver;
+    const ended = movesOn && this.#endWait(handOver);
     // Its model can't run here, so it waits for this task to finish and hand it over.
-    if (this.#turns.get(messageId)?.handOver) return true;
+    if (handOver) return true;
     this.append("message.delivery", { messageId, state: "steering" });
-    this.#deliverInbox("steer", text, messageId, false);
+    const said = this.#deliverInbox("steer", text, messageId, false);
     this.#queued.delete(messageId);
+    if (ended) this.#endedWait(said);
     return true;
   }
   // Withdrawal and inbox delivery are synchronous: a message can only take one path.
@@ -1951,12 +1999,13 @@ export class AgentSession {
     return this.#endControl(record, note);
   }
   // `declined`: the user said "Not now" to dot's hand-off; control they took themselves has nothing
-  // to decline.
+  // to decline. `movedOn`: the note is a message that ended dot's hand-off.
   async handback(
     requestId: string,
     note: string | undefined,
     signal?: AbortSignal,
     declined = false,
+    movedOn = false,
   ): Promise<boolean> {
     const record = this.#control;
     if (
@@ -2006,16 +2055,22 @@ export class AgentSession {
     // Native takeover can retire its brain. With no current generation, keep the physical
     // screens and recorder fenced until prepareScreens confirms the replacement's grant.
     if (this.#screens) this.lastFrameId = undefined;
-    return this.#endControl(record, note, declined && !record.user);
+    return this.#endControl(record, note, declined && !record.user, movedOn && !record.user);
   }
   // A hand-back that cannot finish leaves the user in control, free to try again.
   #keepControl(record: ControlRecord): false {
     if (this.#control === record && !this.stopped) record.returning = false;
     return false;
   }
-  #endControl(record: ControlRecord, note: string | undefined, declined = false): boolean {
+  #endControl(
+    record: ControlRecord,
+    note: string | undefined,
+    declined = false,
+    movedOn = false,
+  ): boolean {
     // Persist the user's hand-back note before waking any replacement brain.
-    if (note) this.post("steer", note);
+    const said = note ? this.post("steer", note) : undefined;
+    if (said && movedOn) this.#endedWait(said);
     this.append(
       "takeover.end",
       {
@@ -2024,6 +2079,7 @@ export class AgentSession {
         by: "user",
         ...(record.typed ? { typed: true } : {}),
         ...(declined ? { declined: true } : {}),
+        ...(movedOn ? { movedOn: true } : {}),
       },
       record.step,
     );
@@ -2044,6 +2100,7 @@ export class AgentSession {
       ...(note ? { note } : {}),
       by: "user",
       ...(declined ? { declined: true } : {}),
+      ...(movedOn ? { movedOn: true } : {}),
     });
     this.#wake();
     return true;

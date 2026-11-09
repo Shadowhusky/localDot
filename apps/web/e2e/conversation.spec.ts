@@ -137,8 +137,8 @@ for (const [engine, size, options] of MATRIX) {
     await browser.close();
   });
 
-  // The composer stays in place as Answer dot, keeping what was typed; the question's choices come
-  // in the thread beside a wide screen, or in a sheet on a phone.
+  // The composer stays in place, keeping what was typed; the question's choices come in the thread
+  // beside a wide screen, or in a sheet on a phone.
   test(`a question keeps the composer and leaves the answer in the thread (${engine} ${size})`, async () => {
     const { browser, page, thread } = await open(engine, options);
     const draft = page.getByRole("textbox", { name: "Message", exact: true });
@@ -151,7 +151,7 @@ for (const [engine, size, options] of MATRIX) {
       name: size === "phone" ? "Which report format should I use?" : "Answer dot",
     });
     await expect(answer).toBeVisible();
-    await expect(draft).toHaveAttribute("placeholder", "Answer dot");
+    await expect(draft).toHaveAttribute("placeholder", "Or message dot");
     await expect(draft).toHaveValue("Keep this draft");
     await answer.getByRole("radio", { name: "Plain text" }).check();
     await answer.getByRole("button", { name: "Send answer" }).click();
@@ -286,8 +286,8 @@ for (const [engine, size, options] of [
   ["chrome", "1440x900", DESKTOP],
   ["webkit", "phone", PHONE],
 ] as const) {
-  // The composer stays in place as Answer dot (design-v2 §10.7), so nothing that happens in the
-  // thread moves it, in or out of the thread or up and down.
+  // The composer stays in place (design-v2 §10.7), so nothing that happens in the thread moves it,
+  // in or out of the thread or up and down.
   test(`a question, its answer and the task's end never move the composer (${engine} ${size})`, async () => {
     const { browser, page } = await open(engine, options);
     await expect(page.locator(".thread-work[data-live]")).toBeVisible();

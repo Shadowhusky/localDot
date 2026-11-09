@@ -387,10 +387,10 @@ describe("the line a card leaves", () => {
 
   it("an old task's card reads as history, never a prompt", () => {
     const old = card({ kind: "keys_locked" }, { seq: 1, at: 1, time: 0 });
-    const asHistory = threadItems([], [], [], [], [], undefined, [], [old]);
+    const asHistory = threadItems([], [], [], [], [], undefined, [], [], [old]);
     expect(asHistory.map((item) => item.kind)).toEqual(["fix"]);
     expect(line(old)).toContain("Saved keys were locked");
-    const stillWaiting = threadItems([], [], [], [], [], undefined, [], [old], true);
+    const stillWaiting = threadItems([], [], [], [], [], undefined, [], [], [old], true);
     expect(stillWaiting).toEqual([]);
   });
 
@@ -418,6 +418,7 @@ describe("the line a card leaves", () => {
       [],
       [],
       undefined,
+      [],
       [],
       [cleared],
     );

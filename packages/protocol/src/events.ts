@@ -294,7 +294,8 @@ export const ApprovalResolve = event(
   z.object({
     approvalId: z.string(),
     decision: z.enum(["approve", "deny", "take_control"]),
-    by: z.enum(["user", "timeout"]),
+    // "message": the user sent a message instead, which counts as not approved.
+    by: z.enum(["user", "timeout", "message"]),
     note: z.string().max(500).optional(),
   }),
 );
@@ -509,7 +510,8 @@ export const AskAnswer = event(
     skipped: z.array(AskFieldId).min(1).max(MAX_ASK_FIELDS).optional(),
     // The user chose the way out ("Not now").
     declined: z.literal(true).optional(),
-    by: z.enum(["user", "timeout", "stop", "pause", "control"]),
+    // "message": the user sent a message instead of answering.
+    by: z.enum(["user", "timeout", "stop", "pause", "control", "message"]),
   }),
 );
 export const TakeoverReason = z.enum(["login", "2fa", "captcha", "payment", "other"]);
@@ -533,6 +535,8 @@ export const TakeoverEnd = event(
     typed: z.literal(true).optional(),
     // The user said "Not now" to dot's hand-off.
     declined: z.literal(true).optional(),
+    // The user's message ended dot's hand-off; the step it asked for may not be done.
+    movedOn: z.literal(true).optional(),
   }),
 );
 export const TaskResult = event(

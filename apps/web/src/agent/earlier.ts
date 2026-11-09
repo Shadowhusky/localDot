@@ -56,6 +56,7 @@ export async function readThread(
     model.routineProposals.values(),
     model.origin,
     model.dots,
+    model.unapproved.values(),
     model.blockers.values(),
   );
   const steps = workSteps(timelineRows(stepRows(stage), stage.keyUses), model);
