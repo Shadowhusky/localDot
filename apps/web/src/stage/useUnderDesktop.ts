@@ -46,6 +46,7 @@ export function useUnderDesktop({
     let shown = false;
     let openedAt = Date.now();
     let closing: ReturnType<typeof setTimeout> | undefined;
+    const offRestart = canvas.current?.onRestart(() => held.stream.retap());
     const offStats = canvas.current?.onUnderStats(({ presented }) => {
       held.stream.presented(presented);
       if (shown) return;
@@ -63,6 +64,7 @@ export function useUnderDesktop({
     return () => {
       clearInterval(refresh);
       clearTimeout(closing);
+      offRestart?.();
       offStats?.();
       disconnect();
       canvas.current?.detachUnder();

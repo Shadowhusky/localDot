@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { qualityMessage } from "@localdot/protocol";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { fakeChromium, playInClient } from "../testing/fake-chromium.ts";
 import type { FrameSource } from "./frame-source.ts";
 import {
   closeStreams,
+  FIRST_STALL_MS,
   holdStream,
   KEEP_MS,
   STALE_MS,
@@ -71,19 +72,287 @@ it("leaves focus where the user is typing while a client starts, as Selkies' tak
   release(0);
 });
 
-it("gives a client that keeps failing to load longer each time, instead of reloading every 10 s", async () => {
+it("gives a client that keeps failing to load longer each time, instead of reloading as often", async () => {
   const { api, minted } = daemon((n) => Response.json({ path: ticket(n) }));
   const { stream } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
   stream.connect(() => {});
   await vi.advanceTimersByTimeAsync(250);
   expect(minted()).toBe(1);
-  await vi.advanceTimersByTimeAsync(STALE_MS);
+  await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min);
   expect(minted()).toBe(2);
   expect(clients().map((frame) => frame.getAttribute("src"))).toEqual([`${ticket(2)}#shared`]);
-  await vi.advanceTimersByTimeAsync(STALE_MS);
+  await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min);
   expect(minted()).toBe(2);
-  await vi.advanceTimersByTimeAsync(STALE_MS);
+  await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min);
   expect(minted()).toBe(3);
+});
+
+// Selkies' client in the states it was seen to sit in: WebKit makes its track as it starts, before
+// its socket opens, and Chromium only with the first decoded frame.
+function clientAt(index: number, readyState: number | null, track: boolean, chunks = 0) {
+  const frame = clients()[index];
+  const view = frame?.contentWindow;
+  if (!frame || !view) throw new Error("no client");
+  if (track) playInClient(frame, `track-${index}`);
+  else {
+    const doc = frame.contentDocument;
+    doc?.getElementById("videoStream")?.remove();
+    const video = doc?.createElement("video");
+    if (video) {
+      video.id = "videoStream";
+      doc?.appendChild(video);
+    }
+  }
+  const transport = readyState === null ? null : { readyState, send: vi.fn(), close: vi.fn() };
+  Object.assign(view, { selkiesTransport: transport, videoChunksReceived: chunks });
+  return { frame, view, transport };
+}
+
+describe("the first picture", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = fakeChromium();
+  });
+  afterEach(() => restore());
+
+  const connecting = async () => {
+    const { api, minted } = daemon((n) => Response.json({ path: ticket(n) }));
+    const stuck = vi.fn();
+    const sources: FrameSource[] = [];
+    const held = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
+    held.stream.connect((source) => sources.push(source), stuck);
+    await vi.advanceTimersByTimeAsync(0);
+    return { ...held, minted, stuck, sources };
+  };
+
+  it("takes a fresh client with a fresh ticket when a video has its track but its socket never opens", async () => {
+    const { minted } = await connecting();
+    const { transport } = clientAt(0, 0, true);
+    await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min + 250);
+    expect(minted()).toBe(2);
+    expect(transport?.close).toHaveBeenCalledOnce();
+    expect(clients().map((frame) => frame.getAttribute("src"))).toEqual([`${ticket(2)}#shared`]);
+  });
+
+  it("takes a fresh client when an open socket's video shows nothing", async () => {
+    for (const track of [true, false]) {
+      const { minted, release } = await connecting();
+      clientAt(0, 1, track);
+      await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min + 250);
+      expect(minted()).toBe(2);
+      expect(clients()).toHaveLength(1);
+      release(0);
+    }
+  });
+
+  it("doesn't wait out a socket that was refused, nor ask again at once", async () => {
+    const { minted } = await connecting();
+    clientAt(0, 3, false);
+    await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min / 8 - 250);
+    expect(minted()).toBe(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(minted()).toBe(2);
+    clientAt(0, 3, false);
+    await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min / 8);
+    expect(minted()).toBe(2);
+    await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min / 8);
+    expect(minted()).toBe(3);
+  });
+
+  it("gives a connection that keeps getting further all the time it needs", async () => {
+    const { minted, stream, sources } = await connecting();
+    const step = FIRST_STALL_MS.min - 1_000;
+    await vi.advanceTimersByTimeAsync(step);
+    clientAt(0, 0, false);
+    await vi.advanceTimersByTimeAsync(step);
+    const client = clientAt(0, 1, false);
+    await vi.advanceTimersByTimeAsync(step);
+    playInClient(client.frame, "track-0");
+    await vi.advanceTimersByTimeAsync(step);
+    Object.assign(client.view, { videoChunksReceived: 1 });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(minted()).toBe(1);
+    expect(sources.length).toBeGreaterThan(0);
+    stream.presented(1);
+    expect(stream.picture).toBe("live");
+  });
+
+  it("doesn't count a client that keeps starting over as getting further", async () => {
+    const { minted } = await connecting();
+    for (let ms = 0; ms < FIRST_STALL_MS.min; ms += 2_000) {
+      clientAt(0, 0, false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      clientAt(0, null, false);
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    await vi.advanceTimersByTimeAsync(250);
+    expect(minted()).toBe(2);
+  });
+
+  it("gives each new try longer, up to a limit, and starts over when the viewer asks", async () => {
+    const { minted, stream } = await connecting();
+    const nextTry = async () => {
+      const before = minted();
+      const from = Date.now();
+      while (minted() === before) await vi.advanceTimersByTimeAsync(250);
+      return Date.now() - from;
+    };
+    const waits = [];
+    for (let tries = 0; tries < 6; tries++) waits.push(await nextTry());
+    const expected = [8_000, 12_000, 18_000, 27_000, 30_000, 30_000];
+    waits.forEach((wait, n) => {
+      expect(wait).toBeGreaterThanOrEqual(expected[n] ?? 0);
+      expect(wait).toBeLessThanOrEqual((expected[n] ?? 0) + 500);
+    });
+    stream.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await nextTry()).toBeLessThanOrEqual(FIRST_STALL_MS.min + 500);
+  });
+
+  it("never holds two clients while it has no picture to keep", async () => {
+    const { stream } = await connecting();
+    let most = 0;
+    const observer = new MutationObserver(() => {
+      most = Math.max(most, clients().length);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    clientAt(0, 1, true);
+    stream.renew();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min + 250);
+    stream.replace();
+    await vi.advanceTimersByTimeAsync(250);
+    observer.disconnect();
+    expect(most).toBe(1);
+    expect(clients()).toHaveLength(1);
+  });
+
+  it("takes a fresh client at once on returning to a socket that never opened", async () => {
+    let visibility: DocumentVisibilityState = "visible";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility,
+    });
+    try {
+      const { minted, stream } = await connecting();
+      clientAt(0, 0, true);
+      await vi.advanceTimersByTimeAsync(250);
+      stream.refresh();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(minted()).toBe(2);
+      visibility = "hidden";
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(clients()).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.max);
+      expect(minted()).toBe(2);
+      visibility = "visible";
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(minted()).toBe(3);
+    } finally {
+      Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+
+  it("doesn't count time out of sight against a client", async () => {
+    const { minted, stream } = await connecting();
+    clientAt(0, 1, false);
+    await vi.advanceTimersByTimeAsync(250);
+    stream.show(false);
+    await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.max);
+    stream.show(true);
+    await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min - 500);
+    expect(minted()).toBe(1);
+  });
+
+  it("asks the stage to start again when its decoder runs and the stage shows nothing", async () => {
+    const { minted, stuck, sources } = await connecting();
+    const { view } = clientAt(0, 1, true);
+    let chunks = 0;
+    const run = async (ms: number) => {
+      for (let at = 0; at < ms; at += 250) {
+        chunks += 8;
+        Object.assign(view, { videoChunksReceived: chunks });
+        await vi.advanceTimersByTimeAsync(250);
+      }
+    };
+    await run(TAP_STALL_MS + 500);
+    expect(stuck).not.toHaveBeenCalled();
+    expect(sources.length).toBeGreaterThanOrEqual(2);
+    await run(TAP_STALL_MS);
+    expect(stuck).toHaveBeenCalled();
+    expect(minted()).toBe(2);
+    expect(clients()).toHaveLength(1);
+  });
+
+  it("asks the stage to start again when a still screen's first frames showed nothing", async () => {
+    const { stuck, minted } = await connecting();
+    const { view } = clientAt(0, 1, true);
+    Object.assign(view, { videoChunksReceived: 1 });
+    await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min + 500);
+    expect(stuck).toHaveBeenCalled();
+    expect(minted()).toBe(2);
+  });
+
+  it("leaves the stage alone on a first try that nothing reached it from, and not on a second", async () => {
+    const { stuck, minted } = await connecting();
+    clientAt(0, 1, false);
+    await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min + 500);
+    expect(minted()).toBe(2);
+    expect(stuck).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(FIRST_STALL_MS.min * 1.5 + 500);
+    expect(minted()).toBe(3);
+    expect(stuck).toHaveBeenCalledOnce();
+  });
+
+  it("gives up on a decoder that takes in frames and never makes a track of them", async () => {
+    const { minted, stuck } = await connecting();
+    const { view } = clientAt(0, 1, false);
+    for (let at = 0; at < FIRST_STALL_MS.min + 500; at += 250) {
+      Object.assign(view, { videoChunksReceived: at });
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    expect(minted()).toBe(2);
+    expect(stuck).not.toHaveBeenCalled();
+  });
+
+  it("starts the stage again as well when the viewer tries again", async () => {
+    const { stream, stuck, minted } = await connecting();
+    stream.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stuck).toHaveBeenCalledOnce();
+    expect(minted()).toBe(2);
+  });
+
+  it("taps again when its stage starts again", async () => {
+    const { stream, sources } = await connecting();
+    clientAt(0, 1, true);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(sources).toHaveLength(1);
+    stream.retap();
+    await vi.advanceTimersByTimeAsync(250);
+    expect(sources).toHaveLength(2);
+  });
+});
+
+it("reconnects a shown stream whose socket stays shut under a track that sends nothing", async () => {
+  const restore = fakeChromium();
+  try {
+    const { api, minted } = daemon((n) => Response.json({ path: ticket(n) }));
+    const { stream } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
+    stream.connect(() => {});
+    await vi.advanceTimersByTimeAsync(250);
+    const { transport } = clientAt(0, 1, true);
+    await vi.advanceTimersByTimeAsync(250);
+    stream.presented(1);
+    if (transport) transport.readyState = 3;
+    await vi.advanceTimersByTimeAsync(STALE_MS - 500);
+    expect(minted()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(minted()).toBe(2);
+  } finally {
+    restore();
+  }
 });
 
 it("asks again for a ticket the daemon refused, less often each time", async () => {

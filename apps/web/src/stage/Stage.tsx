@@ -54,6 +54,8 @@ export interface StageHandle {
   oracle(command: OracleRequest): Promise<unknown>;
   // Raises or lowers the keyboard that types on the computer while the user has control.
   keyboard(on: boolean): void;
+  // The viewer asked for the screen to try again.
+  retryStream(): void;
 }
 
 export interface StageProps {
@@ -226,14 +228,17 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
       () => listedRef.current,
     );
     setHeld({ owner, stream });
-    const disconnect = stream.connect((source) => {
-      if (currentOwner.current !== owner || !canvas.current) {
-        source.stop();
-        return;
-      }
-      sourceOwner.current = owner;
-      canvas.current.attach(source);
-    });
+    const disconnect = stream.connect(
+      (source) => {
+        if (currentOwner.current !== owner || !canvas.current) {
+          source.stop();
+          return;
+        }
+        sourceOwner.current = owner;
+        canvas.current.attach(source);
+      },
+      (now) => canvas.current?.restart({ now }),
+    );
     return () => {
       disconnect();
       const next = currentOwner.current;
@@ -248,6 +253,8 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
       release(stopped ? 0 : KEEP_MS);
     };
   }, [api, cellId, ready, support.ok, owner, parentId, surface]);
+
+  useEffect(() => canvas.current?.onRestart(() => streamRef.current?.retap()), []);
 
   // A status socket that reopened may follow a daemon restart, which ends its tickets.
   const seenReconnects = useRef(reconnects);
@@ -301,8 +308,10 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     if (!stream) return;
     // Wake the renderer as well as its source; a browser may have suspended either one.
     return onForeground((reason) => {
-      // A window focus event alone does not mean capture was suspended.
-      if (reason === "focus" && stream.picture === "live") return false;
+      // A window focus event alone does not mean capture was suspended, nor is one still connecting
+      // any the worse for it.
+      if (reason === "focus" && (stream.picture === "live" || stream.picture === "none"))
+        return false;
       canvas.current?.setView({ freeze: paused });
       if (reason === "resume") stream.replace();
       else stream.refresh();
@@ -416,6 +425,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     setView: (view) => canvas.current?.setView(manual ? { ...view, zoom: 1 } : view),
     oracle: (command) => canvas.current?.oracle(command) ?? Promise.resolve(undefined),
     keyboard: (on) => keyboard.current?.keyboard(on),
+    retryStream: () => streamRef.current?.retry(),
   }));
 
   if (!support.ok) {
