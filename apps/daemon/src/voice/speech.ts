@@ -1,9 +1,9 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
-import { chmod, lstat, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { speechChunks } from "./speech-chunks.ts";
 
 // A speech-to-text model the person installed themselves, run by whisper.cpp's command line.
@@ -124,8 +124,18 @@ const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}　-〿＀-�
 
 // Where recordings wait while they're read: a private folder under localDot's home, emptied at
 // start-up, so audio never outlives a daemon that stopped mid-way. Never stops the daemon starting:
-// what can't be removed is moved aside, and failing that a fresh folder beside it is used.
+// what can't be removed is moved aside, and failing that a fresh folder beside it is used. Folders
+// earlier starts left aside are tried again each time.
 export async function sweepVoiceAudio(dir: string): Promise<string> {
+  const parent = dirname(dir);
+  const name = basename(dir);
+  const literal = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const leftAside = new RegExp(`^${literal}(?:\\.stale-[0-9a-f]{8}|-[A-Za-z0-9]{6})$`);
+  for (const entry of await readdir(parent).catch(() => []))
+    if (leftAside.test(entry))
+      await removeAll(join(parent, entry)).catch((error: unknown) =>
+        console.error(`old recordings in ${entry} couldn't be removed (${codeOf(error)})`),
+      );
   const fresh = async (path: string) => {
     await mkdir(path, { recursive: true, mode: 0o700 });
     await chmod(path, 0o700);
@@ -134,10 +144,10 @@ export async function sweepVoiceAudio(dir: string): Promise<string> {
     return path;
   };
   try {
-    await rm(dir, { recursive: true, force: true });
+    await removeAll(dir);
     return await fresh(dir);
   } catch (error) {
-    console.error(`old recordings couldn't all be removed (${codeOf(error)})`);
+    console.error(`old recordings couldn't be removed (${codeOf(error)})`);
   }
   try {
     await rename(dir, `${dir}.stale-${randomBytes(4).toString("hex")}`);
@@ -145,6 +155,19 @@ export async function sweepVoiceAudio(dir: string): Promise<string> {
   } catch {
     return await mkdtemp(`${dir}-`).catch(() => dir);
   }
+}
+
+// Gives our own folders back their write permission first, so a locked one can still be emptied.
+// Links are removed as links, never followed.
+async function removeAll(path: string) {
+  const unlock = async (at: string) => {
+    const found = await lstat(at).catch(() => null);
+    if (!found?.isDirectory()) return;
+    await chmod(at, 0o700).catch(() => {});
+    for (const entry of await readdir(at).catch(() => [])) await unlock(join(at, entry));
+  };
+  await unlock(path);
+  await rm(path, { recursive: true, force: true });
 }
 
 const codeOf = (error: unknown) =>
