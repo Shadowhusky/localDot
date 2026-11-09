@@ -402,9 +402,11 @@ Only the models the user chose for the task answer: its main model and, where th
 fast and local models, as its next message would run on them. The user already showed the task to
 each, so going from one to another takes nothing anywhere new. No other model, even one set up in
 Settings, is asked: that would take the task's record to a provider without the user choosing it. A
-task whose main model is local (LM Studio or Ollama) stays on this Mac: only its local models answer,
-and a fast model in the cloud is left out. A custom endpoint counts as the cloud here, as it does for
-the local role, even when it is on this Mac. A task none of whose models can answer says why instead.
+task whose main model is local stays on this Mac: only its local models answer, and a fast model in
+the cloud is left out. Local is LM Studio, Ollama, or a custom endpoint whose key is bound to a loopback
+or private address (127/8, 10/8, 172.16/12, 192.168/16, ::1, fc00::/7, `localhost`, `.local`). A
+custom main model whose address can't be read counts as local, and a custom fast model then as the
+cloud. A task none of whose models can answer says why instead.
 
 - **Claude Code:** a process of its own with no built-in tools, whose MCP server serves only the side
   tools (`claude-code/side.ts`). It must start by naming its tools in the expected shape, all of them
@@ -427,20 +429,15 @@ the user wrote:
 
 - `web_fetch` opens only an address in the user's question or in this question's own search results,
   never one a page named or the model composed.
-- Once the question has read anything private (the task's log, the computer's files or folders, the
-  files dot handed over, earlier conversations, the screen, or any picture), a `web_search` may only
-  be made of the words of the user's question and up to three general words from a fixed list
-  ("meaning", "latest" and the like). Nothing read can be added, however it is written. The refusal
-  tells the model to answer from what it found. The model still chooses which allowed words to send
-  and in what order, a narrow channel of a few bits per search.
-- Before that, when it has read only the opening record and public pages, a search is refused if it
-  repeats words or three-word runs of what was read (`TaskTaint` fingerprints, never the text), or a
-  number from it, however the digits are separated. Words and numbers of the user's own question
-  don't count. This catches a copy, not a paraphrase: a line of the record reworded, or a number
-  reversed or encoded, still goes out. A query the redactor changes isn't sent either.
-- A search's `!bang` and `\` commands are taken out, and every search, dot's too, stays on its engine's
-  site (`WebGet.within`): a redirect elsewhere isn't followed, and a page from elsewhere gives no
-  results, nor addresses `web_fetch` may open.
+- A `web_search` is one run of words from the user's question, in their order, and is sent as
+  those words alone, lower case and joined by single spaces, never as the model wrote it: its
+  symbols, case and anything else it added don't go out. Everything a side question reads counts as
+  private from the start, the opening record too, so nothing it read can be searched for unless the
+  user wrote it in the question. A side question makes at most two searches, across both models.
+- What is left to the model is which run of the question's words to search for: about log2(n²) bits
+  for a question of n words, with two searches at most, and which of its own search results to open.
+- Every search, dot's too, stays on its engine's site (`WebGet.within`): a redirect elsewhere isn't
+  followed, and a page from elsewhere gives no results, nor addresses `web_fetch` may open.
 - In the answer, only those same addresses are links, and a link opens the address as it was found,
   not as the model wrote it: a fragment, query or other spelling it added doesn't go with it. Any other
   address shows as text, as it may carry what was read.
@@ -450,4 +447,5 @@ Both tools go through the same keyd web cell as dot's, so the same egress rules 
 **The record** it opens with is what was said in the task and its plan, without messages the user
 took back, inside `<untrusted>` blocks: a line in it can't end the block or ask a question of its own.
 `untrusted()` defuses a tag written with look-alike brackets, slashes or letters, or with invisible
-characters or marks inside, for dot's tools as well.
+characters or marks inside, for dot's tools as well, in time linear in the text: a page or file can't
+hold up the daemon with what follows a bracket.

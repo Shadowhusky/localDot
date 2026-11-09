@@ -35,4 +35,20 @@ describe("text marked as untrusted", () => {
     const text = "a < b, <untrustworthy>, ＜note＞ and 〈quote〉 stay";
     expect(inner(untrusted("page", text))).toBe(text);
   });
+
+  // It wraps every tool output: a page or file must not hold up the daemon.
+  it.each([
+    ["spaces after one bracket", `<${" ".repeat(1_000_000)}`],
+    ["marks after one bracket", `<${"\u0301".repeat(1_000_000)}`],
+    ["a slash and spaces after one bracket", `＜/${"\u3000".repeat(1_000_000)}`],
+    ["many brackets each before spaces", `<${" ".repeat(199)}`.repeat(5_000)],
+    ["many brackets each before a slash and spaces", `﹤/${" ".repeat(98)}`.repeat(10_000)],
+    ["brackets and near-misses", "<untruste ".repeat(100_000)],
+    ["tags, each defused", "</untrusted>".repeat(80_000)],
+  ])("reads a megabyte of %s in under 50 ms", (_what, text) => {
+    untrusted("warm-up", text.slice(0, 1000));
+    const started = performance.now();
+    untrusted("page", text);
+    expect(performance.now() - started).toBeLessThan(50);
+  });
 });

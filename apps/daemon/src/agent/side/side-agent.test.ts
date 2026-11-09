@@ -2,7 +2,6 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TOOL_NAMES, ulid } from "@localdot/protocol";
-import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventLog } from "../../event-log.ts";
 import { redactor } from "../redact.ts";
@@ -991,7 +990,7 @@ describe("what a page can make it do", () => {
           await finish(go, "found", "Done.", ["web"]);
         }),
       ],
-      { readers: readers(f, { web }) },
+      { readers: readers(f, { web }), question: "Are there lisbon flights?" },
     );
     expect(results).toContain("<untrusted");
     expect(fetched).toContain("<untrusted");
@@ -1016,203 +1015,133 @@ describe("what a page can make it do", () => {
   const searched = (asked: URL[]) => asked.map((url) => url.searchParams.get("q"));
 
   const FILE =
-    "Settlement account 99-1234 for Jane Doe, agreed in the mediation session, ref QX-7781";
-  const reading = (content = FILE) => ({
+    "Settlement agreement for Jane Doe: account 99-1234, the house at Elm Road goes to her.";
+  const reading = () => ({
     readFile: async (path: string) => ({
       path,
-      content,
-      bytes: content.length,
+      content: FILE,
+      bytes: FILE.length,
       truncated: false,
       binary: false,
     }),
     listDir: vi.fn(),
     fetchFile: vi.fn(),
   });
-  // Every query is sent or refused; nothing refused reaches an engine.
+  // Each query is sent or refused; what was sent is what the engines got.
   async function searches(
     f: Fixture,
     queries: readonly string[],
     {
+      question,
       before = [],
-      question = "What is QX-7781?",
       prompt,
-      more = {},
+      models = 1,
     }: {
+      question: string;
       before?: readonly [string, unknown][];
-      question?: string;
       prompt?: string;
-      more?: Partial<SideReaders>;
-    } = {},
+      models?: 1 | 2;
+    },
   ) {
     const asked: URL[] = [];
-    const replies = new Map<string, SideResultLike>();
+    const replies: SideResultLike[] = [];
+    const searching = (status: string) => async (go: SideGo) => {
+      for (const [name, input] of before) await go.tools.call(name, input, go.signal);
+      for (const query of queries)
+        replies.push(await go.tools.call("web_search", { query }, go.signal));
+      await finish(go, status, "Done.");
+    };
     await ask(
       f,
-      [
-        model("m", "main", async (go) => {
-          for (const [name, input] of before) await go.tools.call(name, input, go.signal);
-          for (const query of queries)
-            replies.set(query, await go.tools.call("web_search", { query }, go.signal));
-          await finish(go, "found", "Done.");
-        }),
-      ],
+      models === 2
+        ? [model("fast", "fast", searching("not_found")), model("main", "main", searching("found"))]
+        : [model("m", "main", searching("found"))],
       {
-        readers: readers(f, { web: engine(asked), desktop: () => reading() as never, ...more }),
+        readers: readers(f, { web: engine(asked), desktop: () => reading() as never }),
         question,
         prompt: prompt ?? `<record>\nThe user: hello\n</record>\n\nSide question: ${question}`,
         limits: { calls: 60 },
       },
     );
-    const sent = searched(asked);
-    return {
-      sent: (query: string) => replies.get(query)?.ok === true,
-      said: (query: string) => replies.get(query)?.text ?? "",
-      carried: (needle: string) => sent.some((q) => q?.toLowerCase().includes(needle)),
-    };
+    return { replies, sent: searched(asked).filter((q, at, all) => all.indexOf(q) === at) };
   }
+  const QUESTION = "What are the best flights from Leeds to Lisbon in May?";
 
-  it("once it has read a file, searches only the user's words and a few general ones", async () => {
+  it("sends only a run of the user's own words, in order, as plain words", async () => {
     const f = fixture();
-    const leaks = [
-      "Settlement account 99-1234 Jane Doe",
-      "settlement account 99 1234",
-      "99_1234",
-      "4321-99",
-      "OTktMTIzNA==",
-      "Jane Doe",
-      "acct for the Doe family settlement",
-      "please note settlement account 99-1234 for Jane Doe lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod",
-      "agreed in the mediation session",
-      "how do settlement accounts work",
-      "QX-7781 settlement",
-      "QX-7781 latest news release notes",
-      "QX-7781 the the the the",
-      "QX-7781 Јane Dое",
-      "QX-7781 ９９-１２３４",
-      "QX-7781 99\u200b1234",
-    ];
-    const r = await searches(f, [...leaks, "QX-7781 meaning", "what is QX-7781 latest news"], {
-      before: [["read_file", { path: "~/divorce.txt" }]],
-    });
-    for (const query of leaks) expect(r.sent(query), query).toBe(false);
-    expect(r.said("Jane Doe")).toContain("words of the user's question");
-    expect(r.sent("QX-7781 meaning")).toBe(true);
-    expect(r.sent("what is QX-7781 latest news")).toBe(true);
-    for (const needle of ["1234", "4321", "doe", "settlement", "otkt", "mediation"])
-      expect(r.carried(needle), needle).toBe(false);
-  });
-
-  it.each([
-    ["the task's log", ["read_log", {}]],
-    ["the screen", ["look_at_screen", {}]],
-    ["earlier conversations", ["recall", { query: "trip" }]],
-    ["the handed-over files", ["task_files", {}]],
-    ["a folder", ["list_files", { path: "~" }]],
-  ] as const)("is held to the user's words once it has read %s", async (_what, read) => {
-    const f = fixture();
-    f.say("message.assistant", { messageId: ulid(), text: "Working on it" });
-    f.say("observe", { frameId: ulid(), width: 1280, height: 800 });
-    const r = await searches(f, ["lisbon flights"], {
-      before: [read as [string, unknown]],
-      more: {
-        frame: async () => ({ png: Buffer.from("x"), ageMs: 1000 }),
-        recall: () => [{ title: "Trip", day: "2026-10-01", kind: "summary", snippet: "Lisbon" }],
-        handedFiles: async () => [],
-        desktop: () =>
-          ({
-            ...reading(),
-            listDir: async () => ({ path: "~", entries: [], truncated: false }),
-          }) as never,
-      },
-    });
-    expect(r.sent("lisbon flights")).toBe(false);
-  });
-
-  it("is held to the user's words once it has seen a picture from the web", async () => {
-    const f = fixture();
-    const picture = await sharp({
-      create: { width: 8, height: 8, channels: 3, background: "#fff" },
-    })
-      .png()
-      .toBuffer();
-    const asked: URL[] = [];
-    const web: WebAccess = {
-      get: async (url) => {
-        asked.push(url);
-        return url.hostname === "example.org"
-          ? { url, status: 200, contentType: "image/png", body: picture, truncated: false }
-          : {
-              url,
-              status: 200,
-              contentType: "text/html",
-              body: Buffer.from(DDG("https://example.org/page")),
-              truncated: false,
-            };
-      },
-    };
-    const r = await searches(f, ["lisbon flights"], {
-      question: "What is in https://example.org/p.png?",
-      before: [["web_fetch", { url: "https://example.org/p.png" }]],
-      more: { web },
-    });
-    expect(r.sent("lisbon flights")).toBe(false);
-  });
-
-  it("before it reads anything private, keeps out the record's numbers however they're written", async () => {
-    const f = fixture();
-    const prompt =
-      "<record>\nThe user: my card is 4417 9921 0000 1111, and the booking is for Jane Doe\n</record>\n\nSide question: Is 55 66 77 valid?";
     const r = await searches(
       f,
       [
-        "card 4417-9921-0000-1111",
-        "4417992100001111",
-        "4417_9921",
-        "card ４４１７ ９９２１",
-        "card 4417\u200b9921",
-        "how do mortgages work",
-        "55-66-77 valid",
+        "flights from Leeds to Lisbon",
+        "flights from leeds ))~(*&^",
+        "flights 🌑🌑 lisbon",
+        "lisbon leeds",
+        "flights Jane",
+        "!g flights",
       ],
-      { prompt, question: "Is 55 66 77 valid?" },
+      { question: QUESTION },
     );
-    expect(r.sent("card 4417-9921-0000-1111")).toBe(false);
-    expect(r.sent("4417992100001111")).toBe(false);
-    expect(r.sent("4417_9921")).toBe(false);
-    expect(r.sent("card ４４１７ ９９２１")).toBe(false);
-    expect(r.sent("card 4417\u200b9921")).toBe(false);
-    expect(r.sent("how do mortgages work")).toBe(true);
-    // The user's own number, however they wrote it.
-    expect(r.sent("55-66-77 valid")).toBe(true);
+    expect(r.sent).toEqual(["flights from leeds to lisbon", "flights from leeds"]);
+    expect(r.replies.map((reply) => reply.ok)).toEqual([true, true, false, false, false, false]);
+    expect(r.replies[2]?.text).toContain("wasn't sent");
+    expect(r.replies[2]?.text).toContain("run of words from the user's question");
   });
 
-  it("isn't held back by a public web page it read", async () => {
+  it("sends letters as plain lower case, so case and full-width letters carry nothing", async () => {
     const f = fixture();
-    const r = await searches(f, ["lisbon flights"], {
-      question: "What does https://example.org/page say?",
-      before: [["web_fetch", { url: "https://example.org/page" }]],
+    const r = await searches(f, ["BeSt FlIgHtS", "ｂｅｓｔ flights"], { question: QUESTION });
+    expect(r.sent).toEqual(["best flights"]);
+  });
+
+  it("makes at most two searches for a question, across both models", async () => {
+    const f = fixture();
+    const r = await searches(f, ["best flights", "flights from leeds", "lisbon in may"], {
+      question: QUESTION,
+      models: 2,
     });
-    expect(r.sent("lisbon flights")).toBe(true);
+    expect(r.sent).toEqual(["best flights", "flights from leeds"]);
+    expect(r.replies.filter((reply) => reply.ok)).toHaveLength(2);
+    expect(r.replies.at(-1)?.text).toContain("two searches");
   });
 
-  it("takes bangs and backslashes out, so no engine sends the search on", async () => {
+  it("treats the opening record as private from the start", async () => {
     const f = fixture();
-    const asked: URL[] = [];
-    await ask(
+    const prompt =
+      "<record>\nThe user: I'm Jane Doe, my new address is 14 Elm Road Leeds and my passport number is X12345678. Please book the flights.\n</record>\n\nSide question: how is it going?";
+    const r = await searches(
       f,
       [
-        model("m", "main", async (go) => {
-          for (const query of ["!site lisbon flights", "\\lisbon hotels", "lisbon !g trains", "!"])
-            await go.tools.call("web_search", { query }, go.signal);
-          await finish(go, "found", "Done.");
-        }),
+        "Jane Doe new address 14 Elm Road Leeds",
+        "Doe Leeds Elm passport flights",
+        "87654321X",
+        "one two three four five six seven eight",
+        "latest news today",
       ],
-      { readers: readers(f, { web: engine(asked) }), limits: { calls: 20 } },
+      { question: "how is it going?", prompt },
     );
-    const queries = searched(asked);
-    expect(queries).toContain("lisbon flights");
-    expect(queries).toContain("lisbon hotels");
-    expect(queries).toContain("lisbon trains");
-    expect(queries.some((q) => q?.includes("!") || q?.includes("\\"))).toBe(false);
+    expect(r.sent).toEqual([]);
+  });
+
+  it("is held to the same rule after reading a file", async () => {
+    const f = fixture();
+    const r = await searches(f, ["build Settlement", "how is the build going ))~(*&^"], {
+      question: "how is the build going?",
+      before: [["read_file", { path: "~/x.txt" }]],
+    });
+    expect(r.sent).toEqual(["how is the build going"]);
+  });
+
+  it("sends a quoted list only as the user wrote it, never rearranged", async () => {
+    const f = fixture();
+    const r = await searches(
+      f,
+      ["nine nine one two three four Jane Doe Elm Road", "Jane Doe Elm Road"],
+      {
+        question:
+          "what does this mean: zero one two three four five six seven eight nine Jane Doe Elm Road",
+      },
+    );
+    expect(r.sent).toEqual(["jane doe elm road"]);
   });
 
   it("lets the answer link only to addresses the user wrote or its own search found", async () => {
@@ -1243,7 +1172,7 @@ describe("what a page can make it do", () => {
           web: engine(asked, "https://flights.example/lisbon"),
           desktop: () => desktop as never,
         }),
-        question: "Is https://example.org/hours right?",
+        question: "Is https://example.org/hours right, and are there lisbon flights?",
       },
     );
     expect(reply.links).toContain("https://example.org/hours");

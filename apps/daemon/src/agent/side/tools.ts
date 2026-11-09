@@ -4,7 +4,7 @@ import { DesktopdError } from "../../desktopd/client.ts";
 import type { DesktopdTools } from "../../desktopd/tools-client.ts";
 import { redactForIndex } from "../../search/redact-index.ts";
 import type { Redactor } from "../redact.ts";
-import { TaskTaint, words } from "../safety/taint.ts";
+import { words } from "../safety/taint.ts";
 import type { RecallHit } from "../tools/deps.ts";
 import { picture } from "../tools/files.ts";
 import { recalled } from "../tools/recall.ts";
@@ -18,39 +18,11 @@ import { readLog, readTaskLog, searchLog, type TaskLog } from "./log.ts";
 
 const TOOL_CHARS = 12_000;
 const LINKS_KEPT = 100;
-// What, once read, holds every search to the user's own words: what the task did, its computer's
-// files and screen, earlier conversations, and any picture.
-const PRIVATE_READS = new Set<string>([
-  "search_log",
-  "read_log",
-  "look_at_screen",
-  "list_files",
-  "read_file",
-  "task_files",
-  "recall",
-]);
-// The words a search may add to the user's own once something private was read: general enough
-// to say nothing of what was read, and few.
-const GENERAL_WORDS = new Set(
-  (
-    "a an the of for in on at to from by with and or not is are was were be does do did can how " +
-    "what when where which who why vs versus meaning mean means definition define explained " +
-    "explain example examples official docs documentation guide tutorial manual help support " +
-    "fix error errors issue issues bug latest news today current release notes changelog version " +
-    "download install price prices cost review reviews best compare comparison status open hours " +
-    "near english translate translation wiki wikipedia"
-  ).split(" "),
-);
-const GENERAL_KEPT = 3;
-const PRIVATE_SEARCH = `This question has read private material, so a web search may only use the words of the user's question and up to ${GENERAL_KEPT} general words such as "meaning" or "latest". Answer from what you found, and say what the user could put in their question to have it searched.`;
-// Digits as numbers, whatever separates them: "99-1234", "99 1234" and "99_1234" read alike.
-const plain = (text: string) => text.normalize("NFKC").replace(/(\d)[^\p{L}\p{N}]+(?=\d)/gu, "$1");
-// A text's numbers: each group as written, and each run once separators are taken out.
-const numbers = (text: string) =>
-  new Set([
-    ...(text.normalize("NFKC").match(/\d{3,}/g) ?? []),
-    ...(plain(text).match(/\d{3,}/g) ?? []),
-  ]);
+const SEARCHES_KEPT = 2;
+const OWN_WORDS =
+  "That search wasn't sent: a web search may only be a run of words from the user's question, in their order. Answer from what you found, and say what the user could ask to have searched.";
+const SEARCHED =
+  "This side question has made its two searches, all it may make. Answer from what you found.";
 const FILE_BYTES = 32 * 1024;
 const SEARCH_HITS = 12;
 const WEB_HITS = 6;
@@ -258,26 +230,17 @@ export class SideToolbox {
   readonly #consulted = new Set<SideSource>();
   readonly #addresses: Set<string>;
   readonly #trail: string[] = [];
-  // Fingerprints of what this question was given and read, never its text: a search can't carry it
-  // out. Words of the user's own question are theirs to search for.
-  readonly #seen = new TaskTaint();
-  readonly #asked: ReadonlySet<string>;
-  readonly #askedNumbers: ReadonlySet<string>;
-  readonly #numbers = new Set<string>();
-  // Something private was read: searches keep to the user's words from then on.
-  #private = false;
+  // The question's words, in order: all a search may be made of.
+  readonly #question: readonly string[];
+  #searches = 0;
   constructor(
     private readonly readers: SideReaders,
     question: string,
     private readonly limited: () => boolean,
     private readonly progress: (line: string) => void,
-    // The record it opens with.
-    opening = "",
   ) {
     this.#addresses = new Set(typedAddresses(question));
-    this.#asked = new Set(words(plain(question)));
-    this.#askedNumbers = numbers(question);
-    this.#remember(opening);
+    this.#question = words(question);
   }
   // The addresses an answer may link to: the user's own, and its searches' results.
   get links(): readonly string[] {
@@ -324,7 +287,6 @@ export class SideToolbox {
     if (name === "finish") return this.#finish(input.data as z.infer<typeof Finish>);
     try {
       const result = await this.#read(name, input.data, signal);
-      if (result.ok && (PRIVATE_READS.has(name) || result.images?.length)) this.#private = true;
       this.#trail.push(this.#trailLine(name, input.data, result));
       return result;
     } catch (error) {
@@ -350,28 +312,17 @@ export class SideToolbox {
   #clean(text: string): string {
     return this.readers.redact(redactForIndex(text));
   }
-  #remember(text: string): void {
-    if (!text) return;
-    this.#seen.add("recall", "side question", plain(text));
-    for (const number of numbers(text)) this.#numbers.add(number);
-  }
-  // Whether a search would carry what was read word for word, or a number of it however written:
-  // what is left of it once the question's own words and numbers are taken out.
-  #carries(query: string): boolean {
-    const own = words(plain(query)).filter((word) => !this.#asked.has(word));
-    if (own.length && this.#seen.overlap(own.join(" ")).overlaps) return true;
-    return [...numbers(query)].some(
-      (number) => this.#numbers.has(number) && !this.#askedNumbers.has(number),
-    );
-  }
-  // Once something private was read, a search is the user's words and a few general ones.
-  #ownWords(query: string): boolean {
-    const added = words(plain(query)).filter((word) => !this.#asked.has(word));
-    return added.length <= GENERAL_KEPT && added.every((word) => GENERAL_WORDS.has(word));
+  // A search as it will be sent: the run of the question's words it is, as plain words, with
+  // nothing the model wrote around them, its case or its symbols. Undefined when it isn't one.
+  #ownRun(query: string): string | undefined {
+    const asked = words(query);
+    if (!asked.length) return undefined;
+    for (let at = 0; at + asked.length <= this.#question.length; at++)
+      if (asked.every((word, i) => this.#question[at + i] === word)) return asked.join(" ");
+    return undefined;
   }
   #data(source: string, text: string, images?: readonly SideImage[]): SideResult {
     const clean = this.#clean(text);
-    this.#remember(clean);
     const body =
       clean.length > TOOL_CHARS
         ? `${clean.slice(0, TOOL_CHARS)}\n(cut at ${TOOL_CHARS} characters)`
@@ -577,25 +528,21 @@ export class SideToolbox {
     this.#consulted.add("earlier");
     return this.#data("earlier tasks", body);
   }
+  // Whatever the question read, the record above all, can't leave in a search: only the user's own
+  // words do, twice at most. What is left to choose is which run of them: about log2(n²) bits a
+  // search for a question of n words.
   async #webSearch(asked: string, signal: AbortSignal): Promise<SideResult> {
-    // A bang or a backslash has an engine send the search on to another site.
-    const query = asked
-      .replace(/(^|\s)(?:![^\s]*|\\+)/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (!query) return refused("Nothing is left to search for without the engine commands.");
+    const query = this.#ownRun(asked);
+    if (!query) return refused(OWN_WORDS);
+    if (this.#searches >= SEARCHES_KEPT) return refused(SEARCHED);
     if (this.#clean(query) !== query)
       return refused("That search would carry something secret, so it wasn't sent.");
-    if (this.#private && !this.#ownWords(query)) return refused(PRIVATE_SEARCH);
-    if (this.#carries(query))
-      return refused(
-        "That search would carry what was read for this question, so it wasn't sent. Words from the user's question can be searched for: tell the user to ask with what they want searched.",
-      );
     if (!this.#allowed("web_search", { query }))
       return refused(
         "The user's settings ask before dot searches the web, and a side question can't ask.",
       );
     if (!this.readers.web) return refused("The web can't be reached from here right now.");
+    this.#searches += 1;
     this.progress("Searching the web…");
     const outcome = await webSearch(this.readers.web, { query, count: WEB_HITS }, signal);
     if (!outcome.hits.length)
