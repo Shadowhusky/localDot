@@ -141,10 +141,13 @@ it was added with, so taking up either change means removing the old icon and ad
 
 ## Previews
 
-Servers dot starts in its computer open as previews on the owner's tailnet only, never on this
-Mac's `localhost` and not through the localdot.dev relay (a later version). Each open preview is a
-loopback port from the daemon's block (`LOCALDOT_PREVIEW_PORTS`, default `4900-4915`; each
-localDot on a machine needs a block of its own) and a separate HTTPS origin on the tailnet; see
+Servers dot starts in its computer open as previews on the owner's tailnet, not through the
+localdot.dev relay (a later version). An app whose sign-in accepts only its registered address can
+instead open on this Mac's own `localhost`, at a port the owner chooses; see
+[on this Mac](local-development-previews.md#on-this-mac-at-the-apps-own-address). Each preview
+on the tailnet is a loopback port from the daemon's block (`LOCALDOT_PREVIEW_PORTS`, default
+`4900-4915`; each localDot on a machine needs a block of its own) and a separate HTTPS origin on the
+tailnet; see
 [local development previews](local-development-previews.md#opening-previews-on-the-owners-devices)
 for the sign-in, the Host allowlist and the header rewrites.
 
