@@ -812,12 +812,14 @@ const dots = new DotsService({
   origins: configuredAccessOrigins,
 });
 // One installation runs every dot on this computer, so an update restarts them all together.
-const installWait = async () => {
+const installWait = async (hold = true) => {
   const busy = await dots.busyOthers();
   if (busy.length)
     return `Finish or stop the tasks on ${busy.join(" and ")} before updating localDot.`;
-  if (working()) return "Finish or stop the task before updating localDot.";
-  appInstalling = true;
+  if (orchestrator.list().some((cell) => live.busy(cell.id)))
+    return "Finish or stop the task before updating localDot.";
+  if (working()) return "Your computer is starting, stopping or updating. Try again in a moment.";
+  if (hold) appInstalling = true;
   return null;
 };
 const installSettled = () => {

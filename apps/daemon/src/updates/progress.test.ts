@@ -3,7 +3,13 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { expect, it, vi } from "vitest";
 import type { UpdateProgressLine } from "../../../../packages/protocol/src/app-update.ts";
-import { progressAfter, readUpdateProgress, runPreparation } from "./progress.ts";
+import {
+  progressAfter,
+  readUpdateProgress,
+  runPreparation,
+  stallGuard,
+  UpdateFailure,
+} from "./progress.ts";
 
 async function* chunks(...parts: (string | Buffer)[]) {
   for (const part of parts) yield part;
@@ -97,4 +103,79 @@ it("ends a cancelled preparation and does not wait for a channel a grandchild ho
   expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
   proc.emit("exit", 0);
   await expect(run).rejects.toThrow();
+});
+
+it("carries the problem the updater named out of a failed preparation", async () => {
+  const { process: proc, progress } = child();
+  const run = runPreparation(
+    vi.fn(() => proc) as unknown as typeof spawn,
+    { command: "/node", args: [], env: {}, output: "ignore", timeoutMs: 60_000 },
+    new AbortController().signal,
+    () => {},
+  );
+  progress.end('{"step":"download","problem":"disk"}\n');
+  proc.emit("exit", 5);
+  const failure = await run.catch((error: unknown) => error);
+  expect(failure).toBeInstanceOf(UpdateFailure);
+  expect((failure as UpdateFailure).problem).toBe("disk");
+});
+
+it("ends a preparation that has gone silent, and says it stalled", async () => {
+  vi.useFakeTimers();
+  try {
+    const { process: proc, progress } = child();
+    const run = runPreparation(
+      vi.fn(() => proc) as unknown as typeof spawn,
+      {
+        command: "/node",
+        args: [],
+        env: {},
+        output: "ignore",
+        timeoutMs: 3_600_000,
+        stallMs: 60_000,
+      },
+      new AbortController().signal,
+      () => {},
+    ).catch((error: unknown) => error);
+    progress.write('{"step":"download","done":1,"total":2}\n');
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(proc.kill).not.toHaveBeenCalled();
+    progress.write('{"step":"download","done":2,"total":2}\n');
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(proc.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    proc.emit("exit", null);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(((await run) as UpdateFailure).problem).toBe("stalled");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("guards work that reports as it goes, and names the stall when it stops", async () => {
+  vi.useFakeTimers();
+  try {
+    const work = stallGuard(new AbortController().signal, 1000, (signal) =>
+      new Promise<void>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason));
+      }),
+    );
+    const failure = work.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(((await failure) as UpdateFailure).problem).toBe("stalled");
+    let alive: () => void = () => {};
+    const going = stallGuard(new AbortController().signal, 1000, (_signal, touch) => {
+      alive = touch;
+      return new Promise<string>((resolve) => setTimeout(() => resolve("done"), 2500));
+    });
+    await vi.advanceTimersByTimeAsync(900);
+    alive();
+    await vi.advanceTimersByTimeAsync(900);
+    alive();
+    await vi.advanceTimersByTimeAsync(800);
+    await expect(going).resolves.toBe("done");
+  } finally {
+    vi.useRealTimers();
+  }
 });

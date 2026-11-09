@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual as equal } from "node:util";
 import {
@@ -17,11 +18,11 @@ import { readReleaseNotes, versionsBetween } from "./release-notes.ts";
 export function installedAppUpdater(
   home: string,
   identity: ManagedServiceIdentity | null,
-  installWait: () => string | null | Promise<string | null>,
+  installWait: (hold?: boolean) => string | null | Promise<string | null>,
   installSettled: () => void,
   deps = { spawn },
 ) {
-  if (!identity) return new AppUpdater(null);
+  if (!identity) return new AppUpdater(null, "install-record");
   const state = join(home, "install");
   const records = privateRecordStore(state, "app-update.json", AppUpdateRecord);
   const prepared = privateRecordStore(state, "prepared-app-update.json", PreparedAppUpdate);
@@ -40,25 +41,35 @@ export function installedAppUpdater(
     attempts: privateRecordStore(state, "app-update-attempt.json", AppUpdateAttempt.nullable()),
     latest: latestReleaseVersion,
     installWait,
-    install(version) {
-      return new Promise<void>((resolve, reject) => {
-        const child = deps.spawn(process.execPath, [cli, "update", "--install-prepared", version], {
-          cwd: "/",
-          env: environment,
-          stdio: "ignore",
-          detached: true,
+    async install(version) {
+      await mkdir(join(home, "logs"), { recursive: true, mode: 0o700 });
+      const log = await open(join(home, "logs", "app-update.log"), "a", 0o600);
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const child = deps.spawn(
+            process.execPath,
+            [cli, "update", "--install-prepared", version],
+            {
+              cwd: "/",
+              env: environment,
+              stdio: ["ignore", log.fd, log.fd],
+              detached: true,
+            },
+          );
+          child.unref();
+          child.once("error", () => {
+            installSettled();
+            reject(new Error("Update couldn't start"));
+          });
+          child.once("close", (code) => {
+            installSettled();
+            if (code === 0) resolve();
+            else reject(new Error("Update failed"));
+          });
         });
-        child.unref();
-        child.once("error", () => {
-          installSettled();
-          reject(new Error("Update couldn't start"));
-        });
-        child.once("close", (code) => {
-          installSettled();
-          if (code === 0) resolve();
-          else reject(new Error("Update failed"));
-        });
-      });
+      } finally {
+        await log.close();
+      }
     },
     async prepared(version) {
       const candidate = await prepared.read();

@@ -128,3 +128,23 @@ it("shows the release notes the fetched commit adds, never ones the installed co
   ]);
   expect(f.command.mock.calls.some(([, args]) => args.includes("checkout"))).toBe(false);
 });
+it("logs a source update and hands the installer a status file", async () => {
+  const f = await fixture("darwin");
+  const updater = await f.create();
+  await updater.check();
+  await updater.install();
+  await vi.waitFor(() => expect(f.spawn).toHaveBeenCalled());
+  const options = (f.spawn.mock.calls[0] as unknown as [string, string[], Record<string, never>])[2] as unknown as {
+    stdio: unknown[];
+    env: Record<string, string>;
+  };
+  expect(options.env.LOCALDOT_UPDATE_STATUS?.startsWith(f.home)).toBe(true);
+  expect(options.stdio[1]).toEqual(expect.any(Number));
+});
+it("says a bare source checkout runs from source, and a damaged install apart", async () => {
+  const bare = await sourceAppUpdater("/home", undefined, () => null, () => {});
+  expect((await bare.status()).unsupported).toBe("source-checkout");
+  const f = await fixture();
+  await rm(join(f.prefix, "install.env"));
+  expect((await (await f.create()).status()).unsupported).toBe("install-record");
+});

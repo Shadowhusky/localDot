@@ -7,6 +7,7 @@ const messages = {
     "Docker could not access required storage. Check your Docker permissions before retrying.",
   "network-unavailable":
     "An image download was interrupted. Check your connection, DNS and proxy settings, then retry; completed layers are kept.",
+  "docker-unavailable": "Docker isn't answering. Start it, then retry.",
 } as const;
 export class SetupFailure extends Error {
   constructor(readonly code: keyof typeof messages) {

@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -7,6 +7,7 @@ import { AppUpdateAttempt, AppUpdateRecord } from "../../../../packages/protocol
 import { RELEASE_VERSION } from "../../../../packages/protocol/src/release.ts";
 import { privateRecordStore } from "../../../cli/src/install/private-record.ts";
 import { AppUpdater } from "./app-updater.ts";
+import { installerStatus, installerStatusFile } from "./installer-status.ts";
 import { packageAppUpdater } from "./package-updater.ts";
 import { pickNotes, releaseNote } from "./release-notes.ts";
 
@@ -22,11 +23,11 @@ const Prepared = z.strictObject({
 export async function sourceAppUpdater(
   home: string,
   prefix: string | undefined,
-  installWait: () => string | null | Promise<string | null>,
+  installWait: (hold?: boolean) => string | null | Promise<string | null>,
   settled: () => void,
   deps = { exec, spawn, platform: process.platform },
 ): Promise<AppUpdater> {
-  if (!prefix) return new AppUpdater(null);
+  if (!prefix) return new AppUpdater(null, "source-checkout");
   try {
     if ((await realpath(prefix)) !== prefix) throw new Error("Invalid installation");
     const file = join(prefix, "install.env"),
@@ -119,6 +120,7 @@ export async function sourceAppUpdater(
       installOnLaunchSupported: false,
       compare: (a, b) => (a === b ? 0 : 1),
       installWait,
+      installer: installerStatus(home),
       async latest(signal) {
         // Exact tags/commits remain pinned. A missing branch is not an update or an error.
         const branch = ref.startsWith("refs/heads/") ? ref : `refs/heads/${ref}`;
@@ -156,12 +158,16 @@ export async function sourceAppUpdater(
         return saved?.previous === version && saved.candidate === candidate;
       },
       async install(candidate) {
+        let log: Awaited<ReturnType<typeof open>> | undefined;
         try {
           const saved = await prepared.read();
           if (saved?.previous !== version || saved.candidate !== candidate)
             throw new Error("Update changed");
           // Consume before dispatch; failure cannot accidentally repeat a restart.
           await prepared.save({ ...saved, candidate: null });
+          await mkdir(join(home, "logs"), { recursive: true, mode: 0o700 });
+          log = await open(join(home, "logs", "source-update.log"), "a", 0o600);
+          const logFd = log.fd;
           await new Promise<void>((resolve, reject) => {
             const command = join(prefix, "bin", "localdot");
             const environment = {
@@ -169,6 +175,7 @@ export async function sourceAppUpdater(
               PATH: process.env.PATH ?? "/usr/bin:/bin",
               LOCALDOT_UPDATE_COMMIT: Commit.parse(candidate),
               LOCALDOT_UPDATE_SHUTDOWN: "1",
+              LOCALDOT_UPDATE_STATUS: installerStatusFile(home),
             };
             // A detached child is still in systemd's daemon cgroup. A transient user service
             // survives StopUnit; otherwise updating would kill its own installer halfway through.
@@ -189,14 +196,9 @@ export async function sourceAppUpdater(
                 : ["update"];
             const child = deps.spawn(executable, args, {
               detached: true,
-              stdio: "ignore",
+              stdio: ["ignore", logFd, logFd],
               cwd: "/",
-              env: {
-                HOME: process.env.HOME,
-                PATH: process.env.PATH ?? "/usr/bin:/bin",
-                LOCALDOT_UPDATE_COMMIT: Commit.parse(candidate),
-                LOCALDOT_UPDATE_SHUTDOWN: "1",
-              },
+              env: environment,
             });
             child.unref();
             child.once("error", reject);
@@ -205,11 +207,12 @@ export async function sourceAppUpdater(
             );
           });
         } finally {
+          await log?.close();
           settled();
         }
       },
     });
   } catch {
-    return new AppUpdater(null);
+    return new AppUpdater(null, "install-record");
   }
 }

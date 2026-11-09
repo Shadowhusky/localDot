@@ -187,7 +187,12 @@ export function createApp({
       c.set("remoteGrant", grant);
       c.set("remoteValid", () => !!remoteAccess?.authenticate(given));
     }
-    if (appInstalling?.() && !["GET", "HEAD"].includes(c.req.method))
+    // Asking for the update again joins it, so a second device gets a plain answer.
+    if (
+      appInstalling?.() &&
+      !["GET", "HEAD"].includes(c.req.method) &&
+      !c.req.path.startsWith("/api/app-update/")
+    )
       return c.text("localDot is installing an update. Please wait.", 503);
     await next();
     const grant = c.get("remoteGrant");
