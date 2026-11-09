@@ -157,3 +157,22 @@ describe("timeline marks", () => {
     ).toHaveLength(56);
   });
 });
+
+describe("a card on the timeline", () => {
+  it("reads in Replay as what happened, for a new log or an old one", () => {
+    const blocker = { kind: "app", connector: "gh", name: "GitHub", host: "h" };
+    expect(markOf(ev("blocker.raise", { blockerId: "b", blocker, by: "localdot" }))).toMatchObject({
+      label: "GitHub needed signing in",
+      tone: "attention",
+    });
+    expect(markOf(ev("blocker.clear", { blockerId: "b", outcome: "fixed" }))?.label).toBe(
+      "Fixed from the conversation",
+    );
+    expect(markOf(ev("blocker.clear", { blockerId: "b", outcome: "dismissed" }))?.label).toBe(
+      "You said not now",
+    );
+    expect(markOf(ev("blocker.clear", { blockerId: "b", outcome: "moot" }))).toBeNull();
+    expect(markOf(ev("keys.lock", { locked: true }))?.label).toBe("Saved keys were locked");
+    expect(markOf(ev("keys.lock", { locked: false }))?.label).toBe("Keys unlocked");
+  });
+});

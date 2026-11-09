@@ -217,18 +217,17 @@ const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> 
   [STALL.modelUnavailable]: {
     row: "recovery",
     label: "Model not answering",
-    caption: "The model isn't answering. Try again, or change the model.",
+    caption: "The model isn't answering. The chat has the way on.",
   },
   [STALL.providerLimit]: {
     row: "limit",
     label: "Provider limit reached",
-    caption:
-      "Your provider is out of credit or included usage. Change the model or check your plan.",
+    caption: "Your provider is out of credit or included usage. The chat has the way on.",
   },
   [STALL.modelRefused]: {
     row: "recovery",
     label: "Provider request failed",
-    caption: "The provider could not process my request. Check its settings and error details.",
+    caption: "The provider could not process my request. The chat has the way on.",
   },
   [STALL.keyd]: { row: "recovery", label: "Keys are offline", caption: "I can't reach your keys." },
   [STALL.keyReenter]: {
