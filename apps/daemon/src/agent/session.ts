@@ -1671,7 +1671,11 @@ export class AgentSession {
     this.check(generation, signal, true);
     if (!Number.isSafeInteger(after) || after < 0 || after > this.#seq)
       throw new Error("invalid inbox cursor");
-    const ready = () => this.#inbox.filter((i) => i.seq > after);
+    // A stopped brain goes on at anything it reads, so localDot's own words wait for the user's.
+    const ready = () => {
+      const items = this.#inbox.filter((i) => i.seq > after);
+      return this.status === "paused" && items.every((i) => this.#notes.has(i.seq)) ? [] : items;
+    };
     const combined = AbortSignal.any([
       this.abort.signal,
       generation.signal,

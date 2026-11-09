@@ -452,6 +452,31 @@ describe("who a fix wakes", () => {
     expect(said(body)).not.toMatch(/card stays up/);
   });
 
+  it("keeps localDot's word from a stalled brain, which wakes on anything it reads", async () => {
+    const { session } = setup();
+    session.lockKeys();
+    session.setStatus("paused");
+    session.lockKeys(false);
+    const seq = session.inboxSequence;
+    session.keysUnlocked();
+    expect(session.inboxSequence).toBe(seq + 1);
+    expect((await session.inbox(seq, 0)).items).toEqual([]);
+    session.post("resume", "");
+    const { items } = await session.inbox(seq, 0);
+    expect(items.map((item) => item.kind)).toEqual(["steer", "resume"]);
+    expect(items[0]?.text).toBe(KEYS_UNLOCKED_NOTE);
+  });
+
+  it("gives a working brain localDot's word at once", async () => {
+    const { session } = setup();
+    session.lockKeys();
+    const seq = session.inboxSequence;
+    session.keysUnlocked();
+    expect((await session.inbox(seq, 0)).items.map((item) => item.text)).toEqual([
+      KEYS_UNLOCKED_NOTE,
+    ]);
+  });
+
   it("a task stalled on a card fixed elsewhere waits, and says what moves it on", async () => {
     const { session, events } = setup();
     session.setStatus("paused");
