@@ -326,8 +326,11 @@ test("a card fixed elsewhere leaves a stopped task stopped, saying what moves it
   await leavesALine(rail, "Docker is running again");
   const recovery = rail.getByRole("region", { name: "Task recovery" });
   await expect(recovery.getByRole("heading", { name: "That's fixed now" })).toBeVisible();
+  const resumed = page.waitForResponse(
+    (reply) => reply.url().endsWith("/resume") && reply.request().method() === "POST",
+  );
   await recovery.getByRole("button", { name: "Continue" }).click();
-  await expect(recovery).toHaveCount(0);
+  expect((await resumed).status()).toBe(204);
 });
 
 test("a message closes the card on every device", async ({ page, ui, context }) => {

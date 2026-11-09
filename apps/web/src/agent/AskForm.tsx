@@ -265,13 +265,13 @@ function StandardAskForm({
         receive={receiveKey}
         within="answer"
       />
-      {fields.some((field) => TYPED.has(field.kind) || field.kind === "api_key") && (
-        <p className="ask-origin">dot wrote this. localDot never asks for its passphrase here.</p>
-      )}
     </div>
   );
   const foot = (
     <div className={clsx("ask-foot", layout !== "thread" && "decision-foot")}>
+      {fields.some((field) => TYPED.has(field.kind) || field.kind === "api_key") && (
+        <p className="ask-origin">dot wrote this. localDot never asks for its passphrase here.</p>
+      )}
       <p className="ask-problem" role="status">
         {state.failed}
       </p>

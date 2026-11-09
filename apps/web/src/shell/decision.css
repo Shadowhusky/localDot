@@ -398,6 +398,8 @@
   z-index: 1;
   padding-bottom: calc(var(--spacing) * 3);
   background-color: var(--color-overlay);
+  /* Over the sheet's bottom padding too, so what scrolls under the answers doesn't show below them. */
+  box-shadow: 0 max(calc(var(--spacing) * 5), env(safe-area-inset-bottom)) 0 var(--color-overlay);
 }
 
 .decision[data-layout="sheet"] .decision-scope {
@@ -727,6 +729,7 @@
 
 .ask-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: calc(var(--spacing) * 2);
 }
@@ -741,6 +744,7 @@
 }
 
 .ask-origin {
+  flex: 1 0 100%;
   margin: 0;
   color: var(--color-fg-2);
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
