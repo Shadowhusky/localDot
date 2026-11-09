@@ -465,6 +465,122 @@ it("stops bringing a run into view once the reader scrolls back", async () => {
   expect(element.scrollTop).toBe(left);
 });
 
+it("stops bringing a run into view when the reader wheels on toward it too", async () => {
+  const { element, frames } = unfolding(650, 120);
+  await frames(100);
+  fireEvent.wheel(element, { deltaY: 8 });
+  const left = element.scrollTop;
+  await frames(1500);
+  expect(element.scrollTop).toBe(left);
+});
+
+it("stops bringing a run into view when a key scrolls the list", async () => {
+  const { element, frames } = unfolding(650, 120);
+  await frames(100);
+  fireEvent.keyDown(element, { key: "ArrowDown" });
+  const left = element.scrollTop;
+  await frames(1500);
+  expect(element.scrollTop).toBe(left);
+});
+
+it("brings a head above the view's top down into view", async () => {
+  // Its head 5 px down the view, under the fade along the top.
+  const { element, frames } = unfolding(505, 40);
+  await frames(100);
+  expect(element.scrollTop).toBeLessThan(500);
+  await frames(1000);
+  expect(element.scrollTop).toBe(489);
+});
+
+it("sees an element in a list of its own only as far as the list shows it", async () => {
+  vi.useFakeTimers({
+    toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance", "setTimeout"],
+  });
+  function Nested() {
+    const follow = useFollowScroll("task", true);
+    const list = useRef<HTMLDivElement>(null);
+    const row = useRef<HTMLDivElement>(null);
+    return (
+      <div ref={follow.ref} data-testid="view">
+        <ul />
+        <div ref={list} data-testid="list">
+          <div ref={row} data-testid="row" />
+        </div>
+        <button
+          type="button"
+          onClick={() => row.current && follow.show(row.current, 16, 16, list.current)}
+        >
+          Unfold
+        </button>
+      </div>
+    );
+  }
+  render(<Nested />);
+  const { element } = view();
+  element.scrollTop = 500;
+  element.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+  // The list ends 40 px past the view's bottom; the row runs a long way past that, inside it.
+  screen.getByTestId("list").getBoundingClientRect = () =>
+    ({ top: 600 - element.scrollTop, bottom: 740 - element.scrollTop }) as DOMRect;
+  screen.getByTestId("row").getBoundingClientRect = () =>
+    ({ top: 650 - element.scrollTop, bottom: 1400 - element.scrollTop, height: 750 }) as DOMRect;
+  fireEvent.click(screen.getByRole("button", { name: "Unfold" }));
+  await act(async () => {
+    vi.advanceTimersByTime(1500);
+  });
+  expect(element.scrollTop).toBe(556);
+});
+
+it("holds what the reader pressed while what lies above it folds", async () => {
+  vi.useFakeTimers({
+    toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance", "setTimeout"],
+  });
+  function Accordion() {
+    const follow = useFollowScroll("task", true);
+    const row = useRef<HTMLDivElement>(null);
+    return (
+      <div ref={follow.ref} data-testid="view">
+        <ul />
+        <div ref={row} data-testid="row" />
+        <button
+          type="button"
+          onClick={() => {
+            if (!row.current) return;
+            follow.anchorTo(row.current);
+            follow.show(row.current, 16);
+          }}
+        >
+          Unfold
+        </button>
+      </div>
+    );
+  }
+  render(<Accordion />);
+  const { element } = view();
+  element.scrollTop = 500;
+  element.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+  const start = performance.now();
+  // 200 px folds away above the row over 300 ms, with the row itself staying 60 px tall.
+  const at = () => 600 - Math.min(200, ((performance.now() - start) / 300) * 200);
+  const row = screen.getByTestId("row");
+  Object.defineProperty(row, "offsetTop", { configurable: true, get: at });
+  row.getBoundingClientRect = () => {
+    const top = at() - element.scrollTop;
+    return { top, bottom: top + 60, height: 60 } as DOMRect;
+  };
+  fireEvent.click(screen.getByRole("button", { name: "Unfold" }));
+  await act(async () => {
+    vi.advanceTimersByTime(200);
+  });
+  // Within what folds between two frames.
+  expect(Math.abs(row.getBoundingClientRect().top - 100)).toBeLessThan(12);
+  await act(async () => {
+    vi.advanceTimersByTime(1500);
+  });
+  expect(element.scrollTop).toBeCloseTo(300);
+  expect(row.getBoundingClientRect().top).toBeCloseTo(100);
+});
+
 // A reader above the end, over rows whose place and height the test sets: [top in the content, height].
 function Rows({ count, whole }: { count: number; whole?: () => boolean }) {
   const follow = useFollowScroll("task", true, whole);

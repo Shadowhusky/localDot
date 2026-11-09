@@ -63,7 +63,7 @@ import {
 } from "./thread.ts";
 import { UserBubble } from "./UserBubble.tsx";
 import { copyBlocked } from "./useCopy.ts";
-import { useFollowScroll } from "./useFollowScroll.ts";
+import { REVEAL_MARGIN, useFollowScroll } from "./useFollowScroll.ts";
 import { type KeptRows, usePagedRows } from "./usePagedRows.ts";
 
 // The thread mounts about this many items, the newest on opening; scrolling near either end moves it
@@ -80,8 +80,6 @@ const KEEP_PX = 1200;
 // coming and going.
 const FOOT_FROM = 480;
 const END_BELOW = 400;
-// A recovery card brought into view sits this far under the scroller's faded top edge.
-const REVEAL_MARGIN = 16;
 const NONE: readonly string[] = [];
 const itemKey = (item: ThreadItem) => item.key;
 const rowKey = (row: ThreadRow) => row.item.key;
@@ -1408,19 +1406,25 @@ export function Conversation({
           const target =
             event.target instanceof Element
               ? event.target.closest<HTMLButtonElement>(
-                  ".thread-work-steps > .ui-disclosure-trigger, .thread-work > .activity-row > .activity-row-head, .deliverable button.ui-file-main",
+                  ".thread-work-steps > .ui-disclosure-trigger, .thread-work button.activity-row-head, .deliverable button.ui-file-main",
                 )
               : null;
           if (!target) return;
-          follow.anchorTo(target, REVEAL_MARGIN);
-          // A run of steps or a file the reader unfolds comes into view down to its end, clear of
-          // the jump button that leaving the end brings, its head kept in view.
-          const unfolding = target.closest(".thread-work-steps, .deliverable");
-          if (unfolding && target.getAttribute("aria-expanded") === "false")
+          // A step inside a run's list is seen through the list, which keeps its own place.
+          const list = target.closest<HTMLElement>(".thread-work-scroll");
+          const opening = target.getAttribute("aria-expanded") === "false";
+          follow.anchorTo(list ?? target, list || opening ? undefined : REVEAL_MARGIN);
+          // What the reader unfolds comes into view down to its end, clear of the jump button that
+          // leaving the end brings, its head kept in view.
+          const unfolding = target.closest<HTMLElement>(
+            ".activity-row, .thread-work-steps, .deliverable",
+          );
+          if (unfolding && opening)
             follow.show(
-              unfolding as HTMLElement,
+              unfolding,
               REVEAL_MARGIN,
               Math.max(REVEAL_MARGIN, jumpReach() + REVEAL_MARGIN / 2),
+              list,
             );
         }}
         onScroll={() => {
