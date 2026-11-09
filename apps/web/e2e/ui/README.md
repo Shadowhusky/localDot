@@ -38,6 +38,12 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   three that don't), `longtext`, `confirm`, `details` (number, date, phone and web address), `file`,
   `qr` (a link) or `pair` (plain text). Answers go through the real answer route; `GET /__qa/state`
   lists them under `effects`, secret answers only counted.
+- **Cards in the conversation:** what stops dot and the user can fix. `POST /__qa/fix/<kind>` raises
+  one as the daemon does: `key`, `app`, `computer`, `computer-paused`, `runtime`; `/__qa/keys-locked`
+  and `/__qa/stall/model-refused`, `provider-limit`, `key-reenter` and `key-rebound` raise the rest.
+  `POST /__qa/fix-model-answered` is the model answering a retry, `/__qa/fix-docker?starts=0` has Start
+  Docker fail, and `/__qa/fix-docker-up` is Docker coming back. Saving a key, a sign-in and the computer
+  coming back clear theirs through the daemon's own routes.
 - **Connecting apps:** the fixture answers an app's sign-in discovery in memory and stands in for
   keyd's redeeming of the code. The page the daemon would open in the Mac's browser is recorded, not
   opened: `GET /__qa/connect` says where the app would send the user back, so a test approves by

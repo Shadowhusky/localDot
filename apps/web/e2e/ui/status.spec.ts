@@ -57,6 +57,17 @@ const STATUS: Record<
     label: "Select the Net total cell",
     light: "dot",
   },
+  "fix-key": { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
+  "fix-app": { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
+  "fix-model": { shape: "task", control: /^Stop$/, label: "Provider request failed" },
+  "fix-computer": { shape: "computer", control: /^Turn on$/, label: "Stopped" },
+  "fix-computer-paused": { shape: "computer", control: /^Resume$/, label: "Paused" },
+  "fix-runtime": {
+    shape: "task",
+    control: /^Stop$/,
+    label: "Select the Net total cell",
+    light: "dot",
+  },
   "image-output": { shape: "ready", control: /^Take control$/, label: "Done" },
   narrated: { shape: "ready", control: /^Take control$/, label: "Done" },
   "long-run": {

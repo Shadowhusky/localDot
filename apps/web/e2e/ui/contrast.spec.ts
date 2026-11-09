@@ -135,6 +135,12 @@ for (const scenario of [
   "budget",
   "takeover",
   "keys-locked",
+  "fix-key",
+  "fix-app",
+  "fix-model",
+  "fix-computer",
+  "fix-computer-paused",
+  "fix-runtime",
 ] as const)
   test(`computer state: ${scenario}`, async ({ page, ui }) => {
     await ui.open(scenario);
