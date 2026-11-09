@@ -3,6 +3,7 @@ import type {
   AskFieldRecord,
   AskFieldValue,
   AskRequestField,
+  Blocker,
   EventOf,
   GivenBack,
   MessageModel,
@@ -32,12 +33,17 @@ import {
   type TranscriptAppend,
   ulid,
 } from "@localdot/protocol";
-import { KEYS_LOCKED_NOTE, KEYS_UNLOCKED_NOTE } from "@localdot/protocol/guidance";
 import type { ScreenName, ScreenSwitchData } from "../../../../packages/protocol/src/screens.ts";
 import type { ScreenController, ScreenLease, ScreenScope } from "../browser/screen-controller.ts";
 import { NO_CONNECTORS as NO_TASK_CONNECTORS, type TaskConnectors } from "../connectors/hub.ts";
 import type { EventLog } from "../event-log.ts";
 import type { GuiAction, NativeActionIdentity } from "../gateway/gateway.ts";
+import {
+  BlockerDesk,
+  type BlockerOutcome,
+  type OpenBlocker,
+  type RaiseOptions,
+} from "./blockers.ts";
 import type { ResearchLog } from "./research.ts";
 import {
   type ActionBinding,
@@ -356,10 +362,15 @@ export class AgentSession {
   readonly #listeners = new Set<() => void>();
   // dot's next input waits for a fresh look at the screen, which the user has had.
   #lookFirst = false;
-  // The task met locked saved keys; the conversation offers to unlock them until they open.
-  #keysLocked = false;
-  // dot was told they were locked, so it is told when they open.
-  #keysTold = false;
+  // What the conversation offers the user to fix, for this task.
+  readonly #blockers = new BlockerDesk({
+    raised: (data) => this.append("blocker.raise", data),
+    cleared: (data) => this.append("blocker.clear", data),
+    tell: (text, wakes) => this.#note(text, wakes),
+    changed: () => this.#wake(),
+  });
+  // dot's own request_fix calls waiting on a card.
+  #fixWaits = 0;
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
   readonly #manual = new Map<ManualLease, ManualCall>();
@@ -1083,7 +1094,7 @@ export class AgentSession {
     if (
       type === "agent.state" &&
       ["thinking", "acting", "observing", "idle", "done"].includes(String(data.state)) &&
-      (this.#ask || this.pendingApproval || this.#control || this.safetyPause)
+      (this.#ask || this.pendingApproval || this.#control || this.safetyPause || this.#fixWaits)
     )
       return;
     this.eventLog.append(this.id, {
@@ -1132,6 +1143,7 @@ export class AgentSession {
     this.#senders.set(messageId, sender ?? null);
   }
   post(kind: InboxItem["kind"], text: string, sender?: string, turn?: MessageTurn): InboxItem {
+    if (kind !== "resume") this.#blockers.userSpoke();
     const messageId = ulid();
     // Known as the user's before it lands, so a wait it ends hears it as theirs.
     if (kind !== "resume") this.#senders.set(messageId, sender ?? null);
@@ -1176,6 +1188,7 @@ export class AgentSession {
   // Hold follow-ups outside the model inbox until its current task finishes. A queued
   // message can therefore be promoted without racing the model's inbox cursor.
   enqueue(text: string, sender?: string, turn?: MessageTurn): void {
+    this.#blockers.userSpoke();
     if (this.stopped) throw new SessionStoppedError();
     if (this.status === "idle" && !turn?.handOver && !this.#queued.size) {
       this.post("followup", text, sender, turn);
@@ -1304,27 +1317,68 @@ export class AgentSession {
     this.#wake();
   }
   get keysLocked(): boolean {
-    return this.#keysLocked;
+    return this.#blockers.open.some(({ blocker }) => blocker.kind === "keys_locked");
   }
   // Once per lock: the conversation shows the Unlock card, and dot hears not to ask for the
   // passphrase. A task paused on its own model key needs no word; unlocking resumes it.
   lockKeys(tell = true): void {
-    if (this.stopped) return;
-    if (!this.#keysLocked) this.append("keys.lock", { locked: true });
-    this.#keysLocked = true;
-    if (!tell || this.#keysTold) return;
-    this.#keysTold = true;
-    this.#note(KEYS_LOCKED_NOTE);
+    this.raiseBlocker({ kind: "keys_locked" }, tell ? {} : { required: true, tell: false });
   }
   // The vault opened: the card goes, and dot, if it was told, hears it, even from a turn it had
   // ended.
   keysUnlocked(): void {
-    if (this.stopped || !this.#keysLocked) return;
-    this.#keysLocked = false;
-    this.append("keys.lock", { locked: false });
-    if (!this.#keysTold) return;
-    this.#keysTold = false;
-    this.#note(KEYS_UNLOCKED_NOTE, true);
+    this.clearBlockers((blocker) => blocker.kind === "keys_locked");
+  }
+  get openBlockers(): readonly OpenBlocker[] {
+    return this.#blockers.open;
+  }
+  // Undefined once the task has stopped, or while the user's Not now holds.
+  raiseBlocker(blocker: Blocker, options?: RaiseOptions): OpenBlocker | undefined {
+    return this.stopped ? undefined : this.#blockers.raise(blocker, options);
+  }
+  clearBlockers(
+    matches: (blocker: Blocker) => boolean,
+    movedTo?: EventOf<"blocker.clear">["data"]["movedTo"],
+  ): readonly OpenBlocker[] {
+    return this.stopped ? [] : this.#blockers.clear(matches, movedTo);
+  }
+  dismissBlocker(blockerId: string): boolean {
+    return !this.stopped && this.#blockers.dismiss(blockerId);
+  }
+  // The task itself waits, with no call of dot's under way.
+  async waitForBlockerToGo({ blockerId }: OpenBlocker): Promise<void> {
+    while (this.#blockers.isOpen(blockerId) && !this.stopped)
+      await this.#changed(25_000, this.abort.signal);
+    this.abort.signal.throwIfAborted();
+  }
+  // dot's call waits here for the card to go, as a question waits for its answer. The card stays up
+  // after a timeout or a Pause.
+  async waitForBlocker(
+    { blockerId }: OpenBlocker,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<BlockerOutcome | "timeout" | "pause"> {
+    this.#blockers.join(blockerId);
+    const deadline = Date.now() + timeoutMs;
+    this.#fixWaits++;
+    if (!this.safetyPause) {
+      this.setStatus("waiting_user");
+      this.#publishState("waiting_user", "fix");
+    }
+    try {
+      while (this.#blockers.isOpen(blockerId)) {
+        signal.throwIfAborted();
+        if (this.safetyPause) return "pause";
+        const left = deadline - Date.now();
+        if (left <= 0) return "timeout";
+        await this.#changed(left, signal);
+      }
+      return this.#blockers.outcome(blockerId) ?? "fixed";
+    } finally {
+      this.#fixWaits--;
+      if (!this.stopped && !this.#control && !this.safetyPause && !this.#ask)
+        this.status = "running";
+    }
   }
   // A word to dot from localDot rather than the user, heard with dot's next look at its inbox.
   remind(text: string): void {

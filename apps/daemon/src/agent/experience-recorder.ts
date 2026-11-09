@@ -12,6 +12,7 @@ const internal = new Set([
   "update_plan",
   "ask_user",
   "request_takeover",
+  "request_fix",
 ]);
 
 export class ExperienceRecorder {

@@ -292,6 +292,69 @@ describe("a message's model", () => {
     });
   });
 
+  it("the model card moves a stalled task to the chosen model, in place, with its history", async () => {
+    const f = setup();
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "model refused", detail: "400: No" });
+    expect(session.openBlockers).toHaveLength(1);
+    await f.runner.retryOnModel(session.id, { ...OPUS });
+    expect(session.openBlockers).toEqual([]);
+    expect(f.events(session.id, "blocker.clear").at(-1)?.data).toMatchObject({
+      outcome: "fixed",
+      movedTo: { provider: OPUS.provider, model: OPUS.model },
+    });
+    expect(f.runner.get(session.id)).toBe(session);
+    expect(session.stopped).toBe(false);
+  });
+
+  it("the model card's same model retries it, and holds until the model answers", async () => {
+    const f = setup();
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "model unavailable" });
+    const seq = session.inboxSequence;
+    await f.runner.retryOnModel(session.id, { ...SONNET });
+    expect(session.inboxSequence).toBe(seq + 1);
+    expect(f.events(session.id, "blocker.clear").at(-1)?.data).not.toHaveProperty("movedTo");
+  });
+
+  it("the model card hands over to the conversation's next task for another kind of model", async () => {
+    const f = setup();
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "provider limit reached" });
+    const start = vi.spyOn(f.runner, "start").mockImplementation(async () => session);
+    const turn = vi.spyOn(f.runner, "messageTurn").mockResolvedValue({
+      model: { provider: "chatgpt", model: "gpt-6-sol" },
+      ref: { provider: "chatgpt", model: "gpt-6-sol" },
+      moves: () => true,
+      reached: () => {},
+      handOver: () => {},
+    });
+    await f.runner.retryOnModel(session.id, { provider: "chatgpt", model: "gpt-6-sol" });
+    expect(start).toHaveBeenCalledWith(
+      f.cellId,
+      "Continue where you left off.",
+      undefined,
+      expect.objectContaining({
+        continues: session.id,
+        model: { provider: "chatgpt", model: "gpt-6-sol" },
+      }),
+    );
+    start.mockRejectedValueOnce(new Error("no"));
+    session.append("agent.state", { state: "paused", reason: "provider limit reached" });
+    await expect(
+      f.runner.retryOnModel(session.id, { provider: "chatgpt", model: "gpt-6-sol" }),
+    ).rejects.toThrow("no");
+    expect(session.openBlockers).toHaveLength(1);
+    turn.mockRestore();
+    start.mockRestore();
+  });
+
   it("keeps going on the same model without restarting anything extra", async () => {
     const f = setup();
     const session = await f.runner.start(f.cellId, "First");

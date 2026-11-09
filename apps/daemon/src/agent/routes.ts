@@ -12,6 +12,7 @@ import {
   AddMemoryEntryRequest,
   AddPersonRequest,
   ApprovalAnswer,
+  BlockerModelChoice,
   BudgetRaiseRequest,
   CLAUDE_PLAN_REFUSAL,
   ContinueConversation,
@@ -115,6 +116,7 @@ export interface AgentRoutesDeps {
     Partial<
       Pick<
         AgentRunner,
+        | "retryOnModel"
         | "selectionOf"
         | "terminalOf"
         | "pauseTask"
@@ -1094,6 +1096,40 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         : !!parsed.fields &&
           s.answerFields(parsed.askId, parsed.fields, (text) => redact(text, s.id, s.cellId));
       return ok ? c.body(null, 204) : c.text("that question is not waiting", 409);
+    }),
+  );
+  // A card in the conversation: Not now, which tells dot, and for a model's the one to go on with.
+  // Both are the owner's, as unlocking and saving keys are: a shared link's guest sees the task,
+  // never decides what it is owed.
+  const ownerOnly = (c: { get(key: "remoteGrant"): unknown }) => {
+    if (c.get("remoteGrant"))
+      throw new RouteError(403, "Only the owner of this localDot can answer that");
+  };
+  app.post(
+    "/api/agent/sessions/:id/blockers/:blockerId/dismiss",
+    route(async (c) => {
+      ownerOnly(c);
+      const s = active(c.req.param("id") ?? "");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      return s.dismissBlocker(c.req.param("blockerId") ?? "")
+        ? c.body(null, 204)
+        : c.text("that card is not waiting", 409);
+    }),
+  );
+  app.post(
+    "/api/agent/sessions/:id/blockers/:blockerId/model",
+    route(async (c) => {
+      ownerOnly(c);
+      const s = active(c.req.param("id") ?? "");
+      const { model } = await json(c.req.raw, BlockerModelChoice);
+      check(c.req.raw.signal);
+      const blockerId = c.req.param("blockerId") ?? "";
+      if (!s.openBlockers.some((open) => open.blockerId === blockerId))
+        throw new RouteError(409, "that card is not waiting");
+      if (!deps.runner.retryOnModel) throw new RouteError(503, "changing model is unavailable");
+      await deps.runner.retryOnModel(s.id, model, c.req.raw.signal);
+      return c.body(null, 204);
     }),
   );
   // The user takes the computer whatever dot is doing; the reply names the control to hand back.

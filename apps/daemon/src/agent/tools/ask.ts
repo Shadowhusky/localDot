@@ -17,6 +17,7 @@ import { addTaskSecret } from "../redact.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import { type AgentSession, type AskAnswer, type AskForm, SAVED_LOGIN_TAP } from "../session.ts";
 import { fail, frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import { KEYS_NOT_LOCKED, waitForFix } from "./request-fix.ts";
 import { accountOrigin, findSecretField, type SecretField, typeSecret } from "./secret-field.ts";
 
 const reusedLogins = new WeakMap<AgentSession, Set<string>>();
@@ -154,12 +155,44 @@ function shownAnswer(field: Pick<AskRequestField, "kind">, value: AskFieldRecord
   return value;
 }
 
+const ABOUT_LOCALDOT_KEYS = /\b(localdot|saved keys|your keys)\b/i;
+const UNLOCKING = /\b(unlock|locked|pass ?phrase)\b/i;
+const CARD_IS_UP =
+  "localDot's own card for this is on screen and says when it is done, so don't ask the user to confirm it. Call request_fix to wait for it, or carry on with what doesn't need it.";
+// The brain's own guard, not a word from the model.
+const KEEP_GOING = "keep_going";
+
+// A question can't stand in for localDot's own card: the words that would send the user to Keys, or
+// ask for what only Keys may take, get the real card when the keys are locked and nothing otherwise.
+// A question typed by a page through dot never reaches the passphrase this way.
+async function cardInstead(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+  input: AskUserInput,
+): Promise<ToolResult | undefined> {
+  const fields = input.fields ?? [];
+  const words = [
+    input.question,
+    ...fields.flatMap((field) => [field.label, field.hint ?? ""]),
+  ].join(" ");
+  if (ABOUT_LOCALDOT_KEYS.test(words) && UNLOCKING.test(words))
+    return deps.keysLocked?.()
+      ? waitForFix(deps, ctx, { kind: "keys_locked" })
+      : fail(KEYS_NOT_LOCKED);
+  const only = fields.length === 1 ? fields[0] : undefined;
+  if (only?.kind === "confirm" && only.id !== KEEP_GOING && ctx.session.openBlockers.length)
+    return fail(CARD_IS_UP);
+  return undefined;
+}
+
 export async function askUserTool(
   deps: ToolDeps,
   ctx: ToolCallContext,
   input: AskUserInput,
 ): Promise<ToolResult> {
   ctx.check();
+  const card = await cardInstead(deps, ctx, input);
+  if (card) return card;
   if (input.fields) return askFields(deps, ctx, input, input.fields);
   const form = plainForm(input, ctx.redact);
   const timeoutMs = askTimeoutMs(deps, ctx);

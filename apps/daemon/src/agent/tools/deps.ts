@@ -108,12 +108,17 @@ export interface ToolDeps {
     | "isConnected"
     | "refresh"
     | "remove"
+    | "ended"
   >;
   // The app's tools join this task's list: its harness starts again with them, resuming the task.
   appsChanged?(session: AgentSession): void;
   // The web tools' own way out, through keyd, without the screen or the user's sign-ins.
   web?: WebAccess;
   credentials?: Pick<import("../../keyd/service-keys.ts").ServiceKeys, "list" | "request">;
+  // What is really so, for a card: dot's word raises none on its own.
+  keysLocked?(): boolean;
+  computerDown?(cellId: string): "stopped" | "paused" | undefined;
+  runtimeDown?(): Promise<boolean>;
 }
 
 export interface ToolCallContext {

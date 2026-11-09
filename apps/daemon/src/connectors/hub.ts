@@ -8,6 +8,7 @@ import {
   type ConnectorToolSpec,
   type ConnectorView,
   catalogEntry,
+  clipText,
   connectorHost,
   connectorIdFor,
   connectorToolDescription,
@@ -73,6 +74,8 @@ export interface CallOutcome {
   readonly ok: boolean;
   readonly text: string;
   readonly recovery?: ToolRecovery;
+  // The app turned the sign-in away, or it has ended: Connect brings it back.
+  readonly signInEnded?: true;
 }
 
 const IDLE_MS = 5 * 60_000;
@@ -191,6 +194,7 @@ export class ConnectorHub {
   readonly #live = new Map<string, Live>();
   #tools: ToolCache;
   readonly #validator = new AjvJsonSchemaValidator();
+  readonly #keyWatchers = new Set<(secretId: string) => void>();
   constructor(private readonly deps: ConnectorHubDeps) {
     this.#tools = deps.store.tools();
   }
@@ -410,6 +414,22 @@ export class ConnectorHub {
     };
   }
 
+  // The app dot means by this id or name, when Connect is what stands between it and the task, as
+  // localDot itself names it.
+  ended(app: string): { connector: string; name: string; host: string } | undefined {
+    const wanted = app.trim().toLowerCase();
+    const config = this.configs().find(
+      (one) => one.id === wanted || one.catalog === wanted || one.name.toLowerCase() === wanted,
+    );
+    if (config?.server.kind !== "remote" || config.server.auth.kind !== "oauth") return undefined;
+    if (this.isConnected(config.id)) return undefined;
+    return {
+      connector: config.id,
+      name: clipText(config.name, 40),
+      host: connectorHost(config.server.url),
+    };
+  }
+
   // Whether the app has a sign-in that hasn't been seen to end.
   isConnected(id: string): boolean {
     const config = this.config(id);
@@ -469,6 +489,12 @@ export class ConnectorHub {
           : server.env.some((env) => env.secret === secretId);
       if (uses) await this.disconnect(config.id);
     }
+    for (const watcher of [...this.#keyWatchers]) watcher(secretId);
+  }
+  // Told after each key change, a connector's sign-in among them, once the hub has taken it in.
+  whenKeyChanges(watcher: (secretId: string) => void): () => void {
+    this.#keyWatchers.add(watcher);
+    return () => this.#keyWatchers.delete(watcher);
   }
 
   #connect(config: ConnectorConfig): Promise<{ client: Client; open: OpenLink }> {
@@ -708,6 +734,7 @@ export class ConnectorHub {
       return {
         ok: false,
         text: problem.message,
+        ...(problem.status === "needs_sign_in" ? { signInEnded: true as const } : {}),
         recovery: {
           kind: problem.causeKind,
           surface: "connector",

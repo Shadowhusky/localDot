@@ -531,9 +531,11 @@ describe("recovery preserves daemon-owned control", () => {
       expect(warn.mock.calls.filter(([line]) => String(line).includes("paused"))).toEqual([
         [`task ${session.id} paused (model unavailable): ${detail}`],
       ]);
-      const notices = h.log.read(session.id).filter((e) => e.type === "message.assistant");
-      expect(notices.map((e) => e.data.text)).toEqual([
-        `The model is not responding after several attempts. Check its connection, or choose another model and continue.\n\nDetails: ${detail}`,
+      // The card says it, with the way on: no words in the thread say it as well.
+      const log = h.log.read(session.id);
+      expect(log.filter((e) => e.type === "message.assistant")).toEqual([]);
+      expect(log.flatMap((e) => (e.type === "blocker.raise" ? [e.data.blocker] : []))).toEqual([
+        { kind: "model", reason: "model unavailable", detail },
       ]);
     } finally {
       warn.mockRestore();

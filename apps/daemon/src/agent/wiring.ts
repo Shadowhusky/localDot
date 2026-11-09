@@ -70,7 +70,7 @@ import type { KeydClient } from "../keyd/client.ts";
 import { JudgeCell } from "../keyd/judge-cell.ts";
 import { KeyModels } from "../keyd/key-models.ts";
 import { ModelCatalog } from "../keyd/model-catalog.ts";
-import type { KeydMonitor } from "../keyd/monitor.ts";
+import { type KeydMonitor, vaultLocked } from "../keyd/monitor.ts";
 import { QuickModel } from "../keyd/quick-model.ts";
 import { ServiceKeys } from "../keyd/service-keys.ts";
 import type { ScreenRecordings } from "../recorder/screen-recordings.ts";
@@ -111,7 +111,7 @@ import { PrivateFiles } from "./private-files.ts";
 import { RecentActivity } from "./recent-activity.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
-import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { AgentError, AgentRunner, type AgentRunnerDeps, computerDown } from "./runner.ts";
 import { ConnectionApprovals } from "./safety/connections.ts";
 import { NativeTasks } from "./safety/native-tasks.ts";
 import { PurposeService } from "./safety/purpose-service.ts";
@@ -142,6 +142,8 @@ export interface AgentWiringDeps {
   gateway: ActionGateway;
   frames: FrameStore;
   docker: DockerClient;
+  // Docker isn't answering, so nothing can run the computer until it does.
+  dockerDown?(): Promise<boolean>;
   keyd: KeydClient;
   monitor: Pick<KeydMonitor, "health">;
   killSwitch: Pick<KillSwitch, "contain" | "isBusy">;
@@ -277,7 +279,9 @@ export function createAgent(d: AgentWiringDeps) {
       lease.release();
     }
   };
+  const runtimeDown = () => d.dockerDown?.() ?? Promise.resolve(false);
   const unsubscribe = d.cells.subscribe((cell) => {
+    runner.cellChanged(cell);
     const prior = clients.get(cell.id),
       endpoint = d.cells.endpoints(cell.id)?.desktopd;
     if (
@@ -535,6 +539,9 @@ export function createAgent(d: AgentWiringDeps) {
       appsChanged: (session) => runner.refreshApps(session),
       web: webCell,
       credentials: serviceKeys,
+      keysLocked: () => vaultLocked(d.monitor.health),
+      computerDown: (cellId) => computerDown(d.cells.get(cellId)),
+      runtimeDown,
     },
   };
   const computerUp = (cellId: string) => {
@@ -873,6 +880,8 @@ export function createAgent(d: AgentWiringDeps) {
     catalog: () => catalog.get(),
     memory,
     connectors: () => connectors.forTask(),
+    appConnected: (id) => connectors.isConnected(id),
+    runtimeDown,
     recentActivity,
     transcripts,
     conversations,
@@ -1231,6 +1240,9 @@ export function createAgent(d: AgentWiringDeps) {
     }
     return { tools, signal: access.signal, check: access.check, release: access.release };
   };
+  const stopKeyWatch = connectors.whenKeyChanges((id) => {
+    void runner.keyChanged(id).catch(() => console.error("a key change didn't reach its tasks"));
+  });
   const stopExperienceFeed = d.eventLog.subscribe((id, event) => {
     experience.event(id, event);
   });
@@ -1327,6 +1339,7 @@ export function createAgent(d: AgentWiringDeps) {
       catalog.close();
       ready = false;
       unsubscribe();
+      stopKeyWatch();
       stopExperienceFeed();
       stopPlanUsageFeed();
       planUsage.close();

@@ -363,7 +363,7 @@ describe("the user's own hold on the computer", () => {
     "provider limit reached",
     "chatgpt plan limit reached",
     "claude code plan limit reached",
-  ])("persists a reply when %s prevents any model output", async (reason) => {
+  ])("raises one card when %s prevents any model output", async (reason) => {
     const f = setup();
     f.run.mockImplementationOnce(async (session) => {
       session.append("agent.state", {
@@ -380,12 +380,17 @@ describe("the user's own hold on the computer", () => {
       return 0;
     });
     const session = await f.runner.start(f.cellId, "Say hello");
-    await until(() => f.log.read(session.id).some((e) => e.type === "message.assistant"));
-    const replies = f.log.read(session.id).filter((e) => e.type === "message.assistant");
-    expect(replies).toHaveLength(1);
-    expect(replies[0]?.data).toMatchObject({
-      text: expect.stringContaining("Usage resets later today."),
-    });
+    await until(() => f.log.read(session.id).some((e) => e.type === "blocker.raise"));
+    const log = f.log.read(session.id);
+    expect(log.filter((e) => e.type === "blocker.raise").map((e) => e.data)).toEqual([
+      {
+        blockerId: expect.any(String),
+        blocker: { kind: "model", reason, detail: "Usage resets later today." },
+        by: "localdot",
+        required: true,
+      },
+    ]);
+    expect(log.some((e) => e.type === "message.assistant")).toBe(false);
   });
   it("retires a plan-limited task and starts the conversation on the newly selected model", async () => {
     const f = setup();
@@ -2064,19 +2069,19 @@ describe("ChatGPT runner lifecycle", () => {
     const locks = () =>
       f.log
         .read(s.id)
-        .filter((event) => event.type === "keys.lock")
-        .map((event) => event.data);
+        .filter((event) => event.type === "blocker.raise" || event.type === "blocker.clear")
+        .map((event) => event.type);
     const seq = s.inboxSequence;
     f.log.append(s.id, refused);
     f.log.append(s.id, refused);
-    expect(locks()).toEqual([{ locked: true }]);
+    expect(locks()).toEqual(["blocker.raise"]);
     expect(s.keysLocked).toBe(true);
     // dot hears the card is up, but the note alone never wakes a finished turn.
     expect(s.inboxSequence).toBe(seq + 1);
     await new Promise<void>((r) => setImmediate(r));
     expect(f.run).toHaveBeenCalledTimes(1);
     await f.runner.keydChanged(open, locked);
-    expect(locks()).toEqual([{ locked: true }, { locked: false }]);
+    expect(locks()).toEqual(["blocker.raise", "blocker.clear"]);
     await until(() => f.run.mock.calls.length === 2);
     expect(s.keysLocked).toBe(false);
   });
@@ -2095,7 +2100,7 @@ describe("ChatGPT runner lifecycle", () => {
         decision: "deny",
       },
     });
-    expect(f.log.read(s.id).some((event) => event.type === "keys.lock")).toBe(false);
+    expect(f.log.read(s.id).some((event) => event.type === "blocker.raise")).toBe(false);
   });
   it("resumes a task paused on its model's locked key once the keys open, telling only a told dot", async () => {
     const f = setup();
@@ -2120,9 +2125,9 @@ describe("ChatGPT runner lifecycle", () => {
     expect(
       f.log
         .read(s.id)
-        .filter((event) => event.type === "keys.lock")
-        .map((event) => event.data),
-    ).toEqual([{ locked: true }, { locked: false }]);
+        .filter((event) => event.type === "blocker.raise" || event.type === "blocker.clear")
+        .map((event) => event.type),
+    ).toEqual(["blocker.raise", "blocker.clear"]);
     // keyd's refusal of the model call can reach the log first; dot, told then, is told again.
     await f.runner.keydChanged(locked, {
       ...locked,
@@ -2141,6 +2146,217 @@ describe("ChatGPT runner lifecycle", () => {
       locked,
     );
     expect(s.inboxSequence).toBe(told + 2);
+  });
+  describe("a task's cards", () => {
+    const blockers = (f: ReturnType<typeof setup>, id: string) =>
+      f.log
+        .read(id)
+        .flatMap((event) =>
+          event.type === "blocker.raise" || event.type === "blocker.clear"
+            ? [event.type === "blocker.raise" ? event.data.blocker : event.data.outcome]
+            : [],
+        );
+    const refusal = (secretId: string) =>
+      ({
+        type: "key.use",
+        agent: "keyd",
+        data: { secretId, host: "api.example", method: "GET", path: "/", decision: "deny" },
+      }) as const;
+    const off = (f: ReturnType<typeof setup>, state: "stopped" | "failed") => {
+      const cell = f.deps.cell(f.cellId);
+      if (!cell) throw new Error("fixture missing cell");
+      f.deps.cell = () => ({ ...cell, state });
+      return { ...cell, state };
+    };
+    const working = async (f: ReturnType<typeof setup>) => {
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.status === "idle");
+      s.setStatus("running");
+      return s;
+    };
+
+    it("raises a key's card when keyd refuses it for a reason of its own", async () => {
+      const f = setup();
+      const s = await working(f);
+      f.secrets.mockResolvedValue([{ id: "github", kind: "http", reenter: true }] as never);
+      f.log.append(s.id, refusal("github"));
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]?.blocker).toEqual({
+        kind: "key",
+        id: "github",
+        problem: "reenter",
+      });
+      expect(s.openBlockers[0]?.required).toBe(false);
+    });
+
+    it("leaves a key refused for going somewhere it may not go to the task", async () => {
+      const f = setup();
+      const s = await working(f);
+      f.secrets.mockResolvedValue([{ id: "github", kind: "http" }] as never);
+      f.log.append(s.id, refusal("github"));
+      await new Promise<void>((r) => setImmediate(r));
+      expect(blockers(f, s.id)).toEqual([]);
+    });
+
+    it("carries a stalled task on by itself once its key is saved", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "key needs re-entering", detail: "gh" });
+      expect(blockers(f, s.id)).toEqual([{ kind: "key", id: "gh", problem: "reenter" }]);
+      expect(s.openBlockers[0]?.required).toBe(true);
+      const seq = s.inboxSequence;
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http", reenter: true }] as never);
+      await f.runner.keyChanged("gh");
+      expect(s.openBlockers).toHaveLength(1);
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http" }] as never);
+      await f.runner.keyChanged("gh");
+      expect(blockers(f, s.id).at(-1)).toBe("fixed");
+      // Only the Resume: the model retries the call that met the refusal.
+      expect(s.inboxSequence).toBe(seq + 1);
+    });
+
+    it("a removed key clears nothing", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.raiseBlocker({ kind: "key", id: "gh", problem: "rejected" });
+      f.secrets.mockResolvedValue([]);
+      await f.runner.keyChanged("gh");
+      expect(s.openBlockers).toHaveLength(1);
+    });
+
+    it("clears an app's card once its sign-in finished, on any device", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.raiseBlocker({ kind: "app", connector: "github", name: "GitHub", host: "api.example" });
+      f.secrets.mockResolvedValue([]);
+      let connected = false;
+      f.deps.appConnected = () => connected;
+      await f.runner.keyChanged("connector-github");
+      expect(s.openBlockers).toHaveLength(1);
+      connected = true;
+      await f.runner.keyChanged("connector-github");
+      expect(s.openBlockers).toEqual([]);
+      expect(blockers(f, s.id).at(-1)).toBe("fixed");
+    });
+
+    it("offers another model for what only that fixes, holding through a retry that fails", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      const refused = { state: "paused", reason: "model refused", detail: "400: Bad" } as const;
+      s.append("agent.state", refused);
+      expect(blockers(f, s.id)).toEqual([
+        { kind: "model", reason: "model refused", detail: "400: Bad" },
+      ]);
+      s.append("agent.state", { state: "thinking" });
+      expect(s.openBlockers).toHaveLength(1);
+      s.append("agent.state", refused);
+      expect(blockers(f, s.id)).toHaveLength(1);
+      s.append("agent.state", { state: "thinking" });
+      s.append("model.usage", {
+        role: "main",
+        route: "anthropic",
+        model: "m",
+        inputTokens: 1,
+        outputTokens: 1,
+      });
+      expect(blockers(f, s.id).at(-1)).toBe("fixed");
+      expect(s.openBlockers).toEqual([]);
+    });
+
+    it("raises no model card for a stall that clears by itself", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "model busy" });
+      s.append("agent.state", { state: "paused", reason: "budget" });
+      s.append("agent.state", { state: "paused", reason: "question" });
+      expect(blockers(f, s.id)).toEqual([]);
+    });
+
+    it("asks for the computer when it goes off under a task at work, and carries on when it's back", async () => {
+      const f = setup();
+      const s = await working(f);
+      const cell = f.deps.cell(f.cellId);
+      f.runner.cellChanged(off(f, "stopped"));
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]?.blocker).toEqual({ kind: "computer", state: "stopped" });
+      const seq = s.inboxSequence;
+      f.deps.cell = () => cell;
+      f.runner.cellChanged(cell as NonNullable<typeof cell>);
+      expect(s.openBlockers).toEqual([]);
+      expect(s.inboxSequence).toBe(seq + 1);
+      expect(s.status).toBe("running");
+    });
+
+    it("says the computer is paused when that is what it is", async () => {
+      const f = setup();
+      const s = await working(f);
+      f.state.paused = true;
+      const cell = f.deps.cell(f.cellId);
+      f.runner.cellChanged(cell as NonNullable<typeof cell>);
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]?.blocker).toEqual({ kind: "computer", state: "paused" });
+    });
+
+    it("asks a finished task nothing when the computer goes off", async () => {
+      const f = setup();
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.status === "idle");
+      f.runner.cellChanged(off(f, "stopped"));
+      await new Promise<void>((r) => setImmediate(r));
+      expect(s.openBlockers).toEqual([]);
+    });
+
+    it("asks for Docker rather than the computer when Docker has stopped", async () => {
+      const f = setup();
+      let down = true;
+      f.deps.runtimeDown = async () => down;
+      f.deps.runtimeCheckMs = 1;
+      const s = await working(f);
+      f.runner.cellChanged(off(f, "failed"));
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]?.blocker).toEqual({ kind: "runtime" });
+      down = false;
+      await until(() => s.openBlockers.length === 0);
+    });
+
+    it("a stopped task raises nothing, whatever happens to its computer", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.stop();
+      f.runner.cellChanged(off(f, "stopped"));
+      await new Promise<void>((r) => setImmediate(r));
+      expect(blockers(f, s.id)).toEqual([]);
+    });
+
+    it("waits past its idle time while a card is up, then goes on when it's fixed", async () => {
+      const f = setup(5);
+      const locked = {
+        online: true,
+        bootId: "fixture-boot",
+        vault: { backend: "file", state: "locked" as const, key: "passphrase" as const },
+      };
+      await f.runner.keydChanged(locked, { online: true, bootId: "fixture-boot" });
+      f.run.mockImplementationOnce(async (session) => {
+        const generation = session.beginBrain();
+        session.setStatus("running");
+        f.log.append(session.id, refusal("github"));
+        session.retireBrain(generation);
+        return 0;
+      });
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.status === "idle");
+      await new Promise<void>((r) => setTimeout(r, 40));
+      expect(s.stopped).toBe(false);
+      await f.runner.keydChanged(
+        { ...locked, vault: { ...locked.vault, state: "ready" as const } },
+        locked,
+      );
+      await until(() => f.run.mock.calls.length === 2);
+      expect(s.keysLocked).toBe(false);
+    });
   });
   it("keeps an idle task paused after account change until explicit Resume", async () => {
     const f = setup(),

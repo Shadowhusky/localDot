@@ -630,7 +630,7 @@ describe("session-owned screen authority", () => {
     expect(reply.result.ok).toBe(false);
     expect(JSON.stringify(reply)).toContain("Unlock card");
     expect(f.log.read(f.id).filter((e) => e.type === "ask.request")).toHaveLength(0);
-    expect(f.log.read(f.id).filter((e) => e.type === "keys.lock")).toHaveLength(1);
+    expect(f.log.read(f.id).filter((e) => e.type === "blocker.raise")).toHaveLength(1);
     expect(f.session.keysLocked).toBe(true);
   });
 

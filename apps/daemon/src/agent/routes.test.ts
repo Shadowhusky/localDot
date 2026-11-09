@@ -561,6 +561,63 @@ describe("agent user routes", () => {
     ).toBe(204);
     expect(await plain).toEqual({ declined: true, by: "user" });
   });
+  it("a card's Not now reaches the task, once, and only for a card that is up", async () => {
+    const f = await setup();
+    const open = f.session.raiseBlocker({ kind: "keys_locked" });
+    const path = endpoint(`blockers/${open?.blockerId}/dismiss`);
+    expect((await f.send("POST", path)).status).toBe(204);
+    expect(f.session.openBlockers).toEqual([]);
+    expect((await f.send("POST", path)).status).toBe(409);
+    const required = f.session.raiseBlocker(
+      { kind: "model", reason: "model refused" },
+      { required: true },
+    );
+    expect((await f.send("POST", endpoint(`blockers/${required?.blockerId}/dismiss`))).status).toBe(
+      409,
+    );
+  });
+  it("a model card's choice goes to the runner, and takes nothing but a model", async () => {
+    const f = await setup();
+    const retryOnModel = vi.fn(async () => {});
+    Object.assign(f.deps.runner, { retryOnModel });
+    const open = f.session.raiseBlocker(
+      { kind: "model", reason: "model refused" },
+      { required: true },
+    );
+    const path = endpoint(`blockers/${open?.blockerId}/model`);
+    const model = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
+    expect((await f.send("POST", path, { model, text: "Hello" })).status).toBe(400);
+    expect((await f.send("POST", path, { model })).status).toBe(204);
+    expect(retryOnModel).toHaveBeenCalledWith(SESSION, model, expect.any(AbortSignal));
+    expect(
+      (await f.send("POST", endpoint("blockers/01M6R97SHHND5784EZZXSYSBGD/model"), { model }))
+        .status,
+    ).toBe(409);
+  });
+  it("a shared link's guest gains nothing from a card", async () => {
+    const f = await setup();
+    const retryOnModel = vi.fn(async () => {});
+    Object.assign(f.deps.runner, { retryOnModel });
+    const guest = new Hono();
+    guest.use("*", async (c, next) => {
+      c.set("remoteGrant", { id: "guest" } as never);
+      await next();
+    });
+    agentRoutes(guest, f.deps);
+    const open = f.session.raiseBlocker({ kind: "keys_locked" });
+    const post = (action: string, body?: unknown) =>
+      guest.request(`http://127.0.0.1:4747${endpoint(`blockers/${open?.blockerId}/${action}`)}`, {
+        method: "POST",
+        ...(body === undefined
+          ? {}
+          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      });
+    expect((await post("dismiss")).status).toBe(403);
+    expect(f.session.openBlockers).toHaveLength(1);
+    const model = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
+    expect((await post("model", { model })).status).toBe(403);
+    expect(retryOnModel).not.toHaveBeenCalled();
+  });
   it("keeps a task's own model, and sends a message's model on to its turn", async () => {
     const f = await setup();
     const reached = vi.fn();

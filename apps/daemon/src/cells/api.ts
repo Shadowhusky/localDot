@@ -29,6 +29,7 @@ export interface CellApiDeps {
     docker: "ready" | "unavailable";
     startup: "waiting" | "recovering" | "ready" | "failed";
   }>;
+  startRuntime?(): Promise<boolean>;
   // Plain advice when Docker lacks the memory to run one more computer; `force` starts it anyway.
   capacity?(starting?: string): Promise<string | undefined>;
   importComputer?: ComputerImportPort;
@@ -45,6 +46,7 @@ export function cellRoutes(
     update,
     checkRuntime,
     runtimeStatus,
+    startRuntime,
     capacity,
     importComputer,
     size,
@@ -58,6 +60,14 @@ export function cellRoutes(
   });
 
   if (runtimeStatus) app.get("/api/runtime", async (c) => c.json(await runtimeStatus()));
+  // A task's Docker card: opens Docker Desktop on the computer running localDot, which is all that
+  // can be done from here. The owner's alone, as starting the computer is.
+  if (startRuntime)
+    app.post("/api/runtime/start", async (c) => {
+      if (c.get("remoteGrant"))
+        return c.text("Only the owner of this localDot can start Docker", 403);
+      return c.json({ started: await startRuntime() });
+    });
 
   app.get("/api/cells", (c) => c.json(cells.list()));
   app.get("/api/cells/:id/reset/:request", (c) =>
