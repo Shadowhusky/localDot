@@ -53,7 +53,7 @@ const settle = (page: Page) =>
 async function rightClick(page: Page, x: number, y: number): Promise<Click> {
   const expected = await page.evaluate(
     ([x, y]) => {
-      const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-flip]");
+      const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>(".sessions-item");
       if (hit) return hit.dataset.flip ?? null;
       // Beside a row, or in the 2 px gap between two, the nearer one.
       let nearest: string | null = null;

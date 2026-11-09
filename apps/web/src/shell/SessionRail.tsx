@@ -325,7 +325,7 @@ export const SessionRail = memo(function SessionRail({
     event.preventDefault();
     if (selection.selecting) return;
     const item =
-      target?.closest<HTMLElement>("[data-flip]") ??
+      target?.closest<HTMLElement>(".sessions-item") ??
       rowLevelWith(event.currentTarget, event.clientY);
     const row = listed.find((each) => each.entry.sessionId === item?.dataset.flip);
     const trigger = row && buttons.current.get(row.entry.sessionId);
