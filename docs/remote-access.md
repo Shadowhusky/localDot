@@ -186,7 +186,8 @@ A task started through a link (and any task its conversation moves to for anothe
 | Saving a lesson to the owner's memory when it finishes | No | No |
 | The owner's connected apps' tools | No | Yes |
 | `credentials`, `api_request` and fix-it cards for a key, an app or locked keys | No | Yes |
-| The owner's saved website sign-ins (filled after the owner's tap, and saved for later) | No | Yes |
+| The owner's saved website sign-ins, filled after the owner's tap | No | Yes |
+| Saving what the guest types as a sign-in, or changing one of the owner's | No | No |
 | The web browser that keeps the owner's sign-ins: `switch_screen`, `browser_upload`, and public pages through `browser_navigate` | No: pages open in the desktop's Chromium, which keeps no sign-ins | Yes |
 
 The web browser counts as the owner's accounts because it is signed in as them: a page there acts as the owner just as a connected app does. Every link is off by default, links made before this setting included; the owner picks it when making the link. Links can't be edited: make a new one and revoke the old. Each link's row in Settings says when it has the owner's apps, keys and browser.

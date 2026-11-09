@@ -1789,6 +1789,85 @@ describe("session-owned screen authority", () => {
     },
   );
 
+  describe("a shared link's task signing in, with the owner's apps allowed", () => {
+    async function signIn(store: { saved?: { username: string; password: string } }) {
+      const f = fixture();
+      f.session.guest = { apps: true };
+      await f.browser();
+      const h = tools(f);
+      f.client.lookup.mockImplementation((async () => ({
+        target: {
+          point: { x: 400, y: 300 },
+          source: "dom",
+          role: "textbox",
+          name: "Password",
+          url: "https://github.com/login",
+          secret: true,
+        },
+        window: 0,
+        ms: 1,
+      })) as never);
+      const saveLogin = vi.fn(async (_origin: string, username: string, password: string) => {
+        store.saved = { username, password };
+      });
+      h.tools.logins = {
+        login: vi.fn(async () => store.saved && { ...store.saved }),
+        saveLogin,
+      };
+      const input = {
+        question: "Sign in",
+        fields: [
+          { id: "username", kind: "text", label: "Username" },
+          { id: "password", kind: "secret", label: "Password", target: [400, 300] },
+        ],
+      };
+      const answer = async (fields: Record<string, string>) => {
+        const pending = h.callTool("ask_user", input);
+        await until(() => f.session.pendingAsk !== undefined);
+        const ask = f.log.read(f.id).findLast((e) => e.type === "ask.request");
+        const asked = new Set(
+          ask?.type === "ask.request" ? (ask.data.fields ?? []).map((field) => field.id) : [],
+        );
+        f.session.answerFields(
+          f.session.pendingAsk ?? "",
+          Object.fromEntries(Object.entries(fields).filter(([id]) => asked.has(id))),
+          (text) => text,
+        );
+        return { reply: await pending, ask };
+      };
+      const typed = () =>
+        f.client.secret.mock.calls
+          .map((call) => call[2].text)
+          .filter((text): text is string => text !== undefined);
+      return { saveLogin, answer, typed };
+    }
+    it("types a new sign-in where it belongs and saves it nowhere", async () => {
+      const store: { saved?: { username: string; password: string } } = {};
+      const s = await signIn(store);
+      const { reply, ask } = await s.answer({ username: "guest", password: "guest-password" });
+      expect(reply.result.ok).toBe(true);
+      expect(s.typed()).toEqual(["guest-password"]);
+      expect(s.saveLogin).not.toHaveBeenCalled();
+      expect(store.saved).toBeUndefined();
+      expect(JSON.stringify(ask)).not.toContain("Saved securely");
+      expect(JSON.stringify(reply)).not.toContain("saved securely");
+    });
+    it("fills the owner's saved sign-in but never changes it, its account or its password", async () => {
+      const owner = { username: "", password: "owner-password-canary" };
+      const store = { saved: { ...owner } };
+      const s = await signIn(store);
+      const reused = await s.answer({ username: "guest-account" });
+      expect(reused.reply.result.ok).toBe(true);
+      expect(JSON.stringify(reused.reply)).toContain("Used the saved sign-in");
+      const replaced = await s.answer({ username: "guest-account", password: "guest-password" });
+      expect(replaced.reply.result.ok).toBe(true);
+      expect(s.typed()).toEqual(["owner-password-canary", "guest-password"]);
+      expect(s.saveLogin).not.toHaveBeenCalled();
+      expect(store.saved).toEqual(owner);
+      expect(JSON.stringify(replaced.reply)).not.toContain("saved securely");
+    });
+  });
+
   it("opens a public page in the web browser from the desktop by switching the screen first", async () => {
     const f = fixture();
     await f.ready();
