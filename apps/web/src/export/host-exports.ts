@@ -30,7 +30,8 @@ export interface HostExports {
   start(start: ExportStart): Promise<HostExport>;
   cancel(id: string): Promise<void>;
   retry(id: string): Promise<void>;
-  remove(id: string): Promise<void>;
+  // `leave` plays once it is gone, before the list lets it go.
+  remove(id: string, leave?: () => Promise<void>): Promise<void>;
   // A short-lived address that saves the file without the token.
   link(id: string): Promise<string>;
   dispose(): void;
@@ -112,8 +113,9 @@ export function createHostExports(
     async retry(given) {
       merge(HostExport.parse(await api.post(`/api/exports/${id(given)}/retry`)));
     },
-    async remove(given) {
+    async remove(given, leave) {
       await api.del(`/api/exports/${id(given)}`);
+      await leave?.();
       set({ ...view, exports: view.exports.filter((entry) => entry.id !== given) });
     },
     async link(given) {

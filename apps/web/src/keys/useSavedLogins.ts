@@ -19,7 +19,8 @@ export interface SavedLoginsView {
   summary: LoginImport | null;
   importProblem: string | null;
   save(login: { origin: string; username: string; password?: string }): Promise<SavedLogin>;
-  remove(origin: string): Promise<void>;
+  // `leave` plays once it is gone, before the list reads again.
+  remove(origin: string, leave?: () => Promise<void>): Promise<void>;
   importFile(file: File): Promise<void>;
   dismissSummary(): void;
 }
@@ -81,7 +82,11 @@ export function useSavedLogins(api: ApiClient, open: boolean, epoch: string): Sa
     [api, change],
   );
   const remove = useCallback(
-    (origin: string) => change(() => removeLogin(api, origin)),
+    (origin: string, leave?: () => Promise<void>) =>
+      change(async () => {
+        await removeLogin(api, origin);
+        await leave?.();
+      }),
     [api, change],
   );
   const importFile = useCallback(

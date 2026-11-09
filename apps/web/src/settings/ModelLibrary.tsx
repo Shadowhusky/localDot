@@ -7,6 +7,7 @@ import { Checkbox } from "../ui/Checkbox.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote } from "../ui/Group.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { foldAway } from "../ui/leave.ts";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
 import { Select } from "../ui/Select.tsx";
@@ -180,13 +181,20 @@ function ModelRow({
         <MenuItem
           icon="trash"
           disabledReason={role ? "Choose another model for its role first" : undefined}
-          onSelect={onRemove}
+          onSelect={() => void foldAway(goesWith(more.current)).then(onRemove)}
         >
           Remove
         </MenuItem>
       </Menu>
     </div>
   );
+}
+
+// What leaves with a model: its row, or the whole group where it is the last there.
+function goesWith(from: HTMLElement | null) {
+  const row = from?.closest(".settings-model-row");
+  const group = row?.closest(".settings-model-group");
+  return group?.querySelectorAll(".settings-model-row").length === 1 ? group : row;
 }
 
 // The formats a key can speak: formats that share a kind of key share the endpoint behind it.

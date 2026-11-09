@@ -87,7 +87,7 @@ describe("the saved logins list", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Confirm remove login for github.com" }));
     });
-    expect(v.remove).toHaveBeenCalledExactlyOnceWith("https://github.com");
+    expect(v.remove).toHaveBeenCalledExactlyOnceWith("https://github.com", expect.any(Function));
   });
 
   it("filters a long list", () => {

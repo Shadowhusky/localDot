@@ -5,6 +5,7 @@ import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Group } from "../ui/Group.tsx";
 import { ListRow } from "../ui/ListRow.tsx";
+import { foldAway } from "../ui/leave.ts";
 import { MenuItem, MenuSeparator } from "../ui/Menu.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
@@ -210,7 +211,11 @@ function RoutineRow({
         onClose={() => setDeleting(false)}
         onDelete={(gone) =>
           void routines
-            .act((api) => api.remove(gone.id, gone.revision))
+            .act(async (api) => {
+              await api.remove(gone.id, gone.revision);
+              setDeleting(false);
+              await foldAway(more.current?.closest(".routine-row"));
+            })
             .then(() => setDeleting(false))
         }
       />

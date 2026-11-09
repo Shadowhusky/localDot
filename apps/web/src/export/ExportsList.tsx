@@ -11,6 +11,7 @@ import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { ListRow } from "../ui/ListRow.tsx";
+import { foldAway } from "../ui/leave.ts";
 import { useMediaQuery } from "../ui/media.ts";
 import { Progress } from "../ui/Progress.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -72,7 +73,12 @@ export function ExportsList({
       }
       onCancel={() => act(record.id, host.cancel(record.id))}
       onRetry={() => act(record.id, host.retry(record.id))}
-      onRemove={() => act(record.id, host.remove(record.id))}
+      onRemove={(row) =>
+        act(
+          record.id,
+          host.remove(record.id, () => foldAway(row)),
+        )
+      }
     />
   );
   return (
@@ -137,12 +143,14 @@ function ExportRow({
   onSave(): void;
   onCancel(): void;
   onRetry(): void;
-  onRemove(): void;
+  onRemove(row: HTMLElement | null): void;
 }) {
+  const item = useRef<HTMLLIElement>(null);
+  const remove = () => onRemove(item.current);
   const glyph = exportGlyph(record);
   const running = exportRunning(record);
   return (
-    <li className="export-row" data-phase={record.phase}>
+    <li ref={item} className="export-row" data-phase={record.phase}>
       <ListRow
         title={record.name}
         onSelect={record.phase === "done" ? onPreview : undefined}
@@ -174,7 +182,7 @@ function ExportRow({
         }
         swipe={
           phone && !running
-            ? { label: "Remove", accessibleLabel: `Remove ${record.name}`, onAction: onRemove }
+            ? { label: "Remove", accessibleLabel: `Remove ${record.name}`, onAction: remove }
             : undefined
         }
         actions={
@@ -204,7 +212,7 @@ function ExportRow({
                   size={28}
                   icon="trash"
                   label={`Remove ${record.name}`}
-                  onClick={onRemove}
+                  onClick={remove}
                 />
               )}
             </>
