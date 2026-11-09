@@ -281,7 +281,7 @@ test("Update from the previews panel follows the same steps as Settings", async 
     message: "Update your computer to open the servers dot starts in it.",
     addresses: [],
   });
-  const fixture = await ui.open("ready");
+  const fixture = await ui.open("done");
   expect((await page.request.post(`${fixture.origin}/__qa/update?hold=1`)).ok()).toBe(true);
   const panel = await previewsTab(page);
   const answered = page.waitForResponse(
