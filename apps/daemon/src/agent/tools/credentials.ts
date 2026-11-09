@@ -2,13 +2,21 @@ import {
   type ApiRequestInput,
   type CredentialsInput,
   credentialBinding,
+  KEYD_VAULT_LOCKED,
   KeyMetadata,
   sameCredential,
   type ToolResult,
 } from "@localdot/protocol";
-import { SERVICE_BYTES } from "../../keyd/service-keys.ts";
+import { SERVICE_BYTES, ServiceKeyProblem } from "../../keyd/service-keys.ts";
 import { untrusted } from "../untrusted.ts";
-import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import {
+  append,
+  fail,
+  movedOnQuestion,
+  type ToolCallContext,
+  type ToolDeps,
+  text,
+} from "./deps.ts";
 
 const TOOL_LISTING_MS = 20_000;
 
@@ -101,6 +109,7 @@ export async function credentialsTool(
   ctx.check();
   if (answer.by === "pause")
     return { ok: false, pause: true, content: [text("Paused while waiting for the key.")] };
+  if (answer.by === "message") return { ok: true, content: [text(movedOnQuestion(ctx.session))] };
   if (answer.by !== "user" || answer.declined)
     return {
       ok: false,
@@ -176,6 +185,7 @@ async function connectApp(
     return { ok: false, pause: true, content: [text("Paused while waiting for the app.")] };
   if (answer.by !== "user" || answer.declined) {
     if (target.added) await hub.remove(target.config.id).catch(() => undefined);
+    if (answer.by === "message") return { ok: true, content: [text(movedOnQuestion(ctx.session))] };
     return {
       ok: false,
       content: [
@@ -231,9 +241,25 @@ export async function apiRequestTool(
     tool: "api_request",
     title: `Calling ${new URL(input.url).hostname}`,
   });
-  const reply = await deps.credentials.request(input, body, ctx.signal);
+  let reply: Awaited<ReturnType<typeof deps.credentials.request>>;
+  try {
+    reply = await deps.credentials.request(input, body, ctx.signal);
+  } catch (error) {
+    ctx.check();
+    if (!(error instanceof ServiceKeyProblem)) throw error;
+    ctx.session.raiseBlocker({ kind: "key", id: error.id, problem: error.problem });
+    return fail(
+      "This key can't be used right now. localDot's own card for it is on screen, and you'll be told once it is fixed. Don't ask the user about it.",
+    );
+  }
   ctx.check();
+  // A service can answer anything, so the keys being locked is read from what is so, never from it.
+  if (reply.keydReason === KEYD_VAULT_LOCKED && deps.keysLocked?.()) ctx.session.lockKeys();
+  else if (reply.status === 401 && !reply.keydReason)
+    ctx.session.raiseBlocker({ kind: "key", id: input.key_id, problem: "rejected" });
   const ok = reply.status >= 200 && reply.status < 300;
+  if (ok)
+    ctx.session.clearBlockers((blocker) => blocker.kind === "key" && blocker.id === input.key_id);
   let path: string | undefined;
   if (input.output_path && !reply.truncated) {
     try {

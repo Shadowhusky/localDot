@@ -39,6 +39,7 @@ import {
   type Sealed,
   SealedLogin,
   type SessionOrigin,
+  STALL,
   type TaskModelSelection,
   type ToolName,
   toBase64url,
@@ -71,7 +72,7 @@ import { PlanUsageStore } from "../../../daemon/src/agent/plan-usage.ts";
 import { RecentActivity } from "../../../daemon/src/agent/recent-activity.ts";
 import { ResearchLog } from "../../../daemon/src/agent/research.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
-import { AgentError } from "../../../daemon/src/agent/runner.ts";
+import { AgentError, computerUp } from "../../../daemon/src/agent/runner.ts";
 import {
   approvalDraft,
   authorizePrepared,
@@ -576,6 +577,10 @@ const ledger = { limit: 5, spent: 4 };
 let budgetHold: "task" | "day" | undefined;
 let raisedDuringPause = false;
 let session: AgentSession | undefined;
+// The computer coming back clears what waited on it, as the real runner hears it.
+cells.subscribe((cell) => {
+  if (computerUp(cell)) session?.clearBlockers((blocker) => blocker.kind === "computer");
+});
 // The user's own hold on the computer, with no task, while it is the live session.
 let holder: AgentSession | undefined;
 // The seeded running task's open step, which /__qa/step-end finishes.
@@ -2201,6 +2206,19 @@ const agent: AgentRoutesDeps = {
       conversations.chooseModel(conversations.latest(id), ref);
       return ref;
     },
+    // The model card's choice, as the real runner takes a stalled task to it.
+    retryOnModel: async (id, ref) => {
+      if (!session || session.id !== id) throw new Error("no such task");
+      lastTurnModel = ref.model;
+      conversations.chooseModel(conversations.latest(id), ref);
+      effects.push(`model:${ref.model}`);
+      session.clearBlockers((blocker) => blocker.kind === "model" || blocker.kind === "key", {
+        provider: ref.provider,
+        model: ref.model,
+      });
+      session.setStatus("running");
+      session.append("agent.state", { state: "thinking" });
+    },
     messageTurn: async (id, ref) => {
       lastTurnModel = ref.model;
       conversations.chooseModel(conversations.latest(id), ref);
@@ -2671,6 +2689,18 @@ const connectorHub = new ConnectorHub({
   links: connectorLinks,
   keys: async () => keys,
 });
+// dot takes up the message that moved on from its card, as it does for a question.
+log.subscribe((id, event) => {
+  if (event.type === "blocker.clear" && event.data.outcome === "moved_on" && session?.id === id)
+    readsMessage(session);
+});
+// A sign-in finishing clears what waited on it, as the real runner hears it from the hub.
+connectorHub.whenKeyChanges(() => {
+  session?.clearBlockers(
+    (blocker) => blocker.kind === "app" && connectorHub.isConnected(blocker.connector),
+  );
+});
+let dockerStarts = true;
 // An app's sign-in service, in memory: it answers discovery and registration as a real one does. The
 // page it hands the browser is recorded rather than opened, and GET /__qa/connect says where it
 // would send the user back, so a test approves by visiting that. The fixture stands in for keyd too,
@@ -2759,6 +2789,10 @@ const routes = createApp({
     update: updateCell,
     capacity: dotsHere.capacity,
     size: dockerRoom.sizes,
+    startRuntime: async () => {
+      effects.push("docker:start");
+      return dockerStarts;
+    },
   },
   desktop: realDesktop,
   accounts,
@@ -3040,6 +3074,10 @@ routes.post("/api/keys", async (c) => {
   const at = new Date().toISOString();
   const key = { ...binding, createdAt: at, updatedAt: at } as KeydRecord;
   keys = [...keys.filter((k) => k.id !== key.id), key];
+  const cleared = session?.clearBlockers(
+    (blocker) => blocker.kind === "key" && blocker.id === key.id,
+  );
+  if (cleared?.some((open) => open.required)) session?.post("resume", "");
   return c.json({ key, restart: false });
 });
 routes.delete("/api/keys/:id", (c) => {
@@ -3159,6 +3197,7 @@ function requestApproval(
   { always = false, repeat = 1, kind = "" } = {},
 ): string | undefined {
   if (!session?.generation) return "no brain";
+  const owned = session;
   if (kind === "port") {
     // An app's connection beyond the web, as the daemon asks about one keyd holds.
     void session.connections
@@ -3288,7 +3327,10 @@ function requestApproval(
           } as never),
       { signal: controller.signal, check: () => {}, revalidate: async () => true } as never,
     )
-    .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
+    .then((o) => {
+      effects.push(`approval:${JSON.stringify(o)}`);
+      if (o === "message" && owned) readsMessage(owned);
+    })
     .catch((e) => effects.push(`approval-error:${String(e)}`));
 }
 // Keyboard steps with the gateway's own labels: a key pressed five times, a held key, and a held
@@ -3597,6 +3639,17 @@ function liveActions(): string | undefined {
   );
   act(9000, "key", "Save the report", { kind: "key", combo: ["ctrl", "s"] });
 }
+// dot takes up a message that moved on from what it was waiting for, as the real brain does.
+function readsMessage(owned: AgentSession) {
+  setTimeout(() => {
+    if (owned.stopped) return;
+    owned.append("agent.state", { state: "thinking" });
+    owned.append("message.assistant", {
+      messageId: ulid(),
+      text: "Sample reply: I read your message and moved on.",
+    });
+  }, replyMs);
+}
 // A quick choice, asked as dot's ask_user tool asks one.
 function ask(): string | undefined {
   if (!session) return "no session";
@@ -3605,12 +3658,16 @@ function ask(): string | undefined {
     options: ["Markdown", "Plain text", "PDF"],
     recommended: 0,
   };
+  const owned = session;
   void session
     .askFields(
       plainForm(question, (text) => text),
       0,
     )
-    .then((a) => effects.push(`ask:${JSON.stringify(a)}`))
+    .then((a) => {
+      effects.push(`ask:${JSON.stringify(a)}`);
+      if (a.by === "message") readsMessage(owned);
+    })
     .catch((e) => effects.push(`ask-error:${String(e)}`));
 }
 // Questions with typed fields (design-v2/HITL.md §3), answered through the real answer route.
@@ -3814,14 +3871,16 @@ function askForm(name: string): string | undefined {
   const form = ASK_FORMS[name];
   if (!form) return `no question named ${name}; try ${Object.keys(ASK_FORMS).join(", ")}`;
   if (!session) return "no session";
+  const owned = session;
   void session
     .askFields(form, 0)
-    .then((a) =>
+    .then((a) => {
       effects.push(
         `ask:${JSON.stringify(a)}`,
         ...(a.secrets?.size ? [`ask-secrets:${a.secrets.size}`] : []),
-      ),
-    )
+      );
+      if (a.by === "message") readsMessage(owned);
+    })
     .catch((e) => effects.push(`ask-error:${String(e)}`));
 }
 // A field name, or a known localDot key, types into it through the real authorization.
@@ -3863,9 +3922,13 @@ function takeover(field?: string, known = false): string | undefined {
       .catch((e) => effects.push(`takeover-error:${String(e)}`));
     return;
   }
+  const owned = session;
   void session
     .takeover("login", "Please sign in to the sample site, then hand control back.")
-    .then((o) => effects.push(`takeover:${JSON.stringify(o)}`))
+    .then((o) => {
+      effects.push(`takeover:${JSON.stringify(o)}`);
+      if (o.movedOn) readsMessage(owned);
+    })
     .catch((e) => effects.push(`takeover-error:${String(e)}`));
 }
 function budget(scope: "task" | "day" = "task"): string | undefined {
@@ -3893,6 +3956,38 @@ function keysLocked(setup = false): string | undefined {
   });
   session.lockKeys();
 }
+// A card raised as the runner raises it: for a stall, nobody is left to hear about it.
+const STALLED_CARD = { required: true, tell: false } as const;
+// What stops the task for the user to fix, as the daemon notices it.
+function fix(kind: string): string | undefined {
+  if (!session) return "no session";
+  switch (kind) {
+    case "key":
+      session.raiseBlocker({ kind: "key", id: "anthropic-main", problem: "rejected" });
+      return;
+    case "app":
+      session.raiseBlocker({
+        kind: "app",
+        connector: "linear",
+        name: "Linear",
+        host: "mcp.linear.app",
+      });
+      return;
+    case "computer":
+      setCell("stopped");
+      session.raiseBlocker({ kind: "computer", state: "stopped" });
+      return;
+    case "computer-paused":
+      setCell("paused");
+      session.raiseBlocker({ kind: "computer", state: "paused" });
+      return;
+    case "runtime":
+      session.raiseBlocker({ kind: "runtime" });
+      return;
+    default:
+      return "unknown card";
+  }
+}
 // The ways a task stalls that the app must never leave silent.
 function stall(kind: string): string | undefined {
   if (!session) return "no session";
@@ -3910,16 +4005,36 @@ function stall(kind: string): string | undefined {
     session.setStatus("paused");
     session.append("agent.state", {
       state: "paused",
-      reason: "model refused",
+      reason: STALL.modelRefused,
       detail: "400: image input is not supported by this model",
     });
+    session.raiseBlocker(
+      {
+        kind: "model",
+        reason: STALL.modelRefused,
+        detail: "400: image input is not supported by this model",
+      },
+      STALLED_CARD,
+    );
+  } else if (kind === "provider-limit") {
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: STALL.providerLimit });
+    session.raiseBlocker({ kind: "model", reason: STALL.providerLimit }, STALLED_CARD);
   } else if (kind === "key-reenter" || kind === "key-rebound") {
     session.setStatus("paused");
     session.append("agent.state", {
       state: "paused",
-      reason: kind === "key-rebound" ? "key changed outside localDot" : "key needs re-entering",
+      reason: kind === "key-rebound" ? STALL.keyRebound : STALL.keyReenter,
       detail: "anthropic-main",
     });
+    session.raiseBlocker(
+      {
+        kind: "key",
+        id: "anthropic-main",
+        problem: kind === "key-rebound" ? "rebound" : "reenter",
+      },
+      STALLED_CARD,
+    );
   } else if (kind === "keyd") {
     keydMode = "offline";
     session.setStatus("paused");
@@ -3981,6 +4096,12 @@ const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | un
   takeover: () => takeover(),
   budget: () => budget(),
   "keys-locked": () => keysLocked(),
+  "fix/key": () => fix("key"),
+  "fix/app": () => fix("app"),
+  "fix/computer": () => fix("computer"),
+  "fix/computer-paused": () => fix("computer-paused"),
+  "fix/runtime": () => fix("runtime"),
+  "fix/model": () => stall("model-refused"),
   finish,
   "cell/starting": () => setCell("starting"),
   "cell/connecting": () => setCell("connecting"),
@@ -4128,6 +4249,31 @@ routes.post("/__qa/takeover", (c) =>
 );
 routes.post("/__qa/budget", (c) => reply(budget(c.req.query("scope") === "day" ? "day" : "task")));
 routes.post("/__qa/stall/:kind", (c) => reply(stall(c.req.param("kind"))));
+routes.post("/__qa/fix/:kind", (c) => reply(fix(c.req.param("kind"))));
+// The model answered again after a retry: what proves it worked.
+routes.post("/__qa/fix-model-answered", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.setStatus("running");
+  session.append("agent.state", { state: "thinking" });
+  session.append("model.usage", {
+    role: "main",
+    route: "anthropic",
+    model: "claude-sonnet-5-5",
+    inputTokens: 10,
+    outputTokens: 2,
+  });
+  session.clearBlockers((blocker) => blocker.kind === "model");
+  return c.json({ ok: true });
+});
+// Whether Start Docker can do it from here, and Docker coming back.
+routes.post("/__qa/fix-docker", (c) => {
+  dockerStarts = c.req.query("starts") !== "0";
+  return c.json({ ok: true });
+});
+routes.post("/__qa/fix-docker-up", (c) => {
+  session?.clearBlockers((blocker) => blocker.kind === "runtime");
+  return c.json({ ok: true });
+});
 routes.post("/__qa/keys-locked", (c) => reply(keysLocked(c.req.query("setup") === "1")));
 // keyd lists a key whose stored value has to be entered again (?id=, the main model's by default).
 routes.post("/__qa/reenter", (c) => {

@@ -157,7 +157,7 @@ function settled(state: string | undefined, facts: TaskFacts): string | undefine
 export const liveState = (model: AgentModel) => settled(model.state?.state, taskFacts(model));
 
 // Replay has only the timeline: a wait is over once the user settles it or a new step starts.
-const SETTLES = new Set(["approval.resolve", "ask.answer", "takeover.end"]);
+const SETTLES = new Set(["approval.resolve", "ask.answer", "takeover.end", "blocker.clear"]);
 function settledSince(model: SessionModel, at: AgentStateAt, nowMs: number): boolean {
   for (let i = model.marks.length - 1; i >= 0; i--) {
     const mark = model.marks[i];
@@ -217,18 +217,17 @@ const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> 
   [STALL.modelUnavailable]: {
     row: "recovery",
     label: "Model not answering",
-    caption: "The model isn't answering. Try again, or change the model.",
+    caption: "The model isn't answering. The chat has the way on.",
   },
   [STALL.providerLimit]: {
     row: "limit",
     label: "Provider limit reached",
-    caption:
-      "Your provider is out of credit or included usage. Change the model or check your plan.",
+    caption: "Your provider is out of credit or included usage. The chat has the way on.",
   },
   [STALL.modelRefused]: {
     row: "recovery",
     label: "Provider request failed",
-    caption: "The provider could not process my request. Check its settings and error details.",
+    caption: "The provider could not process my request. The chat has the way on.",
   },
   [STALL.keyd]: { row: "recovery", label: "Keys are offline", caption: "I can't reach your keys." },
   [STALL.keyReenter]: {
@@ -245,6 +244,11 @@ const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> 
     row: "recovery",
     label: "Saved keys are locked",
     caption: "My saved keys are locked. Unlock them in the chat and I'll carry on.",
+  },
+  [STALL.runtime]: {
+    row: "recovery",
+    label: "Docker isn't running",
+    caption: "Docker isn't running. Start it in the chat and I'll carry on.",
   },
 };
 

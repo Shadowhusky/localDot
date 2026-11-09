@@ -3055,7 +3055,8 @@
               "type": "string",
               "enum": [
                 "user",
-                "timeout"
+                "timeout",
+                "message"
               ]
             },
             "note": {
@@ -3638,6 +3639,300 @@
           },
           "required": [
             "locked"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "blocker.raise"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "blockerId": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "blocker": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "keys_locked"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "key"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                    },
+                    "problem": {
+                      "type": "string",
+                      "enum": [
+                        "reenter",
+                        "rebound",
+                        "rejected"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "problem"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "app"
+                    },
+                    "connector": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 16
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 40
+                    },
+                    "host": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "connector",
+                    "name",
+                    "host"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "model"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "model refused",
+                        "model unavailable",
+                        "provider limit reached",
+                        "chatgpt plan limit reached",
+                        "claude code plan limit reached"
+                      ]
+                    },
+                    "detail": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "computer"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "stopped",
+                        "paused"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "runtime"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "localdot",
+                "dot"
+              ]
+            },
+            "required": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "blockerId",
+            "blocker",
+            "by"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "blocker.clear"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "blockerId": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "fixed",
+                "dismissed",
+                "moot",
+                "moved_on"
+              ]
+            },
+            "movedTo": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "model": {
+                  "type": "string",
+                  "maxLength": 128
+                }
+              },
+              "required": [
+                "provider",
+                "model"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "blockerId",
+            "outcome"
           ],
           "additionalProperties": false
         }
@@ -4811,7 +5106,8 @@
                 "timeout",
                 "stop",
                 "pause",
-                "control"
+                "control",
+                "message"
               ]
             }
           },
@@ -5141,6 +5437,10 @@
               "const": true
             },
             "declined": {
+              "type": "boolean",
+              "const": true
+            },
+            "movedOn": {
               "type": "boolean",
               "const": true
             }

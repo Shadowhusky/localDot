@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ASK_FIELD_ID, AskFieldKind, MAX_ASK_FIELDS } from "./ask.ts";
+import { RequestFixInput } from "./blockers.ts";
 import { ApiRequestInput, CredentialsInput } from "./credentials.ts";
 import { DesktopUploadPath } from "./desktop-uploads.ts";
 import { FileListResult, FileReadResult } from "./desktopd-tools.ts";
@@ -34,6 +35,7 @@ export const TOOL_NAMES = [
   "update_plan",
   "ask_user",
   "request_takeover",
+  "request_fix",
   "remember",
   "recall",
   "people",
@@ -472,6 +474,7 @@ export const TOOL_INPUTS = {
   api_request: ApiRequestInput,
   ask_user: AskUserInput,
   request_takeover: RequestTakeoverInput,
+  request_fix: RequestFixInput,
   remember: RememberInput,
   recall: RecallInput,
   people: PeopleInput,

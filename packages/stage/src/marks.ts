@@ -1,4 +1,4 @@
-import { clipText, type LocalDotEvent, sessionMsOf } from "@localdot/protocol";
+import { blockerLine, clipText, type LocalDotEvent, sessionMsOf } from "@localdot/protocol";
 import { CURSOR_NAME } from "./scene.ts";
 export type MarkKind =
   | "approval"
@@ -98,6 +98,21 @@ export function markOf(e: LocalDotEvent): TimelineMark | null {
       );
     case "memory.change":
       return mark("memory", `Updated ${e.data.file}`);
+    case "keys.lock":
+      return mark("event", e.data.locked ? "Saved keys were locked" : "Keys unlocked");
+    case "blocker.raise":
+      return mark("event", blockerLine(e.data.blocker, "open"), "attention");
+    case "blocker.clear":
+      return e.data.outcome === "moot"
+        ? null
+        : mark(
+            "event",
+            {
+              fixed: "Fixed from the conversation",
+              dismissed: "You said not now",
+              moved_on: "You moved on with a message",
+            }[e.data.outcome],
+          );
     case "key.use":
       return mark(
         "key",

@@ -1030,3 +1030,15 @@ it("connects synchronous auth pause to the actual runner independently of journa
   required(m.owner).pauseForAuth?.(s, 7);
   expect(pause).toHaveBeenCalledExactlyOnceWith(s, 7);
 });
+
+it("tells the runner what clears a task's cards: the computer changing, and a key or sign-in", async () => {
+  const f = setup();
+  const computer = vi.spyOn(f.agent.runner, "cellChanged");
+  f.change({ state: "stopped" });
+  expect(computer).toHaveBeenCalledWith(
+    expect.objectContaining({ id: f.cellId, state: "stopped" }),
+  );
+  const key = vi.spyOn(f.agent.runner, "keyChanged").mockResolvedValue();
+  await f.agent.connectors.afterKeyChange("connector-linear");
+  expect(key).toHaveBeenCalledWith("connector-linear");
+});

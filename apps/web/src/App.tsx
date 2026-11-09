@@ -32,9 +32,9 @@ import { useAside } from "./actions/useAside.ts";
 import { PlainSteps } from "./agent/ActivityRow.tsx";
 import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
 import { useAskDraft } from "./agent/ask-draft.ts";
-import { composerReply } from "./agent/ask-form.ts";
+import { asksPrivate } from "./agent/ask-form.ts";
 import { BrowserSignIn } from "./agent/BrowserSignIn.tsx";
-import { Composer, keepDraftNow, type ReplyOutcome } from "./agent/Composer.tsx";
+import { Composer, type DotWait, keepDraftNow } from "./agent/Composer.tsx";
 import { endTaskRun } from "./agent/control-api.ts";
 import {
   conversationLook,
@@ -46,8 +46,8 @@ import {
   STATUS_LABEL,
 } from "./agent/conversation-list.ts";
 import { conversationBlockReason } from "./agent/conversation-state.ts";
+import { FixCards, fixesToShow, fixWait } from "./agent/FixCards.tsx";
 import { useTaskStalled } from "./agent/heartbeat.ts";
-import { KeysLockedCard } from "./agent/KeysLockedCard.tsx";
 import { LatestSteps } from "./agent/LatestSteps.tsx";
 import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
 import { markdownToPlain } from "./agent/markdown.ts";
@@ -57,7 +57,7 @@ import { giveBack, sendAfter } from "./agent/queued-draft.ts";
 import { requestResearch, researchWait } from "./agent/research.ts";
 import { uploadFile } from "./agent/resumable-upload.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
-import { TaskRecovery } from "./agent/TaskRecovery.tsx";
+import { planResets, TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
 import { useConversation } from "./agent/useConversation.ts";
@@ -1080,13 +1080,6 @@ function Theatre({ api }: { api: ApiClient }) {
     const marks = askMarks?.filter((mark) => mark.screen === shownScreen);
     return manualGeometry && marks?.length ? { screen: manualGeometry, marks } : undefined;
   }, [askMarks, shownScreen, manualGeometry]);
-  const replyAsk = useHandler(async (text: string, attached: boolean): Promise<ReplyOutcome> => {
-    if (!askDraft) return "failed";
-    const plan = composerReply(askDraft.question, text, attached);
-    if (plan.kind === "hold") return { hold: plan.reason };
-    if (!(await answerAsk(plan.request))) return "failed";
-    return plan.kind === "answer" ? "answered" : "declined";
-  });
   const manualLive =
     yours &&
     controls.canInput &&
@@ -1837,6 +1830,18 @@ function Theatre({ api }: { api: ApiClient }) {
       ) : undefined,
     [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey, keys.save, api, stack],
   );
+  // What the task is waiting on the user to fix, as its own log says on every device.
+  const fixes = fixesToShow(agent.fixes ?? [], keys.health);
+  // What dot waits on the user for, which any message of theirs moves on from.
+  const dotWait: DotWait | undefined = askDraft
+    ? asksPrivate(askDraft.fields)
+      ? "private"
+      : "question"
+    : stepApproval
+      ? "approval"
+      : takeover && takeover.by !== "user"
+        ? "computer"
+        : fixWait(fixes);
   // What a task's decision must not stay behind when a notification opens it.
   const uncover = () => {
     selectReplay(null);
@@ -2090,12 +2095,6 @@ function Theatre({ api }: { api: ApiClient }) {
     }
   };
   const tipAction = idle?.action;
-  // This task met locked saved keys (or its model's key is in them), and they are still locked.
-  const keysLockedHere =
-    vaultLocked(keys.health) &&
-    !!agent.sessionId &&
-    !agent.model.ended &&
-    (agent.model.keysLocked || agent.model.state?.reason === STALL.keysLocked);
   const bandLine = hearing ? LISTENING_LINE : idle ? idle.text : narration;
   const bandSpeaker = hearing || idle ? "dot" : speaker;
   const pendingQuestion = agent.model.pendingAsk
@@ -2234,7 +2233,7 @@ function Theatre({ api }: { api: ApiClient }) {
       reason: yours ? handBack.slot.reason : "dot has the computer",
       run: () => void handBack.run(),
     },
-    research: researchWait(agent) ?? (askDraft ? "Answer dot's question first" : undefined),
+    research: researchWait(agent),
     aside,
     newConversation,
     conversations: {
@@ -2539,7 +2538,7 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const phoneDock = (
     <>
-      {level < 2 && computerNotice}
+      {level < 2 && !fixes.some((open) => open.blocker.kind === "computer") && computerNotice}
       {handOffNote}
       {approvalView && <div className="phone-decision">{approvalView}</div>}
     </>
@@ -2574,7 +2573,7 @@ function Theatre({ api }: { api: ApiClient }) {
       }}
       onRename={() => setDetailsOpen(true)}
       researchReason={researchWait(agent)}
-      sendsAfter={taskWorking && !agent.snapshot?.holder}
+      sendsAfter={taskWorking && !agent.snapshot?.holder && !dotWait}
       onSearch={() => openPalette("actions")}
       switchView={switchViewItem}
       newReason={newConversation.reason}
@@ -3013,7 +3012,8 @@ function Theatre({ api }: { api: ApiClient }) {
             onRightClick={(on) => setPointerMode(on ? "right" : "click")}
             handBack={handBack.slot}
             onHandBack={() => void handBack.run()}
-            onFullScreen={fullScreen.enter}
+            // dot waits on this hand-over, so a message comes first: full screen is in the More menu.
+            {...(dotWait ? { message: true } : { onFullScreen: fullScreen.enter })}
           />
         )
       }
@@ -3070,13 +3070,49 @@ function Theatre({ api }: { api: ApiClient }) {
         !viewedConversation && (
           <>
             {!stack && handOffNote}
-            {keysLockedHere && keys.unlock ? (
-              <KeysLockedCard
-                setup={keys.health?.vault?.state === "setup"}
-                unlock={keys.unlock}
-                onOpenKeys={(trigger) => showSettings(trigger, "keys", "keys-unlock")}
+            {fixes.length > 0 && agent.sessionId && !controls.fenced && (
+              <FixCards
+                blockers={fixes}
+                deps={{
+                  api,
+                  sessionId: agent.sessionId,
+                  keys,
+                  models: {
+                    groups: modelChoices,
+                    current: currentModel,
+                    differs: modelDiffers,
+                    remember: (option) => taskModel.choose(option.choice),
+                  },
+                  stall:
+                    agent.model.state?.state === "paused"
+                      ? {
+                          ...(agent.model.state.reason ? { reason: agent.model.state.reason } : {}),
+                          ...(agent.model.state.detail ? { detail: agent.model.state.detail } : {}),
+                        }
+                      : undefined,
+                  planResets: planResets(agent.model),
+                  local:
+                    taskModels?.kind === "api" &&
+                    taskModels.roles.some(
+                      (role) =>
+                        role.role === "main" && ["ollama", "lmstudio"].includes(role.provider),
+                    ),
+                  retry: {
+                    run: controls.resume,
+                    reason: controls.canResumeTask
+                      ? undefined
+                      : "The task can't continue right now.",
+                  },
+                  computer: {
+                    action: computerAction,
+                    run: (kind) => onComputer[kind](),
+                  },
+                  runtimeChanged: runtime.check,
+                  onOpenKeys: (trigger) => showSettings(trigger, "keys"),
+                }}
               />
-            ) : (
+            )}
+            {!fixes.some((open) => open.required) && (
               <TaskRecovery
                 agent={agent}
                 controls={controls}
@@ -3084,6 +3120,15 @@ function Theatre({ api }: { api: ApiClient }) {
                 onReenterKey={reenterKey}
                 onContinue={continueTask}
                 onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
+                computer={
+                  computerAction && computerAction.kind !== "stop"
+                    ? {
+                        label: computerAction.kind === "resume" ? "Resume" : "Turn on",
+                        reason: computerAction.enabled ? undefined : "Wait a moment",
+                        run: () => onComputer[computerAction.kind](),
+                      }
+                    : undefined
+                }
                 onResumeSelected={modelDiffers && recoveryWait ? carryOn : undefined}
                 resumeBlocked={modelSaving ? "Saving the selected model…" : undefined}
                 onReport={report.start}
@@ -3127,11 +3172,7 @@ function Theatre({ api }: { api: ApiClient }) {
             known={status === "known"}
             pending={pending !== null}
             controlBlocked={
-              controls.fenced ||
-              controls.stopping ||
-              !!cell?.fenced ||
-              !!cell?.replacementPending ||
-              !!safety.approval
+              controls.fenced || controls.stopping || !!cell?.fenced || !!cell?.replacementPending
             }
             agent={agent}
             keysOpen={settings.open}
@@ -3141,7 +3182,7 @@ function Theatre({ api }: { api: ApiClient }) {
             onTaskStarted={session.check}
             layout={sheets ? "pill" : "card"}
             placeholder={stack && level === 2 ? "Steer dot" : undefined}
-            reply={askDraft ? replyAsk : undefined}
+            waitingOn={dotWait}
             modelChanged={modelChanged}
             sendModel={taskModel.ref}
             modelAfter={modelNext && taskModel.ref ? modelLabel : undefined}

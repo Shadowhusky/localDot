@@ -7,6 +7,7 @@ import {
   isToolName,
   type PeopleInput,
   type RememberInput,
+  type RequestFixInput,
   type RoutineToolInput,
   type ShellInput,
   TOOL_INPUTS,
@@ -38,6 +39,7 @@ import {
   fail,
   intentOf,
   listenForUser,
+  movedOnResult,
   type ToolCallContext,
   type ToolDeps,
   text,
@@ -49,6 +51,7 @@ import { peopleTool, saveRefusal } from "./people.ts";
 import { updatePlanTool } from "./plan.ts";
 import { recallTool } from "./recall.ts";
 import { rememberTool } from "./remember.ts";
+import { FIX_TITLES, requestFixTool } from "./request-fix.ts";
 import { researchRefusal, researchTool, withResearchNote } from "./research.ts";
 import { followUpAtTool, routineTool } from "./routine.ts";
 import { switchScreenTool } from "./screen.ts";
@@ -91,6 +94,7 @@ const STEP_KIND: Record<ToolName, string> = {
   update_plan: "think",
   ask_user: "ask",
   request_takeover: "ask",
+  request_fix: "ask",
   remember: "think",
   recall: "think",
   people: "think",
@@ -213,9 +217,12 @@ export async function dispatchTool(
         (!isToolName(name) && !session.connectors.get(name))
       )
         return outcome;
+      const result = session.tookMovedOn(callId)
+        ? movedOnResult(session, outcome.result)
+        : outcome.result;
       return {
         ...outcome,
-        result: withRecoveryAdvice(session.workProgress.record(name, queuedInput, outcome.result)),
+        result: withRecoveryAdvice(session.workProgress.record(name, queuedInput, result)),
       };
     };
     const outcome =
@@ -551,6 +558,11 @@ async function dispatchAdmitted(
         break;
       case "request_takeover":
         result = await requestTakeoverTool(t, ctx, input);
+        break;
+      case "request_fix":
+        result = await stepped(ctx, name, FIX_TITLES[(frozen as RequestFixInput).kind], (c) =>
+          requestFixTool(t, c, input),
+        );
         break;
       case "remember":
         result = await stepped(ctx, name, REMEMBERED[(frozen as RememberInput).file], (c) =>

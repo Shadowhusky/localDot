@@ -3,7 +3,6 @@ import {
   answerRequest,
   answerSummary,
   askFields,
-  composerReply,
   type Draft,
   emptyDraft,
   fieldProblem,
@@ -240,87 +239,6 @@ describe("answers", () => {
       askId: ASK,
       fields: { pair: true },
     });
-  });
-});
-
-describe("composerReply", () => {
-  it("answers a lone choice with the option the message names, or as its own words", () => {
-    expect(composerReply(quick, " pdf ")).toEqual({
-      kind: "answer",
-      request: { askId: ASK, fields: { answer: "PDF" } },
-    });
-    expect(composerReply(quick, "Both, please")).toEqual({
-      kind: "answer",
-      request: { askId: ASK, fields: { answer: "Both, please" } },
-    });
-    const pick: AgentQuestion = {
-      ...quick,
-      fields: [
-        { id: "parts", kind: "multichoice", label: "Include", options: ["Totals", "Charts"] },
-      ],
-    };
-    expect(composerReply(pick, "charts")).toEqual({
-      kind: "answer",
-      request: { askId: ASK, fields: { parts: ["Charts"] } },
-    });
-    expect(composerReply(pick, "Everything\nbut the notes")).toEqual({
-      kind: "answer",
-      request: { askId: ASK, fields: { parts: { other: "Everything\nbut the notes" } } },
-    });
-  });
-
-  it("answers a plain question with the message, or the option it names", () => {
-    expect(composerReply(plain, " pdf ")).toEqual({
-      kind: "answer",
-      request: { askId: ASK, option: "B" },
-    });
-    expect(composerReply(plain, "Both, please")).toEqual({
-      kind: "answer",
-      request: { askId: ASK, text: "Both, please" },
-    });
-    expect(composerReply({ ...plain, allowText: false }, "Both").kind).toBe("decline");
-  });
-
-  it("holds a message while a secret is asked for, so a password never goes as text", () => {
-    expect(composerReply(login, "hunter2").kind).toBe("hold");
-  });
-
-  it("fills a lone field it fits, and otherwise turns the question down", () => {
-    const one: AgentQuestion = {
-      ...setup,
-      fields: [{ id: "reply", kind: "longtext", label: "Reply" }],
-    };
-    expect(composerReply(one, "Thanks, see you Friday")).toEqual({
-      kind: "answer",
-      request: { askId: ASK, fields: { reply: "Thanks, see you Friday" } },
-    });
-    const mail: AgentQuestion = {
-      ...setup,
-      fields: [{ id: "to", kind: "email", label: "To" }],
-    };
-    expect(composerReply(mail, "use my work account").kind).toBe("decline");
-    expect(composerReply(setup, "a").kind).toBe("decline");
-  });
-
-  it("turns the question down for a message with files, so dot reads both at once", () => {
-    expect(composerReply(quick, "PDF", true)).toEqual({
-      kind: "decline",
-      request: { askId: ASK, declined: true },
-    });
-    expect(composerReply(login, "here it is", true).kind).toBe("hold");
-  });
-
-  it("holds what can't answer a question that has no way out", () => {
-    const only: AgentQuestion = { ...plain, allowText: false, declinable: false };
-    expect(composerReply(only, "PDF")).toEqual({
-      kind: "answer",
-      request: { askId: ASK, option: "B" },
-    });
-    expect(composerReply(only, "something else")).toEqual({
-      kind: "hold",
-      reason: "Answer dot's question above first. Your message stays here.",
-    });
-    expect(composerReply({ ...plain, declinable: false }, "Try the menu", true).kind).toBe("hold");
   });
 });
 

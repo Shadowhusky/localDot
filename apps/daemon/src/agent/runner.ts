@@ -5,7 +5,9 @@ import {
   type AgentLimits,
   type AgentRoleChoice,
   type AutonomyPolicy,
+  type Blocker,
   BootConfig,
+  blockerSubject,
   type CheckIns,
   type ClaudeCodeStatus,
   type ConversationLive,
@@ -18,6 +20,7 @@ import {
   type KeydRecord,
   LIVE_ACTIVITY_CHARS,
   type MessageModel,
+  MODEL_BLOCKS,
   MODEL_SWITCH_ENTRY,
   type ModelBinding,
   type ModelOptions,
@@ -28,6 +31,7 @@ import {
   type ReasoningEffort,
   type RecentLine,
   ReviseLink,
+  SECRET_ID_PATTERN,
   SESSION_PAUSE_REASONS,
   SessionOrigin,
   SessionRun,
@@ -125,6 +129,30 @@ const RESTART_BACKOFF_MS = [2000, 4000, 8000];
 const IDLE_MS = 30 * 60 * 1000;
 const TERMINAL_SNAPSHOTS = 256;
 const SESSION_PAUSES = new Set<string | undefined>(SESSION_PAUSE_REASONS);
+// What only a model that answered would have said.
+const ANSWERED: ReadonlySet<string> = new Set([
+  "model.usage",
+  "message.delta",
+  "message.assistant",
+  "thought.delta",
+  "step.start",
+]);
+const DOCKER_CHECK_MS = 5000;
+// What a task the user carried on after a move to another kind of model starts with.
+const CARRY_ON = "Continue where you left off.";
+// A task's card waits this long at most for the user once the task itself has nothing left to do.
+const CARD_WAIT_MS = 4 * 60 * 60_000;
+const CARD_STATES = new Set<CellSummary["state"]>(["stopped", "failed"]);
+// What a Start or Resume would bring back; nothing the computer is doing by itself, or that a
+// fence or replacement holds.
+export function computerDown(cell: CellSummary | undefined): "stopped" | "paused" | undefined {
+  if (!cell || cell.fenced || cell.replacementPending) return undefined;
+  // A stop that failed left it running: finishing the stop is the way on, not starting it.
+  if (cell.error?.startsWith("stop failed")) return undefined;
+  if (CARD_STATES.has(cell.state)) return "stopped";
+  return cell.state === "ready" && cell.paused ? "paused" : undefined;
+}
+export const computerUp = (cell: CellSummary): boolean => cell.state === "ready" && !cell.paused;
 export const RAISE_BUDGET_FIRST = "Raise this task's budget before resuming it.";
 export const CLAUDE_CODE_OFF = "Claude Code isn't available on this computer.";
 // Recovery waits own no user decision or desktop control. They can be retired
@@ -233,6 +261,11 @@ export interface AgentRunnerDeps {
   memory: Pick<MemoryStore, "bootMemory">;
   // The connected apps' tools a task is shown, as the user's settings stand when its model starts.
   connectors?(): TaskConnectors;
+  // Whether an app is connected again, which clears the card that asked for it.
+  appConnected?(connector: string): boolean;
+  // Docker can't run the computer: its card, rather than the computer's own, is the way on.
+  runtimeDown?(): Promise<boolean>;
+  runtimeCheckMs?: number;
   recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
@@ -350,7 +383,9 @@ interface Runtime {
   completion?: "complete" | "blocked";
   providerNotice?: string;
   serial: Promise<void>;
-  pause?: "budget" | "keyd" | "model" | "auth" | "keys";
+  pause?: "budget" | "keyd" | "model" | "auth" | "keys" | "runtime";
+  // The card the model's stall raised, until the model answers again.
+  stalled?: string;
   budgetScope?: "task" | "day";
   authResumeAfter?: number;
   authGeneration?: number;
@@ -438,6 +473,7 @@ export class AgentRunner {
   #health: KeydHealth;
   #lastBoot: string | undefined;
   #closing = false;
+  #dockerWatch: ReturnType<typeof setTimeout> | undefined;
   #fastFailure: { provider: string; model: string; reason: string } | undefined;
   constructor(private readonly deps: AgentRunnerDeps) {
     this.#health = deps.keydHealth?.() ?? { online: true };
@@ -461,18 +497,28 @@ export class AgentRunner {
         rt.budgetScope = event.data.scope;
       }
       if (event.type === "task.result") rt.completion = event.data.outcome ?? "complete";
-      // keyd refused a saved key the task's computer asked for while the vault is locked.
-      if (event.type === "key.use" && event.data.decision === "deny" && vaultLocked(this.#health))
-        rt.session.lockKeys();
+      // keyd refused a saved key the task's computer asked for: the vault is locked, or the key
+      // itself needs the user.
+      if (event.type === "key.use" && event.data.decision === "deny") {
+        if (vaultLocked(this.#health)) rt.session.lockKeys();
+        else void this.#refusedKey(rt, event.data.secretId);
+      }
+      if (
+        ANSWERED.has(event.type) ||
+        (event.type === "agent.state" && event.data.state === "acting")
+      )
+        this.#modelAnswered(rt);
       if (event.type !== "agent.state") return;
       if (event.data.state === "error") rt.failure = event.data;
       else if (["thinking", "acting", "observing", "done"].includes(event.data.state))
         rt.failure = undefined;
       if (event.data.state === "paused") {
+        const card = this.#stallCard(rt, event.data.reason, event.data.detail);
         const notice = providerNotice(event.data.reason, event.data.detail);
         if (notice && rt.providerNotice !== notice) {
           rt.providerNotice = notice;
-          rt.session.append("message.assistant", { messageId: ulid(), text: notice });
+          // A card says it, with the way on; words in the thread as well would say it twice.
+          if (!card) rt.session.append("message.assistant", { messageId: ulid(), text: notice });
           // The brain's own log stays empty; this line is where a stalled model call is traced.
           console.warn(
             `task ${id} paused (${event.data.reason})${event.data.detail ? `: ${event.data.detail}` : ""}`,
@@ -489,7 +535,8 @@ export class AgentRunner {
         } else if (event.data.reason === STALL.keysLocked) {
           rt.pause = "keys";
           rt.session.lockKeys(false);
-        } else if (!SESSION_PAUSES.has(event.data.reason))
+        } else if (event.data.reason === STALL.runtime) rt.pause = "runtime";
+        else if (!SESSION_PAUSES.has(event.data.reason))
           rt.pause =
             event.data.reason === "budget" ? "budget" : this.#health.online ? "model" : "keyd";
       } else if (["thinking", "acting", "observing"].includes(event.data.state)) {
@@ -500,6 +547,149 @@ export class AgentRunner {
           rt.authResumeAfter = undefined;
       }
     });
+  }
+  // The card a model's stall takes, when the user can fix it from the conversation. The task waits
+  // on it: nobody is left to hear about it, and only the fix or Stop moves it on.
+  #stallCard(rt: Runtime, reason: string | undefined, detail: string | undefined): boolean {
+    const required = { required: true, tell: false };
+    const raise = (blocker: Blocker) => {
+      rt.session.raiseBlocker(blocker, required);
+      rt.stalled = blockerSubject(blocker);
+      return true;
+    };
+    if (reason === STALL.keyReenter || reason === STALL.keyRebound) {
+      if (!detail || !SECRET_ID_PATTERN.test(detail)) return false;
+      return raise({
+        kind: "key",
+        id: detail,
+        problem: reason === STALL.keyReenter ? "reenter" : "rebound",
+      });
+    }
+    if (reason === STALL.modelRefused && detail?.startsWith("401:")) {
+      const main =
+        rt.selection.kind === "api"
+          ? rt.selection.roles.find((role) => role.role === "main")
+          : undefined;
+      if (main?.keyId) return raise({ kind: "key", id: main.keyId, problem: "rejected" });
+    }
+    const block = MODEL_BLOCKS.find((known) => known === reason);
+    if (!block) return false;
+    return raise({ kind: "model", reason: block, ...(detail ? { detail } : {}) });
+  }
+  // The model's own answer is what proves a retry worked: a card holds through a try that fails.
+  #modelAnswered(rt: Runtime): void {
+    if (!rt.stalled) return;
+    const subject = rt.stalled;
+    rt.stalled = undefined;
+    rt.session.clearBlockers((blocker) => blockerSubject(blocker) === subject);
+  }
+  // A key refused for a reason of its own: one keyd says the user must enter again or deal with.
+  async #refusedKey(rt: Runtime, secretId: string): Promise<void> {
+    const key = (await this.deps.keyd.secrets().catch(() => [])).find((k) => k.id === secretId);
+    if (key?.reenter || key?.rebound)
+      rt.session.raiseBlocker({
+        kind: "key",
+        id: key.id,
+        problem: key.rebound ? "rebound" : "reenter",
+      });
+  }
+  // A key was saved or a sign-in finished, on any device: what waited on it goes on by itself.
+  async keyChanged(secretId: string): Promise<void> {
+    const keys = await this.deps.keyd.secrets().catch(() => []);
+    const usable = keys.some((key) => key.id === secretId && !key.reenter && !key.rebound);
+    for (const rt of this.#runtime.values()) {
+      const { session } = rt;
+      if (session.stopped) continue;
+      session.clearBlockers(
+        (blocker) => blocker.kind === "app" && !!this.deps.appConnected?.(blocker.connector),
+      );
+      if (!usable) continue;
+      const cleared = session.clearBlockers(
+        (blocker) => blocker.kind === "key" && blocker.id === secretId,
+      );
+      if (rt.stalled === `key:${secretId}`) rt.stalled = undefined;
+      if (
+        cleared.some((open) => open.required) &&
+        rt.pause === "model" &&
+        session.status === "paused" &&
+        !session.controlHeld
+      ) {
+        rt.pause = undefined;
+        session.post("resume", "");
+      }
+    }
+  }
+  // The computer went off or came back under a task. A task at rest asks nothing of it until it is
+  // asked something, and one Stop ended has gone already.
+  cellChanged(cell: CellSummary): void {
+    const down = computerDown(cell);
+    for (const id of this.deps.live.sessionsOn(cell.id)) {
+      const rt = this.#runtime.get(id);
+      if (!rt || rt.session.stopped) continue;
+      if (computerUp(cell)) rt.session.clearBlockers((blocker) => blocker.kind === "computer");
+      else if (down && rt.session.status !== "idle") void this.#computerWentDown(rt, down);
+    }
+  }
+  async #computerWentDown(rt: Runtime, state: "stopped" | "paused"): Promise<void> {
+    const docker = await this.#dockerDown();
+    if (docker) {
+      rt.session.raiseBlocker({ kind: "runtime" });
+      this.#watchDocker();
+    } else if (computerDown(this.deps.cell(rt.session.cellId))) {
+      rt.session.raiseBlocker({ kind: "computer", state });
+    }
+  }
+  #dockerDown(): Promise<boolean> {
+    return this.deps.runtimeDown?.().catch(() => false) ?? Promise.resolve(false);
+  }
+  // Docker has no change to subscribe to, so its cards ask until it answers.
+  #watchDocker(): void {
+    if (this.#dockerWatch) return;
+    const check = async () => {
+      this.#dockerWatch = undefined;
+      const waiting = [...this.#runtime.values()].filter((rt) =>
+        rt.session.openBlockers.some(({ blocker }) => blocker.kind === "runtime"),
+      );
+      if (!waiting.length) return;
+      if (await this.#dockerDown()) return this.#watchDocker();
+      for (const rt of waiting) rt.session.clearBlockers((blocker) => blocker.kind === "runtime");
+    };
+    this.#dockerWatch = setTimeout(() => void check(), this.deps.runtimeCheckMs ?? DOCKER_CHECK_MS);
+    this.#dockerWatch.unref?.();
+  }
+  // The model card's choice: the task goes on where it was, on that model. A model its runtime can't
+  // run takes the conversation's next task, as a message for it would.
+  async retryOnModel(id: string, ref: TaskModelRef, signal?: AbortSignal): Promise<void> {
+    const rt = this.#runtime.get(id);
+    if (!rt || rt.session.stopped) throw new AgentError(404, "no such live task");
+    const { session } = rt;
+    const turn = await this.messageTurn(id, ref, signal);
+    if (!turn || session.stopped) throw new AgentError(404, "no such live task");
+    // The same model is a retry, whose card holds until the model answers.
+    if (!turn.moves()) {
+      session.post("resume", "");
+      return;
+    }
+    const stalled = rt.stalled;
+    rt.stalled = undefined;
+    const cleared = session.clearBlockers((blocker) => blockerSubject(blocker) === stalled, {
+      provider: ref.provider,
+      model: ref.model,
+    });
+    if (turn.handOver) {
+      try {
+        await this.start(session.cellId, CARRY_ON, signal, { continues: id, model: ref });
+      } catch (error) {
+        // It stays the task's to fix: the card comes back as it was.
+        for (const { blocker } of cleared)
+          session.raiseBlocker(blocker, { required: true, tell: false });
+        rt.stalled = stalled;
+        throw error;
+      }
+      return;
+    }
+    rt.pause = undefined;
+    turn.reached();
   }
   resolveRoles(keys: KeydRecord[], settings = this.deps.settings()): ResolvedRole[] {
     const snapshot = AgentSettings.parse(settings);
@@ -1669,7 +1859,8 @@ export class AgentRunner {
         : session.pendingApproval ||
             session.pendingAsk ||
             session.controlHeld ||
-            session.connections.pending
+            session.connections.pending ||
+            session.openBlockers.length
           ? "needs-you"
           : lease.waiting().includes(session.id)
             ? "waiting-for-computer"
@@ -2280,6 +2471,8 @@ export class AgentRunner {
                   : { state: "idle", reason: "gave up" },
           );
           session.setStatus("idle");
+          // dot says it got there: what it might have needed on the way asks nothing now.
+          if (rt.completion === "complete") session.withdrawBlockers();
           const idleWait = new AbortController();
           rt.idleWait = idleWait;
           try {
@@ -2290,6 +2483,9 @@ export class AgentRunner {
               await session.waitForControl(idleWait.signal);
               asked = await session.waitForUser(idleMs, idleWait.signal);
             }
+            // A card still up waits a good while longer: fixing it carries on from here.
+            if (!asked && session.openBlockers.length)
+              asked = await session.waitForUser(CARD_WAIT_MS, idleWait.signal);
             if (!asked) break;
           } catch (error) {
             if (rt.released) break;
@@ -2297,6 +2493,13 @@ export class AgentRunner {
           } finally {
             if (rt.idleWait === idleWait) rt.idleWait = undefined;
           }
+        } else if (await this.#dockerDown()) {
+          // Docker took the brain with it: nothing to count against the task, and its card says so.
+          const open = session.raiseBlocker({ kind: "runtime" }, { required: true, tell: false });
+          session.setStatus("paused");
+          session.append("agent.state", { state: "paused", reason: STALL.runtime });
+          this.#watchDocker();
+          if (open) await session.waitForBlockerToGo(open);
         } else {
           const lost = code === BRAIN_LOST && rt.selection.kind === "api";
           const backoff = RESTART_BACKOFF_MS[lost ? 0 : crashes++];

@@ -301,7 +301,7 @@ export class ToolClient {
     // its field.
     else if (effectiveName === "ask_user")
       timeoutMs = Math.max(30 * 60_000, this.#runWindowMs) + 60_000;
-    else if (name === "request_takeover") timeoutMs = undefined;
+    else if (name === "request_takeover" || name === "request_fix") timeoutMs = undefined;
     if (timeoutMs !== undefined && WAITS_ON_USER.has(effectiveName))
       timeoutMs += Math.max(APPROVAL_TIMEOUT_MS, this.#runWindowMs);
     return this.#json(

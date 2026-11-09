@@ -16,6 +16,12 @@ export type ScenarioStep =
   | "takeover"
   | "budget"
   | "keys-locked"
+  | "fix/key"
+  | "fix/app"
+  | "fix/computer"
+  | "fix/computer-paused"
+  | "fix/runtime"
+  | "fix/model"
   | "finish"
   | `cell/${Exclude<CellKind, "none">}`;
 
@@ -95,6 +101,36 @@ export const UI_SCENARIOS = {
   "keys-locked": {
     about: "dot met the saved keys locked behind their passphrase, as after a restart",
     step: "keys-locked",
+    stepAtBoot: true,
+  },
+  "fix-key": {
+    about: "A service refused a saved key, and the task offers to take a new one",
+    step: "fix/key",
+    stepAtBoot: true,
+  },
+  "fix-app": {
+    about: "A connected app's sign-in ended, and the task offers to connect it",
+    step: "fix/app",
+    stepAtBoot: true,
+  },
+  "fix-model": {
+    about: "The provider refused the model's request, and the task offers another",
+    step: "fix/model",
+    stepAtBoot: true,
+  },
+  "fix-computer": {
+    about: "The computer went off under the task, which offers to turn it on",
+    step: "fix/computer",
+    stepAtBoot: true,
+  },
+  "fix-computer-paused": {
+    about: "The computer was paused under the task, which offers to resume it",
+    step: "fix/computer-paused",
+    stepAtBoot: true,
+  },
+  "fix-runtime": {
+    about: "Docker stopped under the task, which offers to start it",
+    step: "fix/runtime",
     stepAtBoot: true,
   },
   "image-output": {

@@ -137,6 +137,24 @@ it.each([
   for (const method of ["GET", "POST", "PUT", "DELETE"])
     expect(links.permits(row, method, path)).toBe(false);
 });
+it("gives a guest no way to answer a card, even on a task of its own", () => {
+  const { links } = make();
+  const issued = links.create({ ...options, settings: true });
+  const row = links.authenticate(issued.token)!;
+  const id = "0".repeat(26);
+  links.reserve(row.id).finish(id);
+  expect(links.permits(row, "POST", `/api/agent/sessions/${id}/messages`)).toBe(true);
+  for (const path of [
+    `/api/agent/sessions/${id}/blockers/${id}/dismiss`,
+    `/api/agent/sessions/${id}/blockers/${id}/model`,
+    "/api/keyd/unlock",
+    "/api/keys",
+    "/api/runtime/start",
+    `/api/cells/${id}/start`,
+    `/api/connectors/github/sign-in`,
+  ])
+    expect(links.permits(row, "POST", path), path).toBe(false);
+});
 it("enforces replay permission and action ownership separately", () => {
   const { links } = make();
   const id = ulid();

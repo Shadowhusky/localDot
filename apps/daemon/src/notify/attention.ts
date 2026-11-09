@@ -124,6 +124,12 @@ export class AttentionLedger {
         return waitingOn("takeover", event.data.requestId)
           ? item("working", "working", String(event.seq))
           : undefined;
+      case "blocker.raise":
+        return item("fix", "needs_you", `${event.data.blockerId}:0`);
+      case "blocker.clear":
+        return waitingOn("fix", event.data.blockerId)
+          ? item("working", "working", String(event.seq))
+          : undefined;
       case "budget.exceeded":
         return item("budget", "blocked", String(event.seq));
       case "agent.state":

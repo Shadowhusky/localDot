@@ -16,7 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { count } from "../copy/format.ts";
 import { VOICES } from "../dot/voices.ts";
 import type { ApiClient } from "../lib/api.ts";
@@ -41,6 +41,7 @@ import { CopyButton } from "./CopyButton.tsx";
 import { cancelQueuedMessage, steerQueuedMessage } from "./control-api.ts";
 import { DotChoice } from "./DotChoice.tsx";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
+import { FixLine } from "./FixCards.tsx";
 import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine, StepsCaption, sameLive, sameSteps } from "./LiveWorkLine.tsx";
 import type { AgentMessage, AgentResult, AgentWords } from "./model.ts";
@@ -503,6 +504,15 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       (then.pendingAsk === was.question.askId) === (thread.pendingAsk === now.question.askId) &&
       (thread.pendingAsk !== now.question.askId || then.ask === thread.ask),
   },
+  unapproved: {
+    draw: ({ item }) => (
+      <article className="thread-question" aria-label="Not approved">
+        <p className="thread-question-text">{item.title}</p>
+        <p className="thread-note">Not approved: you sent a message instead, so it didn't run.</p>
+      </article>
+    ),
+    same: (was, now) => was.title === now.title,
+  },
   answer: {
     draw: ({ item }) => (
       <article className="thread-message" data-role="user" aria-label="Your answer">
@@ -572,7 +582,12 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       was.took === now.took &&
       was.at === now.at &&
       was.handed === now.handed &&
-      was.declined === now.declined,
+      was.declined === now.declined &&
+      was.movedOn === now.movedOn,
+  },
+  fix: {
+    draw: ({ item, thread }) => <FixLine blocker={item.blocker} names={thread.names} />,
+    same: (was, now, then, thread) => was.blocker === now.blocker && then.names === thread.names,
   },
   work: {
     draw: ({ item, thread }) =>
@@ -1150,10 +1165,21 @@ export function Conversation({
     return host;
   });
   // The computer handed over mid-sentence: its controls take the field's place once the user
-  // leaves it.
+  // leaves it. Called up from those controls, the field stays while it has words to send.
   const [writing, setWriting] = useState(false);
+  const calledUp = useRef(false);
+  const write = useCallback(() => {
+    calledUp.current = true;
+    flushSync(() => setWriting(true));
+    dockHost.querySelector("textarea")?.focus();
+  }, [dockHost]);
   useEffect(() => {
-    const changed = () => setWriting(document.activeElement === dockHost.querySelector("textarea"));
+    const changed = ({ target }: FocusEvent) => {
+      const field = dockHost.querySelector("textarea");
+      if (target === field && document.activeElement !== field && !field?.value.trim())
+        calledUp.current = false;
+      setWriting(document.activeElement === field || calledUp.current);
+    };
     dockHost.addEventListener("focusin", changed);
     dockHost.addEventListener("focusout", changed);
     return () => {
@@ -1172,8 +1198,8 @@ export function Conversation({
       element.style.minHeight = `${element.offsetHeight}px`;
   }, [dockHost]);
   const outbox = useMemo(
-    () => outboxSlot && { slot: outboxSlot, show: showEnd, needs, keep },
-    [outboxSlot, showEnd, needs, keep],
+    () => outboxSlot && { slot: outboxSlot, show: showEnd, needs, keep, write },
+    [outboxSlot, showEnd, needs, keep, write],
   );
   const footShown = useCallback(() => {
     const column = body.current;

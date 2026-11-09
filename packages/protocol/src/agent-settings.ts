@@ -42,6 +42,8 @@ export const TaskModelRef = AgentRoleChoice.pick({
   options: true,
 });
 export type TaskModelRef = z.infer<typeof TaskModelRef>;
+// The model card's choice: the task goes on with it.
+export const BlockerModelChoice = z.strictObject({ model: TaskModelRef });
 export const TaskModelReply = z.strictObject({ choice: AgentRoleChoice.nullable() });
 export type TaskModelReply = z.infer<typeof TaskModelReply>;
 // The models an endpoint's key can reach, as its own list names them.

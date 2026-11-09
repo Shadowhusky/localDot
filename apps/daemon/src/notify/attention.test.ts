@@ -186,3 +186,35 @@ describe("AttentionLedger", () => {
     expect(ledger.approvalExpiresAt(id)).toBeUndefined();
   });
 });
+
+describe("a card in the conversation", () => {
+  const blockerId = ulid();
+  const raise = () =>
+    draft("blocker.raise", { blockerId, blocker: { kind: "keys_locked" }, by: "localdot" });
+
+  it("asks for the user once, and stops asking on any device's fix", () => {
+    const id = session();
+    log.append(id, raise());
+    log.append(id, raise());
+    expect(ledger.current(id)).toMatchObject({ reason: "fix", level: "needs_you" });
+    expect(changes.filter((item) => item.reason === "fix")).toHaveLength(1);
+    log.append(id, draft("blocker.clear", { blockerId, outcome: "fixed" }));
+    expect(ledger.current(id)).toMatchObject({ reason: "working", level: "working" });
+  });
+
+  it("a card that has gone doesn't clear another's wait", () => {
+    const id = session();
+    const other = ulid();
+    log.append(id, raise());
+    log.append(
+      id,
+      draft("blocker.raise", {
+        blockerId: other,
+        blocker: { kind: "computer", state: "paused" },
+        by: "localdot",
+      }),
+    );
+    log.append(id, draft("blocker.clear", { blockerId, outcome: "fixed" }));
+    expect(ledger.current(id)).toMatchObject({ reason: "fix", level: "needs_you" });
+  });
+});

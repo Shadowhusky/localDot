@@ -200,6 +200,7 @@ function toolOfStep(step: StepState, nowMs: number): DotTool | null {
       return "waiting";
     case "ask_user":
     case "request_takeover":
+    case "request_fix":
     case "credentials":
       return "needs-you";
   }

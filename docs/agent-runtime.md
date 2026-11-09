@@ -219,6 +219,38 @@ probes against the final sources; `check:codex-release` verified the resulting r
 The real-account acceptance suite was not run.
 
 
+## Fixing a blocker in the conversation
+
+When something stops dot that the user can fix inside localDot, the fix is a card in the thread, not
+directions. A blocker has a typed kind (`packages/protocol/src/blockers.ts`), a `blocker.raise` event,
+a card in `apps/web/src/agent/FixCards.tsx` and a `blocker.clear` event.
+
+| Kind | Noticed from | The card | Clears on |
+| --- | --- | --- | --- |
+| `keys_locked` | keyd's denial or 423 while the vault is locked, a saved login or connected app failing while it is, the model's own key | Passphrase, sealed to keyd | The vault opening |
+| `key` | keyd naming a key to re-enter or changed outside localDot, a service's or the model's 401 | The Keys form for that one key | The key saved and usable |
+| `app` | A connected app's sign-in ending | Connect | The sign-in finishing |
+| `model` | The provider refusing, not answering or out of quota | Try again, or another model | The model answering, or moving to another |
+| `computer` | The computer going off or pausing under a task at work | Turn on, or Resume | The computer ready |
+| `runtime` | Docker gone, with the computer or the brain | Start Docker | Docker answering |
+
+The daemon raises a card from the failure itself. Otherwise dot calls `request_fix`, which takes a kind
+and an id and no words; the daemon checks the blocker is real first, so a page can't summon a card by
+telling dot to ask for one. `ask_user` can't stand in: a question about unlocking localDot's keys, or a
+lone confirm while a card is up, gets the real card or a refusal. Whichever way a card is raised, one
+thing has one card (`blockerSubject`).
+
+The card's words are localDot's, chosen by kind, and nothing dot or a page wrote reaches them. What is
+typed goes from the card to keyd, sealed in the page as in Keys: it never enters the task's log,
+transcript, the model's context or the daemon's log. Only the owner may answer: `/blockers/*` and
+`/api/runtime/start` refuse a shared link, as `/api/keyd/unlock` does.
+
+When a card clears, on any device, the task goes on by itself: dot hears it, a stalled model is resumed,
+and the card leaves one line in the thread. Not now tells dot to carry on without it or finish and say
+what is left, and the card isn't offered again until the user speaks. A message moves on from a card
+as from any other wait (see "Messages while dot waits on the user"). A card still open when its task
+ends reads as history. `keys.lock` from before all this still loads, as the same history.
+
 ## External waiting and premature completion
 
 The game runs `01M4V5BRM1DTGEVJXNERKTBPMF` and `01M4V5KACPNE0PJE3XMH55TA51`
@@ -302,6 +334,36 @@ running tool holds back.
 
 Delegated agents don't hear the user, so their commands and waits run their course. A batch of
 commands answers only once each has ended or gone to the background.
+
+## Messages while dot waits on the user
+
+The message box works during any wait of dot's and sends straight away. A message the owner sends
+then moves on from the wait, on the daemon, whichever client sent it and whichever harness runs the
+task: the tool call blocked on the wait returns, and the message reaches dot as a steer, through the
+same inbox as any other. It is never taken for the wait's answer, and it isn't queued behind it.
+
+- A question (`ask.answer` with `by: "message"`) closes with no fields, however private: nothing is
+  typed or stored. dot hears that the question is closed and to ask again only if it still needs the
+  answer. A saved login's tap and a key's or an app's card close the same way.
+- A step's approval (`approval.resolve` with `decision: "deny"`, `by: "message"`) counts as not
+  given. The step doesn't run, no Always allow is saved, and dot hears that a new approval is needed
+  if it still wants the step. A late answer to either is refused with a 409, as for any closed card.
+- dot's hand-over keeps the older rule that a message hands the computer back, and says so
+  (`takeover.end` with `movedOn`). dot hears that the step may not be done. The computer the user
+  took themselves stays theirs: a phone's toolbar has no message field while they hold it, and a
+  message from elsewhere hands it back, as it always has.
+- A card that fixes a blocker closes as not done (`blocker.clear` with `moved_on`), keeping nothing
+  that was typed into it: `AgentSession.moveOn` is the one thing that ends dot's wait on it. A fix
+  that comes later clears nothing and resumes nothing. A stalled model takes the message as its way
+  on, and a new card comes up if it stalls again.
+- A connection's card isn't a wait of dot's, so it stays up. A shared link's guest moves on from
+  nothing: what the owner was asked stays theirs to decide.
+- A message for another model reaches dot at once when moving dot ends nothing. Otherwise (a model
+  this task can't run, or commands or delegated agents still running) it waits for the task as
+  usual, the wait still ends, and dot hears to finish.
+
+Each harness gets the same reply and the same inbox item: the built-in brain reads the message on its
+next request, Claude Code takes it from its input stream, and Codex from `turn/steer`.
 
 ## Carrying on after a restart
 

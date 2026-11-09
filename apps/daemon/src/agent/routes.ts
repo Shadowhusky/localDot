@@ -12,6 +12,7 @@ import {
   AddMemoryEntryRequest,
   AddPersonRequest,
   ApprovalAnswer,
+  BlockerModelChoice,
   BudgetRaiseRequest,
   CLAUDE_PLAN_REFUSAL,
   ContinueConversation,
@@ -115,6 +116,7 @@ export interface AgentRoutesDeps {
     Partial<
       Pick<
         AgentRunner,
+        | "retryOnModel"
         | "selectionOf"
         | "terminalOf"
         | "pauseTask"
@@ -826,9 +828,11 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         turn?.reached();
         // A deliberate Send hands control back. Publish this instruction before
         // waking the model, so it cannot resume the old plan ahead of the message.
-        if (!(await s.handback(s.pendingTakeover, text, c.req.raw.signal)))
+        if (!(await s.handback(s.pendingTakeover, text, c.req.raw.signal, false, true)))
           throw new RouteError(409, "The computer is still changing hands. Try sending again.");
       }
+      // A shared link's guest answers for no one: what the owner was asked stays theirs to decide.
+      else if (!grant && s.moveOn(text, undefined, turn)) return c.body(null, 202);
       // A message for another model waits for the task to finish, steered or not: moving dot now
       // would end what it has running.
       else if (parsed.kind === "followup" || turn?.moves()) s.enqueue(text, grant?.id, turn);
@@ -937,7 +941,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const s = active(c.req.param("id") ?? "");
       const messageId = c.req.param("messageId") ?? "";
       if (!ULID_PATTERN.test(messageId)) throw new RouteError(400, "invalid message id");
-      if (!s.steerQueued(messageId)) throw new RouteError(404, "queued message not found");
+      if (!s.steerQueued(messageId, !c.get("remoteGrant")))
+        throw new RouteError(404, "queued message not found");
       return c.body(null, 204);
     }),
   );
@@ -1094,6 +1099,40 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         : !!parsed.fields &&
           s.answerFields(parsed.askId, parsed.fields, (text) => redact(text, s.id, s.cellId));
       return ok ? c.body(null, 204) : c.text("that question is not waiting", 409);
+    }),
+  );
+  // A card in the conversation: Not now, which tells dot, and for a model's the one to go on with.
+  // Both are the owner's, as unlocking and saving keys are: a shared link's guest sees the task,
+  // never decides what it is owed.
+  const ownerOnly = (c: { get(key: "remoteGrant"): unknown }) => {
+    if (c.get("remoteGrant"))
+      throw new RouteError(403, "Only the owner of this localDot can answer that");
+  };
+  app.post(
+    "/api/agent/sessions/:id/blockers/:blockerId/dismiss",
+    route(async (c) => {
+      ownerOnly(c);
+      const s = active(c.req.param("id") ?? "");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      return s.dismissBlocker(c.req.param("blockerId") ?? "")
+        ? c.body(null, 204)
+        : c.text("that card is not waiting", 409);
+    }),
+  );
+  app.post(
+    "/api/agent/sessions/:id/blockers/:blockerId/model",
+    route(async (c) => {
+      ownerOnly(c);
+      const s = active(c.req.param("id") ?? "");
+      const { model } = await json(c.req.raw, BlockerModelChoice);
+      check(c.req.raw.signal);
+      const blockerId = c.req.param("blockerId") ?? "";
+      if (!s.openBlockers.some((open) => open.blockerId === blockerId))
+        throw new RouteError(409, "that card is not waiting");
+      if (!deps.runner.retryOnModel) throw new RouteError(503, "changing model is unavailable");
+      await deps.runner.retryOnModel(s.id, model, c.req.raw.signal);
+      return c.body(null, 204);
     }),
   );
   // The user takes the computer whatever dot is doing; the reply names the control to hand back.

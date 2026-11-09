@@ -16,7 +16,16 @@ import { VaultLockedError } from "../../keyd/client.ts";
 import { addTaskSecret } from "../redact.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import { type AgentSession, type AskAnswer, type AskForm, SAVED_LOGIN_TAP } from "../session.ts";
-import { fail, frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import {
+  fail,
+  frame,
+  MOVED_ON_COMPUTER,
+  movedOnQuestion,
+  type ToolCallContext,
+  type ToolDeps,
+  text,
+} from "./deps.ts";
+import { KEYS_NOT_LOCKED, waitForFix } from "./request-fix.ts";
 import { accountOrigin, findSecretField, type SecretField, typeSecret } from "./secret-field.ts";
 
 const reusedLogins = new WeakMap<AgentSession, Set<string>>();
@@ -55,7 +64,12 @@ function keysLocked(ctx: ToolCallContext): ToolResult {
   );
 }
 
-function unanswered(answer: AskAnswer, timeoutMs: number): ToolResult | undefined {
+function unanswered(
+  session: AgentSession,
+  answer: AskAnswer,
+  timeoutMs: number,
+): ToolResult | undefined {
+  if (answer.by === "message") return { ok: true, content: [text(movedOnQuestion(session))] };
   if (answer.by === "pause")
     return {
       ok: false,
@@ -119,7 +133,7 @@ async function tapToFill(
     ctx.signal,
   );
   ctx.check();
-  const early = unanswered(answer, timeoutMs);
+  const early = unanswered(ctx.session, answer, timeoutMs);
   if (early) return early;
   tapped.add(page);
   return undefined;
@@ -154,18 +168,52 @@ function shownAnswer(field: Pick<AskRequestField, "kind">, value: AskFieldRecord
   return value;
 }
 
+const ABOUT_LOCALDOT_KEYS = /\b(?:[Ll]ocal[Dd]ot|[Ss]aved keys|Keys)\b/;
+const UNLOCKING = /\b(?:unlock|locked|pass ?phrase)\b/i;
+const PASSPHRASE = /\bpass ?phrase\b/i;
+const CARD_IS_UP =
+  "localDot's own card for this is on screen and says when it is done, so don't ask the user to confirm it. Call request_fix to wait for it, or carry on with what doesn't need it.";
+// The brain's own guard, not a word from the model.
+const KEEP_GOING = "keep_going";
+
+// A question can't stand in for localDot's own card: the words that would send the user to Keys, or
+// ask for what only Keys may take, get the real card when the keys are locked and nothing otherwise.
+// A question typed by a page through dot never reaches the passphrase this way.
+async function cardInstead(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+  input: AskUserInput,
+): Promise<ToolResult | undefined> {
+  const fields = input.fields ?? [];
+  const words = [
+    input.question,
+    ...fields.flatMap((field) => [field.label, field.hint ?? ""]),
+  ].join(" ");
+  const locked = deps.keysLocked?.();
+  if (ABOUT_LOCALDOT_KEYS.test(words) && UNLOCKING.test(words))
+    return locked ? waitForFix(deps, ctx, { kind: "keys_locked" }) : fail(KEYS_NOT_LOCKED);
+  // While the vault is locked, any passphrase asked for through dot could be its own.
+  if (locked && PASSPHRASE.test(words)) return waitForFix(deps, ctx, { kind: "keys_locked" });
+  const only = fields.length === 1 ? fields[0] : undefined;
+  if (only?.kind === "confirm" && only.id !== KEEP_GOING && ctx.session.openBlockers.length)
+    return fail(CARD_IS_UP);
+  return undefined;
+}
+
 export async function askUserTool(
   deps: ToolDeps,
   ctx: ToolCallContext,
   input: AskUserInput,
 ): Promise<ToolResult> {
   ctx.check();
+  const card = await cardInstead(deps, ctx, input);
+  if (card) return card;
   if (input.fields) return askFields(deps, ctx, input, input.fields);
   const form = plainForm(input, ctx.redact);
   const timeoutMs = askTimeoutMs(deps, ctx);
   const answer = await ctx.session.askFields(form, timeoutMs, ctx.step, ctx.generation, ctx.signal);
   ctx.check();
-  const early = unanswered(answer, timeoutMs);
+  const early = unanswered(ctx.session, answer, timeoutMs);
   if (early) return early;
   // Read as the lettered choice dot has always been told, which older brains still look for.
   const given = answer.fields?.[ASK_ANSWER_ID];
@@ -304,7 +352,7 @@ async function askFields(
               ctx.signal,
             );
             ctx.check();
-            const early = unanswered(missing, askTimeoutMs(deps, ctx));
+            const early = unanswered(ctx.session, missing, askTimeoutMs(deps, ctx));
             if (early) return early;
             const account = loginFields[0] && missing.fields?.[loginFields[0].id];
             if (typeof account !== "string") return fail("The account name was not provided.");
@@ -420,7 +468,7 @@ async function askFields(
   const typed = answer.secrets;
   try {
     ctx.check();
-    const early = unanswered(answer, timeoutMs);
+    const early = unanswered(ctx.session, answer, timeoutMs);
     if (early) return early;
     const answers: Record<string, unknown> = {};
     for (const field of fields) {
@@ -551,9 +599,11 @@ export async function requestTakeoverTool(
     content: [
       text(
         ctx.redact(
-          outcome.declined
-            ? `The user said not now: they won't do this on the computer at the moment.${note} Don't hand the screen over again for it right away: find another way, or carry on with the rest and tell them what is left for them.`
-            : `The user handed the screen back.${note}`,
+          outcome.movedOn
+            ? MOVED_ON_COMPUTER
+            : outcome.declined
+              ? `The user said not now: they won't do this on the computer at the moment.${note} Don't hand the screen over again for it right away: find another way, or carry on with the rest and tell them what is left for them.`
+              : `The user handed the screen back.${note}`,
         ),
       ),
       image,

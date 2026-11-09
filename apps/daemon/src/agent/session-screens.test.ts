@@ -481,6 +481,29 @@ describe("session-owned screen authority", () => {
       expect(typed(f)).toHaveLength(0);
     });
 
+    it("types nothing, and fetches no password, when a message moves on from the tap", async () => {
+      const f = fixture();
+      await f.browser();
+      const h = tools(f);
+      f.client.lookup.mockImplementation(passwordBox("https://identity.example.org/signin"));
+      const login = vi.fn(async () => ({
+        username: "imported-account",
+        password: "imported-password-canary",
+        confirm: true,
+      }));
+      h.tools.logins = { login, saveLogin: vi.fn(async () => {}) };
+      const pending = h.callTool("ask_user", signIn);
+      await until(() => !!f.session.pendingAsk);
+      const looked = login.mock.calls.length;
+      expect(f.session.moveOn("Don't sign in, I'll do it later")).toBe(true);
+      const reply = await pending;
+      expect(JSON.stringify(reply)).toContain("instead of answering");
+      expect(typed(f)).toHaveLength(0);
+      expect(login).toHaveBeenCalledTimes(looked);
+      expect(JSON.stringify(reply)).not.toContain("imported");
+      expect(JSON.stringify(f.log.read(f.id))).not.toMatch(/imported-account|imported-password/);
+    });
+
     it("keeps filling without a tap a login the user gave dot on this very site", async () => {
       const f = fixture();
       await f.browser();
@@ -630,7 +653,7 @@ describe("session-owned screen authority", () => {
     expect(reply.result.ok).toBe(false);
     expect(JSON.stringify(reply)).toContain("Unlock card");
     expect(f.log.read(f.id).filter((e) => e.type === "ask.request")).toHaveLength(0);
-    expect(f.log.read(f.id).filter((e) => e.type === "keys.lock")).toHaveLength(1);
+    expect(f.log.read(f.id).filter((e) => e.type === "blocker.raise")).toHaveLength(1);
     expect(f.session.keysLocked).toBe(true);
   });
 

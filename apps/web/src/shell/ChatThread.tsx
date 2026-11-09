@@ -157,6 +157,7 @@ export function ChatThread({
     () => (model ? workSteps(rows, model, built.current) : []),
     [rows, model],
   );
+  const waiting = agent?.fixes?.length;
   const items = useMemo(
     () =>
       model
@@ -168,9 +169,12 @@ export function ChatThread({
             model.routineProposals.values(),
             model.origin,
             model.dots,
+            model.unapproved.values(),
+            model.blockers.values(),
+            !!waiting,
           )
         : [],
-    [model],
+    [model, waiting],
   );
   const working =
     !!live && live.phase !== "finished" && !ended && (!live.ahead || unanswered(items));

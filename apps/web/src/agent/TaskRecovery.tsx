@@ -1,5 +1,5 @@
 import { BudgetRaiseRequest, refusalAdvice, STALL } from "@localdot/protocol";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { dollars } from "../copy/format.ts";
 import { ownedPause } from "../session/status.ts";
 import type { ReportAbout } from "../settings/reports-api.ts";
@@ -170,6 +170,17 @@ export function raiseChoice(choice: string, custom: string, limitUSD: number): n
   return Math.round(value * 100) / 100;
 }
 
+// When a plan's limit lifts, by the last of the windows that reached it.
+export function planResets(model: AgentSessionView["model"]): string | null {
+  return resetTime(
+    model.subscription?.data.windows
+      .filter((window) => window.usedPercent >= 100 || model.subscription?.data.limitReached)
+      .map((window) => window.resetsAt)
+      .filter((at): at is number => at !== undefined)
+      .sort((a, b) => b - a)[0],
+  );
+}
+
 // Reasons whose one fix is to try the model again, with another model as the way out.
 const RETRY = new Set<string | undefined>([
   STALL.modelBusy,
@@ -184,6 +195,7 @@ export function TaskRecovery({
   onReenterKey,
   onContinue,
   onCarryOn,
+  computer,
   onResumeSelected,
   resumeBlocked,
   onReport,
@@ -198,6 +210,8 @@ export function TaskRecovery({
   // Starts the conversation's next task to carry on one that was interrupted; left out while the
   // computer can't take a task.
   onCarryOn?(): Promise<boolean>;
+  // Turns on the computer an interrupted task needs: it then carries on by itself.
+  computer?: { label: string; reason?: string; run(): void };
   onResumeSelected?(): Promise<boolean>;
   resumeBlocked?: string;
   // Opens Report a problem about this task.
@@ -212,6 +226,7 @@ export function TaskRecovery({
   const [custom, setCustom] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [continuing, setContinuing] = useState(false);
+  const [carryOnWhenOn, setCarryOnWhenOn] = useState(false);
   const state = agent.model.state;
   const send = (run: () => Promise<boolean>) => {
     if (continuing) return;
@@ -221,6 +236,13 @@ export function TaskRecovery({
       setProblem(sent ? null : "That didn't go through. Try again.");
     });
   };
+  const carryOn = useRef(send);
+  carryOn.current = send;
+  useEffect(() => {
+    if (!carryOnWhenOn || !onCarryOn) return;
+    setCarryOnWhenOn(false);
+    carryOn.current(onCarryOn);
+  }, [carryOnWhenOn, onCarryOn]);
   if (agent.interrupted && !controls.fenced)
     return (
       <section className="thread-recovery" aria-label="Task recovery">
@@ -229,15 +251,30 @@ export function TaskRecovery({
           localDot restarted while I was working. Continue, and I'll pick up where I left off.
         </p>
         <div className="thread-recovery-actions">
-          <Button
-            variant="primary"
-            icon="continue"
-            busy={continuing}
-            disabledReason={onCarryOn ? undefined : "Turn on your computer first"}
-            onClick={() => onCarryOn && send(onCarryOn)}
-          >
-            Continue
-          </Button>
+          {onCarryOn || !computer ? (
+            <Button
+              variant="primary"
+              icon="continue"
+              busy={continuing}
+              disabledReason={onCarryOn ? undefined : "Your computer is on its way"}
+              onClick={() => onCarryOn && send(onCarryOn)}
+            >
+              Continue
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              icon="power"
+              busy={carryOnWhenOn}
+              disabledReason={computer.reason}
+              onClick={() => {
+                setCarryOnWhenOn(true);
+                computer.run();
+              }}
+            >
+              {`${computer.label} and continue`}
+            </Button>
+          )}
         </div>
         {problem && (
           <p className="thread-recovery-reason" role="alert">
@@ -318,17 +355,7 @@ export function TaskRecovery({
   const dayLimit = hold ? hold === "day" : reason === "budget" && budget?.data.scope === "day";
   const raising = taskBudget && budget;
   const raised = raising ? raiseChoice(choice, custom, budget.data.limitUSD) : null;
-  const resets = subscription
-    ? resetTime(
-        agent.model.subscription?.data.windows
-          .filter(
-            (window) => window.usedPercent >= 100 || agent.model.subscription?.data.limitReached,
-          )
-          .map((window) => window.resetsAt)
-          .filter((at): at is number => at !== undefined)
-          .sort((a, b) => b - a)[0],
-      )
-    : null;
+  const resets = subscription ? planResets(agent.model) : null;
   const retry = RETRY.has(reason);
   const providerLimited =
     reason === STALL.providerLimit ||

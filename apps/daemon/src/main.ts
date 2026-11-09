@@ -511,6 +511,7 @@ const systemClock = {
 };
 const offerScanner = new TaskScanner(eventLog);
 agent = createAgent({
+  dockerDown: () => runtimeStartup.snapshot().then(({ docker }) => docker === "unavailable"),
   previewOffers: (id, reply) =>
     turnOffers(
       {
@@ -916,6 +917,7 @@ const app = createApp({
     importComputer: computerImport(home, docker),
     checkRuntime: () => docker.checkReady(),
     runtimeStatus: () => runtimeStartup.snapshot(),
+    startRuntime: () => startDockerDesktop(docker.socketPath),
     update: (id, signal) =>
       updateComputer({ cells: orchestrator, live, runner: agent.runner }, id, signal),
   },

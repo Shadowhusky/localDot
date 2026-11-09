@@ -9,6 +9,7 @@ const UNANSWERED = {
   stop: "The task stopped before an answer.",
   pause: "The task paused before an answer.",
   control: "You took the computer instead. dot will ask again if it still needs to know.",
+  message: "Not answered: you sent a message instead.",
 } as const;
 
 // dot's question in the thread, with its fields under it while dot waits; your answer then shows

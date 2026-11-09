@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AskFieldId, AskFieldKind, AskFieldRecord, MAX_ASK_FIELDS } from "./ask.ts";
+import { Blocker } from "./blockers.ts";
 import { ConversationName } from "./conversation.ts";
 import { MAX_OUTPUT_VERSION, ReviseLink } from "./deliverables.ts";
 import { Point, Rect } from "./geometry.ts";
@@ -132,23 +133,6 @@ export function refusalAdvice(detail: string | undefined): string {
     return "The provider says this key isn't allowed to do this. Check the key's access to this model in Settings";
   return "Check the error details, API address, API type and model ID in Settings";
 }
-// Why a task waits on something other than its own Pause, question or approval. The app gives
-// each one a status, a line from dot and the one action that fixes it.
-export const STALL = {
-  budget: "budget",
-  keyd: "keyd unavailable",
-  modelBusy: "model busy",
-  modelUnavailable: "model unavailable",
-  modelRefused: "model refused",
-  providerLimit: "provider limit reached",
-  actionLimit: "action limit",
-  // The detail names the key whose value the user enters again.
-  keyReenter: "key needs re-entering",
-  // The detail names the key changed outside localDot, which the user removes and adds again.
-  keyRebound: "key changed outside localDot",
-  // The model's key is in the passphrase vault, which is locked; unlocking it resumes the task.
-  keysLocked: "keys locked",
-} as const;
 export const Heartbeat = event(
   "heartbeat",
   z.object({ ongoing: z.boolean(), everyMs: z.number().int().positive() }),
@@ -310,7 +294,8 @@ export const ApprovalResolve = event(
   z.object({
     approvalId: z.string(),
     decision: z.enum(["approve", "deny", "take_control"]),
-    by: z.enum(["user", "timeout"]),
+    // "message": the user sent a message instead, which counts as not approved.
+    by: z.enum(["user", "timeout", "message"]),
     note: z.string().max(500).optional(),
   }),
 );
@@ -362,9 +347,33 @@ export const KeyUse = event(
     decision: z.enum(["allow", "deny", "ask"]),
   }),
 );
-// The task needs saved keys or passwords while their vault is locked: the conversation offers to
-// unlock them until it opens again, which wakes dot.
+// From before blockers: the task needed saved keys or passwords while their vault was locked. Only
+// old logs hold it, and they read as history.
 export const KeysLock = event("keys.lock", z.object({ locked: z.boolean() }));
+// Something the user can fix stops dot: the conversation shows localDot's own card for it until it
+// clears. `by` says who noticed: localDot from the failure, or dot asking for it. `required`: dot
+// can't go on without it, so there is no way out but the fix or Stop.
+export const BlockerRaise = event(
+  "blocker.raise",
+  z.strictObject({
+    blockerId: z.string().regex(ULID_PATTERN),
+    blocker: Blocker,
+    by: z.enum(["localdot", "dot"]),
+    required: z.literal(true).optional(),
+  }),
+);
+// It was fixed, the user said not now, dot finished without it (moot), or the user's message moved
+// on from it (moved_on), on any device. A task that ended with one open needs no event: its card is
+// history once the task is over.
+export const BlockerClear = event(
+  "blocker.clear",
+  z.strictObject({
+    blockerId: z.string().regex(ULID_PATTERN),
+    outcome: z.enum(["fixed", "dismissed", "moot", "moved_on"]),
+    // A model's: the one the task moved to, when it moved.
+    movedTo: MessageModel.pick({ provider: true, model: true }).optional(),
+  }),
+);
 export const BudgetExceeded = event(
   "budget.exceeded",
   z.object({
@@ -502,7 +511,8 @@ export const AskAnswer = event(
     skipped: z.array(AskFieldId).min(1).max(MAX_ASK_FIELDS).optional(),
     // The user chose the way out ("Not now").
     declined: z.literal(true).optional(),
-    by: z.enum(["user", "timeout", "stop", "pause", "control"]),
+    // "message": the user sent a message instead of answering.
+    by: z.enum(["user", "timeout", "stop", "pause", "control", "message"]),
   }),
 );
 export const TakeoverReason = z.enum(["login", "2fa", "captcha", "payment", "other"]);
@@ -526,6 +536,8 @@ export const TakeoverEnd = event(
     typed: z.literal(true).optional(),
     // The user said "Not now" to dot's hand-off.
     declined: z.literal(true).optional(),
+    // The user's message ended dot's hand-off; the step it asked for may not be done.
+    movedOn: z.literal(true).optional(),
   }),
 );
 export const TaskResult = event(
@@ -680,6 +692,8 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   MemoryChange,
   KeyUse,
   KeysLock,
+  BlockerRaise,
+  BlockerClear,
   BudgetExceeded,
   CameraHint,
   MessageUser,
