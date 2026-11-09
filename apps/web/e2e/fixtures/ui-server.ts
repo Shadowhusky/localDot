@@ -588,6 +588,8 @@ async function updateCell(id: string): Promise<void> {
 }
 
 let keys = SAMPLE_KEYS;
+// What the own endpoint (POST /__qa/own-endpoint) lists as its models.
+let endpointModels: { id: string }[] = [{ id: "gpt-6.1-sol" }, { id: "gpt-6.1-terra" }];
 const settingsStore = new SettingsStore(HOME);
 // QA_DOT_NAME names this localDot, as the user tells it apart from their others.
 settingsStore.put({
@@ -2202,7 +2204,7 @@ const agent: AgentRoutesDeps = {
     },
   ],
   conversations,
-  keyModels: { list: async () => [{ id: "gpt-6.1-sol" }, { id: "gpt-6.1-terra" }] },
+  keyModels: { list: async () => endpointModels },
   canChangeMemory: () => !session?.controlHeld && !killSwitch.isBusy(cellId),
   taskMutationReady: (owner) =>
     owner === session &&
@@ -4708,7 +4710,13 @@ routes.post("/__qa/stream", (c) => {
 // dot's turns as the brain reports them: thinking on each model call, acting on each tool call,
 // n of each, `ms` apart. Answers once the last has been sent.
 // A key saved for the user's own endpoint, whose model list the fixture answers.
+// `?models=<n>` has it list that many models, for a list longer than any screen.
 routes.post("/__qa/own-endpoint", (c) => {
+  const many = Number(c.req.query("models") ?? 0);
+  if (many > 0)
+    endpointModels = Array.from({ length: many }, (_, n) => ({
+      id: `relay-model-${String(n + 1).padStart(2, "0")}`,
+    }));
   keys = [
     ...keys,
     {

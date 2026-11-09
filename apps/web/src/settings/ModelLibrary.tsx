@@ -335,7 +335,7 @@ function AddModels({
               className="settings-dot-banner"
             />
             {listed.models.length > 8 && (
-              <Field label="Search">
+              <Field label="Search" className="settings-model-search">
                 <TextField
                   value={filter}
                   autoComplete="off"
@@ -345,7 +345,7 @@ function AddModels({
               </Field>
             )}
             {shown.length > 0 && (
-              <Group className="settings-model-list">
+              <Group role="group" aria-label="Models">
                 {shown.map((model) => {
                   const added = have.has(`${model.id}\0${source?.key ?? ""}`);
                   return (
