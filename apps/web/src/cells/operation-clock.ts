@@ -12,6 +12,8 @@ export interface Timing {
   expectedMs: number;
   kind: ComputerOperationKind;
   step?: ComputerOperationStep;
+  // Where a stage of an update keeps the bar: it moves on no further until that stage has ended.
+  bounds?: [number, number];
 }
 
 // A computer's lifecycle operation on this page's clock. `since` comes from how long the daemon
@@ -77,8 +79,9 @@ const UPDATE_NUDGES: Nudges = {
 };
 
 // Nearly in step with the time at first, slowing as the expected time runs out.
-export function progressAt({ since, expectedMs, kind, step }: Timing, now: number): number {
+export function progressAt({ since, expectedMs, kind, step, bounds }: Timing, now: number): number {
   const eased = PROGRESS_HOLD * Math.tanh((1.25 * Math.max(0, now - since)) / expectedMs);
+  if (bounds) return Math.min(PROGRESS_HOLD, bounds[1], Math.max(bounds[0], eased));
   const nudges = kind === "update" ? UPDATE_NUDGES : kind === "stop" ? {} : START_NUDGES;
   return Math.min(PROGRESS_HOLD, Math.max(eased, (step && nudges[step]) ?? 0));
 }

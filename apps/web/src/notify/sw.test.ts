@@ -110,10 +110,6 @@ describe("service worker", () => {
     expect(withWindow.opened).toEqual([]);
   });
 
-  it("caches nothing: no fetch handler", () => {
-    expect(load().listeners.has("fetch")).toBe(false);
-  });
-
   it("is a standalone Home Screen app on the void colour", () => {
     const manifest = JSON.parse(manifestText) as Record<string, unknown>;
     expect(manifest).toMatchObject({
@@ -124,5 +120,57 @@ describe("service worker", () => {
       theme_color: "#0a0b0d",
     });
     expect(JSON.stringify(manifest.icons)).toContain("maskable");
+  });
+});
+
+describe("a page load while localDot is down", () => {
+  function fetching() {
+    const listeners = new Map<string, Listener>();
+    new Function("self", worker)({
+      location: { origin: "https://mac.example.ts.net" },
+      addEventListener: (type: string, listener: Listener) => listeners.set(type, listener),
+      skipWaiting: vi.fn(),
+      clients: { claim: vi.fn() },
+    });
+    return async (mode: string) => {
+      let answer: Promise<Response> | undefined;
+      listeners.get("fetch")?.({
+        request: { mode, url: "https://mac.example.ts.net/" },
+        respondWith: (response: Promise<Response>) => {
+          answer = response;
+        },
+      });
+      return answer;
+    };
+  }
+  it("answers with a page that waits when localDot can't be reached", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("refused")));
+    const answer = await (await fetching())("navigate");
+    expect(answer?.headers.get("content-type")).toContain("text/html");
+    const page = await answer?.text();
+    expect(page).toContain("localDot is restarting");
+    expect(page).toContain("/healthz");
+    expect(page).toContain("localdot.app-update");
+    vi.unstubAllGlobals();
+  });
+  it("does the same for a front answering for it, and passes anything else through", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("down", { status: 502 })));
+    expect(await (await (await fetching())("navigate"))?.text()).toContain(
+      "localDot is restarting",
+    );
+    const fine = new Response("app");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(fine));
+    expect(await (await fetching())("navigate")).toBe(fine);
+    vi.unstubAllGlobals();
+  });
+  it("leaves every other request alone, so it never stands between the app and its API", async () => {
+    const fetchFile = vi.fn();
+    vi.stubGlobal("fetch", fetchFile);
+    expect(await (await fetching())("cors")).toBeUndefined();
+    expect(fetchFile).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+  it("holds no sign-in token and caches nothing", () => {
+    expect(worker).not.toMatch(/caches\.|Authorization|daemon-token/i);
   });
 });

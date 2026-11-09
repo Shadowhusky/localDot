@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SELFTEST_CHECKS, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { UpdateFailure } from "../updates/progress.ts";
 import {
   ComputerUpdateRefused,
   ComputerUpdateStore,
@@ -11,7 +12,7 @@ import {
   UPDATE_LABEL,
   updateComputer,
 } from "./computer-update.ts";
-import { DockerClient } from "./docker.ts";
+import { DockerClient, DockerError } from "./docker.ts";
 import { retireExactContainers } from "./exact-retirement.ts";
 import {
   CellControlConflict,
@@ -79,7 +80,7 @@ const waitUntil = (pred: () => boolean, ms = 2000) =>
 
 async function setup(
   deps: Partial<OrchestratorDeps> = {},
-  system: Pick<ComputerUpdatesDeps, "migrateSystem"> = {},
+  system: Pick<ComputerUpdatesDeps, "migrateSystem" | "pull"> & { images?: typeof images } = {},
 ) {
   fake = await startFakeDocker();
   const home = mkdtempSync(join(tmpdir(), "local dot's update-"));
@@ -397,6 +398,297 @@ describe("CellOrchestrator.update", () => {
   });
 });
 
+describe("what every device sees of an update", () => {
+  const stages = (changes: CellSummary[], id: string) =>
+    changes
+      .filter((c) => c.id === id && c.updateProgress)
+      .map((c) => c.updateProgress?.stage)
+      .filter((stage, i, all) => stage !== all[i - 1]);
+
+  it("names each stage, from stopping through to the screen coming back", async () => {
+    const { updates, orchestrator, changes, id, record } = await setup(
+      {},
+      {
+        migrateSystem: async (migrating, target, report) => {
+          report?.({ share: 0.5, detail: "Saving what's on your computer" });
+          fake.state.images.add(target);
+          fake.state.imageLabels.set(target, {
+            "localdot.system-source": migrating.ownership?.desktop ?? "",
+          });
+          return target;
+        },
+      },
+    );
+    rebuild();
+    await updates.check(record);
+    const from = changes.length;
+    await orchestrator.update(id);
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    orchestrator.updateStream(id, { connection: "live", viewers: 1 });
+    const seen = changes.slice(from);
+    expect(stages(seen, id)).toEqual(["stop", "keep", "replace", "start", "reconnect"]);
+    expect(seen.find((c) => c.updateProgress?.share)?.updateProgress).toEqual({
+      stage: "keep",
+      share: 0.5,
+      detail: "Saving what's on your computer",
+    });
+    expect(orchestrator.get(id)?.updateProgress).toBeUndefined();
+  });
+
+  it("drops a failure from a ready computer with nothing left to update", async () => {
+    const { updates, orchestrator, id, record } = await setup();
+    rebuild();
+    await updates.check(record);
+    fake.state.failCreate.add(`${record.docker.desktop}-update`);
+    await expect(orchestrator.update(id)).rejects.toThrow("It's back as it was");
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    fake.state.failCreate.clear();
+    fake.state.imageIds.set(images.desktop, OLD);
+    fake.state.imageIds.set(images.gate, OLD);
+    await updates.check(record);
+    expect(orchestrator.get(id)?.updateAvailable).toBeUndefined();
+    expect(orchestrator.get(id)?.updateFailure).toBeUndefined();
+  });
+
+  it("keeps the failure where every device and a reloaded page can read it", async () => {
+    const { updates, orchestrator, id, record } = await setup();
+    rebuild();
+    await updates.check(record);
+    fake.state.failCreate.add(`${record.docker.desktop}-update`);
+    await expect(orchestrator.update(id)).rejects.toThrow("It's back as it was");
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    expect(orchestrator.get(id)).toMatchObject({
+      updateAvailable: true,
+      updateFailure: {
+        stage: "replace",
+        message: "Your computer couldn't be updated. It's back as it was, and your files are kept.",
+        at: expect.any(Number),
+      },
+    });
+    fake.state.failCreate.clear();
+    await orchestrator.update(id);
+    expect(orchestrator.get(id)?.updateFailure).toBeUndefined();
+  });
+
+  it("says why when Docker has run out of room", async () => {
+    const { updates, orchestrator, id, record } = await setup(
+      {},
+      {
+        migrateSystem: async () => {
+          throw new DockerError(500, "write /x: no space left on device", "/commit");
+        },
+      },
+    );
+    rebuild();
+    await updates.check(record);
+    await expect(orchestrator.update(id)).rejects.toThrow("It's back as it was");
+    expect(orchestrator.get(id)?.updateFailure?.message).toContain(
+      "Docker has run out of disk space",
+    );
+  });
+
+  it("starts the computer again by itself when Docker comes back", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    try {
+      const { updates, orchestrator, id, record } = await setup({}, {});
+      rebuild();
+      await updates.check(record);
+      fake.state.failRequests.add(`POST /containers/${record.docker.gate}/start`);
+      fake.state.failRequests.add("POST /containers/create");
+      await expect(orchestrator.update(id)).rejects.toThrow("Turn it on to keep using it");
+      expect(orchestrator.get(id)?.state).not.toBe("ready");
+      expect(orchestrator.get(id)?.updateFailure?.message).toContain("Your files are kept");
+      fake.state.failRequests.clear();
+      await vi.waitFor(
+        async () => {
+          await vi.advanceTimersByTimeAsync(5000);
+          expect(orchestrator.get(id)?.state).toBe("ready");
+        },
+        { timeout: 5000 },
+      );
+      expect(orchestrator.get(id)?.updateFailure?.message).toContain("It's back as it was");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("doesn't call a computer the new version failed to start updated, and keeps the words", async () => {
+    let starts = 0;
+    const { updates, orchestrator, id, record } = await setup({
+      readyTimeoutMs: 20,
+      probeDesktopd: async (_endpoint, _timeout, options) => {
+        if (options?.selftest !== false) starts++;
+        return starts > 1 ? undefined : healthy;
+      },
+    });
+    rebuild();
+    await updates.check(record);
+    await orchestrator.update(id);
+    await waitUntil(() => orchestrator.get(id)?.state === "failed");
+    expect(orchestrator.get(id)).toMatchObject({
+      updateFailure: {
+        stage: "start",
+        message: "Your computer was updated but didn't start. Your files are kept. Start it again.",
+      },
+    });
+    expect(orchestrator.get(id)?.updating).toBeUndefined();
+  });
+});
+
+describe("a pinned image Docker doesn't have yet", () => {
+  const PINNED = {
+    desktop: `ghcr.io/shadowhusky/localdot-desktop@sha256:${"d".repeat(64)}`,
+    gate: `ghcr.io/shadowhusky/localdot-gate@sha256:${"e".repeat(64)}`,
+  };
+  const pinned = async (pull: NonNullable<ComputerUpdatesDeps["pull"]>) => {
+    const f = await setup({}, { pull });
+    const updates = new ComputerUpdates({
+      home: f.home,
+      docker: f.docker,
+      images: PINNED,
+      stream: { fullcolor: false },
+      pull,
+    });
+    return { ...f, updates };
+  };
+
+  it("offers the update, and fetches it while the computer keeps running", async () => {
+    const running: boolean[] = [];
+    const pull = vi.fn(async (references, _signal, report) => {
+      running.push(!!fake.state.containers.get(f.record.docker.desktop)?.running);
+      report({ done: 1_400_000_000, total: 3_100_000_000 });
+      for (const reference of references) fake.state.imageIds.set(reference, NEW_DESKTOP);
+    }) as NonNullable<ComputerUpdatesDeps["pull"]>;
+    const f = await pinned(pull);
+    expect(await f.updates.check(f.record)).toBe(true);
+    expect(f.updates.available(f.id)).toBe(true);
+    const seen: unknown[] = [];
+    await f.updates.fetch(f.record, new AbortController().signal, (progress) =>
+      seen.push(progress),
+    );
+    expect(pull).toHaveBeenCalledWith(
+      [PINNED.gate, PINNED.desktop],
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+    expect(running).toEqual([true]);
+    expect(seen).toEqual([{ done: 1_400_000_000, total: 3_100_000_000 }]);
+  });
+
+  it("fetches nothing for a local tag, which no registry could answer", async () => {
+    const pull = vi.fn() as unknown as NonNullable<ComputerUpdatesDeps["pull"]>;
+    const { updates, record } = await setup({}, { pull });
+    await updates.fetch(record, new AbortController().signal, () => {});
+    expect(pull).not.toHaveBeenCalled();
+  });
+});
+
+describe("an update whose download runs first", () => {
+  const download = (fails?: Error) => {
+    const state: { report?: (p: { done?: number; total?: number }) => void; finish?: () => void } =
+      {};
+    const pull = vi.fn(
+      (
+        _references: string[],
+        _signal: AbortSignal,
+        report: (p: { done?: number; total?: number }) => void,
+      ) =>
+        new Promise<void>((resolve, reject) => {
+          state.report = report;
+          state.finish = () => (fails ? reject(fails) : resolve());
+        }),
+    );
+    return { state, pull: pull as unknown as NonNullable<ComputerUpdatesDeps["pull"]> };
+  };
+  const stub = (orchestrator: CellOrchestrator, updates: ComputerUpdates) => {
+    vi.spyOn(updates, "missing").mockResolvedValue(["registry/desktop@sha256:x"]);
+    return orchestrator;
+  };
+
+  it("shows bytes and percent while the computer stays on and usable", async () => {
+    const { state, pull } = download();
+    const { updates, orchestrator, id, record } = await setup({}, { pull });
+    rebuild();
+    await updates.check(record);
+    stub(orchestrator, updates);
+    const running = orchestrator.update(id);
+    await vi.waitFor(() => expect(state.report).toBeDefined());
+    state.report?.({ done: 1_400_000_000, total: 3_100_000_000 });
+    expect(orchestrator.get(id)).toMatchObject({
+      state: "ready",
+      updating: true,
+      updateProgress: {
+        stage: "download",
+        share: 0.451,
+        detail: "Downloading · 45% · 1.4 of 3.1 GB",
+      },
+    });
+    vi.mocked(updates.missing).mockResolvedValue([]);
+    state.finish?.();
+    await running;
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    expect(orchestrator.get(id)?.updateFailure).toBeUndefined();
+  });
+
+  it("leaves the computer running when the download fails, and says why", async () => {
+    const { state, pull } = download(new UpdateFailure("network"));
+    const { updates, orchestrator, id, record } = await setup({}, { pull });
+    rebuild();
+    await updates.check(record);
+    stub(orchestrator, updates);
+    const before = fake.state.containers.get(record.docker.desktop)?.id;
+    const running = orchestrator.update(id).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(state.finish).toBeDefined());
+    state.finish?.();
+    expect(await running).toBeInstanceOf(CellControlConflict);
+    expect(orchestrator.get(id)).toMatchObject({
+      state: "ready",
+      updateAvailable: true,
+      updateFailure: {
+        stage: "download",
+        message:
+          "The new version couldn't be downloaded. Your computer is still running, and your files are kept. Check your connection and try again.",
+      },
+    });
+    expect(orchestrator.get(id)?.updating).toBeUndefined();
+    expect(fake.state.containers.get(record.docker.desktop)?.id).toBe(before);
+    expect(fake.state.containers.get(record.docker.desktop)?.running).toBe(true);
+  });
+
+  it("says it is updating without a break from the download to stopping", async () => {
+    const { state, pull } = download();
+    const { updates, orchestrator, changes, id, record } = await setup({}, { pull });
+    rebuild();
+    await updates.check(record);
+    const missing = vi.spyOn(updates, "missing").mockResolvedValue(["registry/desktop@sha256:x"]);
+    const from = changes.length;
+    const running = orchestrator.update(id);
+    await vi.waitFor(() => expect(state.finish).toBeDefined());
+    missing.mockResolvedValue([]);
+    state.finish?.();
+    await running;
+    const seen = changes.slice(from).filter((c) => c.id === id);
+    const stopped = seen.findIndex((c) => c.updateProgress?.stage === "stop");
+    expect(stopped).toBeGreaterThan(0);
+    expect(seen.slice(0, stopped).filter((c) => !c.updating)).toEqual([]);
+    expect(orchestrator.get(id)?.updating).toBeUndefined();
+  });
+
+  it("says Docker stopped answering when that is what cut the download off", async () => {
+    const { state, pull } = download(new UpdateFailure("network"));
+    const { updates, orchestrator, id, record } = await setup({}, { pull });
+    rebuild();
+    await updates.check(record);
+    stub(orchestrator, updates);
+    const running = orchestrator.update(id);
+    await vi.waitFor(() => expect(state.finish).toBeDefined());
+    fake.state.loseReplies.add("GET /_ping");
+    state.finish?.();
+    await expect(running).rejects.toThrow("couldn't be downloaded");
+    expect(orchestrator.get(id)?.updateFailure?.message).toContain("Docker stopped answering");
+  });
+});
+
 describe("an update interrupted by a daemon restart", () => {
   it("rolls back an update that was still making its containers", async () => {
     const { orchestrator, boot, home, store, docker, id, record } = await setup();
@@ -705,6 +997,7 @@ describe("an update that can't be finished", () => {
     await waitUntil(() => orchestrator.get(id)?.state === "ready");
     expect(fake.state.containers.get(record.docker.desktop)?.image).toBe(NEW_DESKTOP);
     expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
+    expect(orchestrator.get(id)?.updateFailure).toBeUndefined();
   });
 
   it("lets Remove through while Docker keeps refusing the last step", async () => {
@@ -772,7 +1065,11 @@ describe("an update that met files an installed app changed", () => {
     expect(orchestrator.get(id)).toMatchObject({ state: "ready", updateBlocked: true });
     expect(orchestrator.get(id)).not.toHaveProperty("updateAvailable");
     expect(fake.state.containers.get(record.docker.desktop)?.id).toBe(record.ownership?.desktop);
-    expect(migrateSystem).toHaveBeenCalledWith(expect.objectContaining({ id }), NEW_DESKTOP);
+    expect(migrateSystem).toHaveBeenCalledWith(
+      expect.objectContaining({ id }),
+      NEW_DESKTOP,
+      expect.any(Function),
+    );
 
     // A restarted daemon remembers, and refuses before the computer is stopped.
     orchestrator.dispose();
@@ -1001,6 +1298,39 @@ describe("updateComputer admission", () => {
     expect(d.cells.update).not.toHaveBeenCalled();
     return (error as Error).message;
   };
+
+  it("downloads before it takes the computer, and looks again at what is working afterwards", async () => {
+    const { d, release, order } = deps(summary());
+    const fetchUpdate = vi.fn(async () => {
+      order.push("download");
+    });
+    await updateComputer({ ...d, cells: { ...d.cells, fetchUpdate } }, ID);
+    expect(order).toEqual(["download", "update"]);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a working task before downloading anything", async () => {
+    const { d } = deps(summary(), { status: "working", controlHeld: false });
+    const fetchUpdate = vi.fn(async () => {});
+    await expect(updateComputer({ ...d, cells: { ...d.cells, fetchUpdate } }, ID)).rejects.toThrow(
+      "Wait for dot to finish",
+    );
+    expect(fetchUpdate).not.toHaveBeenCalled();
+  });
+
+  it("says so if a task began while it downloaded, and takes nothing", async () => {
+    const session = { status: "idle", controlHeld: false };
+    const { d } = deps(summary(), session);
+    const fetchUpdate = vi.fn(async () => {
+      session.status = "working";
+    });
+    const endFetch = vi.fn();
+    await expect(
+      updateComputer({ ...d, cells: { ...d.cells, fetchUpdate, endFetch } }, ID),
+    ).rejects.toThrow("Wait for dot to finish");
+    expect(d.cells.update).not.toHaveBeenCalled();
+    expect(endFetch).toHaveBeenCalledWith(ID);
+  });
 
   it("refuses while dot works, while the user holds the computer, or when fenced", async () => {
     for (const [cell, session, words] of [

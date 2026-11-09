@@ -1,4 +1,10 @@
-import { ComputerFence, ComputerOperation, ULID_PATTERN } from "@localdot/protocol";
+import {
+  ComputerFence,
+  ComputerOperation,
+  ComputerUpdateFailure,
+  ComputerUpdateProgress,
+  ULID_PATTERN,
+} from "@localdot/protocol";
 import { z } from "zod";
 import type { CellSummary } from "./types.ts";
 export const CellSummarySchema = z.strictObject({
@@ -20,6 +26,8 @@ export const CellSummarySchema = z.strictObject({
   updating: z.literal(true).optional(),
   needsFreshStart: z.literal(true).optional(),
   operation: ComputerOperation.optional(),
+  updateProgress: ComputerUpdateProgress.optional(),
+  updateFailure: ComputerUpdateFailure.optional(),
 });
 export function parseCells(value: unknown): CellSummary[] {
   const rows = z.array(CellSummarySchema).max(1024).parse(value);

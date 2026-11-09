@@ -45,6 +45,17 @@ die() {
   exit 1
 }
 
+# An update started from the app follows along through this file. The app restarts under the
+# installer, and whichever daemon comes up next reads where it got to.
+in_app() { [ -n "${LOCALDOT_UPDATE_STATUS:-}" ]; }
+update_stage() {
+  in_app || return 0
+  local problem=""
+  [ -z "${UPDATE_PROBLEM:-}" ] || problem=",\"problem\":\"$UPDATE_PROBLEM\""
+  { printf '{"v":1,"pid":%s,"stage":"%s","restored":%s%s}\n' "$$" "$1" "${2:-false}" "$problem" \
+    >"$LOCALDOT_UPDATE_STATUS.new" && mv -f "$LOCALDOT_UPDATE_STATUS.new" "$LOCALDOT_UPDATE_STATUS"; } 2>/dev/null || true
+}
+
 usage() {
   cat <<'EOF'
 Install or upgrade localDot on macOS, Linux or WSL 2.
@@ -528,7 +539,10 @@ check_prerequisites() {
     fi
   fi
   problem=$(docker_problem)
-  [ -z "$problem" ] || problems="$problems  - $problem"$'\n'
+  if [ -n "$problem" ]; then
+    problems="$problems  - $problem"$'\n'
+    UPDATE_PROBLEM=docker
+  fi
   if [ "$OS" = linux ] && ! user_systemd; then
     if [ -n "$WSL" ]; then
       problems="$problems  - systemd. Add these lines to /etc/wsl.conf (sudo nano /etc/wsl.conf), run wsl --shutdown in PowerShell, then open this distro again:"$'\n'"      [boot]"$'\n'"      systemd=true"$'\n'
@@ -538,7 +552,10 @@ check_prerequisites() {
   fi
   if [ "$OS" = linux ] && [ -z "$problems" ]; then
     problem=$(service_docker_problem)
-    [ -z "$problem" ] || problems="$problems  - $problem"$'\n'
+    if [ -n "$problem" ]; then
+      problems="$problems  - $problem"$'\n'
+      UPDATE_PROBLEM=docker
+    fi
   fi
   if [ -n "$problems" ]; then
     printf 'localDot needs a few things first:\n%sThen run the installer again.\n' "$problems" >&2
@@ -791,6 +808,7 @@ check_prefix() {
   case $data in '' | *[][*?\\]*) ;; *) skip=(! -path "./$data" ! -path "./$data/*") ;; esac
   other=$(cd "$PREFIX" && find . -mindepth 1 -maxdepth 2 ${skip[@]+"${skip[@]}"} \
     ! -path ./app.previous ! -path './app.previous/*' ! -path ./.package-install.lock ! -path './.package-install.lock/*' \
+    ! -path ./.package-swap ! -path ./.package-swap.new \
     ! -path ./app ! -path './app/*' ! -path ./app.new ! -path './app.new/*' \
     ! -path ./runtime ! -path './runtime/*' ! -path ./install.env.new ! -path ./bin \
     ! -path ./bin/keyd ! -path ./bin/keyd.new ! -path ./bin/localdot ! -path ./bin/localdot.new \
@@ -801,7 +819,8 @@ check_prefix() {
 # Removes only what the installer makes, and the prefix itself once nothing else is in it.
 remove_installed() {
   rm -rf "$PREFIX/app" "$PREFIX/app.new" "$PREFIX/app.previous" "$PREFIX/runtime"
-  rm -f "$PREFIX/install.env" "$PREFIX/install.env.new" "$PREFIX/start-at-login" "$PREFIX/start-at-login.new" \
+  rm -f "$PREFIX/.package-swap" "$PREFIX/.package-swap.new" \
+    "$PREFIX/install.env" "$PREFIX/install.env.new" "$PREFIX/start-at-login" "$PREFIX/start-at-login.new" \
     "$PREFIX/bin/keyd" "$PREFIX/bin/keyd.new" "$PREFIX/bin/localdot" "$PREFIX/bin/localdot.new"
   rmdir "$PREFIX/bin" 2>/dev/null || true
   rmdir "$PREFIX" 2>/dev/null || true
@@ -1483,6 +1502,15 @@ stop_services() {
   fi
 }
 
+stop_daemon() {
+  if [ "$OS" = macos ]; then
+    launchctl bootout "gui/$(id -u)/$DAEMON_LABEL" 2>/dev/null || true
+  else
+    user_systemd || true
+    systemctl --user stop "$DAEMON_UNIT" 2>/dev/null || true
+  fi
+}
+
 remove_services() {
   owned "$DAEMON_FILE" || owned "$KEYD_FILE" || return 0
   stop_services
@@ -1526,9 +1554,11 @@ PATH_CONFIG
 install_command() {
   local shim=$PREFIX/bin/localdot link=$HOME/.local/bin/localdot
   mkdir -p "$PREFIX/bin" "${link%/*}"
+  # A crash in the instant an update has the app set aside must not take this command with it.
   cat >"$shim.new" <<EOF
 #!/bin/sh
 # $MARKER
+[ -e $(sh_quote "$APP/install.sh") ] || [ ! -e $(sh_quote "$PREFIX/app.previous/install.sh") ] || mv $(sh_quote "$PREFIX/app.previous") $(sh_quote "$APP")
 exec $(sh_quote "$BASH") $(sh_quote "$APP/install.sh") --prefix $(sh_quote "$PREFIX") --as-command "\$@"
 EOF
   chmod 755 "$shim.new"
@@ -1543,16 +1573,20 @@ EOF
 }
 
 cli() {
+  local -a limit=()
+  [ -z "${CLI_SECONDS:-}" ] || limit=(with_timeout "$CLI_SECONDS")
   if [ -n "${PACKAGE_CHANNEL:-}" ]; then
     (cd "$APP"
       while IFS= read -r line; do case "$line" in LOCALDOT_*_IMAGE=*) export "$line" ;; esac; done <<EOF
 $(daemon_environment)
 EOF
-      LOCALDOT_HOME="$LD_HOME" LOCALDOT_PORT="$PORT" LOCALDOT_PUBLIC_ORIGIN="$PUBLIC_ORIGIN" "$NODE_DIR/bin/node" dist/cli.mjs "$@")
+      export LOCALDOT_HOME="$LD_HOME" LOCALDOT_PORT="$PORT" LOCALDOT_PUBLIC_ORIGIN="$PUBLIC_ORIGIN"
+      ${limit[@]+"${limit[@]}"} "$NODE_DIR/bin/node" dist/cli.mjs "$@")
     return
   fi
-  (cd "$APP/apps/daemon" && LOCALDOT_HOME="$LD_HOME" LOCALDOT_PORT="$PORT" \
-    LOCALDOT_PUBLIC_ORIGIN="$PUBLIC_ORIGIN" "$NODE_DIR/bin/node" --import tsx ../cli/src/main.ts "$@")
+  (cd "$APP/apps/daemon" && export LOCALDOT_HOME="$LD_HOME" LOCALDOT_PORT="$PORT" \
+    LOCALDOT_PUBLIC_ORIGIN="$PUBLIC_ORIGIN" &&
+    ${limit[@]+"${limit[@]}"} "$NODE_DIR/bin/node" --import tsx ../cli/src/main.ts "$@")
 }
 
 wait_ready() {
@@ -1640,11 +1674,19 @@ show_link() {
 }
 
 finish() {
+  UPDATE_PROBLEM=start
   wait_ready
-  offer_unlock
+  UPDATE_PROBLEM=checks
+  update_stage check
+  in_app || offer_unlock
   step "Checking the installation"
   local diagnostic=0
-  cli doctor || diagnostic=$?
+  # Nobody is sitting at an update from the app, so a check that hangs must end by itself.
+  if in_app; then
+    CLI_SECONDS=${UPDATE_CHECK_SECONDS:-300} cli doctor || diagnostic=$?
+  else
+    cli doctor || diagnostic=$?
+  fi
   case "$diagnostic" in
   0) ;;
   2) say "localDot is installed. Before starting a task, choose or unlock your vault passphrase:"
@@ -1652,6 +1694,9 @@ finish() {
      say "The vault must be unlocked before dot can use your saved keys." ;;
   *) die "Installation checks failed. Setup is not complete. Your data is kept; run localdot doctor, fix the reported checks, then rerun setup." ;;
   esac
+  UPDATE_PROBLEM=""
+  # The person who asked is looking at the app already, perhaps on another device.
+  in_app && return
   step "Sign in"
   show_link
   case ":$PATH:" in
@@ -1672,13 +1717,20 @@ run_install() {
   check_prefix
   remember_location
   if [ -n "$PACKAGE_CHANNEL" ]; then run_package_install; return; fi
+  ! in_app || trap source_update_exit EXIT
+  [ -n "${LOCALDOT_UPDATE_RESTORE:-}" ] || update_stage prepare
   prepare_prerequisites
   check_prerequisites
   check_port
   if [ "${LOCALDOT_UPDATE_SHUTDOWN:-}" = 1 ]; then
     # Only the explicitly confirmed UI install sets this. Checks/downloads never stop services.
+    update_stage stop
     stop_services
     unset LOCALDOT_UPDATE_SHUTDOWN
+    if [ -d "$APP/.git" ]; then
+      LOCALDOT_UPDATE_RESTORE=$(git -C "$APP" rev-parse HEAD)
+      export LOCALDOT_UPDATE_RESTORE
+    fi
   fi
   if [ "${LOCALDOT_INSTALL_STAGE:-}" != checked-out ] || [ ! -d "$APP/.git" ]; then
     sync_source
@@ -1704,15 +1756,53 @@ run_install() {
   step "Starting localDot"
   write_services
   install_command
+  update_stage start
   start_services "$KEYD_CHANGED" "$DAEMON_CHANGED"
   write_state
   refresh_dots
   finish
 }
 
+# A source update stops the app before it rebuilds in place, so a failure has to put the commit
+# that was running back, however long that takes.
+restore_source() {
+  local commit=${LOCALDOT_UPDATE_RESTORE:-}
+  stop_services
+  KEYD_CHANGED=0
+  if [ -n "$commit" ] && [ "$(git -C "$APP" rev-parse HEAD)" != "$commit" ]; then
+    git -C "$APP" -c advice.detachedHead=false checkout --quiet --detach "$commit" || return 1
+    COMMIT=$commit BUILT_COMMIT=""
+    build_app || return 1
+    build_keyd || return 1
+    write_services
+    start_services "$KEYD_CHANGED" 1 || return 1
+    write_state
+    return
+  fi
+  start_services 0 1
+}
+
+source_update_exit() {
+  local result=$? restored=false
+  trap - EXIT
+  set +e
+  if [ "$result" = 0 ]; then
+    update_stage done
+    exit 0
+  fi
+  if [ -n "${LOCALDOT_UPDATE_RESTORE:-}" ]; then
+    warn "The update didn't finish. Restoring the version that was running; your data is kept."
+    if (restore_source); then restored=true; else warn "Run localdot up to start localDot again."; fi
+  fi
+  update_stage failed "$restored"
+  exit "$result"
+}
+
 # Every dot runs this installation: after an update, each is given the new services and restarts.
 refresh_dots() {
-  cli dots refresh || warn "Your other dots couldn't all be updated. Restart them with: localdot up --dot <name>"
+  local limit=""
+  ! in_app || limit=${UPDATE_CHECK_SECONDS:-300}
+  CLI_SECONDS=$limit cli dots refresh || warn "Your other dots couldn't all be updated. Restart them with: localdot up --dot <name>"
 }
 
 run_uninstall() {
@@ -1779,6 +1869,7 @@ run_command() {
   fi
   case "$COMMAND" in
   up)
+    [ -z "${PACKAGE_CHANNEL:-}" ] || recover_package_swap
     start_services 0 0
     wait_ready
     show_link
@@ -1838,8 +1929,19 @@ prepare_package() {
   PACKAGE_SCRATCH=$scratch
   # A failed or interrupted attempt owns only its private staging directory. An update started
   # from the app names the archive it downloaded; the verifier uses it only if it still matches.
-  if ! "$NODE_DIR/bin/node" "$bootstrap" prepare "$PACKAGE_CHANNEL" "$NODE_PLATFORM" "$scratch" "$scratch/app" "$OPT_PACKAGE_VERSION" "${LOCALDOT_PACKAGE_ARCHIVE:-}"; then
+  update_stage verify
+  local verdict=0
+  "$NODE_DIR/bin/node" "$bootstrap" prepare "$PACKAGE_CHANNEL" "$NODE_PLATFORM" "$scratch" "$scratch/app" "$OPT_PACKAGE_VERSION" "${LOCALDOT_PACKAGE_ARCHIVE:-}" || verdict=$?
+  if [ "$verdict" != 0 ]; then
     rm -rf "$scratch"
+    # What the verifier's exit code names (scripts/distribution/package-download.ts).
+    case "$verdict" in
+    3) UPDATE_PROBLEM=network ;;
+    4) UPDATE_PROBLEM=stalled ;;
+    5) UPDATE_PROBLEM=disk ;;
+    6) UPDATE_PROBLEM=verify ;;
+    7) UPDATE_PROBLEM=channel ;;
+    esac
     die "The packaged download could not be prepared. Your existing app and computer data are kept."
   fi
   PACKAGE_STAGE=$scratch/app
@@ -1855,15 +1957,85 @@ prepare_package() {
       continue
     fi
     step "Computer image: $role (Docker shows progress for each layer)"
-    docker pull "$image" || die "Couldn't download the $role image. Rerun setup to reuse completed downloads; the current app is kept."
+    update_stage images
+    pull_package_image "$image" || die "Couldn't download the $role image. Rerun setup to reuse completed downloads; the current app is kept."
   done
+}
+
+# Nobody reads Docker's own words in an update from the app, so they are read here for the reason.
+pull_package_image() {
+  if ! in_app; then
+    docker pull "$1"
+    return
+  fi
+  local words status=0
+  words=$(docker pull "$1" 2>&1) || status=$?
+  printf '%s\n' "$words"
+  [ "$status" != 0 ] || return 0
+  case "$words" in
+  *"no space left"* | *"not enough space"* | *"disk quota"*) UPDATE_PROBLEM=disk ;;
+  *"Cannot connect to the Docker daemon"* | *"Is the docker daemon running"*) UPDATE_PROBLEM=docker ;;
+  *) UPDATE_PROBLEM=network ;;
+  esac
+  return "$status"
+}
+
+# A record of the swap under way, so an installer killed part-way (kill -9, a power cut) can be
+# undone: by the watcher beside it, or else on the next localdot up or install. A daemon that comes
+# up in the meantime clears it, since it has no need of undoing.
+swap_begin() {
+  local installer=$$ journal=$PREFIX/.package-swap
+  printf '%s\n' "$PACKAGE_ROLLBACK" >"$journal.new"
+  mv -f "$journal.new" "$journal"
+  (
+    trap - EXIT
+    trap '' HUP INT TERM
+    set +e
+    while [ -f "$journal" ] && kill -0 "$installer" 2>/dev/null; do sleep 1; done
+    [ -f "$journal" ] || exit 0
+    # A last look: the installer may have just finished.
+    sleep 1
+    [ -f "$journal" ] || exit 0
+    UPDATE_PROBLEM=interrupted
+    # The lock names the dead installer, which would let another one start on top of this.
+    sh -c 'echo $PPID' >"$PREFIX/.package-install.lock/pid" 2>/dev/null
+    recover_package_swap
+    rm -f "$PREFIX/.package-install.lock/pid"
+    rmdir "$PREFIX/.package-install.lock" 2>/dev/null || true
+    if [ "${PACKAGE_RESTORED:-0}" = 1 ]; then update_stage failed true; else update_stage failed false; fi
+  ) </dev/null &
+  # The watcher's own pid, so a daemon can tell an undoing still to come from one that never will.
+  printf '%s\n%s\n' "$PACKAGE_ROLLBACK" "$!" >"$journal.new"
+  mv -f "$journal.new" "$journal"
+}
+
+swap_end() { rm -f "$PREFIX/.package-swap"; }
+
+recover_package_swap() {
+  local journal=$PREFIX/.package-swap rollback
+  [ -f "$journal" ] || return 0
+  IFS= read -r rollback <"$journal" || true
+  case "$rollback" in
+  "$RUNTIME"/.rollback.*) ;;
+  *)
+    rm -f "$journal"
+    return 0
+    ;;
+  esac
+  PACKAGE_ROLLBACK=$rollback PACKAGE_PENDING=1 PACKAGE_MOVED=0 PACKAGE_ACTIVE=0 KEYD_STOPPED=1
+  if [ -d "$PREFIX/app.previous" ]; then
+    PACKAGE_MOVED=1
+    [ ! -d "$APP" ] || PACKAGE_ACTIVE=1
+  fi
+  rollback_package
+  rm -f "$journal"
 }
 
 rollback_package() {
   [ "${PACKAGE_PENDING:-0}" = 1 ] || return 0
   PACKAGE_PENDING=0
   warn "The new app did not finish starting. Restoring the previous installation; your computer data is kept."
-  stop_services
+  if [ "${KEYD_STOPPED:-1}" = 1 ]; then stop_services; else stop_daemon; fi
   if [ "${PACKAGE_ACTIVE:-0}" = 1 ]; then mv "$APP" "$PACKAGE_ROLLBACK/failed-app"; fi
   if [ "${PACKAGE_MOVED:-0}" = 1 ]; then mv "$PREFIX/app.previous" "$APP"; fi
   local name file
@@ -1871,17 +2043,23 @@ rollback_package() {
     case "$name" in keyd) file=$KEYD_FILE ;; daemon) file=$DAEMON_FILE ;; state) file=$PREFIX/install.env ;; binary) file=$PREFIX/bin/keyd ;; esac
     if [ -f "$PACKAGE_ROLLBACK/$name" ]; then cp -p "$PACKAGE_ROLLBACK/$name" "$file"; else rm -f "$file"; fi
   done
-  if [ -f "$PACKAGE_ROLLBACK/state" ]; then start_services 1 1 || warn "Run localdot up to start the restored app."; fi
+  if [ -f "$PACKAGE_ROLLBACK/state" ]; then
+    if start_services "${KEYD_STOPPED:-1}" 1; then PACKAGE_RESTORED=1; else warn "Run localdot up to start the restored app."; fi
+  fi
 }
 
 package_exit() {
-  local result=$?
+  local result=$? restored=false
   trap - EXIT
   set +e
   rollback_package
+  [ "${PACKAGE_RESTORED:-0}" != 1 ] || restored=true
+  swap_end
   [ -z "${PACKAGE_SCRATCH:-}" ] || rm -rf "$PACKAGE_SCRATCH"
   rm -f "$PREFIX/.package-install.lock/pid"
   rmdir "$PREFIX/.package-install.lock" 2>/dev/null || true
+  # Last, so a retry on reading it doesn't find the lock still held.
+  [ "$result" = 0 ] || update_stage failed "$restored"
   exit "$result"
 }
 
@@ -1895,8 +2073,14 @@ activate_package() {
     [ ! -f "$file" ] || cp -p "$file" "$PACKAGE_ROLLBACK/$name"
   done
   if [ -e "$backup" ]; then rm -rf "$backup"; fi
+  # An unchanged key service keeps running: restarting it would lock a passphrase vault, and can
+  # upset a computer that is running.
+  KEYD_STOPPED=1
+  if [ -f "$PREFIX/bin/keyd" ] && cmp -s "$PREFIX/bin/keyd" "$PACKAGE_STAGE/keyd"; then KEYD_STOPPED=0; fi
   PACKAGE_PENDING=1 PACKAGE_MOVED=0 PACKAGE_ACTIVE=0
-  stop_services
+  swap_begin
+  update_stage stop
+  if [ "$KEYD_STOPPED" = 1 ]; then stop_services; else stop_daemon; fi
   if [ -d "$APP" ]; then mv "$APP" "$backup"; PACKAGE_MOVED=1; fi
   mv "$PACKAGE_STAGE" "$APP"
   PACKAGE_ACTIVE=1
@@ -1909,7 +2093,9 @@ activate_package() {
   else mv "$PREFIX/bin/keyd.new" "$PREFIX/bin/keyd"; KEYD_CHANGED=1; fi
   configure_remote_access
   write_services
+  [ "$KEYD_CHANGED" != 1 ] || KEYD_STOPPED=1
   install_command
+  update_stage start
   start_services "$KEYD_CHANGED" "$DAEMON_CHANGED"
   write_state
   refresh_dots
@@ -1925,12 +2111,18 @@ run_package_install() {
     local owner=""
     [ ! -f "$lock/pid" ] || owner=$(cat "$lock/pid")
     case "$owner" in '' | *[!0-9]*) die "An incomplete installation lock remains at $lock. Check no installer is running before removing it." ;; esac
-    if kill -0 "$owner" 2>/dev/null; then die "Another localDot installation is already running. Wait for it to finish."; fi
+    if kill -0 "$owner" 2>/dev/null; then
+      UPDATE_PROBLEM=busy
+      update_stage failed
+      die "Another localDot installation is already running. Wait for it to finish."
+    fi
     rm -f "$lock/pid"; rmdir "$lock" || die "Couldn't clear the previous installation lock."
     mkdir "$lock" || die "Another installer started; wait for it to finish."
   fi
   printf '%s\n' "$$" > "$lock/pid"
   trap package_exit EXIT
+  update_stage prepare
+  recover_package_swap
   prepare_prerequisites
   check_prerequisites
   check_port
@@ -1940,7 +2132,9 @@ run_package_install() {
   activate_package
   finish
   PACKAGE_PENDING=0
+  swap_end
   rm -rf "$PACKAGE_ROLLBACK"
+  update_stage done
 }
 
 main() {

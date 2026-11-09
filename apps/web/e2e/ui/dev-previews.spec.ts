@@ -274,6 +274,33 @@ test("a computer without the preview service says to update it, and a chip opens
   expect(daemon.requests).toEqual([]);
 });
 
+test("Update from the previews panel follows the same steps as Settings", async ({ page, ui }) => {
+  await previewsDaemon(page, {
+    ...READY,
+    state: "needs-update",
+    message: "Update your computer to open the servers dot starts in it.",
+    addresses: [],
+  });
+  const fixture = await ui.open("done");
+  expect((await page.request.post(`${fixture.origin}/__qa/update?hold=1`)).ok()).toBe(true);
+  const panel = await previewsTab(page);
+  const answered = page.waitForResponse(
+    (r) => r.url().endsWith("/update") && r.request().method() === "POST",
+  );
+  await panel.getByRole("button", { name: "Update", exact: true }).click();
+  await answered;
+  const notices = page.getByRole("region", { name: /notifications/i });
+  await expect(notices.getByText(/Updating your computer · Step 1 of 6/)).toBeVisible();
+  expect(
+    (
+      await page.request.post(
+        `${fixture.origin}/__qa/update/step?stage=keep&share=0.3&detail=Comparing+it+with+the+new+version`,
+      )
+    ).ok(),
+  ).toBe(true);
+  await expect(notices.getByText(/Step 3 of 6 · Comparing it with the new version/)).toBeVisible();
+});
+
 test("without Tailscale a chip says how to turn it on, opens no tab, and leads to Settings", async ({
   page,
   ui,

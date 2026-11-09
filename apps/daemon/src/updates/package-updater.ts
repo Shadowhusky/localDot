@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { lstat, mkdir, mkdtemp, open, readFile, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, open, readdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -19,10 +19,11 @@ import {
 } from "../../../cli/src/install/prepare-images.ts";
 import { privateRecordStore } from "../../../cli/src/install/private-record.ts";
 import { SetupFailure } from "../../../cli/src/install/setup-failure.ts";
-import { dockerSocketPath } from "../cells/docker.ts";
+import { findDockerSocket } from "../doctor-socket.ts";
 import { freeBytes } from "../recorder/disk.ts";
 import { AppUpdater } from "./app-updater.ts";
-import { runPreparation } from "./progress.ts";
+import { installerStatus, installerStatusFile } from "./installer-status.ts";
+import { runPreparation, stallGuard, UpdateFailure } from "./progress.ts";
 import { pickNotes, readReleaseNotes, releaseNote, versionsBetween } from "./release-notes.ts";
 
 const exec = promisify(execFile);
@@ -30,6 +31,15 @@ const exec = promisify(execFile);
 export const IMAGE_ROOM = 10 * 1024 ** 3;
 type Pins = Record<(typeof IMAGE_ROLES)[number], PlatformImagePin>;
 const ARCHITECTURE = process.arch === "arm64" ? "arm64" : "amd64";
+// A package's own download has its stall timer in the verifier; this one is for Docker's pulls,
+// whose layers can be quiet while they extract.
+const VERIFIER_STALL_MS = 5 * 60_000;
+const IMAGE_STALL_MS = 5 * 60_000;
+// A download older than this is what a crash left behind. A fresher one may be another dot's.
+const ABANDONED_MS = 24 * 3_600_000;
+// The engine the app itself uses, which on a Mac may not be the default socket.
+export const imageSocket = (...args: Parameters<typeof findDockerSocket>) =>
+  findDockerSocket(...args).path;
 const pullImages = (
   pins: Pins,
   signal: AbortSignal,
@@ -37,15 +47,21 @@ const pullImages = (
 ) =>
   prepareImages(
     pins,
-    installImageClient(dockerSocketPath(), ARCHITECTURE, { anyEngine: true }),
+    installImageClient(imageSocket(), ARCHITECTURE, { anyEngine: true }),
     signal,
     report,
   );
+const IMAGE_PROBLEMS = {
+  "network-unavailable": "network",
+  "storage-read-only": "disk",
+  "permission-denied": "docker",
+  "docker-unavailable": "docker",
+} as const;
 
 export async function packageAppUpdater(
   home: string,
   prefix: string,
-  installWait: () => string | null | Promise<string | null>,
+  installWait: (hold?: boolean) => string | null | Promise<string | null>,
   settled: () => void,
   deps = { exec, spawn, platform: process.platform, freeBytes, images: pullImages },
 ): Promise<AppUpdater> {
@@ -81,20 +97,37 @@ export async function packageAppUpdater(
       })
       .nullable();
     const prepared = privateRecordStore(home, "prepared-package-update.json", Prepared);
+    const swapJournal = join(prefix, ".package-swap");
+    const installer = installerStatus(home, swapJournal);
+    const attempts = privateRecordStore(
+      home,
+      "app-update-attempt.json",
+      AppUpdateAttempt.nullable(),
+    );
     // A successful install restarts this daemon before the old install() can clean up.
     // Remove only its recorded staging directory once that exact version is running.
-    try {
-      const saved = await prepared.read();
-      if (saved && saved.version === record.version) {
-        await privateDirectory(downloads);
-        const staging = join(downloads, saved.directory);
-        await privateDirectory(staging);
-        await rm(staging, { recursive: true, force: true });
-        await prepared.save(null);
+    const removeInstalled = async () => {
+      try {
+        const saved = await prepared.read();
+        if (saved && saved.version === record.version) {
+          await privateDirectory(downloads);
+          const staging = join(downloads, saved.directory);
+          await privateDirectory(staging);
+          await rm(staging, { recursive: true, force: true });
+          await prepared.save(null);
+        }
+      } catch {
+        console.warn("The completed update's temporary download could not be removed.");
       }
-    } catch {
-      console.warn("The completed update's temporary download could not be removed.");
+    };
+    // Until the installer's last checks pass it can still roll back, and retry from this download.
+    const state = await installer.read();
+    if (!state?.running) {
+      await removeInstalled();
+      // A daemon is running, so a swap the installer never got to finish needs no undoing.
+      await rm(swapJournal, { force: true }).catch(() => {});
     }
+    await removeAbandoned(downloads, (await prepared.read())?.directory);
     const preparedDirectory = async (version: string) => {
       const saved = await prepared.read();
       if (saved?.version !== version) return null;
@@ -129,9 +162,11 @@ export async function packageAppUpdater(
     return new AppUpdater({
       version: record.version,
       ...privateRecordStore(home, "package-app-update.json", AppUpdateRecord),
-      attempts: privateRecordStore(home, "app-update-attempt.json", AppUpdateAttempt.nullable()),
+      attempts,
       installOnLaunchSupported: false,
       installWait,
+      installer,
+      installed: removeInstalled,
       async latest(signal) {
         const { stdout } = await deps.exec(
           process.execPath,
@@ -180,9 +215,10 @@ export async function packageAppUpdater(
                   join(staging, "app"),
                   version,
                 ],
-                env: process.env,
+                env: { ...process.env, LOCALDOT_DOWNLOAD_DIR: join(home, "update-download") },
                 output: log.fd,
-                timeoutMs: 30 * 60_000,
+                timeoutMs: 60 * 60_000,
+                stallMs: VERIFIER_STALL_MS,
               },
               signal,
               progress,
@@ -197,12 +233,17 @@ export async function packageAppUpdater(
             const images = imageShare();
             progress({ step: "images", share: 0 });
             try {
-              await deps.images(pins, signal, (report) => {
-                const share = images(report);
-                if (share) progress({ step: "images", ...share });
-              });
+              await stallGuard(signal, IMAGE_STALL_MS, (active, touch) =>
+                deps.images(pins, active, (report) => {
+                  touch();
+                  const share = images(report);
+                  if (share) progress({ step: "images", ...share });
+                }),
+              );
             } catch (error) {
-              if (!(error instanceof SetupFailure && error.code === "storage-full")) throw error;
+              if (!(error instanceof SetupFailure)) throw error;
+              if (error.code !== "storage-full")
+                throw new UpdateFailure(IMAGE_PROBLEMS[error.code]);
               imagesDeferred = true;
             }
           }
@@ -239,6 +280,7 @@ export async function packageAppUpdater(
             HOME: process.env.HOME ?? "",
             PATH: process.env.PATH ?? "/usr/bin:/bin",
             LOCALDOT_UPDATE_SHUTDOWN: "1",
+            LOCALDOT_UPDATE_STATUS: installerStatusFile(home),
             // Checked again against the signed catalog; a mismatch is downloaded afresh.
             LOCALDOT_PACKAGE_ARCHIVE: join(staging, "app.tgz"),
           };
@@ -290,6 +332,18 @@ export async function packageAppUpdater(
       },
     });
   } catch {
-    return new AppUpdater(null);
+    return new AppUpdater(null, "install-record");
   }
+}
+
+async function removeAbandoned(downloads: string, keep: string | undefined) {
+  try {
+    for (const name of await readdir(downloads)) {
+      if (!name.startsWith(".prepare-") || name === keep) continue;
+      const path = join(downloads, name);
+      const st = await lstat(path);
+      if (st.isDirectory() && Date.now() - st.mtimeMs > ABANDONED_MS)
+        await rm(path, { recursive: true, force: true });
+    }
+  } catch {}
 }

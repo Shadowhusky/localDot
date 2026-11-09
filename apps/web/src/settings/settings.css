@@ -866,6 +866,11 @@
   color: var(--color-fg-1);
 }
 
+.settings-update-overlay {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
+}
+
 .settings-update-steps .settings-step {
   min-height: 0;
   padding: var(--spacing) 0;

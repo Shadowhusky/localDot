@@ -332,6 +332,16 @@ it("merges both package databases and rebuilds the loader's index once the new f
   expect(f.events).toEqual(["plan", "run", "copy", "plan", "run"]);
 });
 
+it("gives a large computer's scans and copies as long as its commits", async () => {
+  const f = migrating();
+  await new SystemMigration({ request: f.request } as never, "/unused").prepare(record, target);
+  const waits = f.request.mock.calls
+    .map(([req]) => req as DockerRequest)
+    .filter((req) => req.path.endsWith("/wait"));
+  expect(waits.length).toBeGreaterThan(0);
+  for (const wait of waits) expect(wait.timeoutMs).toBe(20 * 60_000);
+});
+
 it("refuses before touching a clone when both sides marked a package differently", async () => {
   const f = migrating({
     marks: "Package: libshared\nArchitecture: arm64\nAuto-Installed: 1\nX-From: image\n\n",

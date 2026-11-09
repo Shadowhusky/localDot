@@ -52,3 +52,29 @@ it("sends progress and notes only to pages that ask, as older pages refuse unkno
     notes: [],
   });
 });
+it("hands Update now to the updater, and answers a held-back one with its reason", async () => {
+  const updater = new AppUpdater(null);
+  const update = vi.spyOn(updater, "update").mockResolvedValue();
+  const app = new Hono();
+  appUpdateRoutes(app, updater);
+  const post = (body: unknown) =>
+    app.request("/api/app-update/update", { method: "POST", body: JSON.stringify(body) });
+  expect((await post({})).status).toBe(400);
+  expect(update).not.toHaveBeenCalled();
+  expect((await post({ confirmShutdown: true })).status).toBe(202);
+  update.mockRejectedValue(new Error("Finish or stop the task before updating localDot."));
+  const refused = await post({ confirmShutdown: true });
+  expect(refused.status).toBe(409);
+  expect(await refused.text()).toBe("Finish or stop the task before updating localDot.");
+});
+it("leaves notes out of the fast polls a page keeps its copy through", async () => {
+  const app = new Hono();
+  appUpdateRoutes(app, new AppUpdater(null));
+  expect(await (await app.request("/api/app-update?v=2")).json()).toHaveProperty("notes");
+  expect(await (await app.request("/api/app-update?v=2&notes=0")).json()).not.toHaveProperty(
+    "notes",
+  );
+  const legacy = await (await app.request("/api/app-update")).json();
+  expect(legacy).not.toHaveProperty("updating");
+  expect(legacy).not.toHaveProperty("unsupported");
+});

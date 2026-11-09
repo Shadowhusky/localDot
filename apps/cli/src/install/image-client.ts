@@ -46,14 +46,20 @@ export function installImageClient(
     path: string,
     signal: AbortSignal,
     pulling: boolean,
-    work: (body: IncomingMessage, active: AbortSignal) => Promise<T>,
+    work: (body: IncomingMessage, active: AbortSignal, touch: () => void) => Promise<T>,
   ): Promise<T> {
     signal.throwIfAborted();
     const controller = new AbortController(),
       abort = () => controller.abort(signal.reason);
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
-    const timer = setTimeout(() => controller.abort(fail()), pulling ? 15 * 60_000 : 10_000);
+    // A big image on a slow line takes as long as it takes, as long as it keeps coming.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const touch = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(fail()), pulling ? 15 * 60_000 : 10_000);
+    };
+    touch();
     let req: ReturnType<typeof request> | undefined,
       response: IncomingMessage | undefined,
       closed: Promise<void> | undefined;
@@ -87,7 +93,7 @@ export function installImageClient(
         (length !== undefined && (!/^[0-9]+$/.test(length) || Number(length) > max))
       )
         throw fail();
-      const result = await work(response, controller.signal);
+      const result = await work(response, controller.signal, touch);
       controller.signal.throwIfAborted();
       if (!response.complete) throw fail();
       return result;
@@ -101,6 +107,13 @@ export function installImageClient(
         ["ECONNRESET", "ETIMEDOUT", "EAI_AGAIN"].includes(String(error.code))
       )
         throw new SetupFailure("network-unavailable");
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        ["ENOENT", "ECONNREFUSED"].includes(String(error.code))
+      )
+        throw new SetupFailure("docker-unavailable");
       throw fail();
     } finally {
       response?.destroy();
@@ -171,11 +184,12 @@ export function installImageClient(
         `/${DOCKER_API}/images/create?${query}`,
         signal,
         true,
-        async (response, active) => {
+        async (response, active, touch) => {
           if (response.statusCode !== 200) throw fail();
           let received = 0;
           async function* body() {
             for await (const chunk of response) {
+              touch();
               received += chunk.length;
               yield Buffer.from(chunk);
             }

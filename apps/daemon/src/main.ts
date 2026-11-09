@@ -24,6 +24,7 @@ import { BrowserStreams } from "./browser/streams.ts";
 import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
 import { BrowserRecovery, credentialsChanged } from "./cells/browser-recovery.ts";
+import { pullPinnedImages } from "./cells/computer-image-pull.ts";
 import { ComputerSizes } from "./cells/computer-size.ts";
 import { ComputerUpdates, updateComputer } from "./cells/computer-update.ts";
 import { DockerClient } from "./cells/docker.ts";
@@ -239,7 +240,8 @@ const updates = new ComputerUpdates({
   stream,
   relay,
   preflightSystem: (record, target) => migration.preflight(record, target),
-  migrateSystem: (record, target) => migration.prepare(record, target),
+  migrateSystem: (record, target, report) => migration.prepare(record, target, report),
+  pull: pullPinnedImages,
 });
 const orchestrator = new CellOrchestrator({
   updates,
@@ -813,12 +815,14 @@ const dots = new DotsService({
   origins: configuredAccessOrigins,
 });
 // One installation runs every dot on this computer, so an update restarts them all together.
-const installWait = async () => {
+const installWait = async (hold = true) => {
   const busy = await dots.busyOthers();
   if (busy.length)
     return `Finish or stop the tasks on ${busy.join(" and ")} before updating localDot.`;
-  if (working()) return "Finish or stop the task before updating localDot.";
-  appInstalling = true;
+  if (orchestrator.list().some((cell) => live.busy(cell.id)))
+    return "Finish or stop the task before updating localDot.";
+  if (working()) return "Your computer is starting, stopping or updating. Try again in a moment.";
+  if (hold) appInstalling = true;
   return null;
 };
 const installSettled = () => {

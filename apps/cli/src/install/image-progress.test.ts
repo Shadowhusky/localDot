@@ -70,6 +70,30 @@ it("does not forward hostile status/layer strings or unsafe counters, and thrott
   await readImagePullProgress(stream([body, body, body]), signal(), report);
   expect(report.mock.calls).toEqual([[{ phase: "pulling" }]]);
 });
+it("always says which layers wait, and when each of them first moves", async () => {
+  const line = (status: string, id: string, extra = {}) =>
+    Buffer.from(`${JSON.stringify({ status, id, ...extra })}\n`);
+  const seen: unknown[] = [];
+  await readImagePullProgress(
+    (async function* () {
+      yield line("Pulling fs layer", "a");
+      yield line("Waiting", "b");
+      yield line("Downloading", "c", { progressDetail: { current: 1, total: 2 } });
+      yield line("Downloading", "a", { progressDetail: { current: 1, total: 2 } });
+      yield line("Downloading", "a", { progressDetail: { current: 2, total: 2 } });
+      yield line("Download complete", "b");
+    })(),
+    new AbortController().signal,
+    (progress) => seen.push(progress),
+  );
+  expect(seen).toEqual([
+    { phase: "pulling", layer: "a", queued: true },
+    { phase: "pulling", layer: "b", queued: true },
+    { phase: "downloading", layer: "a", currentBytes: 1, totalBytes: 2 },
+    { phase: "pulling", layer: "b" },
+  ]);
+});
+
 it("drains the input iterator on cancellation", async () => {
   const controller = new AbortController(),
     reason = new Error("stop");

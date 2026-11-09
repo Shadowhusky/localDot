@@ -28,6 +28,12 @@ export interface CurtainProps {
   waking: boolean;
   // The computer is moving onto a new version, from its stop until it is ready again.
   updating?: boolean;
+  // Which step of that it is on, in words, and how long it is taking when that is worth saying.
+  updateLine?: string | null;
+  updateNote?: string | null;
+  updateBounds?: [number, number] | null;
+  // Why the last update didn't work, while the computer it left is off.
+  updateFailure?: string | null;
   // The computer's own words, for a failure.
   caption: string;
   // Why the last request was refused, in place of the usual words.
@@ -91,6 +97,10 @@ export function Curtain({
   first,
   waking,
   updating = false,
+  updateLine,
+  updateNote,
+  updateBounds,
+  updateFailure,
   caption,
   notice,
   action,
@@ -130,16 +140,30 @@ export function Curtain({
       ? freshStartCopy(fresh)
       : recovering
         ? {
-            title: "Your computer needs a fresh start",
+            title: replace.busy ? "Replacing your computer" : "Your computer needs a fresh start",
             sub:
               replace.note ??
-              "An earlier step couldn't be confirmed. Recovery preserves your installed apps, settings and files.",
-            progress: false,
+              (replace.busy
+                ? "Saving the old computer. Your files are kept."
+                : "An earlier step couldn't be confirmed. Recovery preserves your installed apps, settings and files."),
+            clock: replace.busy,
+            progress: replace.busy,
+            kind: "first-start",
             button: { label: "Replace computer" },
           }
         : noPicture
           ? noPictureCopy(noPicture)
-          : curtainCopy(phase, { first, waking, updating, caption, notice, action });
+          : curtainCopy(phase, {
+              first,
+              waking,
+              updating,
+              updateLine,
+              updateNote,
+              updateFailure,
+              caption,
+              notice,
+              action,
+            });
   const enabled =
     runtimeProblem || noPicture ? true : recovering ? replace.enabled : action?.enabled;
   const anyway =
@@ -185,7 +209,13 @@ export function Curtain({
           data-progress={copy?.progress || undefined}
           aria-hidden={(!copy && !onReload) || undefined}
         >
-          <CurtainProgress timing={timing && { ...timing, step }} now={now} done={ready} />
+          <CurtainProgress
+            timing={
+              timing && { ...timing, step, ...(updateBounds ? { bounds: updateBounds } : {}) }
+            }
+            now={now}
+            done={ready}
+          />
           {!copy && onReload && <Button onClick={onReload}>Try again</Button>}
           {fresh ? (
             <FreshStartButton
@@ -281,17 +311,31 @@ function curtainCopy(
     first,
     waking,
     updating,
+    updateLine,
+    updateNote,
+    updateFailure,
     caption,
     notice,
     action,
-  }: Pick<CurtainProps, "first" | "waking" | "updating" | "caption" | "notice" | "action">,
+  }: Pick<
+    CurtainProps,
+    | "first"
+    | "waking"
+    | "updating"
+    | "updateLine"
+    | "updateNote"
+    | "updateFailure"
+    | "caption"
+    | "notice"
+    | "action"
+  >,
 ): Copy | null {
   const turnOn = { label: "Turn on", icon: "power" as const };
   if (phase === "checking") return null;
   if (updating && (STARTING.has(phase) || phase === "stopping"))
     return {
       title: "Updating your computer",
-      sub: "Your files and sign-ins stay.",
+      sub: updateNote ?? `${updateLine ? `${updateLine}. ` : ""}Your files and sign-ins stay.`,
       clock: true,
       progress: true,
       kind: "update",
@@ -334,6 +378,13 @@ function curtainCopy(
       progress: true,
       kind: "stop",
       button: turnOn,
+    };
+  if (updateFailure && (phase === "failed" || phase === "stopped"))
+    return {
+      title: "Your computer wasn't updated",
+      sub: updateFailure,
+      progress: false,
+      button: phase === "failed" ? { label: "Start again" } : turnOn,
     };
   if (phase === "failed")
     return action?.kind === "stop"

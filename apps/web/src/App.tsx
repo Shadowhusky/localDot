@@ -71,11 +71,16 @@ import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { stopNotice, stoppedOff, useStopToast } from "./agent/useStopToast.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
 import { deliverText } from "./agent/write-api.ts";
+import { stageBounds } from "./cells/computer-update-stage.ts";
 import { replacementNotice } from "./cells/errors.ts";
 import { type HudActionKind, hudFor, withScreenHud } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
-import { useComputerUpdate, useUpdateNotice } from "./cells/useComputerUpdate.ts";
+import {
+  useComputerUpdate,
+  useUpdateNotice,
+  useUpdateProgressNotice,
+} from "./cells/useComputerUpdate.ts";
 import { useFreshStart } from "./cells/useFreshStart.ts";
 import { useRuntime } from "./cells/useRuntime.ts";
 import { presetOf } from "./copy/autonomy.ts";
@@ -156,6 +161,7 @@ import {
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { nextChange, SessionNowContext, useNowMs } from "./session/useNowMs.ts";
 import { useSeenReporting } from "./session/useSeenReporting.ts";
+import { AppUpdateOverlay } from "./settings/AppUpdateSettings.tsx";
 import { autoDotReason } from "./settings/AutoDot.tsx";
 import { matchingKeys } from "./settings/choices.ts";
 import { subscription } from "./settings/chooser.ts";
@@ -1341,6 +1347,10 @@ function Theatre({ api }: { api: ApiClient }) {
     setSettingsAt((previous) => ({ section: "computer", request: previous.request + 1 }));
   });
   useUpdateNotice(cell, hud.phase === "live" && !updateWait, computerUpdate);
+  useUpdateProgressNotice(cell, computerUpdate, () => {
+    settings.show();
+    setSettingsAt((previous) => ({ section: "computer", request: previous.request + 1 }));
+  });
   const taskStatus = agent.snapshot?.status;
   const recoveryWait =
     taskStatus === "paused" &&
@@ -2338,6 +2348,14 @@ function Theatre({ api }: { api: ApiClient }) {
       first={!cell && listed.length === 0}
       waking={pending === "start" || pending === "create"}
       updating={!!cell?.updating}
+      updateLine={computerUpdate.line}
+      updateNote={computerUpdate.note}
+      updateBounds={
+        cell?.updateProgress
+          ? stageBounds(cell.updateProgress.stage, cell.updateProgress.share)
+          : null
+      }
+      updateFailure={computerUpdate.failure?.message}
       caption={computer.caption}
       notice={error ?? stoppedOff(controls.stopStatus)}
       onReload={opening && openingSlow ? () => window.location.reload() : undefined}
@@ -2632,6 +2650,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 notices={<SafetyNotes safety={safety} agent={agent} visible={sheetsClosed} />}
               />
               <Toaster anchor={toastAnchor} />
+              <AppUpdateOverlay update={appUpdate} />
               {/* A phone has no top bar: New conversation waits in the top corner, beside the
                   island, whenever there is something to start afresh from, and the conversations
                   in the other, lit when one of them needs the user. */}
@@ -2834,7 +2853,7 @@ function Theatre({ api }: { api: ApiClient }) {
       names={names}
       dotLook={shown.lookAs}
       computerReady={cell?.state === "ready" && !cell.paused}
-      computerUpdating={!!cell?.updating}
+      computerUpdating={!!cell?.updating && cell.state !== "ready"}
       live={
         !viewedConversation && foot && !session.ended
           ? sentThinking
@@ -3368,6 +3387,7 @@ function Theatre({ api }: { api: ApiClient }) {
             <SafetyNotes safety={safety} agent={agent} visible={sheetsClosed} />
           </div>
           <Toaster anchor={toastAnchor} />
+          <AppUpdateOverlay update={appUpdate} />
           <PhoneBanner
             latest={attention.latest}
             viewing={viewing}

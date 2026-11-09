@@ -6,6 +6,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { sourceAppUpdater } from "./source-updater.ts";
 
 const roots: string[] = [];
+// The update takes a few steps before it spawns anything, which a busy machine stretches.
+const soon = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -127,4 +129,31 @@ it("shows the release notes the fetched commit adds, never ones the installed co
     { version: "0.1.0-rc.20", markdown: "## Fixes\n\n- Fixed in docs/releases/0.1.0-rc.20.md." },
   ]);
   expect(f.command.mock.calls.some(([, args]) => args.includes("checkout"))).toBe(false);
+});
+it("logs a source update and hands the installer a status file", async () => {
+  const f = await fixture("darwin");
+  const updater = await f.create();
+  await updater.check();
+  await updater.install();
+  await soon(() => expect(f.spawn).toHaveBeenCalled());
+  const options = (
+    f.spawn.mock.calls[0] as unknown as [string, string[], Record<string, never>]
+  )[2] as unknown as {
+    stdio: unknown[];
+    env: Record<string, string>;
+  };
+  expect(options.env.LOCALDOT_UPDATE_STATUS?.startsWith(f.home)).toBe(true);
+  expect(options.stdio[1]).toEqual(expect.any(Number));
+});
+it("says a bare source checkout runs from source, and a damaged install apart", async () => {
+  const bare = await sourceAppUpdater(
+    "/home",
+    undefined,
+    () => null,
+    () => {},
+  );
+  expect((await bare.status()).unsupported).toBe("source-checkout");
+  const f = await fixture();
+  await rm(join(f.prefix, "install.env"));
+  expect((await (await f.create()).status()).unsupported).toBe("install-record");
 });
