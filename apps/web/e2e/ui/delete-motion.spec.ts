@@ -586,26 +586,23 @@ test.describe("short lists", () => {
   const heightsOf = (item: Locator) =>
     item.evaluate(
       (each) =>
-        new Promise<number[]>((resolve) => {
-          const seen: number[] = [];
+        new Promise<{ t: number; top: number }[]>((resolve) => {
+          const seen: { t: number; top: number }[] = [];
           const tick = () => {
             if (!each.isConnected || seen.length > 600) resolve(seen);
             else {
-              seen.push(each.getBoundingClientRect().height);
+              seen.push({ t: performance.now(), top: each.getBoundingClientRect().height });
               requestAnimationFrame(tick);
             }
           };
           tick();
         }),
     );
-  const expectFolded = (heights: number[]) => {
-    const whole = heights[0] as number;
+  const expectFolded = (heights: { t: number; top: number }[]) => {
+    const whole = (heights[0] as { top: number }).top;
     expect(whole).toBeGreaterThan(20);
-    expect(heights.some((height) => height > 1 && height < whole - 1)).toBe(true);
-    expectNoJump(
-      heights.map((top, at) => ({ t: (at * 1000) / 60, top })),
-      "the row's height",
-    );
+    expect(heights.some(({ top }) => top > 1 && top < whole - 1)).toBe(true);
+    expectNoJump(heights, "the row's height");
   };
 
   test("a saved login folds away and the keys go to the one beside it", async ({ page, ui }) => {
