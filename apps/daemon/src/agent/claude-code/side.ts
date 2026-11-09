@@ -19,6 +19,11 @@ export const onlySideTools: CanUseTool = async (name, input, { mcpServer }) =>
     ? { behavior: "allow", updatedInput: input }
     : { behavior: "deny", message: "A side question can only read, with its own tools." };
 
+const Init = z.looseObject({
+  type: z.literal("system"),
+  subtype: z.literal("init"),
+  tools: z.array(z.string()),
+});
 const Assistant = z.looseObject({
   type: z.literal("assistant"),
   message: z.looseObject({
@@ -121,6 +126,9 @@ export function claudeCodeSideModel(
       try {
         for await (const message of query) {
           go.signal.throwIfAborted();
+          // A tool it offers that isn't a side tool is one a newer Claude Code switched on.
+          if (Init.safeParse(message).data?.tools.some((tool) => !SIDE_TOOLS.includes(tool)))
+            throw new ModelAnswerError(undefined, "Claude Code offered tools of its own");
           const said = Assistant.safeParse(message).data?.message;
           if (said) {
             for (const block of said.content)

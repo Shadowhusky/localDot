@@ -46,7 +46,7 @@ function go(more: Partial<SideGo> = {}) {
   } as unknown as SideGo;
   return { go: value, used, notes, call };
 }
-function listener(close = vi.fn(async () => {})) {
+function listener(close = vi.fn(async (): Promise<number | undefined> => undefined)) {
   return {
     close,
     open: vi.fn(
@@ -139,6 +139,63 @@ describe("a model billed per token", () => {
     await apiSideModel(role, "fast", l.open, fetch as never).run(asked.go);
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(l.close).toHaveBeenCalledOnce();
+  });
+
+  it("counts what keyd says it spent when the reply gave no usage", async () => {
+    const l = listener(vi.fn(async () => 0.2));
+    const fetch = vi.fn(async () =>
+      Response.json({
+        content: [{ type: "tool_use", id: "c", name: "finish", input: { status: "found" } }],
+      }),
+    );
+    const asked = go();
+    await apiSideModel(role, "fast", l.open, fetch as never).run(asked.go);
+    const usd = asked.used.mock.calls.reduce((sum, [usage]) => sum + (usage.usd ?? 0), 0);
+    expect(usd).toBeCloseTo(0.2);
+  });
+
+  it("counts a call that was cut short, by what keyd says it spent", async () => {
+    const l = listener(vi.fn(async () => 0.05));
+    const fetch = vi.fn(async () => {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    });
+    const asked = go();
+    await expect(
+      apiSideModel(role, "fast", l.open, fetch as never).run(asked.go),
+    ).rejects.toThrow();
+    const usd = asked.used.mock.calls.reduce((sum, [usage]) => sum + (usage.usd ?? 0), 0);
+    expect(usd).toBeCloseTo(0.05);
+  });
+
+  it("adds only what keyd counted beyond what the replies said", async () => {
+    const l = listener(vi.fn(async () => 0.15));
+    const fetch = vi.fn(async () =>
+      turn([{ type: "tool_use", id: "c", name: "finish", input: { status: "found" } }], 0, 0),
+    );
+    const asked = go();
+    const priced = {
+      ...role,
+      model: { ...role.model, inputUSDPerMTok: 1_000_000, outputUSDPerMTok: 0 },
+    };
+    fetch.mockImplementationOnce(async () =>
+      Response.json({
+        content: [{ type: "tool_use", id: "c", name: "finish", input: { status: "found" } }],
+        usage: { input_tokens: 0.1, output_tokens: 0 },
+      }),
+    );
+    await apiSideModel(priced, "fast", l.open, fetch as never).run(asked.go);
+    const usd = asked.used.mock.calls.reduce((sum, [usage]) => sum + (usage.usd ?? 0), 0);
+    expect(usd).toBeCloseTo(0.15);
+  });
+
+  it("never counts less than the replies said", async () => {
+    const l = listener(vi.fn(async () => 0));
+    const fetch = vi.fn(async () =>
+      turn([{ type: "tool_use", id: "c", name: "finish", input: { status: "found" } }]),
+    );
+    const asked = go();
+    await apiSideModel(role, "fast", l.open, fetch as never).run(asked.go);
+    expect(asked.used).toHaveBeenCalledTimes(1);
   });
 
   it("gives a flat plan no money to count and no limit to keyd", async () => {

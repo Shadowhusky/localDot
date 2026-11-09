@@ -21,6 +21,7 @@ export interface QuickModelDeps {
     | "modelAdmission"
     | "setModelAdmission"
     | "endTask"
+    | "cell"
   >;
   // A keyd listener port no computer or brain uses, and its return.
   ports: { reserve(): number; release(port: number): void };
@@ -89,12 +90,18 @@ export class QuickModel {
     const { keyd } = this.deps;
     const port = this.deps.ports.reserve();
     let opened = false;
-    const close = async () => {
+    let taskId: string | undefined;
+    const close = async (): Promise<number | undefined> => {
+      let spent: number | undefined;
       if (opened) {
+        // What keyd counted, read while it still holds the task.
+        const info = await keyd.cell(cellId).catch(() => undefined);
+        if (taskId && info?.task?.id === taskId) spent = info.task.spentUSD;
         await keyd.endTask(cellId).catch(() => {});
         await keyd.closeCell(cellId).catch(() => false);
       }
       this.deps.ports.release(port);
+      return spent;
     };
     try {
       // A listener left by an earlier run of the daemon holds a stand-in nobody has any more.
@@ -107,7 +114,7 @@ export class QuickModel {
       });
       opened = true;
       if (cell.port !== port) throw new Error("keyd did not open the quick listener as asked");
-      const taskId = ulid();
+      taskId = ulid();
       if (budgetUSD === undefined) await keyd.beginPricedTask(cellId, taskId, pricingOf([role]));
       else await keyd.beginPricedTask(cellId, taskId, pricingOf([role]), budgetUSD);
       const owner = await keyd.modelAdmission(cellId);

@@ -109,6 +109,21 @@ describe("a side question on Claude Code", () => {
     );
   });
 
+  it("gives up on a process whose start offers a tool of its own", async () => {
+    for (const offered of [["Read"], ["BrandNewReadTool"], ["mcp__localdot__shell"]]) {
+      const f = fake(async function* (_options, client) {
+        yield { type: "system", subtype: "init", tools: [...offered, ...SIDE_TOOLS] };
+        await client.callTool({ name: "finish", arguments: { status: "found", answer: "x" } });
+        yield { type: "result", subtype: "success", is_error: false, result: "x" };
+      });
+      const asked = go();
+      await expect(
+        claudeCodeSideModel(f.deps, { model: "haiku" }, "fast").run(asked.go),
+      ).rejects.toBeInstanceOf(ModelAnswerError);
+      expect(asked.call).not.toHaveBeenCalled();
+    }
+  });
+
   it("allows only its own tools from its own server, at every call", async () => {
     const options = { signal: new AbortController().signal, toolUseID: "t" };
     const side = { source: "sdk", name: SIDE_SERVER };

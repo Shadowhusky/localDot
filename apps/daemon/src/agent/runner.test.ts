@@ -1553,9 +1553,13 @@ describe("Claude Code (your plan)", () => {
       status: 404,
     });
   });
-  it("asks another model the user has set up on the ChatGPT plan, whose one process is the task's", async () => {
+  it("keeps a ChatGPT-plan task's data on its own models: says why, and asks no other", async () => {
     const f = setup();
-    const keys: KeydRecord[] = [
+    f.setSettings({
+      main: { provider: "chatgpt", model: "gpt-6-astra" },
+      fast: { provider: "anthropic", model: "claude-haiku-4-5-20251001", key: "anthropic" },
+    });
+    f.secrets.mockResolvedValue([
       {
         id: "anthropic",
         kind: "llm",
@@ -1563,47 +1567,15 @@ describe("Claude Code (your plan)", () => {
         createdAt: "2026-10-03T00:00:00Z",
         updatedAt: "2026-10-03T00:00:00Z",
       },
-    ];
-    f.setSettings({
-      main: { provider: "chatgpt", model: "gpt-6-astra" },
-      fast: { provider: "anthropic", model: "claude-haiku-4-5-20251001", key: "anthropic" },
-    });
-    f.secrets.mockResolvedValue(keys);
-    const asked: SideGo[] = [];
-    const api = vi.fn(
-      (
-        role: { providerId: string; model: { id: string } },
-        side: SideModel["role"],
-      ): SideModel => ({
-        provider: role.providerId,
-        model: role.model.id,
-        role: side,
-        tools: true,
-        images: true,
-        run: async (go) => {
-          asked.push(go);
-          await go.tools.call(
-            "finish",
-            { status: "not_found", answer: "Not in the log." },
-            go.signal,
-          );
-        },
-      }),
-    );
+    ]);
+    const api = vi.fn();
     f.deps.side = { ...sideDeps(undefined), api: api as never };
     const session = await f.runner.start(f.cellId, "Fixture task");
     await until(() => f.run.mock.calls.length === 1);
-    const runs = f.run.mock.calls.length;
-    const reply = await f.runner.sideAnswer(session.id, "Why?", new AbortController().signal);
-    expect(reply).toMatchObject({
-      provider: "anthropic",
-      model: "claude-haiku-4-5-20251001",
-      answer: "Not in the log.",
-      // The plan can't take over: the question ends with what the other model found.
-      ended: "no-main",
-    });
-    expect(f.run.mock.calls.length).toBe(runs);
-    expect(asked).toHaveLength(1);
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).rejects.toMatchObject({ status: 409, problem: "no-spare-model" });
+    expect(api).not.toHaveBeenCalled();
     session.stop();
     await f.live.settled(session.id);
   });
@@ -1627,21 +1599,13 @@ describe("Claude Code (your plan)", () => {
     expect(f.account.status.mock.calls.length).toBe(read);
     expect(f.run).toHaveBeenCalledOnce();
   });
-  it("goes from a plan that refuses to another model the user has set up", async () => {
+  it("says why when the plan refuses, and asks no model the task doesn't use", async () => {
     const f = claudeSetup();
     f.setSettings({
       main: { provider: "claude-code", model: "sonnet" },
       fast: { provider: "anthropic", model: "claude-haiku-4-5-20251001", key: "anthropic" },
     });
-    f.secrets.mockResolvedValue([
-      {
-        id: "anthropic",
-        kind: "llm",
-        provider: "anthropic",
-        createdAt: "2026-10-03T00:00:00Z",
-        updatedAt: "2026-10-03T00:00:00Z",
-      },
-    ]);
+    f.secrets.mockResolvedValue([]);
     const plan = vi.fn(
       (quick: { model: string }, role: SideModel["role"]): SideModel => ({
         provider: "claude-code",
@@ -1655,31 +1619,38 @@ describe("Claude Code (your plan)", () => {
         },
       }),
     );
-    const api = vi.fn(
-      (
-        role: { providerId: string; model: { id: string } },
-        side: SideModel["role"],
-      ): SideModel => ({
-        provider: role.providerId,
-        model: role.model.id,
-        role: side,
-        tools: true,
-        images: true,
-        run: async (go) => {
-          await go.tools.call("finish", { status: "found", answer: "From the key." }, go.signal);
-        },
-      }),
-    );
+    const api = vi.fn();
     f.deps.side = { ...sideDeps(plan), api: api as never };
     const session = await f.runner.start(f.cellId, "Fixture task");
     await until(() => session.status === "idle");
     await expect(
       f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
-    ).resolves.toMatchObject({
-      answer: "From the key.",
-      provider: "anthropic",
-      failed: { model: "sonnet", reason: "You've hit your usage limit" },
-    });
+    ).rejects.toMatchObject({ status: 502, reason: "You've hit your usage limit" });
+    expect(api).not.toHaveBeenCalled();
+    session.stop();
+    await f.live.settled(session.id);
+  });
+  it("says why when none of the task's models can use tools, and asks none of them", async () => {
+    const f = claudeSetup();
+    f.secrets.mockResolvedValue([]);
+    const run = vi.fn();
+    const plan = vi.fn(
+      (quick: { model: string }, role: SideModel["role"]): SideModel => ({
+        provider: "claude-code",
+        model: quick.model,
+        role,
+        tools: false,
+        images: false,
+        run,
+      }),
+    );
+    f.deps.side = sideDeps(plan);
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).rejects.toMatchObject({ status: 409, problem: "no-tool-model" });
+    expect(run).not.toHaveBeenCalled();
     session.stop();
     await f.live.settled(session.id);
   });

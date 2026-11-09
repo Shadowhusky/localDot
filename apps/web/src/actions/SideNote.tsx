@@ -12,6 +12,20 @@ import type { Aside } from "./useAside.ts";
 import "../ui/command-menu.css";
 
 const STEPS_SHOWN = 4;
+const address = (href: string) => {
+  try {
+    return new URL(href).href.replace(/#.*$/, "");
+  } catch {
+    return href;
+  }
+};
+// An answer opens only the addresses the user wrote or its own searches found: any other may carry
+// what it read to whoever made it up.
+const opensOnly = (links: readonly string[] | undefined) => {
+  const open = new Set((links ?? []).map(address));
+  return (href: string) => open.has(address(href));
+};
+const opensNone = () => false;
 const SOURCE_WORDS: Record<string, string> = {
   record: "what was said in the task",
   log: "the task's log",
@@ -66,7 +80,7 @@ function Steps({
       {partial.length > 0 && (
         <div className="side-note-partial">
           <span className="side-note-by">So far</span>
-          <SafeMarkdown text={partial.at(-1) ?? ""} compact />
+          <SafeMarkdown text={partial.at(-1) ?? ""} compact links={opensNone} />
         </div>
       )}
       <ul className="side-note-steps">
@@ -162,7 +176,7 @@ export function SideNote({
       {aside.phase === "answered" && answer && (
         <>
           <div className="side-note-answer">
-            <SafeMarkdown text={answer.answer} compact />
+            <SafeMarkdown text={answer.answer} compact links={opensOnly(answer.links)} />
           </div>
           {from && <p className="side-note-by">{from}</p>}
           {answer.ended && <p className="side-note-by">{ENDED[answer.ended]}</p>}

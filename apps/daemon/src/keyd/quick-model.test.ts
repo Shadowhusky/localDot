@@ -59,6 +59,12 @@ function quick(answer: () => Promise<Response>) {
     endTask: vi.fn(async () => {
       calls.push("end");
     }),
+    cell: vi.fn(async (id: string) => ({
+      cellId: id,
+      role: "brain",
+      port: 4788,
+      task: { id: gate.taskId, limitUSD: 0.2, spentUSD: 0.07 },
+    })),
   };
   const ports = { reserve: vi.fn(() => 4788), release: vi.fn() };
   const fetch = vi.fn(
@@ -180,5 +186,26 @@ describe("a side question's own listener", () => {
     await expect(q.model.sideListener(role, 0.2, signal)).rejects.toThrow("no");
     expect(q.ports.release).toHaveBeenCalledWith(4788);
     await expect(q.model.sideListener(role, 0.2, signal)).resolves.toBeDefined();
+  });
+  it("says what keyd counted its model spending when it closes", async () => {
+    const q = quick(async () => said("{}"));
+    const listener = await q.model.sideListener(role, 0.2, signal);
+    await expect(listener.close()).resolves.toBeCloseTo(0.07);
+    expect(q.keyd.cell).toHaveBeenCalledWith("side-model-0");
+    // Read before the task ends, while keyd still holds it.
+    expect(q.keyd.cell.mock.invocationCallOrder[0]).toBeLessThan(
+      q.keyd.endTask.mock.invocationCallOrder.at(-1) ?? 0,
+    );
+  });
+  it("doesn't take another task's spending for its own", async () => {
+    const q = quick(async () => said("{}"));
+    q.keyd.cell.mockResolvedValueOnce({
+      cellId: "side-model-0",
+      role: "brain",
+      port: 4788,
+      task: { id: "someone-else", limitUSD: 1, spentUSD: 0.9 },
+    });
+    const listener = await q.model.sideListener(role, 0.2, signal);
+    await expect(listener.close()).resolves.toBeUndefined();
   });
 });

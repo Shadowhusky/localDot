@@ -9,6 +9,8 @@ export interface SideAnswer {
   readonly status?: "found" | "partial" | "not_found";
   // Where the answer came from.
   readonly sources?: readonly string[];
+  // The addresses its answer may link to; any other shows as text.
+  readonly links?: readonly string[];
   // A model that failed, and why.
   readonly failed?: { readonly model: string; readonly reason: string };
   // The model that looked first and couldn't find it.
@@ -35,7 +37,9 @@ export type SideStep =
 const PROBLEMS: Record<string, string> = {
   "no-model": "Choose a model for this task first.",
   "no-spare-model":
-    "The ChatGPT plan answers one request at a time, and this task needs it. Add another model in Settings, such as a fast model with an API key, and side questions can run beside it.",
+    "The ChatGPT plan answers one request at a time, and this task needs it, so it can't take a side question. A task's record stays with the models you chose for it.",
+  "no-tool-model":
+    "Side questions need a model that can use tools, and this task's models can't use tools. A task's record stays with the models you chose for it.",
   busy: "Wait for the answer to your last side question.",
 };
 const NO_ANSWER = "No model could answer. Try again.";
@@ -57,7 +61,7 @@ const refusal = (problem: string, reason: string | undefined) => {
   const said = PROBLEMS[problem] ?? NO_ANSWER;
   return new SideQuestionFailure(
     reason ? `${said} (${reason})` : said,
-    problem === "no-model" || problem === "no-spare-model",
+    problem === "no-model" || problem === "no-spare-model" || problem === "no-tool-model",
   );
 };
 

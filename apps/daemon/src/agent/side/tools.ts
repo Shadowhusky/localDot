@@ -4,6 +4,7 @@ import { DesktopdError } from "../../desktopd/client.ts";
 import type { DesktopdTools } from "../../desktopd/tools-client.ts";
 import { redactForIndex } from "../../search/redact-index.ts";
 import type { Redactor } from "../redact.ts";
+import { TaskTaint, words } from "../safety/taint.ts";
 import type { RecallHit } from "../tools/deps.ts";
 import { picture } from "../tools/files.ts";
 import { recalled } from "../tools/recall.ts";
@@ -16,6 +17,7 @@ import { webSearch } from "../web/search.ts";
 import { readLog, readTaskLog, searchLog, type TaskLog } from "./log.ts";
 
 const TOOL_CHARS = 12_000;
+const LINKS_KEPT = 100;
 const FILE_BYTES = 32 * 1024;
 const SEARCH_HITS = 12;
 const WEB_HITS = 6;
@@ -223,13 +225,25 @@ export class SideToolbox {
   readonly #consulted = new Set<SideSource>();
   readonly #addresses: Set<string>;
   readonly #trail: string[] = [];
+  // Fingerprints of what this question was given and read, never its text: a search can't carry it
+  // out. Words of the user's own question are theirs to search for.
+  readonly #seen = new TaskTaint();
+  readonly #asked: ReadonlySet<string>;
   constructor(
     private readonly readers: SideReaders,
     question: string,
     private readonly limited: () => boolean,
     private readonly progress: (line: string) => void,
+    // The record it opens with.
+    opening = "",
   ) {
     this.#addresses = new Set(typedAddresses(question));
+    this.#asked = new Set(words(question));
+    this.#remember(opening);
+  }
+  // The addresses an answer may link to: the user's own, and its searches' results.
+  get links(): readonly string[] {
+    return [...this.#addresses].slice(0, LINKS_KEPT);
   }
   // A new model takes over: it has its own calls, and sees pictures or not.
   beginModel(options: { images: boolean; calls: number }): void {
@@ -297,8 +311,17 @@ export class SideToolbox {
   #clean(text: string): string {
     return this.readers.redact(redactForIndex(text));
   }
+  #remember(text: string): void {
+    if (text) this.#seen.add("recall", "side question", text);
+  }
+  // Whether a search would carry what was read: its words left once the question's are taken out.
+  #carries(query: string): boolean {
+    const own = words(query).filter((word) => !this.#asked.has(word));
+    return own.length > 0 && this.#seen.overlap(own.join(" ")).overlaps;
+  }
   #data(source: string, text: string, images?: readonly SideImage[]): SideResult {
     const clean = this.#clean(text);
+    this.#remember(clean);
     const body =
       clean.length > TOOL_CHARS
         ? `${clean.slice(0, TOOL_CHARS)}\n(cut at ${TOOL_CHARS} characters)`
@@ -504,9 +527,19 @@ export class SideToolbox {
     this.#consulted.add("earlier");
     return this.#data("earlier tasks", body);
   }
-  async #webSearch(query: string, signal: AbortSignal): Promise<SideResult> {
+  async #webSearch(asked: string, signal: AbortSignal): Promise<SideResult> {
+    // A bang or a backslash has an engine send the search on to another site.
+    const query = asked
+      .replace(/(^|\s)(?:![^\s]*|\\+)/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!query) return refused("Nothing is left to search for without the engine commands.");
     if (this.#clean(query) !== query)
       return refused("That search would carry something secret, so it wasn't sent.");
+    if (this.#carries(query))
+      return refused(
+        "That search would carry what was read for this question, so it wasn't sent. Words from the user's question can be searched for: tell the user to ask with what they want searched.",
+      );
     if (!this.#allowed("web_search", { query }))
       return refused(
         "The user's settings ask before dot searches the web, and a side question can't ask.",

@@ -146,3 +146,39 @@ describe("the web tools' keyd listener", () => {
     expect(h.asked).toEqual([]);
   });
 });
+
+describe("a search kept on its engine's own site", () => {
+  it("doesn't follow a redirect off the site, so nothing it carries reaches another host", async () => {
+    const h = harness((url) =>
+      url.includes("duckduckgo")
+        ? new Response(null, {
+            status: 302,
+            headers: { location: "https://site.example/s?q=99-1234" },
+          })
+        : new Response("<p>landed</p>"),
+    );
+    await expect(
+      h.cell.get(new URL("https://html.duckduckgo.com/html/?q=99-1234"), {
+        ...options,
+        within: "duckduckgo.com",
+      }),
+    ).rejects.toBeInstanceOf(WebError);
+    expect(h.asked.map((a) => a.url)).toEqual(["https://html.duckduckgo.com/html/?q=99-1234"]);
+  });
+
+  it("follows a redirect within the site", async () => {
+    const h = harness((url) =>
+      url.startsWith("https://www.bing.com/")
+        ? new Response(null, {
+            status: 302,
+            headers: { location: "https://cn.bing.com/search?q=x" },
+          })
+        : new Response("<p>results</p>"),
+    );
+    const reply = await h.cell.get(new URL("https://www.bing.com/search?q=x"), {
+      ...options,
+      within: "bing.com",
+    });
+    expect(reply.url.hostname).toBe("cn.bing.com");
+  });
+});

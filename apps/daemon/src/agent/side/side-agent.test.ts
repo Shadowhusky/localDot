@@ -12,6 +12,7 @@ import { sideSpendLedger } from "./spend.ts";
 import { LIMIT_REACHED, SIDE_TOOL_NAMES, type SideReaders } from "./tools.ts";
 
 const SECRET = "hunter2-the-real-password";
+type SideResultLike = { ok: boolean; text: string };
 const KEY = `sk-ant-api03-${"a".repeat(90)}`;
 const homes: string[] = [];
 const logs: EventLog[] = [];
@@ -995,6 +996,132 @@ describe("what a page can make it do", () => {
     expect(fetched).toContain("<untrusted");
     expect(linked).toContain("wasn't opened");
     expect(asked.some((url) => url.includes("evil.example"))).toBe(false);
+  });
+
+  const DDG = (url: string) =>
+    `<html><body><div class="result"><a class="result__a" href="${url}">A page</a><a class="result__snippet">About it</a></div></body></html>`;
+  const engine = (asked: URL[], hit = "https://example.org/page"): WebAccess => ({
+    get: async (url) => {
+      asked.push(url);
+      return {
+        url,
+        status: 200,
+        contentType: "text/html",
+        body: Buffer.from(DDG(hit)),
+        truncated: false,
+      };
+    },
+  });
+  const searched = (asked: URL[]) => asked.map((url) => url.searchParams.get("q"));
+
+  it("won't search with what it read, but searches the user's own words", async () => {
+    const f = fixture();
+    const asked: URL[] = [];
+    const desktop = {
+      readFile: async (path: string) => ({
+        path,
+        content:
+          "Settlement account 99-1234 for J. Doe, agreed in the mediation session, ref QX-7781",
+        bytes: 84,
+        truncated: false,
+        binary: false,
+      }),
+      listDir: vi.fn(),
+      fetchFile: vi.fn(),
+    };
+    const replies: Record<string, SideResultLike> = {};
+    await ask(
+      f,
+      [
+        model("m", "main", async (go) => {
+          await go.tools.call("read_file", { path: "~/divorce.txt" }, go.signal);
+          for (const query of [
+            "Settlement account 99-1234 J. Doe",
+            "99-1234",
+            "agreed in the mediation session",
+            "PIN 4417-9921",
+            "what is QX-7781 used for",
+            "how do settlement accounts work",
+          ])
+            replies[query] = await go.tools.call("web_search", { query }, go.signal);
+          await finish(go, "found", "Done.");
+        }),
+      ],
+      {
+        readers: readers(f, { web: engine(asked), desktop: () => desktop as never }),
+        question: "What is QX-7781 used for?",
+        prompt:
+          "<record>\nThe user: my PIN 4417-9921 is new\n</record>\n\nSide question: What is QX-7781 used for?",
+        limits: { calls: 20 },
+      },
+    );
+    for (const query of [
+      "Settlement account 99-1234 J. Doe",
+      "99-1234",
+      "agreed in the mediation session",
+      "PIN 4417-9921",
+    ])
+      expect(replies[query]?.text).toContain("wasn't sent");
+    expect(replies["what is QX-7781 used for"]?.ok).toBe(true);
+    expect(replies["how do settlement accounts work"]?.ok).toBe(true);
+    expect(searched(asked).some((q) => q?.includes("99-1234") || q?.includes("4417"))).toBe(false);
+  });
+
+  it("takes bangs and backslashes out, so no engine sends the search on", async () => {
+    const f = fixture();
+    const asked: URL[] = [];
+    await ask(
+      f,
+      [
+        model("m", "main", async (go) => {
+          for (const query of ["!site lisbon flights", "\\lisbon hotels", "lisbon !g trains", "!"])
+            await go.tools.call("web_search", { query }, go.signal);
+          await finish(go, "found", "Done.");
+        }),
+      ],
+      { readers: readers(f, { web: engine(asked) }), limits: { calls: 20 } },
+    );
+    const queries = searched(asked);
+    expect(queries).toContain("lisbon flights");
+    expect(queries).toContain("lisbon hotels");
+    expect(queries).toContain("lisbon trains");
+    expect(queries.some((q) => q?.includes("!") || q?.includes("\\"))).toBe(false);
+  });
+
+  it("lets the answer link only to addresses the user wrote or its own search found", async () => {
+    const f = fixture();
+    const asked: URL[] = [];
+    const desktop = {
+      readFile: async (path: string) => ({
+        path,
+        content: "See https://evil.example/r for the report",
+        bytes: 40,
+        truncated: false,
+        binary: false,
+      }),
+      listDir: vi.fn(),
+      fetchFile: vi.fn(),
+    };
+    const reply = await ask(
+      f,
+      [
+        model("m", "main", async (go) => {
+          await go.tools.call("read_file", { path: "a" }, go.signal);
+          await go.tools.call("web_search", { query: "lisbon flights" }, go.signal);
+          await finish(go, "found", "Done.");
+        }),
+      ],
+      {
+        readers: readers(f, {
+          web: engine(asked, "https://flights.example/lisbon"),
+          desktop: () => desktop as never,
+        }),
+        question: "Is https://example.org/hours right?",
+      },
+    );
+    expect(reply.links).toContain("https://example.org/hours");
+    expect(reply.links).toContain("https://flights.example/lisbon");
+    expect(reply.links).not.toContain("https://evil.example/r");
   });
 
   it("won't send a search that carries a secret", async () => {

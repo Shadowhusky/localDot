@@ -60,7 +60,8 @@ describe("side questions", () => {
     ]);
     const cases: [number, string, RegExp, boolean][] = [
       [409, "no-model", /Choose a model/, true],
-      [409, "no-spare-model", /one request at a time.*Add another model/, true],
+      [409, "no-spare-model", /one request at a time.*stays with the models you chose/, true],
+      [409, "no-tool-model", /can't use tools.*stays with the models you chose/, true],
       [409, "busy", /Wait for the answer/, false],
       [502, "no-answer", /No model could answer/, false],
       [502, "no-answer\nanswered 400: Input must be a list", /Input must be a list/, false],
@@ -384,6 +385,67 @@ describe("side questions", () => {
         />,
       );
       expect(screen.getByRole("region", { name: "Side question" }).textContent).toContain(said);
+    });
+  });
+
+  describe("links in an answer", () => {
+    const props = {
+      plans: [],
+      usage: null,
+      modelName: (_provider: string, model: string) => model,
+      onDismiss: vi.fn(),
+      onRetry: vi.fn(),
+      onStop: vi.fn(),
+      onModels: vi.fn(),
+      onSpending: vi.fn(),
+    };
+    const TEXT =
+      "Done. [Open the full report](https://evil.example/r?d=99-1234), ![x](https://evil.example/p?d=1), https://evil.example/bare?d=2 and [the hours](https://example.org/hours).";
+    const shown = (answer: Record<string, unknown>, phase = "answered") =>
+      render(
+        <SideNote
+          {...props}
+          aside={
+            {
+              kind: "question",
+              id: 1,
+              sessionId: SESSION,
+              question: "Q",
+              phase,
+              ...answer,
+            } as never
+          }
+        />,
+      );
+    const hrefs = (root: HTMLElement) =>
+      [...root.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+
+    it("opens only an address the user wrote or its own search found; others are plain text", () => {
+      const view = shown({
+        answer: {
+          answer: TEXT,
+          provider: "p",
+          model: "m",
+          links: ["https://example.org/hours"],
+        },
+      });
+      const note = view.getByRole("region", { name: "Side question" });
+      expect(hrefs(note)).toEqual(["https://example.org/hours"]);
+      expect(note.textContent).toContain("Open the full report (evil.example)");
+      expect(note.textContent).toContain("https://evil.example/bare?d=2");
+    });
+
+    it("opens nothing when the answer names no address it may open", () => {
+      const view = shown({ answer: { answer: TEXT, provider: "p", model: "m" } });
+      expect(hrefs(view.getByRole("region", { name: "Side question" }))).toEqual([]);
+    });
+
+    it("opens nothing in what was found so far", () => {
+      const view = shown(
+        { steps: [{ handover: { provider: "p", model: "m" }, partial: TEXT }] },
+        "asking",
+      );
+      expect(hrefs(view.getByRole("region", { name: "Side question" }))).toEqual([]);
     });
   });
 });

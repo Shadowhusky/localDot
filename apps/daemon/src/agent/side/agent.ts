@@ -82,6 +82,9 @@ export interface SideReply {
   readonly model: string;
   readonly status: SideStatus;
   readonly sources: readonly SideSource[];
+  // The addresses the answer may link to: the user's own and its searches' results. Any other
+  // address in it shows as text, as it may carry what was read.
+  readonly links: readonly string[];
   // A model that failed or refused, and why.
   readonly failed?: { readonly model: string; readonly reason: string };
   // The model that looked first and couldn't find it.
@@ -186,11 +189,16 @@ export async function runSideAgent(run: SideRun): Promise<SideReply> {
   const now = run.now ?? Date.now;
   const meter = new SideMeter(limits, now);
   const deadline = AbortSignal.timeout(limits.timeMs);
+  const asked = `Side question: ${run.question}`;
+  const before = run.prompt.endsWith(asked)
+    ? run.prompt.slice(0, -asked.length).trimEnd()
+    : run.prompt;
   const toolbox = new SideToolbox(
     run.readers,
     run.question,
     () => meter.wrappingUp(),
     (line) => run.onEvent?.({ progress: line }),
+    before,
   );
   let best: { finish: SideFinish; by: SideModel } | undefined;
   let failed: { model: string; reason: string } | undefined;
@@ -223,10 +231,6 @@ export async function runSideAgent(run: SideRun): Promise<SideReply> {
       console.error("a side question's spending could not be saved");
     }
   };
-  const asked = `Side question: ${run.question}`;
-  const before = run.prompt.endsWith(asked)
-    ? run.prompt.slice(0, -asked.length).trimEnd()
-    : run.prompt;
   try {
     for (const model of run.models) {
       // A model that couldn't find it goes to the main model, and only that one.
@@ -317,6 +321,7 @@ export async function runSideAgent(run: SideRun): Promise<SideReply> {
       model: best.by.model,
       status: best.finish.status,
       sources: best.finish.sources,
+      links: toolbox.links,
       ...(failed ? { failed } : {}),
       ...(handedOver && handedOver !== best.by
         ? { handedOver: { provider: handedOver.provider, model: handedOver.model } }
