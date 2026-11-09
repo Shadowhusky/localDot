@@ -63,6 +63,8 @@ export interface StageProps {
   // The computer whose screen is in front.
   cell: CellSummary | null;
   parentId?: string;
+  // The task on show, whose own web browser a conversation may have.
+  session?: string;
   // The desktop, which the web browser is a window on: both make the one screen.
   parent?: CellSummary | null;
   // Which of them is in front, from useStageFront; else the one dot is on (`selection`).
@@ -115,6 +117,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     manual,
     mode = "live",
     parentId,
+    session,
     parent,
     front,
     browserEngine,
@@ -224,7 +227,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   useEffect(() => {
     if (!cellId || !ready || !support.ok) return;
     const { stream, release } = holdStream(
-      { api, cellId, surface, parentId },
+      { api, cellId, surface, parentId, ...(session ? { session } : {}) },
       () => listedRef.current,
     );
     setHeld({ owner, stream });
@@ -252,7 +255,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
         !next.ready;
       release(stopped ? 0 : KEEP_MS);
     };
-  }, [api, cellId, ready, support.ok, owner, parentId, surface]);
+  }, [api, cellId, ready, support.ok, owner, parentId, surface, session]);
 
   useEffect(() => canvas.current?.onRestart(() => streamRef.current?.retap()), []);
 

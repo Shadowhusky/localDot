@@ -365,6 +365,14 @@ ctx.fillText('example.test/orders',360,90);ctx.fillStyle='#1f2a37';ctx.font='bol
 ctx.fillText('Orders',320,400);ctx.fillStyle='#c7ccd3';
 for(let n=0;n<8;n++)ctx.fillRect(320,500+n*120,1400-(n%3)*240,56);
 };setInterval(page,100);`);
+// A conversation's own web browser: another page, with a green toolbar, so which browser the stage
+// shows reads from one pixel.
+const OWN_BROWSER_JS = clientJs(`const page=()=>{
+ctx.fillStyle='#f6f7f4';ctx.fillRect(0,0,2560,1600);ctx.fillStyle='#cfe8d6';ctx.fillRect(0,0,2560,150);
+ctx.fillStyle='#ffffff';ctx.fillRect(320,40,1920,70);ctx.fillStyle='#5b6470';ctx.font='40px sans-serif';
+ctx.fillText('example.test/invoices',360,90);ctx.fillStyle='#1f2a37';ctx.font='bold 96px sans-serif';
+ctx.fillText('Invoices',320,400);
+};setInterval(page,100);`);
 
 let skew = 0;
 // While held, session time moves only by the seed's own steps, so a seeded task lasts the same
@@ -381,20 +389,35 @@ const tickets = new TicketRegistry();
 // running (an instance) or not; a restart is one instance stopping and the next starting.
 const browserCellId = ulid();
 let browserInstance: string | null = null;
+// A conversation's own web browser, beside the computer's main one, and the tasks that use it.
+const ownSlot = ulid();
+const ownBrowserCellId = ulid();
+let ownInstance: string | null = null;
+const ownTasks = new Set<string>();
 const browserChanged = new Set<(parentCellId: string) => void>();
 const browserStreams = new BrowserStreams({
   parents: cells,
   browser: {
-    endpoints: (parentCellId): ReadyBrowser | undefined =>
-      parentCellId === cellId && browserInstance
+    keysOf: (parentCellId) => (parentCellId === cellId ? [cellId, ownSlot] : [parentCellId]),
+    endpoints: (key): ReadyBrowser | undefined =>
+      key === cellId && browserInstance
         ? {
             browserCellId,
-            parentCellId,
+            parentCellId: key,
             instance: browserInstance,
             browserd: { baseUrl: "http://owned-browser.invalid", token: "" },
             stream: { baseUrl: "http://owned-browser.invalid", authorization: "" },
           }
-        : undefined,
+        : key === ownSlot && ownInstance
+          ? {
+              browserCellId: ownBrowserCellId,
+              parentCellId: cellId,
+              slot: ownSlot,
+              instance: ownInstance,
+              browserd: { baseUrl: "http://own-browser.invalid", token: "" },
+              stream: { baseUrl: "http://own-browser.invalid", authorization: "" },
+            }
+          : undefined,
     subscribe(listener) {
       browserChanged.add(listener);
       return () => browserChanged.delete(listener);
@@ -404,6 +427,10 @@ const browserStreams = new BrowserStreams({
 });
 function runBrowser(on: boolean): void {
   browserInstance = on ? ulid() : null;
+  for (const listener of browserChanged) listener(cellId);
+}
+function runOwnBrowser(on: boolean): void {
+  ownInstance = on ? ulid() : null;
   for (const listener of browserChanged) listener(cellId);
 }
 // Which screens' pictures are dropped (POST /__qa/picture/drop).
@@ -3140,11 +3167,18 @@ browserViewerApi(routes, {
   cells: browserStreams,
   tickets,
   vendorDir: fileURLToPath(new URL("../../vendor/selkies", import.meta.url)),
+  browserOf: (sessionId) => (ownTasks.has(sessionId) ? ownSlot : cellId),
 });
 routes.get("/cells/:cell/browser/:ticket/", (c) =>
-  clientPage(c.req.param("cell"), c.req.param("ticket"), "browser", "/owned-browser.js"),
+  clientPage(
+    c.req.param("cell"),
+    c.req.param("ticket"),
+    "browser",
+    c.req.param("cell") === ownBrowserCellId ? "/own-browser.js" : "/owned-browser.js",
+  ),
 );
 routes.get("/owned-browser.js", () => clientScript("browser", BROWSER_JS));
+routes.get("/own-browser.js", () => clientScript("browser", OWN_BROWSER_JS));
 routes.get("/__qa/picture", (c) => c.json({ ...pictureDown, home: desktopHome }));
 routes.get("/owned-desktop.webp", (c) =>
   c.body(readFileSync(env.QA_PICTURE ?? join(ASSETS, "frame-1.webp")), 200, {
@@ -4415,15 +4449,20 @@ routes.post("/__qa/pause-uncertain", (c) => {
 });
 let screenRevision = 0;
 // dot selects the desktop again, as a new task, a screen switch and a hand-back each do; with
-// ?to=browser it moves to the web browser, which starts first as the daemon's does.
+// ?to=browser it moves to the web browser, which starts first as the daemon's does, and with
+// &own=1 to its conversation's own web browser.
 routes.post("/__qa/screen", async (c) => {
   if (!session) return c.text("no session", 409);
   const retired = c.req.query("retired");
   const browser = c.req.query("to") === "browser";
-  if (browser && !browserInstance) runBrowser(true);
+  const own = browser && c.req.query("own") === "1";
+  if (own) {
+    ownTasks.add(session.id);
+    if (!ownInstance) runOwnBrowser(true);
+  } else if (browser && !browserInstance) runBrowser(true);
   session.append("screen.switch", {
     screen: retired === "browser" || browser ? "browser" : "desktop",
-    cellId: retired ? ulid() : browser ? browserCellId : cellId,
+    cellId: retired ? ulid() : own ? ownBrowserCellId : browser ? browserCellId : cellId,
     geometry: { w: 2560, h: 1600, scale: 2 },
     by: browser ? "agent" : "daemon",
     revision: ++screenRevision,
