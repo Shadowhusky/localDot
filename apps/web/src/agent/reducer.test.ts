@@ -130,6 +130,58 @@ describe("bounded agent projection", () => {
     expect(model.questions.get(ask)?.answer?.option).toBe("A");
     expect(model.pendingTakeover).toBe(takeover);
   });
+  it("closes a question a message moved on from, keeping it as not answered", () => {
+    const model = reduce([
+      ev(0, "ask.request", { askId: ask, question: "Which?", options: [], allowText: true }),
+      ev(1, "ask.answer", { askId: ask, by: "message" }),
+    ]);
+    expect(model.pendingAsk).toBeNull();
+    expect(model.questions.get(ask)?.answer).toEqual({ askId: ask, by: "message" });
+  });
+  it("closes a card a message moved on from and keeps its question for the thread", () => {
+    const approvalId = id(77);
+    const model = reduce([
+      ev(0, "approval.request", {
+        approvalId,
+        generation: 1,
+        revision: 1,
+        expiresAt: 9_000_000,
+        kind: "send",
+        actionClass: "send",
+        risk: "high",
+        title: "Send this email?",
+        preview: { fields: [["To", "team@example.test"]] },
+      }),
+      ev(1, "approval.resolve", { approvalId, decision: "deny", by: "message" }),
+    ]);
+    expect(model.approval).toBeNull();
+    expect(model.unapproved.get(approvalId)).toMatchObject({
+      approvalId,
+      title: "Send this email?",
+      seq: 1,
+    });
+  });
+  it("keeps no such row for a card answered, or cancelled by Pause", () => {
+    const approvalId = id(78);
+    const card = {
+      approvalId,
+      generation: 1,
+      revision: 1,
+      expiresAt: 9_000_000,
+      kind: "send",
+      actionClass: "send",
+      risk: "high",
+      title: "Send this email?",
+      preview: { fields: [] },
+    };
+    for (const by of ["user", "timeout"])
+      expect(
+        reduce([
+          ev(0, "approval.request", card),
+          ev(1, "approval.resolve", { approvalId, decision: "deny", by }),
+        ]).unapproved.size,
+      ).toBe(0);
+  });
   it("keeps a result and subsequent idle follow-up; only session end fences stale thinking", () => {
     const model = reduce([
       ev(0, "task.result", {

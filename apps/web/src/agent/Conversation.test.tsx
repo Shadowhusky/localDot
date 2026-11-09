@@ -527,6 +527,45 @@ it("holds a phone's toolbar at the foot however short the column is, its control
   ).toEqual(["Activity", "Message", "More"]);
 });
 
+it("brings the field back from a phone's computer controls, until it is left empty", () => {
+  function Tools() {
+    const write = useContext(Outbox)?.write;
+    return (
+      <button type="button" onClick={write}>
+        Message dot
+      </button>
+    );
+  }
+  render(
+    <Conversation
+      items={items([message("one")])}
+      truncated={false}
+      composer={<textarea aria-label="Message" />}
+      tools={<Tools />}
+      pinned
+    />,
+  );
+  const field = screen.getByRole("textbox", {
+    name: "Message",
+    hidden: true,
+  }) as HTMLTextAreaElement;
+  expect(field.closest(".thread-composer")?.hasAttribute("hidden")).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Message dot" }));
+  expect(field.closest(".thread-composer")?.hasAttribute("hidden")).toBe(false);
+  expect(document.activeElement).toBe(field);
+  expect(screen.queryByRole("button", { name: "Message dot" })).toBeNull();
+  // With words in it the field stays, so a tap on Send lands whatever takes the focus first.
+  fireEvent.change(field, { target: { value: "Skip it" } });
+  act(() => field.blur());
+  expect(field.closest(".thread-composer")?.hasAttribute("hidden")).toBe(false);
+  // Left empty, the controls come back.
+  fireEvent.change(field, { target: { value: "" } });
+  act(() => field.focus());
+  act(() => field.blur());
+  expect(field.closest(".thread-composer")?.hasAttribute("hidden")).toBe(true);
+  expect(screen.getByRole("button", { name: "Message dot" })).toBeTruthy();
+});
+
 describe("a chat", () => {
   const reply = (id: string, text: string) => ({
     kind: "message" as const,

@@ -19,6 +19,7 @@ import {
   type AgentQuestion,
   type AgentResult,
   type AgentTakeover,
+  type AgentUnapproved,
   fastest,
   type RoutineProposal,
   type SpendCall,
@@ -69,6 +70,8 @@ export type ThreadItem =
     })
   | (Item<"question"> & { question: AgentQuestion })
   | (Item<"answer"> & { question: AgentQuestion })
+  // A step that waited on the user's OK until their message moved on from it.
+  | (Item<"unapproved"> & { title: string })
   | (Item<"result"> & { result: AgentResult })
   // A routine dot drafted, for the user to save.
   | (Item<"routine"> & { proposal: RoutineProposal })
@@ -77,8 +80,15 @@ export type ThreadItem =
   // The dot the conversation works as, when Auto picked it or the user switched.
   | (Item<"dot"> & { choice: AgentDotChoice })
   // The computer changing hands: the user took it or dot handed it over (`handed`), or the user
-  // handed it back, maybe saying "Not now" to dot's hand-off (`declined`).
-  | (Item<"control"> & { took: boolean; at?: number; handed?: boolean; declined?: boolean })
+  // handed it back, maybe saying "Not now" to dot's hand-off (`declined`) or sending a message
+  // that ended it (`movedOn`).
+  | (Item<"control"> & {
+      took: boolean;
+      at?: number;
+      handed?: boolean;
+      declined?: boolean;
+      movedOn?: boolean;
+    })
   // The steps dot took between two things it said, or since the last while it works.
   | (Item<"work"> & {
       turn: string;
@@ -114,6 +124,7 @@ export type ThreadKind = ThreadItem["kind"];
 // What the divider says where the computer changed hands.
 export function controlLine(item: Extract<ThreadItem, { kind: "control" }>): string {
   if (item.took) return item.handed ? "dot handed you the computer" : "You took control";
+  if (item.movedOn) return "You moved on with a message";
   return item.declined ? "You said not now" : "You handed back";
 }
 
@@ -154,6 +165,7 @@ export function threadItems(
   proposals: Iterable<RoutineProposal> = [],
   origin?: SessionOrigin,
   dots: Iterable<AgentDotChoice> = [],
+  unapproved: Iterable<AgentUnapproved> = [],
 ): ThreadItem[] {
   const placed: Placed[] = [];
   const place = (item: ThreadItem, order: number | undefined) =>
@@ -190,6 +202,18 @@ export function threadItems(
         question.seq === undefined ? undefined : question.seq + 0.5,
       );
   }
+  for (const step of unapproved)
+    place(
+      {
+        kind: "unapproved",
+        key: `unapproved-${step.approvalId}`,
+        speaker: "dot",
+        time: step.time,
+        atMs: sessionMs(step.at),
+        title: step.title,
+      },
+      step.seq,
+    );
   for (const result of results)
     place(
       {
@@ -248,6 +272,7 @@ export function threadItems(
           atMs: sessionMs(takeover.endAt),
           took: false,
           ...(takeover.end.declined ? { declined: true } : {}),
+          ...(takeover.end.movedOn ? { movedOn: true } : {}),
         },
         takeover.endSeq,
       );

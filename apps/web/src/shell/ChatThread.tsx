@@ -168,6 +168,7 @@ export function ChatThread({
             model.routineProposals.values(),
             model.origin,
             model.dots,
+            model.unapproved.values(),
           )
         : [],
     [model],

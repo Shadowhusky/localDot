@@ -53,6 +53,45 @@ const step = (key: string, startT: number): WorkStep => ({
 });
 
 describe("the conversation's order", () => {
+  it("places a step a message moved on from where it ended", () => {
+    const items = threadItems(
+      [message("Sending it now", 2, "assistant"), message("Book the train", 5)],
+      [],
+      [],
+      [],
+      [],
+      undefined,
+      [],
+      [{ approvalId: ulidAt(1000), title: "Send this email?", seq: 4, time: 1000, at: 4_000_000 }],
+    );
+    expect(items.map((item) => item.kind)).toEqual(["message", "unapproved", "message"]);
+    expect(items[1]).toMatchObject({ speaker: "dot", title: "Send this email?" });
+  });
+
+  it("says a message ended dot's hand-over", () => {
+    const handed = ulidAt(1_000);
+    const items = threadItems(
+      [],
+      [],
+      [],
+      [
+        {
+          requestId: handed,
+          reason: "login",
+          note: "Sign in",
+          seq: 1,
+          time: 1_000,
+          end: { requestId: handed, by: "user", movedOn: true },
+          endSeq: 3,
+          endTime: 2_000,
+        },
+      ],
+    );
+    expect(items.flatMap((item) => (item.kind === "control" ? [controlLine(item)] : []))).toEqual([
+      "You moved on with a message",
+    ]);
+  });
+
   it("interleaves messages, questions with their answers, and results as the task produced them", () => {
     const question: AgentQuestion = {
       askId: "ask",

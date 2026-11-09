@@ -3104,6 +3104,7 @@ function requestApproval(
   { always = false, repeat = 1, kind = "" } = {},
 ): string | undefined {
   if (!session?.generation) return "no brain";
+  const owned = session;
   if (kind === "port") {
     // An app's connection beyond the web, as the daemon asks about one keyd holds.
     void session.connections
@@ -3233,7 +3234,10 @@ function requestApproval(
           } as never),
       { signal: controller.signal, check: () => {}, revalidate: async () => true } as never,
     )
-    .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
+    .then((o) => {
+      effects.push(`approval:${JSON.stringify(o)}`);
+      if (o === "message" && owned) readsMessage(owned);
+    })
     .catch((e) => effects.push(`approval-error:${String(e)}`));
 }
 // Keyboard steps with the gateway's own labels: a key pressed five times, a held key, and a held
@@ -3542,6 +3546,17 @@ function liveActions(): string | undefined {
   );
   act(9000, "key", "Save the report", { kind: "key", combo: ["ctrl", "s"] });
 }
+// dot takes up a message that moved on from what it was waiting for, as the real brain does.
+function readsMessage(owned: AgentSession) {
+  setTimeout(() => {
+    if (owned.stopped) return;
+    owned.append("agent.state", { state: "thinking" });
+    owned.append("message.assistant", {
+      messageId: ulid(),
+      text: "Sample reply: I read your message and moved on.",
+    });
+  }, replyMs);
+}
 // A quick choice, asked as dot's ask_user tool asks one.
 function ask(): string | undefined {
   if (!session) return "no session";
@@ -3550,12 +3565,16 @@ function ask(): string | undefined {
     options: ["Markdown", "Plain text", "PDF"],
     recommended: 0,
   };
+  const owned = session;
   void session
     .askFields(
       plainForm(question, (text) => text),
       0,
     )
-    .then((a) => effects.push(`ask:${JSON.stringify(a)}`))
+    .then((a) => {
+      effects.push(`ask:${JSON.stringify(a)}`);
+      if (a.by === "message") readsMessage(owned);
+    })
     .catch((e) => effects.push(`ask-error:${String(e)}`));
 }
 // Questions with typed fields (design-v2/HITL.md §3), answered through the real answer route.
@@ -3759,14 +3778,16 @@ function askForm(name: string): string | undefined {
   const form = ASK_FORMS[name];
   if (!form) return `no question named ${name}; try ${Object.keys(ASK_FORMS).join(", ")}`;
   if (!session) return "no session";
+  const owned = session;
   void session
     .askFields(form, 0)
-    .then((a) =>
+    .then((a) => {
       effects.push(
         `ask:${JSON.stringify(a)}`,
         ...(a.secrets?.size ? [`ask-secrets:${a.secrets.size}`] : []),
-      ),
-    )
+      );
+      if (a.by === "message") readsMessage(owned);
+    })
     .catch((e) => effects.push(`ask-error:${String(e)}`));
 }
 // A field name, or a known localDot key, types into it through the real authorization.
@@ -3808,9 +3829,13 @@ function takeover(field?: string, known = false): string | undefined {
       .catch((e) => effects.push(`takeover-error:${String(e)}`));
     return;
   }
+  const owned = session;
   void session
     .takeover("login", "Please sign in to the sample site, then hand control back.")
-    .then((o) => effects.push(`takeover:${JSON.stringify(o)}`))
+    .then((o) => {
+      effects.push(`takeover:${JSON.stringify(o)}`);
+      if (o.movedOn) readsMessage(owned);
+    })
     .catch((e) => effects.push(`takeover-error:${String(e)}`));
 }
 function budget(scope: "task" | "day" = "task"): string | undefined {

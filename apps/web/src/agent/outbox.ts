@@ -10,6 +10,8 @@ export interface OutboxSlot {
   // Called just before the composer gives back the lines a sent message took: the room stays
   // under the thread until it grows again, so the message just sent stays where it is.
   keep(): void;
+  // Brings a field the computer's controls took the place of back, ready for words.
+  write?(): void;
 }
 
 export const Outbox = createContext<OutboxSlot | null>(null);

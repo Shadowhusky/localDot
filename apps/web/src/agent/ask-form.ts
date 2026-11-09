@@ -51,16 +51,10 @@ export interface Draft {
 
 export const OTHER = "other";
 
-// Typed answers the composer's message can be on its own.
-const FREE_TEXT = new Set<AskFieldKind>([
-  "text",
-  "longtext",
-  "number",
-  "date",
-  "email",
-  "url",
-  "phone",
-]);
+// Answers that must never go in a message, which isn't kept secret.
+const PRIVATE = new Set<AskFieldKind>(["secret", "code", "api_key"]);
+export const asksPrivate = (fields: readonly AskField[]) =>
+  fields.some((field) => PRIVATE.has(field.kind));
 
 export function askFields(question: AgentQuestion): readonly AskField[] {
   if (question.fields?.length)
@@ -191,67 +185,6 @@ export function answerRequest(
     return option ? { askId: question.askId, option: option.key } : undefined;
   }
   return { askId: question.askId, text: value };
-}
-
-// What the composer does with a message while dot waits on a question: answer it when the message
-// can be the whole answer, as a choice's own words or a lone field's value; otherwise turn the
-// question down so dot reads the message, and any files with it, at once. A question with a secret
-// holds the message, which would reach dot in plain text, and so does one that can only be
-// answered.
-export type ComposerReply =
-  | { readonly kind: "answer"; readonly request: QuestionAnswerRequest }
-  | { readonly kind: "decline"; readonly request: QuestionAnswerRequest }
-  | { readonly kind: "hold"; readonly reason: string };
-
-export function composerReply(
-  question: AgentQuestion,
-  text: string,
-  attached = false,
-): ComposerReply {
-  if (
-    question.fields?.some(
-      (field) =>
-        field.kind === "secret" ||
-        field.kind === "code" ||
-        field.kind === "api_key" ||
-        field.kind === "connect_app",
-    )
-  )
-    return {
-      kind: "hold",
-      reason: "Type it in dot's question above. Messages aren't kept secret.",
-    };
-  const decline: ComposerReply =
-    question.declinable === false
-      ? { kind: "hold", reason: "Answer dot's question above first. Your message stays here." }
-      : { kind: "decline", request: { askId: question.askId, declined: true } };
-  if (attached) return decline;
-  const said = text.trim();
-  if (!question.fields?.length) {
-    const option = question.options.find(
-      (choice) => choice.text.toLowerCase() === said.toLowerCase(),
-    );
-    if (option) return { kind: "answer", request: { askId: question.askId, option: option.key } };
-    return question.allowText && said.length <= 2000
-      ? { kind: "answer", request: { askId: question.askId, text: said } }
-      : decline;
-  }
-  const [field] = askFields(question);
-  if (question.fields.length !== 1 || !field) return decline;
-  const option = field.options.find((choice) => choice.toLowerCase() === said.toLowerCase());
-  const value: AskFieldValue | undefined =
-    field.kind === "choice"
-      ? (option ?? said)
-      : field.kind === "multichoice"
-        ? option
-          ? [option]
-          : { other: said }
-        : FREE_TEXT.has(field.kind)
-          ? said
-          : undefined;
-  return value === undefined || askValueProblem(field, value)
-    ? decline
-    : { kind: "answer", request: { askId: question.askId, fields: { [field.id]: value } } };
 }
 
 const SECRET_SHOWN = "kept secret";

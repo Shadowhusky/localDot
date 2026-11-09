@@ -37,7 +37,8 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   the page), `pin`, `code`, `choice`, `multichoice`, `setup` (one field that needs an answer and
   three that don't), `longtext`, `confirm`, `details` (number, date, phone and web address), `file`,
   `qr` (a link) or `pair` (plain text). Answers go through the real answer route; `GET /__qa/state`
-  lists them under `effects`, secret answers only counted.
+  lists them under `effects`, secret answers only counted. A message that moves on from a question,
+  an approval or a hand-over has dot reply as soon as it reads the message.
 - **Connecting apps:** the fixture answers an app's sign-in discovery in memory and stands in for
   keyd's redeeming of the code. The page the daemon would open in the Mac's browser is recorded, not
   opened: `GET /__qa/connect` says where the app would send the user back, so a test approves by

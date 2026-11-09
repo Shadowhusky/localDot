@@ -7,7 +7,7 @@ import { requestRevise } from "../deliverables/revise-draft.ts";
 import { createApi } from "../lib/api.ts";
 import type { TextAreaProps } from "../ui/TextArea.tsx";
 import { splitAttachments, withAttachments } from "./attachments.ts";
-import { Composer, type ComposerProps, type ReplyOutcome } from "./Composer.tsx";
+import { Composer, type ComposerProps } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { editQueued, giveBack, sendAfter } from "./queued-draft.ts";
@@ -1495,36 +1495,48 @@ describe("typing", () => {
     expect(f.requests).toEqual([]);
   });
 });
-describe("answering dot from the composer", () => {
-  it("answers dot's question, turns it down before sending the message on, or holds the message", async () => {
-    const reply = vi.fn<(text: string, attached: boolean) => Promise<ReplyOutcome>>();
-    const f = setup(undefined, { reply });
-    expect(f.field.placeholder).toBe("Answer dot");
-    reply.mockResolvedValueOnce("answered");
-    f.input("PDF");
-    f.submit();
-    await waitFor(() => expect(f.field.value).toBe(""));
-    expect(reply).toHaveBeenLastCalledWith("PDF", false);
-    expect(f.requests).toEqual([]);
-    reply.mockResolvedValueOnce("declined");
-    f.input("use my work account");
-    f.submit();
-    await waitFor(() => expect(f.requests).toHaveLength(1));
-    expect(f.requests[0]).toEqual({
-      path: `/api/agent/sessions/${sessionId}/messages`,
-      body: { kind: "steer", text: "use my work account" },
-    });
-    reply.mockResolvedValueOnce({ hold: "Type it in dot's question above." });
-    f.input("hunter2");
-    f.submit();
-    await screen.findByText("Type it in dot's question above.");
-    expect(f.field.value).toBe("hunter2");
-    expect(f.requests).toHaveLength(1);
-    f.update({ reply: undefined });
-    expect(f.field.placeholder).toBe("Message dot");
+describe("sending while dot waits on the user", () => {
+  it.each([
+    ["question", "Sending moves on from dot's question"],
+    ["private", "Sending moves on from dot's question. Messages aren't kept secret"],
+    ["approval", "Sending moves on without approving"],
+    ["computer", "Sending hands the computer back"],
+  ] as const)(
+    "sends straight away during a %s wait, saying what it moves on from once typed",
+    async (waitingOn, hint) => {
+      const f = setup(undefined, { waitingOn });
+      expect(f.field.placeholder).toBe("Or message dot");
+      expect(screen.queryByText(hint)).toBeNull();
+      f.input("use my work account");
+      expect(screen.getByText(hint)).toBeTruthy();
+      f.submit();
+      await waitFor(() => expect(f.requests).toHaveLength(1));
+      expect(f.requests[0]).toEqual({
+        path: `/api/agent/sessions/${sessionId}/messages`,
+        body: { kind: "steer", text: "use my work account" },
+      });
+      f.update({ waitingOn: undefined });
+      expect(f.field.placeholder).toBe("Message dot");
+    },
+  );
+
+  it("offers no send for later: any message goes now", () => {
+    const f = setup(undefined, { waitingOn: "question" });
+    f.input("skip that");
+    expect(screen.queryByRole("button", { name: "Message options" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send now" })).toBeTruthy();
   });
 
-  it("turns the question down before a message with files goes, rather than leaving it unread", async () => {
+  it("keeps the key guard: a key typed during a private question goes nowhere", async () => {
+    const f = setup(undefined, { waitingOn: "private" });
+    const key = `sk-${"a".repeat(40)}`;
+    f.input(key);
+    f.submit();
+    expect(f.requests).toEqual([]);
+    expect(f.field.value).not.toContain(key);
+  });
+
+  it("sends a message with files as a message, never as an answer", async () => {
     const calls: { path: string; body: unknown }[] = [];
     const api = createApi("fixture", {
       origin: "http://127.0.0.1:4790",
@@ -1538,16 +1550,13 @@ describe("answering dot from the composer", () => {
           : new Response(null, { status: 202 });
       },
     });
-    const reply = vi.fn(async (_text: string, _attached: boolean): Promise<ReplyOutcome> => {
-      return "declined";
-    });
-    const f = setup(undefined, { api, reply });
+    const f = setup(undefined, { api, waitingOn: "question" });
     f.input("Use this plan instead");
     f.attach(new File(["plan"], "plan.pdf"));
     await waitFor(() => expect(screen.getByText("Uploaded to Downloads")).toBeTruthy());
     f.submit();
     await waitFor(() => expect(calls).toHaveLength(2));
-    expect(reply).toHaveBeenCalledExactlyOnceWith("Use this plan instead", true);
+    expect(calls.some((call) => call.path.endsWith("/answer"))).toBe(false);
     expect(JSON.parse(String(calls[1]?.body))).toEqual({
       kind: "steer",
       text: "Use this plan instead\n\nAttached files on this computer:\n- ~/Downloads/plan.pdf",

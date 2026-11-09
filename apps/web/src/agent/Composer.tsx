@@ -103,9 +103,8 @@ export interface ComposerProps {
   onTaskStarted?(): void;
   // A message is on its way (true) or failed to arrive (false), before the task says anything.
   onSending?(on: boolean): void;
-  // While dot waits on a question: a message answers it, or turns it down so dot reads the message
-  // and its files.
-  reply?(text: string, attached: boolean): Promise<ReplyOutcome>;
+  // What dot waits on the user for: a message moves on from it, and reaches dot straight away.
+  waitingOn?: DotWait;
   // A card in the rail, or one rounded field in a phone's toolbar with its controls inside it.
   layout?: "card" | "pill";
   // What the field says while empty, when it isn't the usual words.
@@ -126,9 +125,14 @@ export interface ComposerProps {
   // What "/" lists: the actions with a command name.
   actions?: readonly Action[];
 }
-// What became of a message sent as a reply: it answered the question, it turned the question down
-// and goes on as a message, it did not arrive, or it was held with the reason why.
-export type ReplyOutcome = "answered" | "declined" | "failed" | { readonly hold: string };
+// `private`: a question with something that must not go in a message, such as a password.
+export type DotWait = "question" | "private" | "approval" | "computer";
+const MOVES_ON: Readonly<Record<DotWait, string>> = {
+  question: "Sending moves on from dot's question",
+  private: "Sending moves on from dot's question. Messages aren't kept secret",
+  approval: "Sending moves on without approving",
+  computer: "Sending hands the computer back",
+};
 export interface Delivery {
   readonly id: number;
   readonly request: TextDelivery;
@@ -166,7 +170,8 @@ function modeFor(props: ComposerProps, selected: "steer" | "followup"): MessageM
     return "new";
   if (!props.agent.sessionId || props.agent.model.ended || props.agent.snapshot?.holder)
     return "new";
-  return props.agent.snapshot?.status === "idle" ? "followup" : selected;
+  if (props.agent.snapshot?.status === "idle") return "followup";
+  return props.waitingOn ? "steer" : selected;
 }
 // Why nothing can be sent to the computer now, in the order someone would fix it.
 function computerReason(props: ComposerProps): string | undefined {
@@ -360,7 +365,6 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     sessionId: props.agent.sessionId,
   });
   const composing = useRef(false);
-  const replying = useRef(false);
   const mounted = useRef(true);
   const wasKeysOpen = useRef(props.keysOpen);
   // Without a thread to wait in, a message waits above the composer.
@@ -890,7 +894,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     const input = field();
     if (!input || composing.current || (talking && !voiceFinished)) return;
     if (commands.submit(input.value) === "handled") return;
-    if (pending.current || replying.current) return;
+    if (pending.current) return;
     if (input.value.length > TEXT_BOUND) {
       moveToFile(input);
       sendOnceUploaded.current = later;
@@ -947,28 +951,6 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     }
     if (link && (chosen === "new" || elsewhere)) {
       deliver(text, "new", false, link);
-      return;
-    }
-    const reply = now.reply;
-    if (reply && chosen !== "new") {
-      replying.current = true;
-      setProblem(null);
-      void reply(text, uploads.rows.length > 0).then((outcome) => {
-        replying.current = false;
-        if (!mounted.current) return;
-        const box = field();
-        if (outcome === "declined") {
-          if (box?.value === text) deliver(text, chosen, later);
-        } else if (outcome === "answered") {
-          if (box?.value === text) {
-            box.value = "";
-            measure(box);
-          }
-        } else
-          setProblem(
-            outcome === "failed" ? "Your reply didn't reach dot. Try again." : outcome.hold,
-          );
-      });
       return;
     }
     deliver(text, chosen, later);
@@ -1088,7 +1070,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     field()?.focus();
   };
 
-  const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
+  const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle" && !props.waitingOn;
   // A phone's field has room for its text and Send only; its More menu has the choice instead.
   const pill = props.layout === "pill";
   const offersMenu = !pill && choosing && !props.modelAfter;
@@ -1230,8 +1212,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   };
   // A message to a conversation at rest starts its next task, but reads as any other message.
   const newConversation = mode === "new" && !props.agent.sessionId;
-  const researchReason =
-    researchWait(props.agent) ?? (props.reply ? "Answer dot's question first." : undefined);
+  const researchReason = researchWait(props.agent);
   const researching = research && !researchReason;
   // On a phone the line over the field folds away still saying what it last said.
   const researchLine = !researchReason && (research || suggested);
@@ -1247,7 +1228,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         ? "Send"
         : mode === "followup"
           ? "Send follow-up"
-          : props.modelAfter
+          : props.modelAfter && !props.waitingOn
             ? "Send after this task"
             : "Send now";
   const note =
@@ -1265,6 +1246,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     choosing &&
       props.modelAfter &&
       !empty && { text: `Runs on ${props.modelAfter} after this task`, alert: false },
+    props.waitingOn && !empty && { text: MOVES_ON[props.waitingOn], alert: false },
   ].filter((notice) => !!notice);
   // The notices fold away holding their last words.
   const shownNotices = useRef(notices);
@@ -1363,8 +1345,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
               ? "What should dot research?"
               : newConversation && !pill
                 ? "Ask dot to do something"
-                : props.reply
-                  ? "Answer dot"
+                : props.waitingOn
+                  ? "Or message dot"
                   : (props.placeholder ?? "Message dot")
           }
           unavailable={!!unavailable}

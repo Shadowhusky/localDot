@@ -1,5 +1,6 @@
 import type { ManualStreamInput } from "@localdot/protocol";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { Outbox } from "../agent/outbox.ts";
 import { textInputs } from "../stage/manual-keys.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
@@ -212,6 +213,7 @@ export function ControlTools({
   decline,
   onDecline,
   onFullScreen,
+  message = false,
   compact = false,
 }: {
   send: Send;
@@ -228,8 +230,11 @@ export function ControlTools({
   decline?: { reason?: string; busy?: boolean };
   onDecline?(): void;
   onFullScreen?(): void;
+  // The message field these controls took the place of, one press away.
+  message?: boolean;
   compact?: boolean;
 }) {
+  const write = useContext(Outbox)?.write;
   const [sheet, setSheet] = useState(false);
   const typeButton = useRef<HTMLButtonElement>(null);
   // Pressing the button takes focus from the keyboard field before its click arrives.
@@ -287,6 +292,16 @@ export function ControlTools({
           icon="expand"
           label="Full screen"
           onClick={onFullScreen}
+        />
+      )}
+      {message && write && (
+        <IconButton
+          size={44}
+          round
+          variant="filled"
+          icon="message-circle"
+          label="Message dot"
+          onClick={write}
         />
       )}
       {decline && (
