@@ -1243,3 +1243,52 @@ describe("revise link", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 });
+
+describe("a task started through a shared link", () => {
+  function shared(apps?: boolean) {
+    const h = setup();
+    const memory = new MemoryStore(h.home);
+    memory.addEntry("USER.md", "The owner banks with Example Bank.");
+    h.deps.memory = memory;
+    h.deps.recentActivity = {
+      list: () => [
+        { sessionId: ulid(), title: "Pay the rent", outcome: "done", day: "2026-10-08" },
+      ],
+    };
+    const spec = { name: "github__list_issues", app: "GitHub", description: "", inputSchema: {} };
+    h.deps.connectors = () => ({ specs: [spec], get: () => undefined });
+    const start = () =>
+      h.runner.start(
+        h.cellId,
+        "Book a table",
+        undefined,
+        apps === undefined ? undefined : { sender: "link", guest: { apps } },
+      );
+    return { ...h, start };
+  }
+  it("boots the owner's task with their memory, recent activity and apps", async () => {
+    const h = shared();
+    const session = await h.start();
+    await h.ready();
+    expect(session.guest).toBeUndefined();
+    expect(h.boots[0]?.guest).toBeUndefined();
+    expect(h.boots[0]?.memory.user).toContain("Example Bank");
+    expect(h.boots[0]?.recent?.map((line) => line.title)).toEqual(["Pay the rent"]);
+    expect(h.boots[0]?.connectors).toHaveLength(1);
+  });
+  it.each([false, true])(
+    "boots with none of the owner's memory or recent activity, and apps only when allowed (%s)",
+    async (apps) => {
+      const h = shared(apps);
+      const session = await h.start();
+      await h.ready();
+      expect(session.guest).toEqual({ apps });
+      expect(session.recent).toEqual([]);
+      expect(h.boots[0]?.guest).toEqual({ apps });
+      expect(h.boots[0]?.memory).toEqual({ user: "", memory: "" });
+      expect(h.boots[0]?.recent).toBeUndefined();
+      expect(h.boots[0]?.connectors?.length ?? 0).toBe(apps ? 1 : 0);
+      expect(session.connectors.specs).toHaveLength(apps ? 1 : 0);
+    },
+  );
+});

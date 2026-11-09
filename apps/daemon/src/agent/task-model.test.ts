@@ -514,6 +514,22 @@ describe("a message's model", () => {
     expect(f.events(nextId, "message.user")[1]?.data).toMatchObject({ text: "And this" });
   });
 
+  it("keeps a shared link's limits on the task its conversation moves to", async () => {
+    const f = setup();
+    f.hold(true);
+    const guest = { apps: false };
+    const session = await f.runner.start(f.cellId, "First", undefined, { sender: "link", guest });
+    await until(() => f.boots.length === 1);
+    const ref = { provider: "claude-code", model: "opus" };
+    session.enqueue("On Claude Code", "link", await f.runner.messageTurn(session.id, ref));
+    f.hold(false);
+    f.finish();
+    await until(() => f.claudeRuns.length > 0);
+    const next = f.conversations.current() as string;
+    expect(next).not.toBe(session.id);
+    expect(f.runner.get(next)?.guest).toEqual(guest);
+  });
+
   it("stays on the model at hand, and says so, when another runtime can't start", async () => {
     const f = setup();
     f.hold(true);

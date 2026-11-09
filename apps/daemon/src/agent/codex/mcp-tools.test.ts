@@ -1,5 +1,6 @@
-import { ComputerAction } from "@localdot/protocol";
+import { ComputerAction, offeredTools } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
+import { localdotTools } from "../claude-code/mcp-server.ts";
 import { codexTools, toCallToolResult } from "./mcp-tools.ts";
 
 describe("Codex's computer tool", () => {
@@ -94,4 +95,16 @@ it("offers the same-call learning choice to subscription agents", () => {
   expect(codexTools().find((tool) => tool.name === "done")?.inputSchema).toMatchObject({
     required: expect.arrayContaining(["experience", "summary"]),
   });
+});
+
+it("lists a shared link's task only what its link allows, on the Codex and Claude Code servers", () => {
+  for (const guest of [{ apps: false }, { apps: true }]) {
+    const offered = offeredTools(false, guest);
+    expect(codexTools(undefined, false, guest).map((tool) => tool.name)).toEqual(offered);
+    expect(localdotTools(false, guest).map((tool) => tool.name)).toEqual(offered);
+    expect(offered).not.toContain("recall");
+    expect(offered.includes("credentials")).toBe(guest.apps);
+  }
+  expect(codexTools().map((tool) => tool.name)).toEqual(offeredTools(false));
+  expect(localdotTools().map((tool) => tool.name)).toContain("recall");
 });

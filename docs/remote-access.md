@@ -170,7 +170,28 @@ The owner can create named links in Settings → Your computer → Links for oth
 
 Each link fixes a configured model or allows selection from up to 32 saved choices, optionally exposes recordings and session settings, and caps successful task starts plus API dollars per task. The lower of owner and link budgets applies. Failed starts refund their task count. Native subscription plans use the provider's account allowance, not an API-dollar meter. Follow-ups share the original task's budget; the task quota counts task sessions, not messages. Turning remote access off invalidates all existing shared links.
 
-The guest page supports chat, progress, the current computer/browser screen and permitted replays. A link reads its own tasks and the tasks of the conversation the owner's app shows, and changes only its own; a task it starts can continue only one of those. It can't list conversations, archived or not. **Allow replays** adds the recordings of every task on this computer, past ones included; without it no recording, card or thumbnail is reachable, even of the link's own tasks. `RemoteLinks.permits` checks each request against this, for HTTP and WebSocket alike, and every path that names a task answers for that task whichever rule lets the path through. Owner settings, keys, link management, approvals and computer lifecycle changes are denied by the server, including for guests allowed to see session settings. This is shared access to the same computer, files and conversation, **not separate tenant isolation**. A task may use services configured by the owner; only share with trusted people. The older one-use sign-in link remains full owner access for the owner's own devices.
+The guest page supports chat, progress, the current computer/browser screen and permitted replays. A link reads its own tasks and the tasks of the conversation the owner's app shows, and changes only its own; a task it starts can continue only one of those. It can't list conversations, archived or not. **Allow replays** adds the recordings of every task on this computer, past ones included; without it no recording, card or thumbnail is reachable, even of the link's own tasks. `RemoteLinks.permits` checks each request against this, for HTTP and WebSocket alike, and every path that names a task answers for that task whichever rule lets the path through. Owner settings, keys, link management, approvals and computer lifecycle changes are denied by the server, including for guests allowed to see session settings. This is shared access to the same computer, files and conversation, **not separate tenant isolation**; only share with trusted people. The older one-use sign-in link remains full owner access for the owner's own devices.
+
+### What a guest's dot can use
+
+A task started through a link (and any task its conversation moves to for another model) is marked with the link's access when it starts. The daemon never offers it the owner's own tools, and refuses them by name if the model asks anyway, in the brain, the ChatGPT plan's Codex and Claude Code alike:
+
+| | Every link | With **Use your apps, keys and browser** |
+| --- | --- | --- |
+| The computer: screen, shell, files, desktop Chromium, page reading, web search and fetch, plan, questions, takeover, fix-it cards for the computer or Docker, research | Yes | Yes |
+| The conversation it continues: what was said in it | Yes | Yes |
+| The owner's memory (USER.md, MEMORY.md, past lessons) in its prompt, and memory recall | No | No |
+| Recent activity: the owner's last tasks | No | No |
+| `recall` (search of earlier tasks), `remember`, `people`, `routine`, `follow_up_at` | No | No |
+| Saving a lesson to the owner's memory when it finishes | No | No |
+| The owner's connected apps' tools | No | Yes |
+| `credentials`, `api_request` and fix-it cards for a key, an app or locked keys | No | Yes |
+| The owner's saved website sign-ins (filled after the owner's tap, and saved for later) | No | Yes |
+| The web browser that keeps the owner's sign-ins: `switch_screen`, `browser_upload`, and public pages through `browser_navigate` | No: pages open in the desktop's Chromium, which keeps no sign-ins | Yes |
+
+The web browser counts as the owner's accounts because it is signed in as them: a page there acts as the owner just as a connected app does. Every link is off by default, links made before this setting included; the owner picks it when making the link. Links can't be edited: make a new one and revoke the old. Each link's row in Settings says when it has the owner's apps, keys and browser.
+
+The guest page has no side questions (`/btw`): a link is refused `/api/agent/sessions/<id>/side-question`, even on its own task.
 
 ## Terminal chat
 

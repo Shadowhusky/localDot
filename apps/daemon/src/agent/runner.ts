@@ -16,6 +16,7 @@ import {
   DEFAULT_PERSONA,
   DEFAULT_RESEARCH_BUDGET,
   freezeAutonomy,
+  type GuestAccess,
   isJevKey,
   type KeydRecord,
   LIVE_ACTIVITY_CHARS,
@@ -88,6 +89,7 @@ import {
   LOOK_MS,
   leastEffort,
 } from "./first-look.ts";
+import { bootMemory, usesOwnersAccounts } from "./guest.ts";
 import type { MemoryStore } from "./memory.ts";
 import { providerNotice } from "./provider-notice.ts";
 import type { RecentActivity } from "./recent-activity.ts";
@@ -219,6 +221,8 @@ export interface TaskStartOptions {
   readonly continues?: string | null;
   // The shared link the task's message came through.
   readonly sender?: string;
+  // Present when the task came through a shared link: what of the owner's it may use.
+  readonly guest?: GuestAccess;
 }
 export class AgentError extends Error {
   constructor(
@@ -877,7 +881,7 @@ export class AgentRunner {
           continues = undefined;
         }
       let recent: RecentLine[] = [];
-      if (settings.recentActivity !== "off" && this.deps.recentActivity)
+      if (settings.recentActivity !== "off" && this.deps.recentActivity && !options.guest)
         try {
           recent = this.deps.recentActivity.list().map(({ sessionId: _, ...line }) => line);
         } catch {
@@ -920,6 +924,7 @@ export class AgentRunner {
       );
       session.earlier = earlier;
       session.inherited = inherited;
+      session.guest = options.guest;
       session.permissionMode = () => {
         // A routine set to ask first or only read keeps its own policy whatever the chat's mode.
         if (session.run && session.run.profile !== "act_within_rules") return "custom";
@@ -1308,6 +1313,7 @@ export class AgentRunner {
         continues: session.id,
         ...(first.turn ? { model: first.turn.ref } : {}),
         ...(first.sender ? { sender: first.sender } : {}),
+        ...(session.guest ? { guest: session.guest } : {}),
       });
       for (const message of rest) {
         const turn = message.turn && (await this.messageTurn(next.id, message.turn.ref));
@@ -2460,7 +2466,9 @@ export class AgentRunner {
           skills = await this.deps.installSkills(session.cellId, session.abort.signal, dressed);
           rt.skills = structuredClone(skills);
         }
-        session.connectors = this.deps.connectors?.() ?? NO_CONNECTORS;
+        session.connectors = usesOwnersAccounts(session.guest)
+          ? (this.deps.connectors?.() ?? NO_CONNECTORS)
+          : NO_CONNECTORS;
         const epoch = rt.epoch;
         let code: number | undefined;
         rt.completion = undefined;
@@ -2731,7 +2739,7 @@ export class AgentRunner {
         const models = Object.fromEntries(
           selection.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
         ) as Record<Role, ModelBinding>;
-        const memory = this.deps.memory.bootMemory(session.task, models.main.contextTokens);
+        const memory = bootMemory(this.deps.memory, session, models.main.contextTokens);
         taintMemory(session.taint, memory);
         let subagents: SubagentResume[] = [];
         try {
@@ -2760,6 +2768,7 @@ export class AgentRunner {
           ...(session.research ? { research: session.research.budget } : {}),
           ...(this.roleOf(session.id) ? { role: this.roleOf(session.id) } : {}),
           ...(subagents.length ? { subagents } : {}),
+          ...(session.guest ? { guest: session.guest } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,

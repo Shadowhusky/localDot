@@ -7,6 +7,7 @@ import {
   CREDENTIALS_DESCRIPTION,
   DoneModelInput,
   FOLLOW_UP_TOOL_DESCRIPTION,
+  type GuestAccess,
   MAX_BATCH_STEPS,
   MAX_DRAG_MS,
   MODEL_SCREEN,
@@ -144,8 +145,9 @@ function jsonSchema(schema: z.ZodType): Record<string, unknown> {
 export function codexTools(
   descriptions: Record<ToolName, string> = CODEX_TOOL_DESCRIPTIONS,
   research = false,
+  guest?: GuestAccess,
 ): McpToolDescriptor[] {
-  return offeredTools(research).map((name) => ({
+  return offeredTools(research, guest).map((name) => ({
     name,
     description: descriptions[name],
     inputSchema: jsonSchema(

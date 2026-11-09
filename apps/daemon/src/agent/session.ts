@@ -6,6 +6,7 @@ import type {
   Blocker,
   EventOf,
   GivenBack,
+  GuestAccess,
   MessageModel,
   PageElement,
   PauseSnapshot,
@@ -47,6 +48,7 @@ import {
   type OpenBlocker,
   type RaiseOptions,
 } from "./blockers.ts";
+import { GUEST_NO_BROWSER } from "./guest.ts";
 import type { ResearchLog } from "./research.ts";
 import {
   type ActionBinding,
@@ -331,6 +333,8 @@ export class AgentSession {
   research: ResearchLog | undefined;
   // The user's last few tasks when this one started.
   recent: readonly RecentLine[] = [];
+  // Present when the task came through a shared link: what of the owner's it may use.
+  guest: GuestAccess | undefined;
   // The connected apps' tools this task's model was shown.
   connectors: TaskConnectors = NO_TASK_CONNECTORS;
   readonly workProgress = new WorkProgress();
@@ -878,6 +882,8 @@ export class AgentSession {
     options: { restart?: boolean; daemon?: boolean } = {},
   ): Promise<ScreenSwitchData> {
     lease.check();
+    // The web browser keeps the owner's sign-ins.
+    if (screen === "browser" && this.guest && !this.guest.apps) throw new Error(GUEST_NO_BROWSER);
     if (!this.#active.has(lease) || !this.#screens || this.#screenReady !== lease.generation)
       throw new SessionStoppedError();
     const releasing = this.releaseInput();

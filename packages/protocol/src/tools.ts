@@ -51,9 +51,28 @@ export function isToolName(name: string): name is ToolName {
   return (TOOL_NAMES as readonly string[]).includes(name);
 }
 
+// A task started through a shared link, and whether its link lets it use the owner's connected
+// apps, saved keys and the web browser that keeps their sign-ins.
+export const GuestAccess = z.strictObject({ apps: z.boolean() });
+export type GuestAccess = z.infer<typeof GuestAccess>;
+const OWNERS_OWN: readonly ToolName[] = ["recall", "remember", "people", "routine", "follow_up_at"];
+const OWNERS_ACCOUNTS: readonly ToolName[] = [
+  "credentials",
+  "api_request",
+  "switch_screen",
+  "browser_upload",
+];
+// What a shared link's task never has of the owner's: their history, memory, contacts and
+// schedule, and their accounts unless the link allows them.
+export function withheldTools(guest: GuestAccess | undefined): readonly ToolName[] {
+  if (!guest) return [];
+  return guest.apps ? OWNERS_OWN : [...OWNERS_OWN, ...OWNERS_ACCOUNTS];
+}
+
 // The tools a model is offered: research is declared only to a task in research mode.
-export function offeredTools(research: boolean): readonly ToolName[] {
-  return research ? TOOL_NAMES : TOOL_NAMES.filter((name) => name !== "research");
+export function offeredTools(research: boolean, guest?: GuestAccess): readonly ToolName[] {
+  const withheld = withheldTools(guest);
+  return TOOL_NAMES.filter((name) => (research || name !== "research") && !withheld.includes(name));
 }
 
 // The model's screen: every screenshot is 1280×800 and every model point is in these pixels once

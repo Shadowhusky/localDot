@@ -127,7 +127,8 @@ export async function doneTool(
   const checked = input.checked?.trim() || completion?.evidence.trim();
   if (checked && completion?.status !== "blocked")
     append(ctx, "step.verify", { status: "success", evidence: cut(ctx.redact(checked), 200) });
-  if (input.experience && deps.saveExperience) {
+  // What a shared link's task learned stays out of the owner's memory.
+  if (input.experience && deps.saveExperience && !ctx.session.guest) {
     const experience = input.experience;
     deps.saveExperience(ctx.session.id, {
       scope: ctx.redact(experience.scope),

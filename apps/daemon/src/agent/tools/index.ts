@@ -15,11 +15,13 @@ import {
   type ToolResult,
   ulid,
   webUrl,
+  withheldTools,
 } from "@localdot/protocol";
 import { BrowserClientError } from "../../browser/client.ts";
 import { ScreenUnavailableError } from "../../browser/screen-controller.ts";
 import type { TaskConnectorTool } from "../../connectors/hub.ts";
 import { splitIntent } from "../../connectors/intent.ts";
+import { guestRefusal, toolsFor, usesOwnersAccounts } from "../guest.ts";
 import type { ToolPolicy } from "../policy.ts";
 import type { Redactor } from "../redact.ts";
 import { authorizePrepared, freezeExecutionInput, toolRisk } from "../safety/authorize.ts";
@@ -125,6 +127,19 @@ async function stepped(
   append(ctx, "tool.end", { ok: result.ok });
   append(ctx, "step.end", { status: result.ok ? "ok" : "failed" });
   return result;
+}
+
+// Something of the owner's that a task started through a shared link reached for.
+function refusedToGuest(session: AgentSession, name: string, redact: Redactor): DispatchOutcome {
+  const tool = redact(clipText(name, 64));
+  blocked(session, tool, "think", `Refused ${tool}`, "not for a shared link's task");
+  return {
+    status: 200,
+    result: {
+      ...fail(guestRefusal(tool)),
+      recovery: { kind: "permission", surface: "runtime", retry: "never" },
+    },
+  };
 }
 
 function blocked(
@@ -295,6 +310,7 @@ async function dispatchAdmitted(
     ctx.check();
     if (!isToolName(name)) {
       const entry = isConnectorToolName(name) ? session.connectors.get(name) : undefined;
+      if (entry && !usesOwnersAccounts(session.guest)) return refusedToGuest(session, name, redact);
       if (entry) return await dispatchConnector(deps, ctx, entry, rawInput, redact);
       blocked(session, redact(name), "think", "Unknown tool", "not a v1 tool");
       return { status: 404, result: fail(`There is no tool named ${redact(clipText(name, 64))}.`) };
@@ -305,6 +321,13 @@ async function dispatchAdmitted(
         status: 400,
         result: fail(`Invalid ${name} input: ${redact(clipText(parsed.error.message, 1000))}`),
       };
+    if (
+      withheldTools(session.guest).includes(name) ||
+      (name === "request_fix" &&
+        !usesOwnersAccounts(session.guest) &&
+        ["key", "app", "keys_locked"].includes((parsed.data as RequestFixInput).kind))
+    )
+      return refusedToGuest(session, name, redact);
     // A batch's every step is an action.
     const steps =
       name === "computer" ? ((parsed.data as { steps?: unknown[] }).steps?.length ?? 1) : 1;
@@ -407,7 +430,12 @@ async function dispatchAdmitted(
     // only resolve on the desktop.
     const page = name === "browser_navigate" && webUrl((frozen as BrowserNavigateInput).url);
     const shown = session.screens?.selection.screen;
-    if (page && opensInWebBrowser(page) && shown === "desktop") {
+    if (
+      page &&
+      opensInWebBrowser(page) &&
+      shown === "desktop" &&
+      usesOwnersAccounts(session.guest)
+    ) {
       try {
         await session.switchScreen("browser", lease);
       } catch (error) {
@@ -492,7 +520,7 @@ async function dispatchAdmitted(
           },
         };
     }
-    const t = deps.tools,
+    const t = toolsFor(deps.tools, session.guest),
       input = frozen as never;
     switch (name) {
       case "work_context":

@@ -22,6 +22,7 @@ import {
   TOOL_INPUTS,
   TOOL_NAMES,
   ToolContent,
+  withheldTools,
 } from "./tools.ts";
 
 const base = { v: 1, id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", seq: 0, t: 0, agent: "main" } as const;
@@ -70,6 +71,23 @@ describe("the v1 tool table", () => {
       expect(isToolName(name)).toBe(false);
     }
     expect(Object.keys(TOOL_INPUTS).sort()).toEqual([...TOOL_NAMES].sort());
+  });
+  it("offers a shared link's task none of the owner's own, and their accounts only when allowed", () => {
+    const owners = ["recall", "remember", "people", "routine", "follow_up_at"];
+    const accounts = ["credentials", "api_request", "switch_screen", "browser_upload"];
+    expect(withheldTools(undefined)).toEqual([]);
+    expect([...withheldTools({ apps: true })].sort()).toEqual([...owners].sort());
+    expect([...withheldTools({ apps: false })].sort()).toEqual([...owners, ...accounts].sort());
+    expect(offeredTools(true, { apps: true })).toEqual(
+      TOOL_NAMES.filter((name) => !owners.includes(name)),
+    );
+    expect(offeredTools(false, { apps: false })).toEqual(
+      TOOL_NAMES.filter((name) => name !== "research" && ![...owners, ...accounts].includes(name)),
+    );
+    expect(offeredTools(false)).toEqual(TOOL_NAMES.filter((name) => name !== "research"));
+    expect(offeredTools(false, { apps: false })).toEqual(
+      expect.arrayContaining(["browser_navigate", "browser_read", "browser_act", "request_fix"]),
+    );
   });
 
   it("searches the web and reads pages in flat, bounded shapes", () => {
@@ -471,6 +489,10 @@ describe("the tool API's shapes", () => {
     expect(
       BootConfig.safeParse({ ...boot, proxy: { ...boot.proxy, url: "https://x:3128" } }).success,
     ).toBe(false);
+    expect(BootConfig.parse({ ...boot, guest: { apps: false } }).guest).toEqual({ apps: false });
+    expect(BootConfig.safeParse({ ...boot, guest: { apps: true, memory: true } }).success).toBe(
+      false,
+    );
   });
 });
 
