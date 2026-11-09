@@ -21,10 +21,13 @@ export function useAppConnect({
   api,
   connector,
   onConnected,
+  onGaveUp,
 }: {
   api?: ApiClient | null;
   connector?: string;
   onConnected(): void | Promise<void>;
+  // A sign-in started here ended without connecting, or couldn't start.
+  onGaveUp?(): void;
 }) {
   const alive = useRef(true);
   // A sign-in started since a check began makes what that check saw out of date.
@@ -32,6 +35,8 @@ export function useAppConnect({
   const waited = useRef(false);
   const told = useRef(onConnected);
   told.current = onConnected;
+  const gaveUp = useRef(onGaveUp);
+  gaveUp.current = onGaveUp;
   const [starting, setStarting] = useState(false);
   const [waiting, setWaiting] = useState<{ remote: boolean; page?: string } | undefined>();
   const [problem, setProblem] = useState("");
@@ -61,8 +66,10 @@ export function useAppConnect({
         const { remote } = view.signIn;
         setWaiting((now) => now ?? { remote });
       } else if (waited.current) {
+        waited.current = false;
         setWaiting(undefined);
         setProblem(view.problem ?? "It didn't finish connecting. Try again.");
+        gaveUp.current?.();
       }
     };
     const timer = setInterval(() => void check(), POLL_MS);
@@ -82,6 +89,7 @@ export function useAppConnect({
       if (alive.current)
         setWaiting({ remote: started.remote, ...(started.url ? { page: started.url } : {}) });
     } catch (error) {
+      gaveUp.current?.();
       if (alive.current) setProblem(problemOf(error, "Couldn't open the sign-in. Try again."));
     } finally {
       if (alive.current) setStarting(false);
@@ -89,6 +97,7 @@ export function useAppConnect({
   };
   const cancel = () => {
     if (waiting && api && connector) void cancelSignIn(api, connector).catch(() => {});
+    if (waiting) gaveUp.current?.();
     setWaiting(undefined);
   };
   return { connect, cancel, starting, waiting, problem };

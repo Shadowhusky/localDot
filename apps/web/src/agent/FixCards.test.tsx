@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { type Blocker, STALL, sealPassphrase, sealSecret } from "@localdot/protocol";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type KeydHealth, type KeyRecord, unlockKeys } from "../keys/keys-api.ts";
 import type { KeysController } from "../keys/useKeys.ts";
@@ -22,6 +22,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+const OPENAI_SHAPED = `sk-${"proj"}-${"a1B2".repeat(10)}`;
 const ID = "01M6R97SHHND5784EZZXSYSBGD";
 const SESSION = "01M6R97SHHND5784EZZXSYSBGE";
 const health = (state: "locked" | "setup" | "ready"): KeydHealth => ({
@@ -55,7 +56,8 @@ const KIMI: ModelOption = {
 
 function setup(overrides: Partial<FixDeps> = {}, keyState: Partial<KeysController> = {}) {
   const post = vi.fn(async (_path: string, _body?: unknown) => undefined as never);
-  const api = { post } as unknown as ApiClient;
+  const del = vi.fn(async (_path: string) => {});
+  const api = { post, del } as unknown as ApiClient;
   const keys: KeysController = {
     health: health("locked"),
     keys: [OPENAI],
@@ -84,7 +86,7 @@ function setup(overrides: Partial<FixDeps> = {}, keyState: Partial<KeysControlle
     onOpenKeys: vi.fn(),
     ...overrides,
   };
-  return { deps, post, keys };
+  return { deps, post, del, keys };
 }
 const card = (blocker: Blocker, extra: Partial<AgentBlocker> = {}): AgentBlocker => ({
   blockerId: ID,
@@ -127,6 +129,118 @@ describe("whose words are on a card", () => {
     const noticed = setup();
     show({ kind: "runtime" }, noticed.deps);
     expect(screen.getByRole("region").textContent).not.toContain("dot asked");
+  });
+});
+
+describe("a card and the keyboard", () => {
+  it("never puts the keys in a key's field by itself", () => {
+    const { deps } = setup();
+    show({ kind: "key", id: "openai", problem: "rejected" }, deps);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("leaves the keys where they are just after a key was pressed", () => {
+    const { deps } = setup();
+    fireEvent.keyDown(document.body, { key: "a" });
+    show({ kind: "keys_locked" }, deps);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("takes the keys for the passphrase when nothing was typed lately", () => {
+    vi.useFakeTimers({ toFake: ["performance"] });
+    fireEvent.keyDown(document.body, { key: "a" });
+    vi.advanceTimersByTime(10_000);
+    const { deps } = setup();
+    show({ kind: "keys_locked" }, deps);
+    expect(document.activeElement).toBe(screen.getByLabelText("Passphrase"));
+    vi.useRealTimers();
+  });
+
+  it("won't save a message typed into a key's field over the saved key", async () => {
+    const { deps, keys, post } = setup();
+    show({ kind: "key", id: "openai", problem: "rejected" }, deps);
+    const region = screen.getByRole("region", { name: "A saved key was refused" });
+    const field = within(region).getByLabelText(/key/i) as HTMLInputElement;
+    for (const typed of ["please also check the logs", "not-an-openai-key-at-all"]) {
+      fireEvent.change(field, { target: { value: typed } });
+      fireEvent.submit(within(region).getByRole("form", { name: "Re-enter openai" }));
+      await within(region).findByText(/Paste the key itself/);
+    }
+    expect(keys.save).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe("a card that didn't fix it", () => {
+  const USE = `/api/agent/sessions/${SESSION}/blockers/${ID}/use`;
+
+  it("takes back its fix when the passphrase is wrong", async () => {
+    const { deps, del, keys } = setup(
+      {},
+      { unlock: vi.fn(async () => Promise.reject(new Error("wrong"))) },
+    );
+    show({ kind: "keys_locked" }, deps);
+    const region = screen.getByRole("region", { name: "Unlock your saved keys" });
+    fireEvent.change(within(region).getByLabelText("Passphrase"), {
+      target: { value: "not my passphrase" },
+    });
+    fireEvent.submit(within(region).getByRole("form", { name: "Unlock saved keys" }));
+    await waitFor(() => expect(keys.unlock).toHaveBeenCalled());
+    await waitFor(() => expect(del).toHaveBeenCalledWith(USE));
+  });
+
+  it("takes back its fix when the app's sign-in is given up", async () => {
+    vi.useFakeTimers();
+    const view = (more: Record<string, unknown>) => ({
+      id: "gh",
+      name: "GitHub",
+      enabled: true,
+      server: {
+        kind: "remote",
+        url: "https://api.githubcopilot.com/mcp/",
+        transport: "http",
+        auth: { kind: "oauth", secret: "connector-gh" },
+      },
+      status: "needs_sign_in",
+      tools: [],
+      createdAt: 1,
+      ...more,
+    });
+    let current = view({});
+    const post = vi.fn(async (path: string) => {
+      if (path.endsWith("/sign-in")) {
+        current = view({ signIn: { expiresAt: 1e15, remote: false } });
+        return { opened: true, expiresAt: 1, remote: false } as never;
+      }
+      return undefined as never;
+    });
+    const del = vi.fn(async () => {});
+    const get = vi.fn(async () => ({ connectors: [current], catalog: [] }));
+    const { deps } = setup({ api: { post, del, get } as unknown as ApiClient });
+    show({ kind: "app", connector: "gh", name: "GitHub", host: "api.githubcopilot.com" }, deps);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    });
+    expect(post).toHaveBeenCalledWith(USE);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2100);
+    });
+    expect(del).not.toHaveBeenCalledWith(USE);
+    current = view({});
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2100);
+    });
+    expect(del).toHaveBeenCalledWith(USE);
+    vi.useRealTimers();
+  });
+
+  it("takes back its fix when the key isn't saved", async () => {
+    const { deps, del } = setup({}, { save: vi.fn(async () => Promise.reject(new Error("no"))) });
+    show({ kind: "key", id: "openai", problem: "rejected" }, deps);
+    const region = screen.getByRole("region", { name: "A saved key was refused" });
+    fireEvent.change(within(region).getByLabelText(/key/i), { target: { value: OPENAI_SHAPED } });
+    fireEvent.submit(within(region).getByRole("form", { name: "Re-enter openai" }));
+    await waitFor(() => expect(del).toHaveBeenCalledWith(USE));
   });
 });
 
@@ -239,7 +353,7 @@ describe("a card for each kind", () => {
     const region = screen.getByRole("region", { name: "A saved key was refused" });
     const field = within(region).getByLabelText(/key/i) as HTMLInputElement;
     expect(within(region).queryByLabelText("Name")).toBeNull();
-    fireEvent.change(field, { target: { value: "sk-replacement" } });
+    fireEvent.change(field, { target: { value: OPENAI_SHAPED } });
     fireEvent.submit(within(region).getByRole("form", { name: "Re-enter openai" }));
     await waitFor(() => expect(keys.save).toHaveBeenCalledOnce());
     expect(vi.mocked(keys.save).mock.calls[0]?.[0]).toMatchObject({ id: "openai", kind: "llm" });

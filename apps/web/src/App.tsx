@@ -46,7 +46,7 @@ import {
   STATUS_LABEL,
 } from "./agent/conversation-list.ts";
 import { conversationBlockReason } from "./agent/conversation-state.ts";
-import { FixCards, fixesToShow, fixWait } from "./agent/FixCards.tsx";
+import { FixCards, fixesToShow, fixWait, takesSecret } from "./agent/FixCards.tsx";
 import { useTaskStalled } from "./agent/heartbeat.ts";
 import { LatestSteps } from "./agent/LatestSteps.tsx";
 import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
@@ -1840,6 +1840,8 @@ function Theatre({ api }: { api: ApiClient }) {
       : takeover && takeover.by !== "user"
         ? "computer"
         : fixWait(fixes);
+  // Whichever wait the message box says it moves on from, a field for a secret may be up beside it.
+  const secretField = (!!askDraft && asksPrivate(askDraft.fields)) || fixes.some(takesSecret);
   // What a task's decision must not stay behind when a notification opens it.
   const uncover = () => {
     selectReplay(null);
@@ -3167,6 +3169,7 @@ function Theatre({ api }: { api: ApiClient }) {
             layout={sheets ? "pill" : "card"}
             placeholder={stack && level === 2 ? "Steer dot" : undefined}
             waitingOn={dotWait}
+            secretField={secretField}
             modelChanged={modelChanged}
             sendModel={taskModel.ref}
             modelAfter={modelNext && taskModel.ref ? modelLabel : undefined}

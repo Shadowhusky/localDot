@@ -393,7 +393,12 @@ export function KeyForm({
       reveal();
       return;
     }
-    const bad = valueProblem(value, check.binding.kind);
+    const bound = check.binding;
+    const bad = valueProblem(value, bound.kind, {
+      ...(bound.kind === "llm" ? { provider: bound.provider } : {}),
+      ...(bound.kind === "http" ? { format: bound.format } : {}),
+      replacing: !!reenter,
+    });
     if (bad) {
       setProblem({ field: "value", message: bad });
       reveal();

@@ -523,6 +523,8 @@ test.describe("a secret and the message box", () => {
       await expect(box).toHaveValue("", { timeout: 2000 });
     }).toPass();
     await box.focus();
+    // Just after a key press, a card leaves the keys where they are.
+    await page.waitForTimeout(3200);
     await page.request.post(`${fixture.origin}/__qa/keys-locked`);
     const card = page.getByRole("region", { name: "Unlock your saved keys" });
     await expect(card.getByLabel("Passphrase")).toBeFocused();
@@ -538,6 +540,42 @@ test.describe("a secret and the message box", () => {
     await box.focus();
     await page.request.post(`${fixture.origin}/__qa/ask?fields=login`);
     await expect(page.locator("form.ask input").first()).toBeFocused();
+  });
+
+  test("a question beside the unlock card still holds the box", async ({ page, ui }) => {
+    const fixture = await ui.open("running");
+    await page.request.post(`${fixture.origin}/__qa/keys-locked`);
+    await expect(page.getByRole("region", { name: "Unlock your saved keys" })).toBeVisible();
+    await page.request.post(`${fixture.origin}/__qa/ask`);
+    await expect(page.locator("form.ask, .ask-quick").first()).toBeVisible();
+    const box = await messageBox(page);
+    await box.click();
+    await box.pressSequentially(SECRET);
+    await expect((await composer(page)).getByText(/Messages aren't kept secret/)).toBeVisible();
+    await trySending(page);
+    await expect(await held(page)).toBeVisible();
+    await page.waitForTimeout(600);
+    expect(await logged(page, fixture.origin)).not.toContain(SECRET);
+  });
+
+  test("a message typed as a key's card comes up isn't saved over the key", async ({
+    page,
+    ui,
+  }) => {
+    const fixture = await ui.open("running");
+    const box = await messageBox(page);
+    await box.click();
+    await page.waitForTimeout(3200);
+    await page.request.post(`${fixture.origin}/__qa/fix/key`);
+    const card = page.getByRole("region", { name: /key was refused/ });
+    await expect(card).toBeVisible();
+    await expect(card.getByRole("textbox").first()).not.toBeFocused();
+    await page.keyboard.type("please also check the logs");
+    await trySending(page);
+    await expect(box).toHaveValue("please also check the logs");
+    await expect(await held(page)).toBeVisible();
+    await expect(card).toBeVisible();
+    expect(await logged(page, fixture.origin)).not.toContain("blocker.clear");
   });
 
   test("words already in the box keep the keys, and still don't go on Enter", async ({

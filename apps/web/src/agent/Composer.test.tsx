@@ -1589,6 +1589,62 @@ describe("sending while dot waits for something private", () => {
     expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "correct horse battery" });
   });
 
+  it.each(["question", "approval", "computer", "fix"] as const)(
+    "holds the box while a field for a secret is up beside a %s wait",
+    async (waitingOn) => {
+      const f = setup(undefined, { waitingOn, secretField: true });
+      f.input("correct horse battery");
+      expect(screen.getByText(/Messages aren't kept secret/)).toBeTruthy();
+      fireEvent.keyDown(f.field, { key: "Enter" });
+      f.submit();
+      await settle();
+      expect(f.requests).toEqual([]);
+      fireEvent.click(screen.getByRole("button", STEP));
+      await waitFor(() => expect(f.requests).toHaveLength(1));
+    },
+  );
+
+  it("takes no long text into a file while a field for a secret is up", async () => {
+    const f = setup(undefined, { waitingOn: "question", secretField: true });
+    fireEvent.paste(f.field, {
+      clipboardData: { files: [], getData: () => `correct horse ${"word ".repeat(1500)}` },
+    });
+    f.input("x".repeat(8000));
+    expect(screen.queryByRole("list", { name: /attached/i })).toBeNull();
+    expect(screen.queryByText(/pasted text|typed text/i)).toBeNull();
+    expect(f.field.value).toBe("");
+    expect(screen.getByText(/Long text isn't taken/)).toBeTruthy();
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    f.submit();
+    await settle();
+    expect(f.requests).toEqual([]);
+    keepDraftNow();
+    expect(localStorage.getItem(DRAFT)).toBeNull();
+  });
+
+  it("holds a file attached while a field for a secret is up", async () => {
+    const calls: string[] = [];
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: async (url) => {
+        const target = new URL(String(url));
+        if (target.pathname === "/api/voice") return Response.json({ onMac: { available: false } });
+        calls.push(target.pathname);
+        return target.pathname.endsWith("/upload")
+          ? Response.json({ path: "~/Downloads/plan.pdf" }, { status: 201 })
+          : new Response(null, { status: 202 });
+      },
+    });
+    const f = setup(undefined, { api, waitingOn: "private-fix" });
+    f.attach(new File(["plan"], "plan.pdf"));
+    await waitFor(() => expect(screen.getByText("Uploaded to Downloads")).toBeTruthy());
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    f.submit();
+    await settle();
+    expect(calls.filter((path) => path.endsWith("/messages"))).toEqual([]);
+    expect(screen.getByRole("button", STEP)).toBeTruthy();
+  });
+
   it("asks again once the words change", async () => {
     const f = setup(undefined, { waitingOn: "private-fix" });
     f.input("one");

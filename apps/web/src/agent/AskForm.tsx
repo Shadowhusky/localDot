@@ -48,7 +48,7 @@ import { CopyButton } from "./CopyButton.tsx";
 import { FileTransferFailure } from "./file-transfer.ts";
 import { KeyFound } from "./KeyFound.tsx";
 import { markdownToPlain } from "./markdown.ts";
-import { emptyMessageBoxHasKeys } from "./message-box.ts";
+import { emptyMessageBoxHasKeys, typedLately } from "./message-box.ts";
 import { PrivateKeyRequest } from "./PrivateKeyRequest.tsx";
 import type { UploadOptions } from "./resumable-upload.ts";
 import { hiddenWarning, plainReveal, revealText } from "./reveal-text.ts";
@@ -103,6 +103,11 @@ const TEXT_INPUT: Partial<Record<AskField["kind"], Partial<TextFieldProps>>> = {
   phone: { type: "tel", inputMode: "tel", autoComplete: "tel" },
 };
 
+// localDot's own words on a form dot wrote, wherever the user can type into it.
+export const DotWroteThis = () => (
+  <p className="ask-origin">dot wrote this. localDot never asks for its passphrase here.</p>
+);
+
 // dot's question answered in place: its fields, then Not now and dot's own verb. The same draft
 // backs every surface, so what is typed in one shows in the others.
 export function AskForm(props: AskFormProps) {
@@ -141,7 +146,7 @@ function StandardAskForm({
   const typed = TYPED.has(fields[0]?.kind ?? "qr");
   const secret = asksPrivate(fields);
   useEffect(() => {
-    if (reason) return;
+    if (reason || typedLately()) return;
     const free = !document.activeElement || document.activeElement === document.body;
     const asked = !touch && layout !== "sheet" && typed && free;
     if (!asked && !(secret && emptyMessageBoxHasKeys())) return;
@@ -269,9 +274,7 @@ function StandardAskForm({
   );
   const foot = (
     <div className={clsx("ask-foot", layout !== "thread" && "decision-foot")}>
-      {fields.some((field) => TYPED.has(field.kind) || field.kind === "api_key") && (
-        <p className="ask-origin">dot wrote this. localDot never asks for its passphrase here.</p>
-      )}
+      {fields.some((field) => TYPED.has(field.kind) || field.other) && <DotWroteThis />}
       <p className="ask-problem" role="status">
         {state.failed}
       </p>

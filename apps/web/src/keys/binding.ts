@@ -1,6 +1,7 @@
 import {
   CLAUDE_PLAN_REFUSAL,
   claudePlanToken,
+  fitsProviderKey,
   GeneralSecretValue,
   type HTTP_FORMATS,
   JEV_HOST,
@@ -197,8 +198,14 @@ export const valueHint = (d: KeyDraft) =>
   d.kind === "llm" && d.provider === "anthropic" ? "sk-ant-api" : undefined;
 
 // keyd stores 8 to 8,192 printable ASCII characters with no space at either end; a paste's stray
-// spaces are trimmed first.
-export function valueProblem(value: string, kind: KeyDraft["kind"] = "http"): string | undefined {
+// spaces are trimmed first. A model key or a bearer token has no spaces at all, and over a saved key
+// what reads as a sentence, or doesn't look like that provider's key, is taken for a message typed
+// in the wrong place rather than saved over a working key.
+export function valueProblem(
+  value: string,
+  kind: KeyDraft["kind"] = "http",
+  shape: { provider?: string; format?: string; replacing?: boolean } = {},
+): string | undefined {
   if (kind === "secret")
     return GeneralSecretValue.safeParse(value).success
       ? undefined
@@ -209,6 +216,16 @@ export function valueProblem(value: string, kind: KeyDraft["kind"] = "http"): st
   }
   if (value.startsWith(" ") || value.endsWith(" ")) {
     return "Remove spaces at the start or end of the key.";
+  }
+  const spaced = value.includes(" ");
+  if (spaced && (kind === "llm" || (shape.format ?? "bearer") === "bearer"))
+    return "A key has no spaces. Paste the key itself.";
+  if (shape.replacing && value.split(" ").length > 2)
+    return "That reads like a message, not a key. Paste the key itself.";
+  if (shape.replacing && kind === "llm" && shape.provider) {
+    const fits = fitsProviderKey(shape.provider, value);
+    if (fits === false)
+      return `That doesn't look like ${PROVIDER_NAMES[shape.provider as Provider] ?? "this provider"}'s key. Paste the key itself.`;
   }
   return undefined;
 }
