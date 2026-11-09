@@ -6,6 +6,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { sourceAppUpdater } from "./source-updater.ts";
 
 const roots: string[] = [];
+// The update takes a few steps before it spawns anything, which a busy machine stretches.
+const soon = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -133,7 +135,7 @@ it("logs a source update and hands the installer a status file", async () => {
   const updater = await f.create();
   await updater.check();
   await updater.install();
-  await vi.waitFor(() => expect(f.spawn).toHaveBeenCalled());
+  await soon(() => expect(f.spawn).toHaveBeenCalled());
   const options = (
     f.spawn.mock.calls[0] as unknown as [string, string[], Record<string, never>]
   )[2] as unknown as {

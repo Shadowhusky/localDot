@@ -20,6 +20,8 @@ import { IMAGE_ROOM, packageAppUpdater } from "./package-updater.ts";
 import { UpdateFailure } from "./progress.ts";
 
 const roots: string[] = [];
+// The update takes a few steps before it spawns anything, which a busy machine stretches.
+const soon = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
 afterEach(async () => {
   for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true });
 });
@@ -138,7 +140,7 @@ it("streams the verifier's progress, fetches the pinned images and keeps the arc
     notes: [{ version: "0.1.0-rc.2", markdown: NOTE }],
   });
   await updater.install();
-  await vi.waitFor(() => expect(f.installs()).toHaveLength(1));
+  await soon(() => expect(f.installs()).toHaveLength(1));
   const [, , install] = f.installs()[0] as unknown as [
     string,
     string[],
@@ -180,7 +182,7 @@ it.each(["darwin", "linux"] as const)(
       updater = await f.create();
     await updater.check();
     await updater.install();
-    await vi.waitFor(() => expect(f.installs()).toHaveLength(1));
+    await soon(() => expect(f.installs()).toHaveLength(1));
     expect(f.settled).not.toHaveBeenCalled();
     const [executable, args, options] = f.installs()[0] as unknown as [
       string,
@@ -193,7 +195,7 @@ it.each(["darwin", "linux"] as const)(
     expect(options.detached).toBe(true);
     if (platform === "linux") expect(args).toContain("--wait");
     f.child.emit("close", 1);
-    await vi.waitFor(() => expect(f.settled).toHaveBeenCalledOnce());
+    await soon(() => expect(f.settled).toHaveBeenCalledOnce());
     await vi.waitFor(async () =>
       expect(await updater.status()).toMatchObject({
         error: expect.stringContaining("couldn't be installed"),
@@ -240,7 +242,7 @@ it("checks and installs through the bundled verifier and new channel after a leg
     "https://downloads.localdot.dev/channels/releases.json",
   ]);
   await updater.install();
-  await vi.waitFor(() => expect(f.installs()).toHaveLength(1));
+  await soon(() => expect(f.installs()).toHaveLength(1));
   const args = (f.installs()[0] as unknown as [string, string[]])[1];
   expect(args[args.indexOf("--package-channel") + 1]).toBe(
     "https://downloads.localdot.dev/channels/releases.json",
@@ -323,7 +325,7 @@ it("hands the installer a status file, and reads back what it recorded", async (
   const updater = await f.create();
   await updater.check();
   await updater.install();
-  await vi.waitFor(() => expect(f.installs()).toHaveLength(1));
+  await soon(() => expect(f.installs()).toHaveLength(1));
   const [, , options] = f.installs()[0] as unknown as [
     string,
     string[],

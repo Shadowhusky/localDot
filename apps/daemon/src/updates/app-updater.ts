@@ -419,6 +419,15 @@ export class AppUpdater {
     if (!host || this.#phase !== "installing") return;
     this.#stopWatching();
     const state = (await host.installer?.read().catch(() => null)) ?? null;
+    // Killed once the swap had begun: its undoing is under way or over, and this daemon is about
+    // to be restarted by it, so it only follows along.
+    if (!words && !this.#stalled && state?.running) {
+      this.#installStarted = false;
+      this.#watch(version);
+      return;
+    }
+    if (!words && state && state.stage !== "failed" && !UNTOUCHED.includes(state.stage))
+      return this.#conclude(version, state);
     await host.attempts?.save(null).catch(() => {});
     const available = this.#record.availableVersion;
     this.#phase =

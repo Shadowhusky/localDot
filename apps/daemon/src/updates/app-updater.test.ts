@@ -453,6 +453,37 @@ it("stops an installer stuck before the swap and says so, leaving the old versio
   });
   await f.updater.close();
 });
+it("an installer killed once the swap began leaves the verdict to whoever undoes it", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  await f.updater.check();
+  let exit: (error: Error) => void = () => {};
+  f.host.install.mockImplementation(
+    () =>
+      new Promise((_resolve, reject) => {
+        exit = reject;
+      }),
+  );
+  await f.updater.update();
+  await vi.advanceTimersByTimeAsync(0);
+  f.host.installer.state = { stage: "start", restored: false, running: true };
+  exit(new Error("killed"));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await f.updater.status()).toMatchObject({ phase: "installing", error: null });
+  expect(await f.host.attempts.read()).toEqual({ v: 1, version: "1.1.0" });
+  f.host.installer.state = {
+    stage: "failed",
+    problem: "interrupted",
+    restored: true,
+    running: false,
+  };
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(await f.updater.status()).toMatchObject({
+    phase: "ready",
+    error: "The update to localDot 1.1.0 was interrupted, so your previous version was restored.",
+  });
+  await f.updater.close();
+});
 it("never cancels an installer that has begun the swap", async () => {
   vi.useFakeTimers();
   const f = fixture();
