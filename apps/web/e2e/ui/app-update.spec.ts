@@ -7,6 +7,7 @@ import {
 } from "../../../../packages/protocol/src/app-update.ts";
 import { TOKEN } from "../fixtures/start-ui-fixture.ts";
 import { closeSettings, openSettings } from "../settings-ui.ts";
+import { auditContrast, wearAppearance } from "./contrast.ts";
 import { expect, FIXTURE_START, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w39");
@@ -389,6 +390,56 @@ for (const { name, choice } of [
       await shot(page, ui, "task-working");
     });
   });
+
+test("what an update says stays readable in every appearance", async ({ page, ui }) => {
+  const daemon = await fakeDaemon(
+    page,
+    updateState({
+      phase: "downloading",
+      updating: true,
+      progress: { step: "download", value: 0.03, detail: "Downloading · 42% · 8 of 19 MB" },
+    }),
+  );
+  await ui.open("ready");
+  const sheet = await openUpdates(page);
+  const read = async (state: string) => {
+    await ui.settle();
+    for (const [turn, appearance] of (["daylight", "graphite", "midnight"] as const).entries()) {
+      await wearAppearance(page, appearance);
+      const { failures } = await auditContrast(page, { stillSince: turn > 0 });
+      expect
+        .soft(
+          failures.map(
+            (each) =>
+              `${state} ${appearance} ${each.ratio}:1 < ${each.needs} ${each.kind} "${each.what}"`,
+          ),
+        )
+        .toEqual([]);
+    }
+  };
+  await expect(sheet.getByText(/Downloading · 42%/)).toBeVisible();
+  await read("downloading");
+  Object.assign(daemon.state, {
+    phase: "ready",
+    updating: false,
+    error: `localDot ${NEW} couldn't be installed, so nothing has changed. Docker isn't running. Start it and try again.`,
+    progress: { step: "install", value: null, detail: null },
+  });
+  await nudge(page);
+  await expect(sheet.getByRole("list", { name: "Update steps" })).toBeVisible();
+  await read("failed");
+  Object.assign(daemon.state, {
+    phase: "installing",
+    updating: true,
+    error: null,
+    progress: { step: "restart", value: 0.97, detail: "Restarting localDot" },
+  });
+  await nudge(page);
+  await expect(
+    page.getByRole("alertdialog", { name: `Updating localDot to ${NEW}` }),
+  ).toBeVisible();
+  await read("restarting");
+});
 
 test("a copy running from source says so, with nothing to press that could fail", async ({
   page,

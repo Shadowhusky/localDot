@@ -110,6 +110,13 @@ it("polls closely through an update, and rarely otherwise", async () => {
   expect(f.state.gets.at(-1)).toContain("notes=0");
   expect(f.hook.result.current.status?.notes).toHaveLength(1);
 });
+it("keeps polling closely in the moment between the download and the install", async () => {
+  const f = fixture({ phase: "ready", updating: true });
+  await settle();
+  const asked = f.state.gets.length;
+  await pass(4_100);
+  expect(f.state.gets.length).toBeGreaterThanOrEqual(asked + 2);
+});
 it("takes a lost daemon during an install as the restart, not a failure", async () => {
   const f = fixture({ phase: "installing", updating: true });
   await settle();

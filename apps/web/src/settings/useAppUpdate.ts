@@ -177,7 +177,7 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
       } else setUnreachable(true);
     }
   }, [api]);
-  const closely = active(status) || restarting || starting;
+  const closely = active(status) || !!status?.updating || restarting || starting;
   useEffect(() => {
     mounted.current = true;
     unavailable.current = false;

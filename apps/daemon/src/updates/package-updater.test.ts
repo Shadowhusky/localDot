@@ -345,8 +345,9 @@ it("hands the installer a status file, and reads back what it recorded", async (
     JSON.stringify({ v: 1, pid: process.pid, stage: "failed", problem: "docker", restored: false }),
   );
   f.child.emit("close", 1);
-  await vi.waitFor(async () =>
-    expect((await updater.status()).error).toContain("Docker isn't running."),
+  await vi.waitFor(
+    async () => expect((await updater.status()).error).toContain("Docker isn't running."),
+    { timeout: 4000 },
   );
 });
 it("downloads into a place of this dot's own, so dots sharing an installation can't mix a partial file", async () => {

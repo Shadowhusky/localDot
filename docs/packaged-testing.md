@@ -73,6 +73,13 @@ silicon/Intel hardware, prerequisites and live computer startup have been exerci
 6. Test both installer URLs anonymously, verify the signed catalog and every referenced app/image
    download, and run installation acceptance. Then update the README's quick-install commands.
 
+## Testing an update
+
+`scripts/distribution/update-flow.test.ts` runs the in-app update end to end in a throwaway home on
+macOS: the real `install.sh`, verifier and updater against a local signed catalog, with launchd and
+Docker faked (`scripts/distribution/testing/`). Never run `install.sh` on a development Mac without
+a fake `launchctl` first on `PATH`: its service labels are the same as the live daemon's.
+
 ## Updates and recovery
 
 The same six-hour update scheduler checks the signed testing channel. Verified download readiness

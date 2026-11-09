@@ -554,6 +554,20 @@ it("says an interrupted update was interrupted, not that the version didn't star
     "The update to localDot 1.1.0 was interrupted, so your previous version was restored.",
   );
 });
+it("doesn't wait forever on an installer record nothing is behind any more", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  await f.host.attempts.save({ v: 1, version: "1.1.0" });
+  f.host.version = "1.1.0";
+  f.host.installer.state = { stage: "start", restored: false, running: true };
+  const updated = f.restart();
+  expect(await updated.status()).toMatchObject({ phase: "installing" });
+  await vi.advanceTimersByTimeAsync(1000);
+  f.advance(21 * 60_000);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(await updated.status()).toMatchObject({ phase: "idle", updating: false, error: null });
+  await updated.close();
+});
 it("says an installer that died before touching anything changed nothing", async () => {
   const f = fixture();
   await f.updater.check();

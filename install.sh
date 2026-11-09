@@ -1800,7 +1800,9 @@ source_update_exit() {
 
 # Every dot runs this installation: after an update, each is given the new services and restarts.
 refresh_dots() {
-  cli dots refresh || warn "Your other dots couldn't all be updated. Restart them with: localdot up --dot <name>"
+  local limit=""
+  ! in_app || limit=${UPDATE_CHECK_SECONDS:-300}
+  CLI_SECONDS=$limit cli dots refresh || warn "Your other dots couldn't all be updated. Restart them with: localdot up --dot <name>"
 }
 
 run_uninstall() {
@@ -1995,7 +1997,8 @@ swap_begin() {
     sleep 1
     [ -f "$journal" ] || exit 0
     UPDATE_PROBLEM=interrupted
-    if recover_package_swap; then update_stage failed true; else update_stage failed false; fi
+    recover_package_swap
+    if [ "${PACKAGE_RESTORED:-0}" = 1 ]; then update_stage failed true; else update_stage failed false; fi
     rm -f "$PREFIX/.package-install.lock/pid"
     rmdir "$PREFIX/.package-install.lock" 2>/dev/null || true
   ) </dev/null &
@@ -2038,15 +2041,17 @@ rollback_package() {
     case "$name" in keyd) file=$KEYD_FILE ;; daemon) file=$DAEMON_FILE ;; state) file=$PREFIX/install.env ;; binary) file=$PREFIX/bin/keyd ;; esac
     if [ -f "$PACKAGE_ROLLBACK/$name" ]; then cp -p "$PACKAGE_ROLLBACK/$name" "$file"; else rm -f "$file"; fi
   done
-  if [ -f "$PACKAGE_ROLLBACK/state" ]; then start_services "${KEYD_STOPPED:-1}" 1 || warn "Run localdot up to start the restored app."; fi
+  if [ -f "$PACKAGE_ROLLBACK/state" ]; then
+    if start_services "${KEYD_STOPPED:-1}" 1; then PACKAGE_RESTORED=1; else warn "Run localdot up to start the restored app."; fi
+  fi
 }
 
 package_exit() {
   local result=$? restored=false
   trap - EXIT
   set +e
-  [ "${PACKAGE_PENDING:-0}" != 1 ] || restored=true
   rollback_package
+  [ "${PACKAGE_RESTORED:-0}" != 1 ] || restored=true
   swap_end
   [ -z "${PACKAGE_SCRATCH:-}" ] || rm -rf "$PACKAGE_SCRATCH"
   [ "$result" = 0 ] || update_stage failed "$restored"

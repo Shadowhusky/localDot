@@ -246,12 +246,11 @@ export class AppUpdater {
             since = this.#now();
             this.#progress = installProgress(version, state.stage);
           }
-          if (adopted && state && !state.running) return this.#conclude(version, state);
-          if (
-            state?.running &&
-            UNTOUCHED.includes(state.stage) &&
-            this.#now() - since >= INSTALL_STALL_MS
-          ) {
+          // A record this old is from an installer long gone, whose pid something else now has.
+          const silent = this.#now() - since >= INSTALL_STALL_MS;
+          if (adopted && state && (!state.running || silent))
+            return this.#conclude(version, { ...state, running: false });
+          if (state?.running && UNTOUCHED.includes(state.stage) && silent) {
             this.#stalled = true;
             installer.cancel();
           }
