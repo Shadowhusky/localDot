@@ -234,6 +234,9 @@ async function askFields(
   input: AskUserInput,
   fields: NonNullable<AskUserInput["fields"]>,
 ): Promise<ToolResult> {
+  // A shared link's task fills the owner's saved sign-ins, when its link allows, but never saves
+  // or changes one: what its guest types is theirs.
+  const keeps = !!deps.logins && !ctx.session.guest;
   if (
     input.purpose === "sign_in" &&
     fields.length === 1 &&
@@ -354,7 +357,7 @@ async function askFields(
             const account = loginFields[0] && missing.fields?.[loginFields[0].id];
             if (typeof account !== "string") return fail("The account name was not provided.");
             reused.username = account;
-            await deps.logins.saveLogin(reused.origin, reused.username, reused.password);
+            if (keeps) await deps.logins.saveLogin(reused.origin, reused.username, reused.password);
           }
           delivering = true;
           addTaskSecret(ctx.session, reused.password);
@@ -425,7 +428,7 @@ async function askFields(
       id: field.id,
       kind: field.kind,
       label: ctx.redact(field.label),
-      ...(where?.loginOrigin && deps.logins
+      ...(where?.loginOrigin && keeps
         ? {
             hint: `Saved securely for ${new URL(where.loginOrigin).host} and reused for future sign-ins.`,
           }
@@ -494,21 +497,24 @@ async function askFields(
           accountFields.length === 1 && accountFields[0]
             ? (knownAccount ?? answer.fields?.[accountFields[0].id])
             : undefined;
-        // A password-only retry retains the account saved with the original answer.
-        const prior =
-          typeof account === "string"
-            ? undefined
-            : await deps.logins.login(field.loginOrigin).catch(() => undefined);
-        ctx.check();
-        username = typeof account === "string" ? account : (prior?.username ?? "");
-        if (prior) prior.password = "";
-        try {
-          await deps.logins.saveLogin(field.loginOrigin, username ?? "", value);
-        } catch (error) {
-          saveFailed = true;
-          if (error instanceof VaultLockedError) ctx.session.lockKeys();
+        if (typeof account === "string") username = account;
+        if (keeps) {
+          // A password-only retry retains the account saved with the original answer.
+          const prior =
+            typeof account === "string"
+              ? undefined
+              : await deps.logins.login(field.loginOrigin).catch(() => undefined);
+          ctx.check();
+          username = typeof account === "string" ? account : (prior?.username ?? "");
+          if (prior) prior.password = "";
+          try {
+            await deps.logins.saveLogin(field.loginOrigin, username ?? "", value);
+          } catch (error) {
+            saveFailed = true;
+            if (error instanceof VaultLockedError) ctx.session.lockKeys();
+          }
+          ctx.check();
         }
-        ctx.check();
       }
       try {
         if (value !== undefined) landed = await typeSecret(deps, ctx, field, value, username);
@@ -553,7 +559,7 @@ async function askFields(
             secrets.size
               ? `\n${deliveries.join("\n")} Verification codes are never saved. The page may advance after the last character; inspect it and never replay a code after it advances. A rejected password needs a replacement; a different verification step needs the matching input form.`
               : ""
-          }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && deps.logins ? "\nThe sign-in was saved securely for future use on this site." : secrets.size && fields.some((field) => field.kind === "secret") && ![...secrets.values()].some((field) => field.loginOrigin) ? "\nThis password was entered once but was not saved: this surface did not provide a verified website sign-in form. Tell the user it will need to be provided again if this sign-in is lost." : ""}`,
+          }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && keeps ? "\nThe sign-in was saved securely for future use on this site." : secrets.size && fields.some((field) => field.kind === "secret") && ![...secrets.values()].some((field) => field.loginOrigin) ? "\nThis password was entered once but was not saved: this surface did not provide a verified website sign-in form. Tell the user it will need to be provided again if this sign-in is lost." : ""}`,
         ),
       ],
     };
