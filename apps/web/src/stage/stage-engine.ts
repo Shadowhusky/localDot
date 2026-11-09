@@ -35,6 +35,11 @@ export interface ReplayHandle {
 
 export interface StageCanvasHandle {
   replay: ReplayHandle;
+  // Starts the stage's worker again on a new canvas, unless it did so only now and no one insists:
+  // a lost worker never comes back, whatever streams it is handed.
+  restart(options?: { now?: boolean }): void;
+  // Tells `listener` each time the stage starts again, its frame sources gone with its worker.
+  onRestart(listener: () => void): () => void;
   attach(source: FrameSource): void;
   detach(): void;
   // The desktop's picture under the browser's window.
@@ -86,6 +91,16 @@ export function backingScale(
 // worker a fresh backing store and a full redraw.
 export const RESIZE_SETTLE_MS = 100;
 
+// How long the stage waits before it may start again, doubling until it shows a frame.
+export const RESTART_MS = { min: 1_000, max: 30_000 };
+
+const newCanvas = () => {
+  const canvas = document.createElement("canvas");
+  canvas.className = "stage-canvas";
+  canvas.setAttribute("aria-label", "The virtual computer");
+  return canvas;
+};
+
 // Whether some of the canvas is in the viewport with a size, and the share of the viewport it
 // covers.
 export interface StageView {
@@ -96,7 +111,7 @@ export interface StageView {
 // The stage's canvas and the worker that owns it. It lives apart from React, so a stage that moves
 // to another container or remounts keeps its picture, its overlays and its frame pump.
 export class StageEngine implements StageCanvasHandle {
-  readonly canvas = document.createElement("canvas");
+  canvas = newCanvas();
   readonly replay: ReplayHandle;
   #worker: Worker | null = null;
   #closed = false;
@@ -123,13 +138,22 @@ export class StageEngine implements StageCanvasHandle {
   #viewListeners = new Set<(view: StageView) => void>();
   #view: StageView = { onScreen: true, share: 0 };
   #teardown: () => void = () => {};
+  #restartListeners = new Set<() => void>();
+  #restartGap = RESTART_MS.min;
+  #restartAfter = 0;
+  #restartTimer: ReturnType<typeof setTimeout> | undefined;
+  #replaying = false;
+  // What the page has told the worker, for the next one.
+  #toldView: StageViewPatch = {};
+  #toldClock: StageClock | null = null;
+  #toldTheme: StageTheme | null = null;
+  #toldEvents: LocalDotEvent[] = [];
 
   constructor() {
-    this.canvas.className = "stage-canvas";
-    this.canvas.setAttribute("aria-label", "The virtual computer");
     this.#mark(null);
     this.replay = {
       open: (source) => {
+        this.#replaying = true;
         this.#sourceId++;
         this.#source?.stop();
         this.#source = null;
@@ -140,7 +164,10 @@ export class StageEngine implements StageCanvasHandle {
       },
       transport: (transport) => this.#post({ type: "replay-transport", transport }),
       seek: (tMs, mode) => this.#post({ type: "replay-seek", tMs, mode }),
-      close: () => this.#post({ type: "replay-close" }),
+      close: () => {
+        this.#replaying = false;
+        this.#post({ type: "replay-close" });
+      },
       onReplay: (listener) => {
         this.#replayListeners.add(listener);
         return () => this.#replayListeners.delete(listener);
@@ -159,6 +186,29 @@ export class StageEngine implements StageCanvasHandle {
         );
       },
     };
+  }
+
+  onRestart(listener: () => void): () => void {
+    this.#restartListeners.add(listener);
+    return () => this.#restartListeners.delete(listener);
+  }
+
+  restart({ now = false }: { now?: boolean } = {}): void {
+    if (this.#closed || this.#replaying) return;
+    const at = Date.now();
+    if (!now && at < this.#restartAfter) return;
+    this.#restartAfter = at + this.#restartGap;
+    this.#restartGap = Math.min(RESTART_MS.max, this.#restartGap * 2);
+    this.#teardown();
+    this.#teardown = () => {};
+    this.#workerTracks = null;
+    this.#fed = this.#underFed = 0;
+    const canvas = newCanvas();
+    this.canvas.replaceWith(canvas);
+    this.canvas = canvas;
+    this.#mark(null);
+    if (this.#anchor) this.#start();
+    for (const listener of this.#restartListeners) listener();
   }
 
   onStats(listener: (stats: PumpStats) => void): () => void {
@@ -210,6 +260,12 @@ export class StageEngine implements StageCanvasHandle {
     this.#closed = true;
     this.canvas.remove();
     this.#teardown();
+    this.#restartListeners.clear();
+    this.#replayListeners.clear();
+    this.#statsListeners.clear();
+    this.#underStatsListeners.clear();
+    this.#flipListeners.clear();
+    this.#viewListeners.clear();
   }
 
   #start(): void {
@@ -235,6 +291,11 @@ export class StageEngine implements StageCanvasHandle {
       [offscreen],
     );
     worker.onmessage = (e: MessageEvent<WorkerOut>) => this.#receive(e.data);
+    // A worker says what it reads as it starts: one that hasn't never loaded.
+    worker.onerror = () => {
+      if (this.#worker !== worker || this.#workerTracks !== null) return;
+      this.#restartTimer = setTimeout(() => this.restart(), this.#restartGap);
+    };
     const onMotion = () => this.#post({ type: "view", view: { reducedMotion: motion.matches } });
     motion.addEventListener("change", onMotion);
     // The observers' first reports, after the canvas is laid out, say where it is: a stage that is
@@ -292,6 +353,7 @@ export class StageEngine implements StageCanvasHandle {
     window.addEventListener(APPEARANCE_EVENT, onAppearance);
     this.#worker = worker;
     this.#teardown = () => {
+      clearTimeout(this.#restartTimer);
       window.removeEventListener(APPEARANCE_EVENT, onAppearance);
       window.removeEventListener("resize", view);
       motion.removeEventListener("change", onMotion);
@@ -308,15 +370,14 @@ export class StageEngine implements StageCanvasHandle {
       }
       this.#pendingOracle.clear();
       this.#pendingReplay.clear();
-      this.#replayListeners.clear();
-      this.#statsListeners.clear();
-      this.#underStatsListeners.clear();
-      this.#flipListeners.clear();
-      this.#viewListeners.clear();
       worker.postMessage({ type: "replay-close" } satisfies WorkerIn);
       worker.terminate();
       this.#worker = null;
     };
+    if (Object.keys(this.#toldView).length) this.#post({ type: "view", view: this.#toldView });
+    if (this.#toldClock) this.#post({ type: "clock", clock: this.#toldClock });
+    if (this.#toldTheme) this.#post({ type: "theme", theme: this.#toldTheme });
+    if (this.#toldEvents.length) this.#post({ type: "events", events: this.#toldEvents });
   }
 
   #receive(m: WorkerOut): void {
@@ -330,6 +391,7 @@ export class StageEngine implements StageCanvasHandle {
       for (const listener of this.#underStatsListeners) listener(m.stats);
     } else if (m.type === "stats") {
       if (!this.#source || m.sourceId !== this.#sourceId) return;
+      this.#restartGap = RESTART_MS.min;
       this.#mark(m.stats);
       for (const listener of this.#statsListeners) listener(m.stats);
     } else if (m.type === "flip") for (const listener of this.#flipListeners) listener(m.flip);
@@ -504,18 +566,22 @@ export class StageEngine implements StageCanvasHandle {
   }
 
   pushEvents(events: LocalDotEvent[]): void {
+    for (const event of events) this.#toldEvents.push(event);
     this.#post({ type: "events", events });
   }
 
   resetSession(): void {
+    this.#toldEvents = [];
     this.#post({ type: "session-reset" });
   }
 
   setClock(clock: StageClock): void {
+    this.#toldClock = clock;
     this.#post({ type: "clock", clock });
   }
 
   setView(view: StageViewPatch): void {
+    this.#toldView = { ...this.#toldView, ...view };
     this.#post({ type: "view", view });
   }
 
@@ -526,6 +592,7 @@ export class StageEngine implements StageCanvasHandle {
 
   // A theme pack restyles the stage by sending its parsed tokens (the stage reads tokens once).
   setTheme(theme: StageTheme): void {
+    this.#toldTheme = theme;
     this.#post({ type: "theme", theme });
   }
 
