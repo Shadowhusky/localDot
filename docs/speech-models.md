@@ -9,11 +9,16 @@ Change engine: **sherpa-onnx runs the models localDot installs**, and a Whisper 
 stays on whisper.cpp, unchanged. No Whisper model was close on Chinese or mixed speech at a size or speed
 a modest machine can bear.
 
-| Tier | Model | Download | On disk | Memory at most | Short message (4 cores / 2 cores) | Two minutes (4 / 2) |
+| Tier | Model | Download | On disk | Memory at most | Short message: Mac / Linux 4 cores / Linux 2 cores | Two minutes: Mac / Linux 4 / Linux 2 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Light | SenseVoice Small int8, 2024-07-17 | about 180 MB | about 260 MB | 520 MB | 0.6 s / 1.9 s | 5.5 s / 8.7 s |
-| **Balanced** (the default) | X-ASR zh-en int8, 2026-06-03 | about 155 MB | about 200 MB | 870 MB | 2.2 s / 5.2 s | 14 s / 24 s |
-| Most languages | Qwen3-ASR 0.6B int8, 2026-03-25 | about 860 MB | about 975 MB | 2 GB | 5.3 s / not measured | 33 s / not measured |
+| Light | SenseVoice Small int8, 2024-07-17 | about 180 MB | about 260 MB | 520 MB | 0.54 s / 0.6 s / 1.9 s | 3.3 s / 5.5 s / 8.7 s |
+| **Balanced** (the default) | X-ASR zh-en int8, 2026-06-03 | about 155 MB | about 200 MB | 870 MB | 0.75 s / 2.2 s / 5.2 s | 3.9 s / 14 s / 24 s |
+| Most languages | Qwen3-ASR 0.6B int8, 2026-03-25 | about 860 MB | about 975 MB | 2 GB | 1.8 s / 5.3 s / not measured | 17 s / 33 s / not measured |
+
+"Mac" is the shipped install flow, run for real on this Mac (Apple M3 Ultra, four threads): download,
+verify, unpack, then transcribe through the voice route's own code. "Linux" is the same program's Linux
+arm64 build in a capped container on the same Mac, which loads models much more slowly than the Mac
+does, so treat it as a pessimistic bound.
 
 The heaviest isn't called Best because it isn't: Balanced beats it on Chinese and mixed speech, the two
 criteria that come first. It is there for people who dictate mainly in English or in another language.
@@ -108,7 +113,9 @@ soon", so measuring it here mattered.
 ## Not measured
 
 - Any real person dictating into localDot: real speech here means ASCEND's recordings.
-- sherpa-onnx natively on macOS, on either architecture, on Metal or Core ML.
+- sherpa-onnx's accuracy natively on macOS. Its speed was measured there (the table above), and the
+  same program and models give the same words, but the accuracy columns come from the Linux build. Its
+  x64 macOS build, Metal and Core ML weren't tried.
 - Any real 8 GB Mac, Intel Mac or x64 Linux machine. x64 Linux ran under emulation to prove the install
   works: it installed, passed its checks and transcribed short clips correctly, though emulation is so slow
   that a minute of audio ran out of time, which says nothing about real speed. The speed words Settings

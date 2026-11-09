@@ -45,6 +45,7 @@ describe.runIf(on)("a real speech install", { timeout: 60 * 60_000 }, () => {
         console.log(`${job.stage} ${job.doneBytes}/${job.totalBytes}`);
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
+      if (speech.status().job) console.log(speech.status().job?.message);
       expect(speech.status().job).toBeNull();
       const model = speech.model();
       expect(model).not.toBeNull();

@@ -17,10 +17,12 @@ export class SpeechDownloadProblem extends Error {
 }
 
 const STALL_MS = 30_000;
-// Tries in a row that get next to nowhere. One that really gets further starts the count again.
-const ATTEMPTS = 4;
+// Tries in a row that get next to nowhere, about three minutes of them with the waits doubling, so a
+// blip doesn't stop a download nobody is watching. One that really gets further starts the count again.
+const ATTEMPTS = 6;
 const REAL_PROGRESS = 256 * 1024;
 const WAIT_MS = 2_000;
+const LONGEST_WAIT_MS = 30_000;
 
 export interface VerifiedDownload {
   url: string;
@@ -152,7 +154,8 @@ export async function downloadVerified(input: VerifiedDownload): Promise<void> {
       throw failure instanceof SpeechDownloadProblem
         ? failure
         : new SpeechDownloadProblem("network", "The download couldn't reach the server.");
-    await new Promise((resolve) => setTimeout(resolve, input.waitMs ?? WAIT_MS));
+    const wait = (input.waitMs ?? WAIT_MS) * 2 ** Math.max(0, fruitless - 1);
+    await new Promise((resolve) => setTimeout(resolve, Math.min(wait, LONGEST_WAIT_MS)));
   }
   await mkdir(dirname(input.to), { recursive: true, mode: 0o700 });
   await rename(part, input.to);
