@@ -411,7 +411,7 @@ describe("what every device sees of an update", () => {
       {
         migrateSystem: async (migrating, target, report) => {
           report?.({ share: 0.5, detail: "Saving what's on your computer" });
-          fake.state.imageIds.set(target, target);
+          fake.state.images.add(target);
           fake.state.imageLabels.set(target, {
             "localdot.system-source": migrating.ownership?.desktop ?? "",
           });
@@ -427,7 +427,7 @@ describe("what every device sees of an update", () => {
     orchestrator.updateStream(id, { connection: "live", viewers: 1 });
     const seen = changes.slice(from);
     expect(stages(seen, id)).toEqual(["stop", "keep", "replace", "start", "reconnect"]);
-    expect(seen.find((c) => c.updateProgress?.stage === "keep")?.updateProgress).toEqual({
+    expect(seen.find((c) => c.updateProgress?.share)?.updateProgress).toEqual({
       stage: "keep",
       share: 0.5,
       detail: "Saving what's on your computer",
