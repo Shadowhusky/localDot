@@ -1,7 +1,7 @@
 import type { Blocker, RequestFixInput, ToolResult } from "@localdot/protocol";
 import { blockerNote } from "@localdot/protocol/guidance";
 import type { OpenBlocker, RaiseOptions } from "../blockers.ts";
-import { fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import { fail, listenForUser, type ToolCallContext, type ToolDeps, text, woken } from "./deps.ts";
 
 const ASK_WINDOW_MS = 30 * 60_000;
 const STILL_OPEN =
@@ -69,11 +69,19 @@ export async function waitForFix(
     tell: false,
   });
   if (!open) return { ok: true, content: [text(blockerNote(blocker, "dismissed"))] };
-  const ended = await ctx.session.waitForBlocker(
-    open,
-    deps.askTimeoutMs ?? ctx.session.approvalWindowMs ?? ASK_WINDOW_MS,
-    ctx.signal,
-  );
+  const timeoutMs = deps.askTimeoutMs ?? ctx.session.approvalWindowMs ?? ASK_WINDOW_MS;
+  // What they say next goes first; the card stays up meanwhile.
+  const listening = listenForUser(ctx, ctx.signal, timeoutMs);
+  let ended: Awaited<ReturnType<typeof ctx.session.waitForBlocker>>;
+  try {
+    ended = await ctx.session.waitForBlocker(open, timeoutMs, listening.signal);
+  } catch (error) {
+    ctx.check();
+    if (!listening.spoke) throw error;
+    return { ok: false, content: [text(`${woken(listening)} ${STILL_OPEN}`)] };
+  } finally {
+    listening.end();
+  }
   ctx.check();
   switch (ended) {
     case "pause":

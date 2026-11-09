@@ -348,6 +348,22 @@ describe("request_fix: a card on dot's say-so", () => {
     expect(raises(events())).toHaveLength(1);
   });
 
+  it("hears the user out while it waits, leaving the card up", async () => {
+    const { call, events, session, tools } = setup();
+    tools.keysLocked = () => true;
+    const reply = call("request_fix", { kind: "keys_locked" });
+    await until(() => raises(events()).length === 1);
+    session.post("steer", "Skip that part and carry on");
+    const { body } = await reply;
+    expect(body.ok).toBe(false);
+    expect(said(body)).toMatch(/user sent a new message/);
+    expect(said(body)).toMatch(/stays up/);
+    expect(session.openBlockers).toHaveLength(1);
+    const seq = session.inboxSequence;
+    session.keysUnlocked();
+    expect(await inbox(session, seq)).toEqual([KEYS_UNLOCKED_NOTE]);
+  });
+
   it("stops waiting for a Pause, as a question does", async () => {
     const { call, events, session, tools } = setup();
     tools.keysLocked = () => true;
