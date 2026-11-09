@@ -102,11 +102,11 @@ export interface ScreenControllerDeps {
   // Synchronously stop agent admission, then physically contain both cells independently.
   fenceSession(): void;
   contain(): Promise<void>;
-  // The computer's one lane: changing what a task holds of a screen waits for its turn.
-  turn?(signal: AbortSignal): Promise<{ release(): void }>;
+  // The lane of the browser `key`: changing what a task holds of a screen waits for its turn.
+  turn?(signal: AbortSignal, key: string): Promise<{ release(): void }>;
   // What a screen shows is about to change to this task's, and has: its recording, and no other
   // task's, takes in what comes after.
-  coming?(screen: ScreenName): void;
+  coming?(screen: ScreenName, key: string): void;
   up?(screen: ScreenName): void;
   // A word to dot, with its next look at its inbox.
   remind?(text: string): void;
@@ -115,6 +115,11 @@ export interface ScreenControllerDeps {
   // in the window of the task it continues.
   readonly freshTab?: boolean;
   readonly continues?: string;
+  // Which web browser the task uses, picked at its first use; the computer's main one without it.
+  readonly lane?: {
+    claim(signal: AbortSignal): Promise<string>;
+    release(): void;
+  };
 }
 export class ScreenControlError extends Error {
   constructor() {
@@ -233,6 +238,10 @@ export class ScreenController {
   #restartRequested = Number.NEGATIVE_INFINITY;
   readonly #downloadRetiring = new Set<Promise<void>>();
   #freshTab: boolean;
+  // The browser this task uses: its computer's id for the main one, else its conversation's slot.
+  #key: string;
+  #claiming: Promise<void> | undefined;
+  #picked = false;
   // The tabs of the task's windows when it last came forward.
   #windowTabs: ReadonlySet<string> = new Set();
 
@@ -240,6 +249,7 @@ export class ScreenController {
     if (!ULID_PATTERN.test(deps.sessionId) || !ULID_PATTERN.test(deps.parentCellId))
       throw new ScreenControlError();
     this.#freshTab = deps.freshTab === true;
+    this.#key = deps.parentCellId;
     this.#desktopGeometry = Object.freeze(ScreenGeometry.parse(deps.desktopGeometry));
     this.#selection = Object.freeze({
       screen: "desktop",
@@ -251,6 +261,34 @@ export class ScreenController {
 
   get selection(): ScreenSelection {
     return this.#selection;
+  }
+
+  // The web browser the task uses; the computer's main one until it has picked.
+  get browserKey(): string {
+    return this.#key;
+  }
+
+  // Whether the task has picked its browser, which then has a lane of its own.
+  get browserPicked(): boolean {
+    return this.#picked;
+  }
+
+  // Picks the task's browser once, before anything waits on that browser's lane.
+  async #claim(scope: BrowserScope): Promise<void> {
+    const lane = this.deps.lane;
+    if (!lane) return;
+    this.#claiming ??= lane.claim(scope.signal).then(
+      (key) => {
+        this.#key = key;
+        this.#picked = true;
+      },
+      (error: unknown) => {
+        this.#claiming = undefined;
+        throw error;
+      },
+    );
+    await this.#claiming;
+    scope.check();
   }
 
   availability(): {
@@ -378,7 +416,7 @@ export class ScreenController {
 
   // The web browser as the daemon sees it, for dot's work context.
   async browserStatus() {
-    return this.deps.browser.status?.(this.deps.parentCellId);
+    return this.deps.browser.status?.(this.#key);
   }
 
   // The user's own hold opens a page in the web browser for them before they take it. The grant
@@ -755,13 +793,12 @@ export class ScreenController {
         // since restarted holds no grant of this session); containment, including a Stop that
         // arrives while the task finishes, stops it.
         const owner = this.#browser;
-        const stop = () => this.deps.browser.stop(this.deps.parentCellId);
+        const stop = () => this.deps.browser.stop(this.#key);
         try {
           if (
             !contain &&
             owner &&
-            this.deps.browser.endpoints(this.deps.parentCellId)?.instance ===
-              owner.endpoint.instance
+            this.deps.browser.endpoints(this.#key)?.instance === owner.endpoint.instance
           )
             await this.#revoke(true).catch(stop);
           if (contain || this.#failed) await stop();
@@ -769,9 +806,11 @@ export class ScreenController {
           throw new ScreenControlError();
         }
         this.#browser?.client.close();
+        this.deps.lane?.release();
         if (results.some((result) => result.status === "rejected")) throw new ScreenControlError();
       })
       .catch(async () => {
+        this.deps.lane?.release();
         // A successful task must not hide unconfirmed recording/browser cleanup.
         await this.#fail().catch(() => {});
         throw new ScreenControlError();
@@ -816,8 +855,11 @@ export class ScreenController {
         let turn: { release(): void } | undefined;
         try {
           guard();
-          // A grant and a window change what the browser's one display shows.
-          if (screen === "browser") turn = await this.deps.turn?.(operationScope.signal);
+          if (screen === "browser") {
+            await this.#claim(operationScope);
+            // A grant and a window change what the browser's one display shows.
+            turn = await this.deps.turn?.(operationScope.signal, this.#key);
+          }
           guard();
           await Promise.all([...this.#active, downloadsRetired]);
           guard();
@@ -894,7 +936,7 @@ export class ScreenController {
             geometry = { w: 1280 * scale, h: 800 * scale, scale };
           } else {
             if (!this.deps.desktopReady()) throw new ScreenControlError();
-            this.deps.coming?.("desktop");
+            this.deps.coming?.("desktop", this.deps.parentCellId);
           }
           const result = ScreenSwitchData.parse({
             screen,
@@ -974,8 +1016,8 @@ export class ScreenController {
             if (granted) await this.#revoke().catch(() => this.#retireBrowser());
             throw new ScreenUnavailableError(
               screen,
-              this.deps.browser.get(this.deps.parentCellId)?.state === "starting",
-              this.deps.browser.problem?.(this.deps.parentCellId),
+              this.deps.browser.get(this.#key)?.state === "starting",
+              this.deps.browser.problem?.(this.#key),
             );
           }
           throw new ScreenControlError();
@@ -996,7 +1038,7 @@ export class ScreenController {
   // A browser the daemon reports as running failed this switch for a reason of its own; anything
   // else is described as the daemon sees it, and dot hears when it runs again.
   async #browserUnavailable(): Promise<ScreenUnavailableError> {
-    const parent = this.deps.parentCellId;
+    const parent = this.#key;
     const status = await this.deps.browser.status?.(parent).catch(() => undefined);
     const unready = status?.state === "ready" ? undefined : status;
     if (unready) this.deps.browser.noteOutage?.(parent);
@@ -1141,27 +1183,29 @@ export class ScreenController {
   }
 
   async #prepare(scope: BrowserScope, restart = false): Promise<BrowserOwner> {
+    await this.#claim(scope);
     if (restart && performance.now() - this.#restartRequested >= BROWSER_RESTART_REQUEST_MS) {
       this.#restartRequested = performance.now();
-      const why = await this.deps.browser.failure?.(this.deps.parentCellId).catch(() => undefined);
+      const why = await this.deps.browser.failure?.(this.#key).catch(() => undefined);
       scope.check();
       this.deps.report?.(`dot restarted the web browser${why ? `: ${why}` : ""}`);
       // It is told what that costs in the tool's own reply.
       this.#windowTabs = new Set();
       this.deps.browser.noteProblem?.(
-        this.deps.parentCellId,
+        this.#key,
         `dot restarted the web browser${why ? ` (${why})` : ""}.`,
       );
       this.#browser?.client.close();
       this.#browser = undefined;
-      await this.deps.browser.stop(this.deps.parentCellId);
+      await this.deps.browser.stop(this.#key);
       scope.check();
     }
     let stopped = false;
     for (let waits = 0; ; ) {
-      const endpoint = await this.deps.browser.start(this.deps.parentCellId);
+      const endpoint = await this.deps.browser.start(this.#key);
       if (
         endpoint.parentCellId !== this.deps.parentCellId ||
+        (endpoint.slot ?? endpoint.parentCellId) !== this.#key ||
         endpoint.browserCellId === endpoint.parentCellId
       )
         throw new ScreenControlError();
@@ -1183,7 +1227,7 @@ export class ScreenController {
         scope.check();
         // A browser restarting its Chromium in place is waited for; one that no longer answers as
         // ready is started again, once.
-        const answer = await this.deps.browser.health?.(this.deps.parentCellId);
+        const answer = await this.deps.browser.health?.(this.#key);
         scope.check();
         if (answer === "restarting" && waits++ < RESTART_WAITS) {
           await sleep(RESTART_WAIT_MS, undefined, { signal: scope.signal });
@@ -1193,24 +1237,20 @@ export class ScreenController {
         if (stopped || (answer !== "unready" && answer !== "silent" && answer !== "restarting"))
           throw error;
         stopped = true;
-        const why = await this.deps.browser
-          .failure?.(this.deps.parentCellId)
-          .catch(() => undefined);
+        const why = await this.deps.browser.failure?.(this.#key).catch(() => undefined);
         scope.check();
         this.deps.report?.(
           `the web browser stopped working; starting it again${why ? `: ${why}` : ""}`,
         );
         this.deps.browser.noteProblem?.(
-          this.deps.parentCellId,
+          this.#key,
           `The web browser stopped working${why ? ` (${why})` : ""}; localDot started it again.`,
         );
         owner.client.close();
         if (this.#browser === owner) this.#browser = undefined;
         // Only the browser that failed is stopped, never one started since.
-        if (
-          this.deps.browser.endpoints(this.deps.parentCellId)?.instance === owner.endpoint.instance
-        )
-          await this.deps.browser.stop(this.deps.parentCellId);
+        if (this.deps.browser.endpoints(this.#key)?.instance === owner.endpoint.instance)
+          await this.deps.browser.stop(this.#key);
         scope.check();
       }
     }
@@ -1318,7 +1358,7 @@ export class ScreenController {
   // something it should hear. The task before it may still be draining an action it was stopped in.
   async #enterWindow(owner: BrowserOwner, scope: BrowserScope): Promise<void> {
     if (!owner.permit || !owner.client.enterWindow) return;
-    this.deps.coming?.("browser");
+    this.deps.coming?.("browser", this.#key);
     for (let waits = 0; ; waits++) {
       try {
         const { tabs } = await owner.client.enterWindow(
@@ -1402,7 +1442,7 @@ export class ScreenController {
       !this.#userOnBrowser ||
       !this.deps.desktopReady() ||
       (owner?.manualPermit &&
-        this.deps.browser.endpoints(this.deps.parentCellId)?.instance === owner.endpoint.instance)
+        this.deps.browser.endpoints(this.#key)?.instance === owner.endpoint.instance)
     )
       return;
     const epoch = this.#epoch;
@@ -1442,7 +1482,7 @@ export class ScreenController {
   async #retireBrowser(): Promise<void> {
     const owner = this.#browser;
     try {
-      await this.deps.browser.stop(this.deps.parentCellId);
+      await this.deps.browser.stop(this.#key);
     } catch {
       await this.#fail();
       throw new ScreenControlError();
@@ -1515,7 +1555,7 @@ export class ScreenController {
     }
   }
   #checkBrowser(owner: BrowserOwner): void {
-    const current = this.deps.browser.endpoints(this.deps.parentCellId);
+    const current = this.deps.browser.endpoints(this.#key);
     if (
       current?.instance !== owner.endpoint.instance ||
       current.browserCellId !== owner.endpoint.browserCellId ||

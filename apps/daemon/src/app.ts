@@ -249,7 +249,13 @@ export function createApp({
     installCodeRoutes(app, installCodes, port, accessLinks, (code) =>
       remoteAccess?.authenticate(code) ? code : undefined,
     );
-  if (browser) browserViewerApi(app, browser);
+  if (browser)
+    browserViewerApi(app, {
+      ...browser,
+      ...(remoteAccess
+        ? { sees: (grant: string, session: string) => remoteAccess.links.sees(grant, session) }
+        : {}),
+    });
   if (accounts) accountsRoutes(app, accounts);
   if (browserStatus) browserStatusRoutes(app, browserStatus);
   if (browserEngine) browserEngineRoutes(app, browserEngine);

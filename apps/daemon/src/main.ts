@@ -20,6 +20,7 @@ import { BrowserDownloadCollector } from "./browser/download-collector.ts";
 import { BrowserIdlePages } from "./browser/idle-pages.ts";
 import { QuarantineStore } from "./browser/quarantine.ts";
 import { SessionScreens } from "./browser/session-screens.ts";
+import { BrowserSlots, extraBrowsers } from "./browser/slots.ts";
 import { BrowserStreams } from "./browser/streams.ts";
 import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
@@ -53,7 +54,7 @@ import { deliverablesFor } from "./deliverables/wiring.ts";
 import { DesktopdRegistry } from "./desktopd/registry.ts";
 import { runDoctor } from "./doctor.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
-import { computerCapacity } from "./dots/capacity.ts";
+import { computerCapacity, dockerRoom } from "./dots/capacity.ts";
 import { computerImport } from "./dots/computer-import.ts";
 import { applyInstanceEnvironment, instanceOf } from "./dots/instance.ts";
 import { DotsRegistry, registryPath } from "./dots/registry.ts";
@@ -231,6 +232,7 @@ serviceReadiness = serviceIdentity
 const keydWiring = new CellKeydWiring({ keyd, docker });
 let agent: ReturnType<typeof createAgent> | undefined;
 let browser: BrowserOrchestrator | undefined;
+let browserSlots: BrowserSlots | undefined;
 let idlePages: BrowserIdlePages | undefined;
 const store = new CellStore(home, keydPorts);
 const sizes = new ComputerSizes({
@@ -260,8 +262,11 @@ const orchestrator = new CellOrchestrator({
     ...(browser?.reservedKeydPorts() ?? []),
   ],
   browser: {
-    stop: (id) => browser?.stop(id) ?? Promise.resolve(),
-    remove: (id, options) => browser?.remove(id, options) ?? Promise.resolve(),
+    stop: (id) => browser?.stopComputer(id) ?? Promise.resolve(),
+    remove: async (id, options) => {
+      await browser?.removeComputer(id, options);
+      browserSlots?.forget(id);
+    },
     reservedKeydPorts: () => browser?.reservedKeydPorts() ?? [],
   },
   browsersUnconfirmed: () => {
@@ -334,6 +339,25 @@ browser = new BrowserOrchestrator({
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],
 });
 const owned = browser;
+// A conversation that needs the web browser while another uses the computer's main one gets a
+// browser of its own, as many beside the main one as Docker's memory allows.
+let extraAllowed = extraBrowsers(undefined, process.env.LOCALDOT_SESSION_BROWSERS);
+void dockerRoom(docker)
+  .then((room) => {
+    extraAllowed = extraBrowsers(room?.memoryBytes, process.env.LOCALDOT_SESSION_BROWSERS);
+  })
+  .catch(() => {});
+const slots = new BrowserSlots({
+  home,
+  browser,
+  extra: () => extraAllowed,
+  computer: (id) => !!store.get(id),
+  viewers: (key) => browserStreams.forKey(key)?.stream.viewers ?? 0,
+  report: (message) => console.error(message),
+});
+browserSlots = slots;
+const rootOf = (sessionId: string) =>
+  agent?.routes.conversations?.chain(sessionId, Number.MAX_SAFE_INTEGER).sessions[0] ?? sessionId;
 // A browser recovery confirms every browser stopped, so it also lifts the computers' fences of
 // stops they could not confirm themselves.
 const browserRecovery = new BrowserRecovery(
@@ -356,9 +380,15 @@ const browserWarmer = new BrowserWarmer({
   report: (message) => console.error(message),
   notify: (id, text) => browserNotice(id, text),
 });
-// Tells the tasks running on a computer about its web browser; a finished or idle one hears nothing.
-const browserNotice = (parentCellId: string, text: string) => {
-  for (const sessionId of live.sessionsOn(parentCellId)) {
+// Tells the tasks using a web browser about it; a finished or idle one hears nothing. A computer's
+// main browser is that of every task on it with no browser of its own.
+const browserNotice = (key: string, text: string) => {
+  const parentCellId = owned.parentOfKey(key) ?? key;
+  const using =
+    key === parentCellId
+      ? live.sessionsOn(parentCellId).filter((id) => (slots.keyOf(id) ?? key) === key)
+      : slots.sessionsOn(key);
+  for (const sessionId of using) {
     const session = agent?.runner.get(sessionId);
     if (session && !session.stopped && session.status !== "idle" && session.status !== "ended")
       session.remind(text);
@@ -379,6 +409,8 @@ const browserViewer = {
   tickets: browserTickets,
   vendorDir: desktop.vendorDir,
   tuning,
+  browserOf: (sessionId: string, parentCellId: string) =>
+    slots.lastKey(sessionId) ?? slots.conversationKey(parentCellId, rootOf(sessionId)),
 };
 const registry = new DesktopdRegistry(orchestrator, clock);
 const onset = loadOnsetTable(home);
@@ -537,6 +569,8 @@ agent = createAgent({
   sessionScreens: new SessionScreens({
     cells: orchestrator,
     browser,
+    slots,
+    conversationOf: rootOf,
     streams: browserStreams,
     recordings: recorder,
     registry,
@@ -562,7 +596,7 @@ agent = createAgent({
   shutdownFreezes,
   liveChanged: (sessionId, state) => {
     appEvents.publish({ type: "conversation.live", sessionId, ...(state ? { live: state } : {}) });
-    idlePages?.changed(live.cellOf(sessionId));
+    idlePages?.changed(slots.keyOf(sessionId) ?? live.cellOf(sessionId));
   },
   keydPorts,
   toolPort,
@@ -581,15 +615,21 @@ const running = agent;
 // Pages nobody uses in a computer's web browser freeze, until someone looks or a task needs them.
 // Opt-in until a task's own window can no longer freeze under it.
 if (process.env.LOCALDOT_IDLE_PAGES === "1")
+  // Each browser is its own: a computer's main one, by the computer's id, and conversations' own.
   idlePages = new BrowserIdlePages({
     browsers: () =>
-      orchestrator.list().flatMap((cell) => {
-        const ready = owned.endpoints(cell.id);
-        return ready ? [{ parentCellId: cell.id, instance: ready.instance }] : [];
-      }),
-    viewers: (id) => browserStreams.forParent(id)?.stream.viewers ?? 0,
-    tasks: (id) =>
-      live.sessionsOn(id).map((sessionId) => {
+      orchestrator.list().flatMap((cell) =>
+        owned.keysOf(cell.id).flatMap((key) => {
+          const ready = owned.endpoints(key);
+          return ready ? [{ parentCellId: key, instance: ready.instance }] : [];
+        }),
+      ),
+    viewers: (key) => browserStreams.forKey(key)?.stream.viewers ?? 0,
+    tasks: (key) =>
+      (owned.parentOfKey(key) === key
+        ? live.sessionsOn(key).filter((id) => (slots.keyOf(id) ?? key) === key)
+        : slots.sessionsOn(key)
+      ).map((sessionId) => {
         const state = running.runner.liveStatus(sessionId)?.state;
         return {
           id: sessionId,
@@ -617,8 +657,8 @@ if (process.env.LOCALDOT_IDLE_PAGES === "1")
     },
   });
 const idleWatches = [
-  browserStreams.subscribe((cell) => idlePages?.changed(owned.parentOf(cell.id))),
-  owned.subscribe((parent) => idlePages?.changed(parent)),
+  browserStreams.subscribe((cell) => idlePages?.changed(browserStreams.ownerOf(cell.id)?.key)),
+  owned.subscribe(() => idlePages?.changed()),
 ];
 const routineLauncher = new RoutineLauncher({
   store: routineStore,
@@ -751,6 +791,7 @@ shutdown.push(
   { name: "key events", stop: () => keydEvents.stop() },
   { name: "key monitor", stop: () => keydMonitor.stop() },
   { name: "browser warmer", stop: () => browserWarmer.dispose() },
+  { name: "conversation browsers", stop: slots.watch() },
   {
     name: "idle pages",
     stop: () => {

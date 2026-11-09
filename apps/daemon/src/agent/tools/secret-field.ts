@@ -51,7 +51,7 @@ async function onScreen<T>(
     // The question's lookups and its delivery reach the screen outside any step's turn.
     const turn = ctx.turn
       ? undefined
-      : await deps.computer?.take(session.id, session.cellId, ctx.signal);
+      : await deps.computer?.take(session.id, session.turnKey, ctx.signal);
     let lease: ReturnType<typeof session.screenLease> | undefined;
     try {
       lease = session.screenLease(ctx.lease);

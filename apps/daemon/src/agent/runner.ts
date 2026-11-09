@@ -250,7 +250,8 @@ export interface AgentRunnerDeps {
     | "busy"
     | "cellOf"
     | "lease"
-  >;
+  > &
+    Partial<Pick<LiveSessions, "subscribeLeases">>;
   // A task's live status changed; undefined once it has ended.
   liveChanged?(sessionId: string, live: ConversationLive | undefined): void;
   // Turns on the computer its tasks share, and which of its windows are whose.
@@ -1534,6 +1535,16 @@ export class AgentRunner {
   // another takes up its windows.
   #share(session: AgentSession, continues?: string): void {
     const cellId = session.cellId;
+    // A task in a browser of its own waits on, and holds, that browser's lane.
+    if (!this.#watched.has("browser lanes") && this.deps.live.subscribeLeases)
+      this.#watched.set(
+        "browser lanes",
+        this.deps.live.subscribeLeases((key) => {
+          if (!key.startsWith("browser:")) return;
+          for (const rt of this.#runtime.values())
+            if (rt.session.browserLane === key) this.#told(rt);
+        }),
+      );
     if (!this.#watched.has(cellId))
       this.#watched.set(
         cellId,
@@ -1915,7 +1926,9 @@ export class AgentRunner {
   #told(rt: Runtime): ConversationLive | undefined {
     const { session } = rt;
     if (session.stopped || rt.selection.kind === "none") return undefined;
-    const lease = this.deps.live.lease(session.cellId);
+    const lanes = [session.cellId, ...(session.browserLane ? [session.browserLane] : [])].map(
+      (key) => this.deps.live.lease(key),
+    );
     const cell = this.deps.cell(session.cellId);
     const state: ConversationLive["state"] =
       session.safetyPause || rt.pause || session.status === "paused" || cell?.paused
@@ -1926,12 +1939,12 @@ export class AgentRunner {
             session.connections.pending ||
             session.openBlockers.length
           ? "needs-you"
-          : lease.waiting().includes(session.id)
+          : lanes.some((lane) => lane.waiting().includes(session.id))
             ? "waiting-for-computer"
             : session.status === "idle"
               ? "idle"
               : "working";
-    const onScreen = lease.holder === session.id;
+    const onScreen = lanes.some((lane) => lane.holder === session.id);
     const activity = state === "idle" ? undefined : rt.activity;
     const { persona } = rt;
     const before = rt.live;

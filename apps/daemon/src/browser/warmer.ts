@@ -22,7 +22,7 @@ export interface BrowserWarmerDeps {
     Partial<
       Pick<
         BrowserOrchestrator,
-        "failure" | "noteProblem" | "noteRetry" | "noteOutage" | "supervisor"
+        "failure" | "noteProblem" | "noteRetry" | "noteOutage" | "supervisor" | "keysOf"
       >
     >;
   // The same admission the browser's own start checks, read before trying.
@@ -80,10 +80,12 @@ export class BrowserWarmer {
     this.#considerAll();
   }
 
+  // A conversation's own browser is checked as the main one is; one that fails is stopped, and
+  // starts again when its conversation next needs it.
   #considerAll(): void {
     for (const cell of this.deps.cells.list()) {
       this.#consider(cell.id);
-      this.#check(cell.id);
+      for (const key of this.deps.browser.keysOf?.(cell.id) ?? [cell.id]) this.#check(key);
     }
   }
 
