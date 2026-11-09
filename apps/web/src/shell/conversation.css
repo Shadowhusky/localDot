@@ -1305,7 +1305,7 @@
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
 
-.thread-fix code {
+.thread-fix-name {
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
 }

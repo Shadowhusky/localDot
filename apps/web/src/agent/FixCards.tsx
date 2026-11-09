@@ -223,7 +223,7 @@ function KeysFix({ open, deps }: { open: BlockerOf<"keys_locked">; deps: FixDeps
 // a key, and the card's own words are localDot's.
 const SavedAs = ({ id }: { id: string }) => (
   <p className="thread-recovery-reason">
-    Saved as <code>{id}</code>
+    Saved as <code className="thread-fix-name">{id}</code>
   </p>
 );
 const noSaving = (health: KeydHealth | null) =>
