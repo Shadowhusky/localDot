@@ -303,6 +303,32 @@ running tool holds back.
 Delegated agents don't hear the user, so their commands and waits run their course. A batch of
 commands answers only once each has ended or gone to the background.
 
+## Messages while dot waits on the user
+
+The message box works during any wait of dot's and sends straight away. A message the owner sends
+then moves on from the wait, on the daemon, whichever client sent it and whichever harness runs the
+task: the tool call blocked on the wait returns, and the message reaches dot as a steer, through the
+same inbox as any other. It is never taken for the wait's answer, and it isn't queued behind it.
+
+- A question (`ask.answer` with `by: "message"`) closes with no fields, however private: nothing is
+  typed or stored. dot hears that the question is closed and to ask again only if it still needs the
+  answer. A saved login's tap and a key's or an app's card close the same way.
+- A step's approval (`approval.resolve` with `decision: "deny"`, `by: "message"`) counts as not
+  given. The step doesn't run, no Always allow is saved, and dot hears that a new approval is needed
+  if it still wants the step. A late answer to either is refused with a 409, as for any closed card.
+- dot's hand-over keeps the older rule that a message hands the computer back, and says so
+  (`takeover.end` with `movedOn`). dot hears that the step may not be done. The computer the user
+  took themselves stays theirs: a phone's toolbar has no message field while they hold it, and a
+  message from elsewhere hands it back, as it always has.
+- A connection's card isn't a wait of dot's, so it stays up. A shared link's guest moves on from
+  nothing: what the owner was asked stays theirs to decide.
+- A message for another model reaches dot at once when moving dot ends nothing. Otherwise (a model
+  this task can't run, or commands or delegated agents still running) it waits for the task as
+  usual, the wait still ends, and dot hears to finish.
+
+Each harness gets the same reply and the same inbox item: the built-in brain reads the message on its
+next request, Claude Code takes it from its input stream, and Codex from `turn/steer`.
+
 ## Carrying on after a restart
 
 | What restarted | What the model keeps |

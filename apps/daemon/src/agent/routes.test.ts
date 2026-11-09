@@ -679,7 +679,7 @@ describe("agent user routes", () => {
       (await f.send("POST", endpoint("messages"), { kind: "followup", text: "next" })).status,
     ).toBe(202);
     expect(f.session.controlHeld).toBe(false);
-    expect(await taking).toEqual({ by: "user", note: "next" });
+    expect(await taking).toEqual({ by: "user", note: "next", movedOn: true });
     expect(f.events.findLast((event) => event.type === "message.user")?.data).toMatchObject({
       kind: "steer",
       text: "next",

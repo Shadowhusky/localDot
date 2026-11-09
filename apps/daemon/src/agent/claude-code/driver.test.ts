@@ -1,6 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type { SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import {
+  type AutonomyPolicy,
+  CAREFUL_AUTONOMY,
   MAX_BATCH_STEPS,
   offeredTools,
   parseEvent,
@@ -12,6 +14,7 @@ import { RETRY_NEXT } from "../native-tools.ts";
 import { redactor } from "../redact.ts";
 import { NativeCleanupPending } from "../safety/native-tasks.ts";
 import { AgentSession } from "../session.ts";
+import { dispatchTool } from "../tools/index.ts";
 import { TranscriptStore } from "../transcript.ts";
 import {
   CLAUDE_CODE_CRASHED,
@@ -70,17 +73,27 @@ function deferred<T>() {
 
 const firstText = (run: FakeRun) =>
   (run.prompts[0]?.message.content as { text?: string }[] | undefined)?.[0]?.text ?? "";
-function fixture(deps: Partial<ClaudeCodeDriverDeps> = {}, task = "Draw a dog") {
+function fixture(
+  deps: Partial<ClaudeCodeDriverDeps> = {},
+  task = "Draw a dog",
+  autonomy?: AutonomyPolicy,
+) {
   const home = mkdtempSync("/tmp/ld-claude-driver-"),
     transcripts = new TranscriptStore(home),
     events: { type: string; data: Record<string, unknown> }[] = [];
-  const session = new AgentSession(ulid(), ulid(), task, {
-    append: (_id, draft) => {
-      const event = parseEvent({ v: 1, id: ulid(), seq: events.length, t: 0, ...draft });
-      events.push({ type: event.type, data: event.data } as never);
-      return event;
+  const session = new AgentSession(
+    ulid(),
+    ulid(),
+    task,
+    {
+      append: (_id, draft) => {
+        const event = parseEvent({ v: 1, id: ulid(), seq: events.length, t: 0, ...draft });
+        events.push({ type: event.type, data: event.data } as never);
+        return event;
+      },
     },
-  });
+    autonomy,
+  );
   const runs: FakeRun[] = [];
   const query = vi.fn<QueryFn>(({ prompt, options }) => {
     const run = new FakeRun(prompt, options);
@@ -677,6 +690,72 @@ describe("Claude Code driver", () => {
     ]);
     await fake.call("done", { summary: "ok" });
     await result;
+  });
+
+  describe("a call blocked on the user when their message moves on", () => {
+    const realTools =
+      (ran: string[]): ClaudeCodeDriverDeps["dispatch"] =>
+      async (session, generation, name, id, input, signal) => {
+        if (name === "done") return { ok: true, final: true, content: [] };
+        const tools = {
+          askTimeoutMs: 60_000,
+          desktop: () => ({
+            shell: () => {
+              ran.push(name);
+              throw new Error("the step ran");
+            },
+          }),
+        } as never;
+        return (
+          await dispatchTool({ tools }, session, name, id, input, (s) => s, generation, signal)
+        ).result;
+      };
+    const words = (reply: unknown) => JSON.stringify((reply as { content?: unknown }).content);
+
+    it("releases a question, tells Claude why, and hands it the message", async () => {
+      const f = fixture();
+      const ran: string[] = [];
+      f.dispatch.mockImplementation(realTools(ran));
+      const result = f.run();
+      const fake = await f.started();
+      const asking = fake.call("ask_user", { question: "Which format?", options: ["PDF", "Word"] });
+      await until(() => !!f.session.pendingAsk);
+      const askId = f.session.pendingAsk ?? "";
+      expect(f.session.moveOn("Skip the report")).toBe(true);
+      const reply = await asking;
+      expect(words(reply)).toContain("instead of answering");
+      expect(words(reply)).not.toContain("Skip the report");
+      await until(() => fake.prompts.length === 2);
+      expect(fake.prompts[1]?.message.content).toBe("Skip the report");
+      expect(f.events.find((e) => e.type === "ask.answer")?.data).toEqual({ askId, by: "message" });
+      expect(f.session.answerFields(askId, { answer: "PDF" }, (s) => s)).toBe(false);
+      fake.emit({ ...turn(), user_message_uuid: fake.prompts[1]?.uuid });
+      await fake.call("done", { summary: "ok" });
+      expect(await result).toBe(CLAUDE_CODE_DONE);
+    });
+
+    it("refuses a step awaiting its OK, which never runs", async () => {
+      const f = fixture({}, "Draw a dog", CAREFUL_AUTONOMY);
+      const ran: string[] = [];
+      f.dispatch.mockImplementation(realTools(ran));
+      const result = f.run();
+      const fake = await f.started();
+      const acting = fake.call("shell", { command: "rm -rf build" });
+      await until(() => !!f.session.pendingApproval);
+      expect(f.session.moveOn("Don't delete anything")).toBe(true);
+      const reply = await acting;
+      expect(words(reply)).toContain("not approved");
+      expect(ran).toEqual([]);
+      await until(() => fake.prompts.length === 2);
+      expect(fake.prompts[1]?.message.content).toBe("Don't delete anything");
+      expect(f.events.find((e) => e.type === "approval.resolve")?.data).toMatchObject({
+        decision: "deny",
+        by: "message",
+      });
+      fake.emit({ ...turn(), user_message_uuid: fake.prompts[1]?.uuid });
+      await fake.call("done", { summary: "ok" });
+      await result;
+    });
   });
 
   it("nudges once when a reply ends without done, then rests", async () => {

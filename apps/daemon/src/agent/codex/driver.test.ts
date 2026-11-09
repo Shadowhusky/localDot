@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { CodexLaunchError, type CodexTurnEpoch, RpcError } from "@localdot/codex-harness";
-import { parseEvent, ulid } from "@localdot/protocol";
+import { type AutonomyPolicy, CAREFUL_AUTONOMY, parseEvent, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RETRY_NEXT } from "../native-tools.ts";
 import { redactor } from "../redact.ts";
 import { AgentSession } from "../session.ts";
+import { dispatchTool } from "../tools/index.ts";
 import { TranscriptStore } from "../transcript.ts";
 import { AccountError, TASK_BUSY } from "./account.ts";
 import {
@@ -32,17 +33,24 @@ afterEach(async () => {
 function fixture(
   task = "Find the weather",
   extra: Pick<CodexDriverDeps, "waitForAuthResume" | "heartbeatMs" | "onRetired"> = {},
+  autonomy?: AutonomyPolicy,
 ) {
   const home = mkdtempSync("/tmp/ld10-"),
     transcript = new TranscriptStore(home),
     events: { type: string; data: Record<string, unknown> }[] = [];
-  const session = new AgentSession(ulid(), ulid(), task, {
-    append: (_id, draft) => {
-      const event = parseEvent({ v: 1, id: ulid(), seq: events.length, t: 0, ...draft });
-      events.push({ type: event.type, data: event.data } as never);
-      return event;
+  const session = new AgentSession(
+    ulid(),
+    ulid(),
+    task,
+    {
+      append: (_id, draft) => {
+        const event = parseEvent({ v: 1, id: ulid(), seq: events.length, t: 0, ...draft });
+        events.push({ type: event.type, data: event.data } as never);
+        return event;
+      },
     },
-  });
+    autonomy,
+  );
   const gates = { endpoint: undefined as Promise<void> | undefined };
   const fake = fakeCodex(),
     endpoints: {
@@ -475,6 +483,63 @@ describe("Codex conversation and durable input recovery", () => {
       expect(await run).toBe(CODEX_DONE);
     },
   );
+  describe("a call blocked on the user when their message moves on", () => {
+    const blocked = (f: ReturnType<typeof fixture>, name: string, input: unknown) =>
+      dispatchTool(
+        { tools: { askTimeoutMs: 60_000 } as never },
+        f.session,
+        name,
+        `codex-${ulid()}`,
+        input,
+        (s) => s,
+        f.session.generation,
+      );
+
+    it("releases a question, tells Codex why, and steers the turn with the message", async () => {
+      const f = fixture(),
+        run = f.run(),
+        first = await f.fake.nextLaunch(1);
+      await first.waitFor("turn/start");
+      const asking = blocked(f, "ask_user", {
+        question: "Which format?",
+        options: ["PDF", "Word"],
+      });
+      await until(() => !!f.session.pendingAsk);
+      const askId = f.session.pendingAsk ?? "";
+      expect(f.session.moveOn("Skip the report")).toBe(true);
+      const { result } = await asking;
+      expect(JSON.stringify(result.content)).toContain("instead of answering");
+      const request = await first.waitFor("turn/steer");
+      expect(request.params).toMatchObject({
+        input: [{ type: "text", text: "Skip the report" }],
+      });
+      expect(f.session.answerFields(askId, { answer: "PDF" }, (s) => s)).toBe(false);
+      expect(f.events.find((e) => e.type === "ask.answer")?.data).toEqual({ askId, by: "message" });
+      f.done();
+      expect(await run).toBe(CODEX_DONE);
+    });
+
+    it("refuses a step awaiting its OK, which never runs", async () => {
+      const f = fixture("Find the weather", {}, CAREFUL_AUTONOMY),
+        run = f.run(),
+        first = await f.fake.nextLaunch(1);
+      await first.waitFor("turn/start");
+      const acting = blocked(f, "shell", { command: "rm -rf build" });
+      await until(() => !!f.session.pendingApproval);
+      expect(f.session.moveOn("Don't delete anything")).toBe(true);
+      const { result } = await acting;
+      expect(result.ok).toBe(false);
+      expect(JSON.stringify(result.content)).toContain("not approved");
+      await first.waitFor("turn/steer");
+      expect(f.events.find((e) => e.type === "approval.resolve")?.data).toMatchObject({
+        decision: "deny",
+        by: "message",
+      });
+      f.done();
+      await run;
+    });
+  });
+
   it("opens a task that continues a conversation with what was said before, after a crash too", async () => {
     const f = fixture();
     f.session.earlier = ["The user: Draw a dog", "dot: Drew it"];
