@@ -13,6 +13,8 @@ export interface UpgradeContext {
   head: Buffer;
   url: URL;
   params: Record<string, string>;
+  // Opened on a shared link rather than by the owner.
+  guest: boolean;
 }
 
 export interface UpgradeRoute {
@@ -69,6 +71,7 @@ export function attachUpgradeRouter(
     for (const route of routes) {
       const match = route.pattern.exec(url.pathname);
       if (!match) continue;
+      let guest = false;
       if (route.auth === "token") {
         const given = tokenFromHeaders({
           authorization: req.headers.authorization,
@@ -80,6 +83,7 @@ export function attachUpgradeRouter(
             refuse(socket, "403 Forbidden");
             return;
           }
+          guest = true;
           const unsubscribe = opts.guests.links.onRevoke((id) => {
             if (id === grant.id) socket.destroy();
           });
@@ -90,7 +94,7 @@ export function attachUpgradeRouter(
       // A throw would escape the 'upgrade' listener and end the daemon. The log names only the route
       // and the error code: tickets travel in paths, and an error's message can quote the request.
       try {
-        route.open({ req, socket, head, url, params });
+        route.open({ req, socket, head, url, params, guest });
       } catch (err) {
         console.error(`upgrade ${route.pattern} failed (${errorCode(err)})`);
         refuse(socket, "500 Internal Server Error");

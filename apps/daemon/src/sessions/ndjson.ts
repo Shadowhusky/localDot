@@ -1,6 +1,6 @@
 import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { parseEvent } from "@localdot/protocol";
+import { type LocalDotEvent, parseEvent } from "@localdot/protocol";
 export const NDJSON_TYPE = "application/x-ndjson";
 // The model's thinking and the heartbeats make up most of a long log, and the conversation shows
 // neither.
@@ -8,7 +8,10 @@ const UNSHOWN = new Set(["thought.delta", "heartbeat"]);
 export function streamEventLines(
   file: string,
   fromSeq = 0,
-  { shown = false }: { shown?: boolean } = {},
+  {
+    shown = false,
+    project = (event) => event,
+  }: { shown?: boolean; project?: (event: LocalDotEvent) => LocalDotEvent } = {},
 ): AsyncGenerator<string> {
   const size = statSync(file, { throwIfNoEntry: false })?.size ?? 0;
   let complete = false;
@@ -21,7 +24,7 @@ export function streamEventLines(
       closeSync(descriptor);
     }
   }
-  return readSnapshot(file, fromSeq, size, complete, shown);
+  return readSnapshot(file, fromSeq, size, complete, shown, project);
 }
 
 async function* readSnapshot(
@@ -30,6 +33,7 @@ async function* readSnapshot(
   size: number,
   complete: boolean,
   shown: boolean,
+  project: (event: LocalDotEvent) => LocalDotEvent,
 ): AsyncGenerator<string> {
   if (size === 0) return;
   // Unshown events are left out before they are checked, which is most of the work on a long log.
@@ -37,7 +41,7 @@ async function* readSnapshot(
     const raw = JSON.parse(text);
     if (shown && UNSHOWN.has(raw?.type)) return undefined;
     const event = parseEvent(raw);
-    return event.seq >= fromSeq ? `${JSON.stringify(event)}\n` : undefined;
+    return event.seq >= fromSeq ? `${JSON.stringify(project(event))}\n` : undefined;
   };
   const stream = createReadStream(file, { start: 0, end: size - 1, highWaterMark: 64 * 1024 });
   const lines = createInterface({ input: stream, crlfDelay: Infinity });

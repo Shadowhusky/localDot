@@ -33,6 +33,7 @@ import { type NotifyRoutesDeps, notifyRoutes } from "./notify/routes.ts";
 import type { Previews } from "./previews/previews.ts";
 import { previewRoutes } from "./previews/routes.ts";
 import type { Recorder } from "./recorder/recorder.ts";
+import { forGuest } from "./remote/guest-events.ts";
 import { publicGrant } from "./remote/links.ts";
 import { type RemoteAccess, remoteRoutes } from "./remote/manager.ts";
 import { revocableResponse } from "./remote/response.ts";
@@ -248,6 +249,7 @@ export function createApp({
     const id = c.req.param("id");
     if (!ULID_PATTERN.test(id)) return c.text("invalid session id", 400);
     const fromSeq = Math.max(0, Number(c.req.query("fromSeq")) || 0);
+    const guest = !!c.get("remoteGrant");
     try {
       if (
         c.req
@@ -261,9 +263,15 @@ export function createApp({
           return new Response(null, {
             headers: { "content-type": NDJSON_TYPE, "cache-control": "no-store" },
           });
-        return eventStreamResponse(file, fromSeq, c.req.raw.signal);
+        return eventStreamResponse(
+          file,
+          fromSeq,
+          c.req.raw.signal,
+          guest ? { project: forGuest } : undefined,
+        );
       }
-      return c.json(eventLog.read(id, fromSeq));
+      const events = eventLog.read(id, fromSeq);
+      return c.json(guest ? events.map(forGuest) : events);
     } catch (err) {
       if (err instanceof UnknownSessionError) return c.text("unknown session", 404);
       throw err;
@@ -278,7 +286,10 @@ export function createApp({
     const fromSeq = Math.max(0, Number(c.req.query("fromSeq")) || 0);
     if (!Number.isSafeInteger(fromSeq)) return c.text("invalid sequence", 400);
     try {
-      return eventStreamResponse(eventLog.logFile(id), fromSeq, c.req.raw.signal, { shown: true });
+      return eventStreamResponse(eventLog.logFile(id), fromSeq, c.req.raw.signal, {
+        shown: true,
+        ...(c.get("remoteGrant") ? { project: forGuest } : {}),
+      });
     } catch (err) {
       if (err instanceof UnknownSessionError) return c.text("unknown session", 404);
       throw err;

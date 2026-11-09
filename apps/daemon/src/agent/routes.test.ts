@@ -1927,10 +1927,11 @@ describe("shared-link task enforcement", () => {
     });
     const stopRun = vi.fn(async (_id: string) => true);
     f.deps.runner.stopRun = stopRun;
+    const eventLog = new EventLog(f.home);
     const app = createApp({
       token: "o".repeat(43),
       port: 4750,
-      eventLog: new EventLog(f.home),
+      eventLog,
       agent: f.deps,
       remoteAccess: {
         links,
@@ -1943,8 +1944,53 @@ describe("shared-link task enforcement", () => {
         headers: { authorization: `Bearer ${issued.token}`, "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-    return { ...f, links, model, issued, send, stopRun };
+    return { ...f, app, eventLog, ownerToken: "o".repeat(43), links, model, issued, send, stopRun };
   }
+  it("names none of the owner's keys to a shared link's guest, whichever way the log is read", async () => {
+    const f = await guest();
+    const task = f.eventLog.createSession("task");
+    f.eventLog.append(task, {
+      type: "blocker.raise",
+      agent: "main",
+      data: {
+        blockerId: ulid(),
+        blocker: { kind: "key", id: "private-stripe", problem: "rejected" },
+        by: "localdot",
+      },
+    });
+    f.eventLog.append(task, {
+      type: "key.use",
+      agent: "keyd",
+      data: {
+        secretId: "private-github",
+        host: "api.example",
+        method: "GET",
+        path: "/",
+        decision: "allow",
+      },
+    });
+    const read = async (token: string, path: string, accept?: string) => {
+      const reply = await f.app.request(`http://127.0.0.1:4750${path}`, {
+        headers: { authorization: `Bearer ${token}`, ...(accept ? { accept } : {}) },
+      });
+      expect(reply.status).toBe(200);
+      return reply.text();
+    };
+    for (const [path, accept] of [
+      [`/api/sessions/${task}/events`, undefined],
+      [`/api/sessions/${task}/events`, "application/x-ndjson"],
+      [`/api/sessions/${task}/history`, undefined],
+    ] as const) {
+      const shown = await read(f.issued.token, path, accept);
+      expect(shown).toContain("blocker.raise");
+      expect(shown).toContain("key.use");
+      expect(shown).not.toContain("private-stripe");
+      expect(shown).not.toContain("private-github");
+      const owned = await read(f.ownerToken, path, accept);
+      expect(owned).toContain("private-stripe");
+      expect(owned).toContain("private-github");
+    }
+  });
   it("pins the owner's model and minimum budget, atomically counts successful tasks, and blocks owner session mutations", async () => {
     const f = await guest();
     f.settings.put({ taskBudgetUSD: 1 });
