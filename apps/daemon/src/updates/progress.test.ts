@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import { expect, it, vi } from "vitest";
 import type { UpdateProgressLine } from "../../../../packages/protocol/src/app-update.ts";
 import {
+  downloadDetail,
   progressAfter,
   readUpdateProgress,
   runPreparation,
@@ -185,4 +186,11 @@ it("guards work that reports as it goes, and names the stall when it stops", asy
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("says only what has come down while the whole size isn't known", () => {
+  expect(downloadDetail(undefined, undefined)).toBe("Downloading");
+  expect(downloadDetail(412e6, undefined)).toBe("Downloading · 412 MB so far");
+  expect(downloadDetail(1.4e9, undefined)).toBe("Downloading · 1.4 GB so far");
+  expect(downloadDetail(1.4e9, 3.1e9)).toBe("Downloading · 45% · 1.4 of 3.1 GB");
 });

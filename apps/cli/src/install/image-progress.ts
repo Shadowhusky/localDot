@@ -3,6 +3,8 @@ import { classifySetupFailure } from "./setup-failure.ts";
 export interface ImagePullProgress {
   phase: "pulling" | "downloading" | "extracting" | "verifying";
   layer?: string;
+  // The layer hasn't started, so its size isn't known yet.
+  queued?: true;
   currentBytes?: number;
   totalBytes?: number;
 }
@@ -23,6 +25,7 @@ export async function readImagePullProgress(
     lines = 0,
     records = 0,
     lastReport = -Infinity;
+  const waiting = new Set<string>();
   function consume() {
     if (++lines > 32768) throw fail();
     const text = new TextDecoder("utf-8", { fatal: true }).decode(line.subarray(0, used)).trim();
@@ -70,7 +73,15 @@ export async function readImagePullProgress(
       progress.currentBytes = detail.current;
       progress.totalBytes = detail.total;
     }
-    if (Date.now() - lastReport >= 250) {
+    const queued =
+      progress.layer !== undefined &&
+      (value.status === "Pulling fs layer" || value.status === "Waiting");
+    if (queued) progress.queued = true;
+    // Past the throttle, so a reader can tell when the sizes of all the layers are known.
+    const told = queued
+      ? !!waiting.add(progress.layer as string)
+      : progress.layer !== undefined && waiting.delete(progress.layer);
+    if (told || Date.now() - lastReport >= 250) {
       report(Object.freeze(progress));
       lastReport = Date.now();
     }

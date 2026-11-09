@@ -36,6 +36,9 @@ export class UpdateFailure extends Error {
 export const reasonFor = (problem: UpdateProblem | undefined) =>
   problem ? REASONS[problem] : undefined;
 
+const size = (bytes: number) =>
+  bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
+
 function amount(done: number, total: number) {
   return total >= 1e9
     ? `${(done / 1e9).toFixed(1)} of ${(total / 1e9).toFixed(1)} GB`
@@ -43,7 +46,8 @@ function amount(done: number, total: number) {
 }
 
 export function downloadDetail(done: number | undefined, total: number | undefined) {
-  if (!total || done === undefined) return "Downloading";
+  if (done === undefined) return "Downloading";
+  if (!total) return `Downloading · ${size(done)} so far`;
   const seen = Math.min(done, total);
   return `Downloading · ${Math.floor((seen / total) * 100)}% · ${amount(seen, total)}`;
 }

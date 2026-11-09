@@ -37,9 +37,28 @@ it("adds up the bytes Docker reports across every layer of every image", async (
       platforms: [expect.stringMatching(/^linux\//)],
     },
   ]);
-  expect(seen.at(2)).toEqual({ done: 15, total: 150 });
-  expect(seen.at(3)).toEqual({ done: 105, total: 150 });
+  expect(seen.at(2)).toEqual({ done: 15 });
+  expect(seen.at(3)).toEqual({ done: 105 });
   expect(seen.at(-1)).toEqual({ done: 120, total: 300 });
+});
+
+it("gives a total only once the size of everything still to come is known", async () => {
+  const seen: unknown[] = [];
+  const pull = vi.fn(async (_pin: unknown, _signal: AbortSignal, report: (p: unknown) => void) => {
+    report({ phase: "pulling", layer: "l1", queued: true });
+    report({ phase: "pulling", layer: "l2", queued: true });
+    report({ phase: "downloading", layer: "l1", currentBytes: 10, totalBytes: 10 });
+    report({ phase: "downloading", layer: "l1" });
+    report({ phase: "downloading", layer: "l2" });
+    report({ phase: "downloading", layer: "l2", currentBytes: 5, totalBytes: 40 });
+  });
+  await pullPinnedImages(
+    [GATE],
+    new AbortController().signal,
+    (p) => seen.push(p),
+    client(pull as never),
+  );
+  expect(seen).toEqual([{}, {}, { done: 10 }, { done: 10 }, { done: 10 }, { done: 15, total: 50 }]);
 });
 
 it.each([

@@ -148,7 +148,10 @@ export function useComputerUpdate(api: ApiClient, cell: CellSummary | null): Com
     run,
     stage,
     line: stage ? stageLine(stage, progress?.detail) : null,
-    value: stage ? stageBounds(stage, progress?.share)[0] : null,
+    value:
+      !stage || (stage === "download" && progress?.share === undefined)
+        ? null
+        : stageBounds(stage, progress?.share)[0],
     note:
       operation && since.current
         ? waitNote(Date.now() - since.current.at, operation.expectedMs)

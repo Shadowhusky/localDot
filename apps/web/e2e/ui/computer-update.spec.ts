@@ -147,6 +147,51 @@ for (const { name, choice } of [
       await expect(sheet.getByText("Updating…", { exact: true })).toBeVisible();
     });
 
+    test("Replace computer says which step it is on, and that files are kept", async ({
+      page,
+      ui,
+    }) => {
+      await ui.open(isPhone(page) ? "conversations" : "fenced");
+      let phase = "retiring";
+      let record: Record<string, unknown> | undefined;
+      await page.route("**/api/cells/*/fence", (route) =>
+        route.fulfill({ json: { revision: 1 } }),
+      );
+      await page.route("**/api/cells/*/replacement", (route) => {
+        const oldCellId = new URL(route.request().url()).pathname.split("/")[3];
+        const { requestId } = route.request().postDataJSON();
+        record = { requestId, oldCellId, revision: 1, phase };
+        return route.fulfill({ json: record });
+      });
+      await page.route("**/api/cells/*/replacement/*", (route) =>
+        route.fulfill({
+          json: {
+            ...record,
+            phase,
+            ...(phase === "allocating" ? { newCellId: "01M704BXGFPKEESTR1F1NPZ0RD" } : {}),
+          },
+        }),
+      );
+      if (isPhone(page)) {
+        await ui.step("fenced");
+        await page.goBack().catch(() => {});
+        await page.evaluate(() => {
+          window.location.hash = "";
+        });
+        await page.locator(".phone-notice").first().getByRole("button", { name: "Details" }).click();
+      }
+      await page.getByRole("button", { name: "Replace computer" }).click();
+      const words = page.locator(".curtain-sub");
+      await expect(words).toContainText("Step 1 of 3 · Saving the old computer. Your files are kept.");
+      await expect(page.getByRole("heading", { name: "Replacing your computer" })).toBeVisible();
+      await expect(words).toHaveText(/^\d+:\d\d · /);
+      await shot(page, ui, "replacing");
+      phase = "allocating";
+      await expect(words).toContainText("Step 2 of 3 · Starting a fresh computer", {
+        timeout: 20_000,
+      });
+    });
+
     test("a computer the failure left off says so, and that it starts by itself", async ({
       page,
       ui,
