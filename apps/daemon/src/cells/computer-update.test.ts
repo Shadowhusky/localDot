@@ -654,6 +654,20 @@ describe("an update whose download runs first", () => {
     expect(fake.state.containers.get(record.docker.desktop)?.id).toBe(before);
     expect(fake.state.containers.get(record.docker.desktop)?.running).toBe(true);
   });
+
+  it("says Docker stopped answering when that is what cut the download off", async () => {
+    const { state, pull } = download(new UpdateFailure("network"));
+    const { updates, orchestrator, id, record } = await setup({}, { pull });
+    rebuild();
+    await updates.check(record);
+    stub(orchestrator, updates);
+    const running = orchestrator.update(id);
+    await vi.waitFor(() => expect(state.finish).toBeDefined());
+    fake.state.loseReplies.add("GET /_ping");
+    state.finish?.();
+    await expect(running).rejects.toThrow("couldn't be downloaded");
+    expect(orchestrator.get(id)?.updateFailure?.message).toContain("Docker stopped answering");
+  });
 });
 
 describe("an update interrupted by a daemon restart", () => {

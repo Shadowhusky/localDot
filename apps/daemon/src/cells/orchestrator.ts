@@ -259,13 +259,13 @@ const BRING_BACK_EVERY_MS = 5_000;
 // A computer may have gigabytes to save, and Docker says nothing of how far along it is.
 const PULL_STALL_MS = 5 * 60_000;
 
+const DOCKER_STOPPED = "Docker stopped answering. Check that it's running, then try again.";
 function updateReason(error: unknown): string | undefined {
   if (error instanceof UpdateFailure) return error.reason;
   const text = error instanceof Error ? error.message : "";
   if (/no space left on device|disk quota exceeded|not enough space/i.test(text))
     return "Docker has run out of disk space. Free some up and try again.";
-  if (error instanceof DockerError && error.status === 0)
-    return "Docker stopped answering. Check that it's running, then try again.";
+  if (error instanceof DockerError && error.status === 0) return DOCKER_STOPPED;
   return undefined;
 }
 const sentences = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ");
@@ -868,7 +868,9 @@ export class CellOrchestrator {
         }),
       );
     } catch (error) {
-      this.#failUpdate(id, "download", sentences(NOT_DOWNLOADED, updateReason(error)));
+      // Docker going away cuts the pull off just as a dropped connection does.
+      const reason = (await this.#dockerAnswers()) ? updateReason(error) : DOCKER_STOPPED;
+      this.#failUpdate(id, "download", sentences(NOT_DOWNLOADED, reason));
       throw new CellControlConflict(NOT_DOWNLOADED);
     } finally {
       this.#fetching.delete(id);
@@ -892,6 +894,13 @@ export class CellOrchestrator {
     this.#emit(id);
   }
 
+  #dockerAnswers(): Promise<boolean> {
+    return this.#docker.request({ method: "GET", path: "/_ping" }).then(
+      () => true,
+      (error: unknown) => !(error instanceof DockerError) || error.status !== 0,
+    );
+  }
+
   // Docker went away with the computer off. It starts again once Docker answers, unless the user
   // has done something else with it by then.
   async #bringBack(id: string, stage: ComputerUpdateStage): Promise<void> {
@@ -900,11 +909,7 @@ export class CellOrchestrator {
     while (!this.#disposed && this.#now() < until) {
       await new Promise((resolve) => setTimeout(resolve, BRING_BACK_EVERY_MS).unref?.());
       if (this.#live.get(id) !== left) return;
-      const answers = await this.#docker.request({ method: "GET", path: "/_ping" }).then(
-        () => true,
-        (error: unknown) => !(error instanceof DockerError) || error.status !== 0,
-      );
-      if (!answers) continue;
+      if (!(await this.#dockerAnswers())) continue;
       await this.start(id).catch(() => {});
       const state = this.#live.get(id)?.state;
       if (state === "starting" || state === "ready") {
