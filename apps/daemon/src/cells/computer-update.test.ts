@@ -435,6 +435,21 @@ describe("what every device sees of an update", () => {
     expect(orchestrator.get(id)?.updateProgress).toBeUndefined();
   });
 
+  it("drops a failure from a ready computer with nothing left to update", async () => {
+    const { updates, orchestrator, id, record } = await setup();
+    rebuild();
+    await updates.check(record);
+    fake.state.failCreate.add(`${record.docker.desktop}-update`);
+    await expect(orchestrator.update(id)).rejects.toThrow("It's back as it was");
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    fake.state.failCreate.clear();
+    fake.state.imageIds.set(images.desktop, OLD);
+    fake.state.imageIds.set(images.gate, OLD);
+    await updates.check(record);
+    expect(orchestrator.get(id)?.updateAvailable).toBeUndefined();
+    expect(orchestrator.get(id)?.updateFailure).toBeUndefined();
+  });
+
   it("keeps the failure where every device and a reloaded page can read it", async () => {
     const { updates, orchestrator, id, record } = await setup();
     rebuild();

@@ -342,6 +342,30 @@ describe("what an update says", () => {
     expect(toasts().join()).not.toContain("Your computer wasn't updated");
   });
 
+  it("says so again when the same failure's words change", async () => {
+    const { api } = control();
+    const away = {
+      ...failure,
+      at: 77,
+      message:
+        "Your computer couldn't be updated. Your files are kept. It starts again by itself as soon as Docker answers.",
+    };
+    const view = render(
+      <Watch api={api} computer={cell({ state: "failed", updateFailure: away })} />,
+    );
+    await settle();
+    expect(toasts().join()).toContain("as soon as Docker answers");
+    view.rerender(
+      <Watch
+        api={api}
+        computer={cell({ updateAvailable: true, updateFailure: { ...failure, at: 77 } })}
+      />,
+    );
+    await settle(2000);
+    expect(toasts().join()).toContain("It's back as it was");
+    expect(toasts().join()).not.toContain("as soon as Docker answers");
+  });
+
   it("offers no Retry when there is nothing left to try again", async () => {
     const { api } = control();
     render(

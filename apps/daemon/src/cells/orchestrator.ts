@@ -2363,7 +2363,8 @@ export class CellOrchestrator {
         ? { updating: true as const }
         : {}),
       ...this.#summaryProgress(record.id, operation),
-      ...(this.#updateFailures.has(record.id)
+      ...(this.#updateFailures.has(record.id) &&
+      (live.state !== "ready" || this.deps.updates?.available(record.id))
         ? { updateFailure: this.#updateFailures.get(record.id) }
         : {}),
       ...(this.deps.updates?.needsFreshStart(record.id) ? { needsFreshStart: true as const } : {}),

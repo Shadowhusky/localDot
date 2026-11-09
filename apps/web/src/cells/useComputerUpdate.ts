@@ -206,10 +206,11 @@ function notice(id: string, said: Said | null): void {
 }
 
 const failureKey = (id: string) => `localdot-update-failure:${id}`;
-function saidFailure(id: string, at: number) {
+function saidFailure(id: string, failure: ComputerUpdateFailure) {
+  const said = `${failure.at} ${failure.message}`;
   try {
-    if (localStorage.getItem(failureKey(id)) === String(at)) return true;
-    localStorage.setItem(failureKey(id), String(at));
+    if (localStorage.getItem(failureKey(id)) === said) return true;
+    localStorage.setItem(failureKey(id), said);
   } catch {}
   return false;
 }
@@ -266,7 +267,7 @@ export function useUpdateProgressNotice(
   const failure = update.failure;
   const offered = !!update.offered;
   useEffect(() => {
-    if (!id || !failure || saidFailure(id, failure.at)) return;
+    if (!id || !failure || saidFailure(id, failure)) return;
     watched.current = false;
     showToast({
       id: FAILED,
