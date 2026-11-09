@@ -177,6 +177,12 @@ export function createApp({
           .stopRun?.(sessionId)
           .catch(() => console.error("Shared task could not be stopped after link revocation"));
     });
+  const conversations = agent?.conversations;
+  if (remoteAccess && conversations)
+    remoteAccess.links.showing(() => {
+      const current = conversations.current();
+      return current ? conversations.chain(current).sessions : [];
+    });
   app.use("/api/*", async (c, next) => {
     const given = tokenFromHeaders({ authorization: c.req.header("authorization") });
     if (!tokensMatch(token, given)) {

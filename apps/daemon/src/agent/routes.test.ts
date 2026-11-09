@@ -1837,6 +1837,25 @@ describe("shared-link task enforcement", () => {
     });
     const stopRun = vi.fn(async (_id: string) => true);
     f.deps.runner.stopRun = stopRun;
+    // The conversation the owner's app shows, which has only the owner's task.
+    const shown: { current: string | null } = { current: null };
+    f.deps.conversations = {
+      current: () => shown.current,
+      chain: (id: string) => ({ sessions: [id], more: false }),
+      snapshot: () => ({ sessions: shown.current ? [shown.current] : [], more: false }),
+      list: (_max?: number, archived = false) => ({
+        conversations: [
+          {
+            sessionId: SESSION,
+            firstTask: SESSION,
+            title: archived ? "The owner's archived plans" : "The owner's private plans",
+            updatedAt: at,
+            tasks: 1,
+          },
+        ],
+        archivedCount: 1,
+      }),
+    } as unknown as NonNullable<AgentRoutesDeps["conversations"]>;
     const app = createApp({
       token: "o".repeat(43),
       port: 4750,
@@ -1853,8 +1872,55 @@ describe("shared-link task enforcement", () => {
         headers: { authorization: `Bearer ${issued.token}`, "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-    return { ...f, links, model, issued, send, stopRun };
+    const read = (path: string, bearer = issued.token) =>
+      app.request(`http://127.0.0.1:4750${path}`, {
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+    return { ...f, links, model, issued, send, read, shown, stopRun };
   }
+  it("lists no conversations to a link, archived or not, and leaves the owner's list alone", async () => {
+    const f = await guest();
+    for (const path of ["/api/conversations", "/api/conversations?archived=1"]) {
+      const reply = await f.read(path);
+      expect(reply.status, path).toBe(403);
+      expect(await reply.text(), path).not.toContain("plans");
+      const owner = await f.read(path, "o".repeat(43));
+      expect(owner.status, path).toBe(200);
+      expect(await owner.text(), path).toContain("plans");
+    }
+  });
+  it("shows a link a task's state only for its own task or the one the owner's app shows", async () => {
+    const f = await guest();
+    const snapshot = () => f.read(`/api/agent/sessions/${SESSION}`);
+    const refused = await snapshot();
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).not.toContain(CELL);
+    expect((await f.read(`/api/agent/sessions/${SESSION}`, "o".repeat(43))).status).toBe(200);
+    f.shown.current = SESSION;
+    expect((await snapshot()).status).toBe(200);
+    f.shown.current = null;
+    expect((await snapshot()).status).toBe(403);
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    expect((await snapshot()).status).toBe(200);
+  });
+  it("lets a link continue only a task it may read, so it can't pull in another conversation", async () => {
+    const f = await guest();
+    const theirs = ulid();
+    expect(
+      (await f.send(`/api/cells/${CELL}/agent`, { task: "Hello", continues: theirs })).status,
+    ).toBe(403);
+    expect(f.start).not.toHaveBeenCalled();
+    expect(f.links.list()[0]?.tasks).toBe(0);
+    expect(
+      (await f.send(`/api/cells/${CELL}/agent`, { task: "Hello", continues: null })).status,
+    ).toBe(202);
+    expect(f.start).toHaveBeenCalledWith(
+      CELL,
+      "Hello",
+      expect.any(AbortSignal),
+      expect.objectContaining({ continues: null }),
+    );
+  });
   it("pins the owner's model and minimum budget, atomically counts successful tasks, and blocks owner session mutations", async () => {
     const f = await guest();
     f.settings.put({ taskBudgetUSD: 1 });

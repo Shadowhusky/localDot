@@ -681,6 +681,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       check(c.req.raw.signal);
       const task = redact(parsed.task, undefined, cellId);
       const grant = c.get("remoteGrant");
+      // Continuing a task brings its conversation into the new one, for dot and for the link.
+      if (grant && parsed.continues && !deps.remoteLinks?.sees(grant.id, parsed.continues))
+        throw new RouteError(403, "This link can continue only its own conversation.");
       let reservation: ReturnType<import("../remote/links.ts").RemoteLinks["reserve"]> | undefined;
       if (grant) {
         try {
