@@ -837,6 +837,11 @@ gallery's `#looks` page; `e2e/ui/task-looks.spec.ts`.
 - **Cheap at any length.** Most rows are `DotAvatar`: a plate, two capsules and what it wears, with no
   engine, timer or canvas. Only rows under way (`working`, `needs-you`) are live `Dot`s, at the badge's
   rates, and the shared scheduler gives those off screen no frames. Each plate is fetched once.
+- **A live dot held still.** `DotAvatar` draws the eyes a live `Dot` of its size draws and turns its
+  plates by the same transforms (`plateTransform`), so glasses stay on the eyes wherever its seed has
+  it look and a row going live keeps its face. Eyewear keeps the eye at its true size
+  (`eyeScaleLimit`); `dot/render/wearables-fit.test.ts` measures every plate against the engine's
+  poses, and `tools/dot-plates/README.md` has the rules a new one must keep.
 - **Status.** A badge at the mark's corner, on the overlay colour with a hairline so it holds on any
   row in both houses, with the same glyph and tones as before.
 - **Arriving.** On a reload dot comes on to the page once, in its final look (`dot/arrival.ts`, and

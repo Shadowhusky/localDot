@@ -15,7 +15,7 @@ const FACE: Partial<Record<Wearable, Place>> = {
   mustache: [0, 6],
   monocle: [5.5, -4.5],
   "heart-glasses": [0, -4.5],
-  "clown-nose": [0, 2],
+  "clown-nose": [0, 5],
   blush: [0, 4],
 };
 
@@ -30,27 +30,28 @@ interface Mount {
   crown: number;
 }
 const HEAD: Partial<Record<Wearable, Mount>> = {
-  cap: { pivot: [0, -15], follow: [0.5, 1], crown: 5.5 },
+  cap: { pivot: [0, -15], follow: [0.5, 1], crown: 5 },
   beret: { pivot: [-2, -18], follow: [0.5, 1], crown: 4.25 },
-  mortarboard: { pivot: [0, -14], follow: [0.5, 1], crown: 3 },
+  mortarboard: { pivot: [0, -14], follow: [0.5, 1], crown: 7.5 },
   // The cups sit on the outline, where a turn only carries them round the back.
-  headphones: { pivot: [0, -21], follow: [0.2, 0.4], crown: 2 },
-  bow: { pivot: [-11, -17], follow: [0.6, 1], crown: 0 },
-  beanie: { pivot: [0, -13], follow: [0.5, 1], crown: 7 },
+  headphones: { pivot: [0, -21], follow: [0.2, 0.4], crown: 1.5 },
+  bow: { pivot: [-11, -17], follow: [0.6, 1], crown: 3 },
+  beanie: { pivot: [0, -13], follow: [0.5, 1], crown: 7.5 },
   "party-hat": { pivot: [-11, -17], follow: [0.6, 1], crown: 7 },
   crown: { pivot: [0, -17], follow: [0.5, 1], crown: 7 },
-  "wizard-hat": { pivot: [0, -15], follow: [0.5, 1], crown: 7 },
+  "wizard-hat": { pivot: [0, -18], follow: [0.5, 1], crown: 7.5 },
   "top-hat": { pivot: [-5, -20], follow: [0.6, 1], crown: 7 },
   "chef-hat": { pivot: [0, -16], follow: [0.5, 1], crown: 7 },
   "hard-hat": { pivot: [0, -15], follow: [0.5, 1], crown: 5 },
   sprout: { pivot: [0, -23], follow: [0.8, 1], crown: 7 },
   "flower-crown": { pivot: [0, -18], follow: [0.6, 1], crown: 0 },
-  antenna: { pivot: [-6, -22], follow: [0.8, 1], crown: 6.5 },
-  "cat-ears": { pivot: [0, -19], follow: [0.6, 1], crown: 1 },
-  halo: { pivot: [0, -23], follow: [0.8, 1], crown: 4 },
-  "viking-helmet": { pivot: [0, -15], follow: [0.5, 1], crown: 3 },
+  antenna: { pivot: [-6, -22], follow: [0.8, 1], crown: 7.5 },
+  // They grow from behind the outline, where a turn only carries them round the back.
+  "cat-ears": { pivot: [0, -19], follow: [0.15, 0.25], crown: 6 },
+  halo: { pivot: [0, -23], follow: [0.8, 1], crown: 7.5 },
+  "viking-helmet": { pivot: [0, -15], follow: [0.5, 1], crown: 5.5 },
   "cowboy-hat": { pivot: [0, -15], follow: [0.5, 1], crown: 7 },
-  "propeller-cap": { pivot: [0, -15], follow: [0.5, 1], crown: 5 },
+  "propeller-cap": { pivot: [0, -15], follow: [0.5, 1], crown: 7.5 },
   headband: { pivot: [0, -14], follow: [0.5, 1], crown: 0 },
 };
 
