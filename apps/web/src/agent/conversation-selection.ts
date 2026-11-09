@@ -1,6 +1,11 @@
 import { count } from "../copy/format.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
-import { type ConversationRow, type Organize, organizeConversation } from "./conversation-list.ts";
+import {
+  type ConversationRow,
+  type Organize,
+  organizeConversation,
+  showOrganized,
+} from "./conversation-list.ts";
 
 // Enough requests at once to hide the round trips over a phone's link, few enough that the
 // daemon's other requests keep moving.
@@ -104,6 +109,7 @@ export async function organizeConversations(
   change: Organize,
 ): Promise<number> {
   let refused = 0;
+  showOrganized(api, ids, change);
   await inTurn(ids, (id) =>
     organizeConversation(api, id, change).catch(() => {
       refused++;
