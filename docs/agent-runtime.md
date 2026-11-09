@@ -266,11 +266,13 @@ regardless: the passphrase field is only ever on localDot's card; a form of dot'
 type, including a request for a service key and a choice with its own-words row, says in fixed words
 that localDot never asks for its passphrase there; and a plain answer that names a secret is refused,
 in a field's id, label or hint, in a choice, or in a question with no field or plain options, with or
-without a verb ("Password for example.com?"). Secrets read for this include passwords in English,
-German, Spanish, French, Italian, Portuguese, Russian, Chinese, Japanese and Korean, "your pass", PINs,
-sign-in and one-time codes, API keys and tokens, card numbers, CVVs and social security numbers. A
-negation passes over only the secret it is on, and bare nouns joined to it by "or": "not an API key or
-client secret" is passed over, "not a PIN, your password" is not. That is a word list too, so a form that gets past it
+without a verb ("Password for example.com?"). Secrets read for this are passwords in these
+languages only: English, German, Dutch, Spanish, French, Italian, Portuguese, Polish, Turkish, Russian,
+Arabic, Hindi, Vietnamese, Chinese, Japanese and Korean; and, in English, "your pass", PINs, sign-in
+and one-time codes, API keys and tokens, card numbers, CVVs and social security numbers. A field's id,
+label and hint are read apart, and a question line by line. A negation passes over only the secret it
+is on, on the same line, and bare nouns joined to it by "or": "not an API key or client secret" is
+passed over, "not a PIN, your password" is not. That is a word list too, so a form that gets past it
 does land its answer in the log and in dot's context. A key request in a task that has ever read
 outside words, whatever the user has said since, loses dot's description and needs an OK before a key
 can go to a place no saved key goes to; that OK covers the one request and offers no "For this task".
@@ -388,7 +390,8 @@ itself, since what is typed there is saved over the key. Over a saved key, a mod
 with spaces or a value that reads as a sentence is refused; a model key must look like its provider's
 where that is known (Anthropic, OpenAI, Google, xAI, Groq, OpenRouter, DeepSeek), and any other key or
 token must have a digit in it, after a raw header's scheme. A saved general secret, which can be any
-words, is replaced only with a "Replace the saved secret" tick as well as Save. No draft is kept during such a wait, one kept from before it is cleared, and whatever is typed
+words, is replaced only with a "Replace the saved secret" tick as well as Save, and in Keys a new key
+under a saved key's ID with a "Replace the saved key with this ID" tick. No draft is kept during such a wait, one kept from before it is cleared, and whatever is typed
 during it is cleared when it ends. A message the owner sends
 moves on from the wait, on the daemon, whichever client sent it and whichever harness runs the
 task: the tool call blocked on the wait returns, and the message reaches dot as a steer, through the
