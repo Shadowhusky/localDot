@@ -358,3 +358,59 @@ Validation: 1,209 safety/tool tests passed, including real filesystem and dispat
 regressions for owned creation, edits, pre-existing data, changed targets, cross-session
 ownership, symlinks, compound destructive commands and byte-preserving recovery. A
 separate disposable-file check passed inside the installed Linux desktop.
+
+## Side questions
+
+`/btw` and the palette's **Ask a side question** run a read-only side agent beside the task
+(`apps/daemon/src/agent/side/`). The route is `POST /api/agent/sessions/<id>/side-question`, which
+answers refusals with their own status and otherwise streams NDJSON: `{"progress"}` lines, a
+`{"handover","partial"}` line when another model takes over, then the answer, or `{"problem"}` if it
+failed after starting. Shared links can't reach it.
+
+**What it can read** is one allowlist, `SIDE_TOOL_NAMES`: `search_log` and `read_log` (the task's
+log with its tool output, thinking and steps, but no typed text, key use, approval values, or
+messages the user took back), `look_at_screen`, `list_files` and `read_file` (`DesktopdTools`'s read
+paths, bounded, never a shell), `task_files` (what dot handed over), `recall`, `web_search`,
+`web_fetch`, and `finish`. Any other name is refused without reaching anything. Each read asks the
+same question as dot's (`runsUnasked`), and is refused if the user's settings would have dot ask,
+since a side question has nobody to ask. Everything read is redacted, then wrapped as untrusted.
+
+**It never disturbs the task.** It holds no lease or turn on the computer and no step of the task's
+queue, writes nothing to the task's log, transcript or taint, and dot never hears of it. Its cost is
+on a keyd listener of its own (`QuickModel.sideListener`), which counts against the day's limit and
+never the task's budget. What it spent is in `sessions/<id>/side-spend.jsonl`: amounts and models,
+no question or answer.
+
+**The screen** is the frames dot already looked at, read from the frame store: other tasks' windows
+and masked fields are covered in them exactly as dot saw them. One thing goes beyond that:
+when a live task's screen is the desktop, dot's newest frame is over 15 seconds old, nobody is acting
+on the computer and the user doesn't hold it, `freshDesktopLook` takes a new look, covering other
+tasks' windows and windows too new to tell whose they are. It isn't saved. The cost is that desktopd
+keeps only its newest capture for zooming, so a zoom dot makes on an older frame enlarges the stored
+frame instead, as it does whenever another look has come since. The web browser gets no new look:
+its observation needs a permit from dot's turn and refuses a second one at once, which could fail
+dot's own, so there the answer is the frame dot last took and says how old it is.
+
+**Models.** The fast model goes first, then the main one. A model that fails, is refused or can't use
+tools leaves the question to the next, and a model without images isn't offered the screen. `finish`
+reports `found`, `partial` or `not_found`, and that field alone decides what happens next, never the
+words of the answer. Anything short of `found` goes to the main model by itself, with what the first
+model found and what it checked. If there's no main model to go to, or no room left, the question
+ends with what it found and says so. After the task's own models, any other model set up in Settings
+can answer if they fail.
+
+- **Claude Code:** a process of its own with no built-in tools, whose MCP server serves only the side
+  tools (`claude-code/side.ts`). A tool outside them is refused, and using one ends that model's go.
+- **ChatGPT plan:** never asked. Every Codex turn is a fresh process that holds the account's
+  credentials, so one here could keep dot's next turn waiting. Other models set up in Settings
+  answer instead; with none, the answer says why.
+
+**Limits**, for both models together (`SIDE_LIMITS`): 120 seconds, 75 of them for any one model, 8
+reads per model, and $0.25, or 300,000 tokens on a plan, where no money is counted. keyd holds the
+money limit too. Near a limit a model is offered only `finish`, so it ends by saying what it found.
+
+**Web.** `web_fetch` opens only an address in the user's question or in this question's own search
+results. A page can't have what was read sent to a host of its choosing, whether by naming the
+address or by having the model compose one: nobody can be asked here, as dot's purpose check can.
+A `web_search` goes only to the search engines, and one holding something the redactor catches isn't
+sent. Both go through the same keyd web cell as dot's, so the same egress rules hold.

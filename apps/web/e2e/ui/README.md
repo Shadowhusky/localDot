@@ -53,8 +53,11 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   `POST /__qa/finish?done=1` ends the task as the real runner does, which raises a Done;
   `?markdown=1` gives the result a summary with a heading, a list and bold words, and
   `?preview=<url>` has the reply come with a preview of that address.
-- **Side questions:** `/btw` in the composer reaches the real side-question route, and the fixture
-  answers it from the task's own record, as the Fast model reads it, with no model.
+- **Side questions:** `/btw` in the composer reaches the real side-question route and the real side
+  agent, reading the task's own log, frames and files. Only its models are scripted
+  (`fixtures/side-agent.ts`): they pick a tool by the question's words. "terminal", "screen" and
+  "receipt" (which the fast model can't find, so it hands over) each show one path; "slowly" gives
+  time to see the steps or press Stop.
 - **Replies:** a new task's first reply comes 800 ms after it starts; `POST /__qa/reply?ms=<n>`
   makes dot take longer, so a Stop can come before it has done anything. `?wake=<n>` has dot's
   brain say nothing for n ms first, as a real one starting up, and then also take up a follow-up
