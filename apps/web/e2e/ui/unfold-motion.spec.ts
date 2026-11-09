@@ -161,9 +161,16 @@ const ROW_PANEL = ".activity-row-detail";
 async function openRun(page: Page, n: number) {
   await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
   const trigger = page.locator(".thread-work-steps > .ui-disclosure-trigger:visible").last();
-  await trigger.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(200);
-  await pressUntil(page, trigger);
+  // Getting here isn't what is measured: the chat can still be arriving, with the head behind the
+  // stage over it, so it is put where it can be pressed each time.
+  await expect(async () => {
+    if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+      await low(trigger);
+      await page.waitForTimeout(100);
+      await press(page, trigger);
+    }
+    await expect(trigger).toHaveAttribute("aria-expanded", "true", { timeout: 1500 });
+  }).toPass();
   await page.waitForTimeout(700);
   const list = page.getByRole("list", { name: "Steps" }).last();
   await expect(list.locator(".activity-row-head").nth(n - 1)).toBeVisible();
