@@ -268,7 +268,11 @@ for (const view of VIEWS)
       await expect(rail.getByRole("article", { name: "You", exact: true }).last()).toContainText(
         SAID,
       );
-      await expect(rail.getByText("I read your message and moved on")).toBeVisible();
+      await expect(
+        rail
+          .getByRole("region", { name: "Conversation history" })
+          .getByText("I read your message and moved on"),
+      ).toBeVisible();
       await holdsNoSecret(page, fixture, PASSPHRASE);
     });
 
@@ -296,7 +300,11 @@ for (const view of VIEWS)
           .getByRole("article", { name: "You", exact: true })
           .getByText("dot stopped waiting to read this"),
       ).toBeVisible();
-      await expect(rail.getByText("I read your message and moved on")).toBeVisible();
+      await expect(
+        rail
+          .getByRole("region", { name: "Conversation history" })
+          .getByText("I read your message and moved on"),
+      ).toBeVisible();
     });
 
     test("resumes nothing when what the card waited on is fixed afterwards", async ({
