@@ -342,10 +342,16 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       const was = model.blockers.get(e.data.blockerId);
       next = {
         ...next,
-        blockers: new Map(model.blockers).set(e.data.blockerId, {
-          ...(was ?? { seq: e.seq, at: e.t, time: ulidTime(e.id) }),
-          ...e.data,
-        }),
+        blockers: put(
+          model.blockers,
+          e.data.blockerId,
+          {
+            ...(was ?? { seq: e.seq, at: e.t, time: ulidTime(e.id) }),
+            ...e.data,
+          },
+          L.blockers,
+        ),
+        historyTruncated: next.historyTruncated || model.blockers.size >= L.blockers,
       };
       break;
     }
@@ -369,14 +375,19 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       if (e.data.locked && !open)
         next = {
           ...next,
-          blockers: new Map(model.blockers).set(e.id, {
-            blockerId: e.id,
-            blocker: { kind: "keys_locked" },
-            by: "localdot",
-            seq: e.seq,
-            at: e.t,
-            time: ulidTime(e.id),
-          }),
+          blockers: put(
+            model.blockers,
+            e.id,
+            {
+              blockerId: e.id,
+              blocker: { kind: "keys_locked" },
+              by: "localdot",
+              seq: e.seq,
+              at: e.t,
+              time: ulidTime(e.id),
+            },
+            L.blockers,
+          ),
         };
       else if (!e.data.locked && open)
         next = {

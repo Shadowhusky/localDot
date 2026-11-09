@@ -1424,6 +1424,9 @@ export class AgentSession {
   dismissBlocker(blockerId: string): boolean {
     return !this.stopped && this.#blockers.dismiss(blockerId);
   }
+  blockerDeclined(blocker: Blocker): boolean {
+    return this.#blockers.declined(blocker);
+  }
   // Not now is the owner's to lift: a guest's message or a routine's follow-up doesn't.
   ownerSpoke(): void {
     this.#blockers.ownerSpoke();

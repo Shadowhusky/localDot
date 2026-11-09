@@ -1,12 +1,14 @@
 import type { Blocker, LocalDotEvent } from "@localdot/protocol";
 import { KEYS_LOCKED_NOTE, KEYS_UNLOCKED_NOTE } from "@localdot/protocol/guidance";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RAISE_AGAIN_MS } from "./blockers.ts";
 import { toolHarness } from "./testing/harness.ts";
 import type { ToolDeps } from "./tools/deps.ts";
 
 const fixtures: ReturnType<typeof toolHarness>[] = [];
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const h of fixtures.splice(0)) h.close();
 });
 function setup(opts: Parameters<typeof toolHarness>[0] = {}) {
@@ -29,6 +31,11 @@ const said = (body: { content: { text?: string }[] }) =>
   body.content.map((part) => part.text ?? "").join("\n");
 const inbox = async (session: ReturnType<typeof setup>["session"], after: number) =>
   (await session.inbox(after, 0)).items.map((item) => item.text);
+
+const later = (ms: number) => {
+  const now = Date.now() + ms;
+  vi.spyOn(Date, "now").mockReturnValue(now);
+};
 
 const KEY: Blocker = { kind: "key", id: "openai", problem: "rejected" };
 const APP: Blocker = {
@@ -103,6 +110,54 @@ describe("a blocker on a task", () => {
     session.ownerSpoke();
     expect(session.raiseBlocker(APP)).toBeDefined();
     expect(raises(events())).toHaveLength(2);
+  });
+
+  it("brings a card back once when nothing was fixed, then slowly, each time more slowly", () => {
+    const { session, events } = setup();
+    session.raiseBlocker(KEY);
+    session.moveOn("do something else", undefined);
+    expect(session.openBlockers).toEqual([]);
+    expect(session.raiseBlocker(KEY)).toBeDefined();
+    session.moveOn("do something else", undefined);
+    expect(session.raiseBlocker(KEY)).toBeUndefined();
+    later(RAISE_AGAIN_MS - 1000);
+    expect(session.raiseBlocker(KEY)).toBeUndefined();
+    later(1000);
+    expect(session.raiseBlocker(KEY)).toBeDefined();
+    session.keyWorked(KEY.id);
+    later(RAISE_AGAIN_MS);
+    expect(session.raiseBlocker(KEY)).toBeUndefined();
+    later(RAISE_AGAIN_MS);
+    expect(session.raiseBlocker(KEY)).toBeDefined();
+    expect(raises(events())).toHaveLength(4);
+  });
+
+  it("brings a card back at once for what the user fixed, or what dot can't go on without", () => {
+    const { session, events } = setup();
+    for (let times = 0; times < 3; times++) {
+      session.raiseBlocker(KEY);
+      session.clearBlockers((blocker) => blocker.kind === "key");
+    }
+    expect(raises(events())).toHaveLength(3);
+    session.raiseBlocker(KEY);
+    session.moveOn("do something else", undefined);
+    session.raiseBlocker(KEY);
+    session.moveOn("do something else", undefined);
+    expect(session.raiseBlocker(KEY)).toBeUndefined();
+    expect(session.raiseBlocker(KEY, { required: true, tell: false })).toBeDefined();
+    expect(raises(events())).toHaveLength(6);
+  });
+
+  it("tells dot when its asking is what holds a card back", async () => {
+    const { call, session, tools } = setup();
+    tools.keysLocked = () => true;
+    session.lockKeys();
+    session.moveOn("do something else", undefined);
+    session.lockKeys();
+    session.moveOn("do something else", undefined);
+    const { body } = await call("request_fix", { kind: "keys_locked" });
+    expect(said(body)).toMatch(/asked the user about this a moment ago/);
+    expect(said(body)).not.toMatch(/not now/);
   });
 
   it("a card dot can't go on without has no Not now, and overrides an earlier one", () => {

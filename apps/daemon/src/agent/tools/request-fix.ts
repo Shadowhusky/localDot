@@ -6,7 +6,10 @@ import { fail, movedOnFix, type ToolCallContext, type ToolDeps, text } from "./d
 const ASK_WINDOW_MS = 30 * 60_000;
 const STILL_OPEN =
   "This isn't fixed yet, and localDot's card stays up. Carry on with what doesn't need it, or end your turn and say what is left: you'll be told once it is fixed. Don't raise it again or ask the user about it.";
-const IT_WORKED = "A call with it just went through, so localDot's card has gone. Carry on with the task.";
+const IT_WORKED =
+  "A call with it just went through, so localDot's card has gone. Carry on with the task.";
+const ASKED_LATELY =
+  "localDot asked the user about this a moment ago, so it doesn't ask again yet. Carry on with what doesn't need it, or finish and say what is left.";
 export const KEYS_NOT_LOCKED =
   "Saved keys aren't locked, so localDot shows no card. If something still fails, the cause is something else: don't ask the user to unlock anything or for a passphrase.";
 
@@ -74,7 +77,15 @@ export async function waitForFix(
     ...options,
     tell: false,
   });
-  if (!open) return { ok: true, content: [text(blockerNote(blocker, "dismissed"))] };
+  if (!open)
+    return {
+      ok: true,
+      content: [
+        text(
+          ctx.session.blockerDeclined(blocker) ? blockerNote(blocker, "dismissed") : ASKED_LATELY,
+        ),
+      ],
+    };
   const ended = await ctx.session.waitForBlocker(
     open,
     deps.askTimeoutMs ?? ctx.session.approvalWindowMs ?? ASK_WINDOW_MS,

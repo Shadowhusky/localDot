@@ -21,6 +21,8 @@ export interface RaiseOptions {
   tell?: boolean;
 }
 
+export const RAISE_AGAIN_MS = 2 * 60_000;
+
 // One task's open blockers: one card per thing, for the journal to tell every viewer about, and
 // what dot is told as each is raised and goes.
 export class BlockerDesk {
@@ -29,6 +31,9 @@ export class BlockerDesk {
   // Turned down by the owner: not offered again until they speak.
   readonly #declined = new Set<string>();
   readonly #ended = new Map<string, BlockerOutcome>();
+  // A card that ended with nothing fixed may come back once, if dot still needs it. After that only
+  // after a while, longer each time, so no run of failures or asking becomes a run of notifications.
+  readonly #unfixed = new Map<string, { times: number; at: number }>();
 
   constructor(
     private readonly port: {
@@ -55,7 +60,7 @@ export class BlockerDesk {
   raise(blocker: Blocker, options: RaiseOptions = {}): OpenBlocker | undefined {
     const { by = "localdot", required = false, tell = true } = options;
     const subject = blockerSubject(blocker);
-    if (!required && this.#declined.has(subject)) return undefined;
+    if (!required && (this.#declined.has(subject) || this.#tooSoon(subject))) return undefined;
     let open = this.#open.get(subject);
     if (!open || (required && !open.required)) {
       open = { blockerId: open?.blockerId ?? ulid(), blocker: open?.blocker ?? blocker, required };
@@ -95,7 +100,7 @@ export class BlockerDesk {
     for (const [subject, open] of [...this.#open]) {
       if (!matches(open.blocker)) continue;
       this.#open.delete(subject);
-      this.#ended.set(open.blockerId, outcome);
+      this.#end(subject, open, outcome);
       this.port.cleared({
         blockerId: open.blockerId,
         outcome,
@@ -114,7 +119,7 @@ export class BlockerDesk {
     if (!this.#open.size) return;
     for (const [subject, open] of [...this.#open]) {
       this.#open.delete(subject);
-      this.#ended.set(open.blockerId, "moved_on");
+      this.#end(subject, open, "moved_on");
       this.port.cleared({ blockerId: open.blockerId, outcome: "moved_on" });
       if (!this.#told.delete(subject)) continue;
       const note = blockerNote(open.blocker, "movedOn");
@@ -127,7 +132,7 @@ export class BlockerDesk {
     for (const [subject, open] of [...this.#open]) {
       this.#open.delete(subject);
       this.#told.delete(subject);
-      this.#ended.set(open.blockerId, "moot");
+      this.#end(subject, open, "moot");
       this.port.cleared({ blockerId: open.blockerId, outcome: "moot" });
     }
   }
@@ -138,7 +143,7 @@ export class BlockerDesk {
       this.#open.delete(subject);
       this.#told.delete(subject);
       this.#declined.add(subject);
-      this.#ended.set(blockerId, "dismissed");
+      this.#end(subject, open, "dismissed");
       this.port.cleared({ blockerId, outcome: "dismissed" });
       const note = blockerNote(open.blocker, "dismissed");
       if (note) this.port.tell(note, true);
@@ -149,5 +154,20 @@ export class BlockerDesk {
   }
   ownerSpoke(): void {
     this.#declined.clear();
+  }
+  #end(subject: string, { blockerId }: OpenBlocker, outcome: BlockerOutcome): void {
+    this.#ended.set(blockerId, outcome);
+    if (outcome === "fixed" || outcome === "moot") this.#unfixed.delete(subject);
+    else
+      this.#unfixed.set(subject, {
+        times: (this.#unfixed.get(subject)?.times ?? 0) + 1,
+        at: Date.now(),
+      });
+  }
+  #tooSoon(subject: string): boolean {
+    const last = this.#unfixed.get(subject);
+    return (
+      !!last && last.times > 1 && Date.now() - last.at < RAISE_AGAIN_MS * 2 ** (last.times - 2)
+    );
   }
 }
