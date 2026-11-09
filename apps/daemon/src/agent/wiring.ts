@@ -103,6 +103,7 @@ import { type ComputerTurn, ComputerTurns } from "./computer-turn.ts";
 import { Conversations } from "./conversation.ts";
 import { ExperienceRecorder } from "./experience-recorder.ts";
 import { FramePng } from "./frame-png.ts";
+import { bootMemory } from "./guest.ts";
 import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
 import { workEvents, workRecord } from "./native-recap.ts";
@@ -204,6 +205,7 @@ export function createAgent(d: AgentWiringDeps) {
       return (
         !!session &&
         !session.stopped &&
+        !session.guest &&
         (session.permissionMode() === "full" ||
           session.autonomy.memory === "act" ||
           session.taskAutonomy.relaxes("memory", {}))
@@ -692,7 +694,7 @@ export function createAgent(d: AgentWiringDeps) {
           observe,
           instructions: (session) =>
             codexInstructions({
-              memory: tainting(session, memory.bootMemory(session.task)),
+              memory: tainting(session, bootMemory(memory, session)),
               recent: session.recent,
               skills: runner.skillsOf(session.id),
               today: new Date(),
@@ -700,6 +702,7 @@ export function createAgent(d: AgentWiringDeps) {
               ...(session.research ? { research: session.research.budget } : {}),
               apps: session.connectors.specs.map((spec) => spec.app),
               role: runner.roleOf(session.id),
+              ...(session.guest ? { guest: session.guest } : {}),
             }),
           redactorFor: (session) => forText(session),
           waitForAuthResume: (session) => runner.waitForAuthResume(session),
@@ -858,7 +861,7 @@ export function createAgent(d: AgentWiringDeps) {
         work: nativeWork,
         instructions: (session) =>
           claudeCodeInstructions({
-            memory: tainting(session, memory.bootMemory(session.task)),
+            memory: tainting(session, bootMemory(memory, session)),
             recent: session.recent,
             skills: runner.skillsOf(session.id),
             today: new Date(),
@@ -866,6 +869,7 @@ export function createAgent(d: AgentWiringDeps) {
             ...(session.research ? { research: session.research.budget } : {}),
             apps: session.connectors.specs.map((spec) => spec.app),
             role: runner.roleOf(session.id),
+            ...(session.guest ? { guest: session.guest } : {}),
           }),
         redactorFor: (session) => forText(session),
       })

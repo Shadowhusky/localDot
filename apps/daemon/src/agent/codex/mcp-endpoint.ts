@@ -576,7 +576,7 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
         if (!validOwner() || connection.closed) throw new McpEndpointError();
         return {
           tools: [
-            ...codexTools(undefined, !!input.session.research),
+            ...codexTools(undefined, !!input.session.research, input.session.guest),
             ...connectorDescriptors(input.session.connectors),
           ],
         };

@@ -2035,7 +2035,7 @@ describe("private saved-key answer verification", () => {
 });
 
 describe("shared-link task enforcement", () => {
-  async function guest() {
+  async function guest(apps?: boolean) {
     const f = await setup();
     const links = new RemoteLinks(f.home);
     const model = {
@@ -2050,6 +2050,7 @@ describe("shared-link task enforcement", () => {
       maxTasks: 1,
       taskBudgetUSD: 2,
       model,
+      ...(apps === undefined ? {} : { apps }),
     });
     const stopRun = vi.fn(async (_id: string) => true);
     f.deps.runner.stopRun = stopRun;
@@ -2132,6 +2133,28 @@ describe("shared-link task enforcement", () => {
     expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
     expect((await snapshot()).status).toBe(200);
   });
+  it("starts a link's task with the owner's apps only when the link allows them", async () => {
+    const f = await guest(true);
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    expect(f.start).toHaveBeenCalledWith(
+      CELL,
+      "Hello",
+      expect.any(AbortSignal),
+      expect.objectContaining({ guest: { apps: true } }),
+    );
+    expect(f.links.authenticate(f.issued.token)?.apps).toBe(true);
+  });
+  it("asks no side question for a link, even about its own task", async () => {
+    const f = await guest();
+    f.deps.runner.sideAnswer = vi.fn();
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    expect(f.links.owns(f.issued.grant.id, SESSION)).toBe(true);
+    const asked = await f.send(`/api/agent/sessions/${SESSION}/side-question`, {
+      question: "What has it done so far?",
+    });
+    expect(asked.status).toBe(403);
+    expect(f.deps.runner.sideAnswer).not.toHaveBeenCalled();
+  });
   it("lets a link continue only a task it may read, so it can't pull in another conversation", async () => {
     const f = await guest();
     const theirs = ulid();
@@ -2209,6 +2232,7 @@ describe("shared-link task enforcement", () => {
       main: f.model,
       budgetUSD: 1,
       sender: f.issued.grant.id,
+      guest: { apps: false },
     });
     expect(f.links.owns(f.issued.grant.id, SESSION)).toBe(true);
     expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Another" })).status).toBe(403);

@@ -1373,6 +1373,22 @@ describe("session-owned screen authority", () => {
     expect(desktop).not.toHaveBeenCalled();
   });
 
+  it("keeps a shared link's task without the owner's apps in the desktop's Chromium, which has no sign-ins", async () => {
+    const f = fixture();
+    f.session.guest = { apps: false };
+    const generation = await f.ready();
+    const h = tools(f);
+    bindDesktop(h);
+    const lease = f.session.admit(generation);
+    await expect(f.session.switchScreen("browser", lease)).rejects.toThrow(/shared link/);
+    lease.finish();
+    const navigated = await h.callTool("browser_navigate", { url: "https://example.test/article" });
+    expect(navigated.result.ok).toBe(true);
+    expect(f.client.navigate).not.toHaveBeenCalled();
+    expect(f.deps.browser.start).not.toHaveBeenCalled();
+    expect(f.screens.selection.screen).toBe("desktop");
+  });
+
   it("reports a download without claiming its URL became a page", async () => {
     const f = fixture();
     await f.browser();

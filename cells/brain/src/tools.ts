@@ -18,6 +18,7 @@ import {
   FOLLOW_UP_TOOL_DESCRIPTION,
   FollowUpAtInput,
   GenericComputerInput,
+  type GuestAccess,
   type ModelBinding,
   PeopleInput,
   RESEARCH_TOOL_DESCRIPTION,
@@ -37,6 +38,7 @@ import {
   WebSearchInput,
   WORK_CONTEXT_DESCRIPTION,
   WorkContextInput,
+  withheldTools,
 } from "@localdot/protocol";
 import {
   ASK_FORM_GUIDANCE,
@@ -87,12 +89,13 @@ export function toolSet(
   research = false,
   connectors: readonly ConnectorToolSpec[] = [],
   harnessTools: readonly ToolSchema[] = [],
+  guest?: GuestAccess,
 ): ToolSet {
   const computer = b.vision ? computerTool(b) : undefined;
   const result: ToolSet = {
     // The user's connected apps' tools, as the daemon described them; it checks every call.
     ...Object.fromEntries(
-      connectors.map((spec) => [
+      (guest && !guest.apps ? [] : connectors).map((spec) => [
         spec.name,
         tool({ description: spec.description, inputSchema: jsonSchema(spec.inputSchema as never) }),
       ]),
@@ -203,5 +206,14 @@ export function toolSet(
     });
   }
   if (harnessTools.some((entry) => entry.name === "todo_write")) delete result.update_plan;
+  for (const name of withheldTools(guest)) delete result[name];
   return result;
+}
+
+// What a delegated agent may use: reading and working on the computer, never acting as the user.
+export function delegatedTools(guest?: GuestAccess): string[] {
+  const withheld: readonly string[] = withheldTools(guest);
+  return ["shell", "files", "web_search", "web_fetch", "recall"].filter(
+    (name) => !withheld.includes(name),
+  );
 }

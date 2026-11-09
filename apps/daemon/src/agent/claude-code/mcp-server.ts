@@ -1,4 +1,5 @@
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import type { GuestAccess } from "@localdot/protocol";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -18,13 +19,14 @@ export type LocaldotCall = (
 
 // The same table and schemas the ChatGPT plan's Codex sees. Here an action is checked against the
 // newest full screenshot dot had seen when it chose the action.
-export function localdotTools(research = false): McpToolDescriptor[] {
+export function localdotTools(research = false, guest?: GuestAccess): McpToolDescriptor[] {
   return codexTools(
     {
       ...CODEX_TOOL_DESCRIPTIONS,
       computer: `${COMPUTER_DESCRIPTION} If the screen changed since the screenshot you acted on, the action is not done and the fresh screenshot comes back instead.`,
     },
     research,
+    guest,
   );
 }
 
@@ -33,13 +35,14 @@ export function localdotServer(
   call: LocaldotCall,
   research = false,
   more: () => McpToolDescriptor[] = () => [],
+  guest?: GuestAccess,
 ): McpSdkServerConfigWithInstance {
   const instance = new McpServer(
     { name: LOCALDOT_SERVER, version: "1.0.0" },
     { capabilities: { tools: {} } },
   );
   instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: [...localdotTools(research), ...more()],
+    tools: [...localdotTools(research, guest), ...more()],
   }));
   instance.server.setRequestHandler(CallToolRequestSchema, (request, extra) =>
     call(request.params.name, request.params.arguments ?? {}, extra.signal),

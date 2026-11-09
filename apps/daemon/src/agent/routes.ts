@@ -723,7 +723,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
                 ),
               }
             : {}),
-          ...(grant ? { sender: grant.id } : {}),
+          ...(grant ? { sender: grant.id, guest: { apps: grant.apps } } : {}),
         };
         result = Object.keys(startOptions).length
           ? await deps.runner.start(cellId, task, startSignal, startOptions)

@@ -912,8 +912,11 @@ export class ClaudeCodeDriver {
           model,
           modelOptions: options,
           instructions: redact(d.instructions(session)),
-          server: localdotServer(call, !!session.research, () =>
-            connectorDescriptors(session.connectors),
+          server: localdotServer(
+            call,
+            !!session.research,
+            () => connectorDescriptors(session.connectors),
+            session.guest,
           ),
           disallowed,
           abort,

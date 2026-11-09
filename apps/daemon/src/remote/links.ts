@@ -10,6 +10,8 @@ export const ShareOptions = z.strictObject({
   replay: z.boolean().default(false),
   settings: z.boolean().default(false),
   chooseModel: z.boolean().default(false),
+  // The owner's connected apps, saved keys and signed-in web browser, for the link's tasks.
+  apps: z.boolean().default(false),
   maxTasks: z.number().int().min(1).max(10000).nullable(),
   taskBudgetUSD: z.number().min(0.01).max(10000).default(5),
   model: AgentRoleChoice,

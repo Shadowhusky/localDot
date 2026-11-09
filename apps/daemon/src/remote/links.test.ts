@@ -40,6 +40,19 @@ it("stores only a private hash, restores grants and never exposes the credential
   stores.push(restored);
   expect(restored.authenticate(issued.token)?.id).toBe(issued.grant.id);
 });
+it("keeps the owner's apps and keys off a link unless it opts in, links made before included", () => {
+  const { home, links } = make();
+  const plain = links.create(options);
+  expect(plain.grant.apps).toBe(false);
+  expect(links.create({ ...options, apps: true }).grant.apps).toBe(true);
+  const path = join(home, "remote-links.json");
+  const rows = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>[];
+  writeFileSync(path, JSON.stringify(rows.map(({ apps: _, ...row }) => row)), { mode: 0o600 });
+  const restored = new RemoteLinks(home);
+  stores.push(restored);
+  expect(restored.authenticate(plain.token)?.apps).toBe(false);
+  expect(restored.list().map((link) => link.apps)).toEqual([false, false]);
+});
 it("revokes just one of several permanent links and its stream tickets", () => {
   const { links } = make();
   const first = links.create({ ...options, expiresInHours: null }),
