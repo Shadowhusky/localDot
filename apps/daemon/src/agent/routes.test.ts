@@ -594,6 +594,28 @@ describe("agent user routes", () => {
         .status,
     ).toBe(409);
   });
+  it("only the owner's own message lifts their Not now on a card", async () => {
+    const f = await setup();
+    const key = { kind: "key", id: "openai", problem: "rejected" } as const;
+    f.session.dismissBlocker(f.session.raiseBlocker(key)?.blockerId ?? "");
+    const guest = new Hono();
+    guest.use("*", async (c, next) => {
+      c.set("remoteGrant", { id: "guest" } as never);
+      await next();
+    });
+    agentRoutes(guest, f.deps);
+    const said = await guest.request(`http://127.0.0.1:4747${endpoint("messages")}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "steer", text: "hello" }),
+    });
+    expect(said.status).toBe(202);
+    expect(f.session.raiseBlocker(key)).toBeUndefined();
+    expect((await f.send("POST", endpoint("messages"), { kind: "steer", text: "hi" })).status).toBe(
+      202,
+    );
+    expect(f.session.raiseBlocker(key)).toBeDefined();
+  });
   it("a shared link's guest gains nothing from a card", async () => {
     const f = await setup();
     const retryOnModel = vi.fn(async () => {});

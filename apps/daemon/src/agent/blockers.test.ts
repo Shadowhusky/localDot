@@ -100,7 +100,7 @@ describe("a blocker on a task", () => {
     expect((await inbox(session, told))[0]).toMatch(/not now to reconnecting GitHub/);
     expect(session.raiseBlocker(APP)).toBeUndefined();
     expect(raises(events())).toHaveLength(1);
-    session.post("steer", "Please try GitHub again");
+    session.ownerSpoke();
     expect(session.raiseBlocker(APP)).toBeDefined();
     expect(raises(events())).toHaveLength(2);
   });
@@ -629,6 +629,18 @@ describe("failures localDot recognises by itself", () => {
     expect(heard).not.toContain("the user entered");
     expect(clears(events()).map((data) => data.outcome)).toEqual(["worked"]);
     expect(session.openBlockers).toEqual([]);
+  });
+
+  it("keeps the owner's Not now against a guest's message or a routine's", () => {
+    const { session } = setup();
+    const open = session.raiseBlocker(KEY);
+    expect(session.dismissBlocker(open?.blockerId ?? "")).toBe(true);
+    session.post("steer", "from a shared link", "guest-grant");
+    session.enqueue("from a shared link", "guest-grant");
+    session.post("followup", "a routine's follow-up");
+    expect(session.raiseBlocker(KEY)).toBeUndefined();
+    session.ownerSpoke();
+    expect(session.raiseBlocker(KEY)).toBeDefined();
   });
 
   describe("a connected app's tool", () => {

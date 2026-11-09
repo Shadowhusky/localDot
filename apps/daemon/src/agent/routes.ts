@@ -824,6 +824,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           : undefined;
       check(c.req.raw.signal);
       if (s.stopped) throw new RouteError(409, "task has stopped");
+      if (!grant) s.ownerSpoke();
       if (s.pendingTakeover) {
         turn?.reached();
         // A deliberate Send hands control back. Publish this instruction before

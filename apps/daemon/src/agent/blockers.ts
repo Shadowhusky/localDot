@@ -26,7 +26,7 @@ export interface RaiseOptions {
 export class BlockerDesk {
   readonly #open = new Map<string, OpenBlocker>();
   readonly #told = new Set<string>();
-  // Turned down by the user: not offered again until they speak.
+  // Turned down by the owner: not offered again until they speak.
   readonly #declined = new Set<string>();
   readonly #ended = new Map<string, BlockerOutcome>();
 
@@ -147,7 +147,7 @@ export class BlockerDesk {
     }
     return false;
   }
-  userSpoke(): void {
+  ownerSpoke(): void {
     this.#declined.clear();
   }
 }

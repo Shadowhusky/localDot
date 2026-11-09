@@ -1160,7 +1160,6 @@ export class AgentSession {
     this.#senders.set(messageId, sender ?? null);
   }
   post(kind: InboxItem["kind"], text: string, sender?: string, turn?: MessageTurn): InboxItem {
-    if (kind !== "resume") this.#blockers.userSpoke();
     const messageId = ulid();
     // Known as the user's before it lands, so a wait it ends hears it as theirs.
     if (kind !== "resume") this.#senders.set(messageId, sender ?? null);
@@ -1252,7 +1251,6 @@ export class AgentSession {
   // Hold follow-ups outside the model inbox until its current task finishes. A queued
   // message can therefore be promoted without racing the model's inbox cursor.
   enqueue(text: string, sender?: string, turn?: MessageTurn): void {
-    this.#blockers.userSpoke();
     if (this.stopped) throw new SessionStoppedError();
     if (this.status === "idle" && !turn?.handOver && !this.#queued.size) {
       this.post("followup", text, sender, turn);
@@ -1425,6 +1423,10 @@ export class AgentSession {
   }
   dismissBlocker(blockerId: string): boolean {
     return !this.stopped && this.#blockers.dismiss(blockerId);
+  }
+  // Not now is the owner's to lift: a guest's message or a routine's follow-up doesn't.
+  ownerSpoke(): void {
+    this.#blockers.ownerSpoke();
   }
   withdrawBlockers(): void {
     if (!this.stopped) this.#blockers.withdraw();
