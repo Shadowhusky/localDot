@@ -141,6 +141,18 @@ test("the chat grows until the stage reaches its minimum, and keeps its width th
   await page.getByRole("button", { name: "Collapse conversations" }).click();
   await expect.poll(width).toBe(wide);
 
+  // A wide screen has the room to give, with the gap between its columns.
+  await page.setViewportSize({ width: 2000, height: 1100 });
+  await expect(edge).toHaveAttribute("aria-valuemax", String(2000 - STAGE_ROOM - FOLDED_RAIL));
+  await edge.focus();
+  for (let press = 0; press < 12; press++) await page.keyboard.press("Shift+ArrowLeft");
+  await expect.poll(width).toBe(2000 - STAGE_ROOM - FOLDED_RAIL);
+  await expect
+    .poll(async () => (await stage.boundingBox())?.width ?? 0)
+    .toBeGreaterThanOrEqual(520);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(width).toBe(wide);
+
   // Double-click goes back to where it started, and forgets the width.
   await edge.dblclick();
   await expect.poll(width).toBe(368);
