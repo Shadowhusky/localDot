@@ -1609,10 +1609,11 @@ describe("sending while dot waits for something private", () => {
     fireEvent.paste(f.field, {
       clipboardData: { files: [], getData: () => `correct horse ${"word ".repeat(1500)}` },
     });
+    expect(f.field.maxLength).toBe(7900);
     f.input("x".repeat(8000));
     expect(screen.queryByRole("list", { name: /attached/i })).toBeNull();
     expect(screen.queryByText(/pasted text|typed text/i)).toBeNull();
-    expect(f.field.value).toBe("");
+    expect(f.field.value).toBe("x".repeat(7900));
     expect(screen.getByText(/Long text isn't taken/)).toBeTruthy();
     fireEvent.keyDown(f.field, { key: "Enter" });
     f.submit();
@@ -1620,6 +1621,8 @@ describe("sending while dot waits for something private", () => {
     expect(f.requests).toEqual([]);
     keepDraftNow();
     expect(localStorage.getItem(DRAFT)).toBeNull();
+    f.update({ waitingOn: undefined, secretField: false });
+    expect(f.field.maxLength).toBe(-1);
   });
 
   it("holds a file attached while a field for a secret is up", async () => {
