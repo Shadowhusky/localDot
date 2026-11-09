@@ -107,7 +107,11 @@ export function markOf(e: LocalDotEvent): TimelineMark | null {
         ? null
         : mark(
             "event",
-            e.data.outcome === "fixed" ? "Fixed from the conversation" : "You said not now",
+            {
+              fixed: "Fixed from the conversation",
+              dismissed: "You said not now",
+              moved_on: "You moved on with a message",
+            }[e.data.outcome],
           );
     case "key.use":
       return mark(

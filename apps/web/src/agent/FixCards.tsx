@@ -19,6 +19,7 @@ import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { Select } from "../ui/Select.tsx";
+import type { DotWait } from "./Composer.tsx";
 import type { AgentBlocker } from "./model.ts";
 import { timeLabel } from "./thread.ts";
 import { useAppConnect } from "./useAppConnect.ts";
@@ -59,6 +60,17 @@ export interface FixDeps {
 // fixed by kind, and a secret goes straight from the card to the key service.
 export function FixCards({ blockers, deps }: { blockers: readonly AgentBlocker[]; deps: FixDeps }) {
   return blockers.map((open) => <FixCard key={open.blockerId} open={open} deps={deps} />);
+}
+// What a message moves on from while cards are up: a card that takes a secret warns that a message
+// isn't kept secret.
+export function fixWait(blockers: readonly AgentBlocker[]): DotWait | undefined {
+  if (!blockers.length) return undefined;
+  return blockers.some(
+    ({ blocker }) =>
+      blocker.kind === "keys_locked" || (blocker.kind === "key" && blocker.problem !== "rebound"),
+  )
+    ? "private-fix"
+    : "fix";
 }
 // Keys already open need no card, whatever a slower word from the task says.
 export const fixesToShow = (blockers: readonly AgentBlocker[], health: KeydHealth | null) =>

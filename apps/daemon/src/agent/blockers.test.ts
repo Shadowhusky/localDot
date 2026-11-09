@@ -348,20 +348,30 @@ describe("request_fix: a card on dot's say-so", () => {
     expect(raises(events())).toHaveLength(1);
   });
 
-  it("hears the user out while it waits, leaving the card up", async () => {
+  it("takes the user's message as moving on, by the one path every wait shares", async () => {
     const { call, events, session, tools } = setup();
     tools.keysLocked = () => true;
     const reply = call("request_fix", { kind: "keys_locked" });
     await until(() => raises(events()).length === 1);
-    session.post("steer", "Skip that part and carry on");
+    expect(session.moveOn("Skip that part and carry on")).toBe(true);
     const { body } = await reply;
-    expect(body.ok).toBe(false);
-    expect(said(body)).toMatch(/user sent a new message/);
-    expect(said(body)).toMatch(/stays up/);
+    expect(body.ok).toBe(true);
+    expect(said(body)).toMatch(/instead of fixing this/);
+    expect(session.openBlockers).toEqual([]);
+    expect(clears(events())[0]).toMatchObject({ outcome: "moved_on" });
+  });
+
+  it("a guest's word doesn't end the wait: only moving on does", async () => {
+    const { call, events, session, tools } = setup();
+    tools.keysLocked = () => true;
+    const reply = call("request_fix", { kind: "keys_locked" });
+    await until(() => raises(events()).length === 1);
+    session.post("steer", "From a shared link", "guest");
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(session.openBlockers).toHaveLength(1);
-    const seq = session.inboxSequence;
+    expect(session.status).toBe("waiting_user");
     session.keysUnlocked();
-    expect(await inbox(session, seq)).toEqual([KEYS_UNLOCKED_NOTE]);
+    expect((await reply).body.ok).toBe(true);
   });
 
   it("stops waiting for a Pause, as a question does", async () => {

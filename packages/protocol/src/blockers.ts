@@ -102,10 +102,11 @@ export const RequestFixInput = z
   });
 export type RequestFixInput = z.infer<typeof RequestFixInput>;
 
+const INSTEAD = "you sent a message instead";
 // How a card reads once it is history, in the thread and in Replay.
 export function blockerLine(
   blocker: Blocker,
-  outcome: "fixed" | "dismissed" | "open",
+  outcome: "fixed" | "dismissed" | "moved_on" | "open",
   movedTo?: string,
 ): string {
   switch (blocker.kind) {
@@ -113,36 +114,42 @@ export function blockerLine(
       return {
         fixed: "Keys unlocked",
         dismissed: "You left your keys locked",
+        moved_on: `Not unlocked: ${INSTEAD}`,
         open: "Saved keys were locked",
       }[outcome];
     case "key":
       return {
         fixed: `${blocker.id} key saved`,
         dismissed: `You left the ${blocker.id} key for now`,
+        moved_on: `The ${blocker.id} key not saved: ${INSTEAD}`,
         open: `The ${blocker.id} key needed your attention`,
       }[outcome];
     case "app":
       return {
         fixed: `${blocker.name} connected`,
         dismissed: `You left ${blocker.name} for now`,
+        moved_on: `${blocker.name} not connected: ${INSTEAD}`,
         open: `${blocker.name} needed signing in`,
       }[outcome];
     case "model":
       return {
         fixed: movedTo ? `Switched to ${movedTo}` : "The model answered again",
         dismissed: "You left the model for now",
+        moved_on: `Model not changed: ${INSTEAD}`,
         open: "The model couldn't go on",
       }[outcome];
     case "computer":
       return {
         fixed: "Your computer is back on",
         dismissed: "You left your computer off",
+        moved_on: `Your computer not turned on: ${INSTEAD}`,
         open: blocker.state === "paused" ? "Your computer was paused" : "Your computer was off",
       }[outcome];
     case "runtime":
       return {
         fixed: "Docker is running again",
         dismissed: "You left Docker off",
+        moved_on: `Docker not started: ${INSTEAD}`,
         open: "Docker wasn't running",
       }[outcome];
   }

@@ -1201,24 +1201,42 @@ export class AgentSession {
     return { ...item };
   }
   // The user's message while dot waits on them moves on from what it waits on: a question closes
-  // unanswered, a step's approval counts as not given, and dot reads the message now, not after the
-  // wait. Moving dot ends what it left running, so a message for another model waits for the task
-  // then, as it does for a model this task can't run. False when dot waits on neither.
+  // unanswered, a step's approval counts as not given, a card closes as not done, and dot reads the
+  // message now, not after the wait. Moving dot ends what it left running, so a message for another
+  // model waits for the task then, as it does for a model this task can't run. False when dot waits
+  // on none of them: a card it wasn't waiting on still closes, and the message goes its usual way.
   moveOn(text: string, sender?: string, turn?: MessageTurn): boolean {
     if (this.stopped) throw new SessionStoppedError();
-    if (!this.#ask && !this.pendingApproval) return false;
+    const stalled = this.#stalledOnCard;
+    if (!this.#ask && !this.pendingApproval && !stalled && !this.#fixWaits) {
+      this.#blockers.moveOn();
+      return false;
+    }
     const waits =
       !!turn?.handOver ||
       (!!turn?.moves() && (this.#leftRunning > 0 || this.#delegates.running().length > 0));
     this.#endWait(waits);
-    if (waits) this.enqueue(text, sender, turn);
-    else this.#endedWait(this.post("steer", text, sender, turn));
+    if (waits) {
+      this.enqueue(text, sender, turn);
+      // A stalled model never finishes for it, so the task that runs that model takes over now.
+      if (stalled) turn?.handOver?.();
+    } else {
+      this.#endedWait(this.post("steer", text, sender, turn));
+      // A plan's harness stays stalled until a Resume, whatever is said; the brain takes either.
+      if (stalled) this.post("resume", "");
+    }
     return true;
+  }
+  // The model stopped on a card: only the fix, or a message, moves it on.
+  get #stalledOnCard(): boolean {
+    return this.#blockers.open.some((open) => open.required);
   }
   #endWait(waits: boolean): boolean {
     this.messageWaits = waits;
+    const onCard = this.#stalledOnCard || this.#fixWaits > 0;
+    this.#blockers.moveOn();
     const asked = this.#ask?.finish({ by: "message" }) ?? false;
-    return this.#approvals.moveOn(this.id) || asked;
+    return this.#approvals.moveOn(this.id) || asked || onCard;
   }
   // As for a timed wait: the message shows it ended this wait, and a wait dot starts next runs on.
   #endedWait(said: InboxItem): void {

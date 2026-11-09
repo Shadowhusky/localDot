@@ -171,6 +171,9 @@ describe("a card on the timeline", () => {
     expect(markOf(ev("blocker.clear", { blockerId: "b", outcome: "dismissed" }))?.label).toBe(
       "You said not now",
     );
+    expect(markOf(ev("blocker.clear", { blockerId: "b", outcome: "moved_on" }))?.label).toBe(
+      "You moved on with a message",
+    );
     expect(markOf(ev("blocker.clear", { blockerId: "b", outcome: "moot" }))).toBeNull();
     expect(markOf(ev("keys.lock", { locked: true }))?.label).toBe("Saved keys were locked");
     expect(markOf(ev("keys.lock", { locked: false }))?.label).toBe("Keys unlocked");

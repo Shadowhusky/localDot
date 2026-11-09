@@ -46,7 +46,7 @@ import {
   STATUS_LABEL,
 } from "./agent/conversation-list.ts";
 import { conversationBlockReason } from "./agent/conversation-state.ts";
-import { FixCards, fixesToShow } from "./agent/FixCards.tsx";
+import { FixCards, fixesToShow, fixWait } from "./agent/FixCards.tsx";
 import { useTaskStalled } from "./agent/heartbeat.ts";
 import { LatestSteps } from "./agent/LatestSteps.tsx";
 import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
@@ -1828,6 +1828,8 @@ function Theatre({ api }: { api: ApiClient }) {
       ) : undefined,
     [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey, keys.save, api, stack],
   );
+  // What the task is waiting on the user to fix, as its own log says on every device.
+  const fixes = fixesToShow(agent.fixes ?? [], keys.health);
   // What dot waits on the user for, which any message of theirs moves on from.
   const dotWait: DotWait | undefined = askDraft
     ? asksPrivate(askDraft.fields)
@@ -1837,7 +1839,7 @@ function Theatre({ api }: { api: ApiClient }) {
       ? "approval"
       : takeover && takeover.by !== "user"
         ? "computer"
-        : undefined;
+        : fixWait(fixes);
   // What a task's decision must not stay behind when a notification opens it.
   const uncover = () => {
     selectReplay(null);
@@ -2091,8 +2093,6 @@ function Theatre({ api }: { api: ApiClient }) {
     }
   };
   const tipAction = idle?.action;
-  // What the task is waiting on the user to fix, as its own log says on every device.
-  const fixes = fixesToShow(agent.fixes ?? [], keys.health);
   const bandLine = hearing ? LISTENING_LINE : idle ? idle.text : narration;
   const bandSpeaker = hearing || idle ? "dot" : speaker;
   const pendingQuestion = agent.model.pendingAsk

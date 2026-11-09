@@ -533,6 +533,172 @@ describe("a message while dot waits on the computer it handed over", () => {
   });
 });
 
+describe("a message while a card in the conversation is up", () => {
+  const raises = (f: ReturnType<typeof setup>) =>
+    f.events().filter((event) => event.type === "blocker.raise");
+  const clears = (f: ReturnType<typeof setup>) =>
+    f.events().flatMap((event) => (event.type === "blocker.clear" ? [event.data] : []));
+  const APP = { kind: "app", connector: "gh", name: "GitHub", host: "api.example" } as const;
+
+  it("ends dot's wait on it, and closes it as not done", async () => {
+    const f = setup();
+    f.tools.keysLocked = () => true;
+    const waiting = f.call("request_fix", { kind: "keys_locked" });
+    await until(() => f.session.openBlockers.length === 1);
+    const blockerId = f.session.openBlockers[0]?.blockerId;
+    expect((await f.say(USER_WORDS)).status).toBe(202);
+
+    expect(f.session.openBlockers).toEqual([]);
+    const { result } = await waiting;
+    expect(result.ok).toBe(true);
+    expect(textOf(result)).toMatch(/instead of fixing this/);
+    expect(textOf(result)).toMatch(/only if you still need/i);
+    expect(textOf(result)).not.toContain(USER_WORDS);
+    expect(clears(f)).toEqual([{ blockerId, outcome: "moved_on" }]);
+    expect(newest(f)).toMatchObject({ text: USER_WORDS, kind: "steer" });
+    expect(newest(f).queued).toBeUndefined();
+    expect(await f.unread()).toEqual([
+      expect.objectContaining({ kind: "steer", text: USER_WORDS }),
+    ]);
+    expect(
+      f
+        .events()
+        .filter((event) => event.type === "message.delivery")
+        .map((event) => event.data),
+    ).toEqual([{ messageId: newest(f).messageId, state: "woke" }]);
+    expect(f.session.status).toBe("running");
+  });
+
+  it("is the same path for a queued message the user steers with now", async () => {
+    const f = setup();
+    f.tools.keysLocked = () => true;
+    const waiting = f.call("request_fix", { kind: "keys_locked" });
+    await until(() => f.session.openBlockers.length === 1);
+    f.session.enqueue(USER_WORDS);
+    const queued = f.events().findLast((event) => event.type === "message.user");
+    if (queued?.type !== "message.user") throw new Error("nothing queued");
+    expect((await f.post(`/messages/${queued.data.messageId}/steer`, {})).status).toBe(204);
+    expect(f.session.openBlockers).toEqual([]);
+    expect(textOf((await waiting).result)).toMatch(/instead of fixing this/);
+    expect(clears(f)[0]).toMatchObject({ outcome: "moved_on" });
+  });
+
+  it("closes a card dot wasn't waiting on, leaving the message to its usual path", async () => {
+    const f = setup();
+    f.session.raiseBlocker(APP);
+    expect((await f.say(USER_WORDS)).status).toBe(202);
+    expect(f.session.openBlockers).toEqual([]);
+    expect(clears(f)[0]).toMatchObject({ outcome: "moved_on" });
+    const heard = await f.unread();
+    expect(heard.at(-2)?.text).toMatch(/instead of reconnecting GitHub/);
+    expect(heard.at(-1)).toMatchObject({ kind: "steer", text: USER_WORDS });
+    expect(f.events().some((event) => event.type === "message.delivery")).toBe(false);
+  });
+
+  it("never treats a card dot wasn't waiting on as the wait the message ended", async () => {
+    const f = setup();
+    f.session.raiseBlocker(APP);
+    const listening = f.session.listenForUser(new AbortController().signal);
+    await f.say(USER_WORDS);
+    expect(listening.spoke).toBe(true);
+    listening.end();
+  });
+
+  it("resumes nothing when the blocker clears afterwards", async () => {
+    const f = setup();
+    f.tools.keysLocked = () => true;
+    const waiting = f.call("request_fix", { kind: "keys_locked" });
+    await until(() => f.session.openBlockers.length === 1);
+    await f.say(USER_WORDS);
+    await waiting;
+    const seq = f.session.inboxSequence;
+    const closed = clears(f).length;
+    f.session.keysUnlocked();
+    expect(f.session.inboxSequence).toBe(seq);
+    expect(clears(f)).toHaveLength(closed);
+    expect(f.session.keysLocked).toBe(false);
+  });
+
+  it("lets dot raise it again if it still needs it", async () => {
+    const f = setup();
+    f.tools.keysLocked = () => true;
+    const first = f.call("request_fix", { kind: "keys_locked" });
+    await until(() => f.session.openBlockers.length === 1);
+    await f.say(USER_WORDS);
+    await first;
+    const again = f.call("request_fix", { kind: "keys_locked" });
+    await until(() => f.session.openBlockers.length === 1);
+    expect(raises(f)).toHaveLength(2);
+    f.session.keysUnlocked();
+    expect((await again).result.ok).toBe(true);
+  });
+
+  it("moves a stalled model on: the message wakes it, and a new stall raises a new card", async () => {
+    const f = setup();
+    f.session.setStatus("paused");
+    const stalled = f.session.raiseBlocker(
+      { kind: "model", reason: "model refused" },
+      { required: true, tell: false },
+    );
+    expect((await f.say(USER_WORDS)).status).toBe(202);
+    expect(f.session.openBlockers).toEqual([]);
+    expect(clears(f)).toEqual([{ blockerId: stalled?.blockerId, outcome: "moved_on" }]);
+    // The message, then the Resume a plan's harness waits for, in that order.
+    expect((await f.unread()).map((item) => item.kind)).toEqual(["steer", "resume"]);
+    expect((await f.unread())[0]?.text).toBe(USER_WORDS);
+    const next = f.session.raiseBlocker(
+      { kind: "model", reason: "model refused" },
+      { required: true, tell: false },
+    );
+    expect(next?.blockerId).not.toBe(stalled?.blockerId);
+  });
+
+  it("takes a stalled task straight to a model it can't run, which it could never finish for", async () => {
+    const handOver = vi.fn();
+    const f = setup({ turn: { handOver } });
+    f.session.setStatus("paused");
+    f.session.raiseBlocker(
+      { kind: "model", reason: "provider limit reached" },
+      { required: true, tell: false },
+    );
+    const model = { provider: "chatgpt", model: "gpt-6-sol" };
+    expect((await f.say(USER_WORDS, "steer", model)).status).toBe(202);
+    expect(handOver).toHaveBeenCalledOnce();
+    expect(f.session.openBlockers).toEqual([]);
+  });
+
+  it("tells a waiting dot to finish when the message goes on after this task", async () => {
+    const f = setup({ turn: { handOver: () => {} } });
+    f.tools.keysLocked = () => true;
+    const waiting = f.call("request_fix", { kind: "keys_locked" });
+    await until(() => f.session.openBlockers.length === 1);
+    const model = { provider: "chatgpt", model: "gpt-6-sol" };
+    expect((await f.say(USER_WORDS, "steer", model)).status).toBe(202);
+    expect(textOf((await waiting).result)).toMatch(/goes on after this task/);
+  });
+
+  it("leaves the card up for a shared link's guest, who answers for no one", async () => {
+    const f = setup({ guest: true });
+    f.tools.keysLocked = () => true;
+    const waiting = f.call("request_fix", { kind: "keys_locked" });
+    await until(() => f.session.openBlockers.length === 1);
+    expect((await f.say(USER_WORDS)).status).not.toBe(500);
+    expect(f.session.openBlockers).toHaveLength(1);
+    expect(clears(f)).toEqual([]);
+    f.session.keysUnlocked();
+    expect((await waiting).result.ok).toBe(true);
+  });
+
+  it("refuses a late Not now, on any device", async () => {
+    const f = setup();
+    const open = f.session.raiseBlocker(APP);
+    await f.say(USER_WORDS);
+    expect(f.session.dismissBlocker(open?.blockerId ?? "")).toBe(false);
+    const model = { provider: "chatgpt", model: "gpt-6-sol" };
+    expect((await f.post(`/blockers/${open?.blockerId}/model`, { model })).status).toBe(409);
+  });
+});
+
 describe("the wait kinds a message leaves as they are", () => {
   it("sends as before when dot isn't waiting on anything", async () => {
     const f = setup();

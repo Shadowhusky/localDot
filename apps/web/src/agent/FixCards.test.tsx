@@ -6,7 +6,7 @@ import { type KeydHealth, type KeyRecord, unlockKeys } from "../keys/keys-api.ts
 import type { KeysController } from "../keys/useKeys.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { ModelOption } from "../settings/model-options.ts";
-import { FixCards, type FixDeps, FixLine, fixesToShow } from "./FixCards.tsx";
+import { FixCards, type FixDeps, FixLine, fixesToShow, fixWait } from "./FixCards.tsx";
 import type { AgentBlocker } from "./model.ts";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { threadItems } from "./thread.ts";
@@ -337,6 +337,19 @@ describe("what a secret entry card is", () => {
   });
 });
 
+describe("what the message box says while a card is up", () => {
+  it("warns where the card takes a secret, and is plain where it doesn't", () => {
+    expect(fixWait([])).toBeUndefined();
+    expect(fixWait([card({ kind: "keys_locked" })])).toBe("private-fix");
+    expect(fixWait([card({ kind: "key", id: "a", problem: "rejected" })])).toBe("private-fix");
+    expect(fixWait([card({ kind: "key", id: "a", problem: "reenter" })])).toBe("private-fix");
+    expect(fixWait([card({ kind: "key", id: "a", problem: "rebound" })])).toBe("fix");
+    expect(fixWait([card({ kind: "runtime" })])).toBe("fix");
+    expect(fixWait([card({ kind: "computer", state: "paused" })])).toBe("fix");
+    expect(fixWait([card({ kind: "runtime" }), card({ kind: "keys_locked" })])).toBe("private-fix");
+  });
+});
+
 describe("the line a card leaves", () => {
   const line = (blocker: AgentBlocker) => {
     render(<FixLine blocker={blocker} />);
@@ -369,6 +382,9 @@ describe("the line a card leaves", () => {
     expect(
       line(card({ kind: "keys_locked" }, { cleared: { ...fixed, outcome: "dismissed" } })),
     ).toContain("You left your keys locked");
+    expect(
+      line(card({ kind: "keys_locked" }, { cleared: { ...fixed, outcome: "moved_on" } })),
+    ).toContain("Not unlocked: you sent a message instead");
   });
 
   it("names a model as the user knows it", () => {

@@ -179,6 +179,8 @@ export const movedOnQuestion = (session: AgentSession) =>
   `The user sent a new message instead of answering, so this question is closed and nothing was entered. ${session.messageWaits ? AFTER_THIS_TASK : NEXT("Ask this again only if you still need the answer.")}`;
 export const movedOnStep = (session: AgentSession) =>
   `The user sent a new message instead of deciding, so this step was not approved and did not run. ${session.messageWaits ? AFTER_THIS_TASK : NEXT("If you still need this step, ask again: it needs a new approval.")}`;
+export const movedOnFix = (session: AgentSession) =>
+  `The user sent a new message instead of fixing this, so its card is closed, it isn't fixed and nothing was entered. ${session.messageWaits ? AFTER_THIS_TASK : NEXT("Call request_fix again only if you still need it.")}`;
 export const MOVED_ON_COMPUTER =
   "The user sent a message, which hands the screen back, so what you asked of them on the computer may not be done. Their message follows as their next message: read it and act on it. Hand the screen over again only if you still need them to.";
 // A step's own words for being refused give way to why; what it did before that, and any screen it

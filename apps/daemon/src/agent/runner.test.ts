@@ -2384,6 +2384,46 @@ describe("ChatGPT runner lifecycle", () => {
       expect(blockers(f, s.id)).toEqual([]);
     });
 
+    it("resumes nothing when a blocker clears after a message moved the task on", async () => {
+      const f = setup();
+      const locked = {
+        online: true,
+        bootId: "fixture-boot",
+        vault: { backend: "file", state: "locked" as const, key: "passphrase" as const },
+      };
+      await f.runner.keydChanged(locked, { online: true, bootId: "fixture-boot" });
+      const s = await working(f);
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "keys locked" });
+      s.raiseBlocker({ kind: "key", id: "gh", problem: "reenter" }, { required: true });
+      expect(s.moveOn("Never mind that, do this instead")).toBe(true);
+      expect(s.openBlockers).toEqual([]);
+      const seq = s.inboxSequence;
+      const closed = blockers(f, s.id).length;
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http" }] as never);
+      await f.runner.keyChanged("gh");
+      await f.runner.keydChanged(
+        { ...locked, vault: { ...locked.vault, state: "ready" as const } },
+        locked,
+      );
+      expect(s.inboxSequence).toBe(seq);
+      expect(blockers(f, s.id)).toHaveLength(closed);
+    });
+
+    it("raises a new card if the model stalls again after a message", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      const stall = { state: "paused", reason: "model refused", detail: "400: No" } as const;
+      s.append("agent.state", stall);
+      const first = s.openBlockers[0]?.blockerId;
+      expect(s.moveOn("Try it like this")).toBe(true);
+      s.append("agent.state", { state: "thinking" });
+      s.append("agent.state", stall);
+      expect(s.openBlockers).toHaveLength(1);
+      expect(s.openBlockers[0]?.blockerId).not.toBe(first);
+    });
+
     it("takes its card down when dot says it finished without it", async () => {
       const f = setup();
       f.run.mockImplementationOnce(async (session) => {

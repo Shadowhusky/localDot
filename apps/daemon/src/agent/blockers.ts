@@ -102,6 +102,20 @@ export class BlockerDesk {
     if (cleared.length) this.port.changed();
     return cleared;
   }
+  // The user's message moved on from them. Closed as not done, on every device; a fix that comes
+  // later finds nothing to clear, so nothing resumes a task that has already moved on.
+  moveOn(): void {
+    if (!this.#open.size) return;
+    for (const [subject, open] of [...this.#open]) {
+      this.#open.delete(subject);
+      this.#ended.set(open.blockerId, "moved_on");
+      this.port.cleared({ blockerId: open.blockerId, outcome: "moved_on" });
+      if (!this.#told.delete(subject)) continue;
+      const note = blockerNote(open.blocker, "movedOn");
+      if (note) this.port.tell(note, false);
+    }
+    this.port.changed();
+  }
   // dot finished without them: nothing waits on the user any more, and nobody needs telling.
   withdraw(): void {
     for (const [subject, open] of [...this.#open]) {

@@ -236,6 +236,95 @@ for (const view of VIEWS)
     });
   });
 
+// A message moves on from a card as from any other wait of dot's.
+const box = (rail: Locator) => rail.getByRole("form", { name: "Message dot" });
+const SAID = "Forget that, book the train instead";
+async function moveOn(rail: Locator, hint: string) {
+  const form = box(rail);
+  const field = form.getByRole("textbox", { name: "Message", exact: true });
+  await expect(field).toHaveAttribute("placeholder", "Or message dot");
+  await field.fill(SAID);
+  await expect(form.getByText(hint)).toBeVisible();
+  await form.getByRole("button", { name: "Send now" }).click();
+}
+const PRIVATE_HINT = "Sending moves on without fixing this. Messages aren't kept secret";
+const HINT = "Sending moves on without fixing this";
+
+for (const view of VIEWS)
+  test.describe(`a message in ${view}`, () => {
+    test.use({ viewStyle: view });
+
+    test("moves on from the unlock card, keeping nothing typed into it", async ({ page, ui }) => {
+      const fixture = await ui.open("keys-locked");
+      const rail = await chatRail(page);
+      const card = rail.getByRole("region", { name: "Unlock your saved keys" });
+      await expect(card).toBeVisible();
+      await card.getByLabel("Passphrase", { exact: true }).fill(PASSPHRASE);
+      await moveOn(rail, PRIVATE_HINT);
+      await leavesALine(rail, "Not unlocked: you sent a message instead");
+      await expect(rail.getByRole("article", { name: "You", exact: true }).last()).toContainText(
+        SAID,
+      );
+      await expect(rail.getByText("I read your message and moved on")).toBeVisible();
+      await holdsNoSecret(page, fixture, PASSPHRASE);
+    });
+
+    test("moves on from a key's card, keeping nothing typed into it", async ({ page, ui }) => {
+      const fixture = await ui.open("fix-key");
+      const rail = await chatRail(page);
+      const card = rail.getByRole("region", { name: /key was refused/ });
+      await card.getByRole("textbox").first().fill(KEY_VALUE);
+      await moveOn(rail, PRIVATE_HINT);
+      await leavesALine(rail, /key not saved: you sent a message instead/);
+      await holdsNoSecret(page, fixture, KEY_VALUE);
+    });
+
+    test("moves a stalled model on, and the message says it ended the wait", async ({
+      page,
+      ui,
+    }) => {
+      await ui.open("fix-model");
+      const rail = await chatRail(page);
+      await expect(rail.getByRole("region", { name: /could not process/ })).toBeVisible();
+      await moveOn(rail, HINT);
+      await leavesALine(rail, "Model not changed: you sent a message instead");
+      await expect(
+        rail
+          .getByRole("article", { name: "You", exact: true })
+          .getByText("dot stopped waiting to read this"),
+      ).toBeVisible();
+      await expect(rail.getByText("I read your message and moved on")).toBeVisible();
+    });
+
+    test("resumes nothing when what the card waited on is fixed afterwards", async ({
+      page,
+      ui,
+    }) => {
+      const fixture = await ui.open("fix-runtime");
+      const rail = await chatRail(page);
+      await expect(rail.getByRole("region", { name: "Docker isn't running" })).toBeVisible();
+      await moveOn(rail, HINT);
+      await leavesALine(rail, "Docker not started: you sent a message instead");
+      await qa(page, fixture, "fix-docker-up");
+      await expect(rail.locator('.thread-row[data-kind="fix"]')).toHaveCount(1);
+      await expect(rail.getByText("Docker is running again")).toHaveCount(0);
+    });
+  });
+
+test("a message closes the card on every device", async ({ page, ui, context }) => {
+  await ui.open("fix-runtime");
+  const other = await context.newPage();
+  await chooseView(other, "studio");
+  await other.goto(page.url());
+  const here = await chatRail(page);
+  const there = await chatRail(other);
+  await expect(there.locator(".thread-fix")).toHaveCount(1);
+  await moveOn(here, HINT);
+  await expect(there.locator(".thread-fix")).toHaveCount(0);
+  await expect(there.getByText("Docker not started: you sent a message instead")).toBeVisible();
+  await other.close();
+});
+
 test("a fix on one device clears the card on another", async ({ page, ui, context }) => {
   const fixture = await ui.open("fix-runtime");
   const other = await context.newPage();

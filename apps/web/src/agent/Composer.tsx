@@ -126,12 +126,14 @@ export interface ComposerProps {
   actions?: readonly Action[];
 }
 // `private`: a question with something that must not go in a message, such as a password.
-export type DotWait = "question" | "private" | "approval" | "computer";
+export type DotWait = "question" | "private" | "approval" | "computer" | "fix" | "private-fix";
 const MOVES_ON: Readonly<Record<DotWait, string>> = {
   question: "Sending moves on from dot's question",
   private: "Sending moves on from dot's question. Messages aren't kept secret",
   approval: "Sending moves on without approving",
   computer: "Sending hands the computer back",
+  fix: "Sending moves on without fixing this",
+  "private-fix": "Sending moves on without fixing this. Messages aren't kept secret",
 };
 export interface Delivery {
   readonly id: number;
@@ -161,6 +163,7 @@ const readyCell = (props: ComposerProps) =>
   ULID_PATTERN.test(props.cell.id);
 function modeFor(props: ComposerProps, selected: "steer" | "followup"): MessageMode {
   if (
+    !props.waitingOn &&
     props.agent.snapshot?.status === "paused" &&
     !props.agent.snapshot.pause &&
     !props.agent.model.pendingAsk &&
@@ -1232,7 +1235,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
             ? "Send after this task"
             : "Send now";
   const note =
-    mode === "new" || takeover
+    mode === "new" || takeover || props.waitingOn
       ? undefined
       : props.agent.snapshot?.status === "paused"
         ? TRIES_AGAIN.has(props.agent.model.state?.reason)

@@ -72,13 +72,17 @@ const NEVER =
 
 // What dot hears as a card is raised, once it is fixed and when the user turns it down: localDot's
 // own words, with no more than the names localDot holds. A model's card has nobody to hear it.
-export function blockerNote(blocker: Blocker, moment: "raised" | "fixed" | "dismissed"): string {
+export function blockerNote(
+  blocker: Blocker,
+  moment: "raised" | "fixed" | "dismissed" | "movedOn",
+): string {
   switch (blocker.kind) {
     case "keys_locked":
       return {
         raised: KEYS_LOCKED_NOTE,
         fixed: KEYS_UNLOCKED_NOTE,
         dismissed: declined("unlocking their saved keys and passwords"),
+        movedOn: instead("unlocking their saved keys and passwords"),
       }[moment];
     case "key":
       return {
@@ -88,6 +92,7 @@ export function blockerNote(blocker: Blocker, moment: "raised" | "fixed" | "dism
             : `(localDot: the key ${blocker.id} can't be used as it's stored or was refused. ${SHOWN} enter it again. ${NEVER} Do what doesn't need it, or call request_fix with kind key and key_id ${blocker.id} to wait.)`,
         fixed: `(localDot: the user entered the key ${blocker.id} again. Retry what failed with it, then carry on with the task.)`,
         dismissed: declined(`entering the key ${blocker.id} again`),
+        movedOn: instead(`entering the key ${blocker.id} again`),
       }[moment];
     case "app": {
       const name = named(blocker.name);
@@ -95,6 +100,7 @@ export function blockerNote(blocker: Blocker, moment: "raised" | "fixed" | "dism
         raised: `(localDot: ${name}'s sign-in has ended. ${SHOWN} reconnect it. ${NEVER} Do what doesn't need it, or call request_fix with kind app and app ${blocker.connector} to wait.)`,
         fixed: `(localDot: ${name} is connected again. Retry what failed with it, then carry on with the task.)`,
         dismissed: declined(`reconnecting ${name}`),
+        movedOn: instead(`reconnecting ${name}`),
       }[moment];
     }
     case "computer":
@@ -103,6 +109,7 @@ export function blockerNote(blocker: Blocker, moment: "raised" | "fixed" | "dism
         fixed:
           "(localDot: the computer is back on. Look at the screen first, then carry on with the task.)",
         dismissed: declined("turning the computer back on"),
+        movedOn: instead("turning the computer back on"),
       }[moment];
     case "runtime":
       return {
@@ -110,11 +117,14 @@ export function blockerNote(blocker: Blocker, moment: "raised" | "fixed" | "dism
         fixed:
           "(localDot: Docker is running again. Look at the screen first, then carry on with the task.)",
         dismissed: declined("starting Docker"),
+        movedOn: instead("starting Docker"),
       }[moment];
     case "model":
       return "";
   }
 }
+const instead = (what: string) =>
+  `(localDot: the user sent a message instead of ${what}, so its card is closed and nothing was entered. Read their message. Call request_fix again only if you still need it.)`;
 const declined = (what: string) =>
   `(localDot: the user said not now to ${what}. Don't ask again unless they bring it up: carry on without it, or finish and say what is left.)`;
 

@@ -3055,7 +3055,8 @@
               "type": "string",
               "enum": [
                 "user",
-                "timeout"
+                "timeout",
+                "message"
               ]
             },
             "note": {
@@ -3906,7 +3907,8 @@
               "enum": [
                 "fixed",
                 "dismissed",
-                "moot"
+                "moot",
+                "moved_on"
               ]
             },
             "movedTo": {
@@ -5104,7 +5106,8 @@
                 "timeout",
                 "stop",
                 "pause",
-                "control"
+                "control",
+                "message"
               ]
             }
           },
@@ -5434,6 +5437,10 @@
               "const": true
             },
             "declined": {
+              "type": "boolean",
+              "const": true
+            },
+            "movedOn": {
               "type": "boolean",
               "const": true
             }

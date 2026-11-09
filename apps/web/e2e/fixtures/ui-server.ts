@@ -2647,6 +2647,11 @@ const connectorHub = new ConnectorHub({
   links: connectorLinks,
   keys: async () => keys,
 });
+// dot takes up the message that moved on from its card, as it does for a question.
+log.subscribe((id, event) => {
+  if (event.type === "blocker.clear" && event.data.outcome === "moved_on" && session?.id === id)
+    readsMessage(session);
+});
 // A sign-in finishing clears what waited on it, as the real runner hears it from the hub.
 connectorHub.whenKeyChanges(() => {
   session?.clearBlockers(

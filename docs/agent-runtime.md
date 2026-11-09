@@ -247,7 +247,8 @@ transcript, the model's context or the daemon's log. Only the owner may answer: 
 
 When a card clears, on any device, the task goes on by itself: dot hears it, a stalled model is resumed,
 and the card leaves one line in the thread. Not now tells dot to carry on without it or finish and say
-what is left, and the card isn't offered again until the user speaks. A card still open when its task
+what is left, and the card isn't offered again until the user speaks. A message moves on from a card
+as from any other wait (see "Messages while dot waits on the user"). A card still open when its task
 ends reads as history. `keys.lock` from before all this still loads, as the same history.
 
 ## External waiting and premature completion
@@ -351,6 +352,10 @@ same inbox as any other. It is never taken for the wait's answer, and it isn't q
   (`takeover.end` with `movedOn`). dot hears that the step may not be done. The computer the user
   took themselves stays theirs: a phone's toolbar has no message field while they hold it, and a
   message from elsewhere hands it back, as it always has.
+- A card that fixes a blocker closes as not done (`blocker.clear` with `moved_on`), keeping nothing
+  that was typed into it: `AgentSession.moveOn` is the one thing that ends dot's wait on it. A fix
+  that comes later clears nothing and resumes nothing. A stalled model takes the message as its way
+  on, and a new card comes up if it stalls again.
 - A connection's card isn't a wait of dot's, so it stays up. A shared link's guest moves on from
   nothing: what the owner was asked stays theirs to decide.
 - A message for another model reaches dot at once when moving dot ends nothing. Otherwise (a model

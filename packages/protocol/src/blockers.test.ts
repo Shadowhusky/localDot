@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BLOCKER_KINDS,
   Blocker,
+  blockerLine,
   blockerSubject,
   MODEL_BLOCKS,
   modelBlock,
@@ -83,7 +84,7 @@ describe("blocker events", () => {
       });
       expect(raised.type).toBe("blocker.raise");
     }
-    for (const outcome of ["fixed", "dismissed"] as const)
+    for (const outcome of ["fixed", "dismissed", "moot", "moved_on"] as const)
       expect(
         parseEvent({
           ...envelope,
@@ -115,6 +116,15 @@ describe("blocker events", () => {
   });
 });
 
+describe("the line a card leaves", () => {
+  it("says it wasn't done when a message moved on from it", () => {
+    for (const blocker of EVERY)
+      expect(blockerLine(blocker, "moved_on"), blocker.kind).toMatch(
+        /^.+ not .+: you sent a message instead$|^Not .+: you sent a message instead$/,
+      );
+  });
+});
+
 describe("request_fix", () => {
   it("is a tool of its own, offered to every harness", () => {
     expect(ToolName.options).toContain("request_fix");
@@ -139,7 +149,7 @@ describe("what dot is told", () => {
   it("says the fix is on screen, and never where to go", () => {
     expect(KEYS_LOCKED_NOTE).toContain("request_fix");
     for (const blocker of EVERY.filter((one) => one.kind !== "model"))
-      for (const moment of ["raised", "fixed", "dismissed"] as const) {
+      for (const moment of ["raised", "fixed", "dismissed", "movedOn"] as const) {
         const note = blockerNote(blocker, moment);
         expect(note.startsWith("(localDot:"), note).toBe(true);
         expect(note, moment).not.toMatch(/go to|open settings|in settings|tap done/i);
@@ -147,6 +157,14 @@ describe("what dot is told", () => {
     expect(blockerNote({ kind: "keys_locked" }, "raised")).toBe(KEYS_LOCKED_NOTE);
     expect(blockerNote({ kind: "keys_locked" }, "fixed")).toBe(KEYS_UNLOCKED_NOTE);
     expect(blockerNote({ kind: "keys_locked" }, "dismissed")).toMatch(/carry on without/i);
+  });
+
+  it("says a message moved on from it, with nothing entered", () => {
+    expect(blockerNote({ kind: "keys_locked" }, "movedOn")).toMatch(
+      /sent a message instead of unlocking/,
+    );
+    expect(blockerNote({ kind: "keys_locked" }, "movedOn")).toMatch(/nothing was entered/);
+    expect(blockerNote({ kind: "model", reason: "model refused" }, "movedOn")).toBe("");
   });
 
   it("carries nothing from the failure into its words but the names localDot holds", () => {
