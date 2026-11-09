@@ -93,6 +93,13 @@ describe("downloading a pinned file", () => {
     expect(readdirSync(partials)).toEqual([]);
   });
 
+  it("gives up on a fresh download that doesn't match at once, so the next source is tried", async () => {
+    await expect(download(() => served(Buffer.alloc(BYTES.length, 7)))).rejects.toMatchObject({
+      problem: "verify",
+    });
+    expect(asked).toEqual([0]);
+  });
+
   it("starts once more from nothing when a mismatch may be a bad partial", async () => {
     mkdirSync(partials, { recursive: true });
     writeFileSync(partialPath(partials, SHA256), Buffer.alloc(BYTES.length, 1));
