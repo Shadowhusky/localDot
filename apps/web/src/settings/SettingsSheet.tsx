@@ -956,9 +956,14 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
       leading={<IconTile icon="download" />}
       label={
         <span className="settings-update-label" role="status">
-          <span data-shown={update.busy || failure ? undefined : ""}>New version ready</span>
-          <span data-shown={update.busy ? "" : undefined}>Updating…</span>
-          <span data-shown={failure && !update.busy ? "" : undefined}>Not updated</span>
+          {failure && !update.busy ? (
+            <span data-shown="">Not updated</span>
+          ) : (
+            <>
+              <span data-shown={update.busy ? undefined : ""}>New version ready</span>
+              <span data-shown={update.busy ? "" : undefined}>Updating…</span>
+            </>
+          )}
         </span>
       }
       detail={

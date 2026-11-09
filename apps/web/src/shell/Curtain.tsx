@@ -302,7 +302,7 @@ function curtainCopy(
   if (updating && (STARTING.has(phase) || phase === "stopping"))
     return {
       title: "Updating your computer",
-      sub: updateNote ?? `${updateLine ?? "Updating"}. Your files and sign-ins stay.`,
+      sub: updateNote ?? `${updateLine ? `${updateLine}. ` : ""}Your files and sign-ins stay.`,
       clock: true,
       progress: true,
       kind: "update",
