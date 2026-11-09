@@ -34,7 +34,7 @@ export function plainWords(text: string): string {
     .replace(/[\p{L}\p{N}@$]+/gu, (word) =>
       /\p{L}/u.test(word) ? word.replace(/[013457@$]/g, (sign) => LEET[sign] ?? sign) : word,
     )
-    .replace(/\s+/gu, " ")
+    .replace(/[^\S\n]+/gu, " ")
     .trim();
 }
 
@@ -86,6 +86,10 @@ const A_SECRET = [
   String.raw`\b(?:passwort|kennwort)\w*`,
   String.raw`\bsenhas?\b${ABOUT}`,
   String.raw`\bparola d['’]?\s*ordine\b`,
+  String.raw`\bwachtwoord\w*`,
+  String.raw`\bhas[łl][oa]\b`,
+  String.raw`\bsifre\w*`,
+  String.raw`\bmat (?:khau|ma)\b`,
   // A pass, as a password: "your pass", not "your boarding pass".
   String.raw`\b(?:your|my)\s+pass\b(?![\s_-]*(?:word|code|phrase))`,
   String.raw`\b(?:log[\s_-]?in|sign[\s_-]?in|one[\s_-]?time|verification|2fa|two[\s_-]?factor|auth(?:entication)?|otp|mfa|sms)[\s_-]+codes?\b`,
@@ -99,10 +103,10 @@ const NAMES_A_SECRET = new RegExp(A_SECRET, "iu");
 // "Not an API key or client secret" names what the answer isn't. Only the secret the negation is on
 // is passed over, with bare nouns joined to it by "or": one with its own article or possessive is
 // named anew ("not the PIN or the password", "no PIN nor your password", "not a PIN, your password").
-const ARTICLE = String.raw`(?:(?:an?|the|your|any)\s+)?`;
+const ARTICLE = String.raw`(?:(?:an?|the|your|any)[ \t]+)?`;
 const OWN_DETERMINER = String.raw`(?:an?|the|your|my|our|their|his|her|its|any|this|that)\b`;
 const DENIED = new RegExp(
-  String.raw`\b(?:not|never|no)\s+${ARTICLE}(?:[\p{L}-]+\s+)?(?:${A_SECRET})(?:\s+(?:or|nor)\s+(?!${OWN_DETERMINER})(?:${A_SECRET}))*`,
+  String.raw`\b(?:not|never|no)[ \t]+${ARTICLE}(?:[\p{L}-]+[ \t]+)?(?:${A_SECRET})(?:[ \t]+(?:or|nor)[ \t]+(?!${OWN_DETERMINER})(?:${A_SECRET}))*`,
   "giu",
 );
 const affirmed = (words: string) =>
@@ -116,10 +120,17 @@ const native = (words: string) =>
     .replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, "")
     .toLowerCase();
 const NATIVE_SECRET =
-  /парол[ьяеюи]|пин[\s-]?код|비밀번호|암호|暗証番号|パスワード|密码|密碼|口令|密钥|密鑰|金鑰/u;
+  /парол[ьяеюи]|пин[\s-]?код|비밀번호|암호|暗証番号|パスワード|密码|密碼|口令|密钥|密鑰|金鑰|كلمة\s*(?:ال)?مرور|كلمة\s*السر|पासवर्ड/u;
 const NATIVE_FIRST = new RegExp(String.raw`^(?:ваш[аеи]?\s+)?(?:${NATIVE_SECRET.source})`, "u");
 const NATIVE_ASKS =
-  /введите|укажите|напишите|сообщите|입력|入力|输入|輸入|提供|告诉|告訴|填写|填寫|教えて/u;
+  /введите|укажите|напишите|сообщите|입력|入力|输入|輸入|提供|告诉|告訴|填写|填寫|教えて|أدخل|ادخل|اكتب|दर्ज|डालें|लिखें/u;
+// A password word with a verb in the same language, in either order: "Şifrenizi girin".
+const OTHER_SECRET = String.raw`\b(?:wachtwoord\w*|has[łl][oa]|sifre\w*|mat khau)\b`;
+const OTHER_VERB = String.raw`\b(?:voer|vul|podaj|wpisz|wprowadz|gir\w*|nhap)\b`;
+const ASKS_IN_OTHER_WORDS = new RegExp(
+  `${OTHER_SECRET}[\\s\\S]*${OTHER_VERB}|${OTHER_VERB}[\\s\\S]*${OTHER_SECRET}`,
+  "iu",
+);
 const ASKS_FOR_A_SECRET = new RegExp(
   [
     String.raw`\b(?:enter|type|provide|give|send|share|paste|input|supply|tell\s+me|what(?:'s|\s+is)|need|introduce|escribe|ingresa|indica|saisis\w*|entre[rz]?|tape[rz]?|donne[rz]?|gib|gebe|geben|eingeben|eintragen|nenne|nennen|digite|digita|informe|insira|introduza|inserisci|inserire|scrivi)\b[^?!\n]{0,60}(?:${A_SECRET})`,
@@ -129,7 +140,8 @@ const ASKS_FOR_A_SECRET = new RegExp(
     String.raw`^(?:your|my|tu|su|votre|ton)\s+(?:[\p{L}.-]+\s+)?(?:${A_SECRET})\s*,`,
     String.raw`(?:输入|輸入|提供|告诉|告訴|填写|填寫)[^。？！\n]{0,20}(?:密码|密碼|口令|密钥|密鑰|金鑰)`,
   ].join("|"),
-  "iu",
+  // Each line of the question is read from its start: "Thanks!" then "Your PIN?" asks for it.
+  "imu",
 );
 // Fields whose answer is the user's own words: a choice's Other takes them too.
 const OWN_WORDS: ReadonlySet<string> = new Set([
@@ -143,7 +155,7 @@ const OWN_WORDS: ReadonlySet<string> = new Set([
   "choice",
   "multichoice",
 ]);
-export const fieldWords = (id: string) => id.replaceAll("_", " ");
+export const fieldWords = (id: string) => id.replace(/[_-]+/g, " ");
 
 // Everything a form puts in front of the user.
 export function formWords(input: AskUserInput): string {
@@ -178,9 +190,10 @@ export function asksSecretInPlainText(input: AskUserInput): boolean {
     NAMES_A_SECRET.test(affirmed(words)) ||
     /\bsecrets?\b/iu.test(affirmed(words)) ||
     NATIVE_SECRET.test(native(words));
+  // Each read on its own, so that nothing in one can deny what another names.
   if (
     fields.some(
-      (f) => OWN_WORDS.has(f.kind) && named(`${fieldWords(f.id)}\n${f.label}\n${f.hint ?? ""}`),
+      (f) => OWN_WORDS.has(f.kind) && [fieldWords(f.id), f.label, f.hint ?? ""].some(named),
     )
   )
     return true;
@@ -192,6 +205,7 @@ export function asksSecretInPlainText(input: AskUserInput): boolean {
     !typedPrivately &&
     answeredInWords &&
     (ASKS_FOR_A_SECRET.test(affirmed(input.question)) ||
+      ASKS_IN_OTHER_WORDS.test(plainWords(input.question)) ||
       (NATIVE_SECRET.test(asked) && NATIVE_ASKS.test(asked)) ||
       NATIVE_FIRST.test(asked.trim()))
   );
