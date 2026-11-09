@@ -3772,6 +3772,12 @@ function Theatre({ api }: { api: ApiClient }) {
                       onModels: settings.changeModels,
                       onRole: settings.takeRole,
                       list: (keyId, signal) => loadKeyModels(api, keyId, signal),
+                      keyStore: keys,
+                      plans: {
+                        chatgpt: settings.chatgpt,
+                        claudeCode: settings.claudeCode,
+                        browse: settings.browseAccounts,
+                      },
                     }
                   : undefined
               }

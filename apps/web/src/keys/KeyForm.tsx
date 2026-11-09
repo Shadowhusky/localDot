@@ -74,6 +74,9 @@ export interface KeyFormProps {
   // A saved key whose value is stored again, under the same name and destination: only the key
   // itself is asked for.
   reenter?: KeyRecord;
+  // A new key for the preset's provider alone: only the key is asked for, and an address where the
+  // provider has none of its own. It takes a name of its own.
+  keyOnly?: boolean;
 }
 export type KeyFormPreset =
   | { readonly requestId: number; readonly provider: Provider; readonly baseURL?: string }
@@ -136,6 +139,7 @@ export function KeyForm({
   onCancel,
   actions,
   reenter,
+  keyOnly = false,
 }: KeyFormProps) {
   const statusId = useId();
   const [metadata, setMetadata] = useState<KeyMetadata>({});
@@ -315,6 +319,7 @@ export function KeyForm({
     ? valueHint({ ...draft, kind: reenter.kind, provider: reenter.provider as Provider })
     : valueHint(draft);
   const urlHint = draft.kind === "llm" ? baseURLHint(draft.provider) : undefined;
+  const fixedAddress = keyOnly && !!preset && "provider" in preset && !!preset.baseURL;
   const shown: Problem | null = problem ?? (tried && !check.ok ? check : null);
   const set = (patch: Partial<KeyDraft>) => {
     if (patch.kind && patch.kind !== draft.kind && valueRef.current) {
@@ -461,6 +466,23 @@ export function KeyForm({
 
   const readOnly = locked || saving;
   const typed = draft.id.trim();
+  const baseURLField = (
+    <Field label="Base URL" description={urlHint} error={errorFor("baseURL")}>
+      <TextField
+        {...PLAIN}
+        value={draft.baseURL}
+        readOnly={readOnly}
+        inputMode="url"
+        enterKeyHint="next"
+        placeholder={
+          draft.provider === "anthropic-compatible"
+            ? "e.g. https://api.example.com/anthropic"
+            : "e.g. https://api.example.com/v1"
+        }
+        onChange={(e) => set({ baseURL: e.target.value })}
+      />
+    </Field>
+  );
   return (
     <form
       ref={scope}
@@ -471,7 +493,9 @@ export function KeyForm({
       aria-busy={saving}
       autoComplete="off"
     >
-      {reenter ? (
+      {keyOnly ? (
+        needsBaseURL(draft.provider) && !fixedAddress && baseURLField
+      ) : reenter ? (
         <p className="keys-reenter-note">
           <Icon name="lock" size={14} />
           <span>
@@ -512,23 +536,7 @@ export function KeyForm({
                   onValueChange={(provider) => set({ provider: provider as Provider })}
                 />
               </Field>
-              {needsBaseURL(draft.provider) && (
-                <Field label="Base URL" description={urlHint} error={errorFor("baseURL")}>
-                  <TextField
-                    {...PLAIN}
-                    value={draft.baseURL}
-                    readOnly={readOnly}
-                    inputMode="url"
-                    enterKeyHint="next"
-                    placeholder={
-                      draft.provider === "anthropic-compatible"
-                        ? "e.g. https://api.example.com/anthropic"
-                        : "e.g. https://api.example.com/v1"
-                    }
-                    onChange={(e) => set({ baseURL: e.target.value })}
-                  />
-                </Field>
-              )}
+              {needsBaseURL(draft.provider) && baseURLField}
             </>
           ) : draft.kind === "http" ? (
             <>

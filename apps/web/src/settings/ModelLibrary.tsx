@@ -4,6 +4,7 @@ import { Badge } from "../ui/Badge.tsx";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
+import { Combobox } from "../ui/Combobox.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote } from "../ui/Group.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -23,8 +24,9 @@ import {
   type ProviderModels,
   type RoleChoice,
 } from "./choices.ts";
-import { CHATGPT, CLAUDE_CODE, CUSTOM_FORMATS, isCustomFormat, subscription } from "./chooser.ts";
+import { CHATGPT, CLAUDE_CODE, CUSTOM_FORMATS, isCustomFormat } from "./chooser.ts";
 import {
+  firstSource,
   knownFacts,
   type LibraryRow,
   libraryGroups,
@@ -33,10 +35,11 @@ import {
   modelSources,
   newChoices,
   setModelOn,
+  sourceGroups,
   withModels,
   withoutModel,
 } from "./model-library.ts";
-import { optionId } from "./model-options.ts";
+import { type SetupControls, SourceSetup } from "./SourceSetup.tsx";
 import type { ProviderIndex } from "./settings-api.ts";
 import { priceOf, type SettingsDraft } from "./settings-form.ts";
 
@@ -49,6 +52,10 @@ export interface ModelLibraryProps {
   onModels(models: RoleChoice[]): void;
   onRole(role: ModelRole, choice: RoleChoice): void;
   list(keyId: string, signal: AbortSignal): Promise<readonly { id: string; name?: string }[]>;
+  // What sets up a provider from Add models: the key layer, and the plans' own sign-in, whose
+  // accounts are read once it opens.
+  keyStore: SetupControls["keyStore"];
+  plans: SetupControls["plans"] & { browse(): void };
 }
 
 const ROLE_NAMES: Record<ModelRole, string> = { main: "Default", fast: "Fast", local: "Local" };
@@ -197,10 +204,13 @@ function goesWith(from: HTMLElement | null) {
   return group?.querySelectorAll(".settings-model-row").length === 1 ? group : row;
 }
 
-// The formats a key can speak: formats that share a kind of key share the endpoint behind it.
-const formatsOf = (source: ModelSource) =>
+// The formats a key can speak: formats that share a kind of key share the endpoint behind it. An
+// endpoint still to be set up can be any of them.
+const formatsOf = (source: ModelSource | undefined) =>
   CUSTOM_FORMATS.filter(
-    (row) => providerById(row.value)?.keyd === providerById(source.provider)?.keyd,
+    (row) =>
+      source?.custom &&
+      (source.setup || providerById(row.value)?.keyd === providerById(source.provider)?.keyd),
   ).map((row) => ({ ...row }));
 
 function AddModels({
@@ -211,6 +221,8 @@ function AddModels({
   keys,
   providers,
   list,
+  keyStore,
+  plans,
   onClose,
   onAdd,
 }: ModelLibraryProps & {
@@ -219,16 +231,39 @@ function AddModels({
   onClose(): void;
   onAdd(added: RoleChoice[]): void;
 }) {
-  const sources = useMemo(() => modelSources(index, keys), [index, keys]);
-  const [sourceId, setSourceId] = useState("");
-  const source = sources.find((row) => row.id === sourceId) ?? sources[0];
+  const chatgptReady = plans.chatgpt.summary?.state === "signed_in" && plans.chatgpt.verified;
+  const claudeReady = plans.claudeCode.canStart;
+  const sources = useMemo(
+    () => modelSources(index, keys, { [CHATGPT]: chatgptReady, [CLAUDE_CODE]: claudeReady }),
+    [index, keys, chatgptReady, claudeReady],
+  );
+  // Null until one is chosen: the first ready key or plan, if any.
+  const [sourceId, setSourceId] = useState<string | null>(null);
+  // A key just saved here, whose source comes in with the next list of keys.
+  const [awaiting, setAwaiting] = useState<string | null>(null);
+  const arrived = awaiting ? sources.find((row) => row.key === awaiting) : undefined;
+  const chosenId = arrived?.id ?? sourceId;
+  const source = sources.find((row) => row.id === chosenId) ?? firstSource(sources);
+  // The one set up just now, which says so once its models are in.
+  const [fresh, setFresh] = useState<string | null>(null);
+  useEffect(() => {
+    if (!arrived) return;
+    setSourceId(arrived.id);
+    setFresh(arrived.id);
+    setAwaiting(null);
+  }, [arrived]);
+  const browse = useRef(plans.browse);
+  browse.current = plans.browse;
+  useEffect(() => {
+    if (open) browse.current();
+  }, [open]);
   const [chosenFormat, setFormat] = useState<string | null>(null);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [typed, setTyped] = useState("");
   const [filter, setFilter] = useState("");
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
-  const listed = useListedModels(open, source, providers, list);
+  const listed = useListedModels(open, source, providers, plans, list);
   const reset = () => {
     setPicked(new Set());
     setTyped("");
@@ -245,7 +280,7 @@ function AddModels({
       ),
     [draft],
   );
-  const id = source?.typed ? typed.trim() : "";
+  const id = source?.typed && !source.setup ? typed.trim() : "";
   const idProblem = id ? modelIdProblem(id) : null;
   const ids = [...picked, ...(id && !idProblem ? [id] : [])];
   const siblings = [draft.choices.main, draft.choices.fast, ...(draft.models ?? [])].filter(
@@ -257,6 +292,7 @@ function AddModels({
     siblings.find((row) => row.key === source?.key && isCustomFormat(row.provider))?.provider ??
     source?.provider ??
     "";
+  const formats = formatsOf(source);
   const flat = !!siblings.find((row) => row.key === source?.key && row.plan);
   const unpriced =
     !!source?.custom && !flat && ids.some((model) => !knownFacts(providers, model).price);
@@ -264,20 +300,28 @@ function AddModels({
   const shown = listed.models.filter((model) =>
     `${model.id} ${model.name ?? ""}`.toLowerCase().includes(filter.trim().toLowerCase()),
   );
-  const reason = !ids.length
-    ? "Choose a model first"
-    : unpriced && !price
-      ? "Give a price first"
-      : undefined;
+  const reason = !source
+    ? "Choose where they come from first"
+    : source.setup
+      ? `Set up ${source.setup === "endpoint" ? "your endpoint" : source.label} first`
+      : !ids.length
+        ? "Choose a model first"
+        : unpriced && !price
+          ? "Give a price first"
+          : undefined;
   return (
     <Sheet
       open={open}
       onClose={() => {
         reset();
+        setSourceId(null);
+        setAwaiting(null);
+        setFresh(null);
+        setFormat(null);
         onClose();
       }}
       title="Add models"
-      description="From a key you've saved. The key stays in your key layer."
+      description="From any provider or plan. One that isn't set up yet can be set up here."
       modal
       returnFocus={returnFocus}
       closeLabel="Close"
@@ -300,130 +344,159 @@ function AddModels({
       }
     >
       <div className="settings-dot-form">
-        {sources.length ? (
+        <Field label="From">
+          <Combobox
+            value={source?.id ?? ""}
+            groups={sourceGroups(sources)}
+            placeholder="Choose a provider"
+            searchPlaceholder="Search providers"
+            onValueChange={(next) => {
+              setSourceId(next);
+              setAwaiting(null);
+              setFresh(null);
+              setFormat(null);
+              reset();
+            }}
+          />
+        </Field>
+        {!source && (
+          <p className="settings-lede">
+            Choose an API provider, a plan you already have or an app on this Mac.
+          </p>
+        )}
+        {formats.length > 1 && (
+          <Field label="API format">
+            <Select value={format} items={formats} onValueChange={setFormat} />
+          </Field>
+        )}
+        {source?.setup && (
+          <SourceSetup
+            source={source}
+            format={format}
+            active={open}
+            controls={{ keyStore, plans }}
+            onKeySaved={setAwaiting}
+          />
+        )}
+        {awaiting && !arrived && (
+          <p className="settings-lede" role="status">
+            <Spinner size={16} /> Reading its models…
+          </p>
+        )}
+        {fresh && fresh === source?.id && (
+          <p className="settings-lede" role="status">
+            {source.label} is set up. Choose the models to add.
+          </p>
+        )}
+        {listed.loading && (
+          <p className="settings-lede" role="status">
+            <Spinner size={16} /> Reading the model list…
+          </p>
+        )}
+        <Banner
+          tone="neutral"
+          open={!!listed.problem}
+          announce
+          title={listed.problem ?? ""}
+          className="settings-dot-banner"
+        />
+        {source?.typed && !source.setup && !source.custom && (
+          <p className="settings-note">{LOCAL_HINTS[source.provider]}</p>
+        )}
+        {listed.models.length > 8 && (
+          <Field label="Search" className="settings-model-search">
+            <TextField
+              value={filter}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setFilter(event.target.value)}
+            />
+          </Field>
+        )}
+        {shown.length > 0 && (
+          <Group role="group" aria-label="Models">
+            {shown.map((model) => {
+              const added = have.has(`${model.id}\0${source?.key ?? ""}`);
+              return (
+                <Checkbox
+                  key={model.id}
+                  className="ui-group-row"
+                  label={model.name ?? model.id}
+                  description={model.name ? model.id : undefined}
+                  checked={added || picked.has(model.id)}
+                  {...(added ? { disabledReason: "Already on your list" } : {})}
+                  onCheckedChange={(checked) =>
+                    setPicked((was) => {
+                      const next = new Set(was);
+                      if (checked) next.add(model.id);
+                      else next.delete(model.id);
+                      return next;
+                    })
+                  }
+                />
+              );
+            })}
+          </Group>
+        )}
+        {source?.typed && !source.setup && (
+          <Field label="Add by ID" error={idProblem ?? undefined}>
+            <TextField
+              value={typed}
+              maxLength={128}
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              placeholder="e.g. my-model-1"
+              onChange={(event) => setTyped(event.target.value)}
+            />
+          </Field>
+        )}
+        {unpriced && (
           <>
-            <Field label="From">
-              <Select
-                value={source?.id ?? ""}
-                items={sources.map((row) => ({
-                  value: row.id,
-                  label: row.label,
-                  description: row.description,
-                }))}
-                onValueChange={(next) => {
-                  setSourceId(next);
-                  setFormat(null);
-                  reset();
-                }}
+            <Field label="Input price">
+              <TextField
+                inputMode="decimal"
+                maxLength={64}
+                autoComplete="off"
+                prefix="$"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
               />
             </Field>
-            {source?.custom && formatsOf(source).length > 1 && (
-              <Field label="API format">
-                <Select value={format} items={formatsOf(source)} onValueChange={setFormat} />
-              </Field>
-            )}
-            {listed.loading && (
-              <p className="settings-lede" role="status">
-                <Spinner size={16} /> Reading the model list…
-              </p>
-            )}
-            <Banner
-              tone="neutral"
-              open={!!listed.problem}
-              announce
-              title={listed.problem ?? ""}
-              className="settings-dot-banner"
-            />
-            {listed.models.length > 8 && (
-              <Field label="Search">
-                <TextField
-                  value={filter}
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(event) => setFilter(event.target.value)}
-                />
-              </Field>
-            )}
-            {shown.length > 0 && (
-              <Group className="settings-model-list">
-                {shown.map((model) => {
-                  const added = have.has(`${model.id}\0${source?.key ?? ""}`);
-                  return (
-                    <Checkbox
-                      key={model.id}
-                      className="ui-group-row"
-                      label={model.name ?? model.id}
-                      description={model.name ? model.id : undefined}
-                      checked={added || picked.has(model.id)}
-                      {...(added ? { disabledReason: "Already on your list" } : {})}
-                      onCheckedChange={(checked) =>
-                        setPicked((was) => {
-                          const next = new Set(was);
-                          if (checked) next.add(model.id);
-                          else next.delete(model.id);
-                          return next;
-                        })
-                      }
-                    />
-                  );
-                })}
-              </Group>
-            )}
-            {source?.typed && (
-              <Field label="Add by ID" error={idProblem ?? undefined}>
-                <TextField
-                  value={typed}
-                  maxLength={128}
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  placeholder="e.g. my-model-1"
-                  onChange={(event) => setTyped(event.target.value)}
-                />
-              </Field>
-            )}
-            {unpriced && (
-              <>
-                <Field label="Input price">
-                  <TextField
-                    inputMode="decimal"
-                    maxLength={64}
-                    autoComplete="off"
-                    prefix="$"
-                    value={input}
-                    onChange={(event) => setInput(event.target.value)}
-                  />
-                </Field>
-                <Field label="Output price">
-                  <TextField
-                    inputMode="decimal"
-                    maxLength={64}
-                    autoComplete="off"
-                    prefix="$"
-                    value={output}
-                    onChange={(event) => setOutput(event.target.value)}
-                  />
-                </Field>
-                <GroupNote>
-                  US dollars per million tokens, used to set aside a task's spending. It isn't your
-                  bill.
-                </GroupNote>
-              </>
-            )}
+            <Field label="Output price">
+              <TextField
+                inputMode="decimal"
+                maxLength={64}
+                autoComplete="off"
+                prefix="$"
+                value={output}
+                onChange={(event) => setOutput(event.target.value)}
+              />
+            </Field>
+            <GroupNote>
+              US dollars per million tokens, used to set aside a task's spending. It isn't your
+              bill.
+            </GroupNote>
           </>
-        ) : (
-          <p className="settings-lede">Add a key first: models come from a key you've saved.</p>
         )}
       </div>
     </Sheet>
   );
 }
 
-// A source's models: its catalog, or for a custom endpoint the list it keeps itself.
+// What a local server needs before its models answer; nothing here can see whether it runs.
+const LOCAL_HINTS: Readonly<Record<string, string>> = {
+  lmstudio: "Start LM Studio's local server and load a model, then add it.",
+  ollama: "Keep Ollama running with the model pulled, then add it.",
+};
+
+// A source's models: its catalog, a plan's own list, or for a custom endpoint the list it keeps
+// itself. One still to be set up has none yet.
 function useListedModels(
   open: boolean,
   source: ModelSource | undefined,
   providers: readonly ProviderModels[],
+  plans: ModelLibraryProps["plans"],
   list: ModelLibraryProps["list"],
 ) {
   const [read, setRead] = useState<{
@@ -455,14 +528,16 @@ function useListedModels(
     );
     return () => controller.abort();
   }, [open, key, custom]);
-  if (!source) return { loading: false, models: [] };
+  if (!source || source.setup) return { loading: false, models: [] };
+  if (source.provider === CHATGPT) return { loading: false, models: plans.chatgpt.models };
+  if (source.provider === CLAUDE_CODE) return { loading: false, models: plans.claudeCode.models };
   if (!custom)
     return {
       loading: false,
       models:
         providers
           .find((row) => row.id === source.provider)
-          ?.models.filter((model) => subscription(source.provider) || modelAllowed("main", model))
+          ?.models.filter((model) => modelAllowed("main", model))
           .map((model) => ({ id: model.id, name: model.name })) ?? [],
     };
   if (!read || read.key !== key) return { loading: open, models: [] };
