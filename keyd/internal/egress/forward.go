@@ -209,6 +209,8 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 		FlushInterval: -1,
 		ErrorLog:      log.New(io.Discard, "", 0),
 		ModifyResponse: func(resp *http.Response) error {
+			dropKeydFields(resp.Header)
+			dropKeydFields(resp.Trailer)
 			var usage io.Writer
 			if rt.meter != nil {
 				usage = rt.meter.start(resp)
@@ -244,7 +246,10 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 			}
 			resp.Body = &tally{
 				ReadCloser: body,
-				atEOF:      func() { scrubber.Header(resp.Trailer) },
+				atEOF: func() {
+					dropKeydFields(resp.Trailer)
+					scrubber.Header(resp.Trailer)
+				},
 				done: func(n int64, eof bool, err error) {
 					l.BytesOut = n
 					c.streamOutcome(&l, eof, err, r.Context(), rt.gen)
@@ -277,6 +282,16 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 	proxy.ServeHTTP(scrubbedWriter{ResponseWriter: w, s: scrubber}, r.WithContext(ctx))
 }
 
+// dropKeydFields removes what an upstream wrote in keyd's own name: the brain and the daemon read
+// X-Keyd-* as keyd's word, and a reply from a provider or service can't speak for it.
+func dropKeydFields(h http.Header) {
+	for name := range h {
+		if strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Keyd-") {
+			delete(h, name)
+		}
+	}
+}
+
 // scrubbedWriter scrubs the headers of informational responses, which ReverseProxy relays as they
 // arrive, before ModifyResponse sees anything.
 type scrubbedWriter struct {
@@ -286,6 +301,7 @@ type scrubbedWriter struct {
 
 func (w scrubbedWriter) WriteHeader(code int) {
 	if code < 200 {
+		dropKeydFields(w.ResponseWriter.Header())
 		w.s.Header(w.ResponseWriter.Header())
 	}
 	w.ResponseWriter.WriteHeader(code)

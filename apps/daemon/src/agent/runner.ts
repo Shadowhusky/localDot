@@ -534,7 +534,8 @@ export class AgentRunner {
           }
         } else if (event.data.reason === STALL.keysLocked) {
           rt.pause = "keys";
-          rt.session.lockKeys(false);
+          // The brain's word came from a model call's reply: keyd's own health says if it is so.
+          if (vaultLocked(this.#health)) rt.session.lockKeys(false);
         } else if (event.data.reason === STALL.runtime) rt.pause = "runtime";
         else if (!SESSION_PAUSES.has(event.data.reason))
           rt.pause =
@@ -559,11 +560,8 @@ export class AgentRunner {
     };
     if (reason === STALL.keyReenter || reason === STALL.keyRebound) {
       if (!detail || !SECRET_ID_PATTERN.test(detail)) return false;
-      return raise({
-        kind: "key",
-        id: detail,
-        problem: reason === STALL.keyReenter ? "reenter" : "rebound",
-      });
+      void this.#stallOnKey(rt, detail, reason === STALL.keyReenter ? "reenter" : "rebound");
+      return true;
     }
     if (reason === STALL.modelRefused && detail?.startsWith("401:")) {
       const main =
@@ -575,6 +573,13 @@ export class AgentRunner {
     const block = MODEL_BLOCKS.find((known) => known === reason);
     if (!block) return false;
     return raise({ kind: "model", reason: block, ...(detail ? { detail } : {}) });
+  }
+  // The brain's word for this came from a model call's reply, so it is checked with keyd itself.
+  async #stallOnKey(rt: Runtime, id: string, problem: "reenter" | "rebound"): Promise<void> {
+    const key = (await this.deps.keyd.secrets().catch(() => [])).find((k) => k.id === id);
+    if (!key?.[problem] || rt.session.status !== "paused") return;
+    rt.session.raiseBlocker({ kind: "key", id, problem }, { required: true, tell: false });
+    rt.stalled = `key:${id}`;
   }
   // The model's own answer is what proves a retry worked: a card holds through a try that fails.
   #modelAnswered(rt: Runtime): void {
@@ -2138,6 +2143,7 @@ export class AgentRunner {
         rt.pause = undefined;
         session.post("resume", "");
       } else if (!now.online && rt.pause === "model") rt.pause = "keyd";
+      if (vaultLocked(now) && rt.pause === "keys" && !session.keysLocked) session.lockKeys(false);
       if (now.online && !vaultLocked(now) && session.keysLocked) {
         // dot hears the keys are open; a model that stopped on its own key also resumes.
         session.keysUnlocked();

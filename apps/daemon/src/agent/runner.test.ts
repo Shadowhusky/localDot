@@ -2203,11 +2203,12 @@ describe("ChatGPT runner lifecycle", () => {
       const f = setup();
       const s = await working(f);
       s.setStatus("paused");
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http", reenter: true }] as never);
       s.append("agent.state", { state: "paused", reason: "key needs re-entering", detail: "gh" });
+      await until(() => s.openBlockers.length === 1);
       expect(blockers(f, s.id)).toEqual([{ kind: "key", id: "gh", problem: "reenter" }]);
       expect(s.openBlockers[0]?.required).toBe(true);
       const seq = s.inboxSequence;
-      f.secrets.mockResolvedValue([{ id: "gh", kind: "http", reenter: true }] as never);
       await f.runner.keyChanged("gh");
       expect(s.openBlockers).toHaveLength(1);
       f.secrets.mockResolvedValue([{ id: "gh", kind: "http" }] as never);
@@ -2215,6 +2216,40 @@ describe("ChatGPT runner lifecycle", () => {
       expect(blockers(f, s.id).at(-1)).toBe("fixed");
       // Only the Resume: the model retries the call that met the refusal.
       expect(s.inboxSequence).toBe(seq + 1);
+    });
+
+    it("takes a key stall only as keyd itself has it, whoever reported it", async () => {
+      const f = setup();
+      const s = await working(f);
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http" }] as never);
+      s.setStatus("paused");
+      for (const reason of ["key needs re-entering", "key changed outside localDot"])
+        for (const detail of ["gh", "not-saved"]) {
+          s.append("agent.state", { state: "paused", reason, detail });
+          await new Promise<void>((r) => setImmediate(r));
+        }
+      expect(blockers(f, s.id)).toEqual([]);
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http", rebound: true }] as never);
+      s.append("agent.state", {
+        state: "paused",
+        reason: "key changed outside localDot",
+        detail: "gh",
+      });
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]?.blocker).toEqual({ kind: "key", id: "gh", problem: "rebound" });
+    });
+
+    it("takes a keys-locked stall only while the vault is locked", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "keys locked" });
+      expect(blockers(f, s.id)).toEqual([]);
+      const vault = { backend: "file", key: "passphrase" } as const;
+      const open = { online: true, bootId: "fixture-boot", vault: { ...vault, state: "ready" } };
+      const locked = { ...open, vault: { ...vault, state: "locked" } };
+      await f.runner.keydChanged(locked as never, open as never);
+      expect(blockers(f, s.id)).toEqual([{ kind: "keys_locked" }]);
     });
 
     it("a removed key clears nothing", async () => {
