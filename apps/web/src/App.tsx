@@ -71,11 +71,16 @@ import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { stopNotice, stoppedOff, useStopToast } from "./agent/useStopToast.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
 import { deliverText } from "./agent/write-api.ts";
+import { stageBounds } from "./cells/computer-update-stage.ts";
 import { replacementNotice } from "./cells/errors.ts";
 import { type HudActionKind, hudFor, withScreenHud } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
-import { useComputerUpdate, useUpdateNotice } from "./cells/useComputerUpdate.ts";
+import {
+  useComputerUpdate,
+  useUpdateNotice,
+  useUpdateProgressNotice,
+} from "./cells/useComputerUpdate.ts";
 import { useFreshStart } from "./cells/useFreshStart.ts";
 import { useRuntime } from "./cells/useRuntime.ts";
 import { presetOf } from "./copy/autonomy.ts";
@@ -1347,6 +1352,10 @@ function Theatre({ api }: { api: ApiClient }) {
     setSettingsAt((previous) => ({ section: "computer", request: previous.request + 1 }));
   });
   useUpdateNotice(cell, hud.phase === "live" && !updateWait, computerUpdate);
+  useUpdateProgressNotice(cell, computerUpdate, () => {
+    settings.show();
+    setSettingsAt((previous) => ({ section: "computer", request: previous.request + 1 }));
+  });
   const taskStatus = agent.snapshot?.status;
   const recoveryWait =
     taskStatus === "paused" &&
@@ -2336,6 +2345,14 @@ function Theatre({ api }: { api: ApiClient }) {
       first={!cell && listed.length === 0}
       waking={pending === "start" || pending === "create"}
       updating={!!cell?.updating}
+      updateLine={computerUpdate.line}
+      updateNote={computerUpdate.note}
+      updateBounds={
+        cell?.updateProgress
+          ? stageBounds(cell.updateProgress.stage, cell.updateProgress.share)
+          : null
+      }
+      updateFailure={computerUpdate.failure?.message}
       caption={computer.caption}
       notice={error ?? stoppedOff(controls.stopStatus)}
       onReload={opening && openingSlow ? () => window.location.reload() : undefined}

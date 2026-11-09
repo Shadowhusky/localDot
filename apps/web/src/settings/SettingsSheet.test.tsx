@@ -729,6 +729,64 @@ describe("settings inspector", () => {
     expect(within(sheet()).queryByText(/new version/)).toBeNull();
   });
 
+  it("shows the computer's update stage by stage, with its words and a bar", () => {
+    const update = {
+      available: true,
+      busy: true,
+      error: null,
+      run: vi.fn(),
+      stage: "keep" as const,
+      line: "Step 3 of 6 · Saving what's on your computer",
+      value: 0.33,
+      note: null,
+    };
+    render(<SettingsSheet {...props()} update={update} />);
+    fireEvent.click(screen.getByRole("button", { name: "Your computer" }));
+    expect(within(sheet()).getByText("Updating…")).toBeTruthy();
+    expect(within(sheet()).getByText("Step 3 of 6 · Saving what's on your computer")).toBeTruthy();
+    expect(
+      within(sheet())
+        .getByRole("progressbar", { name: "Update progress" })
+        .getAttribute("aria-valuenow"),
+    ).toBe("0.33");
+    const steps = within(within(sheet()).getByRole("list", { name: "Update steps" })).getAllByRole(
+      "listitem",
+    );
+    expect(steps.map((step) => [step.textContent, step.getAttribute("data-state")])).toEqual([
+      ["Get the new version", "done"],
+      ["Stop your computer", "done"],
+      ["Keep your apps and files", "doing"],
+      ["Install the new version", "todo"],
+      ["Start your computer", "todo"],
+      ["Reconnect the screen", "todo"],
+    ]);
+  });
+
+  it("says what failed over the steps, offers Retry, and keeps saying files are kept", () => {
+    const run = vi.fn();
+    const failure = {
+      stage: "replace" as const,
+      message: "Your computer couldn't be updated. It's back as it was, and your files are kept.",
+      at: 1,
+    };
+    const update = { available: true, busy: false, error: null, run, failure };
+    const view = render(<SettingsSheet {...props()} update={update} />);
+    fireEvent.click(screen.getByRole("button", { name: "Your computer" }));
+    expect(within(sheet()).getByText("Your computer wasn't updated")).toBeTruthy();
+    expect(within(sheet()).getByText(failure.message)).toBeTruthy();
+    expect(
+      within(within(sheet()).getByRole("list", { name: "Update steps" }))
+        .getByText("Install the new version")
+        .closest("li")
+        ?.getAttribute("data-state"),
+    ).toBe("failed");
+    fireEvent.click(within(sheet()).getByRole("button", { name: "Retry" }));
+    expect(run).toHaveBeenCalledOnce();
+    view.rerender(<SettingsSheet {...props()} update={{ ...update, available: false }} />);
+    expect(within(sheet()).getByText(failure.message)).toBeTruthy();
+    expect(within(sheet()).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
   it("holds Update, saying why, while dot works or you hold the computer", () => {
     const run = vi.fn();
     render(

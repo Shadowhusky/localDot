@@ -36,6 +36,87 @@ it("says the computer is updating through its stop and its start", () => {
   expect(screen.getByRole("heading").textContent).toBe("Starting your computer");
 });
 
+it("says which step of the update it is on, and that files stay", () => {
+  render(
+    <Curtain
+      phase="stopping"
+      first={false}
+      waking={false}
+      updating
+      updateLine="Step 3 of 6 · Keeping your apps and files"
+      caption=""
+      action={{ kind: "stop", enabled: false }}
+      onAction={() => {}}
+      showDot={false}
+    />,
+  );
+  expect(screen.getByRole("heading").textContent).toBe("Updating your computer");
+  expect(screen.getByText(/Step 3 of 6 · Keeping your apps and files\. Your files/)).toBeTruthy();
+});
+
+it("says when it is running long, in place of the step", () => {
+  render(
+    <Curtain
+      phase="starting"
+      first={false}
+      waking={false}
+      updating
+      updateLine="Step 3 of 6 · Keeping your apps and files"
+      updateNote="This is taking longer than usual, which is normal for a computer with many apps."
+      caption=""
+      action={{ kind: "stop", enabled: false }}
+      onAction={() => {}}
+      showDot={false}
+    />,
+  );
+  expect(screen.getByText(/taking longer than usual/)).toBeTruthy();
+});
+
+it("says what a failed update left, with the way back on, not a bare could-not-start", () => {
+  const onAction = vi.fn();
+  render(
+    <Curtain
+      phase="failed"
+      first={false}
+      waking={false}
+      updateFailure="Your computer couldn't be updated. Your files are kept. It starts again by itself as soon as Docker answers."
+      caption="Your computer could not start."
+      action={{ kind: "start", enabled: true }}
+      onAction={onAction}
+      showDot={false}
+    />,
+  );
+  expect(screen.getByRole("heading").textContent).toBe("Your computer wasn't updated");
+  expect(screen.getByText(/Your files are kept/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Start again" }));
+  expect(onAction).toHaveBeenCalled();
+});
+
+it("says how a replacement is going, with a clock, rather than only spinning", () => {
+  render(
+    <Curtain
+      phase="unavailable"
+      first={false}
+      waking={false}
+      caption=""
+      action={{ kind: "retry", enabled: false }}
+      replace={{
+        enabled: false,
+        busy: true,
+        note: "Step 1 of 3 · Saving the old computer. Your files are kept.",
+        run: () => {},
+      }}
+      onAction={() => {}}
+      showDot={false}
+    />,
+  );
+  expect(screen.getByRole("heading").textContent).toBe("Replacing your computer");
+  expect(document.querySelector(".curtain-sub")?.textContent).toMatch(
+    /^0:00 · Step 1 of 3 · Saving the old computer/,
+  );
+  expect(document.querySelector(".curtain-act")?.hasAttribute("data-progress")).toBe(true);
+});
+
 const stuck = (freshStart: FreshStartAction, onAction = () => {}) =>
   render(
     <Curtain

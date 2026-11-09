@@ -15,8 +15,11 @@ export function replacementNotice(
     return record.reason === "old_retirement"
       ? "The old computer couldn't be saved and shut down safely. Your files are kept. Check Docker, then try again."
       : "The fresh computer couldn't be checked. Your saved computer data is kept. Try recovery again.";
-  if (record?.phase === "ready") return "The fresh computer is ready. Opening it…";
-  return record ? "Saving the old computer and starting a fresh one." : undefined;
+  if (record?.phase === "ready")
+    return "Step 3 of 3 · The fresh computer is ready. Opening it. Your files are kept.";
+  if (record?.phase === "allocating" || record?.phase === "retired")
+    return "Step 2 of 3 · Starting a fresh computer. Your files are kept.";
+  return record ? "Step 1 of 3 · Saving the old computer. Your files are kept." : undefined;
 }
 
 const RESUME_ANSWERS: Record<string, string> = {

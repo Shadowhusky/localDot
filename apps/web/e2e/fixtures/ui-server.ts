@@ -512,14 +512,35 @@ cells.start = async (id) => {
   startCell(id, "start");
 };
 
-// Update: the computer stops, comes back on the new version and is ready a moment later.
+// Update: the computer stops, comes back on the new version and is ready a moment later, or, after
+// POST /__qa/update?hold=1, waits for POST /__qa/update/step at each stage.
+const NO_STREAM = { connection: "none" as const, viewers: 0, lastUpstreamAt: null };
+let holdUpdate = false;
+let updateRefusal: string | undefined;
 async function updateCell(id: string): Promise<void> {
   const c = cells.get(id);
   if (!c?.updateAvailable) throw new ComputerUpdateRefused("Your computer is up to date.");
-  const { updateAvailable: _available, ...rest } = c;
-  const none = { connection: "none" as const, viewers: 0, lastUpstreamAt: null };
-  cells.emit({ ...rest, state: "stopping", updating: true, stream: none });
-  setTimeout(() => cells.emit({ ...rest, state: "starting", updating: true, stream: none }), 800);
+  const { updateAvailable: _available, updateFailure: _failure, ...rest } = c;
+  if (updateRefusal) throw new ComputerUpdateRefused(updateRefusal);
+  if (holdUpdate) return;
+  cells.emit({
+    ...rest,
+    state: "stopping",
+    updating: true,
+    updateProgress: { stage: "stop" },
+    stream: NO_STREAM,
+  });
+  setTimeout(
+    () =>
+      cells.emit({
+        ...rest,
+        state: "starting",
+        updating: true,
+        updateProgress: { stage: "start" },
+        stream: NO_STREAM,
+      }),
+    800,
+  );
   setTimeout(
     () =>
       cells.emit({
@@ -3945,10 +3966,85 @@ const reply = (problem: string | undefined) =>
   problem ? new Response(problem, { status: 409 }) : Response.json({ ok: true });
 
 // A new version of the computer becomes ready.
-routes.post("/__qa/update", () => {
-  const c = cells.get(cellId);
-  if (!c) return reply("no computer");
-  cells.emit({ ...c, updateAvailable: true });
+routes.post("/__qa/update", (c) => {
+  const cell = cells.get(cellId);
+  if (!cell) return reply("no computer");
+  holdUpdate = c.req.query("hold") === "1";
+  updateRefusal = c.req.query("refuse");
+  cells.emit({ ...cell, updateAvailable: true });
+  return reply(undefined);
+});
+// Moves a computer's update on by hand: ?stage=, with &share= and &detail=, while its state follows
+// (running through download, stopping or starting after). ?fail= ends it as that stage failing.
+routes.post("/__qa/update/step", (c) => {
+  const cell = cells.get(cellId);
+  if (!cell) return reply("no computer");
+  const stage = c.req.query("stage") as NonNullable<CellSummary["updateProgress"]>["stage"];
+  const share = c.req.query("share");
+  const detail = c.req.query("detail");
+  const fail = c.req.query("fail");
+  const {
+    updateAvailable: _a,
+    updating: _u,
+    updateProgress: _p,
+    updateFailure: _f,
+    operation: _o,
+    ...rest
+  } = cell;
+  if (fail) {
+    cells.emit({
+      ...rest,
+      state: (c.req.query("state") as CellSummary["state"]) ?? "ready",
+      ...(c.req.query("offered") === "0" ? {} : { updateAvailable: true as const }),
+      updateFailure: {
+        stage: fail as typeof stage,
+        message: c.req.query("message") ?? "Your computer couldn't be updated.",
+        at: Number(c.req.query("at") ?? 1000),
+      },
+    });
+    return reply(undefined);
+  }
+  if (!stage) {
+    cells.emit({
+      ...rest,
+      state: "ready",
+      stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
+    });
+    return reply(undefined);
+  }
+  const started = Number(c.req.query("elapsed") ?? 1000);
+  cells.emit({
+    ...rest,
+    state:
+      stage === "download" || stage === "reconnect"
+        ? "ready"
+        : stage === "stop" || stage === "keep" || stage === "replace"
+          ? "stopping"
+          : "starting",
+    ...(stage === "reconnect" ? {} : { updating: true as const }),
+    updateProgress: {
+      stage,
+      ...(share ? { share: Number(share) } : {}),
+      ...(detail ? { detail } : {}),
+    },
+    ...(stage === "download"
+      ? {}
+      : {
+          operation: {
+            kind: "update" as const,
+            step:
+              stage === "reconnect"
+                ? ("screen" as const)
+                : stage === "start"
+                  ? ("ready" as const)
+                  : ("install" as const),
+            startedAt: 1,
+            elapsedMs: started,
+            expectedMs: 40_000,
+          },
+        }),
+    stream: stage === "download" ? rest.stream : NO_STREAM,
+  });
   return reply(undefined);
 });
 routes.post("/__qa/approval", async (c) => {

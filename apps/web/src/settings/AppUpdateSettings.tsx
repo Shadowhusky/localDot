@@ -9,9 +9,9 @@ import { Dialog } from "../ui/Dialog.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Progress } from "../ui/Progress.tsx";
-import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { StableText } from "./StableText.tsx";
+import { UpdateSteps } from "./UpdateSteps.tsx";
 import {
   failedStage,
   STAGE_NAMES,
@@ -36,29 +36,8 @@ function UpdateProgress({ progress }: { progress: AppUpdateProgress }) {
   );
 }
 
-// The steps of the update, those behind it done and the one under way or failed marked.
-function UpdateSteps({ at, failed }: { at: UpdateStage; failed: boolean }) {
-  const index = UPDATE_STAGES.indexOf(at);
-  return (
-    <ol className="settings-steps settings-update-steps" aria-label="Update steps">
-      {UPDATE_STAGES.map((stage, i) => {
-        const state = i < index ? "done" : i > index ? "todo" : failed ? "failed" : "doing";
-        return (
-          <li
-            key={stage}
-            className="settings-step"
-            data-state={state}
-            aria-current={state === "doing" ? "step" : undefined}
-          >
-            <StatusGlyph state={state} className="settings-step-glyph" />
-            <span className="settings-step-text">
-              <span className="settings-step-name">{STAGE_NAMES[stage]}</span>
-            </span>
-          </li>
-        );
-      })}
-    </ol>
-  );
+function AppUpdateSteps({ at, failed }: { at: UpdateStage; failed: boolean }) {
+  return <UpdateSteps stages={UPDATE_STAGES} names={STAGE_NAMES} at={at} failed={failed} />;
 }
 
 // What failed, in one sentence, over the steps the update went through.
@@ -66,7 +45,7 @@ function UpdateFailure({ error, failed }: { error: string; failed: UpdateStage }
   return (
     <div className="settings-update-progress">
       <p className="settings-update-error">{error}</p>
-      <UpdateSteps at={failed} failed />
+      <AppUpdateSteps at={failed} failed />
     </div>
   );
 }
@@ -210,7 +189,7 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
               {progress && <UpdateProgress progress={progress} />}
               {stage && (
                 <div className="settings-update-progress">
-                  <UpdateSteps at={stage} failed={false} />
+                  <AppUpdateSteps at={stage} failed={false} />
                 </div>
               )}
             </>
@@ -342,7 +321,7 @@ export function AppUpdateOverlay({ update }: { update: AppUpdateControl }) {
             valueText={line}
           />
           <p className="settings-update-detail">{line}</p>
-          <UpdateSteps at={stage} failed={false} />
+          <AppUpdateSteps at={stage} failed={false} />
         </div>
       }
     >
