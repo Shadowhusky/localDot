@@ -3,12 +3,15 @@ import type { VoiceRoute } from "./support.ts";
 
 export const LISTENING_LINE = "Listening…";
 
-export function routeLabel(route: VoiceRoute): string {
+// What to call the computer running localDot, as its own status says.
+export type ComputerWord = "Mac" | "computer";
+
+export function routeLabel(route: VoiceRoute, computer: ComputerWord = "Mac"): string {
   switch (route.kind) {
     case "device":
       return "On this device";
     case "mac":
-      return "On your Mac";
+      return `On your ${computer}`;
     case "online":
       return "Online";
     case "none":
@@ -17,12 +20,12 @@ export function routeLabel(route: VoiceRoute): string {
 }
 
 // One line on where the words are made, for Settings.
-export function routeDetail(route: VoiceRoute): string {
+export function routeDetail(route: VoiceRoute, computer: ComputerWord = "Mac"): string {
   switch (route.kind) {
     case "device":
       return "Your browser turns speech into text without sending audio anywhere.";
     case "mac":
-      return "The speech model on your Mac turns it into text. Audio goes nowhere else.";
+      return `The speech model on your ${computer} turns it into text. Audio goes nowhere else.`;
     case "online":
       return "Your browser's online speech service hears what you say.";
     case "none":

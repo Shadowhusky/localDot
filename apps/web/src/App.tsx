@@ -283,6 +283,7 @@ import { useListening } from "./voice/listening.ts";
 import { useVoicePrefs } from "./voice/prefs.ts";
 import { useReadAloud } from "./voice/read-aloud.ts";
 import { useVoiceSupport, voiceRoute } from "./voice/support.ts";
+import { useSpeechInstall } from "./voice/useSpeechInstall.ts";
 import { browserLanguages } from "./voice/useVoice.ts";
 import { LISTENING_LINE } from "./voice/words.ts";
 
@@ -1512,6 +1513,8 @@ function Theatre({ api }: { api: ApiClient }) {
     configured: !!settings.saved?.main,
     replaying: !!replayId,
   });
+  // Followed from here so a download started in setup or on another device shows wherever it's read.
+  const speechInstall = useSpeechInstall(api, onboarding.open || settings.open);
   const setupStep = onboarding.progress.step;
   const previewRoom = useMediaQuery(PREVIEW_ROOM) && layout !== "phone";
   const place = stack
@@ -3627,6 +3630,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 browser: voiceBrowser,
                 downloading: voiceSupport.downloading,
                 download: voiceSupport.download,
+                speech: speechInstall,
               }}
               stopNote={stopNote}
               stream={streamChoice}
@@ -3918,6 +3922,8 @@ function Theatre({ api }: { api: ApiClient }) {
               }
               showDot={showDot.value}
               view={viewStyle}
+              speech={speechInstall}
+              language={voiceLanguage}
             />
           </ErrorBoundary>
         </Presence>

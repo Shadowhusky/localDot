@@ -41,6 +41,7 @@ import { Sheet, SheetNavItem, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { speechSummary } from "../voice/speech-words.ts";
 import { routeLabel } from "../voice/words.ts";
 import { AccessLinksSettings } from "./AccessLinksSettings.tsx";
 import { AccessoryPicker } from "./AccessoryPicker.tsx";
@@ -705,7 +706,11 @@ function SectionList({
     rules: countValue(props.rules?.rules.length),
     spending: props.loading ? "" : spendingValue(props.spending?.value, planOnly(props.choices)),
     appearance: APPEARANCE_NAMES[props.appearance?.value ?? "graphite"],
-    voice: props.voice ? routeLabel(props.voice.route) : "",
+    voice: props.voice
+      ? props.voice.speech?.status?.job?.state === "running"
+        ? speechSummary(props.voice.speech.status)
+        : routeLabel(props.voice.route, props.voice.speech?.status?.host.computer)
+      : "",
     notifications: notificationsValue(props.notifications?.device),
     accounts: props.accounts?.phase === "ready" ? countValue(props.accounts.sites.length) : "",
     connectors:

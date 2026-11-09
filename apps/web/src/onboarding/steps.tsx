@@ -2,6 +2,10 @@ import type { ComputerSize, ComputerSizeView } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
 import type { BrowserEngineName } from "../../../../packages/protocol/src/browser-engine.ts";
+import type {
+  SpeechInstallStatus,
+  SpeechTierId,
+} from "../../../../packages/protocol/src/speech-install.ts";
 import { AUTONOMY_PRESETS } from "../copy/autonomy.ts";
 import { DOCTOR } from "../keys/Protection.tsx";
 import { ChromeTerms } from "../settings/BrowserEngineSettings.tsx";
@@ -9,6 +13,7 @@ import { SizeSlider, tooSmall } from "../settings/ComputerSize.tsx";
 import { modelAllowed, type PickerModel, type SubscriptionModel } from "../settings/choices.ts";
 import { modelItems } from "../settings/chooser.ts";
 import { cpuCount, gigabytes, sameSize } from "../settings/computer-size.ts";
+import { SpeechProgress, SpeechTierPicker } from "../settings/SpeechInstall.tsx";
 import { CommandChip } from "../shell/CommandChip.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -25,6 +30,7 @@ import { Select } from "../ui/Select.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import type { SpeechInstallControl } from "../voice/useSpeechInstall.ts";
 import {
   API_PROVIDERS,
   abilityLine,
@@ -673,6 +679,82 @@ export function BrowserStep({
           <ChromeTerms />
         </p>
       )}
+    </>
+  );
+}
+
+// Optional, and nothing downloads until the step's button is pressed. The computer running localDot
+// does the download in the background, whichever device this is.
+export function SpeechStep({
+  speech,
+  status,
+  tier,
+  onTier,
+  language,
+  phone,
+}: {
+  speech: SpeechInstallControl;
+  status: SpeechInstallStatus;
+  tier: SpeechTierId;
+  onTier(tier: SpeechTierId): void;
+  language: string;
+  phone: boolean;
+}) {
+  const { job, installed, handInstalled, host } = status;
+  const computer = host.computer;
+  if (job)
+    return (
+      <Group roomy>
+        <GroupRow
+          leading={<IconTile icon="download" />}
+          label={
+            <span role="status">
+              {job.state === "running" ? `Downloading on your ${computer}` : "The download stopped"}
+            </span>
+          }
+          detail={
+            job.state === "running" ? "Setup doesn't need to wait for it. Keep going." : undefined
+          }
+        >
+          <SpeechProgress job={job}>
+            {job.state === "failed" && (
+              <Button
+                size="sm"
+                busy={speech.pending === "install"}
+                onClick={() => void speech.install(job.tier)}
+              >
+                Retry
+              </Button>
+            )}
+            <Button size="sm" variant="quiet" onClick={speech.cancel}>
+              {job.state === "failed" ? "Discard" : "Cancel"}
+            </Button>
+          </SpeechProgress>
+        </GroupRow>
+      </Group>
+    );
+  if (installed || handInstalled)
+    return (
+      <Group roomy>
+        <GroupRow
+          leading={<IconTile icon="mic" />}
+          label={installed?.name ?? "Your own Whisper"}
+          detail={
+            installed
+              ? `Installed on your ${computer}. Change it any time in Settings.`
+              : "You set this up, so there's nothing to install."
+          }
+        />
+      </Group>
+    );
+  return (
+    <>
+      <SpeechTierPicker status={status} language={language} value={tier} onChange={onTier} roomy />
+      <p className="onboarding-note">
+        {phone
+          ? `Your ${computer} does the download, not this phone. It carries on in the background, and you can change this in Settings.`
+          : "It downloads in the background, so setup won't wait. You can change this in Settings."}
+      </p>
     </>
   );
 }

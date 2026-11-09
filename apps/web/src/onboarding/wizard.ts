@@ -1,4 +1,5 @@
 import { PROVIDERS, type ProviderSpec, providerById } from "@localdot/providers";
+import type { SpeechInstallStatus } from "../../../../packages/protocol/src/speech-install.ts";
 import type { DotState } from "../dot/engine/states.ts";
 import type { PickerModel } from "../settings/choices.ts";
 
@@ -11,6 +12,7 @@ export type WizardStep =
   | "dot"
   | "view"
   | "browser"
+  | "speech"
   | "turn-on";
 export type ThinkKind = "api" | "chatgpt" | "claude-code" | "plan" | "local" | "custom";
 // A plan the person signs in to in its own app, which brings its own models.
@@ -26,6 +28,7 @@ export const WIZARD_STEPS = [
   "dot",
   "view",
   "browser",
+  "speech",
   "turn-on",
 ] as const;
 type CountedStep = (typeof WIZARD_STEPS)[number];
@@ -55,6 +58,7 @@ const STEP_TITLES: Record<CountedStep, string> = {
   dot: "Your dot",
   view: "View",
   browser: "Web browser",
+  speech: "Talk to dot",
   "turn-on": "Turn on",
 };
 
@@ -76,6 +80,7 @@ export const STEP_DOT: Readonly<Record<WizardStep, DotState>> = {
   dot: "listening",
   view: "idle",
   browser: "idle",
+  speech: "listening",
   "turn-on": "waking",
 };
 
@@ -94,7 +99,8 @@ export function nextStep(progress: WizardProgress): WizardStep {
       step === "permissions" ||
       step === "dot" ||
       step === "view" ||
-      step === "browser")
+      step === "browser" ||
+      step === "speech")
   )
     return progress.back;
   return WIZARD_STEPS[WIZARD_STEPS.indexOf(step) + 1] ?? "turn-on";
@@ -103,6 +109,14 @@ export function nextStep(progress: WizardProgress): WizardStep {
 export function previousStep(step: WizardStep): WizardStep {
   if (step === "welcome" || step === "thinks") return "welcome";
   return WIZARD_STEPS[WIZARD_STEPS.indexOf(step) - 1] ?? "welcome";
+}
+
+// Talk to dot is asked only where there's a choice to make: this computer has a speech program to
+// install and doesn't already have speech.
+export function speechOffered(
+  status: Pick<SpeechInstallStatus, "supported" | "installed" | "handInstalled"> | null,
+): boolean {
+  return !!status?.supported && !status.installed && !status.handInstalled;
 }
 
 // First run: the saved settings are in, no main model is chosen and setup was not put off or

@@ -8,8 +8,8 @@ export type BrowserSpeech = "local" | "download" | "online" | "none";
 
 export interface VoiceSupport {
   readonly browser: BrowserSpeech;
-  // The computer's own speech model: every language, English only, or none.
-  readonly mac: "all" | "en" | null;
+  // The computer's own speech model: every language, the languages it hears, or none.
+  readonly mac: "all" | readonly string[] | null;
 }
 
 // An installed local engine owns capture consistently across clients; otherwise use browser
@@ -28,7 +28,7 @@ export function voiceRoute(
 ): VoiceRoute {
   if (globalThis.isSecureContext === false) return { kind: "none", why: "insecure" };
   if (!support) return { kind: "none", why: "checking" };
-  if (support.mac === "all" || (support.mac === "en" && modelLanguage(language) === "en"))
+  if (support.mac === "all" || support.mac?.includes(modelLanguage(language)))
     return { kind: "mac" };
   if (support.browser === "local") return { kind: "device" };
   if (online && support.browser !== "none") return { kind: "online" };
@@ -97,11 +97,11 @@ export async function browserSpeech(language: string): Promise<BrowserSpeech> {
 
 export async function macSpeech(api: ApiClient): Promise<VoiceSupport["mac"]> {
   try {
-    const reply = await api.get<{ onMac?: { available?: boolean; englishOnly?: boolean } }>(
-      "/api/voice",
-    );
+    const reply = await api.get<{
+      onMac?: { available?: boolean; englishOnly?: boolean; languages?: readonly string[] };
+    }>("/api/voice");
     if (!reply.onMac?.available) return null;
-    return reply.onMac.englishOnly ? "en" : "all";
+    return reply.onMac.languages ?? (reply.onMac.englishOnly ? ["en"] : "all");
   } catch {
     return null;
   }
@@ -138,6 +138,12 @@ function check(api: ApiClient, language: string): Promise<VoiceSupport> {
     languages.set(language, found);
   }
   return found;
+}
+
+// Something changed what this computer can do, such as a speech model finishing its install.
+export function refreshVoiceSupport() {
+  checked = new WeakMap();
+  changed();
 }
 
 // The browser's one-time download of on-device speech, which needs a press to start.

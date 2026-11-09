@@ -25,11 +25,17 @@ describe("where speech becomes text", () => {
     });
     expect(voiceRoute({ browser: "local", mac: null }, false, "en-US")).toEqual({ kind: "device" });
     expect(voiceRoute({ browser: "online", mac: "all" }, true, "ja-JP")).toEqual({ kind: "mac" });
-    expect(voiceRoute({ browser: "online", mac: "en" }, false, "ja-JP")).toEqual({
+    expect(voiceRoute({ browser: "online", mac: ["en"] }, false, "ja-JP")).toEqual({
       kind: "none",
       why: "online-off",
     });
-    expect(voiceRoute({ browser: "online", mac: "en" }, false, "en-GB")).toEqual({ kind: "mac" });
+    expect(voiceRoute({ browser: "online", mac: ["en"] }, false, "en-GB")).toEqual({ kind: "mac" });
+    expect(voiceRoute({ browser: "local", mac: ["zh", "en"] }, false, "zh-CN")).toEqual({
+      kind: "mac",
+    });
+    expect(voiceRoute({ browser: "local", mac: ["zh", "en"] }, false, "ja-JP")).toEqual({
+      kind: "device",
+    });
     expect(voiceRoute({ browser: "online", mac: null }, true, "en-US")).toEqual({
       kind: "online",
     });
@@ -47,6 +53,7 @@ describe("where speech becomes text", () => {
   it("names the route and why the mic can't be used", () => {
     expect(routeLabel({ kind: "device" })).toBe("On this device");
     expect(routeLabel({ kind: "mac" })).toBe("On your Mac");
+    expect(routeLabel({ kind: "mac" }, "computer")).toBe("On your computer");
     expect(routeLabel({ kind: "online" })).toBe("Online");
     expect(routeBlocked({ kind: "none", why: "checking" })).toContain("Checking speech support");
     expect(routeBlocked({ kind: "none", why: "download" })).toBeUndefined();
@@ -87,7 +94,12 @@ describe("where speech becomes text", () => {
         }),
       }) as unknown as ApiClient;
     expect(await macSpeech(api({ onMac: { available: true, englishOnly: false } }))).toBe("all");
-    expect(await macSpeech(api({ onMac: { available: true, englishOnly: true } }))).toBe("en");
+    expect(await macSpeech(api({ onMac: { available: true, englishOnly: true } }))).toEqual(["en"]);
+    expect(
+      await macSpeech(
+        api({ onMac: { available: true, englishOnly: false, languages: ["zh", "en"] } }),
+      ),
+    ).toEqual(["zh", "en"]);
     expect(await macSpeech(api({ onMac: { available: false } }))).toBeNull();
     expect(await macSpeech(api(new Error("404")))).toBeNull();
   });
