@@ -18,8 +18,8 @@ const PICTURE_SIDE = 1568;
 
 // A picture dot reads is shown to it, as a JPEG no larger than a model uses. Anything that is not
 // a picture the decoder takes stays a note.
-async function picture(
-  desktop: NonNullable<ReturnType<ToolDeps["desktop"]>>,
+export async function picture(
+  desktop: Pick<NonNullable<ReturnType<ToolDeps["desktop"]>>, "fetchFile">,
   path: string,
   bytes: number,
   signal: AbortSignal,

@@ -58,6 +58,8 @@ import { openInBrowser } from "../connectors/open-browser.ts";
 import { RemoteLinks } from "../connectors/remote.ts";
 import { ConnectorStore } from "../connectors/store.ts";
 import type { ComputerAccess } from "../deliverables/convert.ts";
+import { StoredFiles } from "../deliverables/stored.ts";
+import { TaskScanner } from "../deliverables/task-scan.ts";
 import { DesktopdClient } from "../desktopd/client.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
 import { DesktopdTools } from "../desktopd/tools-client.ts";
@@ -90,6 +92,7 @@ import {
   findClaudeCode,
   runFile,
 } from "./claude-code/setup.ts";
+import { claudeCodeSideModel } from "./claude-code/side.ts";
 import { claudePlanUsage } from "./claude-code/usage.ts";
 import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexDriver } from "./codex/driver.ts";
@@ -119,6 +122,9 @@ import { RulesStore } from "./safety/rules.ts";
 import { taintMemory } from "./safety/taint.ts";
 import type { AgentSession, BrainGeneration } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
+import { apiSideModel } from "./side/api-model.ts";
+import { sideReaders } from "./side/readers.ts";
+import { sideSpendLedger } from "./side/spend.ts";
 import { leftoverSkills, listSkills, skillDesktopPath, skillFiles, skillsFor } from "./skills.ts";
 import { createToolApi } from "./tool-api.ts";
 import type { ToolDeps } from "./tools/deps.ts";
@@ -857,6 +863,8 @@ export function createAgent(d: AgentWiringDeps) {
         redactorFor: (session) => forText(session),
       })
     : undefined;
+  const sideScanner = new TaskScanner(d.eventLog);
+  const sideStored = new StoredFiles(d.home);
   const runner = new AgentRunner({
     home: d.home,
     installSession: d.sessionScreens?.install.bind(d.sessionScreens),
@@ -897,6 +905,58 @@ export function createAgent(d: AgentWiringDeps) {
       : {}),
     jev: (secretId, body, signal) => purposeService.post(secretId, body, signal),
     quickModel: (role, system, prompt, signal) => quickModel.ask(role, system, prompt, signal),
+    side: {
+      api: (role, side) =>
+        apiSideModel(role, side, (asked, budget, signal) =>
+          quickModel.sideListener(asked, budget, signal),
+        ),
+      ...(claudeDriver && claudeSetup
+        ? {
+            plan: (quick, side) =>
+              claudeCodeSideModel(
+                { query: claudeQuery, launch: () => claudeSetup.launch(), spawn: spawnClaudeCode },
+                quick,
+                side,
+              ),
+          }
+        : {}),
+      readers: (sessionId, session, logFile) =>
+        sideReaders(
+          {
+            frames: d.frames,
+            png,
+            desktop: (cellId) => (dispatch.tools.device?.(cellId) ? desktop(cellId) : undefined),
+            device: (cellId) => dispatch.tools.device?.(cellId),
+            owners: (cellId) => turns.owners(cellId),
+            holder: (cellId) => d.live.lease(cellId).holder,
+            scale: (cellId) => d.cells.get(cellId)?.scale,
+            cellOf: (id) => {
+              const cells = d.cells.list();
+              return (
+                d.live.cellOf(id) ??
+                runner.terminalOf(id)?.cellId ??
+                // A task from before this daemon started ran on the one computer.
+                (cells.length === 1 ? cells[0]?.id : undefined)
+              );
+            },
+            scanner: sideScanner,
+            stored: sideStored,
+            chain: (id) => conversations.chain(id).sessions,
+            ...(dispatch.tools.recall ? { recall: dispatch.tools.recall } : {}),
+            ...(dispatch.tools.recallExperience
+              ? { recallExperience: dispatch.tools.recallExperience }
+              : {}),
+            web: webCell,
+            settings: () => settings.get(),
+            redactor: (session, cellId) => forText(session, cellId),
+            now: () => Date.now(),
+          },
+          sessionId,
+          session,
+          logFile,
+        ),
+      ledger: (logFile) => sideSpendLedger(logFile),
+    },
     ...(driver && auth
       ? {
           codex: {

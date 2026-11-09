@@ -146,6 +146,24 @@ export function claudeCodeOptions(input: ClaudeCodeOptionsInput): Options {
   };
 }
 
+// A side question: a process of its own with the read-only tools it is given, and every call to
+// anything else refused.
+export function claudeCodeSideOptions(
+  input: ClaudeCodeRunInput & {
+    readonly serverName: string;
+    readonly server: McpSdkServerConfigWithInstance;
+    readonly canUseTool: CanUseTool;
+    readonly maxTurns: number;
+  },
+): Options {
+  return {
+    ...isolated(input),
+    mcpServers: { [input.serverName]: input.server },
+    canUseTool: input.canUseTool,
+    maxTurns: input.maxTurns,
+  };
+}
+
 // One answer to one question, in one turn, with no tools at all.
 export function claudeCodeAnswerOptions(input: ClaudeCodeRunInput): Options {
   return { ...isolated(input), maxTurns: 1 };

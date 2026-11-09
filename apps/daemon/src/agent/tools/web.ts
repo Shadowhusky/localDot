@@ -31,7 +31,11 @@ const SEARCHED: Record<WebSearchKind, string> = {
   news: "Searched the news for",
 };
 
-function listed(kind: WebSearchKind, hits: readonly SearchHit[], shown: Set<number>): string {
+export function listed(
+  kind: WebSearchKind,
+  hits: readonly SearchHit[],
+  shown: Set<number>,
+): string {
   return hits
     .map((hit, i) => {
       const lines = [`${i + 1}. ${hit.title}`];

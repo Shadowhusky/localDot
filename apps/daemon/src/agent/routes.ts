@@ -68,6 +68,7 @@ import { DesktopdError } from "../desktopd/client.ts";
 import type { DesktopdTools } from "../desktopd/tools-client.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import type { KeyModels } from "../keyd/key-models.ts";
+import { NDJSON_TYPE } from "../sessions/ndjson.ts";
 import {
   activeRoles,
   BindingError,
@@ -857,7 +858,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({ choice: deps.runner.chooseTaskModel(id, ref) });
     }),
   );
-  // One at a time for each task; the answer goes back to the user alone.
+  // One at a time for each task; the answer goes back to the user alone, each step as it comes.
   const asking = new Set<string>();
   app.post(
     "/api/agent/sessions/:id/side-question",
@@ -869,37 +870,88 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!deps.runner.sideAnswer) throw new RouteError(503, "side questions are unavailable");
       if (asking.has(id)) throw new RouteError(409, "busy");
       asking.add(id);
-      const late = AbortSignal.timeout(90_000);
-      try {
-        const reply = await deps.runner.sideAnswer(
-          id,
-          text,
-          AbortSignal.any([c.req.raw.signal, late]),
-        );
-        return c.json(
-          reply.failed
-            ? {
-                ...reply,
-                failed: {
-                  ...reply.failed,
-                  reason: redact(reply.failed.reason, id, undefined, SIDE_QUESTION_CHARS),
+      const outward = (value: string) => deps.redactUserText(value, id);
+      const encoder = new TextEncoder();
+      const stopped = new AbortController();
+      const signal = AbortSignal.any([c.req.raw.signal, stopped.signal]);
+      let send: ((line: unknown) => void) | undefined;
+      const held: unknown[] = [];
+      const line = (value: unknown) => {
+        if (send) send(value);
+        else held.push(value);
+      };
+      // Refusals before anything is under way keep their own status; after that, the last line says.
+      const started = Promise.withResolvers<void>();
+      const answer = deps.runner
+        .sideAnswer(id, text, signal, (event) => {
+          line(
+            "progress" in event
+              ? { progress: outward(event.progress) }
+              : {
+                  handover: event.handover,
+                  ...(event.partial ? { partial: outward(event.partial) } : {}),
                 },
-              }
-            : reply,
-        );
+          );
+          started.resolve();
+        })
+        .then((reply) => {
+          const clean = {
+            ...reply,
+            answer: outward(reply.answer),
+            ...(reply.failed
+              ? { failed: { ...reply.failed, reason: outward(reply.failed.reason) } }
+              : {}),
+          };
+          line(clean);
+          started.resolve();
+        })
+        .finally(() => asking.delete(id));
+      try {
+        await Promise.race([started.promise, answer]);
       } catch (error) {
         if (error instanceof SideQuestionError)
           throw new RouteError(
             error.status,
-            error.reason
-              ? `${error.problem}\n${redact(error.reason, id, undefined, SIDE_QUESTION_CHARS)}`
-              : error.problem,
+            error.reason ? `${error.problem}\n${outward(error.reason)}` : error.problem,
           );
-        if (late.aborted) throw new RouteError(502, "no-answer");
         throw error;
-      } finally {
-        asking.delete(id);
       }
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const write = (value: unknown) =>
+            controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
+          for (const value of held.splice(0)) write(value);
+          send = write;
+          void answer
+            .catch((error: unknown) => {
+              if (signal.aborted) return;
+              write(
+                error instanceof SideQuestionError
+                  ? {
+                      problem: error.problem,
+                      status: error.status,
+                      ...(error.reason ? { reason: outward(error.reason) } : {}),
+                    }
+                  : { problem: "no-answer", status: 502 },
+              );
+            })
+            .finally(() => {
+              send = undefined;
+              try {
+                controller.close();
+              } catch {
+                // The reader has gone.
+              }
+            });
+        },
+        cancel() {
+          send = undefined;
+          stopped.abort();
+        },
+      });
+      return new Response(body, {
+        headers: { "content-type": NDJSON_TYPE, "cache-control": "no-store" },
+      });
     }),
   );
   app.post(

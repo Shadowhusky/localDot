@@ -13,6 +13,8 @@ import { MemoryStore } from "./memory.ts";
 import { AgentRunner } from "./runner.ts";
 import type { AgentSession } from "./session.ts";
 import { type AgentSettings, SettingsStore } from "./settings.ts";
+import type { SideGo } from "./side/agent.ts";
+import { sideSpendLedger } from "./side/spend.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
 
@@ -110,6 +112,7 @@ function setup(initial: AgentSettings = { main: SONNET, models: [HAIKU, OPUS] })
     const answer = answers.get(role.model.id);
     return answer ? answer() : `from ${role.model.id}`;
   });
+  const sideAsked: SideGo[] = [];
   const claudeRuns: { model: string; resume: boolean }[] = [];
   const claudeRun = vi.fn(
     async (session: AgentSession, input: { model: string; resume: boolean }) => {
@@ -175,6 +178,22 @@ function setup(initial: AgentSettings = { main: SONNET, models: [HAIKU, OPUS] })
       answer,
     },
     quickModel,
+    side: {
+      api: (role, side) => ({
+        provider: role.providerId,
+        model: role.model.id,
+        role: side,
+        tools: true,
+        images: true,
+        run: async (go) => {
+          sideAsked.push(go);
+          const answer = await quickModel(role);
+          await go.tools.call("finish", { status: "found", answer }, go.signal);
+        },
+      }),
+      readers: (sessionId, _session, logFile) => ({ sessionId, logFile, redact: (text) => text }),
+      ledger: sideSpendLedger,
+    },
   });
   fixtures.push({ runner, log, home });
   return {
@@ -188,6 +207,7 @@ function setup(initial: AgentSettings = { main: SONNET, models: [HAIKU, OPUS] })
     opened,
     boots,
     quickModel,
+    sideAsked,
     claudeRuns,
     answer,
     answers,
@@ -470,18 +490,81 @@ describe("what steps record", () => {
   });
 });
 
-describe("short questions with no tools", () => {
+describe("side questions", () => {
   it("answers on the main model when there is no fast model", async () => {
     const f = setup();
     const session = await f.runner.start(f.cellId, "First");
     await idle(session);
     await expect(
       f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       answer: `from ${SONNET.model}`,
       provider: "anthropic",
       model: SONNET.model,
+      status: "found",
     });
+  });
+
+  it("asks the fast model first, and only it when it finds the answer", async () => {
+    const f = setup({ main: SONNET, fast: HAIKU });
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    f.quickModel.mockClear();
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).resolves.toMatchObject({ model: HAIKU.model });
+    expect(f.quickModel).toHaveBeenCalledOnce();
+  });
+
+  it("takes no turn on the computer, and leaves the task exactly as it was", async () => {
+    const f = setup({ main: SONNET, fast: HAIKU });
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    const lease = f.live.lease(f.cellId);
+    const acquire = vi.spyOn(lease, "acquire");
+    const admit = vi.spyOn(session, "admit");
+    const admitCall = vi.spyOn(session, "admitCall");
+    const before = {
+      events: f.log.read(session.id).length,
+      delivered: session.delivered,
+      tainted: session.tainted,
+      taint: session.taint.sources.length,
+      lastFrameId: session.lastFrameId,
+      status: session.status,
+      toolCalls: session.toolCalls,
+      actions: session.actionsSinceUser,
+      transcript: f.transcripts.read(session.id),
+    };
+    let holderDuring: string | undefined = "unset";
+    f.answers.set(HAIKU.model, async () => {
+      holderDuring = lease.holder;
+      return "An answer.";
+    });
+    await f.runner.sideAnswer(session.id, "Why?", new AbortController().signal);
+    expect(holderDuring).toBeUndefined();
+    expect(acquire).not.toHaveBeenCalled();
+    expect(admit).not.toHaveBeenCalled();
+    expect(admitCall).not.toHaveBeenCalled();
+    expect({
+      events: f.log.read(session.id).length,
+      delivered: session.delivered,
+      tainted: session.tainted,
+      taint: session.taint.sources.length,
+      lastFrameId: session.lastFrameId,
+      status: session.status,
+      toolCalls: session.toolCalls,
+      actions: session.actionsSinceUser,
+      transcript: f.transcripts.read(session.id),
+    }).toEqual(before);
+  });
+
+  it("tells the model where the task stands", async () => {
+    const f = setup();
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    await f.runner.sideAnswer(session.id, "Why?", new AbortController().signal);
+    expect(f.sideAsked.at(-1)?.prompt).toContain("Its computer is off");
+    expect(f.sideAsked.at(-1)?.prompt).toContain("Side question: Why?");
   });
 
   it("falls back to the main model when the fast one fails, and tells the real reason", async () => {
@@ -494,7 +577,7 @@ describe("short questions with no tools", () => {
     await idle(session);
     await expect(
       f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       answer: `from ${SONNET.model}`,
       provider: "anthropic",
       model: SONNET.model,

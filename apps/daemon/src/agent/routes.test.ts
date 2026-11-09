@@ -624,50 +624,163 @@ describe("agent user routes", () => {
       queued: true,
     });
   });
-  it("answers a side question for the user alone, redacted, one at a time, saying why it can't", async () => {
-    const f = await setup();
-    const gate = deferred();
-    const sideAnswer = vi.fn(async (_id: string, question: string) => {
-      await gate.promise;
-      return { answer: `About: ${question}`, provider: "claude-code", model: "haiku" };
+  describe("side questions", () => {
+    const REPLY = {
+      status: "found" as const,
+      sources: [],
+      spend: {
+        usd: 0.002,
+        limitUSD: 0.25,
+        inputTokens: 10,
+        outputTokens: 2,
+        plan: false,
+        taskUSD: 0.002,
+      },
+    };
+    const lines = async (reply: Response) =>
+      (await reply.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    it("answers for the user alone, redacted, one at a time, saying why it can't", async () => {
+      const f = await setup();
+      const gate = deferred();
+      const sideAnswer = vi.fn(async (_id: string, question: string) => {
+        await gate.promise;
+        return {
+          ...REPLY,
+          answer: `About: ${question}`,
+          provider: "claude-code",
+          model: "haiku",
+        };
+      });
+      f.deps.runner.sideAnswer = sideAnswer;
+      const asked = f.send("POST", endpoint("side-question"), {
+        question: "Is credential-fixture safe?",
+      });
+      await vi.waitFor(() => expect(sideAnswer).toHaveBeenCalledOnce());
+      const again = await f.send("POST", endpoint("side-question"), { question: "And now?" });
+      expect(again.status).toBe(409);
+      gate.resolve();
+      const reply = await asked;
+      expect(reply.status).toBe(200);
+      expect(reply.headers.get("content-type")).toBe("application/x-ndjson");
+      expect(await lines(reply)).toEqual([
+        {
+          ...REPLY,
+          answer: "About: Is [redacted] safe?",
+          provider: "claude-code",
+          model: "haiku",
+        },
+      ]);
+      // Nothing reaches the task: no message, no event.
+      expect(f.events).toEqual([]);
+      expect(f.session.delivered).toBe(0);
+      for (const question of ["", " ", "x".repeat(2001), `key sk-ant-api03-${"a".repeat(90)}`])
+        expect((await f.send("POST", endpoint("side-question"), { question })).status).toBe(400);
+      expect(
+        (await f.send("POST", "/api/agent/sessions/nope/side-question", { question: "Hi" })).status,
+      ).toBe(400);
+      sideAnswer.mockRejectedValueOnce(new SideQuestionError(409, "no-spare-model"));
+      const none = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+      expect([none.status, await none.text()]).toEqual([409, "no-spare-model"]);
+      sideAnswer.mockRejectedValueOnce(
+        new SideQuestionError(502, "no-answer", "answered 400: Input must be a list"),
+      );
+      const refused = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+      expect([refused.status, await refused.text()]).toEqual([
+        502,
+        "no-answer\nanswered 400: Input must be a list",
+      ]);
+      sideAnswer.mockRejectedValueOnce(new AgentError(404, "no such task"));
+      expect((await f.send("POST", endpoint("side-question"), { question: "Hi" })).status).toBe(
+        404,
+      );
+      expect(sideAnswer).toHaveBeenCalledTimes(4);
     });
-    f.deps.runner.sideAnswer = sideAnswer;
-    const asked = f.send("POST", endpoint("side-question"), {
-      question: "Is credential-fixture safe?",
+    it("sends each step as it comes, then the answer, all of it redacted", async () => {
+      const f = await setup();
+      const leak = "credential-fixture";
+      const gate = deferred();
+      f.deps.runner.sideAnswer = vi.fn(async (_id, _question, _signal, onEvent) => {
+        onEvent?.({ progress: `Reading ${leak}…` });
+        await gate.promise;
+        onEvent?.({
+          handover: { provider: "anthropic", model: "opus" },
+          partial: `Only ${leak} so far`,
+        });
+        return {
+          ...REPLY,
+          answer: `It is ${leak}`,
+          provider: "anthropic",
+          model: "opus",
+          failed: { model: "haiku", reason: `said ${leak}` },
+        };
+      });
+      const reply = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+      expect(reply.status).toBe(200);
+      const reader = (reply.body as ReadableStream<Uint8Array>).getReader();
+      const first = new TextDecoder().decode((await reader.read()).value);
+      expect(JSON.parse(first)).toEqual({ progress: "Reading [redacted]…" });
+      gate.resolve();
+      let rest = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        rest += new TextDecoder().decode(value);
+      }
+      const [handover, answer] = rest
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(handover).toEqual({
+        handover: { provider: "anthropic", model: "opus" },
+        partial: "Only [redacted] so far",
+      });
+      expect(answer).toMatchObject({
+        answer: "It is [redacted]",
+        failed: { model: "haiku", reason: "said [redacted]" },
+      });
     });
-    await vi.waitFor(() => expect(sideAnswer).toHaveBeenCalledOnce());
-    const again = await f.send("POST", endpoint("side-question"), { question: "And now?" });
-    expect(again.status).toBe(409);
-    gate.resolve();
-    const reply = await asked;
-    expect(reply.status).toBe(200);
-    expect(await reply.json()).toEqual({
-      answer: "About: Is [redacted] safe?",
-      provider: "claude-code",
-      model: "haiku",
+    it("says in the last line what stopped it once it was under way", async () => {
+      const f = await setup();
+      f.deps.runner.sideAnswer = vi.fn(async (_id, _question, _signal, onEvent) => {
+        onEvent?.({ progress: "Reading…" });
+        throw new SideQuestionError(502, "no-answer", "answered 529: Overloaded");
+      });
+      const reply = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+      expect(reply.status).toBe(200);
+      expect(await lines(reply)).toEqual([
+        { progress: "Reading…" },
+        { problem: "no-answer", status: 502, reason: "answered 529: Overloaded" },
+      ]);
     });
-    // Nothing reaches the task: no message, no event.
-    expect(f.events).toEqual([]);
-    expect(f.session.delivered).toBe(0);
-    for (const question of ["", " ", "x".repeat(2001), `key sk-ant-api03-${"a".repeat(90)}`])
-      expect((await f.send("POST", endpoint("side-question"), { question })).status).toBe(400);
-    expect(
-      (await f.send("POST", "/api/agent/sessions/nope/side-question", { question: "Hi" })).status,
-    ).toBe(400);
-    sideAnswer.mockRejectedValueOnce(new SideQuestionError(409, "no-spare-model"));
-    const none = await f.send("POST", endpoint("side-question"), { question: "Hi" });
-    expect([none.status, await none.text()]).toEqual([409, "no-spare-model"]);
-    sideAnswer.mockRejectedValueOnce(
-      new SideQuestionError(502, "no-answer", "answered 400: Input must be a list"),
-    );
-    const refused = await f.send("POST", endpoint("side-question"), { question: "Hi" });
-    expect([refused.status, await refused.text()]).toEqual([
-      502,
-      "no-answer\nanswered 400: Input must be a list",
-    ]);
-    sideAnswer.mockRejectedValueOnce(new AgentError(404, "no such task"));
-    expect((await f.send("POST", endpoint("side-question"), { question: "Hi" })).status).toBe(404);
-    expect(sideAnswer).toHaveBeenCalledTimes(4);
+    it("stops the work when the user cancels, and frees the task for another question", async () => {
+      const f = await setup();
+      let stopped: AbortSignal | undefined;
+      const gone = deferred();
+      f.deps.runner.sideAnswer = vi.fn(async (_id, _question, signal, onEvent) => {
+        stopped = signal;
+        onEvent?.({ progress: "Reading…" });
+        signal.addEventListener("abort", () => gone.resolve());
+        await gone.promise;
+        throw signal.reason;
+      });
+      const reply = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+      await (reply.body as ReadableStream<Uint8Array>).cancel();
+      await gone.promise;
+      expect(stopped?.aborted).toBe(true);
+      f.deps.runner.sideAnswer = vi.fn(async () => ({
+        ...REPLY,
+        answer: "Again",
+        provider: "p",
+        model: "m",
+      }));
+      await vi.waitFor(async () => {
+        const next = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+        expect(next.status).toBe(200);
+      });
+    });
   });
   it("a message hands control back and reaches the model as steering before it resumes", async () => {
     const f = await setup();

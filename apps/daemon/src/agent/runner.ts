@@ -107,10 +107,20 @@ import { visualNavigation } from "./safety/visual-target.ts";
 import { AgentSession, abortable, type MessageTurn, SessionStoppedError } from "./session.ts";
 import { AgentSettings, RoleChoice } from "./settings.ts";
 import {
+  runSideAgent,
+  type SideEvent,
+  type SideModel,
+  SideNoAnswer,
+  type SideReply,
+  type SideSpendLedger,
+} from "./side/agent.ts";
+import { sideModels } from "./side/models.ts";
+import type { SideReaders } from "./side/tools.ts";
+import {
   SideQuestionError,
-  sideAnswerText,
   sideQuestionEvents,
   sideQuestionPrompt,
+  sideState,
 } from "./side-question.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
 import { resumable, unfinishedIn } from "./subagents.ts";
@@ -264,6 +274,13 @@ export interface AgentRunnerDeps {
     >;
     // Asks a task's fast model on the plan one question, with no tools.
     answer?(fast: { model: string; options?: ModelOptions }): ClaudeCodeAnswer;
+  };
+  // The side agent: what it can read and who can answer.
+  side?: {
+    api(role: ResolvedRole, side: SideModel["role"]): SideModel;
+    plan?(quick: { model: string; options?: ModelOptions }, side: SideModel["role"]): SideModel;
+    readers(sessionId: string, session: AgentSession | undefined, logFile: string): SideReaders;
+    ledger(logFile: string): SideSpendLedger;
   };
   // Asks a model billed per token one short question before the task's brain starts.
   quickModel?(
@@ -1378,19 +1395,15 @@ export class AgentRunner {
       ),
     };
   }
-  // A side question about a task, answered with no tools by its fast model, or by its main model at
-  // its least thinking. The task never hears of it: nothing of the question or the answer reaches
-  // its transcript or its log. A task that has ended answers as its next one would.
+  // A side question about a task, for the side agent: read-only, on any model the user has set up.
+  // The task never hears of it: nothing of the question or the answer reaches its transcript, its
+  // log, its budget or its turn on the computer. A task that has ended answers as its next one would.
   async sideAnswer(
     sessionId: string,
     question: string,
     signal: AbortSignal,
-  ): Promise<{
-    answer: string;
-    provider: string;
-    model: string;
-    failed?: { model: string; reason: string };
-  }> {
+    onEvent?: (event: SideEvent) => void,
+  ): Promise<SideReply> {
     let file: string;
     try {
       file = this.deps.eventLog.logFile(sessionId);
@@ -1398,26 +1411,64 @@ export class AgentRunner {
       throw new AgentError(404, "no such task");
     }
     if (!existsSync(file)) throw new AgentError(404, "no such task");
+    const side = this.deps.side;
+    if (!side) throw new SideQuestionError(409, "no-spare-model");
     const live = this.#runtime.get(sessionId);
     const rt = live && !live.session.stopped && live.selection.kind !== "none" ? live : undefined;
-    const helpers = this.#helpers(
-      rt?.selection ?? (await this.#restingSelection(sessionId, signal)),
-      rt?.session,
+    const claude = this.deps.claudeCode;
+    let problem: SideQuestionError | undefined;
+    const selection =
+      rt?.selection ??
+      (await this.#restingSelection(sessionId, signal).catch((error: unknown) => {
+        if (!(error instanceof SideQuestionError)) throw error;
+        problem = error;
+        return { kind: "none" as const };
+      }));
+    const models = await sideModels(selection, {
+      settings: this.deps.settings(),
+      keys: () => this.deps.keyd.secrets(),
+      catalog: () => this.deps.catalog(),
+      claudeReady: async () => (await claude?.status())?.state === "signed_in",
+      api: side.api,
+      ...(side.plan ? { plan: side.plan } : {}),
+    });
+    if (!models.length) throw problem ?? new SideQuestionError(409, "no-spare-model");
+    const readers = side.readers(sessionId, rt?.session, file);
+    const { system, prompt } = sideQuestionPrompt(
+      sideQuestionEvents(file),
+      question,
+      sideState(rt?.session, !!readers.desktop?.()),
     );
-    if (!helpers.length) throw new SideQuestionError(409, "no-spare-model");
-    const { system, prompt } = sideQuestionPrompt(sideQuestionEvents(file), question);
-    const { text, helper, failed } = await this.#answerFrom(helpers, system, prompt, signal);
-    return {
-      answer: sideAnswerText(text),
-      provider: helper.provider,
-      model: helper.model,
-      ...(failed ? { failed } : {}),
-    };
+    try {
+      return await runSideAgent({
+        models,
+        readers,
+        question,
+        system,
+        prompt,
+        signal,
+        spend: side.ledger(file),
+        ...(onEvent ? { onEvent } : {}),
+        onFailed: (model, reason) => {
+          if (model.role === "fast")
+            this.#fastFailure = { provider: model.provider, model: model.model, reason };
+        },
+        onAnswered: (model) => {
+          if (model.role === "fast") this.#fastFailure = undefined;
+        },
+      });
+    } catch (error) {
+      if (error instanceof SideNoAnswer)
+        throw new SideQuestionError(502, "no-answer", error.reason);
+      throw error;
+    }
   }
   async #restingSelection(sessionId: string, signal: AbortSignal): Promise<ModelSelection> {
     const saved = this.deps.settings();
     const main = this.taskModel(sessionId) ?? saved.main;
     if (!main) throw new SideQuestionError(409, "no-model");
+    // Its one Codex process would hold the account dot's next turn needs.
+    if (main.provider === CHATGPT) return { kind: "chatgpt" } as ModelSelection;
     try {
       return (await this.#selection(AgentSettings.parse({ ...saved, main }), undefined, signal))
         .selection;
