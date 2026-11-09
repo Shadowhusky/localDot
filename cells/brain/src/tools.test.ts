@@ -35,6 +35,7 @@ describe("the model's advertised tools and instructions", () => {
         "update_plan",
         "ask_user",
         "request_takeover",
+        "request_fix",
         "remember",
         "recall",
         "people",
