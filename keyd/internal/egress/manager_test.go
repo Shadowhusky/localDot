@@ -387,3 +387,107 @@ func freePort(t *testing.T) int {
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
 }
+
+// A computer a shared link's task works on: its web keys are refused while the task runs, and the
+// surrogates the task could read stop working once it ends.
+func TestHeldKeysRefuseEveryWebKeyUntilReleasedAndThenRetireTheOldSurrogates(t *testing.T) {
+	m, w := newManager(t)
+	var seen atomic.Value
+	w.tlsUpstream("api.example.test", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		seen.Store(r.Header.Get("Authorization"))
+		io.WriteString(rw, "ok")
+	}))
+	w.tlsUpstream("www.example.test", http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { io.WriteString(rw, "ok") }))
+	o, err := m.Open(OpenRequest{CellID: "c1", Role: "desktop", Secrets: []string{"weather"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := cellClient(w, o)
+	call := func(token string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest("GET", "https://api.example.test/now", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	if err := m.HoldKeys("c1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.HoldKeys("c1"); err != nil {
+		t.Fatalf("a second hold: %v", err)
+	}
+	if info, _ := m.Cell("c1"); !info.KeysHeld {
+		t.Fatalf("the cell does not say its keys are held: %+v", info)
+	}
+	if resp := call(o.Surrogates["weather"]); resp.StatusCode != 403 || resp.Header.Get("X-Keyd-Reason") != ReasonKeysHeld {
+		t.Fatalf("a web key while held: %d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+	}
+	if seen.Load() != nil {
+		t.Fatal("a held key reached its service")
+	}
+	if resp, err := client.Get("https://www.example.test/"); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("a request with no key while held: %v", err)
+	}
+	n, err := m.ReleaseKeys("c1")
+	if err != nil || n != 1 {
+		t.Fatalf("ReleaseKeys = %d, %v", n, err)
+	}
+	if info, _ := m.Cell("c1"); info.KeysHeld || len(info.Surrogates) != 0 {
+		t.Fatalf("after release: %+v", info)
+	}
+	if resp := call(o.Surrogates["weather"]); resp.StatusCode != 403 || resp.Header.Get("X-Keyd-Reason") != "unknown-surrogate" {
+		t.Fatalf("a surrogate from the hold after release: %d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+	}
+	fresh, err := m.Mint("c1", []string{"weather"})
+	if err != nil || fresh["weather"] == o.Surrogates["weather"] {
+		t.Fatalf("Mint after release: %v %v", fresh, err)
+	}
+	if resp := call(fresh["weather"]); resp.StatusCode != 200 || seen.Load() != "Bearer "+realValue {
+		t.Fatalf("a fresh surrogate after release: %d %v", resp.StatusCode, seen.Load())
+	}
+	w.waitLine(func(l audit.Line) bool { return l.Reason == "keys-hold" })
+	w.waitLine(func(l audit.Line) bool {
+		return l.Reason == "keys-release" && strings.Contains(l.Detail, "1 surrogate")
+	})
+	if err := m.HoldKeys("nope"); !errors.Is(err, ErrUnknownCell) {
+		t.Fatalf("hold on an unknown cell: %v", err)
+	}
+	if _, err := m.ReleaseKeys("nope"); !errors.Is(err, ErrUnknownCell) {
+		t.Fatalf("release on an unknown cell: %v", err)
+	}
+}
+
+// A surrogate minted while the hold stands (a key saved meanwhile) is held too.
+func TestHeldKeysCoverSurrogatesMintedDuringTheHold(t *testing.T) {
+	m, w := newManager(t)
+	var reached atomic.Bool
+	w.tlsUpstream("api.example.test", http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		reached.Store(true)
+		io.WriteString(rw, "ok")
+	}))
+	o, err := m.Open(OpenRequest{CellID: "c1", Role: "desktop", Secrets: []string{"weather"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.HoldKeys("c1"); err != nil {
+		t.Fatal(err)
+	}
+	minted, err := m.Mint("c1", []string{"weather"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("GET", "https://api.example.test/", nil)
+	req.Header.Set("Authorization", "Bearer "+minted["weather"])
+	resp, err := cellClient(w, o).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 403 || resp.Header.Get("X-Keyd-Reason") != ReasonKeysHeld || reached.Load() {
+		t.Fatalf("a key minted during the hold: %d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+	}
+}

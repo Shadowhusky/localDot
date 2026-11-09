@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { LiveSessions } from "../gateway/live.ts";
+import { RemoteLinks } from "../remote/links.ts";
 import type { ResolvedRole } from "./bindings.ts";
 import type { BrainCell, OpenBrain } from "./brain-cell.ts";
 import { Conversations } from "./conversation.ts";
@@ -144,8 +145,11 @@ function setup(initial: AgentSettings = { main: SONNET, models: [HAIKU, OPUS] })
     inputTokens: 1,
     outputTokens: 1,
   }));
+  const links = new RemoteLinks(home);
   const runner = new AgentRunner({
     home,
+    links,
+    keysHeld: { hold: async () => {}, release: async () => {} },
     eventLog: log,
     live,
     cell: (id) =>
@@ -196,8 +200,33 @@ function setup(initial: AgentSettings = { main: SONNET, models: [HAIKU, OPUS] })
     },
   });
   fixtures.push({ runner, log, home });
+  // A task a shared link starts, as its route starts one.
+  const guestTask = async (
+    task: string,
+    link: { maxTasks?: number; apps?: boolean } = {},
+  ): Promise<{ session: AgentSession; link: string }> => {
+    const { grant } = links.create({
+      label: "Alex",
+      expiresInHours: null,
+      maxTasks: link.maxTasks ?? 5,
+      taskBudgetUSD: 0.5,
+      apps: link.apps ?? false,
+      model: SONNET,
+    });
+    const reservation = links.reserve(grant.id);
+    const session = await runner.start(cellId, task, undefined, {
+      sender: grant.id,
+      guest: { apps: grant.apps },
+      main: reservation.model,
+      budgetUSD: reservation.budgetUSD,
+    });
+    reservation.finish(session.id);
+    return { session, link: grant.id };
+  };
   return {
     home,
+    links,
+    guestTask,
     log,
     live,
     runner,
@@ -514,20 +543,106 @@ describe("a message's model", () => {
     expect(f.events(nextId, "message.user")[1]?.data).toMatchObject({ text: "And this" });
   });
 
-  it("keeps a shared link's limits on the task its conversation moves to", async () => {
+  it("keeps a shared link's task its link's, limits and all, on the task it moves to", async () => {
     const f = setup();
     f.hold(true);
-    const guest = { apps: false };
-    const session = await f.runner.start(f.cellId, "First", undefined, { sender: "link", guest });
+    const { session, link } = await f.guestTask("First");
     await until(() => f.boots.length === 1);
     const ref = { provider: "claude-code", model: "opus" };
-    session.enqueue("On Claude Code", "link", await f.runner.messageTurn(session.id, ref));
+    session.enqueue("On Claude Code", link, await f.runner.messageTurn(session.id, ref));
     f.hold(false);
     f.finish();
     await until(() => f.claudeRuns.length > 0);
     const next = f.conversations.current() as string;
     expect(next).not.toBe(session.id);
-    expect(f.runner.get(next)?.guest).toEqual(guest);
+    expect(f.runner.get(next)?.guest).toEqual({ apps: false });
+    expect(f.links.owns(link, next)).toBe(true);
+    expect(f.links.list()[0]?.tasks).toBe(2);
+    expect(f.events(next, "session.start")[0]?.data.link).toEqual({ id: link, apps: false });
+    expect(f.events(next, "message.user")[0]?.data.link).toBe(link);
+  });
+
+  it("keeps a shared link's task its link's when the owner's model card moves it on", async () => {
+    const f = setup();
+    f.hold(true);
+    const { session, link } = await f.guestTask("Find me a flight");
+    await until(() => f.boots.length === 1);
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "provider limit reached" });
+    expect(session.openBlockers).toHaveLength(1);
+    await f.runner.retryOnModel(session.id, { provider: "claude-code", model: "opus" });
+    f.hold(false);
+    f.finish();
+    await until(() => f.claudeRuns.length > 0);
+    const next = f.conversations.current() as string;
+    expect(next).not.toBe(session.id);
+    const moved = f.runner.get(next);
+    expect(moved?.guest).toEqual({ apps: false });
+    expect(moved?.recent).toEqual([]);
+    expect(f.links.owns(link, next)).toBe(true);
+    expect(f.links.list()[0]?.tasks).toBe(2);
+    expect(f.events(next, "session.start")[0]?.data.link).toEqual({ id: link, apps: false });
+  });
+
+  it("moves no shared link's task on once its link has ended or used its tasks", async () => {
+    for (const ended of ["revoked", "used"] as const) {
+      const f = setup();
+      f.hold(true);
+      const { session, link } = await f.guestTask("Find me a flight", { maxTasks: 1 });
+      await until(() => f.boots.length === 1);
+      if (ended === "revoked") f.links.revoke(link);
+      session.setStatus("paused");
+      session.append("agent.state", { state: "paused", reason: "provider limit reached" });
+      await expect(
+        f.runner.retryOnModel(session.id, { provider: "claude-code", model: "opus" }),
+      ).rejects.toThrow(/link/);
+      expect(session.openBlockers).toHaveLength(1);
+      expect(f.conversations.current()).toBe(session.id);
+      expect(f.links.list()[0]?.tasks).toBe(1);
+    }
+  });
+
+  it("starts the owner's own follow-up to a shared link's task as theirs", async () => {
+    const f = setup();
+    const { session, link } = await f.guestTask("Find me a flight");
+    await until(() => f.boots.length === 1);
+    session.stop();
+    await f.live.settled(session.id);
+    const next = await f.runner.start(f.cellId, "Book the cheapest", undefined, {
+      continues: session.id,
+      byOwner: true,
+    });
+    expect(next.guest).toBeUndefined();
+    expect(f.links.owns(link, next.id)).toBe(false);
+    expect(f.events(next.id, "session.start")[0]?.data.link).toBeUndefined();
+  });
+
+  it("carries a shared link's task on from its record when it is no longer running", async () => {
+    const f = setup();
+    const { grant } = f.links.create({
+      label: "Alex",
+      expiresInHours: null,
+      maxTasks: 5,
+      model: SONNET,
+    });
+    const earlier = f.log.createSession("Earlier");
+    f.log.append(earlier, {
+      type: "session.start",
+      agent: "main",
+      data: {
+        screen: { w: 1280, h: 800, scale: 1 },
+        os: "linux",
+        link: { id: grant.id, apps: false },
+      },
+    });
+    f.log.append(earlier, {
+      type: "message.user",
+      agent: "main",
+      data: { messageId: ulid(), text: "Find me a flight", kind: "task", link: grant.id },
+    });
+    const next = await f.runner.start(f.cellId, "Carry on", undefined, { continues: earlier });
+    expect(next.guest).toEqual({ apps: false });
+    expect(f.links.owns(grant.id, next.id)).toBe(true);
   });
 
   it("stays on the model at hand, and says so, when another runtime can't start", async () => {

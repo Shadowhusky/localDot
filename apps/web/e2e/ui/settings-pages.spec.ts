@@ -109,7 +109,7 @@ test("owner creates a permanent limited link and revokes it from the same page",
   const apps = group.getByRole("switch", { name: "Use your apps, keys and browser", exact: true });
   await expect(apps).not.toBeChecked();
   await expect(apps).toHaveAccessibleDescription(
-    "Their tasks can use your connected apps, saved keys and the web browser you're signed in to.",
+    "Their tasks can use your connected apps, saved keys and the web browser you're signed in to. Sign-ins saved on the computer itself, such as gh or git, work for every link.",
   );
   await group.getByRole("button", { name: "Create shared link", exact: true }).click();
   await expect(group.getByRole("textbox", { name: "New shared link", exact: true })).toBeVisible();

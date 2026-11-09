@@ -177,7 +177,7 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
         <Switch
           className="ui-group-row"
           label="Use your apps, keys and browser"
-          description="Their tasks can use your connected apps, saved keys and the web browser you're signed in to."
+          description="Their tasks can use your connected apps, saved keys and the web browser you're signed in to. Sign-ins saved on the computer itself, such as gh or git, work for every link."
           checked={apps}
           onCheckedChange={setApps}
         />

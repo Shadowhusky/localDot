@@ -228,7 +228,11 @@ serviceReadiness = serviceIdentity
       (bootId) => browserRecovery.availableFor(bootId),
     )
   : undefined;
-const keydWiring = new CellKeydWiring({ keyd, docker });
+const keydWiring = new CellKeydWiring({
+  keyd,
+  docker,
+  held: (id) => agent?.runner.holdsKeys(id) ?? false,
+});
 let agent: ReturnType<typeof createAgent> | undefined;
 let browser: BrowserOrchestrator | undefined;
 let idlePages: BrowserIdlePages | undefined;
@@ -467,6 +471,9 @@ keydMonitor.subscribe((now, before) => {
     void orchestrator
       .rewireIfLost(cell.id)
       .catch(() => console.error("keyd: a computer could not reconnect"));
+    void agent?.runner
+      .releaseStrayHold(cell.id)
+      .catch(() => console.error("keyd: a computer's saved keys could not be given back"));
   }
 });
 const searchIndex = new SearchIndex(home, { sessions: eventLog });
@@ -521,6 +528,18 @@ const systemClock = {
 };
 const offerScanner = new TaskScanner(eventLog);
 agent = createAgent({
+  links: {
+    reserve: (id) => remoteAccess.links.reserve(id),
+    active: (id) => remoteAccess.links.active(id),
+  },
+  keysHeld: {
+    hold: (id) => keyd.holdKeys(id),
+    held: async (id) => (await keyd.cell(id))?.keysHeld === true,
+    release: async (id) => {
+      await keyd.releaseKeys(id);
+      await orchestrator.refreshKeys(id);
+    },
+  },
   dockerDown: () => runtimeStartup.snapshot().then(({ docker }) => docker === "unavailable"),
   previewOffers: (id, reply) =>
     turnOffers(

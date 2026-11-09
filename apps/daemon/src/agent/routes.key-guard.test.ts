@@ -185,7 +185,12 @@ describe("independent key safeguard at all four daemon text ingresses", () => {
     const f = await fixture();
     const task = `请整理 monthly report, sk-proj-EXAMPLE and ${"deadbeef".repeat(8)}`;
     expect((await f.send(`/api/cells/${f.cell}/agent`, { task })).status).toBe(202);
-    expect(f.start.mock.calls[0]).toEqual([f.cell, task, expect.any(AbortSignal)]);
+    expect(f.start.mock.calls[0]).toEqual([
+      f.cell,
+      task,
+      expect.any(AbortSignal),
+      { byOwner: true },
+    ]);
     for (const kind of ["steer", "followup"] as const)
       expect(
         (await f.send(f.endpoint("messages"), { kind, text: `${kind}: ${task}` })).status,

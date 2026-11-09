@@ -57,7 +57,10 @@ describe("revise an ended task's file", () => {
     expect(task).toMatch(
       /^Revise totals\.csv: add a total row\n\n\(totals\.csv v1 is on this computer at ~\/Downloads\/revise-/,
     );
-    expect(opts).toEqual({ revises: { sessionId: f.id, name: "totals.csv", version: 1 } });
+    expect(opts).toEqual({
+      revises: { sessionId: f.id, name: "totals.csv", version: 1 },
+      byOwner: true,
+    });
     expect(f.released).toHaveBeenCalledOnce();
   });
   it("redacts the user's words before the task starts", async () => {

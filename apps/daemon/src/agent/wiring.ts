@@ -137,6 +137,9 @@ import { UserUploads } from "./user-uploads.ts";
 import { WebCell } from "./web/cell.ts";
 export interface AgentWiringDeps {
   fences?: import("./safety/fences.ts").ComputerFences;
+  // The shared links whose tasks a carried-on task counts against.
+  links?: AgentRunnerDeps["links"];
+  keysHeld?: AgentRunnerDeps["keysHeld"];
   home: string;
   installToken: string;
   eventLog: EventLog;
@@ -897,6 +900,8 @@ export function createAgent(d: AgentWiringDeps) {
     recentActivity,
     transcripts,
     conversations,
+    ...(d.links ? { links: d.links } : {}),
+    ...(d.keysHeld ? { keysHeld: d.keysHeld } : {}),
     installSkills,
     prepareDesktop: (session) => prepareDesktop(session.cellId, session.id, session.abort.signal),
     waitForUploads: (id, signal) => transfers.wait(id, signal),

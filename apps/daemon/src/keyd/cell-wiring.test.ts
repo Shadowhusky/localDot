@@ -106,6 +106,25 @@ describe("CellKeydWiring.refresh", () => {
     expect(cell.valid.size).toBe(0);
   });
 
+  it("opens a computer again with its keys still held while a shared link's task needs them", async () => {
+    const record = sampleRecord("01JXYZ0000000000000000ABCD");
+    const client = new KeydClient(keyd.socketPath, 1000);
+    const dockerClient = new DockerClient(docker.socketPath);
+    vi.spyOn(dockerClient, "request").mockResolvedValue({ State: { Running: false } });
+    const write = vi.spyOn(dockerClient, "putArchive").mockResolvedValue();
+    let held = true;
+    const wiring = new CellKeydWiring({ keyd: client, docker: dockerClient, held: () => held });
+    keyd.records.set("weather", http("weather"));
+    write.mockImplementationOnce(async () => {
+      expect(keyd.cells.get(record.id)?.keysHeld).toBe(true);
+    });
+    await wiring.wire(record);
+    expect(keyd.cells.get(record.id)?.keysHeld).toBe(true);
+    held = false;
+    await wiring.wire(record);
+    expect(keyd.cells.get(record.id)?.keysHeld).toBe(false);
+  });
+
   it("never gives the computer a stand-in for a connector's key", async () => {
     const record = sampleRecord("01JXYZ0000000000000000ABCD");
     const dockerClient = new DockerClient(docker.socketPath);

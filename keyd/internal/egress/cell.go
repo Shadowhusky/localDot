@@ -55,6 +55,9 @@ const (
 	ReasonOAuthDown     = "oauth-unavailable"
 	ReasonNoAudit       = "audit-unavailable"
 	ReasonConnectionCap = "connection-cap"
+	// The daemon holds this computer's web keys while a shared link's task without the owner's
+	// apps runs on it: its programs share one proxy, so none of them may use one.
+	ReasonKeysHeld = "keys-held-for-shared-link"
 )
 
 const (
@@ -85,6 +88,7 @@ type Cell struct {
 	gen            *generation
 	closed         bool
 	policyChanging bool
+	keysHeld       bool
 }
 
 func Open(cfg Config, deps Deps) (*Cell, error) {
@@ -175,6 +179,19 @@ func (c *Cell) Close() error {
 	}
 	g.stop()
 	return err
+}
+
+// HoldKeys refuses every surrogate swap the cell asks for until it is released.
+func (c *Cell) HoldKeys(held bool) {
+	c.mu.Lock()
+	c.keysHeld = held
+	c.mu.Unlock()
+}
+
+func (c *Cell) KeysHeld() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.keysHeld
 }
 
 // Revoke is the kill switch for one cell: every upstream connection and tunnel closes, in-flight

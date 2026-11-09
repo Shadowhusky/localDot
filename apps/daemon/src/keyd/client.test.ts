@@ -92,6 +92,25 @@ describe("KeydClient", () => {
     expect(await client.cell("c1")).toBeUndefined();
   });
 
+  it("holds a cell's keys, and releases them with the surrogates it had", async () => {
+    await client.putSecret(weather, sealed);
+    const opened = await client.openCell({
+      cellId: "c1",
+      role: "desktop",
+      port: 4791,
+      secrets: ["weather"],
+    });
+    await client.holdKeys("c1");
+    expect(keyd.calls.at(-1)).toMatchObject({ method: "PUT", path: "/v1/cells/c1/keys-held" });
+    expect(keyd.cells.get("c1")?.keysHeld).toBe(true);
+    expect((await client.cell("c1"))?.keysHeld).toBe(true);
+    expect(await client.releaseKeys("c1")).toBe(1);
+    expect(keyd.calls.at(-1)).toMatchObject({ method: "DELETE", path: "/v1/cells/c1/keys-held" });
+    expect(keyd.cells.get("c1")?.keysHeld).toBe(false);
+    expect(keyd.cells.get("c1")?.valid.has(opened.surrogates?.weather ?? "")).toBe(false);
+    await expect(client.holdKeys("nope")).rejects.toMatchObject({ status: 404 });
+  });
+
   it("refuses a reply that is not what keyd promises", async () => {
     keyd.failures.set("GET /v1/status", { status: 200, code: "x" });
     await expect(client.status()).rejects.toMatchObject({ code: "bad-reply" });

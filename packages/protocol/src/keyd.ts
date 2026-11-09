@@ -284,6 +284,8 @@ export const KeydCellInfo = z.object({
   intercepts: z.array(z.string()).nullish(),
   surrogates: z.array(z.object({ secretId: z.string(), surrogateId: z.string() })).nullish(),
   task: z.object({ id: z.string(), limitUSD: z.number(), spentUSD: z.number() }).nullish(),
+  // keyd refuses the cell's keys for a shared link's task.
+  keysHeld: z.boolean().nullish(),
 });
 export type KeydCellInfo = z.infer<typeof KeydCellInfo>;
 

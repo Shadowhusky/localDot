@@ -38,6 +38,9 @@ const envelope = {
 const event = <T extends string, D extends z.ZodType>(type: T, data: D) =>
   z.object({ ...envelope, type: z.literal(type), data });
 
+// A shared link's id, as the daemon keeps it beside the link's hashed secret.
+const LinkId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+
 export const Risk = z.enum(["none", "low", "medium", "high"]);
 const PlanStatus = z.enum(["todo", "doing", "done", "skipped"]);
 
@@ -73,6 +76,8 @@ export const SessionStart = event(
     research: ResearchBudget.optional(),
     // The dot it starts as; Auto may choose another just after (persona.choice).
     persona: PersonaId.optional(),
+    // The shared link it works for, and whether that link allows the owner's apps.
+    link: z.strictObject({ id: LinkId, apps: z.boolean() }).optional(),
   }),
 );
 export const SessionEnd = event(
@@ -411,6 +416,8 @@ export const MessageUser = event(
     // What delivering it early would cost: a switch ends what dot has running, and a hand-over can
     // only happen once the task has finished.
     waitsFor: z.enum(["switch", "handover"]).optional(),
+    // The shared link it came through; left out, the owner's.
+    link: LinkId.optional(),
   }),
 );
 // A message its task's Stop left unanswered says so: cancelled, it waits unsent for its writer to

@@ -205,7 +205,9 @@ credential reflections from responses. The cell's web traffic reaches keyd throu
 computer's keyd listener and stops its containers. **Resume computer** revokes again and refreshes
 the stand-ins while the computer is still frozen; it requires keyd to be running. Existing
 processes keep their revoked values: start a new shell or reload `/etc/localdot/cell/surrogates.sh`
-to use the fresh stand-ins. If keyd has restarted, resuming starts a fresh desktop with the same home volume. The Keys sheet and
+to use the fresh stand-ins. While a shared link's task without the owner's apps runs on a computer, keyd holds its keys
+(`PUT`/`DELETE /v1/cells/<id>/keys-held`) and refuses every stand-in it sends; releasing drops them and the
+daemon writes fresh ones ([shared links](remote-access.md#what-a-guests-dot-can-use)). If keyd has restarted, resuming starts a fresh desktop with the same home volume. The Keys sheet and
 `pnpm --filter @localdot/daemon run doctor` report whether keyd knows this network's public address,
 which it refuses to dial (the hairpin guard).
 

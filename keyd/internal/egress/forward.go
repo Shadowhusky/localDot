@@ -86,6 +86,10 @@ func (c *Cell) forward(w http.ResponseWriter, r *http.Request, rt route) {
 		c.deny(w, line, http.StatusForbidden, v.Reason)
 		return
 	}
+	if len(v.Swaps) > 0 && c.KeysHeld() {
+		c.deny(w, line, http.StatusForbidden, ReasonKeysHeld)
+		return
+	}
 	if err := c.freshen(r.Context(), v.Swaps); err != nil {
 		c.refuseSecret(w, line, err)
 		return
@@ -107,6 +111,8 @@ func (c *Cell) forward(w http.ResponseWriter, r *http.Request, rt route) {
 // left unrecorded.
 var errNoAudit = errors.New("the audit log cannot be written")
 
+var errKeysHeld = errors.New("the cell's keys are held")
+
 // freshen makes sure the sign-ins behind these surrogates are good to send before they are swapped,
 // so that a value refreshed here is the one swap reads.
 func (c *Cell) freshen(ctx context.Context, swaps []keys.Entry) error {
@@ -125,6 +131,9 @@ func (c *Cell) freshen(ctx context.Context, swaps []keys.Entry) error {
 func (c *Cell) swap(h http.Header, swaps []keys.Entry) error {
 	if len(swaps) == 0 {
 		return nil
+	}
+	if c.KeysHeld() {
+		return errKeysHeld
 	}
 	if c.deps.Audit.Err() != nil {
 		return errNoAudit
@@ -149,6 +158,8 @@ func (c *Cell) refuseSecret(w http.ResponseWriter, l audit.Line, err error) {
 		c.deny(w, l, http.StatusServiceUnavailable, ReasonOAuthDown)
 	case errors.Is(err, errNoAudit):
 		c.deny(w, l, http.StatusServiceUnavailable, ReasonNoAudit)
+	case errors.Is(err, errKeysHeld):
+		c.deny(w, l, http.StatusForbidden, ReasonKeysHeld)
 	case errors.Is(err, vault.ErrLocked):
 		c.deny(w, l, http.StatusLocked, ReasonVaultLocked)
 	case errors.As(err, &reentry):

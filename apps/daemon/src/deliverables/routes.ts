@@ -65,7 +65,10 @@ export interface ReviseDeps {
     cellId: string,
     task: string,
     signal: AbortSignal,
-    opts: { revises: { sessionId: string; name: string; version: number | null } },
+    opts: {
+      revises: { sessionId: string; name: string; version: number | null };
+      byOwner: true;
+    },
   ): Promise<{ id: string }>;
   access(cellId: string, signal: AbortSignal): UploadAccess | undefined;
   redactUserText(text: string, sessionId?: string, cellId?: string): string;
@@ -386,7 +389,7 @@ function reviseRoute(
           body.cellId,
           deps.redactUserText(task, undefined, body.cellId),
           c.req.raw.signal,
-          { revises: { sessionId: id, name, version: chosen.version } },
+          { revises: { sessionId: id, name, version: chosen.version }, byOwner: true },
         );
         return c.json(ReviseReply.parse({ sessionId: session.id }), 202);
       } catch (error) {

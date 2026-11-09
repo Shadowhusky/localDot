@@ -111,6 +111,13 @@ for (const [name, setting] of Object.entries(LINKS))
     expect((await guest(`/api/sessions/${ownedSessions[0]}/history`)).status()).toBe(200);
     expect((await guest(`/api/agent/sessions/${ownedSessions[0]}`)).status()).toBe(200);
 
+    // The web browser is signed in as the owner: only a link with their apps watches it.
+    const moved = await page.request.post(`${fixture.origin}/__qa/screen?to=browser`);
+    expect(moved.ok()).toBe(true);
+    await expect(page.locator(".shared-screen-status")).toHaveText(
+      "apps" in setting ? "Browser" : "Computer",
+    );
+
     if ("replay" in setting) {
       await page.getByRole("button", { name: "Replays", exact: true }).click();
       const replays = page.getByRole("dialog", { name: "Replays" });

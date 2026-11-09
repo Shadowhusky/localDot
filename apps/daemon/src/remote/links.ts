@@ -205,7 +205,7 @@ export class RemoteLinks {
       return (
         /^\/api\/(whoami|clock|remote-session|cells|runtime|conversation)$/.test(path) ||
         /^\/api\/cells\/[0-9A-Z]{26}(?:\/(?:live|status))?$/.test(path) ||
-        /^\/api\/browsers\/[0-9A-Z]{26}(?:\/status)?$/.test(path) ||
+        (row.apps && /^\/api\/browsers\/[0-9A-Z]{26}(?:\/status)?$/.test(path)) ||
         /^\/api\/agent\/sessions\/[0-9A-Z]{26}$/.test(path) ||
         /^\/api\/sessions\/[0-9A-Z]{26}\/(?:events|history|stream|clock)$/.test(path)
       );
@@ -214,7 +214,9 @@ export class RemoteLinks {
     if (task !== undefined && !this.owns(row.id, task)) return false;
     if (path === "/api/remote-session/model") return row.chooseModel;
     return (
-      /^\/api\/cells\/[0-9A-Z]{26}\/(?:agent|stream-ticket|browser-stream-ticket)$/.test(path) ||
+      /^\/api\/cells\/[0-9A-Z]{26}\/(?:agent|stream-ticket)$/.test(path) ||
+      // The web browser is signed in as the owner.
+      (row.apps && /^\/api\/cells\/[0-9A-Z]{26}\/browser-stream-ticket$/.test(path)) ||
       path === "/api/conversation/new" ||
       /^\/api\/agent\/sessions\/[0-9A-Z]{26}\/(?:messages|stop|answer)$/.test(path)
     );
