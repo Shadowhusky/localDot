@@ -212,6 +212,23 @@
                 "research",
                 "design"
               ]
+            },
+            "link": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{1,64}$"
+                },
+                "apps": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "apps"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -632,6 +649,45 @@
             "next": {
               "type": "string",
               "maxLength": 200
+            },
+            "autoContinue": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "at": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "checking": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "at"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "off": {
+                      "type": "string",
+                      "enum": [
+                        "cancelled",
+                        "gave_up",
+                        "disabled"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "off"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
             }
           },
           "required": [
@@ -4254,6 +4310,10 @@
                 "switch",
                 "handover"
               ]
+            },
+            "link": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
             }
           },
           "required": [
