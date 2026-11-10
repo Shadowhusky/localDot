@@ -1,5 +1,9 @@
+import type { AgentRoleChoice } from "@localdot/protocol";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { type ApiClient, ApiError } from "../lib/api.ts";
+import { providerName } from "../settings/choices.ts";
+import type { ModelNames } from "../settings/model-names.ts";
+import { type ModelGroup, type ModelOption, optionId } from "../settings/model-options.ts";
 import type { ShareLink } from "../settings/ShareLinkControls.tsx";
 
 export type GuestGrant = ShareLink & {
@@ -22,7 +26,7 @@ export const useGuest = () => useContext(GuestContext);
 
 const ID = "[0-9A-Z]{26}";
 const READS = [
-  /^\/api\/(?:whoami|clock|remote-session|cells|runtime|conversation)$/,
+  /^\/api\/(?:whoami|clock|remote-session|cells|runtime|conversation|conversations)$/,
   new RegExp(`^/api/cells/${ID}(?:/(?:live|status))?$`),
   new RegExp(`^/api/agent/sessions/${ID}$`),
   new RegExp(`^/api/sessions/${ID}/(?:events|history|stream|clock)$`),
@@ -33,25 +37,60 @@ const RECORDINGS = new RegExp(
 );
 const WRITES = [
   new RegExp(`^/api/cells/${ID}/(?:agent|stream-ticket)$`),
-  /^\/api\/conversation\/new$/,
+  /^\/api\/conversation\/(?:new|continue)$/,
 ];
 const BROWSER_WRITE = new RegExp(`^/api/cells/${ID}/browser-stream-ticket$`);
 const OWN_TASK = new RegExp(`^/api/agent/sessions/(${ID})/(?:messages|stop|answer)$`);
+const TASK = /^\/api\/(?:agent\/)?(?:sessions|conversations)\/([^/]*)/;
+
+// What a model reads as: the name the computer's catalog gives it; a plan's "default" by its plan.
+function modelName(grant: GuestGrant, provider: string, model: string): string {
+  const named = grant.names?.find((each) => each.provider === provider && each.model === model);
+  if (named) return named.name;
+  return model === "default" ? `Default · ${providerName(provider)}` : model;
+}
+
+export function guestModelName(grant: GuestGrant, choice: AgentRoleChoice): string {
+  return modelName(grant, choice.provider, choice.model);
+}
+
+export function guestNames(grant: GuestGrant): ModelNames {
+  return {
+    provider: (route) => route,
+    name: (route, model) =>
+      grant.names?.find((each) => each.provider === route && each.model === model)?.name ??
+      grant.names?.find((each) => each.model === model)?.name ??
+      modelName(grant, route, model),
+  };
+}
+
+// The link's models for the composer's model menu, under their providers' names.
+export function guestModelGroups(grant: GuestGrant): ModelGroup[] {
+  const groups = new Map<string, ModelOption[]>();
+  for (const choice of grant.chooseModel ? grant.models : [grant.model]) {
+    const label = providerName(choice.provider);
+    groups.set(label, [
+      ...(groups.get(label) ?? []),
+      { id: optionId(choice), name: guestModelName(grant, choice), choice },
+    ]);
+  }
+  return [...groups].map(([label, options]) => ({ label, options }));
+}
 
 // What the daemon lets a link do (`RemoteLinks.permits`), so the page asks for nothing it would be
 // refused. The daemon still decides: this only keeps refused requests off the wire.
 export function guestPermits(grant: GuestGrant, method: string, address: string): boolean {
   const path = address.split(/[?#]/)[0] ?? "";
+  const task = TASK.exec(path)?.[1];
+  const own = task === undefined || grant.ownedSessions.includes(task);
   if (method === "GET" || method === "HEAD")
     return (
       (grant.replay && (RECORDINGS.test(path) || path === "/api/session-index")) ||
-      (grant.apps && BROWSER_READ.test(path)) ||
-      READS.some((rule) => rule.test(path))
+      (own && ((grant.apps && BROWSER_READ.test(path)) || READS.some((rule) => rule.test(path))))
     );
-  if (method !== "POST") return false;
+  if (method !== "POST" || !own) return false;
   if (path === "/api/remote-session/model") return grant.chooseModel;
-  const task = OWN_TASK.exec(path)?.[1];
-  if (task) return grant.ownedSessions.includes(task);
+  if (OWN_TASK.test(path)) return true;
   return (grant.apps && BROWSER_WRITE.test(path)) || WRITES.some((rule) => rule.test(path));
 }
 
@@ -64,7 +103,7 @@ export function guestApi(api: ApiClient, guest: () => Guest | null): ApiClient {
     if (!now) return false;
     if (guestPermits(now.grant, method, path)) return true;
     // A task this link just started may not be on its list yet.
-    if (!OWN_TASK.test(path.split(/[?#]/)[0] ?? "")) return false;
+    if (!TASK.test(path.split(/[?#]/)[0] ?? "")) return false;
     await now.refresh().catch(() => {});
     const again = guest();
     return !!again && guestPermits(again.grant, method, path);

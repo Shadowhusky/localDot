@@ -443,28 +443,32 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
   };
   const start = () => {
     let opened = false;
-    const socket = openSocket({
-      url: api.socketUrl("/api/events"),
-      protocols: api.socketProtocols(),
-      handlers: {
-        onOpen: () => {
-          if (opened) refresh();
-          opened = true;
-        },
-        onMessage: (data) => {
-          let value: unknown;
-          try {
-            value = JSON.parse(data);
-          } catch {
-            return;
-          }
-          const live = ConversationLiveEvent.safeParse(value);
-          if (live.success) change(live.data);
-          const filed = ConversationOrganizedEvent.safeParse(value);
-          if (filed.success) reorganized(filed.data);
-        },
-      },
-    });
+    // A shared link hears no app events, which name the owner's conversations: it reads its own.
+    const socket =
+      api.permits?.("GET", "/api/events") === false
+        ? null
+        : openSocket({
+            url: api.socketUrl("/api/events"),
+            protocols: api.socketProtocols(),
+            handlers: {
+              onOpen: () => {
+                if (opened) refresh();
+                opened = true;
+              },
+              onMessage: (data) => {
+                let value: unknown;
+                try {
+                  value = JSON.parse(data);
+                } catch {
+                  return;
+                }
+                const live = ConversationLiveEvent.safeParse(value);
+                if (live.success) change(live.data);
+                const filed = ConversationOrganizedEvent.safeParse(value);
+                if (filed.success) reorganized(filed.data);
+              },
+            },
+          });
     const looked = () => {
       if (document.hidden) clearTimeout(timer);
       else refresh();
@@ -472,7 +476,7 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
     document.addEventListener("visibilitychange", looked);
     window.addEventListener("focus", looked);
     return () => {
-      socket.close();
+      socket?.close();
       document.removeEventListener("visibilitychange", looked);
       window.removeEventListener("focus", looked);
       clearTimeout(timer);
@@ -492,11 +496,6 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
     hold,
     drop,
     use() {
-      // A shared link has no list of conversations: it is known, and empty.
-      if (api.permits?.("GET", "/api/conversations") === false) {
-        if (!store.state.entries) set({ ...store.state, entries: [] });
-        return () => {};
-      }
       if (users++ === 0) stop = start();
       read();
       return () => {

@@ -4,6 +4,7 @@ import { sendAfter } from "../agent/queued-draft.ts";
 import { requestResearch } from "../agent/research.ts";
 import type { HudActionKind } from "../cells/hud-state.ts";
 import { DotAvatar } from "../dot/DotAvatar.tsx";
+import { useGuest } from "../remote/guest.ts";
 import type { HudAction } from "../session/status.ts";
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { Button } from "../ui/Button.tsx";
@@ -143,6 +144,7 @@ export function ConversationMenuItems({
   onNew,
   stop,
   onStop,
+  onChatSettings,
 }: {
   dotHidden: boolean;
   look: readonly Wearable[];
@@ -165,7 +167,11 @@ export function ConversationMenuItems({
   onNew(): void;
   stop?: HudAction;
   onStop(): void;
+  // A shared link's own settings, in Settings' place.
+  onChatSettings?(): void;
 }) {
+  // A shared link's guest has what the link allows: no workspace, organizing or other views.
+  const guest = useGuest();
   return (
     <>
       {dotHidden && (
@@ -183,48 +189,63 @@ export function ConversationMenuItems({
           <MenuSeparator />
         </>
       )}
-      <MenuItem icon="list" onSelect={onWorkspace}>
-        {PANEL_NAME}
-      </MenuItem>
-      <MenuItem
-        icon="history"
-        disabledReason={hasRecordings ? undefined : NO_RECORDINGS}
-        onSelect={onReplay}
-      >
-        Replay
-      </MenuItem>
+      {!guest && (
+        <MenuItem icon="list" onSelect={onWorkspace}>
+          {PANEL_NAME}
+        </MenuItem>
+      )}
+      {(!guest || guest.grant.replay) && (
+        <MenuItem
+          icon="history"
+          disabledReason={hasRecordings ? undefined : NO_RECORDINGS}
+          onSelect={onReplay}
+        >
+          Replay
+        </MenuItem>
+      )}
+      {onChatSettings && (
+        <MenuItem icon="settings" onSelect={onChatSettings}>
+          Chat settings
+        </MenuItem>
+      )}
       {model && (
         <MenuItem icon="cpu" disabledReason={model.reason} onSelect={model.open}>
           {model.label}
         </MenuItem>
       )}
-      {entry && (
+      {entry && !guest && (
         <MenuItem icon={entry.pinned ? "pin-off" : "pin"} onSelect={onPin}>
           {entry.pinned ? "Unpin" : "Pin to top"}
         </MenuItem>
       )}
-      {entry && (
+      {entry && !guest && (
         <MenuItem icon="type" onSelect={onRename}>
           Rename
         </MenuItem>
       )}
-      <MenuItem icon="globe" disabledReason={researchReason} onSelect={requestResearch}>
-        Research a question
-      </MenuItem>
+      {!guest && (
+        <MenuItem icon="globe" disabledReason={researchReason} onSelect={requestResearch}>
+          Research a question
+        </MenuItem>
+      )}
       {sendsAfter && (
         <MenuItem icon="arrow-down" onSelect={sendAfter}>
           Send after this task
         </MenuItem>
       )}
-      <MenuItem icon="search" onSelect={onSearch}>
-        Search actions
-      </MenuItem>
+      {!guest && (
+        <MenuItem icon="search" onSelect={onSearch}>
+          Search actions
+        </MenuItem>
+      )}
       <MenuItem icon="compose" disabledReason={newReason} onSelect={onNew}>
         New conversation
       </MenuItem>
-      <MenuItem icon="layout-grid" onSelect={switchView.run}>
-        {switchView.label}
-      </MenuItem>
+      {!guest && (
+        <MenuItem icon="layout-grid" onSelect={switchView.run}>
+          {switchView.label}
+        </MenuItem>
+      )}
       {stop && (
         <>
           <MenuSeparator />

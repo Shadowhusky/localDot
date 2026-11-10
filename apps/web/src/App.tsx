@@ -283,14 +283,15 @@ import { useHandler } from "./ui/useHandler.ts";
 import { WorkView } from "./work/WorkView.tsx";
 import { workCard } from "./work/work-view.ts";
 import "./app.css";
+import { GuestSettingsSheet } from "./remote/GuestSettings.tsx";
 import {
-  GuestMenuItems,
-  GuestModelChip,
-  GuestSettingsSheet,
+  type Guest,
+  GuestProvider,
+  guestModelGroups,
   guestModelName,
   guestNames,
-} from "./remote/GuestParts.tsx";
-import { type Guest, GuestProvider, useGuestLink } from "./remote/guest.ts";
+  useGuestLink,
+} from "./remote/guest.ts";
 import { speechLanguage } from "./voice/language.ts";
 import { useListening } from "./voice/listening.ts";
 import { useVoicePrefs } from "./voice/prefs.ts";
@@ -466,6 +467,7 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 
 // How long a sent message shows dot thinking with no word from the task before the real status returns.
 const SENDING_HOLD_MS = 20_000;
+const FIXED_MODEL = "This link sets the model";
 const THINKING_LINE = "Thinking…";
 
 // A shared link opens the same app, with the link's limits in front of everything it asks for.
@@ -894,7 +896,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const viewStyle = guest ? { ...chosenStyle, value: "chat" as const } : chosenStyle;
   // Chat: a stack of the list, the conversation and the computer, opened out from tablet width up.
   const stack = viewStyle.value === "chat";
-  const split = stack && layout !== "phone" && !guest;
+  const split = stack && layout !== "phone";
   // On a wide screen Replay takes the whole page, under the top bar.
   const wideReplay = stack && layout !== "phone" && !!replayId;
   // Studio's phone layout.
@@ -903,7 +905,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const sheets = phone || stack;
   const nav = usePhoneRoute(stack);
   // Beside the list a tablet always shows a conversation.
-  const level = split || guest ? (nav.route.level === 2 ? 2 : 1) : nav.route.level;
+  const level = split ? (nav.route.level === 2 ? 2 : 1) : nav.route.level;
   // The live picture rests in the thread's foot while this task holds the computer.
   const [thumb, setThumb] = useState<HTMLElement | null>(null);
   // Off the computer screen and the foot, a phone asks for no frames. A picture it asked to stop,
@@ -1487,6 +1489,11 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       if (context?.request === request) void settings.keySaved(context.capture, key);
     },
   };
+  // A shared link hears no app events: its list is read again as its own tasks come and go.
+  const guestTask = guest ? `${session.sessionId}:${session.ended}:${guest.grant.tasks}` : null;
+  useEffect(() => {
+    if (guestTask) readConversationsAgain(api);
+  }, [guestTask, api]);
   const fresh =
     conversation.known && !conversation.sessions.length && !session.sessionId && !switching;
   const newConversation: NewConversation = {
@@ -1614,17 +1621,20 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const taskChoice = taskModel.choice ?? mainChoice;
   const modelChoices = useMemo(
     () =>
-      modelGroups(
-        settings.saved,
-        providerIndex,
-        {
-          chatgpt: { ready: chatgptReady, models: accountModels },
-          claudeCode: { ready: claudeReady, models: claudeModels },
-        },
-        names,
-        taskChoice,
-      ),
+      guest
+        ? guestModelGroups(guest.grant)
+        : modelGroups(
+            settings.saved,
+            providerIndex,
+            {
+              chatgpt: { ready: chatgptReady, models: accountModels },
+              claudeCode: { ready: claudeReady, models: claudeModels },
+            },
+            names,
+            taskChoice,
+          ),
     [
+      guest,
       settings.saved,
       providerIndex,
       chatgptReady,
@@ -1644,7 +1654,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     provider === "chatgpt" || provider === "claude-code" ? provider : "api";
   const running = !agent.model.ended ? taskModels?.kind : undefined;
   // The chosen model runs elsewhere than this task's agent: the next message starts a task on it.
-  const modelChanged = !!taskChoice && !!running && runtimeOf(taskChoice.provider) !== running;
+  const runtimeMoved = !!taskChoice && !!running && runtimeOf(taskChoice.provider) !== running;
   // A task at work finishes what it is doing unless a message says otherwise.
   const taskWorking =
     !!taskModels && !agent.model.ended && agent.snapshot?.status !== "idle" && !recoveryWait;
@@ -1657,11 +1667,13 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const modelDiffers =
     !!taskChoice &&
     !!runningOn &&
-    (modelChanged ||
+    (runtimeMoved ||
       ("provider" in runningOn && runningOn.provider !== taskChoice.provider) ||
       runningOn.model !== taskChoice.model ||
       !sameModelOptions(runningOn.options, taskChoice.options));
   const modelNext = taskWorking && modelDiffers;
+  // A link's follow-ups keep the task's model, so another model of its starts a task of its own.
+  const modelChanged = guest ? modelDiffers : runtimeMoved;
   const planUsage = usePlanUsage(
     api,
     settings.chatgpt.canStart || settings.claudeCode.canStart,
@@ -1672,7 +1684,17 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     : (modelSaving?.name ?? (taskChoice ? names.name(taskChoice.provider, taskChoice.model) : ""));
   const chooseModel = useHandler(async (option: ModelOption) => {
     setModelSaving(option);
-    const saved = await taskModel.choose(option.choice);
+    const saved = guest
+      ? await api
+          .post("/api/remote-session/model", {
+            index: guest.grant.models.findIndex((choice) => optionId(choice) === option.id),
+          })
+          .then(() => guest.refresh())
+          .then(
+            () => true,
+            () => false,
+          )
+      : await taskModel.choose(option.choice);
     setModelSaving(null);
     if (!saved) {
       showToast({
@@ -1717,31 +1739,19 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   });
   const modelChip = useMemo(
     () =>
-      guest ? (
-        <GuestModelChip api={api} guest={guest} />
-      ) : (
-        taskChoice && (
-          <ModelChip
-            {...modelMenu}
-            name={modelLabel}
-            next={modelNext}
-            disabledReason={modelSaving ? "Saving…" : undefined}
-            onPeek={browseAccounts}
-            onManage={showModels}
-          />
-        )
+      taskChoice && (
+        <ModelChip
+          {...modelMenu}
+          name={modelLabel}
+          next={modelNext}
+          disabledReason={
+            modelSaving ? "Saving…" : guest && !guest.grant.chooseModel ? FIXED_MODEL : undefined
+          }
+          onPeek={guest ? undefined : browseAccounts}
+          onManage={guest ? undefined : showModels}
+        />
       ),
-    [
-      api,
-      guest,
-      taskChoice,
-      modelMenu,
-      modelLabel,
-      modelNext,
-      modelSaving,
-      browseAccounts,
-      showModels,
-    ],
+    [guest, taskChoice, modelMenu, modelLabel, modelNext, modelSaving, browseAccounts, showModels],
   );
   const permissionMode = settings.saved?.permissionMode ?? "custom";
   const choosePermissions = useHandler((mode: typeof permissionMode) => {
@@ -2515,10 +2525,13 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     levelShown.current = level;
   }, [level]);
   // A link has no list to be on.
-  const guestAtList = !!guest && nav.route.level === 0;
+  // A link opens on its latest conversation, with its list under it.
+  const guestLands = useRef(!!guest && stack && !split && nav.route.level === 0);
   useEffect(() => {
-    if (guestAtList) nav.replace({ level: 1, id: "current" });
-  }, [guestAtList, nav]);
+    if (!guestLands.current) return;
+    guestLands.current = false;
+    nav.enter("current");
+  }, [nav]);
   usePhoneAddress({
     on: stack,
     nav,
@@ -2527,7 +2540,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     current: currentTask,
     settling: !!switching || choosing || !!viewedConversation,
     // A link can't take up another conversation: it stays on the one on show.
-    takeUp: guest ? () => nav.show("current") : takeUpConversation,
+    takeUp: takeUpConversation,
     startNew: () => void choose(null),
   });
   // Taking the computer goes to it.
@@ -2672,17 +2685,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     setPhoneModels(true);
   };
   const [guestSettings, setGuestSettings] = useState(false);
-  const phoneMenu = guest ? (
-    <GuestMenuItems
-      guest={guest}
-      newReason={newConversation.reason}
-      onNew={newConversation.run}
-      onReplay={() => selectReplay(replayTarget)}
-      onSettings={() => setGuestSettings(true)}
-      onStop={stopTask ? taskStop : undefined}
-    />
-  ) : (
+  const phoneMenu = (
     <ConversationMenuItems
+      onChatSettings={guest?.grant.settings ? () => setGuestSettings(true) : undefined}
       dotHidden={!showDot.value}
       look={shown.look}
       seed={shown.seed}
@@ -3339,8 +3344,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const phoneStack = stack && (
     <PhoneStack
       nav={nav}
-      split={split || !!guest}
-      listHidden={listHidden || !!guest}
+      split={split}
+      listHidden={listHidden}
       flyer={flyer}
       flightFrom={flightFrom}
       showDot={showDot.value}
@@ -3349,48 +3354,46 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         return entry ? conversationLook(entry) : undefined;
       }}
       list={
-        !guest && (
-          <PhoneList
-            api={api}
-            current={shownId ?? null}
-            facts={liveFacts}
-            attention={attention.items}
-            reason={conversationList.reason}
-            selecting={split}
-            onOpen={(row, from) => {
-              flightFrom.current = from;
-              pickConversation(row.entry.sessionId, row.entry.sessions);
-            }}
-            onNew={() => {
-              if (fresh) nav.show("new");
-              else newConversation.run();
-            }}
-            newReason={conversationReason}
-            onReplay={() => selectReplay(LIBRARY)}
-            onDeleted={conversationList.onDeleted}
-            computer={{
-              name: settings.saved?.name || "This computer",
-              onOpen: localDots.refresh,
-              menu: (
-                <ComputerMenuItems
-                  name={settings.saved?.name || "This computer"}
-                  others={otherDots}
-                  onManage={() => goToSettings(null, "dot")}
-                  onRoutines={() => setRoutinesOpen(true)}
-                  hasRecordings={hasRecordings}
-                  onReplay={() => selectReplay(LIBRARY)}
-                  onSettings={() => goToSettings(null)}
-                  onKeys={() => showKeys(null)}
-                  onSearch={() => openPalette("actions")}
-                  switchView={switchViewItem}
-                  stoppingAll={stopAll.running}
-                  onStopAll={() => void stopAll.run()}
-                />
-              ),
-            }}
-            notice={level === 0 && computerNotice}
-          />
-        )
+        <PhoneList
+          api={api}
+          current={shownId ?? null}
+          facts={liveFacts}
+          attention={attention.items}
+          reason={conversationList.reason}
+          selecting={split}
+          onOpen={(row, from) => {
+            flightFrom.current = from;
+            pickConversation(row.entry.sessionId, row.entry.sessions);
+          }}
+          onNew={() => {
+            if (fresh) nav.show("new");
+            else newConversation.run();
+          }}
+          newReason={conversationReason}
+          onReplay={() => selectReplay(LIBRARY)}
+          onDeleted={conversationList.onDeleted}
+          computer={{
+            name: settings.saved?.name || "This computer",
+            onOpen: localDots.refresh,
+            menu: (
+              <ComputerMenuItems
+                name={settings.saved?.name || "This computer"}
+                others={otherDots}
+                onManage={() => goToSettings(null, "dot")}
+                onRoutines={() => setRoutinesOpen(true)}
+                hasRecordings={hasRecordings}
+                onReplay={() => selectReplay(LIBRARY)}
+                onSettings={() => goToSettings(null)}
+                onKeys={() => showKeys(null)}
+                onSearch={() => openPalette("actions")}
+                switchView={switchViewItem}
+                stoppingAll={stopAll.running}
+                onStopAll={() => void stopAll.run()}
+              />
+            ),
+          }}
+          notice={level === 0 && computerNotice}
+        />
       }
       bar={
         <PhoneBar
@@ -3404,20 +3407,18 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 }
           }
           back={
-            guest
-              ? undefined
-              : split
-                ? {
-                    label: "Show or hide the list",
-                    icon: "panel-left",
-                    onPress: () => setListHidden((was) => !was),
-                  }
-                : {
-                    label: "Back to conversations",
-                    icon: "chevron-left",
-                    attention: [...needsYou].some((id) => id !== currentTask),
-                    onPress: nav.back,
-                  }
+            split
+              ? {
+                  label: "Show or hide the list",
+                  icon: "panel-left",
+                  onPress: () => setListHidden((was) => !was),
+                }
+              : {
+                  label: "Back to conversations",
+                  icon: "chevron-left",
+                  attention: [...needsYou].some((id) => id !== currentTask),
+                  onPress: nav.back,
+                }
           }
           onDetails={() => setDetailsOpen(true)}
           lamp={holding}
@@ -3438,7 +3439,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             side="bottom"
             align="end"
             dim
-            onManage={showModels}
+            onManage={guest ? undefined : showModels}
           />
         </aside>
       }
@@ -3579,7 +3580,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             look={shown.look}
             seed={shown.seed}
             onRename={
-              shown.entry
+              shown.entry && !guest
                 ? (name) => {
                     void renameConversation(api, shown.entry?.sessionId ?? "", name).then(
                       () => {
@@ -3614,7 +3615,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                     },
                   ]
                 : []),
-              ...(mainChoice && !guest
+              ...(mainChoice
                 ? [
                     {
                       label: "Model",
@@ -3776,7 +3777,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                       side="top"
                       align="end"
                       dim
-                      onManage={showModels}
+                      onManage={guest ? undefined : showModels}
                     />
                   )}
                 </ErrorBoundary>
@@ -4198,7 +4199,6 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         )}
         {guest && (
           <GuestSettingsSheet
-            api={api}
             guest={guest}
             open={guestSettings}
             onClose={() => setGuestSettings(false)}

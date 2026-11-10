@@ -6,6 +6,7 @@ import { RemoteLinks } from "../../../daemon/src/remote/links.ts";
 import { type GuestGrant, guestPermits } from "./guest.ts";
 
 const OWN = "01M4DBVBR6MWMZ3N8M49NW7T9J";
+const OTHER = "01M4DBVBR9D9SAGT06DJFHAAHY";
 const CELL = "01M4DBVBQWQE768FVBPRNT79JD";
 const homes: string[] = [];
 afterEach(() => {
@@ -60,6 +61,16 @@ const PATHS = [
   `/api/sessions/${OWN}/card`,
   `/api/sessions/${OWN}/frames/000001`,
   `/api/sessions/${OWN}/thumbnail`,
+  ...[
+    `/api/agent/sessions/${OTHER}`,
+    `/api/agent/sessions/${OTHER}/messages`,
+    `/api/agent/sessions/${OTHER}/stop`,
+    `/api/sessions/${OTHER}/history`,
+    `/api/sessions/${OTHER}/events`,
+    `/api/sessions/${OTHER}/stream`,
+    `/api/sessions/${OTHER}/card`,
+    `/api/conversations/${OTHER}/archive`,
+  ],
 ];
 
 // The page asks only for what the daemon would let its link have, for a task of the link's own.

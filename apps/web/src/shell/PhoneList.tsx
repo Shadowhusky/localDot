@@ -34,6 +34,7 @@ import { searchConversations } from "../agent/conversation-search.ts";
 import { markdownToPlain } from "../agent/markdown.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import { type ApiClient, ApiError } from "../lib/api.ts";
+import { useGuest } from "../remote/guest.ts";
 import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
@@ -213,6 +214,8 @@ export function PhoneList({
     return () => clearInterval(timer);
   }, []);
   const all = useMemo(() => conversationRows(recent.entries, facts), [recent.entries, facts]);
+  // A shared link's own conversations: opened and started, never organized, which is the owner's.
+  const guest = useGuest();
   const [tag, setTag] = useState<ConversationTag | null>(null);
   const tags = useMemo(() => tagsInUse(all), [all]);
   const tagged = tag && tags.includes(tag) ? tag : null;
@@ -285,11 +288,12 @@ export function PhoneList({
   // Where the list fills the screen a hold lifts the row into its preview; beside the conversation
   // it opens the same menu a right click, the menu key and More do.
   const hold = (row: ConversationRow, from: HTMLElement, trigger = from) => {
+    if (guest) return;
     if (selecting) openMenu(row, trigger);
     else openPeek(row, from);
   };
   const menuKey = (row: ConversationRow) => (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (!isMenuKey(event)) return;
+    if (guest || !isMenuKey(event)) return;
     event.preventDefault();
     openMenu(row, event.currentTarget);
   };
@@ -307,6 +311,7 @@ export function PhoneList({
     rowElement(row)?.focus();
   });
   const swipes = (row: ConversationRow) => {
+    if (guest) return {};
     const isPinned = !!row.entry.pinned;
     const pin: SwipeAction = {
       label: isPinned ? "Unpin" : "Pin",
@@ -508,16 +513,20 @@ export function PhoneList({
                 <SwipeActions
                   className="phone-row-swipe"
                   {...swipes(row)}
-                  onHold={() => {
-                    const from = rowElement(row);
-                    if (from) hold(row, from);
-                  }}
+                  onHold={
+                    guest
+                      ? undefined
+                      : () => {
+                          const from = rowElement(row);
+                          if (from) hold(row, from);
+                        }
+                  }
                 >
                   {button}
                 </SwipeActions>
               )}
               <TagMark tag={row.entry.tag} />
-              {!choosing && (
+              {!choosing && !guest && (
                 <IconButton
                   className="phone-row-actions"
                   icon="more-horizontal"
@@ -552,6 +561,8 @@ export function PhoneList({
               chosen={selection.picked.length}
               onChange={selection.all}
             />
+          ) : guest ? (
+            <span className="phone-pill-spacer" />
           ) : (
             <>
               <Button
@@ -582,7 +593,7 @@ export function PhoneList({
               </Menu>
             </>
           )}
-          {(selection.selecting || all.length > 0) && (
+          {!guest && (selection.selecting || all.length > 0) && (
             <Button
               ref={selectToggle}
               variant="quiet"
@@ -678,9 +689,11 @@ export function PhoneList({
                 </Button>
               ) : (
                 <>
-                  <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
-                    See all in Replay
-                  </Button>
+                  {(!guest || guest.grant.replay) && (
+                    <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
+                      See all in Replay
+                    </Button>
+                  )}
                   {recent.archivedCount > 0 && (
                     <Button
                       variant="quiet"

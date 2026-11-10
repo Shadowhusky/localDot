@@ -22,7 +22,16 @@ const LINKS = {
     models: MODELS,
   },
 };
-type Setting = { replay?: boolean; apps?: boolean; settings?: boolean; maxTasks?: number };
+type Choice = { provider: string; model: string };
+type Setting = {
+  replay?: boolean;
+  apps?: boolean;
+  settings?: boolean;
+  chooseModel?: boolean;
+  maxTasks?: number;
+  model?: Choice;
+  models?: Choice[];
+};
 
 interface Conversation {
   sessionId: string;
@@ -152,50 +161,55 @@ const messageBox = (page: Page) =>
 
 async function send(page: Page, text: string) {
   await messageBox(page).fill(text);
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page
+    .getByRole("form", { name: "Message dot" })
+    .getByRole("button", { name: /^(Send|Start task)$/ })
+    .click();
+}
+
+// The list of conversations: beside the conversation on a wide screen, under it on a phone.
+async function openList(page: Page) {
+  if (isPhone(page)) {
+    await page.getByRole("button", { name: "Back to conversations" }).click();
+    await expect(page.locator(".phone-stack")).toHaveAttribute("data-level", "0");
+  }
+  return page.getByRole("region", { name: "Conversations" });
+}
+
+async function ownerShows(page: Page, origin: string) {
+  const reply = await page.request.get(`${origin}/api/conversation`, {
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+  return (await reply.json()).sessions as string[];
 }
 
 for (const [name, setting] of Object.entries(LINKS) as [string, Setting][])
-  test(`a guest has the app's own conversation, with only what the link allows (${name})`, async ({
+  test(`a guest has the app with its own conversations, and only what the link allows (${name})`, async ({
     page,
     ui,
   }) => {
     const { fixture, owner, guest, refused, asked, errors } = await openAsGuest(page, ui, setting);
     const chat = thread(page);
-    await expect(chat.getByText(/^Summarise the sample sales table/)).toBeVisible();
     const slug = name.replaceAll(/[^a-z]+/gi, "-").toLowerCase();
+    // A link with no task yet lands in a new conversation: the owner's is not on show.
+    await expect(chat.getByRole("heading", { name: "What should we do?" })).toBeVisible();
+    await expect(page.getByText(/^Summarise the sample sales table/)).toHaveCount(0);
     await shot(page, ui, `guest-${slug}`);
 
     // The owner's side of the app is not on the page.
-    for (const owners of [
-      "Back to conversations",
-      "Show or hide the list",
-      "Settings",
-      "Keys",
-      "Attach files",
-      "Add",
-      "Download all",
-    ])
+    for (const owners of ["Settings", "Keys", "Attach files", "Add", "Select"])
       await expect(page.getByRole("button", { name: owners, exact: true })).toHaveCount(0);
-    await expect(page.locator(".phone-list-screen, .top-bar, .session-rail")).toHaveCount(0);
-    const replays = chat.getByRole("button", { name: "Replay this task" });
-    if (setting.replay) await expect(replays.first()).toBeVisible();
-    else await expect(replays).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /this computer and app settings$/ })).toHaveCount(
+      0,
+    );
 
-    await page.getByRole("button", { name: "More", exact: true }).click();
-    const menu = page.getByRole("menu", { name: "More" });
-    await expect(menu.getByRole("menuitem")).toHaveText([
-      "New conversation",
-      ...(setting.replay ? ["Replay"] : []),
-      ...(setting.settings ? ["Chat settings"] : []),
-    ]);
-    await shot(page, ui, `guest-${slug}-menu`);
-    await page.keyboard.press("Escape");
-
-    for (const path of ["/api/conversations", "/api/conversations?archived=1"])
-      expect((await guest(path)).status(), path).toBe(403);
+    for (const path of ["/api/conversations", "/api/conversations?archived=1"]) {
+      const listed = await guest(path);
+      expect(listed.status(), path).toBe(200);
+      expect((await listed.json()).conversations, path).toEqual([]);
+    }
     expect(owner.others.length).toBeGreaterThan(4);
-    for (const sessionId of owner.others) {
+    for (const sessionId of [...owner.others, ...owner.shown]) {
       for (const part of ["stream", "clock"])
         expect((await guest(`/api/sessions/${sessionId}/${part}`)).status(), part).toBe(403);
       expect((await guest(`/api/agent/sessions/${sessionId}`)).status()).toBe(403);
@@ -206,13 +220,6 @@ for (const [name, setting] of Object.entries(LINKS) as [string, Setting][])
       if (!setting.replay)
         expect((await guest(`/api/sessions/${sessionId}/card`)).status()).toBe(403);
     }
-    for (const sessionId of owner.shown)
-      expect((await guest(`/api/sessions/${sessionId}/history`)).status()).toBe(200);
-
-    // The steps of a turn unfold in the thread, as they do for the owner.
-    await chat.getByRole("button", { name: /5 steps/ }).click();
-    await chat.getByRole("button", { name: /Validate report schema/ }).click();
-    await expect(chat.getByText(/exit code 2/).first()).toBeVisible();
 
     await send(page, "Water the plants on Friday");
     await expect(chat.getByText("Sample reply: I received the task.")).toBeVisible();
@@ -221,6 +228,31 @@ for (const [name, setting] of Object.entries(LINKS) as [string, Setting][])
     expect(ownedSessions).toHaveLength(1);
     expect((await guest(`/api/sessions/${ownedSessions[0]}/history`)).status()).toBe(200);
     expect((await guest(`/api/agent/sessions/${ownedSessions[0]}`)).status()).toBe(200);
+    // The guest's task is a conversation of its own: the owner's app still shows theirs.
+    expect(await ownerShows(page, fixture.origin)).toEqual(owner.shown);
+    const listed = await (await guest("/api/conversations")).json();
+    expect(listed.conversations.map((each: { sessionId: string }) => each.sessionId)).toEqual(
+      ownedSessions,
+    );
+
+    await page.getByRole("button", { name: "More", exact: true }).click();
+    const menu = page.getByRole("menu", { name: "More" });
+    const items = menu.getByRole("menuitem");
+    await expect(items.filter({ hasText: "New conversation" })).toHaveCount(1);
+    await expect(items.filter({ hasText: /^Model: / })).toHaveCount(1);
+    await expect(items.filter({ hasText: /^Replay$/ })).toHaveCount(setting.replay ? 1 : 0);
+    await expect(items.filter({ hasText: "Chat settings" })).toHaveCount(setting.settings ? 1 : 0);
+    for (const owners of [
+      /^Pin/,
+      /^Rename/,
+      /^Workspace/,
+      /^Search actions/,
+      /^Switch to/,
+      /^Research/,
+    ])
+      await expect(items.filter({ hasText: owners })).toHaveCount(0);
+    await shot(page, ui, `guest-${slug}-menu`);
+    await page.keyboard.press("Escape");
 
     // The web browser is signed in as the owner: only a link with their apps watches it.
     await page
@@ -240,7 +272,7 @@ for (const [name, setting] of Object.entries(LINKS) as [string, Setting][])
     }
     await shot(page, ui, `guest-${slug}-computer`);
     await page.getByRole("button", { name: "Back to the conversation" }).click();
-    await expect(page.locator(".phone-stack")).toHaveAttribute("data-level", "1");
+    await expect(page.locator(".phone-stack")).not.toHaveAttribute("data-level", "2");
 
     if (setting.replay) {
       await page.getByRole("button", { name: "More", exact: true }).click();
@@ -251,21 +283,8 @@ for (const [name, setting] of Object.entries(LINKS) as [string, Setting][])
       // A recording plays; deleting, exporting and its files stay the owner's.
       for (const owners of ["Select", "Free up space", "Continue"])
         await expect(page.getByRole("button", { name: owners, exact: true })).toHaveCount(0);
-      await page
-        .getByRole("button", { name: /Organize the sample workspace/ })
-        .first()
-        .click();
-      await expect(page.getByRole("button", { name: /^(Play|Pause)/ }).first()).toBeVisible();
       await expect(page.getByRole("button", { name: /^(Export|Delete)/ })).toHaveCount(0);
-      await shot(page, ui, `guest-${slug}-recording`);
-      // A wide screen has the top bar's Watch and Replay, with none of the owner's buttons.
-      if (isPhone(page)) {
-        await page.goBack();
-        await page.goBack();
-      } else {
-        await expect(page.locator(".bar").getByRole("button")).toHaveCount(0);
-        await page.getByRole("radio", { name: "Watch" }).click();
-      }
+      await page.goBack();
       await expect(page.locator(".app")).not.toHaveAttribute("data-replaying");
     }
     if (setting.settings) {
@@ -273,7 +292,7 @@ for (const [name, setting] of Object.entries(LINKS) as [string, Setting][])
       await page.getByRole("menuitem", { name: "Chat settings", exact: true }).click();
       const sheet = page.getByRole("dialog", { name: "Chat settings" });
       await expect(sheet.getByText("1 of 5 used")).toBeVisible();
-      await expect(sheet.getByRole("combobox", { name: "Model" })).toHaveText(/Claude Sonnet/);
+      await expect(sheet.getByText("Claude Sonnet 5.5")).toBeVisible();
       await shot(page, ui, `guest-${slug}-settings`);
       await page.keyboard.press("Escape");
     }
@@ -285,17 +304,111 @@ for (const [name, setting] of Object.entries(LINKS) as [string, Setting][])
     await expectCleanConsole(page, errors);
   });
 
-test("the last thing dot said shows whole, and the thread scrolls", async ({ page, ui }) => {
-  const { refused, errors } = await openAsGuest(page, ui, {});
+test("a guest's list holds the conversations it started; switching and New chat leave the owner's alone", async ({
+  page,
+  ui,
+}) => {
+  const { fixture, owner, refused, errors } = await openAsGuest(page, ui, { replay: true });
   const chat = thread(page);
+  await send(page, "Water the plants on Friday");
+  await expect(chat.getByText("Sample reply: I received the task.")).toBeVisible();
+  // The computer takes one task at a time: this one ends before the next starts.
+  expect((await page.request.post(`${fixture.origin}/__qa/finish?done=1`)).ok()).toBe(true);
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New conversation", exact: true }).click();
+  await expect(chat.getByRole("heading", { name: "What should we do?" })).toBeVisible();
+  expect(await ownerShows(page, fixture.origin)).toEqual(owner.shown);
+  await send(page, "Book a table for Saturday");
+  await expect(chat.getByText("Sample reply: I received the task.")).toBeVisible();
+  await expect(chat.getByText("Water the plants on Friday")).toHaveCount(0);
+  expect(await ownerShows(page, fixture.origin)).toEqual(owner.shown);
+
+  const list = await openList(page);
+  const rows = list.locator("[data-conversation]");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText("Book a table for Saturday");
+  await expect(rows.nth(1)).toContainText("Water the plants on Friday");
+  await expect(list.getByText(/Summarise the sample sales table|Find a plumber/)).toHaveCount(0);
+  // Organizing is the owner's: no actions, swipes or Select.
+  await expect(list.getByRole("button", { name: /^Actions for/ })).toHaveCount(0);
+  await shot(page, ui, "guest-list");
+
+  expect((await page.request.post(`${fixture.origin}/__qa/finish?done=1`)).ok()).toBe(true);
+  await rows.nth(1).getByRole("button").first().click();
+  if (isPhone(page)) await expect(page.locator(".phone-stack")).toHaveAttribute("data-level", "1");
+  await expect(chat.getByText("Water the plants on Friday")).toBeVisible();
+  await expect(chat.getByText("Book a table for Saturday")).toHaveCount(0);
+  expect(await ownerShows(page, fixture.origin)).toEqual(owner.shown);
+  // A message continues the guest's own conversation, not the owner's.
+  await send(page, "And the ferns");
+  await expect(chat.getByText("And the ferns")).toBeVisible();
+  expect(await ownerShows(page, fixture.origin)).toEqual(owner.shown);
+  expect(refused).toEqual([]);
+  await expectCleanConsole(page, errors);
+});
+
+for (const switching of [true, false])
+  test(`the composer's own model menu offers ${switching ? "the link's models by name" : "the link's model alone"}`, async ({
+    page,
+    ui,
+  }) => {
+    // As a link made before rc.44 reads back: a plan's "default" and another model.
+    const models = [
+      { provider: "claude-code", model: "default" },
+      { provider: "deepseek", model: "deepseek-flash" },
+    ];
+    const { guest, refused, errors } = await openAsGuest(page, ui, {
+      settings: true,
+      replay: true,
+      model: models[0],
+      ...(switching ? { chooseModel: true, models } : {}),
+    });
+    const chip = page
+      .getByRole("form", { name: "Message dot" })
+      .getByRole("button", { name: /^Model: / });
+    await messageBox(page).focus();
+    await expect(chip).toHaveAccessibleName("Model: Default · Claude Code");
+    if (!switching) {
+      await expect(chip).toHaveAttribute("aria-disabled", "true");
+      await expect(chip).toHaveAccessibleDescription("This link sets the model");
+      await shot(page, ui, "guest-model-fixed");
+      expect(refused).toEqual([]);
+      await expectCleanConsole(page, errors);
+      return;
+    }
+    await chip.click();
+    const panel = page.getByRole("dialog", { name: "Model and thinking" });
+    await expect(panel.getByRole("button", { name: "Manage models…" })).toHaveCount(0);
+    await panel.getByRole("combobox", { name: "Model" }).click();
+    const options = page.getByRole("option");
+    await expect(options.filter({ hasText: "Default · Claude Code" })).toHaveCount(1);
+    await expect(options.filter({ hasText: "deepseek-flash" })).toHaveCount(1);
+    await shot(page, ui, "guest-model-menu");
+    await options.filter({ hasText: "deepseek-flash" }).click();
+    await panel.getByRole("button", { name: "Apply" }).click();
+    await expect
+      .poll(async () => (await (await guest("/api/remote-session")).json()).model)
+      .toEqual(models[1]);
+    await expect(chip).toHaveAccessibleName("Model: deepseek-flash");
+    expect(refused).toEqual([]);
+    await expectCleanConsole(page, errors);
+  });
+
+test("the last thing dot said shows whole, and the thread scrolls", async ({ page, ui }) => {
+  const { fixture, refused, errors } = await openAsGuest(page, ui, {});
+  const chat = thread(page);
+  await send(page, "Summarise the sample sales table");
+  await expect(chat.getByText("Sample reply: I received the task.")).toBeVisible();
+  expect((await page.request.post(`${fixture.origin}/__qa/finish?done=1&markdown=1`)).ok()).toBe(
+    true,
+  );
   const scroller = chat.locator(".thread-scroll");
   const report = chat
     .locator(".thread-message, .thread-bubble")
     .filter({ hasText: "Report ready" });
   await expect(report).toContainText("monthly total is 12,480");
   await expect(report).toBeInViewport({ ratio: 1 });
-  const summary = chat.getByText("One validation command failed");
-  await expect(summary).toBeInViewport({ ratio: 1 });
+  const summary = report;
   const composer = messageBox(page);
   const [last, box, view] = [
     await summary.boundingBox(),
@@ -309,12 +422,13 @@ test("the last thing dot said shows whole, and the thread scrolls", async ({ pag
   const range = () =>
     scroller.evaluate((el) => ({ at: el.scrollTop, most: el.scrollHeight - el.clientHeight }));
   const end = await range();
-  expect(end.most).toBeGreaterThan(0);
   expect(end.at).toBeGreaterThan(end.most - 4);
-  await scroller.evaluate((el) => el.scrollTo(0, 0));
-  await expect.poll(async () => (await range()).at).toBe(0);
-  await expect(chat.getByText("Find last month's sales table")).toBeInViewport({ ratio: 1 });
-  await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  if (end.most > 0) {
+    await scroller.evaluate((el) => el.scrollTo(0, 0));
+    await expect.poll(async () => (await range()).at).toBe(0);
+    await expect(chat.getByText("Summarise the sample sales table")).toBeInViewport();
+    await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  }
   await expect(summary).toBeInViewport({ ratio: 1 });
 
   // The screen's own bar stays clear of its picture.

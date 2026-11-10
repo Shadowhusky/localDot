@@ -51,9 +51,16 @@ test("shared access has its own guest view and fixed model with no owner setting
   await expect(composer.getByRole("textbox")).toBeVisible();
   await expect(page.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Keys", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^Model/ })).toHaveCount(0);
+  await composer.getByRole("textbox").focus();
+  await expect(composer.getByRole("button", { name: /^Model: / })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
   await page.getByRole("button", { name: "More", exact: true }).click();
-  await expect(page.getByRole("menuitem")).toHaveText([/^New conversation/]);
+  const items = page.getByRole("menuitem");
+  await expect(items.filter({ hasText: /^New conversation/ })).toHaveCount(1);
+  for (const owners of [/^Replay/, /^Chat settings/, /^Pin/, /^Rename/, /^Search actions/])
+    await expect(items.filter({ hasText: owners })).toHaveCount(0);
   await page.keyboard.press("Escape");
   const box = await composer.getByRole("textbox").boundingBox();
   expect(box && box.x >= 0 && box.x + box.width <= (page.viewportSize()?.width ?? 0)).toBe(true);

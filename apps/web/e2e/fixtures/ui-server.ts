@@ -131,7 +131,7 @@ import { createNotify } from "../../../daemon/src/notify/wiring.ts";
 import { writeManifest } from "../../../daemon/src/recorder/manifest.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
-import { RemoteLinks } from "../../../daemon/src/remote/links.ts";
+import { linkConversation, RemoteLinks } from "../../../daemon/src/remote/links.ts";
 import type { RemoteAccess } from "../../../daemon/src/remote/manager.ts";
 import { stopAll } from "../../../daemon/src/routines/stop-all.ts";
 import { RoutineStore, scheduleOf, toRoutine } from "../../../daemon/src/routines/store.ts";
@@ -2255,7 +2255,11 @@ const agent: AgentRoutesDeps = {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
       await endLive();
-      const continues = conversations.current() ?? undefined;
+      // As the runner does: what the request names, else the conversation on show.
+      const continues =
+        options?.continues === undefined
+          ? (conversations.current() ?? undefined)
+          : (options.continues ?? undefined);
       session = newSession(
         task.slice(0, 60),
         task,
@@ -2264,7 +2268,8 @@ const agent: AgentRoutesDeps = {
         options?.revises,
         options?.research ? (settingsStore.get().research ?? DEFAULT_RESEARCH_BUDGET) : undefined,
       );
-      conversations.adopt(session.id);
+      // A shared link's task is a conversation of its own, never the owner's on show.
+      if (!options?.guest) conversations.adopt(session.id);
       budgetHold = undefined;
       raisedDuringPause = false;
       selection = planSelection();
@@ -2830,7 +2835,11 @@ const routes = createApp({
     live,
     killSwitch,
     frames,
-    conversation: () => conversations.current(),
+    conversation: (link) =>
+      link && links
+        ? (linkConversation(links, conversations, link).sessions.at(-1) ?? null)
+        : conversations.current(),
+    owns: (link, sessionId) => !!links?.owns(link, sessionId),
   },
   agent,
   search: { index: searchIndex, feed: searchFeed },

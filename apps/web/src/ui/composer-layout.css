@@ -483,6 +483,10 @@
   .model-config-actions .model-config-manage {
     margin-inline-start: 0;
   }
+
+  .model-config-actions > :last-child {
+    margin-inline-start: auto;
+  }
   /* Each plan's limits, under the model's settings: a name, a bar and when it resets. */
   .plan-usage-list {
     display: grid;
