@@ -239,7 +239,7 @@ describe("the overview", () => {
       width: 320,
       height: 200,
     });
-    for (const width of ["1280", "0", "640.0", "abc"])
+    for (const width of ["2560", "0", "640.0", "abc"])
       expect((await f.read(`/api/sessions/${id}/thumbs/${frame}?w=${width}`)).status).toBe(400);
   });
 });

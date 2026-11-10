@@ -1081,7 +1081,7 @@
   .dot-typing-dots {
     display: inline-flex;
     flex: none;
-    gap: 3px;
+    gap: calc(var(--spacing) * 0.75);
   }
 
   .dot-typing-dots > i {
