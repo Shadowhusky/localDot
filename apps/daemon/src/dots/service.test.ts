@@ -45,7 +45,10 @@ function computer(self = "main") {
   const registry = new DotsRegistry(registryPath({ XDG_CONFIG_HOME: join(root, "config") }), main);
   registry.update((entries) => [...entries, { id: "work", home: work }]);
   const running = new Set([4750]);
-  const others = { busy: false, origins: ["https://studio.example.ts.net:5750"] };
+  const others = {
+    busy: false,
+    origins: ["https://studio.example.ts.net:5750", "https://b2b2--dot.relay.example"],
+  };
   const spawned: Spawned[] = [];
   const asked: string[] = [];
   const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -246,7 +249,14 @@ describe("the dots on this computer, as the app sees them", () => {
     expect(await c.service.signIn("work", "https://studio.example.ts.net:4750")).toEqual({
       url: `https://studio.example.ts.net:5750/#code=${CODE}`,
     });
+    // Through the relay each dot has a name of its own under the same domain.
+    expect(await c.service.signIn("work", "https://a1a1--dot.relay.example")).toEqual({
+      url: `https://b2b2--dot.relay.example/#code=${CODE}`,
+    });
     await expect(c.service.signIn("work", "https://elsewhere.example:4750")).rejects.toThrow(
+      "can't be opened from this device",
+    );
+    await expect(c.service.signIn("work", "https://a1a1--dot.other.example")).rejects.toThrow(
       "can't be opened from this device",
     );
   });

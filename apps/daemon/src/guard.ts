@@ -44,6 +44,12 @@ export function configuredAccessOrigins(): string[] {
   return [...new Set(publicOrigins.map((url) => url.origin))];
 }
 
+// Every HTTPS front the owner reaches this daemon at now: configured ones, Tailscale Serve and the
+// relay, so another dot on this computer can send the owner's browser here from any of them.
+export function ownerOrigins(): string[] {
+  return [...new Set([...configuredAccessOrigins(), ...remoteOrigins])];
+}
+
 export function isPublicOrigin(origin: string | undefined): boolean {
   return (
     publicOrigins.some((url) => origin === url.origin) ||
