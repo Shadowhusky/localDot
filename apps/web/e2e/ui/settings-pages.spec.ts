@@ -46,13 +46,16 @@ test("shared access has its own guest view and fixed model with no owner setting
     }),
   );
   await ui.open("ready");
-  await expect(page.getByRole("main")).toHaveClass("shared-app");
-  await expect(page.getByRole("textbox", { name: "Message dot" })).toBeVisible();
+  await expect(page.locator(".app[data-guest]")).toBeVisible();
+  const composer = page.getByRole("form", { name: "Message dot" });
+  await expect(composer.getByRole("textbox")).toBeVisible();
   await expect(page.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Replays", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
-  const box = await page.getByRole("textbox", { name: "Message dot" }).boundingBox();
+  await expect(page.getByRole("button", { name: "Keys", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Model/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await expect(page.getByRole("menuitem")).toHaveText([/^New conversation/]);
+  await page.keyboard.press("Escape");
+  const box = await composer.getByRole("textbox").boundingBox();
   expect(box && box.x >= 0 && box.x + box.width <= (page.viewportSize()?.width ?? 0)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("shared-chat.png") });
 });

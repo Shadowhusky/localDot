@@ -283,7 +283,14 @@ import { useHandler } from "./ui/useHandler.ts";
 import { WorkView } from "./work/WorkView.tsx";
 import { workCard } from "./work/work-view.ts";
 import "./app.css";
-import { SharedApp } from "./remote/SharedApp.tsx";
+import {
+  GuestMenuItems,
+  GuestModelChip,
+  GuestSettingsSheet,
+  guestModelName,
+  guestNames,
+} from "./remote/GuestParts.tsx";
+import { type Guest, GuestProvider, useGuestLink } from "./remote/guest.ts";
 import { speechLanguage } from "./voice/language.ts";
 import { useListening } from "./voice/listening.ts";
 import { useVoicePrefs } from "./voice/prefs.ts";
@@ -297,7 +304,7 @@ export interface AppProps {
   fetchImpl?: typeof fetch;
 }
 
-type Rejected = "stored" | "link" | "code" | "unconfirmed" | null;
+type Rejected = "stored" | "ended" | "link" | "code" | "unconfirmed" | null;
 
 const RETRY_CHECK_MS = 2000;
 // Slow restoration offers recovery; elapsed time never means the history is ready.
@@ -433,8 +440,8 @@ export function App({ fetchImpl }: AppProps) {
             onUnauthorized: () => {
               if (tokenOwner.current !== token) return;
               tokenOwner.current = null;
+              setRejected(sharedToken(token) ? "ended" : "stored");
               forgetToken(token);
-              setRejected("stored");
               setToken((current) => (current === token ? null : current));
             },
           })
@@ -442,7 +449,8 @@ export function App({ fetchImpl }: AppProps) {
     [token, fetchImpl],
   );
 
-  if (api) return shared ? <SharedApp key={token} api={api} /> : <Theatre key={token} api={api} />;
+  if (api)
+    return shared ? <GuestTheatre key={token} api={api} /> : <Theatre key={token} api={api} />;
   if (candidate || arriving) return <SignIn state="checking" />;
   return <SignIn state={SIGN_IN[rejected ?? "none"]} />;
 }
@@ -450,6 +458,7 @@ export function App({ fetchImpl }: AppProps) {
 const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
   none: "first",
   stored: "signed-out",
+  ended: "ended",
   link: "expired",
   code: "expired",
   unconfirmed: "unconfirmed",
@@ -459,13 +468,25 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 const SENDING_HOLD_MS = 20_000;
 const THINKING_LINE = "Thinking…";
 
-function Theatre({ api }: { api: ApiClient }) {
+// A shared link opens the same app, with the link's limits in front of everything it asks for.
+function GuestTheatre({ api }: { api: ApiClient }) {
+  const link = useGuestLink(api);
+  if (!link.guest) return <SignIn state="checking" />;
+  return (
+    <GuestProvider value={link.guest}>
+      <Theatre api={link.api} guest={link.guest} />
+    </GuestProvider>
+  );
+}
+
+function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }) {
+  const canReplay = !guest || guest.grant.replay;
   const appearance = useAppearance();
   const localDots = useLocalDots(api);
   const showDot = useShowDot();
   const streamChoice = useStreamPreference(showToast);
   const [replayId, setReplayId] = useState<string | null>(() =>
-    replayAddress(new URLSearchParams(window.location.search).get("replay")),
+    canReplay ? replayAddress(new URLSearchParams(window.location.search).get("replay")) : null,
   );
   const playing = replayId === LIBRARY ? null : replayId;
   // undefined until the recordings are read: Replay is offered meanwhile rather than dimmed.
@@ -499,6 +520,7 @@ function Theatre({ api }: { api: ApiClient }) {
     entry: "navigate" | "replace" = "navigate",
     atMs?: number,
   ) => {
+    if (id && !canReplay) return;
     const was = replayIdRef.current;
     const address = new URL(window.location.href);
     if (id) address.searchParams.set("replay", id);
@@ -569,7 +591,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const worn = useMemo(() => outfit(persona, accessory), [persona, accessory]);
   const dotAnchor = useRef<HTMLElement | null>(null);
   const [choosingDot, setChoosingDot] = useState(false);
-  const ownDotKnown = !!settings.saved;
+  const ownDotKnown = !!settings.saved || !!guest;
   // Ahead of the effects of any dot this render brings on to the page.
   useLayoutEffect(() => {
     if (ownDotKnown) setWearing(worn, accessory);
@@ -589,10 +611,14 @@ function Theatre({ api }: { api: ApiClient }) {
     [providerIndex, accountModels, claudeModels],
   );
   const names = useMemo(
-    () => modelNames(providerIndex, { chatgpt: accountModels, claudeCode: claudeModels }),
-    [providerIndex, accountModels, claudeModels],
+    () =>
+      guest
+        ? guestNames(guest.grant)
+        : modelNames(providerIndex, { chatgpt: accountModels, claudeCode: claudeModels }),
+    [guest, providerIndex, accountModels, claudeModels],
   );
-  const mainChoice = settings.saved?.main;
+  // A link's tasks run on the link's model, which the owner set up.
+  const mainChoice = guest ? guest.grant.model : settings.saved?.main;
   const mainApp =
     mainChoice?.provider === "chatgpt" || mainChoice?.provider === "claude-code"
       ? mainChoice.provider
@@ -626,7 +652,7 @@ function Theatre({ api }: { api: ApiClient }) {
             (keys.health?.online === true && keys.metadataReady === true)));
   const [setupSeen, setSetupSeen] = useState<boolean | undefined>(undefined);
   if (mainKnown && setupSeen !== mainReady) setSetupSeen(mainReady);
-  const setupDone = mainKnown ? mainReady : setupSeen;
+  const setupDone = guest ? true : mainKnown ? mainReady : setupSeen;
   const keysButton = useRef<HTMLButtonElement>(null);
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
@@ -649,11 +675,12 @@ function Theatre({ api }: { api: ApiClient }) {
   const { show: openSettings } = settings;
   const goToSettings = useCallback(
     (trigger: HTMLElement | null, section?: SettingsSection, tip?: SettingsTip) => {
+      if (guest) return;
       if (!settingsOpen.current) settingsOrigin.current = trigger;
       setSettingsAt((now) => ({ section, tip, request: now.request + 1 }));
       openSettings();
     },
-    [openSettings],
+    [openSettings, guest],
   );
   const showSettings: (trigger: HTMLElement, section?: SettingsSection, tip?: SettingsTip) => void =
     goToSettings;
@@ -728,6 +755,10 @@ function Theatre({ api }: { api: ApiClient }) {
     seen.current = now;
   }, [session.sessionId, session.ended, rereadConversation]);
   useEffect(() => {
+    if (!canReplay) {
+      setNewestReplayId(null);
+      return;
+    }
     if (session.sessionId && !session.ended) {
       setNewestReplayId(session.sessionId);
       return;
@@ -746,8 +777,10 @@ function Theatre({ api }: { api: ApiClient }) {
         if (!controller.signal.aborted) setReplayUnlisted(true);
       });
     return () => controller.abort();
-  }, [api, session.sessionId, session.ended, historyRevision]);
+  }, [api, canReplay, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
+  // A link changes only the tasks it started.
+  const mine = !guest || guest.owns(agent.sessionId);
   // The dot this task works as, which the one on screen wears from the moment it is chosen. While
   // a task's record is being read it keeps what it wears, so taking up a conversation changes it once.
   const worksAs = session.sessionId ? session.model.dots.at(-1)?.persona : undefined;
@@ -840,7 +873,8 @@ function Theatre({ api }: { api: ApiClient }) {
     },
     [startNew, continueFrom, beginStageSwitch, endStageSwitch],
   );
-  const selectedScreen = agent.watchScreen;
+  // The web browser is signed in as the owner: a link without their apps watches the desktop.
+  const selectedScreen = guest && !guest.grant.apps ? undefined : agent.watchScreen;
   const stageFront = useStageFront(
     api,
     cell,
@@ -855,17 +889,21 @@ function Theatre({ api }: { api: ApiClient }) {
   const physicalStageCell = shownScreen === "browser" ? browserScreen.cell : cell;
   const { picture, onPicture } = useStagePicture(shownScreen, physicalStageCell?.state === "ready");
   const layout = useLayout();
-  const viewStyle = useViewStyle();
+  const chosenStyle = useViewStyle();
+  // A shared link has one conversation: Chat, with no list beside it.
+  const viewStyle = guest ? { ...chosenStyle, value: "chat" as const } : chosenStyle;
   // Chat: a stack of the list, the conversation and the computer, opened out from tablet width up.
   const stack = viewStyle.value === "chat";
-  const split = stack && layout !== "phone";
+  const split = stack && layout !== "phone" && !guest;
+  // On a wide screen Replay takes the whole page, under the top bar.
+  const wideReplay = stack && layout !== "phone" && !!replayId;
   // Studio's phone layout.
   const phone = layout === "phone" && !stack;
   // No rails: what a wide Studio keeps in them comes up in sheets.
   const sheets = phone || stack;
   const nav = usePhoneRoute(stack);
   // Beside the list a tablet always shows a conversation.
-  const level = split ? (nav.route.level === 2 ? 2 : 1) : nav.route.level;
+  const level = split || guest ? (nav.route.level === 2 ? 2 : 1) : nav.route.level;
   // The live picture rests in the thread's foot while this task holds the computer.
   const [thumb, setThumb] = useState<HTMLElement | null>(null);
   // Off the computer screen and the foot, a phone asks for no frames. A picture it asked to stop,
@@ -900,14 +938,16 @@ function Theatre({ api }: { api: ApiClient }) {
   const [tipsRead, setTipsRead] = useState(false);
   const routines = useRoutines(
     api,
-    railView === "routines" ||
-      routinesOpen ||
-      routineTarget !== null ||
-      agent.model.routineProposals.size > 0
-      ? "live"
-      : settings.open || tipsRead
-        ? "read"
-        : "off",
+    guest
+      ? "off"
+      : railView === "routines" ||
+          routinesOpen ||
+          routineTarget !== null ||
+          agent.model.routineProposals.size > 0
+        ? "live"
+        : settings.open || tipsRead
+          ? "read"
+          : "off",
   );
   const routineOrigin = useRef<HTMLElement | null>(null);
   const routinesControl = useMemo<RoutinesControl>(
@@ -1045,26 +1085,26 @@ function Theatre({ api }: { api: ApiClient }) {
     (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
-  const yours = !!takeover && takeover === heldByUser(agent.model);
+  const yours = !guest && !!takeover && takeover === heldByUser(agent.model);
   useHandOff({
     sessionId: agent.sessionId,
     fresh: agent.fresh,
-    offered: yours ? undefined : takeover,
+    offered: yours || guest ? undefined : takeover,
     shown: !replayId && !settings.open,
     canTake: controls.canTake,
     take: controls.take,
   });
-  const askDraft = useAskDraft(question);
+  const askDraft = useAskDraft(mine ? question : undefined);
   const answer = useRef(controls.answer);
   answer.current = controls.answer;
   const answerAsk = useCallback((request: QuestionAnswerRequest) => answer.current(request), []);
   const askCell = cell?.state === "ready" && !cell.paused ? cell.id : null;
   const uploadAsk = useMemo<AskUpload | undefined>(
     () =>
-      askCell
+      askCell && !guest
         ? (file, signal, options) => uploadFile(api, askCell, file, signal, options)
         : undefined,
-    [api, askCell],
+    [api, askCell, guest],
   );
   const askReason = controls.canAnswer ? undefined : "Check the current task before answering.";
   // While dot waits on the answer, the stage keeps its ring on each field a secret goes into.
@@ -1177,7 +1217,7 @@ function Theatre({ api }: { api: ApiClient }) {
         session.check();
       });
   });
-  useStopHotkey(taskStop, controls.canStop && !controls.stopping && !stoppingRun);
+  useStopHotkey(taskStop, mine && controls.canStop && !controls.stopping && !stoppingRun);
   // Carries on a task the user's action limit stopped: their message starts the count again.
   const continueTask = async () => {
     if (!cell || !agent.sessionId) return false;
@@ -1347,7 +1387,7 @@ function Theatre({ api }: { api: ApiClient }) {
     settings.show();
     setSettingsAt((previous) => ({ section: "computer", request: previous.request + 1 }));
   });
-  useUpdateNotice(cell, hud.phase === "live" && !updateWait, computerUpdate);
+  useUpdateNotice(cell, !guest && hud.phase === "live" && !updateWait, computerUpdate);
   useUpdateProgressNotice(cell, computerUpdate, () => {
     settings.show();
     setSettingsAt((previous) => ({ section: "computer", request: previous.request + 1 }));
@@ -1395,7 +1435,7 @@ function Theatre({ api }: { api: ApiClient }) {
           : controls.stopStatus.phase === "paused"
             ? "stopped"
             : null,
-    canStop: controls.canStop,
+    canStop: mine && controls.canStop,
     link: linkLost ? "lost" : null,
     letGo: controls.fenced || !!agent.model.pendingTakeover || !!agent.snapshot?.pendingTakeover,
   });
@@ -1502,9 +1542,12 @@ function Theatre({ api }: { api: ApiClient }) {
   // Studio's phone shows full screen as focus mode, and Chat's computer screen is its full screen;
   // a wider screen gives the stage the whole screen.
   const full = fullScreen.on && !sheets;
-  const computerAction = appStatus.actions.find(
-    (action): action is HudAction & { kind: HudActionKind } => action.kind !== "stop-task",
-  );
+  // Turning the computer on and off is the owner's.
+  const computerAction = guest
+    ? undefined
+    : appStatus.actions.find(
+        (action): action is HudAction & { kind: HudActionKind } => action.kind !== "stop-task",
+      );
   const onComputer = {
     start: () => guardStart(),
     stop: guardComputerStop,
@@ -1566,7 +1609,7 @@ function Theatre({ api }: { api: ApiClient }) {
   // The conversation's own model, else the default its next task starts on.
   const taskModel = useTaskModel(
     api,
-    conversation.known ? (conversation.sessions.at(-1) ?? null) : null,
+    conversation.known && !guest ? (conversation.sessions.at(-1) ?? null) : null,
   );
   const taskChoice = taskModel.choice ?? mainChoice;
   const modelChoices = useMemo(
@@ -1624,8 +1667,9 @@ function Theatre({ api }: { api: ApiClient }) {
     settings.chatgpt.canStart || settings.claudeCode.canStart,
     taskWorking,
   );
-  const modelLabel =
-    modelSaving?.name ?? (taskChoice ? names.name(taskChoice.provider, taskChoice.model) : "");
+  const modelLabel = guest
+    ? guestModelName(guest.grant, guest.grant.model)
+    : (modelSaving?.name ?? (taskChoice ? names.name(taskChoice.provider, taskChoice.model) : ""));
   const chooseModel = useHandler(async (option: ModelOption) => {
     setModelSaving(option);
     const saved = await taskModel.choose(option.choice);
@@ -1673,17 +1717,31 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const modelChip = useMemo(
     () =>
-      taskChoice && (
-        <ModelChip
-          {...modelMenu}
-          name={modelLabel}
-          next={modelNext}
-          disabledReason={modelSaving ? "Saving…" : undefined}
-          onPeek={browseAccounts}
-          onManage={showModels}
-        />
+      guest ? (
+        <GuestModelChip api={api} guest={guest} />
+      ) : (
+        taskChoice && (
+          <ModelChip
+            {...modelMenu}
+            name={modelLabel}
+            next={modelNext}
+            disabledReason={modelSaving ? "Saving…" : undefined}
+            onPeek={browseAccounts}
+            onManage={showModels}
+          />
+        )
       ),
-    [taskChoice, modelMenu, modelLabel, modelNext, modelSaving, browseAccounts, showModels],
+    [
+      api,
+      guest,
+      taskChoice,
+      modelMenu,
+      modelLabel,
+      modelNext,
+      modelSaving,
+      browseAccounts,
+      showModels,
+    ],
   );
   const permissionMode = settings.saved?.permissionMode ?? "custom";
   const choosePermissions = useHandler((mode: typeof permissionMode) => {
@@ -1698,6 +1756,7 @@ function Theatre({ api }: { api: ApiClient }) {
     [permissionMode, settings.busy, choosePermissions],
   );
   const stoppable =
+    mine &&
     !!agent.sessionId &&
     !agent.model.ended &&
     agent.snapshot?.status !== "idle" &&
@@ -2081,7 +2140,7 @@ function Theatre({ api }: { api: ApiClient }) {
     // The picture coming back, after Replay or a dropped stream, until the curtain has lifted off
     // it, is no task: dot keeps its line for when the stage is back.
     suspended: !!replayId || onboarding.open || pictureAway(appStatus.computer) || curtain.lifting,
-    held: pageHidden || overBand || settings.open,
+    held: pageHidden || overBand || settings.open || !!guest,
     voice,
     signals: {
       touch: touch || sheets,
@@ -2201,7 +2260,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const usageShown = aside.aside?.kind === "usage";
   const watchUsage = planUsage.watch;
   useEffect(() => (usageShown ? watchUsage() : undefined), [usageShown, watchUsage]);
-  usePaletteKeys(openPalette, !onboarding.open);
+  usePaletteKeys(openPalette, !onboarding.open && !guest);
   const nothing = () => {};
   const showView = (view: "chat" | "activity" | "routines") => {
     if (replayId) selectReplay(null);
@@ -2366,9 +2425,9 @@ function Theatre({ api }: { api: ApiClient }) {
       onReload={opening && openingSlow ? () => window.location.reload() : undefined}
       action={computerAction}
       onAction={() => computerAction && onComputer[computerAction.kind]()}
-      startAnyway={startAnyway ? () => guardStart(true) : undefined}
+      startAnyway={startAnyway && !guest ? () => guardStart(true) : undefined}
       replace={
-        cell?.fenced
+        cell?.fenced && !guest
           ? {
               enabled: safety.canReplace,
               busy: safety.replacing,
@@ -2377,7 +2436,7 @@ function Theatre({ api }: { api: ApiClient }) {
             }
           : undefined
       }
-      freshStart={freshStart.curtain}
+      freshStart={guest ? undefined : freshStart.curtain}
       operation={operation}
       ready={curtain.lifting}
       showDot={showDot.value}
@@ -2455,6 +2514,11 @@ function Theatre({ api }: { api: ApiClient }) {
     }
     levelShown.current = level;
   }, [level]);
+  // A link has no list to be on.
+  const guestAtList = !!guest && nav.route.level === 0;
+  useEffect(() => {
+    if (guestAtList) nav.replace({ level: 1, id: "current" });
+  }, [guestAtList, nav]);
   usePhoneAddress({
     on: stack,
     nav,
@@ -2462,7 +2526,8 @@ function Theatre({ api }: { api: ApiClient }) {
     sessions: conversation.sessions,
     current: currentTask,
     settling: !!switching || choosing || !!viewedConversation,
-    takeUp: takeUpConversation,
+    // A link can't take up another conversation: it stays on the one on show.
+    takeUp: guest ? () => nav.show("current") : takeUpConversation,
     startNew: () => void choose(null),
   });
   // Taking the computer goes to it.
@@ -2525,7 +2590,7 @@ function Theatre({ api }: { api: ApiClient }) {
     agent.sessionId && (agent.model.ended || task?.phase === "finished")
       ? agent.sessionId
       : LIBRARY;
-  const handOffNote = !switching && !viewedConversation && (
+  const handOffNote = !guest && !switching && !viewedConversation && (
     <>
       {takeover && takeover.by !== "user" && (
         <div className="thread-handoff" role="status">
@@ -2559,11 +2624,46 @@ function Theatre({ api }: { api: ApiClient }) {
       onDetails={openComputer}
     />
   );
+  // What a link's guest can't decide: an approval, a hand-over, or a question asked of the owner.
+  const ownerWait =
+    !!guest &&
+    !!agent.snapshot &&
+    !agent.model.ended &&
+    (stepApproval ||
+      !!takeover ||
+      !!agent.snapshot.holder ||
+      !!agent.snapshot.manualControl ||
+      agent.snapshot.status === "paused" ||
+      (!!question && !mine));
+  const startsTask = !mine || !!agent.model.ended;
+  const usedUp =
+    !!guest && guest.grant.maxTasks !== null && guest.grant.tasks >= guest.grant.maxTasks;
+  const linkReason = ownerWait
+    ? "Waiting for the owner"
+    : !mine && taskWorking
+      ? "Another task is running"
+      : startsTask && usedUp
+        ? "This link has used all its tasks"
+        : undefined;
+  const composerLink = useMemo(
+    () => (guest ? { own: mine, reason: linkReason } : undefined),
+    [guest, mine, linkReason],
+  );
+  const startedTask = useHandler(() => {
+    session.check();
+    void guest?.refresh();
+  });
   const phoneDock = (
     <>
       {level < 2 && !fixes.some((open) => open.blocker.kind === "computer") && computerNotice}
       {handOffNote}
-      {approvalView && <div className="phone-decision">{approvalView}</div>}
+      {approvalView && !guest && <div className="phone-decision">{approvalView}</div>}
+      {ownerWait && (
+        <div className="thread-handoff" role="status">
+          <strong>Waiting for the owner</strong>
+          <p>This task needs the computer owner’s input or approval. It has not finished.</p>
+        </div>
+      )}
     </>
   );
   const openPhoneModels = () => {
@@ -2571,7 +2671,17 @@ function Theatre({ api }: { api: ApiClient }) {
     phoneModelsAnchor.current = moreButton.current;
     setPhoneModels(true);
   };
-  const phoneMenu = (
+  const [guestSettings, setGuestSettings] = useState(false);
+  const phoneMenu = guest ? (
+    <GuestMenuItems
+      guest={guest}
+      newReason={newConversation.reason}
+      onNew={newConversation.run}
+      onReplay={() => selectReplay(replayTarget)}
+      onSettings={() => setGuestSettings(true)}
+      onStop={stopTask ? taskStop : undefined}
+    />
+  ) : (
     <ConversationMenuItems
       dotHidden={!showDot.value}
       look={shown.look}
@@ -2844,7 +2954,7 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const chatThread = (
     <ChatThread
-      previews={previews}
+      previews={guest ? null : previews}
       visible={shownView === "chat" && (!stack || level > 0)}
       suggestions={voice.suggestions}
       agent={switching ? undefined : viewedConversation ? historyAgent : agent}
@@ -2867,13 +2977,15 @@ function Theatre({ api }: { api: ApiClient }) {
           : null
       }
       onReplay={
-        viewedConversation
-          ? () => selectReplay(viewedConversation.id)
-          : agent.sessionId && (agent.model.ended || task?.phase === "finished")
-            ? () => selectReplay(agent.sessionId)
-            : undefined
+        !canReplay
+          ? undefined
+          : viewedConversation
+            ? () => selectReplay(viewedConversation.id)
+            : agent.sessionId && (agent.model.ended || task?.phase === "finished")
+              ? () => selectReplay(agent.sessionId)
+              : undefined
       }
-      onReplayTask={(id, atMs) => selectReplay(id, "navigate", atMs)}
+      onReplayTask={canReplay ? (id, atMs) => selectReplay(id, "navigate", atMs) : undefined}
       sessions={switching ? NO_SESSIONS : (viewedConversation?.sessions ?? conversation.sessions)}
       more={!switching && conversation.more}
       withdrawn={conversation.withdrawn}
@@ -2889,7 +3001,7 @@ function Theatre({ api }: { api: ApiClient }) {
       lead={
         stack
           ? // Adding goes into the message field, which a conversation opened to read hasn't got.
-            !viewedConversation && <PhoneAdd researchReason={researchWait(agent)} />
+            !viewedConversation && !guest && <PhoneAdd researchReason={researchWait(agent)} />
           : phone && (
               <IconButton
                 className="toolbar-button"
@@ -3090,6 +3202,7 @@ function Theatre({ api }: { api: ApiClient }) {
         )
       }
       recovery={
+        !guest &&
         !switching &&
         !viewedConversation && (
           <>
@@ -3204,19 +3317,20 @@ function Theatre({ api }: { api: ApiClient }) {
             receiveKey={receiveKey}
             configured={setupDone}
             onSettings={showModels}
-            onTaskStarted={session.check}
+            onTaskStarted={startedTask}
+            link={composerLink}
             layout={sheets ? "pill" : "card"}
             placeholder={stack && level === 2 ? "Steer dot" : undefined}
             waitingOn={dotWait}
             secretField={secretField}
             modelChanged={modelChanged}
-            sendModel={taskModel.ref}
+            sendModel={guest ? undefined : taskModel.ref}
             modelAfter={modelNext && taskModel.ref ? modelLabel : undefined}
-            permissions={permissionChip}
+            permissions={guest ? undefined : permissionChip}
             taskAction={stopAction}
             stopping={stoppingRun}
             model={modelChip}
-            actions={commands.actions}
+            actions={guest ? undefined : commands.actions}
           />
         )
       }
@@ -3225,8 +3339,8 @@ function Theatre({ api }: { api: ApiClient }) {
   const phoneStack = stack && (
     <PhoneStack
       nav={nav}
-      split={split}
-      listHidden={listHidden}
+      split={split || !!guest}
+      listHidden={listHidden || !!guest}
       flyer={flyer}
       flightFrom={flightFrom}
       showDot={showDot.value}
@@ -3235,46 +3349,48 @@ function Theatre({ api }: { api: ApiClient }) {
         return entry ? conversationLook(entry) : undefined;
       }}
       list={
-        <PhoneList
-          api={api}
-          current={shownId ?? null}
-          facts={liveFacts}
-          attention={attention.items}
-          reason={conversationList.reason}
-          selecting={split}
-          onOpen={(row, from) => {
-            flightFrom.current = from;
-            pickConversation(row.entry.sessionId, row.entry.sessions);
-          }}
-          onNew={() => {
-            if (fresh) nav.show("new");
-            else newConversation.run();
-          }}
-          newReason={conversationReason}
-          onReplay={() => selectReplay(LIBRARY)}
-          onDeleted={conversationList.onDeleted}
-          computer={{
-            name: settings.saved?.name || "This computer",
-            onOpen: localDots.refresh,
-            menu: (
-              <ComputerMenuItems
-                name={settings.saved?.name || "This computer"}
-                others={otherDots}
-                onManage={() => goToSettings(null, "dot")}
-                onRoutines={() => setRoutinesOpen(true)}
-                hasRecordings={hasRecordings}
-                onReplay={() => selectReplay(LIBRARY)}
-                onSettings={() => goToSettings(null)}
-                onKeys={() => showKeys(null)}
-                onSearch={() => openPalette("actions")}
-                switchView={switchViewItem}
-                stoppingAll={stopAll.running}
-                onStopAll={() => void stopAll.run()}
-              />
-            ),
-          }}
-          notice={level === 0 && computerNotice}
-        />
+        !guest && (
+          <PhoneList
+            api={api}
+            current={shownId ?? null}
+            facts={liveFacts}
+            attention={attention.items}
+            reason={conversationList.reason}
+            selecting={split}
+            onOpen={(row, from) => {
+              flightFrom.current = from;
+              pickConversation(row.entry.sessionId, row.entry.sessions);
+            }}
+            onNew={() => {
+              if (fresh) nav.show("new");
+              else newConversation.run();
+            }}
+            newReason={conversationReason}
+            onReplay={() => selectReplay(LIBRARY)}
+            onDeleted={conversationList.onDeleted}
+            computer={{
+              name: settings.saved?.name || "This computer",
+              onOpen: localDots.refresh,
+              menu: (
+                <ComputerMenuItems
+                  name={settings.saved?.name || "This computer"}
+                  others={otherDots}
+                  onManage={() => goToSettings(null, "dot")}
+                  onRoutines={() => setRoutinesOpen(true)}
+                  hasRecordings={hasRecordings}
+                  onReplay={() => selectReplay(LIBRARY)}
+                  onSettings={() => goToSettings(null)}
+                  onKeys={() => showKeys(null)}
+                  onSearch={() => openPalette("actions")}
+                  switchView={switchViewItem}
+                  stoppingAll={stopAll.running}
+                  onStopAll={() => void stopAll.run()}
+                />
+              ),
+            }}
+            notice={level === 0 && computerNotice}
+          />
+        )
       }
       bar={
         <PhoneBar
@@ -3288,18 +3404,20 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
           }
           back={
-            split
-              ? {
-                  label: "Show or hide the list",
-                  icon: "panel-left",
-                  onPress: () => setListHidden((was) => !was),
-                }
-              : {
-                  label: "Back to conversations",
-                  icon: "chevron-left",
-                  attention: [...needsYou].some((id) => id !== currentTask),
-                  onPress: nav.back,
-                }
+            guest
+              ? undefined
+              : split
+                ? {
+                    label: "Show or hide the list",
+                    icon: "panel-left",
+                    onPress: () => setListHidden((was) => !was),
+                  }
+                : {
+                    label: "Back to conversations",
+                    icon: "chevron-left",
+                    attention: [...needsYou].some((id) => id !== currentTask),
+                    onPress: nav.back,
+                  }
           }
           onDetails={() => setDetailsOpen(true)}
           lamp={holding}
@@ -3347,7 +3465,18 @@ function Theatre({ api }: { api: ApiClient }) {
             )
           }
           controls={
-            yours ? (
+            guest ? (
+              stopTask && (
+                <Button
+                  icon="stop"
+                  busy={stopTask.busy}
+                  disabledReason={stopTask.enabled ? undefined : "Wait a moment"}
+                  onClick={taskStop}
+                >
+                  Stop
+                </Button>
+              )
+            ) : yours ? (
               <ControlTools
                 send={sendToComputer}
                 blocked={inputBlocked}
@@ -3463,14 +3592,29 @@ function Theatre({ api }: { api: ApiClient }) {
                 : undefined
             }
             rows={[
-              { label: PANEL_NAME, icon: "list", run: () => setActivityOpen(true) },
-              {
-                label: "Replay",
-                icon: "history",
-                disabledReason: hasRecordings ? undefined : "No recordings yet",
-                run: () => selectReplay(replayTarget),
-              },
-              ...(mainChoice
+              ...(guest
+                ? []
+                : [{ label: PANEL_NAME, icon: "list" as const, run: () => setActivityOpen(true) }]),
+              ...(canReplay
+                ? [
+                    {
+                      label: "Replay",
+                      icon: "history" as const,
+                      disabledReason: hasRecordings ? undefined : "No recordings yet",
+                      run: () => selectReplay(replayTarget),
+                    },
+                  ]
+                : []),
+              ...(guest?.grant.settings
+                ? [
+                    {
+                      label: "Chat settings",
+                      icon: "settings" as const,
+                      run: () => setGuestSettings(true),
+                    },
+                  ]
+                : []),
+              ...(mainChoice && !guest
                 ? [
                     {
                       label: "Model",
@@ -3498,8 +3642,9 @@ function Theatre({ api }: { api: ApiClient }) {
         className={appStatus.control && !replayId ? "app control" : "app"}
         style={{ "--dot-crown": crown(dotArrival.look ?? dotLook) } as CSSProperties}
         data-layout={layout}
-        data-stack={(stack && !(split && replayId)) || undefined}
+        data-stack={(stack && !wideReplay) || undefined}
         data-view={viewStyle.value}
+        data-guest={guest ? "" : undefined}
         data-sessions={railShown ? (railExpanded ? "expanded" : "collapsed") : undefined}
         data-screen-minimized={(!replayId && mobileScreen.minimized) || undefined}
         // Replay's rail takes the chat's column whether or not Watch shows the chat.
@@ -3513,8 +3658,9 @@ function Theatre({ api }: { api: ApiClient }) {
         data-setup={onboarding.open ? "" : undefined}
         data-entering={opening ? "" : undefined}
       >
-        {(!stack || (split && !!replayId)) && (
+        {(!stack || wideReplay) && (
           <TopBar
+            guest={!!guest}
             brand={brand}
             title={
               replayId === LIBRARY
@@ -3545,8 +3691,8 @@ function Theatre({ api }: { api: ApiClient }) {
             settingsOpen={settings.open}
             onSettings={showSettings}
             settingsRef={settingsButton}
-            more={barMore}
-            panels={panelsToggle}
+            more={guest ? undefined : barMore}
+            panels={guest ? undefined : panelsToggle}
           />
         )}
         <div className="watch" hidden={!!replayId} inert={!!replayId}>
@@ -3663,7 +3809,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 if (id === replayId) selectReplay(LIBRARY, "replace");
               }}
               onTitle={setRecorded}
-              continueTask={replayContinue}
+              continueTask={guest ? undefined : replayContinue}
               exportJob={exportJob}
               hostExports={hostExports}
               visible={!settings.open && !safety.approval}
@@ -4049,6 +4195,14 @@ function Theatre({ api }: { api: ApiClient }) {
               line={onboarding.open || bandSpeaker !== "dot" || hearing ? "" : bandLine}
             />
           </ErrorBoundary>
+        )}
+        {guest && (
+          <GuestSettingsSheet
+            api={api}
+            guest={guest}
+            open={guestSettings}
+            onClose={() => setGuestSettings(false)}
+          />
         )}
         <PreviewNotice previews={previews} />
         <CommandPalette

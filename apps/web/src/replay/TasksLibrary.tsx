@@ -15,6 +15,7 @@ import {
 import { bytes } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import { type ApiClient, ApiError } from "../lib/api.ts";
+import { useGuest } from "../remote/guest.ts";
 import { dayLabel } from "../settings/memory/memory-copy.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -251,6 +252,7 @@ export function TaskList({
   // a swipe to delete; or the player's rail, where a row only opens its recording.
   variant?: "library" | "phone" | "rail";
 }) {
+  const guest = useGuest();
   const list = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const anchor = useRef<HTMLElement | null>(null);
@@ -333,7 +335,7 @@ export function TaskList({
         windowed.scrollTo(flat.findIndex((row) => row.key === next.id));
         setFocusKey(next.id);
       }
-    } else if (!picking && (event.key === "Backspace" || event.key === "Delete")) {
+    } else if (!picking && !guest && (event.key === "Backspace" || event.key === "Delete")) {
       const card = rows[at];
       if (!card) return;
       event.preventDefault();
@@ -516,6 +518,8 @@ function TaskRow({
   const verdict = verdictGlyph(card.verdict);
   const phone = variant === "phone";
   const wide = variant === "library";
+  // Deleting a recording is the owner's.
+  const guest = useGuest();
   const locked = picking && !deletable(card);
   return (
     <li
@@ -579,7 +583,7 @@ function TaskRow({
                     Continue
                   </Button>
                 )}
-                {wide && (
+                {wide && !guest && (
                   <IconButton
                     size={28}
                     icon="trash"
@@ -591,7 +595,7 @@ function TaskRow({
             )
           }
           swipe={
-            phone && !picking
+            phone && !picking && !guest
               ? { label: "Delete", accessibleLabel: `Delete ${title}`, onAction: onDelete }
               : undefined
           }

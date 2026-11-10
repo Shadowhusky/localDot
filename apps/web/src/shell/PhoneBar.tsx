@@ -10,8 +10,8 @@ export interface PhoneBarProps {
   title: string;
   // Under the name, only while dot isn't there to say it.
   status?: { kind: SessionStatus | "none"; text: ReactNode };
-  // Back, or beside the list a toggle for it.
-  back: { label: string; icon: IconName; attention?: boolean; onPress(): void };
+  // Back, or beside the list a toggle for it; none where there is no list to go back to.
+  back?: { label: string; icon: IconName; attention?: boolean; onPress(): void };
   onDetails(): void;
   // This task holds the computer.
   lamp: boolean;
@@ -42,15 +42,17 @@ export function PhoneBar({
     <header className="phone-bar phone-chat-bar" data-sub={status ? "" : undefined}>
       <div className="phone-bar-glass" />
       <div className="phone-bar-row">
-        <IconButton
-          size={36}
-          round
-          variant="filled"
-          icon={back.icon}
-          label={back.label}
-          attention={back.attention}
-          onClick={back.onPress}
-        />
+        {back && (
+          <IconButton
+            size={36}
+            round
+            variant="filled"
+            icon={back.icon}
+            label={back.label}
+            attention={back.attention}
+            onClick={back.onPress}
+          />
+        )}
         <Button
           variant="quiet"
           className="phone-title"

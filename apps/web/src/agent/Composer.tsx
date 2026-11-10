@@ -128,6 +128,8 @@ export interface ComposerProps {
   modelAfter?: string;
   // What "/" lists: the actions with a command name.
   actions?: readonly Action[];
+  // A shared link's limits: its messages go to its own task or start one, and it attaches nothing.
+  link?: { own: boolean; reason?: string };
 }
 // `private`: a question with something that must not go in a message, such as a password.
 export type DotWait = "question" | "private" | "approval" | "computer" | "fix" | "private-fix";
@@ -170,6 +172,7 @@ const readyCell = (props: ComposerProps) =>
   !props.cell.paused &&
   ULID_PATTERN.test(props.cell.id);
 function modeFor(props: ComposerProps, selected: "steer" | "followup"): MessageMode {
+  if (props.link && !props.link.own) return "new";
   if (
     !props.waitingOn &&
     props.agent.snapshot?.status === "paused" &&
@@ -203,6 +206,7 @@ function computerReason(props: ComposerProps): string | undefined {
 function blockedReason(props: ComposerProps, mode: MessageMode) {
   return (
     computerReason(props) ??
+    props.link?.reason ??
     (mode !== "new" && !props.agent.fresh ? "Reconnecting to the task…" : undefined)
   );
 }
@@ -338,7 +342,9 @@ function sameComposerProps(was: ComposerProps, now: ComposerProps): boolean {
         ? !sameTask(was.agent, now.agent)
         : key === "cell"
           ? !sameCell(was.cell, now.cell)
-          : was[key] !== now[key]
+          : key === "link"
+            ? was.link?.own !== now.link?.own || was.link?.reason !== now.link?.reason
+            : was[key] !== now[key]
     )
       return false;
   return true;
@@ -1291,11 +1297,13 @@ export const Composer = memo(function Composer(props: ComposerProps) {
                 : empty && !talking
                   ? "Write a message first."
                   : undefined));
-  const attachReason = guard.notice
-    ? "Discard the key or move it to Keys first."
-    : sending || uncertain
-      ? "Wait until your message is sent."
-      : reason;
+  const attachReason = props.link
+    ? "Files can't be attached on a shared link."
+    : guard.notice
+      ? "Discard the key or move it to Keys first."
+      : sending || uncertain
+        ? "Wait until your message is sent."
+        : reason;
   attach.current = (files) => {
     if (attachReason || !files.length) return false;
     sendConfirmed.current = false;
@@ -1470,15 +1478,17 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           events={events}
         />
         <div className="composer-bar">
-          <FileButton
-            label="Attach files"
-            icon="paperclip"
-            size={pill ? 36 : 28}
-            round={pill}
-            multiple
-            onFiles={(files) => attach.current([...files])}
-            disabledReason={attachReason}
-          />
+          {!props.link && (
+            <FileButton
+              label="Attach files"
+              icon="paperclip"
+              size={pill ? 36 : 28}
+              round={pill}
+              multiple
+              onFiles={(files) => attach.current([...files])}
+              disabledReason={attachReason}
+            />
+          )}
           {!pill && (
             <ResearchToggle
               on={research}
@@ -1521,7 +1531,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
             </MenuItem>
           </Menu>
           {props.permissions}
-          <VoiceButton voice={voice} />
+          {!props.link && <VoiceButton voice={voice} />}
           <IconButton
             type={talking || taskAction ? "button" : "submit"}
             onPointerDown={(event) => {

@@ -226,7 +226,7 @@ for (const appearance of CASES)
         }),
       );
       await ui.open("ready");
-      await expect(page.getByRole("main")).toHaveClass("shared-app");
+      await expect(page.locator(".app[data-guest]")).toBeVisible();
       await opensIn(page);
       await ui.settle();
       await shot(page, "shared-link");

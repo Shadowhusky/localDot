@@ -213,8 +213,8 @@ test("what someone with a shared link sees", async ({ page, ui }) => {
     }),
   );
   await ui.open("ready");
-  await expect(page.getByRole("main")).toHaveClass("shared-app");
-  await noStray(page, ui, "shared-app");
+  await expect(page.locator(".app[data-guest]")).toBeVisible();
+  await noStray(page, ui, "shared-link");
 });
 
 test("what dot knows, with facts, notes and people", async ({ page, ui }) => {

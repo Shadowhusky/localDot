@@ -492,6 +492,11 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
     hold,
     drop,
     use() {
+      // A shared link has no list of conversations: it is known, and empty.
+      if (api.permits?.("GET", "/api/conversations") === false) {
+        if (!store.state.entries) set({ ...store.state, entries: [] });
+        return () => {};
+      }
       if (users++ === 0) stop = start();
       read();
       return () => {

@@ -5282,6 +5282,9 @@ routes.post("/__qa/link", async (c) => {
   });
   return c.json({ token, id: grant.id });
 });
+routes.post("/__qa/link/revoke", (c) =>
+  links?.revoke(c.req.query("id") ?? "") ? c.json({ ok: true }) : c.text("no such link", 404),
+);
 routes.get("/__qa/manual-inputs", (c) => c.json(manualInputs));
 routes.get("/__qa/notify", (c) => c.json(notified));
 routes.get("/__qa/state", (c) =>

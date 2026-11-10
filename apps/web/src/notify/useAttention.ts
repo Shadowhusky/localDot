@@ -50,6 +50,7 @@ export function useAttention(
   open.current = openSession;
 
   useEffect(() => {
+    if (api.permits?.("GET", "/api/events") === false) return;
     let cancelled = false;
     let opened = false;
     const doc = opts.doc ?? document;

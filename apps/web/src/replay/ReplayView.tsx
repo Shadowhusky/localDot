@@ -25,6 +25,7 @@ import type { ExportJob } from "../export/job.ts";
 import { exportSupport } from "../export/sink.ts";
 import { useExportProbe } from "../export/useExportProbe.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { useGuest } from "../remote/guest.ts";
 import { timelineRows } from "../session/key-uses.ts";
 import { type StepRowView, stepRows } from "../session/session-view.ts";
 import { taskHud } from "../session/status.ts";
@@ -293,6 +294,8 @@ function Library({
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const matches = useTaskSearch(api, search);
   const exportState = useHostExports(hostExports);
+  // Deleting, freeing space and exported videos are the owner's.
+  const guest = useGuest();
   const libraryLoading =
     (tasks.loading && tasks.cards.length === 0) || exportState.loading === true;
   const shown = shownCards(tasks.cards, search, filter, matches);
@@ -402,30 +405,32 @@ function Library({
                 <span className="replay-library-total num">
                   {freed ?? libraryTotal(tasks.cards, tasks.more)}
                 </span>
-                <span className="replay-library-tools">
-                  <FreeUpSpace
-                    cards={tasks.cards}
-                    counting={tasks.more && !tasks.failed}
-                    onOpen={() => setCounting(true)}
-                    onChoose={(cleanup, picks) => {
-                      setSearch("");
-                      setFilter("all");
-                      setPicking(true);
-                      setPicked(new Set(picks.map((entry) => entry.id)));
-                      lastPick.current = null;
-                      if (picks[0]) setReveal({ id: picks[0].id });
-                      setConfirming({ cleanup });
-                    }}
-                  />
-                  <Button
-                    ref={barAction}
-                    variant="quiet"
-                    size="sm"
-                    onClick={() => setPicking(true)}
-                  >
-                    Select
-                  </Button>
-                </span>
+                {!guest && (
+                  <span className="replay-library-tools">
+                    <FreeUpSpace
+                      cards={tasks.cards}
+                      counting={tasks.more && !tasks.failed}
+                      onOpen={() => setCounting(true)}
+                      onChoose={(cleanup, picks) => {
+                        setSearch("");
+                        setFilter("all");
+                        setPicking(true);
+                        setPicked(new Set(picks.map((entry) => entry.id)));
+                        lastPick.current = null;
+                        if (picks[0]) setReveal({ id: picks[0].id });
+                        setConfirming({ cleanup });
+                      }}
+                    />
+                    <Button
+                      ref={barAction}
+                      variant="quiet"
+                      size="sm"
+                      onClick={() => setPicking(true)}
+                    >
+                      Select
+                    </Button>
+                  </span>
+                )}
               </>
             )}
           </div>
@@ -435,7 +440,7 @@ function Library({
             <DotLoader className="replay-loading" label="Loading your recordings" />
           ) : (
             <>
-              {search.trim() === "" && filter === "all" && !picking && (
+              {search.trim() === "" && filter === "all" && !picking && !guest && (
                 <ExportsList
                   api={api}
                   host={hostExports}
@@ -525,6 +530,7 @@ function RecordingPreview({
   onDeleted(card: SessionCard): void;
 }) {
   const summary = useRecordingSummary(api, card.id);
+  const guest = useGuest();
   const now = useMemo(() => new Date(), []);
   const remove = useRef<HTMLButtonElement>(null);
   const [deleting, setDeleting] = useState<SessionCard | null>(null);
@@ -574,7 +580,7 @@ function RecordingPreview({
             Watch replay
           </Button>
         </div>
-        {summary && summary.files.length > 0 && (
+        {summary && summary.files.length > 0 && !guest && (
           <section className="replay-files" aria-labelledby={`${card.id}-files`}>
             <h3 id={`${card.id}-files`} className="replay-files-title">
               Files
@@ -588,11 +594,13 @@ function RecordingPreview({
           </section>
         )}
       </div>
-      <div className="replay-preview-foot">
-        <Button ref={remove} variant="destructive" icon="trash" onClick={() => setDeleting(card)}>
-          Delete recording…
-        </Button>
-      </div>
+      {!guest && (
+        <div className="replay-preview-foot">
+          <Button ref={remove} variant="destructive" icon="trash" onClick={() => setDeleting(card)}>
+            Delete recording…
+          </Button>
+        </div>
+      )}
       <DeleteTask
         api={api}
         card={deleting}
@@ -704,6 +712,7 @@ function Player({
 }) {
   const stage = useRef<StageHandle>(null);
   const hostView = useHostExports(hostExports);
+  const guest = useGuest();
   const onHost = hostCanMake(hostView);
   const hostAnswered = !!hostView.host && hostView.host.state !== "checking";
   const area = useRef<HTMLElement>(null);
@@ -1044,23 +1053,26 @@ function Player({
               cardShown={!noticeOver}
               viewControl={viewControl}
               exportControl={
-                <ExportButton
-                  ref={exportTrigger}
-                  job={job}
-                  open={exportOpen}
-                  disabledReason={
-                    onHost || support.ok
-                      ? replay.info && replay.map
-                        ? undefined
-                        : LOADING
-                      : support.reason
-                  }
-                  onOpen={() => {
-                    replay.run({ kind: "pause" });
-                    const context = job.snapshot().context ?? exportContext(api, sessionId, replay);
-                    setExporting((was) => ({ context, open: true, key: (was?.key ?? 0) + 1 }));
-                  }}
-                />
+                !guest && (
+                  <ExportButton
+                    ref={exportTrigger}
+                    job={job}
+                    open={exportOpen}
+                    disabledReason={
+                      onHost || support.ok
+                        ? replay.info && replay.map
+                          ? undefined
+                          : LOADING
+                        : support.reason
+                    }
+                    onOpen={() => {
+                      replay.run({ kind: "pause" });
+                      const context =
+                        job.snapshot().context ?? exportContext(api, sessionId, replay);
+                      setExporting((was) => ({ context, open: true, key: (was?.key ?? 0) + 1 }));
+                    }}
+                  />
+                )
               }
             />
           </div>

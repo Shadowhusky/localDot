@@ -1,20 +1,28 @@
+import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { TOKEN, type UiFixture } from "../fixtures/start-ui-fixture.ts";
-import { expect, isPhone, runAt, test } from "./harness.ts";
+import { expect, type Harness, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w14", "w39");
 
-const OTHER_MODEL = { provider: "openai", model: "gpt-6.1-sol" };
+const MODELS = [
+  { provider: "anthropic", model: "claude-sonnet-5-5" },
+  { provider: "openai", model: "gpt-6.1-sol" },
+];
 const LINKS = {
   "Replay off": {},
   "Replay on": { replay: true },
   "the owner's apps, keys and browser": { apps: true },
-  "chat settings and model switching": {
+  "chat settings and model switching": { settings: true, chooseModel: true, models: MODELS },
+  "everything a link can have": {
     settings: true,
     chooseModel: true,
-    models: [{ provider: "anthropic", model: "claude-sonnet-5-5" }, OTHER_MODEL],
+    replay: true,
+    apps: true,
+    models: MODELS,
   },
 };
+type Setting = { replay?: boolean; apps?: boolean; settings?: boolean; maxTasks?: number };
 
 interface Conversation {
   sessionId: string;
@@ -53,36 +61,136 @@ async function ownerSide(page: Page, fixture: UiFixture) {
   };
 }
 
-for (const [name, setting] of Object.entries(LINKS))
-  test(`a guest sees the conversation on show and its own task, and nothing else (${name})`, async ({
+// A guest's page on a new link: what it was refused, what it asked for, and what its console said.
+async function openAsGuest(page: Page, ui: Harness, setting: Setting) {
+  await recordStyles(page);
+  const fixture = await ui.open("shared-links", undefined, "");
+  const owner = await ownerSide(page, fixture);
+  const { token, id } = await (
+    await page.request.post(`${fixture.origin}/__qa/link`, { data: setting })
+  ).json();
+  const refused: string[] = [];
+  const asked: string[] = [];
+  const errors: string[] = [];
+  page.on("response", (response) => {
+    if (response.status() === 403) refused.push(new URL(response.url()).pathname);
+  });
+  page.on("request", (request) => asked.push(new URL(request.url()).pathname));
+  page.on("websocket", (socket) => asked.push(new URL(socket.url()).pathname));
+  page.on("console", (message) => {
+    // A task at rest has no live status and the fixture daemon no runtime check: both answer 404,
+    // for the owner's page too.
+    if (message.type() === "error" && !message.text().includes("status of 404"))
+      errors.push(message.text());
+  });
+  await page.goto(`${fixture.origin}/#token=${token}`);
+  await expect(page.locator(".app[data-guest]")).toBeVisible();
+  await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
+  // Before any screenshot: the page alone has nothing the policy refuses.
+  expect(errors).toEqual([]);
+  const guest = (path: string) =>
+    page.request.get(`${fixture.origin}${path}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+  return { fixture, owner, token, id, guest, refused, asked, errors };
+}
+
+// The page policy refuses inline styles, and the app adds none. In WebKit Playwright itself adds an
+// empty one (`body {}`) to the head for each screenshot, which the console reports as refused: every
+// style element that reached the document is on record, so each report is matched to one of those.
+const PLAYWRIGHT_STYLE = "body {}";
+const REFUSED_STYLE = /^Refused to apply a stylesheet/;
+declare global {
+  interface Window {
+    stylesAdded?: string[];
+  }
+}
+function recordStyles(page: Page) {
+  return page.addInitScript(() => {
+    const added: string[] = [];
+    window.stylesAdded = added;
+    new MutationObserver((records) => {
+      for (const record of records)
+        for (const node of record.addedNodes)
+          if (node.nodeName === "STYLE") added.push(node.textContent ?? "");
+    }).observe(document, { childList: true, subtree: true });
+  });
+}
+async function expectCleanConsole(page: Page, errors: readonly string[]) {
+  const styles = await page.evaluate(() => window.stylesAdded ?? []);
+  expect(
+    styles.filter((text) => text !== PLAYWRIGHT_STYLE),
+    "style elements the page added",
+  ).toEqual([]);
+  expect(
+    errors.filter((text) => !REFUSED_STYLE.test(text)),
+    "what the page's console reported",
+  ).toEqual([]);
+  expect(
+    errors.filter((text) => REFUSED_STYLE.test(text)).length,
+    "refused stylesheets that were not a screenshot's",
+  ).toBeLessThanOrEqual(styles.length);
+}
+
+async function shot(page: Page, ui: Harness, name: string) {
+  // A sheet or menu just opened has finished coming in.
+  await page.waitForTimeout(300);
+  await ui.settle();
+  await ui.still();
+  const project = test.info().project.name;
+  const dir = process.env.QA_GUEST_SHOTS;
+  if (dir) mkdirSync(dir, { recursive: true });
+  await page.screenshot({
+    path: dir ? `${dir}/${project}-${name}.png` : test.info().outputPath(`${name}.png`),
+  });
+}
+
+const thread = (page: Page) => page.getByRole("complementary", { name: "Conversation" });
+
+const messageBox = (page: Page) =>
+  page.getByRole("form", { name: "Message dot" }).getByRole("textbox");
+
+async function send(page: Page, text: string) {
+  await messageBox(page).fill(text);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+}
+
+for (const [name, setting] of Object.entries(LINKS) as [string, Setting][])
+  test(`a guest has the app's own conversation, with only what the link allows (${name})`, async ({
     page,
     ui,
   }) => {
-    const fixture = await ui.open("shared-links", undefined, "");
-    const owner = await ownerSide(page, fixture);
-    const { token } = await (
-      await page.request.post(`${fixture.origin}/__qa/link`, { data: setting })
-    ).json();
-    const guest = (path: string) =>
-      page.request.get(`${fixture.origin}${path}`, {
-        headers: { authorization: `Bearer ${token}` },
-      });
-    const refused: string[] = [];
-    page.on("response", (response) => {
-      if (response.status() === 403) refused.push(new URL(response.url()).pathname);
-    });
-
-    await page.goto(`${fixture.origin}/#token=${token}`);
-    const main = page.getByRole("main");
-    await expect(main).toHaveClass("shared-app");
-    const chat = page.getByRole("region", { name: "Conversation" });
+    const { fixture, owner, guest, refused, asked, errors } = await openAsGuest(page, ui, setting);
+    const chat = thread(page);
     await expect(chat.getByText(/^Summarise the sample sales table/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Replays", exact: true })).toHaveCount(
-      "replay" in setting ? 1 : 0,
-    );
-    await expect(page.getByRole("button", { name: "Settings", exact: true })).toHaveCount(
-      "settings" in setting ? 1 : 0,
-    );
+    const slug = name.replaceAll(/[^a-z]+/gi, "-").toLowerCase();
+    await shot(page, ui, `guest-${slug}`);
+
+    // The owner's side of the app is not on the page.
+    for (const owners of [
+      "Back to conversations",
+      "Show or hide the list",
+      "Settings",
+      "Keys",
+      "Attach files",
+      "Add",
+      "Download all",
+    ])
+      await expect(page.getByRole("button", { name: owners, exact: true })).toHaveCount(0);
+    await expect(page.locator(".phone-list-screen, .top-bar, .session-rail")).toHaveCount(0);
+    const replays = chat.getByRole("button", { name: "Replay this task" });
+    if (setting.replay) await expect(replays.first()).toBeVisible();
+    else await expect(replays).toHaveCount(0);
+
+    await page.getByRole("button", { name: "More", exact: true }).click();
+    const menu = page.getByRole("menu", { name: "More" });
+    await expect(menu.getByRole("menuitem")).toHaveText([
+      "New conversation",
+      ...(setting.replay ? ["Replay"] : []),
+      ...(setting.settings ? ["Chat settings"] : []),
+    ]);
+    await shot(page, ui, `guest-${slug}-menu`);
+    await page.keyboard.press("Escape");
 
     for (const path of ["/api/conversations", "/api/conversations?archived=1"])
       expect((await guest(path)).status(), path).toBe(403);
@@ -93,17 +201,20 @@ for (const [name, setting] of Object.entries(LINKS))
       expect((await guest(`/api/agent/sessions/${sessionId}`)).status()).toBe(403);
       for (const part of ["events", "history"])
         expect((await guest(`/api/sessions/${sessionId}/${part}`)).status(), part).toBe(
-          "replay" in setting ? 200 : 403,
+          setting.replay ? 200 : 403,
         );
-      if (!("replay" in setting))
+      if (!setting.replay)
         expect((await guest(`/api/sessions/${sessionId}/card`)).status()).toBe(403);
     }
     for (const sessionId of owner.shown)
       expect((await guest(`/api/sessions/${sessionId}/history`)).status()).toBe(200);
 
-    const box = page.getByRole("textbox", { name: "Message dot" });
-    await box.fill("Water the plants on Friday");
-    await page.getByRole("button", { name: "Send", exact: true }).click();
+    // The steps of a turn unfold in the thread, as they do for the owner.
+    await chat.getByRole("button", { name: /5 steps/ }).click();
+    await chat.getByRole("button", { name: /Validate report schema/ }).click();
+    await expect(chat.getByText(/exit code 2/).first()).toBeVisible();
+
+    await send(page, "Water the plants on Friday");
     await expect(chat.getByText("Sample reply: I received the task.")).toBeVisible();
     await expect(chat.getByText("Water the plants on Friday")).toBeVisible();
     const { ownedSessions } = await (await guest("/api/remote-session")).json();
@@ -112,31 +223,166 @@ for (const [name, setting] of Object.entries(LINKS))
     expect((await guest(`/api/agent/sessions/${ownedSessions[0]}`)).status()).toBe(200);
 
     // The web browser is signed in as the owner: only a link with their apps watches it.
+    await page
+      .getByRole("button", { name: /^Open the computer/ })
+      .first()
+      .click();
+    await expect(page.locator(".phone-stack")).toHaveAttribute("data-level", "2");
+    await ui.picture(page.locator(".phone-computer .stage"));
     const moved = await page.request.post(`${fixture.origin}/__qa/screen?to=browser`);
     expect(moved.ok()).toBe(true);
-    await expect(page.locator(".shared-screen-status")).toHaveText(
-      "apps" in setting ? "Browser" : "Computer",
-    );
+    const browser = () =>
+      asked.some((path) => /browser-stream-ticket|\/api\/browsers\//.test(path));
+    if (setting.apps) await expect.poll(browser).toBe(true);
+    else {
+      await page.waitForTimeout(1500);
+      expect(browser()).toBe(false);
+    }
+    await shot(page, ui, `guest-${slug}-computer`);
+    await page.getByRole("button", { name: "Back to the conversation" }).click();
+    await expect(page.locator(".phone-stack")).toHaveAttribute("data-level", "1");
 
-    if ("replay" in setting) {
-      await page.getByRole("button", { name: "Replays", exact: true }).click();
-      const replays = page.getByRole("dialog", { name: "Replays" });
-      await replays.getByRole("button", { name: /Organize the sample workspace/ }).click();
-      await expect(page.getByRole("button", { name: "Live screen" })).toBeVisible();
-      await page.getByRole("button", { name: "Live screen" }).click();
+    if (setting.replay) {
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Replay", exact: true }).click();
+      await expect(page.locator(".app")).toHaveAttribute("data-replaying", "");
+      await ui.settle();
+      await shot(page, ui, `guest-${slug}-replay`);
+      // A recording plays; deleting, exporting and its files stay the owner's.
+      for (const owners of ["Select", "Free up space", "Continue"])
+        await expect(page.getByRole("button", { name: owners, exact: true })).toHaveCount(0);
+      await page
+        .getByRole("button", { name: /Organize the sample workspace/ })
+        .first()
+        .click();
+      await expect(page.getByRole("button", { name: /^(Play|Pause)/ }).first()).toBeVisible();
+      await expect(page.getByRole("button", { name: /^(Export|Delete)/ })).toHaveCount(0);
+      await shot(page, ui, `guest-${slug}-recording`);
+      // A wide screen has the top bar's Watch and Replay, with none of the owner's buttons.
+      if (isPhone(page)) {
+        await page.goBack();
+        await page.goBack();
+      } else {
+        await expect(page.locator(".bar").getByRole("button")).toHaveCount(0);
+        await page.getByRole("radio", { name: "Watch" }).click();
+      }
+      await expect(page.locator(".app")).not.toHaveAttribute("data-replaying");
     }
-    if ("settings" in setting) {
-      await page.getByRole("button", { name: "Settings", exact: true }).click();
+    if (setting.settings) {
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Chat settings", exact: true }).click();
       const sheet = page.getByRole("dialog", { name: "Chat settings" });
-      await expect(sheet.getByText("1 of 5 tasks used.")).toBeVisible();
-      await expect(sheet.getByRole("combobox", { name: "Model" })).toBeVisible();
+      await expect(sheet.getByText("1 of 5 used")).toBeVisible();
+      await expect(sheet.getByRole("combobox", { name: "Model" })).toHaveText(/Claude Sonnet/);
+      await shot(page, ui, `guest-${slug}-settings`);
+      await page.keyboard.press("Escape");
     }
-    const field = await box.boundingBox();
+    const field = await messageBox(page).boundingBox();
     expect(
       field && field.x >= 0 && field.x + field.width <= (page.viewportSize()?.width ?? 0),
     ).toBe(true);
-    await page.screenshot({
-      path: test.info().outputPath(`shared-${isPhone(page) ? "phone" : "desktop"}.png`),
-    });
     expect(refused, "requests the guest's page made that were refused").toEqual([]);
+    await expectCleanConsole(page, errors);
+  });
+
+test("the last thing dot said shows whole, and the thread scrolls", async ({ page, ui }) => {
+  const { refused, errors } = await openAsGuest(page, ui, {});
+  const chat = thread(page);
+  const scroller = chat.locator(".thread-scroll");
+  const report = chat
+    .locator(".thread-message, .thread-bubble")
+    .filter({ hasText: "Report ready" });
+  await expect(report).toContainText("monthly total is 12,480");
+  await expect(report).toBeInViewport({ ratio: 1 });
+  const summary = chat.getByText("One validation command failed");
+  await expect(summary).toBeInViewport({ ratio: 1 });
+  const composer = messageBox(page);
+  const [last, box, view] = [
+    await summary.boundingBox(),
+    await composer.boundingBox(),
+    await scroller.boundingBox(),
+  ];
+  if (!last || !box || !view) throw new Error("The thread is not laid out");
+  expect(last.y + last.height).toBeLessThanOrEqual(box.y);
+  expect(view.y + view.height).toBeLessThanOrEqual(box.y + 1);
+
+  const range = () =>
+    scroller.evaluate((el) => ({ at: el.scrollTop, most: el.scrollHeight - el.clientHeight }));
+  const end = await range();
+  expect(end.most).toBeGreaterThan(0);
+  expect(end.at).toBeGreaterThan(end.most - 4);
+  await scroller.evaluate((el) => el.scrollTo(0, 0));
+  await expect.poll(async () => (await range()).at).toBe(0);
+  await expect(chat.getByText("Find last month's sales table")).toBeInViewport({ ratio: 1 });
+  await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await expect(summary).toBeInViewport({ ratio: 1 });
+
+  // The screen's own bar stays clear of its picture.
+  await page
+    .getByRole("button", { name: /^Open the computer/ })
+    .first()
+    .click();
+  await expect(page.locator(".phone-stack")).toHaveAttribute("data-level", "2");
+  const picture = page.locator(".phone-computer .stage");
+  await ui.picture(picture);
+  const frame = await picture.boundingBox();
+  const back = await page.getByRole("button", { name: "Back to the conversation" }).boundingBox();
+  if (!frame || !back) throw new Error("The computer screen is not laid out");
+  expect(back.y + back.height).toBeLessThanOrEqual(frame.y);
+  expect(frame.width).toBeGreaterThan(
+    (page.viewportSize()?.width ?? 0) * (isPhone(page) ? 0.9 : 0.4),
+  );
+  expect(refused).toEqual([]);
+  await expectCleanConsole(page, errors);
+});
+
+test("a link that is used up says so, and one the owner ends leaves the app", async ({
+  page,
+  ui,
+}) => {
+  const { fixture, id, refused } = await openAsGuest(page, ui, { maxTasks: 1 });
+  const chat = thread(page);
+  await send(page, "Water the plants on Friday");
+  await expect(chat.getByText("Sample reply: I received the task.")).toBeVisible();
+  // Its own task still takes messages; a new conversation would need a task the link has not got.
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New conversation", exact: true }).click();
+  await expect(chat.getByText("Water the plants on Friday")).toHaveCount(0);
+  await messageBox(page).fill("And the ferns");
+  const sendButton = page
+    .getByRole("form", { name: "Message dot" })
+    .getByRole("button", { name: "Start task" });
+  await expect(sendButton).toHaveAttribute("aria-disabled", "true");
+  await expect(sendButton).toHaveAccessibleDescription(/used all its tasks/);
+  await shot(page, ui, "guest-used-up");
+  expect(refused).toEqual([]);
+
+  ui.leaving();
+  expect((await page.request.post(`${fixture.origin}/__qa/link/revoke?id=${id}`)).ok()).toBe(true);
+  await expect(page.getByRole("heading", { name: "This link has ended" })).toBeVisible();
+  await expect(page.getByText("localdot open")).toHaveCount(0);
+  await shot(page, ui, "guest-ended");
+  expect(refused).toEqual([]);
+});
+
+for (const appearance of ["graphite", "daylight"] as const)
+  test(`the guest's page while dot works and asks, in ${appearance}`, async ({ page, ui }) => {
+    await page.addInitScript((value) => {
+      localStorage.setItem("localdot.appearance.v1", value);
+    }, appearance);
+    const { fixture, refused, errors } = await openAsGuest(page, ui, { apps: true });
+    const chat = thread(page);
+    await expect(page.locator("html")).toHaveAttribute("data-appearance", appearance);
+    await page.request.post(`${fixture.origin}/__qa/reply?ms=60000`);
+    await send(page, "Water the plants on Friday");
+    await expect(chat.getByText("Water the plants on Friday")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop task", exact: true })).toBeVisible();
+    await shot(page, ui, `guest-working-${appearance}`);
+
+    // dot asks the link's own task: the guest answers it in the thread.
+    expect((await page.request.post(`${fixture.origin}/__qa/ask`)).ok()).toBe(true);
+    await expect(chat.locator(".thread-question, .question-card").first()).toBeVisible();
+    await shot(page, ui, `guest-question-${appearance}`);
+    expect(refused).toEqual([]);
+    await expectCleanConsole(page, errors);
   });
