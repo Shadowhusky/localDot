@@ -672,6 +672,15 @@
     margin-inline-start: auto;
   }
 
+  /* The overview waits beside New conversation, after Select when there is something to choose. */
+  .phone-overview.ui-icon-button {
+    margin-inline-start: auto;
+  }
+
+  .phone-select ~ .phone-overview.ui-icon-button {
+    margin-inline-start: 0;
+  }
+
   .phone-list-screen[data-selecting] .phone-row > .ui-button-content {
     grid-template-columns: 48px minmax(0, 1fr) auto;
   }

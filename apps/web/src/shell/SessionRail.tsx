@@ -77,6 +77,8 @@ export interface SessionRailProps {
   // Why a new conversation can't be started now.
   newReason?: string;
   onDeleted?(sessions: readonly string[]): void;
+  // The overview of every conversation: whether it is on show, and how to show it.
+  overview?: { open: boolean; onOpen(): void };
 }
 
 // "Plan the trip, blue tag, working, on screen, 2 min": what a screen reader calls a row.
@@ -130,6 +132,7 @@ export const SessionRail = memo(function SessionRail({
   onNew,
   newReason,
   onDeleted,
+  overview,
 }: SessionRailProps) {
   const recent = useRecentConversations(api, true);
   const [query, setQuery] = useState("");
@@ -444,7 +447,12 @@ export const SessionRail = memo(function SessionRail({
           />
         </div>
       ) : (
-        <NewRow expanded={expanded} reason={newReason} onNew={onNew} />
+        <div className="sessions-new">
+          <NewRow expanded={expanded} reason={newReason} onNew={onNew} />
+          {overview && (
+            <OverviewRow expanded={expanded} open={overview.open} onOpen={overview.onOpen} />
+          )}
+        </div>
       )}
       <RailSearch
         expanded={expanded}
@@ -654,7 +662,7 @@ function NewRow({
     content: expanded || reason ? undefined : "New conversation",
   });
   return (
-    <div className="sessions-new">
+    <>
       <Button
         {...tip.handlers}
         variant="quiet"
@@ -667,7 +675,39 @@ function NewRow({
         <span className="sessions-title">New conversation</span>
       </Button>
       {tooltip}
-    </div>
+    </>
+  );
+}
+
+// Every conversation's screen and progress at once, lit while on show as a conversation's row is.
+function OverviewRow({
+  expanded,
+  open,
+  onOpen,
+}: {
+  expanded: boolean;
+  open: boolean;
+  onOpen(): void;
+}) {
+  const { triggerProps: tip, tooltip } = useTooltip({
+    content: expanded ? undefined : "Overview",
+  });
+  return (
+    <>
+      <Button
+        {...tip.handlers}
+        variant="quiet"
+        className="sessions-row sessions-overview"
+        aria-label="Overview"
+        aria-current={open ? "page" : undefined}
+        data-current={open || undefined}
+        onClick={onOpen}
+      >
+        <Icon name="layout-dashboard" />
+        <span className="sessions-title">Overview</span>
+      </Button>
+      {tooltip}
+    </>
   );
 }
 

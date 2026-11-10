@@ -82,6 +82,8 @@ export interface PhoneListProps {
   onNew(): void;
   newReason?: string;
   onReplay(): void;
+  // Every conversation's screen and progress at once.
+  onOverview?(): void;
   onDeleted?(sessions: readonly string[]): void;
   // This computer's name on the pill, and what the pill opens.
   computer: { name: string; onOpen?(): void; menu: ReactNode };
@@ -188,6 +190,7 @@ export function PhoneList({
   onNew,
   newReason,
   onReplay,
+  onOverview,
   onDeleted,
   computer,
   notice,
@@ -591,6 +594,16 @@ export function PhoneList({
             >
               {selection.selecting ? "Cancel" : "Select"}
             </Button>
+          )}
+          {!selection.selecting && onOverview && (
+            <IconButton
+              size={36}
+              round
+              icon="layout-dashboard"
+              label="Overview"
+              className="phone-overview"
+              onClick={onOverview}
+            />
           )}
           {!selection.selecting && (
             <IconButton
