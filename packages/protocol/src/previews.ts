@@ -17,6 +17,8 @@ export const PreviewItem = z.strictObject({
   openedAt: z.string(),
   // A *.localhost site answers for itself: the port it shares may still be running without it.
   state: z.enum(["answering", "not-answering"]).optional(),
+  // It opens on the Mac, at the localhost address in `origin`.
+  local: z.literal(true).optional(),
 });
 export type PreviewItem = z.infer<typeof PreviewItem>;
 
@@ -69,9 +71,13 @@ export const ResultPreview = z.strictObject({
 export type ResultPreview = z.infer<typeof ResultPreview>;
 
 // POST /api/sessions/:id/previews: an address dot printed, or a listening server by its port.
+// `local` opens it on the Mac at http://localhost:<local> instead of over the tailnet: the address
+// a sign-in provider has registered for the app, such as localhost:3000. Lower ports need an
+// administrator.
+const MacPort = z.number().int().min(1024).max(65535);
 export const PreviewRequest = z.union([
-  z.strictObject({ url: z.string().min(1).max(2048) }),
-  z.strictObject({ port: z.number().int().min(1).max(65535) }),
+  z.strictObject({ url: z.string().min(1).max(2048), local: MacPort.optional() }),
+  z.strictObject({ port: z.number().int().min(1).max(65535), local: MacPort.optional() }),
 ]);
 export type PreviewRequest = z.infer<typeof PreviewRequest>;
 

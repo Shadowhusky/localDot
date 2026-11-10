@@ -1,11 +1,18 @@
-import type { PreviewItem, PreviewRequest, PreviewServer } from "@localdot/protocol";
-import { useEffect } from "react";
+import type {
+  PreviewItem,
+  PreviewRequest,
+  PreviewServer,
+  PreviewsStatus,
+} from "@localdot/protocol";
+import { useEffect, useId } from "react";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
-import { Group, GroupRow } from "../ui/Group.tsx";
+import { Group, GroupHead, GroupRow } from "../ui/Group.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { TOUCH, useMediaQuery } from "../ui/media.ts";
+import { macAddress, OpenOnMac } from "./OpenOnMac.tsx";
 import { type Previews, requestKey, unavailable, usePreviews } from "./PreviewsContext.tsx";
 import "../ui/previews.css";
 
@@ -130,6 +137,7 @@ export function PreviewsPanel({ active }: { active: boolean }) {
       {fading.length > 0 && (
         <FoldedApps label="Replaced or not answering" apps={fading} previews={previews} />
       )}
+      <OnThisMac previews={previews} status={status} />
       {apps.length > 0 && status.previews.length > 0 && (
         <Group>
           <GroupRow
@@ -192,6 +200,7 @@ function AppRow({ app, previews }: { app: App; previews: Previews }) {
   const title = "url" in request ? undefined : server.title;
   // A title names the app, so its address says where it is; else its folder or program does.
   const where = title ? address : (server.project ?? server.name);
+  const target = "url" in request ? request.url : server.url;
   return (
     <GroupRow
       label={title ?? address}
@@ -210,6 +219,14 @@ function AppRow({ app, previews }: { app: App; previews: Previews }) {
             label={`Copy link to ${address}`}
             aria-busy={previews.pending.has(`copy ${requestKey(request)}`) || undefined}
             onClick={(event) => previews.copy(request, event.currentTarget)}
+          />
+          <OpenOnMac
+            previews={previews}
+            request={request}
+            target={target}
+            address={address}
+            app={server.project ?? title ?? address}
+            port={server.port}
           />
           <Button
             size="sm"
@@ -231,6 +248,58 @@ function AppRow({ app, previews }: { app: App; previews: Previews }) {
         </>
       }
     />
+  );
+}
+
+// The apps open on the Mac's own localhost. Each holds a port there, so each can be closed; a phone
+// can only close one, as it has no way to the Mac's localhost.
+function OnThisMac({ previews, status }: { previews: Previews; status: PreviewsStatus }) {
+  const heading = useId();
+  const touch = useMediaQuery(TOUCH);
+  const open = status.previews.filter((preview) => preview.local);
+  if (!open.length) return null;
+  return (
+    <section aria-labelledby={heading}>
+      <GroupHead id={heading} title="On this Mac" />
+      <Group>
+        {open.map((preview) => {
+          const address = macAddress(preview);
+          const local = Number(new URL(preview.origin).port);
+          const server = status.servers.find((entry) => entry.url === preview.target);
+          const request: PreviewRequest = server
+            ? { port: server.port, local }
+            : { url: preview.target, local };
+          const target = shownAddress(preview.target);
+          return (
+            <GroupRow
+              key={preview.id}
+              label={address}
+              detail={server?.title ? `${server.title} · ${target}` : target}
+              trailing={
+                <>
+                  {!touch && (
+                    <Button
+                      size="sm"
+                      aria-label={`Open ${address}`}
+                      busy={previews.pending.has(requestKey(request))}
+                      onClick={(event) => previews.open(request, event.currentTarget)}
+                    >
+                      Open
+                    </Button>
+                  )}
+                  <IconButton
+                    icon="x"
+                    label={`Close ${address} on this Mac`}
+                    aria-busy={previews.pending.has(`end ${preview.id}`) || undefined}
+                    onClick={(event) => previews.end(preview.id, event.currentTarget)}
+                  />
+                </>
+              }
+            />
+          );
+        })}
+      </Group>
+    </section>
   );
 }
 

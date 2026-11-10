@@ -185,11 +185,11 @@ says what the app is now: **Running** with **Open** and **Copy link**, **Not ans
 **Stopped**, with no link. Edits made through the shell leave no record of their files, so a turn
 that only edits that way and looks at nothing offers nothing.
 
-Previews open only over Tailscale: one HTTPS address that works the same on the Mac and the phone,
-on a site separate from this Mac's `localhost`. A preview never opens at `localhost:<port>`, which
-shares cookies with every other local server and reaches the LAN outside the key layer. Without
-Tailscale the app says so and points to **Settings › Your computer**. Previews are the owner's
-only; shared links cannot list, open or stop them.
+Previews open over Tailscale: one HTTPS address that works the same on the Mac and the phone, on a
+site separate from this Mac's `localhost`, which is shared by every local server. Without Tailscale
+the app says so and points to **Settings › Your computer**. The one exception is an app that must
+be at its own address, which the owner opens on this Mac (below). Previews are the owner's only;
+shared links cannot list, open or stop them.
 
 How a request travels:
 
@@ -275,12 +275,60 @@ A computer made before previews has no forwarder or no preview relay, so the Pre
 **Update your computer to open previews** until desktopd answers on 7701. Computers update when
 the owner presses Update (desktop and gate images together).
 
-Not supported (open the page in the computer's own browser instead): OAuth callbacks registered
-to localhost (the identity provider sends the browser to the device's own localhost, and changing
-`redirect_uri` would not match the registration), addresses built in a script from parts
-(`"http://localhost:" + port`), subresource integrity or a page policy's hashes over a rewritten
-script, and a server's root-relative paths in a page loaded through the via path (opening that
-server's page makes it a preview of its own instead).
+Not supported (open the page in the computer's own browser instead): addresses built in a script
+from parts (`"http://localhost:" + port`), subresource integrity or a page policy's hashes over a
+rewritten script, and a server's root-relative paths in a page loaded through the via path (opening
+that server's page makes it a preview of its own instead). Sign-in registered to a localhost
+address works on this Mac (below).
+
+### On this Mac, at the app's own address
+
+A sign-in provider (WorkOS AuthKit, Auth0, Google and the like) accepts only the redirect addresses
+and browser origins registered for the app's client, such as `http://localhost:3000`. At a
+preview's tailnet address it refuses; for thema-app WorkOS answered
+`{"error":"invalid_client","error_description":"The client_id is not valid for the requested domain."}`.
+No rewrite can fix that: the browser names its own origin to the provider (a client-side app such
+as thema-app builds the address to come back to from `window.origin`, and the provider checks the
+Origin of the code exchange), and a changed `redirect_uri` would not match the registration.
+
+So a preview can also open on the Mac at `http://localhost:<port>`. **Open on this Mac** (the
+screen icon on an app's row and on a reply's card; not on a touch screen) asks for the port: the
+server's own, else the one this app last used on this Mac. The daemon then listens on the Mac's
+127.0.0.1 and ::1 at that port, so the page's origin is the registered one, and the provider's
+redirect back to `localhost:<port>/callback` reaches the same preview and the app. The port need
+not be the server's: an app the computer runs on 5173 (the computer's own 3000 is localDot's
+stream) can open at `localhost:3000`. The request is `POST /api/sessions/:id/previews` with
+`local: <port>`; the preview is listed with `local: true` and its `http://localhost` origin. The
+Previews tab lists it under **On this Mac** with **Open** and **Close** (a phone can only close it),
+and a reply's card says **On this Mac at localhost:3000**.
+
+- **Signing in** is the same one-use link (`http://localhost:<port>/__localdot/preview#…`) and an
+  HttpOnly, SameSite=Lax cookie named for the port, `localdot-preview-<port>` (plain http can't
+  carry `Secure`, so no `__Host-` prefix). Without it a request gets **Open this preview from
+  localDot**.
+- **Host** must be `localhost`, `127.0.0.1` or `[::1]` at that port, or the app's own `*.localhost`
+  name, so a page that rebinds its name to this Mac is refused. A WebSocket must come from the
+  preview's own origin: the Mac's other servers share its cookies, not its sockets.
+- **The app is asked by the address the browser has** (`Host: localhost:3000`, Origin and Referer
+  as sent), so a callback a server builds from its Host names the registered address too. A
+  `*.localhost` site keeps its own name, which its proxy routes by. Addresses in what the app sends
+  back are rewritten as for any preview, over `http:` and `ws:` to the Mac address; other servers
+  in the computer go through the via path, and a page that opens one opens it on the Mac at its
+  own port, never in place of another app there.
+- **Ports** are 1024 to 65535, none from the preview block, and never one that something on the Mac
+  answers on, on any address: on macOS a listener on 127.0.0.1 would take the loopback traffic of a
+  server listening everywhere. Such a port is refused (**Something on this Mac already uses
+  localhost:3000. Stop it, or choose another port.**). Opening another app at a port a local
+  preview holds replaces it.
+- **The Mac's localhost is shared.** Cookies the browser already held for `localhost` when it signed
+  in (other local servers', whatever their port) are not passed to the computer, unless the app's
+  server sets one of the same name; cookies made after that, by the app's server or its pages, are. The app's pages still run at `localhost` in the owner's
+  browser, where a script can read what that browser keeps there (cookies that aren't HttpOnly,
+  and storage at that origin), so the popover says the app shares localhost with the Mac's other
+  servers. Nothing is cleared: that storage is the owner's own.
+- It needs no Tailscale and works only in a browser on this Mac; a phone has no way to the Mac's
+  localhost. It ends as any preview does: on **Close**, **Sign out**, two hours unused, or when the
+  computer stops.
 
 ### Checks
 
@@ -304,4 +352,10 @@ server's page makes it a preview of its own instead).
   It runs a Vite-like server (modules, a redirect, a hot-reload socket that checks Host and
   Origin) and a Portless-like HTTPS server with live updates inside a desktop behind its gate, and
   opens both through the daemon's listener, 120 module requests at once included.
+- On this Mac: `previews.test.ts` runs a sign-in fixture (`testing/sign-in.ts`: a provider that
+  accepts only the registered origin, as WorkOS does, and an app that signs in from
+  `window.origin`) through the tailnet preview, which the provider refuses, and through a preview
+  on the Mac, whose callback reaches the app; and the bounds (loopback only, Host, cookies, the
+  WebSocket origin, ports in use, Stop). `apps/web/e2e/ui/preview-sign-in.spec.ts` runs the same
+  round trip in Chromium and WebKit (`c14`, `w14`).
 - UI: `apps/web/e2e/ui/dev-previews.spec.ts` (see the UI harness README).
