@@ -40,6 +40,28 @@ declare module "hono" {
   }
 }
 
+interface ConversationChains {
+  has(sessionId: string): boolean;
+  latest(sessionId: string): string;
+  snapshotOf(sessionId: string | null): { sessions: string[]; more: boolean };
+}
+
+// The tasks of a link's conversation on show, oldest first: the one it chose or, with none chosen,
+// its latest. Only its own: a link made before links kept to their own conversations may have
+// continued the owner's, which stays out.
+export function linkConversation(
+  links: RemoteLinks,
+  conversations: ConversationChains,
+  id: string,
+): { sessions: string[]; more: boolean } {
+  const chosen = links.shown(id);
+  if (chosen === null) return { sessions: [], more: false };
+  const latest = chosen ?? links.sessions(id).findLast((task) => conversations.has(task));
+  const whole = conversations.snapshotOf(latest ? conversations.latest(latest) : null);
+  const from = whole.sessions.findLastIndex((task) => !links.owns(id, task)) + 1;
+  return from ? { sessions: whole.sessions.slice(from), more: false } : whole;
+}
+
 // Persist only hashes. Revocation and quotas are committed before a request is admitted.
 // Link recipients share this computer and its chat; this is not tenant/file isolation.
 export class RemoteLinks {
@@ -48,7 +70,9 @@ export class RemoteLinks {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private file: string;
   private unreadable = false;
-  private shown: () => readonly string[] = () => [];
+  // Each link's own conversation on show: the task it continues, or null for a new one. Kept for
+  // as long as the daemon runs; after a restart a link lands in its latest conversation.
+  private current = new Map<string, string | null>();
   constructor(
     home: string,
     private now = Date.now,
@@ -148,9 +172,25 @@ export class RemoteLinks {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
   }
-  select(id: string, index: number) {
+  // What the link's tasks may run on: the model it was made with and, while it allows switching,
+  // the models it was made with and those the owner has configured now, so a link made before a
+  // model was added (or one made with only its own) still offers them.
+  choices(row: RemoteGrant, configured: readonly AgentRoleChoice[] = []): AgentRoleChoice[] {
+    if (!row.chooseModel) return [row.model];
+    const seen = new Set<string>();
+    return [row.model, ...row.models, ...configured]
+      .map(({ off: _off, ...choice }) => choice)
+      .filter((choice) => {
+        const key = [choice.provider, choice.model, choice.key ?? ""].join("\0");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 32);
+  }
+  select(id: string, index: number, configured: readonly AgentRoleChoice[] = []) {
     const row = this.active(id);
-    const model = row?.models[index];
+    const model = row && this.choices(row, configured)[index];
     if (!row?.chooseModel || !model) throw new Error("Model is not allowed by this link");
     this.save(this.rows.map((r) => (r.id === id ? { ...r, model } : r)));
   }
@@ -181,29 +221,28 @@ export class RemoteLinks {
   owns(id: string, session: string) {
     return !!this.active(id)?.sessions.includes(session);
   }
-  // The tasks of the conversation the owner's app shows, which every link shares.
-  showing(tasks: () => readonly string[]) {
-    this.shown = tasks;
+  // The link's conversation on show, by a task in it; null for a new one, undefined for none chosen.
+  shown(id: string): string | null | undefined {
+    return this.current.get(id);
   }
-  sees(id: string, session: string) {
-    if (this.owns(id, session)) return true;
-    try {
-      return !!this.active(id) && this.shown().includes(session);
-    } catch {
-      return false;
-    }
+  show(id: string, session: string | null) {
+    if (session !== null && !this.owns(id, session)) return false;
+    this.current.set(id, session);
+    return true;
   }
   // A small explicit allowlist: new owner endpoints stay private by default. A path that names a
-  // task answers for that task, whichever rule lets it through: a link changes only its own tasks
-  // and reads those and the conversation the owner's app shows. Replay adds every task's recording.
+  // task answers for that task, whichever rule lets it through: a link reads and changes only its
+  // own tasks. Replay adds every task's recording.
   permits(row: RemoteGrant, method: string, path: string): boolean {
     if (!this.active(row.id)) return false;
     const task = TASK.exec(path)?.[1];
     if (method === "GET" || method === "HEAD") {
       if (row.replay && (RECORDINGS.test(path) || path === "/api/session-index")) return true;
-      if (task !== undefined && !this.sees(row.id, task)) return false;
+      if (task !== undefined && !this.owns(row.id, task)) return false;
       return (
-        /^\/api\/(whoami|clock|remote-session|cells|runtime|conversation)$/.test(path) ||
+        /^\/api\/(whoami|clock|remote-session|cells|runtime|conversation|conversations)$/.test(
+          path,
+        ) ||
         /^\/api\/cells\/[0-9A-Z]{26}(?:\/(?:live|status))?$/.test(path) ||
         (row.apps && /^\/api\/browsers\/[0-9A-Z]{26}(?:\/status)?$/.test(path)) ||
         /^\/api\/agent\/sessions\/[0-9A-Z]{26}$/.test(path) ||
@@ -218,6 +257,7 @@ export class RemoteLinks {
       // The web browser is signed in as the owner.
       (row.apps && /^\/api\/cells\/[0-9A-Z]{26}\/browser-stream-ticket$/.test(path)) ||
       path === "/api/conversation/new" ||
+      path === "/api/conversation/continue" ||
       /^\/api\/agent\/sessions\/[0-9A-Z]{26}\/(?:messages|stop|answer)$/.test(path)
     );
   }

@@ -69,6 +69,7 @@ import { DesktopdError } from "../desktopd/client.ts";
 import type { DesktopdTools } from "../desktopd/tools-client.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import type { KeyModels } from "../keyd/key-models.ts";
+import { linkConversation } from "../remote/links.ts";
 import { NDJSON_TYPE } from "../sessions/ndjson.ts";
 import {
   activeRoles,
@@ -143,6 +144,7 @@ export interface AgentRoutesDeps {
     Conversations,
     | "current"
     | "snapshot"
+    | "snapshotOf"
     | "begin"
     | "select"
     | "has"
@@ -684,8 +686,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       check(c.req.raw.signal);
       const task = redact(parsed.task, undefined, cellId);
       const grant = c.get("remoteGrant");
-      // Continuing a task brings its conversation into the new one, for dot and for the link.
-      if (grant && parsed.continues && !deps.remoteLinks?.sees(grant.id, parsed.continues))
+      // Continuing a task brings its conversation into the new one, for dot and for the link: a
+      // link continues only its own, and without one starts a new conversation, never the owner's.
+      if (grant && parsed.continues && !deps.remoteLinks?.owns(grant.id, parsed.continues))
         throw new RouteError(403, "This link can continue only its own conversation.");
       let reservation: ReturnType<import("../remote/links.ts").RemoteLinks["reserve"]> | undefined;
       if (grant) {
@@ -711,7 +714,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           : c.req.raw.signal;
         const startOptions = {
           ...(parsed.mode === "research" ? { research: true } : {}),
-          ...(parsed.continues !== undefined ? { continues: parsed.continues } : {}),
+          ...(parsed.continues !== undefined || grant
+            ? { continues: parsed.continues ?? null }
+            : {}),
           // A shared link's model is the link's to set, never the request's.
           ...(parsed.model && !grant ? { model: parsed.model } : {}),
           ...(reservation
@@ -731,6 +736,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           ? await deps.runner.start(cellId, task, startSignal, startOptions)
           : await deps.runner.start(cellId, task, startSignal);
         reservation?.finish(result.id);
+        if (grant) deps.remoteLinks?.show(grant.id, result.id);
         if (grant && !deps.remoteLinks?.active(grant.id)) {
           await deps.runner.stopRun?.(result.id);
           throw new RouteError(403, "Shared access ended");
@@ -748,14 +754,29 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   const conversations = deps.conversations;
   if (conversations) {
     // Choosing a conversation only changes what the app shows: every task goes on.
+    // A link has conversations of its own: the one it shows is its own choice, never the owner's.
+    const links = deps.remoteLinks;
+    const own = (grant: { id: string } | undefined) =>
+      grant && links
+        ? (sessions: readonly string[]) => sessions.some((id) => links.owns(grant.id, id))
+        : undefined;
+    const linkSnapshot = (id: string) =>
+      links ? linkConversation(links, conversations, id) : { sessions: [], more: false };
     app.get(
       "/api/conversation",
-      route((c) => c.json(conversations.snapshot())),
+      route((c) => {
+        const grant = c.get("remoteGrant");
+        return c.json(grant ? linkSnapshot(grant.id) : conversations.snapshot());
+      }),
     );
     app.get(
       "/api/conversations",
       route((c) => {
-        const listed = conversations.list(undefined, c.req.query("archived") === "1");
+        const listed = conversations.list(
+          undefined,
+          c.req.query("archived") === "1",
+          own(c.get("remoteGrant")),
+        );
         return c.json({
           ...listed,
           conversations: listed.conversations.map((entry) => {
@@ -770,6 +791,11 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       "/api/conversation/new",
       route(async (c) => {
         await empty(c.req.raw);
+        const grant = c.get("remoteGrant");
+        if (grant) {
+          links?.show(grant.id, null);
+          return c.json(linkSnapshot(grant.id));
+        }
         conversations.begin();
         return c.json(conversations.snapshot());
       }),
@@ -778,6 +804,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       "/api/conversation/continue",
       route(async (c) => {
         const { sessionId } = await json(c.req.raw, ContinueConversation);
+        const grant = c.get("remoteGrant");
+        if (grant) {
+          if (!conversations.has(sessionId) || !links?.show(grant.id, sessionId))
+            throw new RouteError(404, "no such task");
+          return c.json(linkSnapshot(grant.id));
+        }
         if (!conversations.select(sessionId)) throw new RouteError(404, "no such task");
         return c.json(conversations.snapshot());
       }),

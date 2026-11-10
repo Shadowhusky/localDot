@@ -72,8 +72,7 @@ it("gives a link none of the owner's tasks it did not start, whatever the route"
     [`/api/sessions/${theirs}/recording`, {}],
     ["/api/sessions", {}],
     ["/api/session-index", {}],
-    ["/api/conversations", {}],
-    ["/api/conversations?archived=1", {}],
+    [`/api/conversations/${theirs}/latest`, {}],
   ] as const) {
     const reply = await read(path, token, headers);
     expect(reply.status, path).toBe(403);
@@ -97,7 +96,6 @@ it("opens every task's recordings to a link with Replay, but never another's liv
   expect((await read(`/api/sessions/${theirs}/history`)).status).toBe(200);
   expect((await read(`/api/sessions/${theirs}/clock`)).status).toBe(403);
   expect((await read(`/api/agent/sessions/${theirs}`)).status).toBe(403);
-  expect((await read("/api/conversations")).status).toBe(403);
 });
 it("guest exchange retains its own restricted token; owner exchange stays single use", async () => {
   const { app, token, owner, codes, origin } = fixture();

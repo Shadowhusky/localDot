@@ -188,7 +188,7 @@ it("names none of the owner's keys to a guest's live feed", async () => {
       },
     });
   raise("private-early");
-  links.showing(() => [id]);
+  links.reserve(issued.grant.id).finish(id);
   const port = await freePort();
   const server = serve({ fetch: new Hono().fetch, hostname: "127.0.0.1", port });
   attachUpgradeRouter(
@@ -228,7 +228,7 @@ it("names none of the owner's keys to a guest's live feed", async () => {
   }
 });
 
-it("opens a task's live feed to a link only for its own task or the one the owner's app shows", async () => {
+it("opens a task's live feed to a link only for its own task", async () => {
   const home = mkdtempSync("/tmp/localdot-guest-ws-");
   const links = new RemoteLinks(home);
   const issued = links.create({
@@ -241,7 +241,6 @@ it("opens a task's live feed to a link only for its own task or the one the owne
     shown = "01JXYZ0000000000000000BBB2",
     theirs = "01JXYZ0000000000000000CCC3";
   links.reserve(issued.grant.id).finish(own);
-  let showing: string | null = null;
   const { route, opened } = spyRoute(/^\/api\/sessions\/([^/]+)\/stream$/, ["id"], "token");
   const port = await freePort();
   const server = serve({ fetch: new Hono().fetch, hostname: "127.0.0.1", port });
@@ -264,15 +263,8 @@ it("opens a task's live feed to a link only for its own task or the one the owne
     );
     expect(opened).toEqual([]);
     expect(await upgrade(port, `/api/sessions/${own}/stream?fromSeq=4`, [guest])).toBe(OPENED);
-    links.showing(() => (showing ? [showing] : []));
-    showing = shown;
-    expect(await upgrade(port, `/api/sessions/${shown}/stream`, [guest])).toBe(OPENED);
-    showing = null;
-    expect(await upgrade(port, `/api/sessions/${shown}/stream`, [guest])).toBe(
-      "HTTP/1.1 403 Forbidden",
-    );
     expect(await upgrade(port, `/api/sessions/${theirs}/stream`, [TOKEN_PROTOCOL])).toBe(OPENED);
-    expect(opened).toEqual([{ id: own }, { id: shown }, { id: theirs }]);
+    expect(opened).toEqual([{ id: own }, { id: theirs }]);
   } finally {
     server.close();
     links.close();

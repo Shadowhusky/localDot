@@ -2055,24 +2055,45 @@ describe("shared-link task enforcement", () => {
     const stopRun = vi.fn(async (_id: string) => true);
     f.deps.runner.stopRun = stopRun;
     const eventLog = new EventLog(f.home);
-    // The conversation the owner's app shows, which has only the owner's task.
-    const shown: { current: string | null } = { current: null };
+    // The conversation the owner's app shows, which has only the owner's task; the link's own
+    // task (SESSION, once started) is a conversation of its own.
+    const owners = ulid();
+    const shown: { current: string | null } = { current: owners };
+    const begin = vi.fn(() => {
+      shown.current = null;
+    });
+    const select = vi.fn((id: string) => {
+      shown.current = id;
+      return true;
+    });
+    const entry = (id: string, title: string) => ({
+      sessionId: id,
+      firstTask: id,
+      title,
+      updatedAt: at,
+      tasks: 1,
+      sessions: [id],
+    });
     f.deps.conversations = {
       current: () => shown.current,
+      begin,
+      select,
+      has: (id: string) => id === owners || id === SESSION,
+      latest: (id: string) => id,
       chain: (id: string) => ({ sessions: [id], more: false }),
       snapshot: () => ({ sessions: shown.current ? [shown.current] : [], more: false }),
-      list: (_max?: number, archived = false) => ({
-        conversations: [
-          {
-            sessionId: SESSION,
-            firstTask: SESSION,
-            title: archived ? "The owner's archived plans" : "The owner's private plans",
-            updatedAt: at,
-            tasks: 1,
-          },
-        ],
-        archivedCount: 1,
-      }),
+      snapshotOf: (id: string | null) => ({ sessions: id ? [id] : [], more: false }),
+      list: (
+        _max?: number,
+        archived = false,
+        keep: (sessions: readonly string[]) => boolean = () => true,
+      ) => {
+        const all = [
+          entry(owners, archived ? "The owner's archived plans" : "The owner's private plans"),
+          entry(SESSION, archived ? "The guest's archived chat" : "The guest's chat"),
+        ].filter((each) => keep(each.sessions));
+        return { conversations: all, archivedCount: all.length };
+      },
     } as unknown as NonNullable<AgentRoutesDeps["conversations"]>;
     const app = createApp({
       token: "o".repeat(43),
@@ -2105,31 +2126,71 @@ describe("shared-link task enforcement", () => {
       send,
       read,
       shown,
+      owners,
+      begin,
+      select,
       stopRun,
     };
   }
-  it("lists no conversations to a link, archived or not, and leaves the owner's list alone", async () => {
+  it("lists a link only the conversations it started, archived or not, and leaves the owner's list alone", async () => {
     const f = await guest();
     for (const path of ["/api/conversations", "/api/conversations?archived=1"]) {
+      const none = await f.read(path);
+      expect(none.status, path).toBe(200);
+      expect(((await none.json()) as { conversations: unknown[] }).conversations, path).toEqual([]);
+    }
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    for (const path of ["/api/conversations", "/api/conversations?archived=1"]) {
       const reply = await f.read(path);
-      expect(reply.status, path).toBe(403);
-      expect(await reply.text(), path).not.toContain("plans");
-      const owner = await f.read(path, "o".repeat(43));
-      expect(owner.status, path).toBe(200);
+      expect(reply.status, path).toBe(200);
+      const text = await reply.text();
+      expect(text, path).toContain("guest's");
+      expect(text, path).not.toContain("plans");
+      const owner = await f.read(path, f.ownerToken);
       expect(await owner.text(), path).toContain("plans");
     }
   });
-  it("shows a link a task's state only for its own task or the one the owner's app shows", async () => {
+  it("keeps a link's conversation on show its own, never the owner's", async () => {
+    const f = await guest();
+    const sessions = async (token?: string) =>
+      ((await (await f.read("/api/conversation", token)).json()) as { sessions: string[] })
+        .sessions;
+    const shown = () => sessions();
+    // A link with no task of its own lands in a new conversation, whatever the owner shows.
+    expect(await shown()).toEqual([]);
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    // Its task starts a conversation of its own and leaves the owner's on show as it was.
+    expect(f.start).toHaveBeenCalledWith(
+      CELL,
+      "Hello",
+      expect.any(AbortSignal),
+      expect.objectContaining({ continues: null }),
+    );
+    expect(f.shown.current).toBe(f.owners);
+    expect(await shown()).toEqual([SESSION]);
+    // Its New chat and its choices are its own too.
+    expect((await f.send("/api/conversation/new", undefined)).status).toBe(200);
+    expect(await shown()).toEqual([]);
+    expect((await f.send("/api/conversation/continue", { sessionId: f.owners })).status).toBe(404);
+    expect((await f.send("/api/conversation/continue", { sessionId: SESSION })).status).toBe(200);
+    expect(await shown()).toEqual([SESSION]);
+    expect(f.begin).not.toHaveBeenCalled();
+    expect(f.select).not.toHaveBeenCalled();
+    expect(f.shown.current).toBe(f.owners);
+    // The owner's own app is unchanged.
+    expect(await sessions(f.ownerToken)).toEqual([f.owners]);
+  });
+  it("shows a link a task's state only for its own task, never the one the owner's app shows", async () => {
     const f = await guest();
     const snapshot = () => f.read(`/api/agent/sessions/${SESSION}`);
     const refused = await snapshot();
     expect(refused.status).toBe(403);
     expect(await refused.text()).not.toContain(CELL);
-    expect((await f.read(`/api/agent/sessions/${SESSION}`, "o".repeat(43))).status).toBe(200);
+    expect((await f.read(`/api/agent/sessions/${SESSION}`, f.ownerToken)).status).toBe(200);
     f.shown.current = SESSION;
-    expect((await snapshot()).status).toBe(200);
-    f.shown.current = null;
     expect((await snapshot()).status).toBe(403);
+    for (const part of ["history", "events", "stream"])
+      expect((await f.read(`/api/sessions/${f.owners}/${part}`)).status, part).toBe(403);
     expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
     expect((await snapshot()).status).toBe(200);
   });
@@ -2176,7 +2237,7 @@ describe("shared-link task enforcement", () => {
   it("names none of the owner's keys to a shared link's guest, whichever way the log is read", async () => {
     const f = await guest();
     const task = f.eventLog.createSession("task");
-    f.shown.current = task;
+    f.links.reserve(f.issued.grant.id).finish(task);
     f.eventLog.append(task, {
       type: "blocker.raise",
       agent: "main",
@@ -2229,6 +2290,7 @@ describe("shared-link task enforcement", () => {
     expect(f.start).not.toHaveBeenCalled();
     expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
     expect(f.start).toHaveBeenCalledWith(CELL, "Hello", expect.any(AbortSignal), {
+      continues: null,
       main: f.model,
       budgetUSD: 1,
       sender: f.issued.grant.id,

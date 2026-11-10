@@ -204,7 +204,11 @@ export class Conversations {
   }
 
   snapshot(): ConversationSnapshot {
-    const current = this.current();
+    return this.snapshotOf(this.current());
+  }
+
+  // The conversation that ends with this task, as the app shows it.
+  snapshotOf(current: string | null): ConversationSnapshot {
     if (!current) return { sessions: [], more: false };
     const chain = this.chain(current);
     const withdrawn = chain.sessions.flatMap((id) => this.#withdrawn(id));
@@ -545,12 +549,19 @@ ${checkpoint}`),
 
   // The recent conversations, newest first, or the archived ones, and how many are archived. Those
   // pinned are kept before the rest are counted.
-  list(max = CONVERSATION_LIST, archived = false): Required<ConversationList> {
+  // `keep`, given, lists only the conversations whose tasks it keeps, as a shared link's own.
+  list(
+    max = CONVERSATION_LIST,
+    archived = false,
+    keep?: (sessions: readonly string[]) => boolean,
+  ): Required<ConversationList> {
     const records = this.#organized();
-    const found = this.#found().map((conversation) => ({
-      ...conversation,
-      ...this.#organization(conversation.sessions[0] ?? "", records),
-    }));
+    const found = (keep ? this.#found().filter((each) => keep(each.sessions)) : this.#found()).map(
+      (conversation) => ({
+        ...conversation,
+        ...this.#organization(conversation.sessions[0] ?? "", records),
+      }),
+    );
     const shown = found.filter((conversation) => conversation.archived === archived);
     const kept = new Set(
       [...shown.filter((each) => each.pinned), ...shown.filter((each) => !each.pinned)].slice(

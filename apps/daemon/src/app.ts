@@ -178,12 +178,6 @@ export function createApp({
           .stopRun?.(sessionId)
           .catch(() => console.error("Shared task could not be stopped after link revocation"));
     });
-  const conversations = agent?.conversations;
-  if (remoteAccess && conversations)
-    remoteAccess.links.showing(() => {
-      const current = conversations.current();
-      return current ? conversations.chain(current).sessions : [];
-    });
   app.use("/api/*", async (c, next) => {
     const given = tokenFromHeaders({ authorization: c.req.header("authorization") });
     if (!tokensMatch(token, given)) {
@@ -217,12 +211,20 @@ export function createApp({
   if (appUpdater) appUpdateRoutes(app, appUpdater);
   if (remoteAccess) {
     remoteRoutes(app, remoteAccess, agent?.settings.get.bind(agent.settings));
+    // The models the owner has configured now, which a link that allows switching offers.
+    const configured = () => {
+      const saved = agent?.settings.get();
+      return [saved?.main, saved?.fast, saved?.local, ...(saved?.models ?? [])].filter(
+        (choice): choice is NonNullable<typeof choice> => !!choice && !choice.off,
+      );
+    };
     app.get("/api/remote-session", (c) => {
       const grant = c.get("remoteGrant");
       if (!grant) return c.text("Not a shared session", 400);
+      const models = remoteAccess.links.choices(grant, configured());
       // The page has no catalog of its own: the link's models come with their names.
       const catalog = agent?.catalog.get();
-      const names = [grant.model, ...grant.models].flatMap(({ provider, model }) => {
+      const names = models.flatMap(({ provider, model }) => {
         const name = (
           catalog?.providers[provider]?.models[model] ??
           Object.values(catalog?.providers ?? {}).find((each) => each.models[model])?.models[model]
@@ -231,6 +233,7 @@ export function createApp({
       });
       return c.json({
         ...publicGrant(grant),
+        models,
         ownedSessions: remoteAccess.links.sessions(grant.id),
         names,
       });
@@ -241,7 +244,7 @@ export function createApp({
       try {
         const { index } = await c.req.json();
         if (!Number.isInteger(index)) return c.text("Invalid model", 400);
-        remoteAccess.links.select(grant.id, index);
+        remoteAccess.links.select(grant.id, index, configured());
         return c.body(null, 204);
       } catch {
         return c.text("Model not permitted", 403);

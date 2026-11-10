@@ -27,8 +27,10 @@ export interface GatewayRoutesDeps {
   frames?: FrameStore;
   live?: LiveSessions;
   prepareDesktopTask?(cellId: string, sessionId: string, signal: AbortSignal): Promise<void>;
-  // The latest task of the conversation the app shows.
-  conversation?(): string | null;
+  // The latest task of the conversation the app shows, or a shared link's own.
+  conversation?(link?: string): string | null;
+  // Whether a task is a shared link's own.
+  owns?(link: string, sessionId: string): boolean;
   killSwitch?: Pick<KillSwitch, "stopSession" | "resume"> & Partial<Pick<KillSwitch, "isBusy">>;
 }
 
@@ -143,17 +145,26 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     const sessionId = deps.live?.get(id);
     // Every task the computer runs, oldest first; `sessionId` is the one acting or last to act,
     // `current` the one of the conversation the app shows and `holder` the one on the screen now.
-    const sessions = deps.live?.sessionsOn(id) ?? [];
+    // A shared link hears of its own tasks only.
+    const link = c.get("remoteGrant")?.id;
+    const sessions = (deps.live?.sessionsOn(id) ?? []).filter(
+      (task) => !link || !!deps.owns?.(link, task),
+    );
     const holder = deps.live?.lease(id).holder;
     let current: string | null | undefined;
     try {
-      current = deps.conversation?.();
+      current = deps.conversation?.(link);
     } catch {
       current = undefined;
     }
-    return sessionId
+    const acting = link
+      ? sessions.includes(sessionId ?? "")
+        ? sessionId
+        : sessions.at(-1)
+      : sessionId;
+    return acting
       ? c.json({
-          sessionId,
+          sessionId: acting,
           sessions,
           ...(current && sessions.includes(current) ? { current } : {}),
           ...(holder ? { holder } : {}),

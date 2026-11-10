@@ -561,6 +561,24 @@ describe("the user's own hold on the computer", () => {
     });
   });
 
+  it("starts a shared link's task in a conversation of its own, leaving the owner's as it was", async () => {
+    const f = setup();
+    const conversations = new Conversations(f.home, f.log);
+    f.deps.conversations = conversations;
+    conversations.begin();
+    const session = await f.runner.start(f.cellId, "Water the plants", undefined, {
+      continues: null,
+      sender: "a".repeat(24),
+      guest: { apps: true },
+    });
+    expect(f.log.read(session.id).find((e) => e.type === "session.start")?.data).not.toHaveProperty(
+      "continues",
+    );
+    expect(conversations.current()).toBeNull();
+    session.stop();
+    await f.live.settled(session.id);
+  });
+
   it("holds the computer for the user beside a task live on it", async () => {
     const f = setup();
     const task = await f.runner.start(f.cellId, "Fixture task");

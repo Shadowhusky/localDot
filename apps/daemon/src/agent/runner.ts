@@ -1114,8 +1114,9 @@ export class AgentRunner {
         this.#runtime.delete(id);
         throw error;
       }
-      // The user looking at a routine's conversation stays with it as a new run starts.
-      if (!origin || continues)
+      // The user looking at a routine's conversation stays with it as a new run starts. A shared
+      // link's own task leaves the owner's conversation as it was.
+      if ((!origin || continues) && !options.guest)
         try {
           this.deps.conversations?.adopt(id, continues ?? null);
         } catch {

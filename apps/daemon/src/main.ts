@@ -93,6 +93,7 @@ import { resumeCompactions } from "./recorder/compaction.ts";
 import { compactionFromEnv, DockerTrackEncoder, RecordingCompactor } from "./recorder/compactor.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
 import { ScreenRecordings } from "./recorder/screen-recordings.ts";
+import { linkConversation } from "./remote/links.ts";
 import { configuredRemoteDomain, RemoteAccess } from "./remote/manager.ts";
 import { type LiveSources, liveFacts } from "./reports/routes.ts";
 import { ReportStore } from "./reports/store.ts";
@@ -983,7 +984,14 @@ const app = createApp({
     live,
     killSwitch,
     prepareDesktopTask: agent.prepareDesktopTask,
-    conversation: () => running.routes.conversations?.current() ?? null,
+    conversation: (link) => {
+      const conversations = running.routes.conversations;
+      if (!conversations) return null;
+      return link
+        ? (linkConversation(remoteAccess.links, conversations, link).sessions.at(-1) ?? null)
+        : conversations.current();
+    },
+    owns: (link, sessionId) => remoteAccess.links.owns(link, sessionId),
   },
   keys: {
     keyd,
