@@ -72,10 +72,11 @@ export function openSocket(opts: SocketOptions): SocketHandle {
     if (reason === "focus" && live?.readyState === 1) return false;
     if (closed) return;
     clearTimeout(timer);
+    // A deliberate refresh is not a lost connection: the reader hears of a loss only if the new
+    // socket fails too, so a return to the app shows nothing.
     const previous = ws;
     ws = live = null;
     previous?.close();
-    opts.handlers.onClose?.();
     delay = backoff.min;
     connect();
   });

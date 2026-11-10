@@ -365,18 +365,25 @@ export const StepsCaption = memo(function StepsCaption({
 
 // A step with the details it unfolds in place, where there is a task to read them from. A step that
 // has not changed is not drawn again as the steps after it arrive.
-const StepRow = memo(function StepRow({
+export const StepRow = memo(function StepRow({
   id,
   step,
   sessionId,
   open,
   onToggle,
+  current,
+  runningFrom,
+  nowMs,
 }: {
   id: string;
   step: WorkStep;
   sessionId?: string;
   open: boolean;
   onToggle(key: string, trigger: HTMLButtonElement): void;
+  // The step at work now, with the time it has run.
+  current?: boolean;
+  runningFrom?: number;
+  nowMs?: number;
 }) {
   const preview = useStepPreviewEnvironment();
   const plain = useContext(PlainSteps);
@@ -387,6 +394,8 @@ const StepRow = memo(function StepRow({
       view={step.meta === step.title ? { ...step, meta: "" } : step}
       open={open}
       onToggle={detail ? (trigger) => onToggle(step.key, trigger) : undefined}
+      current={current}
+      {...(runningFrom !== undefined ? { runningFrom, nowMs } : {})}
     >
       {detail && preview && (
         <ActivityDetail

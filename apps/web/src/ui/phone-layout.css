@@ -1033,10 +1033,92 @@
       opacity var(--dur-fade) var(--ease-standard);
   }
 
+  /* What scrolls under dot's line fades into it over a long edge, never cut off at a hard one. */
   .dot-strip[data-live] {
     position: sticky;
     bottom: 0;
-    background: linear-gradient(transparent, var(--color-void) calc(var(--spacing) * 3.5));
+    background: var(--color-void);
+  }
+
+  .dot-strip[data-live]::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: 100%;
+    height: calc(var(--spacing) * 12);
+    background: linear-gradient(
+      color-mix(in srgb, var(--color-void) 0%, transparent),
+      color-mix(in srgb, var(--color-void) 55%, transparent) 50%,
+      var(--color-void)
+    );
+    pointer-events: none;
+  }
+
+  /* dot hidden: what it is doing, in a bubble of its own, as a messenger shows typing. */
+  .dot-typing {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+    max-width: min(86%, 560px);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3.25);
+    border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xl) var(--radius-tail);
+    background-color: var(--color-raised);
+    box-shadow: var(--shadow-raised);
+    color: var(--color-fg-2);
+    font:
+      var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+  }
+
+  .dot-typing-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dot-typing-dots {
+    display: inline-flex;
+    flex: none;
+    gap: 3px;
+  }
+
+  .dot-typing-dots > i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.35;
+    animation: dot-typing 1.2s var(--ease-standard) infinite;
+  }
+
+  .dot-typing-dots > i:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .dot-typing-dots > i:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  @keyframes dot-typing {
+    0%,
+    60%,
+    100% {
+      opacity: 0.35;
+      translate: 0 0;
+    }
+    30% {
+      opacity: 0.9;
+      translate: 0 -2px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dot-typing-dots > i {
+      animation: none;
+      opacity: 0.6;
+    }
   }
 
   .dot-strip[data-hidden] {
@@ -1058,6 +1140,12 @@
     min-height: calc(var(--spacing) * 16);
     padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3 + var(--_safe-right))
       calc(var(--spacing) / 2) calc(var(--spacing) * 2 + var(--_safe-left));
+  }
+
+  .dot-strip[data-typing] .dot-strip-row {
+    min-height: 0;
+    padding-top: calc(var(--spacing) / 2);
+    padding-left: calc(var(--spacing) * 3 + var(--_safe-left));
   }
 
   .dot-strip .narrator,
@@ -1328,7 +1416,8 @@
   .phone-decision {
     max-height: 62vh;
     margin: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3) 0;
-    overflow: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     border-radius: var(--radius-decision);
     background-color: var(--color-raised);
     box-shadow: var(--shadow-overlay);
@@ -1471,7 +1560,31 @@
   }
 
   .phone-computer-bottom {
+    position: relative;
     margin-top: auto;
+  }
+
+  /* On the computer screen a decision floats over the picture and steps, dimmed behind it, and
+     scrolls when it is taller than the room: the steps and controls keep their places. */
+  .phone-computer-bottom:has(.phone-decision)::before {
+    content: "";
+    position: absolute;
+    z-index: 5;
+    inset-inline: 0;
+    bottom: 100%;
+    height: 100vh;
+    background: color-mix(in srgb, var(--color-void) 55%, transparent);
+    pointer-events: none;
+  }
+
+  .phone-computer-dock .phone-decision {
+    position: absolute;
+    z-index: 6;
+    inset-inline: 0;
+    bottom: calc(100% + var(--spacing) * 2);
+    max-height: calc(100svh - var(--spacing) * 48);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .phone-computer-controls {
@@ -1852,6 +1965,11 @@
     .phone-computer-curtain {
       position: absolute;
       inset: 0;
+    }
+
+    /* The controls place themselves in the computer's margin, not in this strip. */
+    .phone-computer-bottom {
+      position: static;
     }
 
     .phone-computer-controls {

@@ -10,6 +10,7 @@ import {
   groupConversations,
   liveConversations,
   renameConversation,
+  spreadLooks,
   tagsInUse,
   whenLabel,
 } from "./conversation-list.ts";
@@ -319,5 +320,27 @@ describe("when", () => {
     expect(whenLabel(at(20), NOW)).toBe(
       new Date(at(20)).toLocaleDateString([], { day: "numeric", month: "short" }),
     );
+  });
+});
+
+describe("conversations' looks", () => {
+  it("draws again for a conversation that would look like an older one, and keeps the older look", () => {
+    const seen = new Map<string, string>();
+    let pair: [string, string] | undefined;
+    for (let n = 0; !pair && n < 5000; n++) {
+      const id = `01M7${String(n).padStart(22, "0")}`;
+      const worn = taskOutfit(id).join(" ");
+      const before = seen.get(worn);
+      if (before) pair = [before, id];
+      else seen.set(worn, id);
+    }
+    if (!pair) throw new Error("no two ids drew alike");
+    const [older, newer] = pair.map((id) => entry({ sessionId: id, firstTask: id }));
+    if (!older || !newer) throw new Error("no entries");
+    spreadLooks([newer, older]);
+    expect(conversationLook(older)).toEqual(taskOutfit(older.sessionId));
+    expect(conversationLook(newer)).not.toEqual(conversationLook(older));
+    spreadLooks([older]);
+    expect(conversationLook(newer)).toEqual(conversationLook(older));
   });
 });

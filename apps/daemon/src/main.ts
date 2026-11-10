@@ -72,7 +72,7 @@ import { KillSwitch } from "./gateway/kill-switch.ts";
 import { LiveSessions } from "./gateway/live.ts";
 import { loadOnsetTable } from "./gateway/onset-table.ts";
 import { policyFromEnv } from "./gateway/ring-onset.ts";
-import { configuredAccessOrigins, setPublicOrigin } from "./guard.ts";
+import { configuredAccessOrigins, ownerOrigins, setPublicOrigin } from "./guard.ts";
 import { InstallCodes } from "./install-codes.ts";
 import { CellKeydWiring, refreshRunningCells } from "./keyd/cell-wiring.ts";
 import { KeydClient, keydSocketPath } from "./keyd/client.ts";
@@ -884,7 +884,7 @@ const dots = new DotsService({
   cli: serviceIdentity ? undefined : dotsCli(process.env, import.meta.url.endsWith(".ts")),
   env: process.env,
   busy: working,
-  origins: configuredAccessOrigins,
+  origins: ownerOrigins,
 });
 // One installation runs every dot on this computer, so an update restarts them all together.
 const installWait = async (hold = true) => {

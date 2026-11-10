@@ -206,11 +206,42 @@ export function conversationLook(
   entry: ConversationEntry,
   persona: PersonaId | undefined = entry.live?.persona ?? entry.persona,
 ): readonly Wearable[] {
-  return entry.look ?? taskOutfit(lookSeed(entry), persona);
+  return entry.look ?? taskOutfit(drawSeed(entry), persona);
 }
 
 export const lookSeed = (entry: ConversationEntry) =>
   entry.firstTask ?? entry.sessions.at(-1) ?? entry.sessionId;
+
+// A conversation whose draw matches an older one's look draws again, so no two in the list look
+// alike while the outfits allow it. Oldest first by their first task's id (a ULID), so a look never
+// changes as newer conversations arrive, and every device draws the same.
+const redrawn = new Map<string, string>();
+const REDRAWS = 12;
+const drawSeed = (entry: ConversationEntry) => redrawn.get(lookSeed(entry)) ?? lookSeed(entry);
+
+export function spreadLooks(entries: readonly ConversationEntry[]): void {
+  redrawn.clear();
+  const taken = new Set<string>();
+  const oldestFirst = [...entries].sort((a, b) =>
+    lookSeed(a) < lookSeed(b) ? -1 : lookSeed(a) > lookSeed(b) ? 1 : 0,
+  );
+  for (const entry of oldestFirst) {
+    if (entry.look) {
+      taken.add(entry.look.join(" "));
+      continue;
+    }
+    const seed = lookSeed(entry);
+    const persona = entry.live?.persona ?? entry.persona;
+    let drawn = seed;
+    let worn = taskOutfit(drawn, persona).join(" ");
+    for (let n = 1; n <= REDRAWS && taken.has(worn); n++) {
+      drawn = `${seed}#${n}`;
+      worn = taskOutfit(drawn, persona).join(" ");
+    }
+    taken.add(worn);
+    if (drawn !== seed) redrawn.set(seed, drawn);
+  }
+}
 
 // An empty title gives the conversation back its own.
 export function renameConversation(
@@ -349,6 +380,7 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stop: (() => void) | null = null;
   const set = (state: ListState) => {
+    if (state.entries !== store.state.entries && state.entries) spreadLooks(state.entries);
     store.state = state;
     for (const listener of listeners) listener();
   };

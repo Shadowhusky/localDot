@@ -9,6 +9,8 @@ export interface DotStripProps {
   hidden: boolean;
   // dot and its one sentence.
   band: ReactNode;
+  // What dot is doing, said in a typing bubble while dot itself is hidden.
+  status?: ReactNode;
   // This task holds the computer: its picture, a tap from the computer screen.
   thumb?: {
     light: "dot" | "you" | "none";
@@ -20,13 +22,32 @@ export interface DotStripProps {
   time?: ReactNode;
 }
 
-// The foot of the thread: one dot, one sentence and, while this task has it, the computer.
-export function DotStrip({ live, hidden, band, thumb, time }: DotStripProps) {
+// The foot of the thread: one dot, one sentence and, while this task has it, the computer. With dot
+// hidden, a task at work still shows it is going on, as a messenger shows the other side typing.
+export function DotStrip({ live, hidden, band, status, thumb, time }: DotStripProps) {
+  const typing = hidden && live && !!status;
+  const away = hidden && !typing;
   return (
-    <div className="dot-strip" data-live={live || undefined} data-hidden={hidden || undefined}>
-      <div className="dot-strip-clip" inert={hidden}>
+    <div
+      className="dot-strip"
+      data-live={live || undefined}
+      data-hidden={away || undefined}
+      data-typing={typing || undefined}
+    >
+      <div className="dot-strip-clip" inert={away}>
         <div className="dot-strip-row">
-          {band}
+          {typing ? (
+            <div className="dot-typing" role="status">
+              <span className="dot-typing-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+              <span className="dot-typing-text">{status}</span>
+            </div>
+          ) : (
+            band
+          )}
           {thumb ? (
             <Button
               variant="quiet"
@@ -40,7 +61,7 @@ export function DotStrip({ live, hidden, band, thumb, time }: DotStripProps) {
               {thumb.time && <span className="phone-thumb-time num">{thumb.time}</span>}
             </Button>
           ) : (
-            time && <span className="dot-strip-time num">{time}</span>
+            time && !typing && <span className="dot-strip-time num">{time}</span>
           )}
         </div>
       </div>

@@ -24,6 +24,8 @@ ARG INSTALL_CHROME=
 COPY cells/browser/install-chrome.sh /opt/localdot/install-chrome.sh
 RUN if [ "$INSTALL_CHROME" = 1 ]; then /opt/localdot/install-chrome.sh; fi
 COPY cells/browser/root/etc/localdot/browser-nginx.conf /etc/localdot/browser-nginx.conf
+COPY cells/browser/root/etc/chromium/policies/managed/localdot-network.json /etc/chromium/policies/managed/localdot-network.json
+COPY cells/browser/root/etc/chromium/policies/managed/localdot-network.json /etc/opt/chrome/policies/managed/localdot-network.json
 COPY cells/browser/browserd/dist/browserd.mjs cells/browser/browserd/dist/forwarder.mjs /opt/localdot/
 COPY cells/browser/browserd/x/browser-helper.py cells/browser/browserd/x/browser_surface.py cells/browser/browserd/x/browser-capture.py /opt/localdot/
 COPY cells/desktop/desktopd/x/xhelper.py /opt/localdot/xhelper.py
