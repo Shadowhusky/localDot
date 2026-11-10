@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "653c373b1780a7c4c42a3bb4a09f95da2d8f07c44a756d6b0b5de0db6d853c1a",
+  "inputSha256": "f79106a15c0f46cc71a03547314c6b6f0faf0805108fc4dab7e05266b1a4b6d4",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -839,7 +839,7 @@
     "apps/daemon/src/previews/fronts.test.ts": "d16f67b4be249e675a7234cc514f3b63fa562e50694604af21775a7ecaa998c2",
     "apps/daemon/src/previews/fronts.ts": "581b4821e8c8cd1baa22f740861ee17b72740dc2c669fd817e93bc65322cb64a",
     "apps/daemon/src/previews/previews.docker.test.ts": "795895d2983549320f495c48f6434b4d4deefbc9ccd7b73a92aa988cfe924793",
-    "apps/daemon/src/previews/previews.test.ts": "6f3259669533e86288eb6488618857f6e3c9c68273b37b1055b528b7dd17d2f6",
+    "apps/daemon/src/previews/previews.test.ts": "a9673f4008ad8d1ed9a375aea7f2528bdb119ca03ab1069962263f68c5213c2e",
     "apps/daemon/src/previews/previews.ts": "1fa27cb5ac811a598fff96bdb43365ce011e3d855d0541f27b7cde1dc1eea824",
     "apps/daemon/src/previews/rewrite.test.ts": "0e312b34940c75aa7650a22bb605e0da5246b4760bf25bde8a4d15662173d08c",
     "apps/daemon/src/previews/rewrite.ts": "0c5b33d310d533614db3e09b4f2bc38a6a6db68fe84c03abea1ce2f805e7e254",
@@ -1300,7 +1300,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "b0f19802abd8a84cdfce599679304c2b38ffa80185b50c42d4a99254cfad54e6",
+  "reportSha256": "5a7b202204287f9cd4eb366f7ab714b85730876ddaa391eff44768e2d43384e1",
   "exit": {
     "code": 0,
     "signal": null

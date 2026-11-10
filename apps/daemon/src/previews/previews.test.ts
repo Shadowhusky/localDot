@@ -870,7 +870,8 @@ describe("opening a preview on this Mac at the app's own address", () => {
     const { previews, range } = await dot();
     // Listening everywhere doesn't stop a narrower listener on macOS, which would take its
     // loopback traffic: what answers is asked first.
-    const owners = createTcpServer((socket) => socket.end("owner's own"));
+    // localDot's own check hangs up at once, which can reset the owner's side of it.
+    const owners = createTcpServer((socket) => socket.on("error", () => {}).end("owner's own"));
     owners.listen(0, "0.0.0.0");
     await once(owners, "listening");
     cleanup.push(() => owners.close());
@@ -886,6 +887,7 @@ describe("opening a preview on this Mac at the app's own address", () => {
     });
     const answer = await new Promise<string>((resolve) => {
       const socket = createConnection({ host: "127.0.0.1", port: taken });
+      socket.on("error", () => {});
       socket.on("data", (data) => resolve(String(data)));
     });
     expect(answer).toBe("owner's own");
