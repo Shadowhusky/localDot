@@ -11,6 +11,7 @@ import type { IconName } from "../ui/icons.ts";
 import { Meter } from "../ui/Meter.tsx";
 import { MoneyField } from "../ui/MoneyField.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
+import { planWait } from "./FixCards.tsx";
 import { resetTime } from "./UsageFooter.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { TaskControls } from "./useTaskControls.ts";
@@ -201,6 +202,7 @@ export function TaskRecovery({
   onContinue,
   onCarryOn,
   computer,
+  onDontContinue,
   onResumeSelected,
   resumeBlocked,
   onReport,
@@ -217,6 +219,8 @@ export function TaskRecovery({
   onCarryOn?(): Promise<boolean>;
   // Turns on the computer an interrupted task needs: it then carries on by itself.
   computer?: { label: string; reason?: string; run(): void };
+  // "Don't continue" for an interrupted task still waiting on its plan's reset.
+  onDontContinue?(): Promise<boolean>;
   onResumeSelected?(): Promise<boolean>;
   resumeBlocked?: string;
   // Opens Report a problem about this task.
@@ -248,12 +252,19 @@ export function TaskRecovery({
     setCarryOnWhenOn(false);
     carryOn.current(onCarryOn);
   }, [carryOnWhenOn, onCarryOn]);
+  // A restart ended a task waiting on its plan's reset: it still carries on by itself then.
+  const wait = state?.state === "paused" ? planWait(state.reason, state.autoContinue) : undefined;
+  const waiting = wait?.waiting ? wait : undefined;
   if (agent.interrupted && !controls.fenced)
     return (
       <section className="thread-recovery" aria-label="Task recovery">
-        <h3 className="thread-recovery-title">I was cut off before I finished</h3>
+        <h3 className="thread-recovery-title">
+          {waiting ? waiting.title : "I was cut off before I finished"}
+        </h3>
         <p className="thread-recovery-text">
-          localDot restarted while I was working. Continue, and I'll pick up where I left off.
+          {waiting
+            ? waiting.text
+            : "localDot restarted while I was working. Continue, and I'll pick up where I left off."}
         </p>
         <div className="thread-recovery-actions">
           {onCarryOn || !computer ? (
@@ -264,7 +275,7 @@ export function TaskRecovery({
               disabledReason={onCarryOn ? undefined : "Your computer is on its way"}
               onClick={() => onCarryOn && send(onCarryOn)}
             >
-              Continue
+              {waiting ? "Continue now" : "Continue"}
             </Button>
           ) : (
             <Button
@@ -278,6 +289,11 @@ export function TaskRecovery({
               }}
             >
               {`${computer.label} and continue`}
+            </Button>
+          )}
+          {waiting && onDontContinue && (
+            <Button variant="quiet" busy={continuing} onClick={() => send(onDontContinue)}>
+              Don't continue
             </Button>
           )}
         </div>

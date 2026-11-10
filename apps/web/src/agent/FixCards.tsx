@@ -378,7 +378,7 @@ const MODEL_WORDS: Record<string, { title: string; text: string }> = {
 
 type AutoContinue = NonNullable<EventOf<"agent.state">["data"]["autoContinue"]>;
 // A plan's limit: the task waits for the plan to reset and goes on by itself, unless told not to.
-function planWait(reason: string | undefined, wait: AutoContinue | undefined) {
+export function planWait(reason: string | undefined, wait: AutoContinue | undefined) {
   const plan =
     reason === "chatgpt plan limit reached"
       ? "ChatGPT"

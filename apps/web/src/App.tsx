@@ -3360,6 +3360,15 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                       }
                     : undefined
                 }
+                onDontContinue={async () => {
+                  if (!agent.sessionId) return false;
+                  try {
+                    await api.post(`/api/agent/sessions/${agent.sessionId}/auto-continue/cancel`);
+                    return true;
+                  } catch {
+                    return false;
+                  }
+                }}
                 onResumeSelected={modelDiffers && recoveryWait ? carryOn : undefined}
                 resumeBlocked={modelSaving ? "Saving the selected model…" : undefined}
                 onReport={report.start}
