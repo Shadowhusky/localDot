@@ -110,7 +110,7 @@ it("refreshes a silent OPEN socket on app return and rejects its late events", (
   window.dispatchEvent(new Event("pageshow"));
   expect(FakeWebSocket.instances).toHaveLength(2);
   expect(old?.closed).toBe(true);
-  expect(close).toHaveBeenCalledTimes(1);
+  expect(close).not.toHaveBeenCalled();
   expect(FakeWebSocket.instances[1]?.url).toContain("fromSeq=12");
   old?.onmessage?.({ data: "stale" });
   old?.onclose?.();

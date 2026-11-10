@@ -85,6 +85,7 @@ export class Notifier {
       this.deps.presence.snapshot(),
       this.deps.now(),
       this.deps.timeZone(),
+      this.deps.mac.available,
     );
     if (!delivery) return;
     // An approval's push lives as long as its card, between a minute and four hours.

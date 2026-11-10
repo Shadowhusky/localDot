@@ -1,15 +1,38 @@
 import { execFile as nodeExecFile } from "node:child_process";
-import { readdirSync, statSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { constants, readdirSync, statSync } from "node:fs";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, delimiter, dirname, join, sep } from "node:path";
+import { speechChunks } from "./speech-chunks.ts";
 
-// A speech-to-text model already installed on this computer, run by whisper.cpp's command line.
-export interface SpeechModel {
+// A speech-to-text model the person installed themselves, run by whisper.cpp's command line.
+export interface HandInstalledModel {
   readonly binary: string;
   readonly model: string;
   readonly englishOnly: boolean;
 }
+
+// A model localDot installed: the program, its flags, and the languages it hears.
+export interface InstalledModel {
+  readonly binary: string;
+  readonly args: readonly string[];
+  readonly languages: readonly string[] | null;
+}
+
+export type SpeechModel = HandInstalledModel | InstalledModel;
+const isInstalled = (model: SpeechModel): model is InstalledModel => "args" in model;
 
 export interface SpeechLookup {
   env: NodeJS.ProcessEnv;
@@ -53,7 +76,7 @@ export const hostSpeechLookup = (): SpeechLookup => ({
   },
 });
 
-export function findSpeechModel(lookup: SpeechLookup): SpeechModel | null {
+export function findSpeechModel(lookup: SpeechLookup): HandInstalledModel | null {
   const dirs = [...(lookup.env.PATH ?? "").split(delimiter).filter(Boolean), ...BIN_DIRS];
   const binary = BINARIES.flatMap((name) => dirs.map((dir) => join(dir, name))).find(lookup.isFile);
   if (!binary) return null;
@@ -94,48 +117,162 @@ export class SpeechBusyError extends Error {
 
 export interface Transcriber {
   readonly englishOnly: boolean;
+  // The languages it hears; absent or null when any language will do.
+  readonly languages?: readonly string[] | null;
   // A 16 kHz mono WAV in, its words out. The audio lives in a private temporary folder only while
   // the model reads it.
   transcribe(wav: Uint8Array, language: string | null, signal?: AbortSignal): Promise<string>;
 }
 
 const TIMEOUT_MS = 30_000;
+const PIECES_PER_RUN = 3;
+const WAV_BYTES_PER_SECOND = 32_000;
+// A long recording takes longer on a slow computer, so it isn't lost at the very moment it's sent.
+export const speechTimeoutMs = (bytes: number) =>
+  Math.max(TIMEOUT_MS, Math.ceil(bytes / WAV_BYTES_PER_SECOND) * 1000 + TIMEOUT_MS / 2);
 const NOISE = /^[[(].*[\])]$/;
 const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}　-〿＀-￯]/u;
 
+// Where recordings wait while they're read: a private folder under localDot's home, emptied at
+// start-up, so audio never outlives a daemon that stopped mid-way. Never stops the daemon starting:
+// what can't be removed is moved aside, and failing that a fresh folder beside it is used. Both get
+// names only this makes, and every start tries again to remove them.
+export async function sweepVoiceAudio(dir: string): Promise<string> {
+  const parent = dirname(dir);
+  const name = basename(dir);
+  for (const entry of await readdir(parent).catch(() => []))
+    if (entry.startsWith(`${name}.`) && LEFT_ASIDE.test(entry.slice(name.length)))
+      await removeAll(join(parent, entry)).catch((error: unknown) =>
+        console.error(`old recordings in ${entry} couldn't be removed (${codeOf(error)})`),
+      );
+  const fresh = async (path: string) => {
+    await mkdir(path, { recursive: true, mode: 0o700 });
+    await chmod(path, 0o700);
+    const found = await lstat(path);
+    if (!found.isDirectory()) throw new Error("not a folder");
+    return path;
+  };
+  try {
+    await removeAll(dir);
+    return await fresh(dir);
+  } catch (error) {
+    console.error(`old recordings couldn't be removed (${codeOf(error)})`);
+  }
+  try {
+    await rename(dir, `${dir}.stale-${randomBytes(4).toString("hex")}`);
+    return await fresh(dir);
+  } catch {
+    return await mkdtemp(`${dir}.tmp-`).catch(() => dir);
+  }
+}
+
+const LEFT_ASIDE = /^\.(?:stale-[0-9a-f]{8}|tmp-[A-Za-z0-9]{6})$/;
+
+async function removeAll(path: string) {
+  await unlockTree(path).catch(() => {});
+  await rm(path, { recursive: true, force: true });
+}
+
+const FOLDER = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+
+// Gives our own locked folders their write permission back, so they can still be emptied. Each is
+// changed through a handle opened without following a link, and only once the handle is seen to be
+// the folder at a real path inside `top`. Node can't list a folder through a handle, so a folder
+// swapped for a link part-way may still be listed, but nothing outside is ever changed.
+async function unlockTree(top: string) {
+  const home = await realpath(dirname(top));
+  const inside = await unlock(top, home);
+  if (!inside) return;
+  const walk = async (dir: string) => {
+    for (const entry of await readdir(dir).catch(() => [])) {
+      const path = join(dir, entry);
+      if (await unlock(path, inside)) await walk(path);
+    }
+  };
+  await walk(top);
+}
+
+// The folder's real path once it's unlocked, or null when it isn't a folder of ours to change.
+async function unlock(path: string, inside: string): Promise<string | null> {
+  const handle = await open(path, FOLDER).catch(() => null);
+  if (!handle) return null;
+  try {
+    const real = await realpath(path).catch(() => null);
+    if (!real?.startsWith(`${inside}${sep}`)) return null;
+    const [held, there] = await Promise.all([handle.stat(), lstat(real).catch(() => null)]);
+    if (!there?.isDirectory() || held.ino !== there.ino || held.dev !== there.dev) return null;
+    await handle.chmod(0o700);
+    return real;
+  } finally {
+    await handle.close();
+  }
+}
+
+const codeOf = (error: unknown) =>
+  error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
+
 export function speechTranscriber(
   model: SpeechModel,
-  opts: { execFile?: ExecFile; tmp?: string } = {},
+  opts: { execFile?: ExecFile; tmp: string },
 ): Transcriber {
   const run = opts.execFile ?? (nodeExecFile as unknown as ExecFile);
   let busy = false;
+  const installed = isInstalled(model) ? model : null;
+  const hand = isInstalled(model) ? null : model;
   return {
-    englishOnly: model.englishOnly,
+    englishOnly: hand?.englishOnly ?? installed?.languages?.join() === "en",
+    languages: installed?.languages ?? null,
     async transcribe(wav, language, signal) {
       signal?.throwIfAborted();
       if (busy) throw new SpeechBusyError();
       busy = true;
       let dir: string | undefined;
       try {
-        dir = await mkdtemp(join(opts.tmp ?? tmpdir(), "localdot-voice-"));
+        await mkdir(opts.tmp, { recursive: true, mode: 0o700 });
+        dir = await mkdtemp(join(opts.tmp, "localdot-voice-"));
         signal?.throwIfAborted();
-        const file = join(dir, "speech.wav");
-        await writeFile(file, wav, { mode: 0o600 });
-        const args = ["-m", model.model, "-f", file, "-l", language ?? "auto", "-nt", "-np"];
-        const out = await new Promise<string>((resolve, reject) =>
-          run(
-            model.binary,
-            args,
-            {
-              timeout: TIMEOUT_MS,
-              maxBuffer: 256 * 1024,
-              signal,
-              env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME },
-            },
-            (error, stdout) => (error ? reject(error) : resolve(String(stdout))),
-          ),
+        const pieces = installed ? speechChunks(wav) : [wav];
+        const files = pieces.map((_, index) => join(dir as string, `speech-${index}.wav`));
+        await Promise.all(
+          pieces.map((piece, index) => writeFile(files[index] as string, piece, { mode: 0o600 })),
         );
-        return spokenText(out);
+        const once = (args: readonly string[]) =>
+          new Promise<string>((resolve, reject) =>
+            run(
+              model.binary,
+              args,
+              {
+                timeout: speechTimeoutMs(wav.length),
+                maxBuffer: installed ? 8 * 1024 * 1024 : 256 * 1024,
+                signal,
+                env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME },
+              },
+              (error, stdout) => (error ? reject(error) : resolve(String(stdout))),
+            ),
+          );
+        if (!installed) {
+          const [file = ""] = files;
+          return spokenText(
+            await once([
+              "-m",
+              hand?.model ?? "",
+              "-f",
+              file,
+              "-l",
+              language ?? "auto",
+              "-nt",
+              "-np",
+            ]),
+          );
+        }
+        // The program holds every piece of one run in memory at once, so long audio takes a few runs.
+        const said: string[] = [];
+        for (let at = 0; at < files.length; at += PIECES_PER_RUN) {
+          signal?.throwIfAborted();
+          const group = files.slice(at, at + PIECES_PER_RUN);
+          said.push(...installedWords(await once([...installed.args, ...group]), group.length));
+        }
+        return spokenText(said.join("\n"));
       } finally {
         busy = false;
         if (dir) await rm(dir, { recursive: true, force: true });
@@ -158,18 +295,48 @@ export function spokenText(out: string): string {
     }, "");
 }
 
+// The program prints one line of JSON per piece of audio, in order. Fewer lines than pieces means
+// it failed part way, which is not the same as silence.
+function installedWords(out: string, pieces: number): string[] {
+  const lines = out.split("\n").filter((line) => line.trimStart().startsWith("{"));
+  if (lines.length !== pieces) throw new Error("the speech program printed no words line");
+  return lines.map((line) => {
+    let text: unknown;
+    try {
+      text = (JSON.parse(line) as { text?: unknown }).text;
+    } catch {
+      text = undefined;
+    }
+    if (typeof text !== "string") throw new Error("the speech program printed no words line");
+    return text.replace(/([，。！？、；：])\s+/gu, "$1").trim();
+  });
+}
+
 // The model as the computer has it now, so one installed while localDot runs is found. The same
-// model keeps its transcriber, and with it the one-at-a-time rule.
-export function installedSpeech(lookup = hostSpeechLookup): () => Transcriber | null {
+// model keeps its transcriber, and with it the one-at-a-time rule. A model named in
+// LOCALDOT_SPEECH_MODEL comes first, then what localDot installed, then any Whisper found here.
+export function installedSpeech(
+  lookup: () => SpeechLookup,
+  ours: () => InstalledModel | null,
+  opts: { audio: string; execFile?: ExecFile },
+): () => Transcriber | null {
   let kept: { key: string; transcriber: Transcriber } | null = null;
   return () => {
-    const model = findSpeechModel(lookup());
+    const found = lookup();
+    const named = found.env.LOCALDOT_SPEECH_MODEL ? findSpeechModel(found) : null;
+    const model = named ?? ours() ?? findSpeechModel(found);
     if (!model) {
       kept = null;
       return null;
     }
-    const key = `${model.binary}\n${model.model}`;
-    if (kept?.key !== key) kept = { key, transcriber: speechTranscriber(model) };
+    const key = isInstalled(model)
+      ? `${model.binary}\n${model.args.join("\n")}`
+      : `${model.binary}\n${model.model}`;
+    if (kept?.key !== key)
+      kept = {
+        key,
+        transcriber: speechTranscriber(model, { tmp: opts.audio, execFile: opts.execFile }),
+      };
     return kept.transcriber;
   };
 }

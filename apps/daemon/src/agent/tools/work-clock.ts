@@ -51,7 +51,8 @@ export function startWorkClock(
   tool: string,
   input: unknown,
 ): WorkClock | undefined {
-  if (tool === "ask_user" || tool === "request_takeover") return undefined;
+  if (tool === "ask_user" || tool === "request_takeover" || tool === "request_fix")
+    return undefined;
   const allowance =
     tool === "shell"
       ? (((input as ShellInput).timeout_sec ?? 120) + 10) * 1000

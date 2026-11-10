@@ -1,12 +1,15 @@
-import { providerById } from "@localdot/providers";
+import { type ProviderSpec, providerById } from "@localdot/providers";
+import type { PickerGroup } from "../ui/listbox.ts";
 import {
+  groupOf,
   type ModelRole,
   matchingKeys,
   type PickerKey,
+  PROVIDER_GROUPS,
   type ProviderModels,
   type RoleChoice,
 } from "./choices.ts";
-import { isCustomFormat, subscription } from "./chooser.ts";
+import { CHATGPT, CLAUDE_CODE, CUSTOM_FORMATS, isCustomFormat, subscription } from "./chooser.ts";
 import { modelGroupLabel, optionId } from "./model-options.ts";
 import type { ProviderIndex } from "./settings-api.ts";
 import { formOf, priceOf, type SettingsDraft } from "./settings-form.ts";
@@ -102,6 +105,13 @@ export function promoted(
   };
 }
 
+export const SOURCE_GROUPS = [
+  "Ready",
+  "Not set up yet",
+  "Not available here",
+  "Later releases",
+] as const;
+
 export interface ModelSource {
   readonly id: string;
   readonly label: string;
@@ -111,42 +121,74 @@ export interface ModelSource {
   readonly custom: boolean;
   // Takes model IDs as its server names them; a catalog provider's models are its catalog's.
   readonly typed: boolean;
+  readonly group: (typeof SOURCE_GROUPS)[number];
+  // What it needs before its models can be added: a key, its plan's own sign-in, or an endpoint's
+  // address and key.
+  readonly setup?: "key" | "plan" | "endpoint";
+  readonly disabledReason?: string;
 }
 
-// Where models can come from: a saved key's provider or endpoint, once each, and the local servers.
+const PLAN_SOURCES = [
+  { id: CHATGPT, label: "ChatGPT plan", ready: "Signed in", setup: "Sign in with your account" },
+  {
+    id: CLAUDE_CODE,
+    label: "Claude Code (your plan)",
+    ready: "Uses your own Claude Code",
+    setup: "Set up Claude Code",
+  },
+] as const;
+
+// Where models can come from, every provider localDot offers: first what is ready (a saved key's
+// provider or endpoint, a plan signed in, the local servers), then what can be set up here, then
+// what can't be used yet. A key that two providers share is offered under each.
 export function modelSources(
   index: ProviderIndex | null,
   keys: readonly PickerKey[],
+  plansReady: Readonly<Record<typeof CHATGPT | typeof CLAUDE_CODE, boolean>> = {
+    [CHATGPT]: false,
+    [CLAUDE_CODE]: false,
+  },
 ): ModelSource[] {
+  const listed = (index?.providers ?? [])
+    .map((row) => providerById(row.id))
+    .filter((row): row is ProviderSpec => !!row);
+  const usable = listed.filter((row) => !row.notOffered && !row.availableIn && !row.local);
   const sources: ModelSource[] = [];
   for (const key of keys) {
-    const provider = (index?.providers ?? [])
-      .map((row) => providerById(row.id))
-      .find(
-        (row) =>
-          row &&
-          !row.notOffered &&
-          !row.availableIn &&
-          !row.local &&
-          matchingKeys(row, [key]).length > 0,
-      );
-    if (!provider) continue;
-    const custom = !!provider.custom;
-    sources.push({
-      id: key.id,
-      label: custom
-        ? modelGroupLabel({ provider: provider.id, model: "", key: key.id }, index)
-        : provider.name,
-      description: `Key ${key.id}`,
-      provider: provider.id,
-      key: key.id,
-      custom,
-      typed: custom,
-    });
+    const fits = usable.filter((row) => matchingKeys(row, [key]).length > 0);
+    const named = fits.filter((row) => !row.custom);
+    for (const provider of named.length ? named : fits.slice(0, 1)) {
+      const custom = !!provider.custom;
+      sources.push({
+        id: `${provider.id}/${key.id}`,
+        label: custom
+          ? modelGroupLabel({ provider: provider.id, model: "", key: key.id }, index)
+          : provider.name,
+        description: `Key ${key.id}`,
+        provider: provider.id,
+        key: key.id,
+        custom,
+        typed: custom,
+        group: "Ready",
+      });
+    }
   }
-  for (const row of index?.providers ?? []) {
-    const provider = providerById(row.id);
-    if (provider?.local)
+  const unavailable = (id: string) =>
+    index?.subscriptions.find((row) => row.id === id)?.available === false;
+  const plan = (row: (typeof PLAN_SOURCES)[number], ready: boolean): ModelSource => ({
+    id: row.id,
+    label: row.label,
+    description: ready ? row.ready : row.setup,
+    provider: row.id,
+    custom: false,
+    typed: false,
+    group: ready ? "Ready" : "Not set up yet",
+    ...(ready ? {} : { setup: "plan" as const }),
+    ...(!ready && unavailable(row.id) ? { disabledReason: "Not available on this Mac yet" } : {}),
+  });
+  for (const row of PLAN_SOURCES) if (plansReady[row.id]) sources.push(plan(row, true));
+  for (const provider of listed)
+    if (provider.local)
       sources.push({
         id: provider.id,
         label: provider.name,
@@ -154,9 +196,65 @@ export function modelSources(
         provider: provider.id,
         custom: false,
         typed: true,
+        group: "Ready",
       });
+  // The rest in the order the model pickers list providers, a custom endpoint once.
+  for (const label of PROVIDER_GROUPS) {
+    if (label === "Local servers")
+      for (const row of PLAN_SOURCES) if (!plansReady[row.id]) sources.push(plan(row, false));
+    for (const provider of listed) {
+      if (groupOf(provider) !== label || provider.local) continue;
+      if (provider.custom && provider.id !== CUSTOM_FORMATS[0].value) continue;
+      if (!provider.custom && matchingKeys(provider, keys).length) continue;
+      sources.push({
+        id: provider.id,
+        label: provider.custom ? "Custom endpoint" : provider.name,
+        description: provider.custom
+          ? "Add your server's address and key"
+          : provider.plan
+            ? "Add your plan's key"
+            : "Add an API key",
+        provider: provider.id,
+        custom: !!provider.custom,
+        typed: !!provider.custom,
+        ...(provider.availableIn
+          ? { group: "Later releases" as const, disabledReason: "Coming in a later release" }
+          : provider.notOffered
+            ? {
+                group: "Not available here" as const,
+                disabledReason: "Its maker allows it only in their own tools",
+              }
+            : {
+                group: "Not set up yet" as const,
+                setup: provider.custom ? ("endpoint" as const) : ("key" as const),
+              }),
+      });
+    }
   }
   return sources;
+}
+
+// The source the sheet starts on: the first key or plan that is ready. A local server may not be
+// running, so it is never assumed.
+export const firstSource = (sources: readonly ModelSource[]) =>
+  sources.find(
+    (row) => row.group === "Ready" && !providerById(row.provider)?.local && !row.disabledReason,
+  );
+
+export function sourceGroups(sources: readonly ModelSource[]): PickerGroup[] {
+  return SOURCE_GROUPS.map((label) => ({
+    label,
+    items: sources
+      .filter((row) => row.group === label)
+      .map((row) => ({
+        value: row.id,
+        label: row.label,
+        ...(row.description ? { description: row.description } : {}),
+        ...(row.disabledReason ? { disabledReason: row.disabledReason } : {}),
+        // A Claude search finds Anthropic, where an API key works, as the model pickers do.
+        keywords: `${row.provider} ${row.key ?? ""}${row.provider === "anthropic" ? " claude" : ""}`,
+      })),
+  })).filter((group) => group.items.length > 0);
 }
 
 // What another provider's catalog says of a model an endpoint passes on under the same name.

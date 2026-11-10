@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import { useLoadAgain } from "../lib/useLoadAgain.ts";
 import { replayOrigin } from "./useReplay.ts";
@@ -48,6 +48,13 @@ async function load(
   return held;
 }
 
+// The thumbnail widths the daemon makes (sessions/thumbs.ts THUMB_WIDTHS).
+const THUMB_WIDTHS = [320, 640, 1280] as const;
+export function thumbWidth(cssWidth: number | undefined, ratio = globalThis.devicePixelRatio ?? 1) {
+  const wanted = (cssWidth || 160) * (ratio || 1);
+  return THUMB_WIDTHS.find((width) => width >= wanted) ?? 1280;
+}
+
 // While the next picture loads the one before it stays, so moving along a timeline never blinks.
 export function ReplayImage({
   api,
@@ -84,12 +91,19 @@ export function ReplayImage({
   }, [full, near]);
   const [image, setImage] = useState<{ sessionId: string; url: string } | null>(null);
   const shown = useRef<string | null>(null);
+  // As many pixels as the place it is drawn in has on this display, so it is sharp at 2x.
+  const [measured, setMeasured] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    setMeasured(thumbWidth(picture.current?.parentElement?.getBoundingClientRect().width));
+  }, []);
   const kind = full ? "frames" : "thumbs";
-  const key = `${sessionId}/${kind}/${frameId}`;
+  const key = full
+    ? `${sessionId}/frames/${frameId}?size=full`
+    : `${sessionId}/thumbs/${frameId}?w=${measured}`;
   const { attempt, failed } = useLoadAgain(key);
   // biome-ignore lint/correctness/useExhaustiveDependencies: another attempt loads it again.
   useEffect(() => {
-    if (!frameId || !near) return;
+    if (!frameId || !near || (!full && measured === null)) return;
     const controller = new AbortController();
     void load(api, kind, key, controller.signal)
       .then((blob) => {

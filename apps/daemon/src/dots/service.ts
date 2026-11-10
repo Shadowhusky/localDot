@@ -59,6 +59,24 @@ const JOB_KEEP_MS = 10 * 60_000;
 const jobId = () => randomBytes(16).toString("base64url");
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
+// The other dot's address on the front this page came through: the same Tailscale name on its own
+// port, or its own name under the same relay domain (each dot has a name of its own there).
+export function sameFront(page: URL, origins: readonly string[]): string | undefined {
+  const urls = origins.flatMap((origin) => (URL.canParse(origin) ? [new URL(origin)] : []));
+  const parent = (host: string) => host.slice(host.indexOf(".") + 1);
+  return (
+    urls.find((url) => url.hostname === page.hostname) ??
+    urls.find(
+      (url) =>
+        url.protocol === "https:" &&
+        page.protocol === "https:" &&
+        !url.hostname.endsWith(".ts.net") &&
+        parent(url.hostname).includes(".") &&
+        parent(url.hostname) === parent(page.hostname),
+    )
+  )?.origin;
+}
+
 function described(home: string) {
   const instance = instanceOf(home);
   return { instance, name: dotName(home, instance.name) };
@@ -357,13 +375,11 @@ export class DotsService implements DotsRoutesDeps {
     }
     const origin = LOOPBACK.has(page.hostname)
       ? `http://127.0.0.1:${port}`
-      : (await this.#about(dot.home, port))?.origins.find(
-          (candidate) => new URL(candidate).hostname === page.hostname,
-        );
+      : sameFront(page, (await this.#about(dot.home, port))?.origins ?? []);
     if (!origin)
       throw new DotsError(
         409,
-        `${dot.name} can't be opened from this device yet. Open it on this computer, or turn on Tailscale for it.`,
+        `${dot.name} can't be opened from this device yet. Turn on Remote access in its Settings → Your computer (open it on this computer once), or turn on Tailscale for it.`,
       );
     let link: string | undefined;
     const code = await runOpenLink(

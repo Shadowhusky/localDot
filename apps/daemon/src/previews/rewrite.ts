@@ -21,13 +21,18 @@ export interface Computer {
 }
 
 // One answer's way back to a device: the preview's Host (the front's name and port), the server it
-// previews, and, for an answer from another server reached through the via path, that path.
+// previews, and, for an answer from another server reached through the via path, that path. A
+// `local` preview is on the Mac's own loopback, over http.
 export interface Route {
   front: string;
   target: PreviewTarget;
   computer: Computer;
   via?: string;
+  local?: boolean;
 }
+
+const wire = (route: Route, socket: boolean) =>
+  route.local ? (socket ? "ws" : "http") : socket ? "wss" : "https";
 
 const isComputer = (name: string, addresses: readonly string[]) =>
   LOOPBACK.has(name) || LOCAL_NAME.test(name) || addresses.includes(name);
@@ -42,6 +47,8 @@ function placeOf(scheme: string, hostname: string, port: number, route: Route): 
   const sameServer = (n: string) => LOOPBACK.has(n) || addresses.includes(n);
   if (port === route.target.port && (name === own || (sameServer(name) && sameServer(own))))
     return "";
+  // On the Mac the app is asked by the address the browser has, so it may name that one.
+  if (route.local && LOOPBACK.has(name) && `${port}` === route.front.split(":").at(-1)) return "";
   if (!ports.has(port)) return undefined;
   const secure = scheme === "https" || scheme === "wss";
   const host = name === "0.0.0.0" || name === "[::]" ? "localhost" : name;
@@ -58,8 +65,7 @@ export function previewUrl(value: string, route: Route): string {
   const secure = scheme === "https" || scheme === "wss";
   const place = placeOf(scheme, url.hostname, Number(url.port || (secure ? 443 : 80)), route);
   if (place === undefined) return value;
-  const wire = scheme.startsWith("ws") ? "wss" : "https";
-  return `${wire}://${route.front}${place}${url.pathname}${url.search}${url.hash}`;
+  return `${wire(route, scheme.startsWith("ws"))}://${route.front}${place}${url.pathname}${url.search}${url.hash}`;
 }
 
 // A Location, Content-Location or Refresh address: absolute ones as previewUrl, and a server reached
@@ -86,9 +92,9 @@ export function rewriteText(text: string, route: Route, origins = false): string
       const secure = lower === "https" || lower === "wss";
       const place = placeOf(lower ?? "http", name, Number(port ?? (secure ? 443 : 80)), route);
       if (place === undefined) return match;
-      const wire = lower ? `${lower.startsWith("ws") ? "wss" : "https"}:` : "";
+      const to = lower ? `${wire(route, lower.startsWith("ws"))}:` : "";
       const path = origins ? "" : slashes.length > 2 ? place.replaceAll("/", "\\/") : place;
-      return `${wire}${slashes}${route.front}${path}`;
+      return `${to}${slashes}${route.front}${path}`;
     },
   );
 }

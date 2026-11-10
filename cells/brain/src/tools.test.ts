@@ -1,8 +1,10 @@
 import { GenericComputerInput } from "@localdot/protocol";
 import {
   ASK_FORM_GUIDANCE,
+  CHECK_MEMORY_FIRST,
   DONE_TOOL_DESCRIPTION,
   ENVIRONMENT_CONTEXT,
+  guestSection,
   researchSection,
   workingRules,
 } from "@localdot/protocol/guidance";
@@ -11,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { imagesInToolResults, languageModel } from "./models.ts";
 import { reminder, systemPrompt } from "./prompt.ts";
 import { binding, bootConfig } from "./testing/scripted.ts";
-import { toolSet } from "./tools.ts";
+import { delegatedTools, toolSet } from "./tools.ts";
 
 describe("the model's advertised tools and instructions", () => {
   it("exposes exactly the daemon-dispatched tools with no execute functions", () => {
@@ -35,6 +37,7 @@ describe("the model's advertised tools and instructions", () => {
         "update_plan",
         "ask_user",
         "request_takeover",
+        "request_fix",
         "remember",
         "recall",
         "people",
@@ -64,6 +67,43 @@ describe("the model's advertised tools and instructions", () => {
     for (const tools of [toolSet(binding()), toolSet(binding({ vision: false }))]) {
       expect(tools.web_search?.description).toContain('kind "images"');
       expect(tools.web_fetch?.description).toContain("without opening the browser");
+    }
+  });
+  it("offers a shared link's task none of the owner's tools, and their accounts only when allowed", () => {
+    const connectors = [
+      { name: "github__list_issues", app: "GitHub", description: "List issues.", inputSchema: {} },
+    ];
+    const owners = ["recall", "remember", "people", "routine", "follow_up_at"];
+    const accounts = ["credentials", "api_request", "switch_screen", "browser_upload"];
+    const all = Object.keys(toolSet(binding(), false, connectors));
+    const allowed = Object.keys(toolSet(binding(), false, connectors, [], { apps: true }));
+    expect(allowed.sort()).toEqual(all.filter((name) => !owners.includes(name)).sort());
+    const closed = Object.keys(toolSet(binding(), false, connectors, [], { apps: false }));
+    expect(closed.sort()).toEqual(
+      all.filter((name) => ![...owners, ...accounts, "github__list_issues"].includes(name)).sort(),
+    );
+    expect(delegatedTools()).toEqual(["shell", "files", "web_search", "web_fetch", "recall"]);
+    expect(delegatedTools({ apps: true })).toEqual(["shell", "files", "web_search", "web_fetch"]);
+  });
+  it("tells a shared link's task it has none of the owner's memory, history or contacts", () => {
+    const today = new Date("2026-10-09T00:00:00Z");
+    const owner = systemPrompt(
+      bootConfig({ recent: [{ title: "Pay the rent", outcome: "done", day: "2026-10-08" }] }),
+      binding(),
+      today,
+    );
+    expect(owner).toContain('<user_file name="USER.md">');
+    expect(owner).toContain(CHECK_MEMORY_FIRST);
+    expect(owner).toContain("Pay the rent");
+    for (const guest of [{ apps: false }, { apps: true }]) {
+      const prompt = systemPrompt(
+        bootConfig({ guest, memory: { user: "", memory: "" } }),
+        binding(),
+        today,
+      );
+      expect(prompt).not.toContain("<user_file");
+      expect(prompt).not.toContain(CHECK_MEMORY_FIRST);
+      expect(prompt).toContain(guestSection(guest));
     }
   });
   it("offers research, with its rules and budget, only to a research task", () => {

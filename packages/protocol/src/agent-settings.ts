@@ -42,6 +42,8 @@ export const TaskModelRef = AgentRoleChoice.pick({
   options: true,
 });
 export type TaskModelRef = z.infer<typeof TaskModelRef>;
+// The model card's choice: the task goes on with it.
+export const BlockerModelChoice = z.strictObject({ model: TaskModelRef });
 export const TaskModelReply = z.strictObject({ choice: AgentRoleChoice.nullable() });
 export type TaskModelReply = z.infer<typeof TaskModelReply>;
 // The models an endpoint's key can reach, as its own list names them.
@@ -116,6 +118,8 @@ export const AgentSettingsDocument = z.strictObject({
   purposeCheck: PurposeCheck.optional(),
   // On when absent: each task starts knowing the user's last few tasks.
   recentActivity: z.enum(["on", "off"]).optional(),
+  // On when absent: a task a plan's limit paused continues by itself once the limit resets.
+  autoContinue: z.enum(["on", "off"]).optional(),
   // How far a research task reads before it writes; DEFAULT_RESEARCH_BUDGET when absent.
   research: ResearchBudget.optional(),
   // Which dot works the next task; the everyday dot when absent.

@@ -58,6 +58,8 @@ import { openInBrowser } from "../connectors/open-browser.ts";
 import { RemoteLinks } from "../connectors/remote.ts";
 import { ConnectorStore } from "../connectors/store.ts";
 import type { ComputerAccess } from "../deliverables/convert.ts";
+import { StoredFiles } from "../deliverables/stored.ts";
+import { TaskScanner } from "../deliverables/task-scan.ts";
 import { DesktopdClient } from "../desktopd/client.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
 import { DesktopdTools } from "../desktopd/tools-client.ts";
@@ -70,13 +72,15 @@ import type { KeydClient } from "../keyd/client.ts";
 import { JudgeCell } from "../keyd/judge-cell.ts";
 import { KeyModels } from "../keyd/key-models.ts";
 import { ModelCatalog } from "../keyd/model-catalog.ts";
-import type { KeydMonitor } from "../keyd/monitor.ts";
+import { type KeydMonitor, vaultLocked } from "../keyd/monitor.ts";
 import { QuickModel } from "../keyd/quick-model.ts";
 import { ServiceKeys } from "../keyd/service-keys.ts";
 import type { ScreenRecordings } from "../recorder/screen-recordings.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
+import { AutoContinueScheduler } from "./auto-continue.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
+import { ClaudeAccountChoice } from "./claude-code/account.ts";
 import { claudeCodeAnswer } from "./claude-code/answer.ts";
 import { ClaudeCodeCleanupError, ClaudeCodeDriver } from "./claude-code/driver.ts";
 import { claudeCodeInstructions } from "./claude-code/instructions.ts";
@@ -90,6 +94,7 @@ import {
   findClaudeCode,
   runFile,
 } from "./claude-code/setup.ts";
+import { claudeCodeSideModel } from "./claude-code/side.ts";
 import { claudePlanUsage } from "./claude-code/usage.ts";
 import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexDriver } from "./codex/driver.ts";
@@ -100,6 +105,7 @@ import { type ComputerTurn, ComputerTurns } from "./computer-turn.ts";
 import { Conversations } from "./conversation.ts";
 import { ExperienceRecorder } from "./experience-recorder.ts";
 import { FramePng } from "./frame-png.ts";
+import { bootMemory } from "./guest.ts";
 import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
 import { workEvents, workRecord } from "./native-recap.ts";
@@ -111,14 +117,17 @@ import { PrivateFiles } from "./private-files.ts";
 import { RecentActivity } from "./recent-activity.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
-import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { AgentError, AgentRunner, type AgentRunnerDeps, CARRY_ON, computerDown } from "./runner.ts";
 import { ConnectionApprovals } from "./safety/connections.ts";
 import { NativeTasks } from "./safety/native-tasks.ts";
 import { PurposeService } from "./safety/purpose-service.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { taintMemory } from "./safety/taint.ts";
-import type { AgentSession, BrainGeneration } from "./session.ts";
+import { AGENT, type AgentSession, type BrainGeneration } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
+import { apiSideModel } from "./side/api-model.ts";
+import { sideReaders } from "./side/readers.ts";
+import { sideSpendLedger } from "./side/spend.ts";
 import { leftoverSkills, listSkills, skillDesktopPath, skillFiles, skillsFor } from "./skills.ts";
 import { createToolApi } from "./tool-api.ts";
 import type { ToolDeps } from "./tools/deps.ts";
@@ -130,6 +139,9 @@ import { UserUploads } from "./user-uploads.ts";
 import { WebCell } from "./web/cell.ts";
 export interface AgentWiringDeps {
   fences?: import("./safety/fences.ts").ComputerFences;
+  // The shared links whose tasks a carried-on task counts against.
+  links?: AgentRunnerDeps["links"];
+  keysHeld?: AgentRunnerDeps["keysHeld"];
   home: string;
   installToken: string;
   eventLog: EventLog;
@@ -142,6 +154,8 @@ export interface AgentWiringDeps {
   gateway: ActionGateway;
   frames: FrameStore;
   docker: DockerClient;
+  // Docker isn't answering, so nothing can run the computer until it does.
+  dockerDown?(): Promise<boolean>;
   keyd: KeydClient;
   monitor: Pick<KeydMonitor, "health">;
   killSwitch: Pick<KillSwitch, "contain" | "isBusy">;
@@ -158,7 +172,7 @@ export interface AgentWiringDeps {
   claudeCode?: { realHome: string };
   recordings?: Pick<ScreenRecordings, "coming" | "up" | "forUser">;
   sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual" | "startBrowser"> &
-    Partial<Pick<SessionScreens, "workEndpoint">>;
+    Partial<Pick<SessionScreens, "workEndpoint" | "sharing">>;
   transfers?: Transfers;
   quarantine?: QuarantineStore;
   // Earlier tasks for the recall tool, from the search index.
@@ -196,6 +210,7 @@ export function createAgent(d: AgentWiringDeps) {
       return (
         !!session &&
         !session.stopped &&
+        !session.guest &&
         (session.permissionMode() === "full" ||
           session.autonomy.memory === "act" ||
           session.taskAutonomy.relaxes("memory", {}))
@@ -277,7 +292,9 @@ export function createAgent(d: AgentWiringDeps) {
       lease.release();
     }
   };
+  const runtimeDown = () => d.dockerDown?.() ?? Promise.resolve(false);
   const unsubscribe = d.cells.subscribe((cell) => {
+    runner.cellChanged(cell);
     const prior = clients.get(cell.id),
       endpoint = d.cells.endpoints(cell.id)?.desktopd;
     if (
@@ -467,13 +484,20 @@ export function createAgent(d: AgentWiringDeps) {
       return client?.windows ? (request, signal) => client.windows(request, signal) : undefined;
     },
     browser: (id) => runner.get(id)?.browserTurn,
+    lane: (id) => runner.get(id)?.browserLane,
     ...(d.recordings
       ? {
           screens: {
             coming: (cellId, id) =>
               d.recordings?.coming(cellId, id, "desktop", d.live.sessionsOn(cellId)),
             up: (id) => d.recordings?.up(id, "desktop"),
-            forUser: (cellId, id) => d.recordings?.forUser(cellId, id, d.live.sessionsOn(cellId)),
+            forUser: (cellId, id) => {
+              const lane = runner.get(id)?.browserLane;
+              if (!lane) return d.recordings?.forUser(cellId, id, d.live.sessionsOn(cellId));
+              // The user's control reaches the desktop and this task's own browser, not another's.
+              d.recordings?.coming(cellId, id, "desktop", d.live.sessionsOn(cellId));
+              d.recordings?.coming(lane, id, "browser", d.sessionScreens?.sharing?.(id) ?? [id]);
+            },
           },
         }
       : {}),
@@ -535,6 +559,9 @@ export function createAgent(d: AgentWiringDeps) {
       appsChanged: (session) => runner.refreshApps(session),
       web: webCell,
       credentials: serviceKeys,
+      keysLocked: () => vaultLocked(d.monitor.health),
+      computerDown: (cellId) => computerDown(d.cells.get(cellId)),
+      runtimeDown,
     },
   };
   const computerUp = (cellId: string) => {
@@ -568,7 +595,7 @@ export function createAgent(d: AgentWiringDeps) {
     };
     try {
       // Reading the desktop waits for nobody; the web browser's one display takes turns.
-      if (session.browserTurn) turn = await turns.take(session.id, session.cellId, lease.signal);
+      if (session.browserTurn) turn = await turns.take(session.id, session.turnKey, lease.signal);
       screen = session.screens ? session.screenLease(lease) : undefined;
       if (screen) await session.screens?.refreshBrowser(screen);
       const binding = screen ? d.sessionScreens?.bind(session, screen) : undefined;
@@ -679,7 +706,7 @@ export function createAgent(d: AgentWiringDeps) {
           observe,
           instructions: (session) =>
             codexInstructions({
-              memory: tainting(session, memory.bootMemory(session.task)),
+              memory: tainting(session, bootMemory(memory, session)),
               recent: session.recent,
               skills: runner.skillsOf(session.id),
               today: new Date(),
@@ -687,6 +714,7 @@ export function createAgent(d: AgentWiringDeps) {
               ...(session.research ? { research: session.research.budget } : {}),
               apps: session.connectors.specs.map((spec) => spec.app),
               role: runner.roleOf(session.id),
+              ...(session.guest ? { guest: session.guest } : {}),
             }),
           redactorFor: (session) => forText(session),
           waitForAuthResume: (session) => runner.waitForAuthResume(session),
@@ -753,6 +781,7 @@ export function createAgent(d: AgentWiringDeps) {
         })),
     );
   const claudeHome = d.claudeCode?.realHome;
+  const claudeAccount = claudeHome ? new ClaudeAccountChoice(d.home) : undefined;
   const claudeSetup = claudeHome
     ? new ClaudeCodeSetup({
         home: claudeHome,
@@ -760,6 +789,7 @@ export function createAgent(d: AgentWiringDeps) {
         find: () => findClaudeCode(claudeHome),
         run: runFile,
         env: process.env,
+        account: () => claudeAccount?.folder(),
         listModels: claudeModels,
       })
     : undefined;
@@ -808,6 +838,32 @@ export function createAgent(d: AgentWiringDeps) {
   const stopPlanUsageFeed = d.eventLog.subscribe((_, event) => {
     if (event.type === "subscription.usage") planUsage.record(event.data, Date.now());
   });
+  const modelKey = (sessionId: string) => {
+    const choice = conversations.model(sessionId);
+    return choice ? `${choice.provider}/${choice.model}` : undefined;
+  };
+  // A task a plan's limit paused goes on by itself once the plan resets.
+  const autoContinue = new AutoContinueScheduler({
+    home: d.home,
+    enabled: () => settings.get().autoContinue !== "off",
+    plan: (provider) => planUsage.list().find((plan) => plan.provider === provider),
+    refresh: () => planUsage.refresh(),
+    live: (sessionId) => runner.sessions.get(sessionId),
+    latest: (sessionId) => conversations.latest(sessionId),
+    model: modelKey,
+    announce: (sessionId, paused) =>
+      d.eventLog.append(sessionId, {
+        type: "agent.state",
+        agent: AGENT,
+        data: { state: "paused", ...paused },
+      }),
+    resume: (task) => runner.sessions.get(task.id)?.post("resume", ""),
+    carryOn: async ({ sessionId, cellId }) =>
+      (await runner.start(cellId, CARRY_ON, undefined, { continues: sessionId, byOwner: true })).id,
+  });
+  const stopAutoContinueFeed = d.eventLog.subscribe((sessionId, event) =>
+    autoContinue.observe(sessionId, event),
+  );
   const claudeDriver = claudeSetup
     ? new ClaudeCodeDriver({
         onRetired: nativeRetired,
@@ -845,7 +901,7 @@ export function createAgent(d: AgentWiringDeps) {
         work: nativeWork,
         instructions: (session) =>
           claudeCodeInstructions({
-            memory: tainting(session, memory.bootMemory(session.task)),
+            memory: tainting(session, bootMemory(memory, session)),
             recent: session.recent,
             skills: runner.skillsOf(session.id),
             today: new Date(),
@@ -853,10 +909,13 @@ export function createAgent(d: AgentWiringDeps) {
             ...(session.research ? { research: session.research.budget } : {}),
             apps: session.connectors.specs.map((spec) => spec.app),
             role: runner.roleOf(session.id),
+            ...(session.guest ? { guest: session.guest } : {}),
           }),
         redactorFor: (session) => forText(session),
       })
     : undefined;
+  const sideScanner = new TaskScanner(d.eventLog);
+  const sideStored = new StoredFiles(d.home);
   const runner = new AgentRunner({
     home: d.home,
     installSession: d.sessionScreens?.install.bind(d.sessionScreens),
@@ -873,9 +932,15 @@ export function createAgent(d: AgentWiringDeps) {
     catalog: () => catalog.get(),
     memory,
     connectors: () => connectors.forTask(),
+    planLimited: (session, reason, detail, auto) =>
+      autoContinue.limited(session, reason, detail, auto),
+    appConnected: (id) => connectors.isConnected(id),
+    runtimeDown,
     recentActivity,
     transcripts,
     conversations,
+    ...(d.links ? { links: d.links } : {}),
+    ...(d.keysHeld ? { keysHeld: d.keysHeld } : {}),
     installSkills,
     prepareDesktop: (session) => prepareDesktop(session.cellId, session.id, session.abort.signal),
     waitForUploads: (id, signal) => transfers.wait(id, signal),
@@ -897,6 +962,58 @@ export function createAgent(d: AgentWiringDeps) {
       : {}),
     jev: (secretId, body, signal) => purposeService.post(secretId, body, signal),
     quickModel: (role, system, prompt, signal) => quickModel.ask(role, system, prompt, signal),
+    side: {
+      api: (role, side) =>
+        apiSideModel(role, side, (asked, budget, signal) =>
+          quickModel.sideListener(asked, budget, signal),
+        ),
+      ...(claudeDriver && claudeSetup
+        ? {
+            plan: (quick, side) =>
+              claudeCodeSideModel(
+                { query: claudeQuery, launch: () => claudeSetup.launch(), spawn: spawnClaudeCode },
+                quick,
+                side,
+              ),
+          }
+        : {}),
+      readers: (sessionId, session, logFile) =>
+        sideReaders(
+          {
+            frames: d.frames,
+            png,
+            desktop: (cellId) => (dispatch.tools.device?.(cellId) ? desktop(cellId) : undefined),
+            device: (cellId) => dispatch.tools.device?.(cellId),
+            owners: (cellId) => turns.owners(cellId),
+            holder: (cellId) => d.live.lease(cellId).holder,
+            scale: (cellId) => d.cells.get(cellId)?.scale,
+            cellOf: (id) => {
+              const cells = d.cells.list();
+              return (
+                d.live.cellOf(id) ??
+                runner.terminalOf(id)?.cellId ??
+                // A task from before this daemon started ran on the one computer.
+                (cells.length === 1 ? cells[0]?.id : undefined)
+              );
+            },
+            scanner: sideScanner,
+            stored: sideStored,
+            chain: (id) => conversations.chain(id).sessions,
+            ...(dispatch.tools.recall ? { recall: dispatch.tools.recall } : {}),
+            ...(dispatch.tools.recallExperience
+              ? { recallExperience: dispatch.tools.recallExperience }
+              : {}),
+            web: webCell,
+            settings: () => settings.get(),
+            redactor: (session, cellId) => forText(session, cellId),
+            now: () => Date.now(),
+          },
+          sessionId,
+          session,
+          logFile,
+        ),
+      ledger: (logFile) => sideSpendLedger(logFile),
+    },
     ...(driver && auth
       ? {
           codex: {
@@ -1183,7 +1300,20 @@ export function createAgent(d: AgentWiringDeps) {
       ? { chatgpt: { account: auth, installer, availability: platform, setup } }
       : {}),
     ...(claudeSetup ? { claudeCode: claudeSetup } : {}),
+    ...(claudeSetup && claudeAccount
+      ? {
+          claudeAccount: (separate: boolean) => {
+            if (claudeAccount.separate !== separate) {
+              claudeAccount.set(separate);
+              // What the plan said belonged to the other account.
+              planUsage.forget("claude-code");
+            }
+            return claudeSetup.check();
+          },
+        }
+      : {}),
     planUsage,
+    autoContinue,
     redactUserText: (text, id, cellId) =>
       forText(
         id ? runner.get(id) : undefined,
@@ -1231,6 +1361,9 @@ export function createAgent(d: AgentWiringDeps) {
     }
     return { tools, signal: access.signal, check: access.check, release: access.release };
   };
+  const stopKeyWatch = connectors.whenKeyChanges((id) => {
+    void runner.keyChanged(id).catch(() => console.error("a key change didn't reach its tasks"));
+  });
   const stopExperienceFeed = d.eventLog.subscribe((id, event) => {
     experience.event(id, event);
   });
@@ -1316,6 +1449,7 @@ export function createAgent(d: AgentWiringDeps) {
           throw new Error("agent is closed");
         }
         ready = true;
+        autoContinue.start();
         // Check provider metadata on every daemon launch without delaying the computer/UI.
         void tracked(catalog.refresh().catch(() => undefined));
       })();
@@ -1327,7 +1461,11 @@ export function createAgent(d: AgentWiringDeps) {
       catalog.close();
       ready = false;
       unsubscribe();
+      stopKeyWatch();
       stopExperienceFeed();
+      // Before the tasks end, so the schedule outlives them for the next start.
+      const autoContinueClosed = autoContinue.close();
+      stopAutoContinueFeed();
       stopPlanUsageFeed();
       planUsage.close();
       transfers.close();
@@ -1371,6 +1509,7 @@ export function createAgent(d: AgentWiringDeps) {
           ),
           ...containments,
           frozen,
+          autoContinueClosed,
           runner.close(),
           judgeCell.close(),
           webCell.close(),

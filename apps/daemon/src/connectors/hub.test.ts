@@ -307,3 +307,58 @@ it("explains local port exhaustion without blaming valid app credentials", () =>
     message: expect.stringContaining("no free connection slots"),
   });
 });
+
+describe("what a card needs from the hub", () => {
+  const oauth = (hub: ConnectorHub, secret?: string) =>
+    hub.add({
+      name: "Linear",
+      catalog: "linear",
+      server: {
+        kind: "remote",
+        url: "https://mcp.linear.app/mcp",
+        transport: "http",
+        auth: { kind: "oauth", ...(secret ? { secret } : {}) },
+      },
+    });
+
+  it("names an app whose sign-in really ended, by id, catalog or name", async () => {
+    const { hub, app } = setup(TOOLS, [http("connector-linear", ["mcp.linear.app"])]);
+    const config = oauth(hub, "connector-linear");
+    expect(hub.ended("linear")).toBeUndefined();
+    app.state.fail = new Error("401 Unauthorized");
+    await hub.refresh(config.id);
+    expect(hub.isConnected(config.id)).toBe(false);
+    const named = { connector: config.id, name: "Linear", host: "mcp.linear.app" };
+    expect(hub.ended(config.id)).toEqual(named);
+    expect(hub.ended("linear")).toEqual(named);
+    expect(hub.ended("LINEAR")).toEqual(named);
+    expect(hub.ended("nothing like it")).toBeUndefined();
+  });
+
+  it("names nothing for an app never signed in, or that no sign-in would help", () => {
+    const { hub } = setup();
+    oauth(hub);
+    expect(hub.ended("linear")).toBeUndefined();
+    hub.add({
+      name: "Keyed",
+      server: {
+        kind: "remote",
+        url: "https://keyed.example/mcp",
+        transport: "http",
+        auth: { kind: "key", secret: "k" },
+      },
+    });
+    expect(hub.ended("keyed")).toBeUndefined();
+  });
+
+  it("tells who is watching after a key changes, once it has taken it in", async () => {
+    const { hub } = setup();
+    const seen: string[] = [];
+    const stop = hub.whenKeyChanges((id) => seen.push(id));
+    await hub.afterKeyChange("connector-linear");
+    expect(seen).toEqual(["connector-linear"]);
+    stop();
+    await hub.afterKeyChange("another");
+    expect(seen).toEqual(["connector-linear"]);
+  });
+});

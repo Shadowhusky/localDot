@@ -40,6 +40,38 @@ it("stores only a private hash, restores grants and never exposes the credential
   stores.push(restored);
   expect(restored.authenticate(issued.token)?.id).toBe(issued.grant.id);
 });
+it("keeps the owner's apps and keys off a link unless it opts in, links made before included", () => {
+  const { home, links } = make();
+  const plain = links.create(options);
+  expect(plain.grant.apps).toBe(false);
+  expect(links.create({ ...options, apps: true }).grant.apps).toBe(true);
+  const path = join(home, "remote-links.json");
+  const rows = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>[];
+  writeFileSync(path, JSON.stringify(rows.map(({ apps: _, ...row }) => row)), { mode: 0o600 });
+  const restored = new RemoteLinks(home);
+  stores.push(restored);
+  expect(restored.authenticate(plain.token)?.apps).toBe(false);
+  expect(restored.list().map((link) => link.apps)).toEqual([false, false]);
+});
+it("shows the signed-in web browser only to a link with the owner's apps", () => {
+  const { links } = make();
+  const cell = ulid();
+  const paths = [
+    ["POST", `/api/cells/${cell}/browser-stream-ticket`],
+    ["GET", `/api/browsers/${cell}`],
+    ["HEAD", `/api/browsers/${cell}`],
+    ["GET", `/api/browsers/${cell}/status`],
+  ] as const;
+  for (const setting of [{}, { replay: true, settings: true }]) {
+    const row = links.authenticate(links.create({ ...options, ...setting }).token);
+    if (!row) throw new Error("the link did not authenticate");
+    for (const [method, path] of paths) expect(links.permits(row, method, path), path).toBe(false);
+    expect(links.permits(row, "POST", `/api/cells/${cell}/stream-ticket`)).toBe(true);
+  }
+  const row = links.authenticate(links.create({ ...options, apps: true }).token);
+  if (!row) throw new Error("the link did not authenticate");
+  for (const [method, path] of paths) expect(links.permits(row, method, path), path).toBe(true);
+});
 it("revokes just one of several permanent links and its stream tickets", () => {
   const { links } = make();
   const first = links.create({ ...options, expiresInHours: null }),
@@ -137,13 +169,31 @@ it.each([
   for (const method of ["GET", "POST", "PUT", "DELETE"])
     expect(links.permits(row, method, path)).toBe(false);
 });
+it("gives a guest no way to answer a card, even on a task of its own", () => {
+  const { links } = make();
+  const issued = links.create({ ...options, settings: true });
+  const row = links.authenticate(issued.token)!;
+  const id = "0".repeat(26);
+  links.reserve(row.id).finish(id);
+  expect(links.permits(row, "POST", `/api/agent/sessions/${id}/messages`)).toBe(true);
+  for (const path of [
+    `/api/agent/sessions/${id}/blockers/${id}/dismiss`,
+    `/api/agent/sessions/${id}/blockers/${id}/model`,
+    "/api/keyd/unlock",
+    "/api/keys",
+    "/api/runtime/start",
+    `/api/cells/${id}/start`,
+    `/api/connectors/github/sign-in`,
+  ])
+    expect(links.permits(row, "POST", path), path).toBe(false);
+});
 it("enforces replay permission and action ownership separately", () => {
   const { links } = make();
   const id = ulid();
   const issued = links.create(options);
   const row = links.authenticate(issued.token)!;
   expect(links.permits(row, "GET", `/api/sessions/${id}/recording/video.mp4`)).toBe(false);
-  expect(links.permits(row, "GET", `/api/sessions/${id}/clock`)).toBe(true);
+  expect(links.permits(row, "GET", `/api/sessions/${id}/clock`)).toBe(false);
   expect(links.permits(row, "GET", "/api/clock")).toBe(true);
   expect(links.permits(row, "POST", "/api/clock")).toBe(false);
   expect(links.permits(row, "POST", `/api/agent/sessions/${id}/messages`)).toBe(false);
@@ -162,6 +212,127 @@ it("enforces replay permission and action ownership separately", () => {
   ).toBe(true);
   links.revoke(row.id);
   expect(links.permits(row, "GET", "/api/cells")).toBe(false);
+});
+const LIVE = ["events", "history", "stream", "clock"] as const;
+const RECORDING = [
+  "card",
+  "recording",
+  "recording/video.mp4",
+  "manifest",
+  "fragments/0",
+  "frames/01JXYZ0000000000000000FRAM",
+  "thumbs/01JXYZ0000000000000000FRAM",
+  "thumbnail",
+  "summary",
+  "events",
+  "history",
+  "replay",
+] as const;
+const SETTINGS = [
+  {},
+  { replay: true },
+  { settings: true },
+  { chooseModel: true, models: [options.model] },
+  { replay: true, settings: true, chooseModel: true, models: [options.model] },
+];
+const signIn = (links: RemoteLinks, setting: object = {}) => {
+  const row = links.authenticate(links.create({ ...options, ...setting }).token);
+  if (!row) throw new Error("the link did not authenticate");
+  return row;
+};
+it.each(SETTINGS)("reads only its own tasks and conversations (%o)", (setting) => {
+  const { links } = make();
+  const row = signIn(links, setting);
+  const own = ulid(),
+    other = ulid();
+  links.reserve(row.id).finish(own);
+  for (const method of ["GET", "HEAD"]) {
+    expect(links.permits(row, method, `/api/agent/sessions/${own}`)).toBe(true);
+    for (const part of LIVE)
+      expect(links.permits(row, method, `/api/sessions/${own}/${part}`), part).toBe(true);
+    expect(links.permits(row, method, `/api/agent/sessions/${other}`)).toBe(false);
+    for (const part of ["stream", "clock"])
+      expect(links.permits(row, method, `/api/sessions/${other}/${part}`), part).toBe(false);
+    for (const part of RECORDING)
+      expect(links.permits(row, method, `/api/sessions/${other}/${part}`), part).toBe(!!row.replay);
+    // The routes answer a link with its own conversations only.
+    expect(links.permits(row, method, "/api/conversation")).toBe(true);
+    expect(links.permits(row, method, "/api/conversations")).toBe(true);
+    expect(links.permits(row, method, `/api/conversations/${other}/latest`)).toBe(false);
+  }
+  for (const path of ["/api/conversation/new", "/api/conversation/continue"])
+    expect(links.permits(row, "POST", path), path).toBe(true);
+  for (const path of [`/api/agent/sessions/${other}/messages`, `/api/agent/sessions/${other}/stop`])
+    expect(links.permits(row, "POST", path), path).toBe(false);
+  for (const path of ["archive", "pin", "title"])
+    expect(links.permits(row, "POST", `/api/conversations/${own}/${path}`), path).toBe(false);
+});
+it("keeps a link's own conversation on show, by its own tasks only", () => {
+  const { links } = make();
+  const row = signIn(links);
+  const own = ulid(),
+    other = ulid();
+  links.reserve(row.id).finish(own);
+  expect(links.shown(row.id)).toBeUndefined();
+  expect(links.show(row.id, other)).toBe(false);
+  expect(links.shown(row.id)).toBeUndefined();
+  expect(links.show(row.id, own)).toBe(true);
+  expect(links.shown(row.id)).toBe(own);
+  expect(links.show(row.id, null)).toBe(true);
+  expect(links.shown(row.id)).toBeNull();
+});
+it("offers a link that allows switching its models and the owner's configured ones", () => {
+  const { links } = make();
+  const deepseek = { provider: "deepseek", model: "deepseek-flash" };
+  const plan = { provider: "claude-code", model: "default" };
+  const configured = [plan, deepseek, { provider: "openai", model: "gpt-off", off: true as const }];
+  // As a link made before rc.44 reads back: its two models, switching allowed.
+  const old = signIn(links, { chooseModel: true, model: plan, models: [plan, deepseek] });
+  expect(links.choices(old)).toEqual([plan, deepseek]);
+  expect(links.choices(old, configured)).toEqual([
+    plan,
+    deepseek,
+    { provider: "openai", model: "gpt-off" },
+  ]);
+  // One made with only its own model still offers what the owner has configured now.
+  const one = signIn(links, { chooseModel: true, models: [options.model] });
+  expect(links.choices(one, [deepseek])).toEqual([options.model, deepseek]);
+  links.select(one.id, 1, [deepseek]);
+  expect(links.active(one.id)?.model).toEqual(deepseek);
+  expect(links.reserve(one.id).model).toEqual(deepseek);
+  // Without switching, only its model, whatever is configured.
+  const fixed = signIn(links);
+  expect(links.choices(fixed, [deepseek])).toEqual([options.model]);
+  expect(() => links.select(fixed.id, 0, [deepseek])).toThrow();
+});
+it("keeps a link without Replay away from every recording, its own task's too", () => {
+  const { links } = make();
+  const row = signIn(links);
+  const own = ulid();
+  links.reserve(row.id).finish(own);
+  for (const part of RECORDING.filter((part) => part !== "events" && part !== "history"))
+    expect(links.permits(row, "GET", `/api/sessions/${own}/${part}`), part).toBe(false);
+  expect(links.permits(row, "GET", "/api/sessions")).toBe(false);
+  expect(links.permits(row, "GET", "/api/session-index")).toBe(false);
+});
+it("answers for the task in every path that names one, whichever rule lets the path through", () => {
+  const { links } = make();
+  const row = signIn(links, { settings: true, chooseModel: true, models: [options.model] });
+  const other = ulid();
+  const named = [
+    ...LIVE.map((part) => `/api/sessions/${other}/${part}`),
+    ...RECORDING.map((part) => `/api/sessions/${other}/${part}`),
+    `/api/agent/sessions/${other}`,
+    ...["messages", "stop", "answer", "model", "files/report.pdf", "conversation-files"].map(
+      (part) => `/api/agent/sessions/${other}/${part}`,
+    ),
+    `/api/conversations/${other}`,
+    `/api/conversations/${other}/latest`,
+    `/api/sessions/${other.toLowerCase()}/events`,
+  ];
+  for (const path of named)
+    for (const method of ["GET", "HEAD", "POST", "PUT", "DELETE"])
+      expect(links.permits(row, method, path), `${method} ${path}`).toBe(false);
 });
 it("never lets a link read files on the computer, even of a task it started", () => {
   const { links } = make();

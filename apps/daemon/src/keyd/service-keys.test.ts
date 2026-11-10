@@ -44,6 +44,28 @@ function fixture() {
   return { keyd, ports, fetch, service, call };
 }
 describe("saved service keys", () => {
+  it("names a key the user has to fix, so its card can be raised", async () => {
+    const f = fixture();
+    for (const [flag, problem] of [
+      ["reenter", "reenter"],
+      ["rebound", "rebound"],
+    ] as const) {
+      f.keyd.secrets.mockResolvedValueOnce([{ ...key, [flag]: true }]);
+      await expect(f.call()).rejects.toMatchObject({ id: "studio", problem });
+    }
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+  it("passes keyd's own refusal on beside the reply, and nothing when there is none", async () => {
+    const f = fixture();
+    expect((await f.call()).keydReason).toBeUndefined();
+    f.fetch.mockResolvedValueOnce(
+      new Response("keyd: vault-locked", {
+        status: 423,
+        headers: { "x-keyd-reason": "vault-locked" },
+      }),
+    );
+    expect(await f.call()).toMatchObject({ status: 423, keydReason: "vault-locked" });
+  });
   it("discovers by description and uses the same provider credential through an isolated listener", async () => {
     const f = fixture();
     expect(await f.service.list("catalog")).toEqual([key]);

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { RoleChoice } from "./choices.ts";
 import {
+  firstSource,
   libraryGroups,
   libraryProblem,
   modelSources,
   newChoices,
   promoted,
   setModelOn,
+  sourceGroups,
   withModels,
   withoutModel,
 } from "./model-library.ts";
@@ -73,19 +75,80 @@ describe("adding models", () => {
   const keys = index.keys.map((key) => ({ ...key, kind: "llm" as const }));
   it("offers each saved key, once, as its provider or endpoint", () => {
     const sources = modelSources(index, keys);
-    expect(sources.find((row) => row.id === "relay")).toMatchObject({
-      label: "relay.example",
+    expect(sources.filter((row) => row.key === "relay")).toMatchObject([
+      { label: "relay.example", custom: true, group: "Ready" },
+    ]);
+    expect(sources.filter((row) => row.key === "anthropic")).toMatchObject([
+      { provider: "anthropic", custom: false, group: "Ready" },
+    ]);
+  });
+
+  it("lists every provider: the ready ones, then those to set up, then those not offered", () => {
+    const sources = modelSources(index, keys, { chatgpt: false, "claude-code": true });
+    const groups = sourceGroups(sources);
+    expect(groups.map((group) => group.label)).toEqual([
+      "Ready",
+      "Not set up yet",
+      "Not available here",
+      "Later releases",
+    ]);
+    expect(groups[0]?.items.map((item) => item.label)).toEqual([
+      "Anthropic",
+      "OpenAI",
+      "example.test",
+      "relay.example",
+      "Claude Code (your plan)",
+      "LM Studio",
+      "Ollama",
+    ]);
+    const later = groups[1]?.items ?? [];
+    expect(later.map((item) => item.label)).toEqual(
+      expect.arrayContaining([
+        "Google Gemini",
+        "Groq",
+        "Together",
+        "MiniMax Token Plan",
+        "Custom endpoint",
+        "ChatGPT plan",
+      ]),
+    );
+    expect(later.map((item) => item.label)).not.toContain("Anthropic");
+    expect(later.find((item) => item.label === "Groq")?.description).toBe("Add an API key");
+    expect(later.find((item) => item.label === "ChatGPT plan")?.disabledReason).toBe(
+      "Not available on this Mac yet",
+    );
+    expect(sources.find((row) => row.id === "groq")).toMatchObject({ setup: "key" });
+    expect(sources.find((row) => row.id === "openai-compatible")).toMatchObject({
+      setup: "endpoint",
       custom: true,
-      key: "relay",
     });
-    expect(sources.find((row) => row.id === "anthropic")).toMatchObject({
-      provider: "anthropic",
-      custom: false,
-    });
+    expect(groups[2]?.items.every((item) => item.disabledReason)).toBe(true);
+    expect(sources.filter((row) => row.custom && !row.key)).toHaveLength(1);
+  });
+
+  it("offers a key two providers share under each", () => {
+    const shared = [
+      {
+        id: "mm",
+        kind: "llm" as const,
+        provider: "openai-compatible",
+        baseURL: "https://api.minimax.io/v1",
+      },
+    ];
+    const sources = modelSources(index, shared).filter((row) => row.key === "mm");
+    expect(sources.map((row) => row.provider)).toEqual(["minimax", "minimax-coding-plan"]);
+  });
+
+  it("starts on the first key or plan that is ready, never on a local server", () => {
+    expect(firstSource(modelSources(index, keys))?.key).toBe("anthropic");
+    expect(firstSource(modelSources(index, []))).toBeUndefined();
+    expect(firstSource(modelSources(index, [], { chatgpt: true, "claude-code": false }))?.id).toBe(
+      "chatgpt",
+    );
   });
 
   it("sets a new model up as the endpoint's others are, keeping the key where it is", () => {
-    const source = modelSources(index, keys).find((row) => row.id === "relay");
+    const source = modelSources(index, keys).find((row) => row.key === "relay");
     if (!source) throw new Error("no source");
     const siblings = [{ ...SOL, price: undefined, plan: true as const, speedTiers: true as const }];
     expect(
@@ -102,7 +165,7 @@ describe("adding models", () => {
   });
 
   it("prices a model from the catalog when another provider lists it, else as typed", () => {
-    const source = modelSources(index, keys).find((row) => row.id === "relay");
+    const source = modelSources(index, keys).find((row) => row.key === "relay");
     if (!source) throw new Error("no source");
     const typed = { inputUSDPerMTok: 1, outputUSDPerMTok: 2 };
     const providers = [

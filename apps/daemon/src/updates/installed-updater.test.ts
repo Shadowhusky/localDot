@@ -88,7 +88,7 @@ it("prepares through the installed CLI with a progress channel, then shows the d
   expect(seen).toEqual({
     step: "images",
     value: 0.55,
-    detail: "Preparing the computer · 1 of 2 MB",
+    detail: "Preparing the computer · 50% · 1 of 2 MB",
   });
   expect(await updater.status()).toMatchObject({
     phase: "ready",

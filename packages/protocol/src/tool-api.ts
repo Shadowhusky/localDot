@@ -17,6 +17,7 @@ import { ModelControls, ModelOptions } from "./model-options.ts";
 import { RECENT_TASKS, RecentLine } from "./recent-activity.ts";
 import { ResearchBudget } from "./research.ts";
 import { SessionRun } from "./routines.ts";
+import { GuestAccess } from "./tools.ts";
 
 // The brain's tool API (spec "Ports": 4751). The brain calls only these, through its gate, with
 // its own bearer token; everything it may do to the computer or the user goes through them.
@@ -152,6 +153,8 @@ export const BootConfig = z.object({
   // The chosen dot's instructions; absent for the everyday dot.
   role: z.string().min(1).max(2000).optional(),
   subagents: z.array(SubagentResume).max(MAX_SUBAGENT_BRIEFS).optional(),
+  // Present when the task came through a shared link.
+  guest: GuestAccess.optional(),
 });
 export type BootConfig = z.infer<typeof BootConfig>;
 

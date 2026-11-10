@@ -8,6 +8,7 @@ import {
   rm,
   stat,
   symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,8 +17,11 @@ import { PassThrough } from "node:stream";
 import { afterEach, expect, it, vi } from "vitest";
 import { SetupFailure } from "../../../cli/src/install/setup-failure.ts";
 import { IMAGE_ROOM, packageAppUpdater } from "./package-updater.ts";
+import { UpdateFailure } from "./progress.ts";
 
 const roots: string[] = [];
+// The update takes a few steps before it spawns anything, which a busy machine stretches.
+const soon = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
 afterEach(async () => {
   for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true });
 });
@@ -136,7 +140,7 @@ it("streams the verifier's progress, fetches the pinned images and keeps the arc
     notes: [{ version: "0.1.0-rc.2", markdown: NOTE }],
   });
   await updater.install();
-  await vi.waitFor(() => expect(f.installs()).toHaveLength(1));
+  await soon(() => expect(f.installs()).toHaveLength(1));
   const [, , install] = f.installs()[0] as unknown as [
     string,
     string[],
@@ -178,7 +182,7 @@ it.each(["darwin", "linux"] as const)(
       updater = await f.create();
     await updater.check();
     await updater.install();
-    await vi.waitFor(() => expect(f.installs()).toHaveLength(1));
+    await soon(() => expect(f.installs()).toHaveLength(1));
     expect(f.settled).not.toHaveBeenCalled();
     const [executable, args, options] = f.installs()[0] as unknown as [
       string,
@@ -191,7 +195,7 @@ it.each(["darwin", "linux"] as const)(
     expect(options.detached).toBe(true);
     if (platform === "linux") expect(args).toContain("--wait");
     f.child.emit("close", 1);
-    await vi.waitFor(() => expect(f.settled).toHaveBeenCalledOnce());
+    await soon(() => expect(f.settled).toHaveBeenCalledOnce());
     await vi.waitFor(async () =>
       expect(await updater.status()).toMatchObject({
         error: expect.stringContaining("couldn't be installed"),
@@ -206,6 +210,7 @@ it("leaves a working task alone when the update is ready", async () => {
   await updater.check();
   f.installWait.mockReturnValue("Finish or stop the task before updating localDot.");
   await expect(updater.install()).rejects.toThrow("Finish or stop");
+  await updater.close();
   expect(f.installs()).toEqual([]);
 });
 it("does not adopt a writable installed-package record", async () => {
@@ -237,7 +242,7 @@ it("checks and installs through the bundled verifier and new channel after a leg
     "https://downloads.localdot.dev/channels/releases.json",
   ]);
   await updater.install();
-  await vi.waitFor(() => expect(f.installs()).toHaveLength(1));
+  await soon(() => expect(f.installs()).toHaveLength(1));
   const args = (f.installs()[0] as unknown as [string, string[]])[1];
   expect(args[args.indexOf("--package-channel") + 1]).toBe(
     "https://downloads.localdot.dev/channels/releases.json",
@@ -286,4 +291,159 @@ it("does not follow a replaced staging directory during post-update cleanup", as
   expect(JSON.parse(await readFile(join(f.home, "prepared-package-update.json"), "utf8"))).toEqual(
     record,
   );
+});
+
+it("looks for Docker where the app itself does, not only at the default socket", async () => {
+  const { imageSocket } = await import("./package-updater.ts");
+  const elsewhere = "/Users/me/.docker/run/docker.sock";
+  expect(imageSocket({ DOCKER_HOST: `unix://${elsewhere}` })).toBe(elsewhere);
+  expect(
+    imageSocket(
+      { HOME: "/Users/me" },
+      {
+        exists: (path: string) => path === elsewhere,
+        context: () => undefined,
+      },
+      "darwin",
+    ),
+  ).toBe(elsewhere);
+});
+it.each([
+  ["network-unavailable", "network"],
+  ["storage-read-only", "disk"],
+  ["permission-denied", "docker"],
+  ["docker-unavailable", "docker"],
+] as const)("names what stopped the images: %s", async (code, problem) => {
+  const f = await fixture();
+  f.images.mockRejectedValue(new SetupFailure(code));
+  const updater = await f.create();
+  await updater.check();
+  expect((await updater.status()).error).toContain(new UpdateFailure(problem).reason);
+});
+it("hands the installer a status file, and reads back what it recorded", async () => {
+  const f = await fixture("darwin");
+  const updater = await f.create();
+  await updater.check();
+  await updater.install();
+  await soon(() => expect(f.installs()).toHaveLength(1));
+  const [, , options] = f.installs()[0] as unknown as [
+    string,
+    string[],
+    { env: Record<string, string> },
+  ];
+  const file = options.env.LOCALDOT_UPDATE_STATUS ?? "";
+  expect(file.startsWith(f.home)).toBe(true);
+  await writeFile(
+    file,
+    JSON.stringify({ v: 1, pid: process.pid, stage: "verify", restored: false }),
+  );
+  await vi.waitFor(
+    async () =>
+      expect((await updater.status()).progress?.detail).toBe("Checking the download once more"),
+    { timeout: 3000 },
+  );
+  await writeFile(
+    file,
+    JSON.stringify({ v: 1, pid: process.pid, stage: "failed", problem: "docker", restored: false }),
+  );
+  f.child.emit("close", 1);
+  await vi.waitFor(
+    async () => expect((await updater.status()).error).toContain("Docker isn't running."),
+    { timeout: 4000 },
+  );
+});
+it("downloads into a place of this dot's own, so dots sharing an installation can't mix a partial file", async () => {
+  const f = await fixture();
+  const updater = await f.create();
+  await updater.check();
+  const [, , options] = f.spawn.mock.calls.find(([, args]) => args[1] === "prepare") as unknown as [
+    string,
+    string[],
+    { env: Record<string, string> },
+  ];
+  expect(options.env.LOCALDOT_DOWNLOAD_DIR?.startsWith(f.home)).toBe(true);
+});
+it("clears downloads a crash left behind, but never another dot's fresh one", async () => {
+  const f = await fixture();
+  const downloads = join(f.prefix, "runtime/package-updates");
+  await mkdir(join(downloads, ".prepare-crashed"), { recursive: true });
+  await mkdir(join(downloads, ".prepare-other-dot"), { recursive: true });
+  const old = new Date(Date.now() - 2 * 24 * 3_600_000);
+  await utimes(join(downloads, ".prepare-crashed"), old, old);
+  await f.create();
+  await expect(stat(join(downloads, ".prepare-crashed"))).rejects.toThrow();
+  expect((await stat(join(downloads, ".prepare-other-dot"))).isDirectory()).toBe(true);
+});
+it("keeps a downloaded update while the installer's checks could still roll back", async () => {
+  const f = await fixture();
+  await (await f.create()).check();
+  const record = JSON.parse(await readFile(join(f.home, "prepared-package-update.json"), "utf8"));
+  await writeFile(
+    join(f.prefix, "app/package-release.json"),
+    JSON.stringify({
+      version: record.version,
+      channel: "https://downloads.localdot.dev/channels/releases.json",
+    }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(f.home, "app-update-attempt.json"),
+    JSON.stringify({ v: 1, version: record.version }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(f.home, "app-update-install.json"),
+    JSON.stringify({ v: 1, pid: process.pid, stage: "check", restored: false }),
+  );
+  const staging = join(f.prefix, "runtime/package-updates", record.directory);
+  const updated = await f.create();
+  expect(await updated.status()).toMatchObject({ phase: "installing" });
+  expect((await stat(staging)).isDirectory()).toBe(true);
+  await writeFile(
+    join(f.home, "app-update-install.json"),
+    JSON.stringify({ v: 1, pid: process.pid, stage: "done", restored: false }),
+  );
+  await vi.waitFor(async () => expect((await updated.status()).phase).toBe("idle"), {
+    timeout: 3000,
+  });
+  await vi.waitFor(() => expect(stat(staging)).rejects.toThrow());
+  await updated.close();
+});
+it("forgets a swap the installer can no longer finish once a daemon runs", async () => {
+  const f = await fixture();
+  await writeFile(join(f.prefix, ".package-swap"), "/gone\n");
+  await f.create();
+  await expect(stat(join(f.prefix, ".package-swap"))).rejects.toThrow();
+});
+it("holds its verdict while a killed installer's swap is still being undone", async () => {
+  const f = await fixture();
+  await (await f.create()).check();
+  const record = JSON.parse(await readFile(join(f.home, "prepared-package-update.json"), "utf8"));
+  await writeFile(
+    join(f.prefix, "app/package-release.json"),
+    JSON.stringify({
+      version: record.version,
+      channel: "https://downloads.localdot.dev/channels/releases.json",
+    }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(f.home, "app-update-attempt.json"),
+    JSON.stringify({ v: 1, version: record.version }),
+    { mode: 0o600 },
+  );
+  const dead = 2 ** 22 + 1;
+  await writeFile(
+    join(f.home, "app-update-install.json"),
+    JSON.stringify({ v: 1, pid: dead, stage: "start", restored: false }),
+  );
+  await writeFile(join(f.prefix, ".package-swap"), `/rollback\n${process.pid}\n`);
+  const updated = await f.create();
+  expect(await updated.status()).toMatchObject({ phase: "installing" });
+  expect((await stat(join(f.prefix, ".package-swap"))).isFile()).toBe(true);
+  await updated.close();
+  await writeFile(join(f.prefix, ".package-swap"), `/rollback\n${dead}\n`);
+  const after = await f.create();
+  expect((await after.status()).phase).not.toBe("installing");
+  await expect(stat(join(f.prefix, ".package-swap"))).rejects.toThrow();
 });

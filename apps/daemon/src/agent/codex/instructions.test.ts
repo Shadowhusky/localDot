@@ -3,10 +3,12 @@ import {
   ASK_FORM_GUIDANCE,
   DONE_TOOL_DESCRIPTION,
   ENVIRONMENT_CONTEXT,
+  guestSection,
   researchSection,
   workingRules,
 } from "@localdot/protocol/guidance";
 import { describe, expect, it } from "vitest";
+import { claudeCodeInstructions } from "../claude-code/instructions.ts";
 import { codexInstructions } from "./instructions.ts";
 import { CODEX_TOOL_DESCRIPTIONS, codexTools } from "./mcp-tools.ts";
 
@@ -25,6 +27,21 @@ describe("Codex developer instructions", () => {
     expect(text).toContain("check these files, then people and recall");
     expect(text).toContain("- 2026-10-08 · done · Send Henry the report on WeChat");
     expect(text.match(/<\/recent_tasks>/g)).toHaveLength(1);
+  });
+  it("gives a shared link's task none of the owner's memory, history or tools, in either harness", () => {
+    for (const guest of [{ apps: false }, { apps: true }])
+      for (const instructions of [codexInstructions, claudeCodeInstructions]) {
+        const text = instructions({
+          memory: { user: "", memory: "" },
+          skills: [],
+          today: new Date("2026-10-09T12:00:00Z"),
+          guest,
+        });
+        expect(text).toContain(`MCP server's: ${offeredTools(false, guest).join(", ")}.`);
+        expect(text).not.toContain("<user_file");
+        expect(text).not.toContain("then people and recall");
+        expect(text).toContain(guestSection(guest));
+      }
   });
   it("carries the chosen dot's role", () => {
     const base = {

@@ -19,6 +19,19 @@ export interface ServiceReply {
   contentType: string;
   body: Buffer;
   truncated: boolean;
+  // keyd's own refusal, as it says so. A service can claim the same, so it proves nothing alone.
+  keydReason?: string;
+}
+
+// A saved key keyd can't use until the user fixes it.
+export class ServiceKeyProblem extends Error {
+  constructor(
+    readonly id: string,
+    readonly problem: "reenter" | "rebound",
+  ) {
+    super("The selected key needs attention.");
+    this.name = "ServiceKeyProblem";
+  }
 }
 
 // One bounded call, one private listener and one key. Nothing runs on a host shell and no
@@ -61,8 +74,9 @@ export class ServiceKeys {
     const cellId = `service-${randomUUID()}`;
     try {
       const record = (await this.list()).find((key) => key.id === input.key_id);
-      if (!record || record.reenter || record.rebound)
-        throw new Error("The selected key is missing or needs attention in Keys.");
+      if (record?.reenter || record?.rebound)
+        throw new ServiceKeyProblem(record.id, record.rebound ? "rebound" : "reenter");
+      if (!record) throw new Error("The selected key is missing. Check credentials/list.");
       if (record.kind === "secret")
         throw new Error(
           "This general key has no API binding. Choose a saved model or service key for an API request.",
@@ -144,11 +158,13 @@ export class ServiceKeys {
       } finally {
         reader?.releaseLock();
       }
+      const keydReason = reply.headers.get("x-keyd-reason");
       return {
         status: reply.status,
         contentType: reply.headers.get("content-type") ?? "application/octet-stream",
         body: Buffer.concat(chunks, size),
         truncated,
+        ...(keydReason ? { keydReason } : {}),
       };
     } finally {
       controller.abort();

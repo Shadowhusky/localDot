@@ -481,6 +481,29 @@ describe("session-owned screen authority", () => {
       expect(typed(f)).toHaveLength(0);
     });
 
+    it("types nothing, and fetches no password, when a message moves on from the tap", async () => {
+      const f = fixture();
+      await f.browser();
+      const h = tools(f);
+      f.client.lookup.mockImplementation(passwordBox("https://identity.example.org/signin"));
+      const login = vi.fn(async () => ({
+        username: "imported-account",
+        password: "imported-password-canary",
+        confirm: true,
+      }));
+      h.tools.logins = { login, saveLogin: vi.fn(async () => {}) };
+      const pending = h.callTool("ask_user", signIn);
+      await until(() => !!f.session.pendingAsk);
+      const looked = login.mock.calls.length;
+      expect(f.session.moveOn("Don't sign in, I'll do it later")).toBe(true);
+      const reply = await pending;
+      expect(JSON.stringify(reply)).toContain("instead of answering");
+      expect(typed(f)).toHaveLength(0);
+      expect(login).toHaveBeenCalledTimes(looked);
+      expect(JSON.stringify(reply)).not.toContain("imported");
+      expect(JSON.stringify(f.log.read(f.id))).not.toMatch(/imported-account|imported-password/);
+    });
+
     it("keeps filling without a tap a login the user gave dot on this very site", async () => {
       const f = fixture();
       await f.browser();
@@ -630,7 +653,7 @@ describe("session-owned screen authority", () => {
     expect(reply.result.ok).toBe(false);
     expect(JSON.stringify(reply)).toContain("Unlock card");
     expect(f.log.read(f.id).filter((e) => e.type === "ask.request")).toHaveLength(0);
-    expect(f.log.read(f.id).filter((e) => e.type === "keys.lock")).toHaveLength(1);
+    expect(f.log.read(f.id).filter((e) => e.type === "blocker.raise")).toHaveLength(1);
     expect(f.session.keysLocked).toBe(true);
   });
 
@@ -1350,6 +1373,22 @@ describe("session-owned screen authority", () => {
     expect(desktop).not.toHaveBeenCalled();
   });
 
+  it("keeps a shared link's task without the owner's apps in the desktop's Chromium, which has no sign-ins", async () => {
+    const f = fixture();
+    f.session.guest = { apps: false };
+    const generation = await f.ready();
+    const h = tools(f);
+    bindDesktop(h);
+    const lease = f.session.admit(generation);
+    await expect(f.session.switchScreen("browser", lease)).rejects.toThrow(/shared link/);
+    lease.finish();
+    const navigated = await h.callTool("browser_navigate", { url: "https://example.test/article" });
+    expect(navigated.result.ok).toBe(true);
+    expect(f.client.navigate).not.toHaveBeenCalled();
+    expect(f.deps.browser.start).not.toHaveBeenCalled();
+    expect(f.screens.selection.screen).toBe("desktop");
+  });
+
   it("reports a download without claiming its URL became a page", async () => {
     const f = fixture();
     await f.browser();
@@ -1749,6 +1788,85 @@ describe("session-owned screen authority", () => {
       await again;
     },
   );
+
+  describe("a shared link's task signing in, with the owner's apps allowed", () => {
+    async function signIn(store: { saved?: { username: string; password: string } }) {
+      const f = fixture();
+      f.session.guest = { apps: true };
+      await f.browser();
+      const h = tools(f);
+      f.client.lookup.mockImplementation((async () => ({
+        target: {
+          point: { x: 400, y: 300 },
+          source: "dom",
+          role: "textbox",
+          name: "Password",
+          url: "https://github.com/login",
+          secret: true,
+        },
+        window: 0,
+        ms: 1,
+      })) as never);
+      const saveLogin = vi.fn(async (_origin: string, username: string, password: string) => {
+        store.saved = { username, password };
+      });
+      h.tools.logins = {
+        login: vi.fn(async () => store.saved && { ...store.saved }),
+        saveLogin,
+      };
+      const input = {
+        question: "Sign in",
+        fields: [
+          { id: "username", kind: "text", label: "Username" },
+          { id: "password", kind: "secret", label: "Password", target: [400, 300] },
+        ],
+      };
+      const answer = async (fields: Record<string, string>) => {
+        const pending = h.callTool("ask_user", input);
+        await until(() => f.session.pendingAsk !== undefined);
+        const ask = f.log.read(f.id).findLast((e) => e.type === "ask.request");
+        const asked = new Set(
+          ask?.type === "ask.request" ? (ask.data.fields ?? []).map((field) => field.id) : [],
+        );
+        f.session.answerFields(
+          f.session.pendingAsk ?? "",
+          Object.fromEntries(Object.entries(fields).filter(([id]) => asked.has(id))),
+          (text) => text,
+        );
+        return { reply: await pending, ask };
+      };
+      const typed = () =>
+        f.client.secret.mock.calls
+          .map((call) => call[2].text)
+          .filter((text): text is string => text !== undefined);
+      return { saveLogin, answer, typed };
+    }
+    it("types a new sign-in where it belongs and saves it nowhere", async () => {
+      const store: { saved?: { username: string; password: string } } = {};
+      const s = await signIn(store);
+      const { reply, ask } = await s.answer({ username: "guest", password: "guest-password" });
+      expect(reply.result.ok).toBe(true);
+      expect(s.typed()).toEqual(["guest-password"]);
+      expect(s.saveLogin).not.toHaveBeenCalled();
+      expect(store.saved).toBeUndefined();
+      expect(JSON.stringify(ask)).not.toContain("Saved securely");
+      expect(JSON.stringify(reply)).not.toContain("saved securely");
+    });
+    it("fills the owner's saved sign-in but never changes it, its account or its password", async () => {
+      const owner = { username: "", password: "owner-password-canary" };
+      const store = { saved: { ...owner } };
+      const s = await signIn(store);
+      const reused = await s.answer({ username: "guest-account" });
+      expect(reused.reply.result.ok).toBe(true);
+      expect(JSON.stringify(reused.reply)).toContain("Used the saved sign-in");
+      const replaced = await s.answer({ username: "guest-account", password: "guest-password" });
+      expect(replaced.reply.result.ok).toBe(true);
+      expect(s.typed()).toEqual(["owner-password-canary", "guest-password"]);
+      expect(s.saveLogin).not.toHaveBeenCalled();
+      expect(store.saved).toEqual(owner);
+      expect(JSON.stringify(replaced.reply)).not.toContain("saved securely");
+    });
+  });
 
   it("opens a public page in the web browser from the desktop by switching the screen first", async () => {
     const f = fixture();

@@ -73,6 +73,15 @@ test("setup's steps", async ({ page, ui }) => {
   await readable(page, ui, "setup-thinks");
 });
 
+test("setup's Talk to dot", async ({ page, ui }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("localdot.onboarding.v1", JSON.stringify({ step: "speech" })),
+  );
+  await ui.open("first-run");
+  await expect(page.getByRole("heading", { name: "Talk to dot" })).toBeVisible();
+  await readable(page, ui, "setup-speech");
+});
+
 for (const scenario of [
   "starting",
   "reconnecting",
@@ -84,6 +93,12 @@ for (const scenario of [
   "budget",
   "takeover",
   "keys-locked",
+  "fix-key",
+  "fix-app",
+  "fix-model",
+  "fix-computer",
+  "fix-computer-paused",
+  "fix-runtime",
 ] as const)
   test(`computer state: ${scenario}`, async ({ page, ui }) => {
     await ui.open(scenario);

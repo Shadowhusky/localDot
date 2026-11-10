@@ -6,6 +6,7 @@ import {
 } from "@localdot/protocol";
 import {
   type FormEvent,
+  type ReactNode,
   type Ref,
   useCallback,
   useEffect,
@@ -16,6 +17,7 @@ import {
   useState,
 } from "react";
 import { Button } from "../ui/Button.tsx";
+import { Checkbox } from "../ui/Checkbox.tsx";
 import { Combobox } from "../ui/Combobox.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -67,9 +69,14 @@ export interface KeyFormProps {
   onHolding?(holding: boolean): void;
   // Offers Cancel, which clears the form, then calls this.
   onCancel?(): void;
+  // More ways on, beside Save.
+  actions?: ReactNode;
   // A saved key whose value is stored again, under the same name and destination: only the key
   // itself is asked for.
   reenter?: KeyRecord;
+  // A new key for the preset's provider alone: only the key is asked for, and an address where the
+  // provider has none of its own. It takes a name of its own.
+  keyOnly?: boolean;
 }
 export type KeyFormPreset =
   | { readonly requestId: number; readonly provider: Provider; readonly baseURL?: string }
@@ -130,7 +137,9 @@ export function KeyForm({
   preset,
   onHolding,
   onCancel,
+  actions,
   reenter,
+  keyOnly = false,
 }: KeyFormProps) {
   const statusId = useId();
   const [metadata, setMetadata] = useState<KeyMetadata>({});
@@ -138,6 +147,9 @@ export function KeyForm({
   const paired = !useMediaQuery(PHONE);
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [tried, setTried] = useState(false);
+  // A general secret has no shape to tell it from typed words, and a new key under a saved one's ID
+  // takes its place: either is said in so many words first.
+  const [replacing, setReplacing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
@@ -161,6 +173,14 @@ export function KeyForm({
   const locked = Boolean(unavailable) || busy;
   const report = () => holding.current?.(!!valueRef.current?.value);
   const general = (reenter?.kind ?? draft.kind) === "secret";
+  const overwrites = !reenter && taken.includes(draft.id.trim());
+  const asksToReplace = (!!reenter && general) || overwrites;
+  const replaceWords = overwrites
+    ? "Replace the saved key with this ID"
+    : "Replace the saved secret";
+  // A tick is for the key it was given beside.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the ID is what the tick was for
+  useEffect(() => setReplacing(false), [draft.id]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -299,6 +319,7 @@ export function KeyForm({
     ? valueHint({ ...draft, kind: reenter.kind, provider: reenter.provider as Provider })
     : valueHint(draft);
   const urlHint = draft.kind === "llm" ? baseURLHint(draft.provider) : undefined;
+  const fixedAddress = keyOnly && !!preset && "provider" in preset && !!preset.baseURL;
   const shown: Problem | null = problem ?? (tried && !check.ok ? check : null);
   const set = (patch: Partial<KeyDraft>) => {
     if (patch.kind && patch.kind !== draft.kind && valueRef.current) {
@@ -369,6 +390,11 @@ export function KeyForm({
     }
     setTried(true);
     setSaved(null);
+    if (asksToReplace && !replacing) {
+      setProblem({ field: "value", message: `Tick ${replaceWords}, then save.` });
+      reveal();
+      return;
+    }
     const value = general ? input.value : input.value.trim();
     // Clear before any callback, including one that throws synchronously.
     input.value = "";
@@ -389,7 +415,12 @@ export function KeyForm({
       reveal();
       return;
     }
-    const bad = valueProblem(value, check.binding.kind);
+    const bound = check.binding;
+    const bad = valueProblem(value, bound.kind, {
+      ...(bound.kind === "llm" ? { provider: bound.provider } : {}),
+      ...(bound.kind === "http" ? { format: bound.format } : {}),
+      replacing: !!reenter,
+    });
     if (bad) {
       setProblem({ field: "value", message: bad });
       reveal();
@@ -435,6 +466,23 @@ export function KeyForm({
 
   const readOnly = locked || saving;
   const typed = draft.id.trim();
+  const baseURLField = (
+    <Field label="Base URL" description={urlHint} error={errorFor("baseURL")}>
+      <TextField
+        {...PLAIN}
+        value={draft.baseURL}
+        readOnly={readOnly}
+        inputMode="url"
+        enterKeyHint="next"
+        placeholder={
+          draft.provider === "anthropic-compatible"
+            ? "e.g. https://api.example.com/anthropic"
+            : "e.g. https://api.example.com/v1"
+        }
+        onChange={(e) => set({ baseURL: e.target.value })}
+      />
+    </Field>
+  );
   return (
     <form
       ref={scope}
@@ -445,7 +493,9 @@ export function KeyForm({
       aria-busy={saving}
       autoComplete="off"
     >
-      {reenter ? (
+      {keyOnly ? (
+        needsBaseURL(draft.provider) && !fixedAddress && baseURLField
+      ) : reenter ? (
         <p className="keys-reenter-note">
           <Icon name="lock" size={14} />
           <span>
@@ -486,23 +536,7 @@ export function KeyForm({
                   onValueChange={(provider) => set({ provider: provider as Provider })}
                 />
               </Field>
-              {needsBaseURL(draft.provider) && (
-                <Field label="Base URL" description={urlHint} error={errorFor("baseURL")}>
-                  <TextField
-                    {...PLAIN}
-                    value={draft.baseURL}
-                    readOnly={readOnly}
-                    inputMode="url"
-                    enterKeyHint="next"
-                    placeholder={
-                      draft.provider === "anthropic-compatible"
-                        ? "e.g. https://api.example.com/anthropic"
-                        : "e.g. https://api.example.com/v1"
-                    }
-                    onChange={(e) => set({ baseURL: e.target.value })}
-                  />
-                </Field>
-              )}
+              {needsBaseURL(draft.provider) && baseURLField}
             </>
           ) : draft.kind === "http" ? (
             <>
@@ -654,6 +688,17 @@ export function KeyForm({
           />
         )}
       </Field>
+      {asksToReplace && (
+        <Checkbox
+          label={replaceWords}
+          description="What you typed above takes its place."
+          checked={replacing}
+          onCheckedChange={(on) => {
+            setReplacing(on);
+            if (on && problem?.field === "value") setProblem(null);
+          }}
+        />
+      )}
       <div className="keys-form-actions">
         <div id={statusId} className="keys-form-status">
           {shown?.field === "form" ? (
@@ -683,6 +728,7 @@ export function KeyForm({
             Cancel
           </Button>
         )}
+        {actions}
         <Button
           type="submit"
           variant="primary"

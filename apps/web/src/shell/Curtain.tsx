@@ -28,6 +28,12 @@ export interface CurtainProps {
   waking: boolean;
   // The computer is moving onto a new version, from its stop until it is ready again.
   updating?: boolean;
+  // Which step of that it is on, in words, and how long it is taking when that is worth saying.
+  updateLine?: string | null;
+  updateNote?: string | null;
+  updateBounds?: [number, number] | null;
+  // Why the last update didn't work, while the computer it left is off.
+  updateFailure?: string | null;
   // The computer's own words, for a failure.
   caption: string;
   // Why the last request was refused, in place of the usual words.
@@ -46,6 +52,15 @@ export interface CurtainProps {
   ready?: boolean;
   showDot: boolean;
   onReload?(): void;
+  // While connecting: no picture has come, for long enough to say so.
+  stuck?: ScreenStuck;
+}
+
+// A first picture that has been long in coming, and the way on from it.
+export interface ScreenStuck {
+  // The web browser in front isn't up, which no stream can mend: the desktop is the way on.
+  browser: boolean;
+  retry(): void;
 }
 
 export interface ReplaceAction {
@@ -82,6 +97,10 @@ export function Curtain({
   first,
   waking,
   updating = false,
+  updateLine,
+  updateNote,
+  updateBounds,
+  updateFailure,
   caption,
   notice,
   action,
@@ -93,10 +112,13 @@ export function Curtain({
   ready = false,
   showDot,
   onReload,
+  stuck,
 }: CurtainProps) {
   const phone = useMediaQuery(PHONE);
   const fresh = phase === "checking" || runtimeProblem ? undefined : freshStart;
   const recovering = !runtimeProblem && !fresh && phase === "unavailable" && !!replace;
+  const noPicture =
+    !runtimeProblem && !fresh && phase === "connecting" && !updating ? stuck : undefined;
   const copy: Copy | null = runtimeProblem
     ? {
         title:
@@ -118,15 +140,32 @@ export function Curtain({
       ? freshStartCopy(fresh)
       : recovering
         ? {
-            title: "Your computer needs a fresh start",
+            title: replace.busy ? "Replacing your computer" : "Your computer needs a fresh start",
             sub:
               replace.note ??
-              "An earlier step couldn't be confirmed. Recovery preserves your installed apps, settings and files.",
-            progress: false,
+              (replace.busy
+                ? "Saving the old computer. Your files are kept."
+                : "An earlier step couldn't be confirmed. Recovery preserves your installed apps, settings and files."),
+            clock: replace.busy,
+            progress: replace.busy,
+            kind: "first-start",
             button: { label: "Replace computer" },
           }
-        : curtainCopy(phase, { first, waking, updating, caption, notice, action });
-  const enabled = runtimeProblem ? true : recovering ? replace.enabled : action?.enabled;
+        : noPicture
+          ? noPictureCopy(noPicture)
+          : curtainCopy(phase, {
+              first,
+              waking,
+              updating,
+              updateLine,
+              updateNote,
+              updateFailure,
+              caption,
+              notice,
+              action,
+            });
+  const enabled =
+    runtimeProblem || noPicture ? true : recovering ? replace.enabled : action?.enabled;
   const anyway =
     !runtimeProblem && !recovering && !copy?.progress && action?.kind === "start"
       ? startAnyway
@@ -170,7 +209,13 @@ export function Curtain({
           data-progress={copy?.progress || undefined}
           aria-hidden={(!copy && !onReload) || undefined}
         >
-          <CurtainProgress timing={timing && { ...timing, step }} now={now} done={ready} />
+          <CurtainProgress
+            timing={
+              timing && { ...timing, step, ...(updateBounds ? { bounds: updateBounds } : {}) }
+            }
+            now={now}
+            done={ready}
+          />
           {!copy && onReload && <Button onClick={onReload}>Try again</Button>}
           {fresh ? (
             <FreshStartButton
@@ -183,7 +228,7 @@ export function Curtain({
               run={fresh.run}
             />
           ) : (
-            (action || recovering || runtimeProblem) &&
+            (action || recovering || runtimeProblem || noPicture) &&
             copy?.button && (
               <Button
                 variant="primary"
@@ -199,9 +244,11 @@ export function Curtain({
                     ? onRuntimeRetry
                     : copy.progress
                       ? undefined
-                      : recovering
-                        ? replace.run
-                        : (anyway ?? onAction)
+                      : noPicture
+                        ? noPicture.retry
+                        : recovering
+                          ? replace.run
+                          : (anyway ?? onAction)
                 }
               >
                 {anyway ? "Start anyway" : copy.button.label}
@@ -242,23 +289,53 @@ function freshStartCopy({ busy, note }: FreshStartAction): Copy {
       };
 }
 
+function noPictureCopy({ browser }: ScreenStuck): Copy {
+  return browser
+    ? {
+        title: "The web browser isn't ready",
+        sub: "Your computer is running, and its web browser hasn't come up yet.",
+        progress: false,
+        button: { label: "Show the desktop" },
+      }
+    : {
+        title: "Can't show your screen yet",
+        sub: "Your computer is running, and localDot keeps trying. You can also try again now.",
+        progress: false,
+        button: { label: "Try again" },
+      };
+}
+
 function curtainCopy(
   phase: ComputerPhase,
   {
     first,
     waking,
     updating,
+    updateLine,
+    updateNote,
+    updateFailure,
     caption,
     notice,
     action,
-  }: Pick<CurtainProps, "first" | "waking" | "updating" | "caption" | "notice" | "action">,
+  }: Pick<
+    CurtainProps,
+    | "first"
+    | "waking"
+    | "updating"
+    | "updateLine"
+    | "updateNote"
+    | "updateFailure"
+    | "caption"
+    | "notice"
+    | "action"
+  >,
 ): Copy | null {
   const turnOn = { label: "Turn on", icon: "power" as const };
   if (phase === "checking") return null;
   if (updating && (STARTING.has(phase) || phase === "stopping"))
     return {
       title: "Updating your computer",
-      sub: "Your files and sign-ins stay.",
+      sub: updateNote ?? `${updateLine ? `${updateLine}. ` : ""}Your files and sign-ins stay.`,
       clock: true,
       progress: true,
       kind: "update",
@@ -301,6 +378,13 @@ function curtainCopy(
       progress: true,
       kind: "stop",
       button: turnOn,
+    };
+  if (updateFailure && (phase === "failed" || phase === "stopped"))
+    return {
+      title: "Your computer wasn't updated",
+      sub: updateFailure,
+      progress: false,
+      button: phase === "failed" ? { label: "Start again" } : turnOn,
     };
   if (phase === "failed")
     return action?.kind === "stop"

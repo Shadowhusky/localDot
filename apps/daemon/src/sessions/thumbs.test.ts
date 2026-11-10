@@ -51,6 +51,30 @@ describe("observation thumbnails", () => {
     expect(await thumbs.path(sessionId, unmade)).toBeUndefined();
   });
 
+  // A 2x display draws a 104 px thumbnail with 208 device pixels, a side panel's 360 px with 720:
+  // each width is made from the screen's own pixels when the frame kept them, never stretched.
+  it("makes wider thumbnails for sharper displays, from the full-resolution frame", async () => {
+    const { home, sessionId, ids, thumbs } = await setup();
+    const frameId = ids[0] as string;
+    const full = await sharp({
+      create: { width: 2560, height: 1600, channels: 3, background: "red" },
+    })
+      .webp()
+      .toBuffer();
+    new FrameStore(home).saveFull(sessionId, frameId, full);
+    const wide = (await thumbs.path(sessionId, frameId, 1280)) as string;
+    expect(await sharp(wide).metadata()).toMatchObject({ width: 1280, height: 800 });
+    const [r] = await sharp(wide).removeAlpha().raw().toBuffer();
+    expect(r).toBeGreaterThan(200);
+    expect(
+      await sharp((await thumbs.path(sessionId, frameId, 640)) as string).metadata(),
+    ).toMatchObject({
+      width: 640,
+      height: 400,
+    });
+    expect(await thumbs.path(sessionId, frameId, 500)).toBeUndefined();
+  });
+
   it("returns no thumbnail for missing or invalid frame ids", async () => {
     const { sessionId, thumbs } = await setup();
     expect(await thumbs.path(sessionId, ulid())).toBeUndefined();

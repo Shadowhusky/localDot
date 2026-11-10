@@ -7,6 +7,7 @@ import {
   CREDENTIALS_DESCRIPTION,
   DoneModelInput,
   FOLLOW_UP_TOOL_DESCRIPTION,
+  type GuestAccess,
   MAX_BATCH_STEPS,
   MAX_DRAG_MS,
   MODEL_SCREEN,
@@ -24,6 +25,7 @@ import {
   ASK_FORM_GUIDANCE,
   DONE_TOOL_DESCRIPTION,
   HUMAN_INPUT_GUIDANCE,
+  REQUEST_FIX_DESCRIPTION,
 } from "@localdot/protocol/guidance";
 import { z } from "zod";
 
@@ -115,6 +117,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "(such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in " +
     "the note what they need to do. For passwords and codes, ask with ask_user fields instead. Hand over a " +
     "sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",
+  request_fix: REQUEST_FIX_DESCRIPTION,
   remember:
     'Add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping), or append to today\'s daily notes (file "notes"), which are searchable but not loaded into later tasks.',
   recall:
@@ -142,8 +145,9 @@ function jsonSchema(schema: z.ZodType): Record<string, unknown> {
 export function codexTools(
   descriptions: Record<ToolName, string> = CODEX_TOOL_DESCRIPTIONS,
   research = false,
+  guest?: GuestAccess,
 ): McpToolDescriptor[] {
-  return offeredTools(research).map((name) => ({
+  return offeredTools(research, guest).map((name) => ({
     name,
     description: descriptions[name],
     inputSchema: jsonSchema(

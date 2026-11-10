@@ -396,6 +396,12 @@
   min-width: 140px;
   margin-inline-start: auto;
 }
+.onboarding-skip + .onboarding-primary {
+  margin-inline-start: 0;
+}
+.onboarding-footer .onboarding-skip {
+  margin-inline-start: auto;
+}
 
 .onboarding-model .ui-group-row-label,
 .onboarding-fast .ui-choice-label {
@@ -552,7 +558,8 @@
     max(calc(var(--spacing) * 6), var(--home-foot));
 }
 
-.onboarding-foot .onboarding-primary {
+.onboarding-foot .onboarding-primary,
+.onboarding-foot .onboarding-skip {
   width: 100%;
   margin: 0;
 }

@@ -53,7 +53,11 @@ export function claudeCodeSteps(
         { ...install, state: "done", detail: version },
         checking
           ? { ...signIn, ...looking }
-          : { ...signIn, state: "todo", detail: "Not signed in" },
+          : {
+              ...signIn,
+              state: "todo",
+              detail: status.separate ? "This dot's account isn't signed in" : "Not signed in",
+            },
       ];
     case "signed_in":
       return [
@@ -61,7 +65,10 @@ export function claudeCodeSteps(
         {
           ...signIn,
           state: "done",
-          detail: status.plan ? `Signed in · ${planName(status.plan)} plan` : "Signed in",
+          detail: [
+            status.separate ? "Signed in on this dot" : "Signed in",
+            ...(status.plan ? [`${planName(status.plan)} plan`] : []),
+          ].join(" · "),
         },
       ];
   }

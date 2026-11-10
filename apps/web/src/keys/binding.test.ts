@@ -212,6 +212,54 @@ describe("valueProblem", () => {
   });
 });
 
+describe("valueProblem for words that aren't a key", () => {
+  const anthropic = `sk-ant-${"api"}03-${"a1B2".repeat(10)}`;
+  it("refuses spaces inside a model key or a bearer token", () => {
+    expect(valueProblem("please also check the logs", "llm")).toBeDefined();
+    expect(valueProblem("abc def ghi", "http", { format: "bearer" })).toBeDefined();
+    expect(valueProblem("Token abcdefgh", "http", { format: "raw" })).toBeUndefined();
+    expect(valueProblem("correct horse battery", "secret")).toBeUndefined();
+  });
+  it("refuses, over a saved key, what reads as a message", () => {
+    expect(
+      valueProblem("please also check logs", "http", { format: "raw", replacing: true }),
+    ).toBeDefined();
+    expect(
+      valueProblem("Token abcd1234", "http", { format: "raw", replacing: true }),
+    ).toBeUndefined();
+  });
+  it("over a saved key, takes only what looks like a token", () => {
+    const over = (format?: string) => ({ ...(format ? { format } : {}), replacing: true });
+    for (const [value, kind, format] of [
+      ["pleasecheckthelogs", "http", "bearer"],
+      ["yes-go-ahead", "http", "raw"],
+      ["checklogs please", "http", "raw"],
+      ["thanks-dot!", "http", "basic-user"],
+      ["just-a-word", "llm", undefined],
+    ] as const)
+      expect(valueProblem(value, kind, over(format)), value).toBeDefined();
+    expect(valueProblem(`tok_${"a1".repeat(10)}`, "http", over("bearer"))).toBeUndefined();
+    expect(valueProblem(`Token ${"a1".repeat(10)}`, "http", over("raw"))).toBeUndefined();
+    expect(valueProblem("pleasecheckthelogs", "http", { format: "bearer" })).toBeUndefined();
+  });
+  it("over a saved DeepSeek key, takes only what looks like one", () => {
+    const over = { provider: "deepseek", replacing: true };
+    expect(valueProblem("thanks-dot!", "llm", over)).toMatch(/DeepSeek/);
+    expect(valueProblem(`sk-${"0a1b".repeat(8)}`, "llm", over)).toBeUndefined();
+  });
+  it("over a saved model key, takes only what looks like that provider's key", () => {
+    const over = { provider: "anthropic", replacing: true };
+    expect(valueProblem(anthropic, "llm", over)).toBeUndefined();
+    expect(valueProblem("not-an-anthropic-key-value", "llm", over)).toMatch(/Anthropic/);
+    expect(
+      valueProblem("not-an-anthropic-key-value", "llm", { provider: "anthropic" }),
+    ).toBeUndefined();
+    expect(
+      valueProblem("any7thing-goes-here", "llm", { provider: "mistral", replacing: true }),
+    ).toBeUndefined();
+  });
+});
+
 describe("Claude plan tokens", () => {
   const SENTENCE =
     "Claude plan tokens can't be used here: Anthropic doesn't allow other apps to sign in with them. To use your plan, choose Claude Code (your plan) in Settings, or add an Anthropic API key.";

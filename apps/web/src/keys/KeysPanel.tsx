@@ -37,6 +37,14 @@ export const keysDescription = (health: KeydHealth | null) =>
 const HELD = "Keys are held until the audit log works again";
 const LOCKED = "Saved keys are locked until you unlock them";
 
+// Why no key can be saved just now, if one can't.
+export function keysUnavailable(health: KeydHealth | null): string | undefined {
+  if (!health) return "Checking key protection";
+  if (!health.online) return "Key protection is off";
+  if (health.audit?.ok === false) return HELD;
+  return vaultLocked(health) ? LOCKED : undefined;
+}
+
 // What a passphrase vault is, said where it asks for its passphrase.
 export const LOCKED_TEXT =
   "Your saved keys and passwords are kept in a file only your passphrase opens. They lock each time the computer running localDot restarts, and dot can't use them until you unlock them. Sites already signed in keep working.";
@@ -100,15 +108,7 @@ export function KeysPanel({
     (health.online && keys.metadataReady === false && keys.keys.length === 0 && !keys.loadError);
   // With no key saved yet, the form is what the section is for.
   const formShown = adding || (!loading && keys.keys.length === 0);
-  const unavailable = !health
-    ? "Checking key protection"
-    : offline
-      ? "Key protection is off"
-      : held
-        ? HELD
-        : locked
-          ? LOCKED
-          : undefined;
+  const unavailable = keysUnavailable(health);
 
   // Asked for a key for a provider, Keys opens the form and brings it into view.
   useLayoutEffect(() => {

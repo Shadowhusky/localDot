@@ -1,4 +1,9 @@
-import type { ComputerOperation, SelfTestReport } from "@localdot/protocol";
+import type {
+  ComputerOperation,
+  ComputerUpdateFailure,
+  ComputerUpdateProgress,
+  SelfTestReport,
+} from "@localdot/protocol";
 
 export type Scale = 1 | 2;
 
@@ -28,6 +33,9 @@ export interface CellSummary {
   needsFreshStart?: true;
   // The start, update or stop going on, from when the daemon began it.
   operation?: ComputerOperation;
+  // The stage of an update under way, and how the last one ended if it didn't work.
+  updateProgress?: ComputerUpdateProgress;
+  updateFailure?: ComputerUpdateFailure;
   id: string;
   state: CellState;
   scale: Scale;
@@ -91,6 +99,8 @@ export interface BrowserCellRecord {
   kind: "browser";
   id: string;
   parentCellId: string;
+  // A conversation's own browser; absent for the computer's main one.
+  slot?: string;
   createdAt: string;
   scale: Scale;
   keydPort: number;

@@ -306,6 +306,7 @@ test.describe("first run", () => {
       page.getByRole("heading", { name: "Which web browser should dot use?" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: "Skip for now" }).click();
     await expect(page.getByRole("heading", { name: "You're all set." })).toBeVisible();
     await expect(page.getByText(phone ? "Studio" : "Chat", { exact: true })).toBeVisible();
     expect(await page.evaluate((key) => localStorage.getItem(key), VIEWS_TRIED_KEY)).toBeNull();

@@ -55,6 +55,7 @@ import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { ConversationMenu } from "./ConversationMenu.tsx";
 import { ConversationPeek, type Peek } from "./ConversationPeek.tsx";
 import { adds, SelectAll, SelectionActions } from "./ConversationSelection.tsx";
+import { fileConversations } from "./conversation-leave.ts";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import { LiveDeck } from "./LiveDeck.tsx";
 import { useConversationSelection } from "./useConversationSelection.ts";
@@ -285,10 +286,13 @@ export function ConversationList({
     setPeek(null);
     setAction(row);
   };
-  // The cards, day headings, rows and the foot all glide to their new places together.
+  // The cards, day headings, rows and the foot all glide to their new places together. In the
+  // popover what a search finds shows at once.
   useFlip(
-    sheet ? body : NO_BODY,
-    [...live.map((row) => row.entry.sessionId), ...flat.map((item) => item.key)].join(" "),
+    body,
+    sheet || !found
+      ? [...live.map((row) => row.entry.sessionId), ...flat.map((item) => item.key)].join(" ")
+      : "results",
   );
   const swipes = (row: ConversationRow) => {
     const pinned = !!row.entry.pinned;
@@ -438,7 +442,7 @@ export function ConversationList({
                 key={item.key}
                 ref={windowed.measure}
                 data-index={index}
-                data-flip={sheet ? `day ${item.label}` : undefined}
+                data-flip={`day ${item.label}`}
                 role="presentation"
                 className="conversations-day"
               >
@@ -509,7 +513,8 @@ export function ConversationList({
               key={id}
               ref={windowed.measure}
               data-index={index}
-              data-flip={sheet ? id : undefined}
+              data-flip={id}
+              data-conversation={id}
               aria-rowindex={ordered.indexOf(row) + 1}
               id={optionId(row)}
               role="row"
@@ -694,7 +699,12 @@ export function ConversationList({
             setRenaming({ id: action.entry.sessionId, name: action.title, was: action.title });
         }}
         onOrganize={(change) => {
-          if (action) void organize(action, change);
+          if (action)
+            fileConversations(
+              [action.entry.sessionId],
+              change,
+              () => void organize(action, change),
+            );
         }}
         onLook={(entry, look) => {
           organizeConversation(api, entry.sessionId, { look }).catch(() =>
@@ -723,10 +733,8 @@ export function ConversationList({
         conversations={deleting}
         anchor={actionAnchor}
         onClose={() => setDeleting(null)}
-        onDeleted={(sessions) => {
-          onDeleted?.(sessions);
-          selection.drop(sessions);
-        }}
+        onDeleted={onDeleted}
+        onRowsGone={selection.drop}
       />
       {selection.selecting ? (
         <SelectionActions
@@ -745,8 +753,6 @@ export function ConversationList({
     </div>
   );
 }
-
-const NO_BODY = { current: null };
 
 // The rail header's way to the recent conversations: a popover from the button.
 export function ConversationsButton(props: Omit<ConversationListProps, "open">) {

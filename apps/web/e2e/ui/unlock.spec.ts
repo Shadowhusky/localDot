@@ -3,8 +3,8 @@ import { TOKEN } from "../fixtures/start-ui-fixture.ts";
 import { nestedKeys } from "../settings-ui.ts";
 import { chatRail, expect, runAt, test } from "./harness.ts";
 
-// Saved keys locked behind their passphrase: the chat's Unlock card, Keys lit up from it, and a
-// link straight there, at desktop and phone widths in both appearances.
+// Saved keys locked behind their passphrase: the chat's Unlock card, and Keys lit up from a link
+// straight there, at desktop and phone widths in both appearances.
 runAt("c14", "c39", "w39");
 
 const PASSPHRASE = "correct horse battery";
@@ -64,10 +64,15 @@ test("the chat asks for the passphrase in a card, says when it's wrong, and goes
   }
 });
 
-test("Open Keys lights the unlock form in Settings", async ({ page, ui }, testInfo) => {
+test("the link to Keys lights the unlock form in Settings", async ({ page, ui }, testInfo) => {
   await ui.open("keys-locked");
-  const rail = await chatRail(page);
-  await rail.getByRole("button", { name: "Open Keys", exact: true }).click();
+  // The app is up, so what the address says next is heard.
+  await expect(
+    (await chatRail(page)).getByRole("region", { name: "Unlock your saved keys" }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.location.hash = "settings=keys&tip=unlock";
+  });
   const keys = nestedKeys(page);
   const form = keys.getByRole("form", { name: "Unlock saved keys" });
   await expect(form).toBeVisible();

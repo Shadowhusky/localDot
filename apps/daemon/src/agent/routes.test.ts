@@ -561,6 +561,108 @@ describe("agent user routes", () => {
     ).toBe(204);
     expect(await plain).toEqual({ declined: true, by: "user" });
   });
+  it("a card's Not now reaches the task, once, and only for a card that is up", async () => {
+    const f = await setup();
+    const open = f.session.raiseBlocker({ kind: "keys_locked" });
+    const path = endpoint(`blockers/${open?.blockerId}/dismiss`);
+    expect((await f.send("POST", path)).status).toBe(204);
+    expect(f.session.openBlockers).toEqual([]);
+    expect((await f.send("POST", path)).status).toBe(409);
+    const required = f.session.raiseBlocker(
+      { kind: "model", reason: "model refused" },
+      { required: true },
+    );
+    expect((await f.send("POST", endpoint(`blockers/${required?.blockerId}/dismiss`))).status).toBe(
+      409,
+    );
+  });
+  it("a model card's choice goes to the runner, and takes nothing but a model", async () => {
+    const f = await setup();
+    const retryOnModel = vi.fn(async () => {});
+    Object.assign(f.deps.runner, { retryOnModel });
+    const open = f.session.raiseBlocker(
+      { kind: "model", reason: "model refused" },
+      { required: true },
+    );
+    const path = endpoint(`blockers/${open?.blockerId}/model`);
+    const model = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
+    expect((await f.send("POST", path, { model, text: "Hello" })).status).toBe(400);
+    expect((await f.send("POST", path, { model })).status).toBe(204);
+    expect(retryOnModel).toHaveBeenCalledWith(SESSION, model, expect.any(AbortSignal));
+    expect(
+      (await f.send("POST", endpoint("blockers/01M6R97SHHND5784EZZXSYSBGD/model"), { model }))
+        .status,
+    ).toBe(409);
+  });
+  it("only the owner's own message lifts their Not now on a card", async () => {
+    const f = await setup();
+    const key = { kind: "key", id: "openai", problem: "rejected" } as const;
+    f.session.dismissBlocker(f.session.raiseBlocker(key)?.blockerId ?? "");
+    const guest = new Hono();
+    guest.use("*", async (c, next) => {
+      c.set("remoteGrant", { id: "guest" } as never);
+      await next();
+    });
+    agentRoutes(guest, f.deps);
+    const said = await guest.request(`http://127.0.0.1:4747${endpoint("messages")}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "steer", text: "hello" }),
+    });
+    expect(said.status).toBe(202);
+    expect(f.session.raiseBlocker(key)).toBeUndefined();
+    expect((await f.send("POST", endpoint("messages"), { kind: "steer", text: "hi" })).status).toBe(
+      202,
+    );
+    expect(f.session.raiseBlocker(key)).toBeDefined();
+  });
+  it("hears when the owner starts a fix from a card, for a card that is up", async () => {
+    const f = await setup();
+    const open = f.session.raiseBlocker({ kind: "keys_locked" });
+    const use = vi.spyOn(f.session, "useBlocker");
+    expect((await f.send("POST", endpoint(`blockers/${open?.blockerId}/use`))).status).toBe(204);
+    expect(use).toHaveBeenCalledWith(open?.blockerId);
+    expect((await f.send("POST", endpoint("blockers/01M6R97SHHND5784EZZXSYSBGD/use"))).status).toBe(
+      409,
+    );
+  });
+  it("forgets a card's fix when the owner's try failed", async () => {
+    const f = await setup();
+    const open = f.session.raiseBlocker({ kind: "keys_locked" });
+    const release = vi.spyOn(f.session, "releaseBlocker");
+    expect((await f.send("DELETE", endpoint(`blockers/${open?.blockerId}/use`))).status).toBe(204);
+    expect(release).toHaveBeenCalledWith(open?.blockerId);
+  });
+  it("a shared link's guest gains nothing from a card", async () => {
+    const f = await setup();
+    const retryOnModel = vi.fn(async () => {});
+    Object.assign(f.deps.runner, { retryOnModel });
+    const guest = new Hono();
+    guest.use("*", async (c, next) => {
+      c.set("remoteGrant", { id: "guest" } as never);
+      await next();
+    });
+    agentRoutes(guest, f.deps);
+    const open = f.session.raiseBlocker({ kind: "keys_locked" });
+    const post = (action: string, body?: unknown) =>
+      guest.request(`http://127.0.0.1:4747${endpoint(`blockers/${open?.blockerId}/${action}`)}`, {
+        method: "POST",
+        ...(body === undefined
+          ? {}
+          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      });
+    expect((await post("dismiss")).status).toBe(403);
+    expect((await post("use")).status).toBe(403);
+    const released = await guest.request(
+      `http://127.0.0.1:4747${endpoint(`blockers/${open?.blockerId}/use`)}`,
+      { method: "DELETE" },
+    );
+    expect(released.status).toBe(403);
+    expect(f.session.openBlockers).toHaveLength(1);
+    const model = { provider: "anthropic", model: "claude-opus-5-5", key: "anthropic" };
+    expect((await post("model", { model })).status).toBe(403);
+    expect(retryOnModel).not.toHaveBeenCalled();
+  });
   it("keeps a task's own model, and sends a message's model on to its turn", async () => {
     const f = await setup();
     const reached = vi.fn();
@@ -624,50 +726,164 @@ describe("agent user routes", () => {
       queued: true,
     });
   });
-  it("answers a side question for the user alone, redacted, one at a time, saying why it can't", async () => {
-    const f = await setup();
-    const gate = deferred();
-    const sideAnswer = vi.fn(async (_id: string, question: string) => {
-      await gate.promise;
-      return { answer: `About: ${question}`, provider: "claude-code", model: "haiku" };
+  describe("side questions", () => {
+    const REPLY = {
+      status: "found" as const,
+      sources: [],
+      links: [],
+      spend: {
+        usd: 0.002,
+        limitUSD: 0.25,
+        inputTokens: 10,
+        outputTokens: 2,
+        plan: false,
+        taskUSD: 0.002,
+      },
+    };
+    const lines = async (reply: Response) =>
+      (await reply.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    it("answers for the user alone, redacted, one at a time, saying why it can't", async () => {
+      const f = await setup();
+      const gate = deferred();
+      const sideAnswer = vi.fn(async (_id: string, question: string) => {
+        await gate.promise;
+        return {
+          ...REPLY,
+          answer: `About: ${question}`,
+          provider: "claude-code",
+          model: "haiku",
+        };
+      });
+      f.deps.runner.sideAnswer = sideAnswer;
+      const asked = f.send("POST", endpoint("side-question"), {
+        question: "Is credential-fixture safe?",
+      });
+      await vi.waitFor(() => expect(sideAnswer).toHaveBeenCalledOnce());
+      const again = await f.send("POST", endpoint("side-question"), { question: "And now?" });
+      expect(again.status).toBe(409);
+      gate.resolve();
+      const reply = await asked;
+      expect(reply.status).toBe(200);
+      expect(reply.headers.get("content-type")).toBe("application/x-ndjson");
+      expect(await lines(reply)).toEqual([
+        {
+          ...REPLY,
+          answer: "About: Is [redacted] safe?",
+          provider: "claude-code",
+          model: "haiku",
+        },
+      ]);
+      // Nothing reaches the task: no message, no event.
+      expect(f.events).toEqual([]);
+      expect(f.session.delivered).toBe(0);
+      for (const question of ["", " ", "x".repeat(2001), `key sk-ant-api03-${"a".repeat(90)}`])
+        expect((await f.send("POST", endpoint("side-question"), { question })).status).toBe(400);
+      expect(
+        (await f.send("POST", "/api/agent/sessions/nope/side-question", { question: "Hi" })).status,
+      ).toBe(400);
+      sideAnswer.mockRejectedValueOnce(new SideQuestionError(409, "no-spare-model"));
+      const none = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+      expect([none.status, await none.text()]).toEqual([409, "no-spare-model"]);
+      sideAnswer.mockRejectedValueOnce(
+        new SideQuestionError(502, "no-answer", "answered 400: Input must be a list"),
+      );
+      const refused = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+      expect([refused.status, await refused.text()]).toEqual([
+        502,
+        "no-answer\nanswered 400: Input must be a list",
+      ]);
+      sideAnswer.mockRejectedValueOnce(new AgentError(404, "no such task"));
+      expect((await f.send("POST", endpoint("side-question"), { question: "Hi" })).status).toBe(
+        404,
+      );
+      expect(sideAnswer).toHaveBeenCalledTimes(4);
     });
-    f.deps.runner.sideAnswer = sideAnswer;
-    const asked = f.send("POST", endpoint("side-question"), {
-      question: "Is credential-fixture safe?",
+    it("sends each step as it comes, then the answer, all of it redacted", async () => {
+      const f = await setup();
+      const leak = "credential-fixture";
+      const gate = deferred();
+      f.deps.runner.sideAnswer = vi.fn(async (_id, _question, _signal, onEvent) => {
+        onEvent?.({ progress: `Reading ${leak}…` });
+        await gate.promise;
+        onEvent?.({
+          handover: { provider: "anthropic", model: "opus" },
+          partial: `Only ${leak} so far`,
+        });
+        return {
+          ...REPLY,
+          answer: `It is ${leak}`,
+          provider: "anthropic",
+          model: "opus",
+          failed: { model: "haiku", reason: `said ${leak}` },
+        };
+      });
+      const reply = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+      expect(reply.status).toBe(200);
+      const reader = (reply.body as ReadableStream<Uint8Array>).getReader();
+      const first = new TextDecoder().decode((await reader.read()).value);
+      expect(JSON.parse(first)).toEqual({ progress: "Reading [redacted]…" });
+      gate.resolve();
+      let rest = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        rest += new TextDecoder().decode(value);
+      }
+      const [handover, answer] = rest
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(handover).toEqual({
+        handover: { provider: "anthropic", model: "opus" },
+        partial: "Only [redacted] so far",
+      });
+      expect(answer).toMatchObject({
+        answer: "It is [redacted]",
+        failed: { model: "haiku", reason: "said [redacted]" },
+      });
     });
-    await vi.waitFor(() => expect(sideAnswer).toHaveBeenCalledOnce());
-    const again = await f.send("POST", endpoint("side-question"), { question: "And now?" });
-    expect(again.status).toBe(409);
-    gate.resolve();
-    const reply = await asked;
-    expect(reply.status).toBe(200);
-    expect(await reply.json()).toEqual({
-      answer: "About: Is [redacted] safe?",
-      provider: "claude-code",
-      model: "haiku",
+    it("says in the last line what stopped it once it was under way", async () => {
+      const f = await setup();
+      f.deps.runner.sideAnswer = vi.fn(async (_id, _question, _signal, onEvent) => {
+        onEvent?.({ progress: "Reading…" });
+        throw new SideQuestionError(502, "no-answer", "answered 529: Overloaded");
+      });
+      const reply = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+      expect(reply.status).toBe(200);
+      expect(await lines(reply)).toEqual([
+        { progress: "Reading…" },
+        { problem: "no-answer", status: 502, reason: "answered 529: Overloaded" },
+      ]);
     });
-    // Nothing reaches the task: no message, no event.
-    expect(f.events).toEqual([]);
-    expect(f.session.delivered).toBe(0);
-    for (const question of ["", " ", "x".repeat(2001), `key sk-ant-api03-${"a".repeat(90)}`])
-      expect((await f.send("POST", endpoint("side-question"), { question })).status).toBe(400);
-    expect(
-      (await f.send("POST", "/api/agent/sessions/nope/side-question", { question: "Hi" })).status,
-    ).toBe(400);
-    sideAnswer.mockRejectedValueOnce(new SideQuestionError(409, "no-spare-model"));
-    const none = await f.send("POST", endpoint("side-question"), { question: "Hi" });
-    expect([none.status, await none.text()]).toEqual([409, "no-spare-model"]);
-    sideAnswer.mockRejectedValueOnce(
-      new SideQuestionError(502, "no-answer", "answered 400: Input must be a list"),
-    );
-    const refused = await f.send("POST", endpoint("side-question"), { question: "Hi" });
-    expect([refused.status, await refused.text()]).toEqual([
-      502,
-      "no-answer\nanswered 400: Input must be a list",
-    ]);
-    sideAnswer.mockRejectedValueOnce(new AgentError(404, "no such task"));
-    expect((await f.send("POST", endpoint("side-question"), { question: "Hi" })).status).toBe(404);
-    expect(sideAnswer).toHaveBeenCalledTimes(4);
+    it("stops the work when the user cancels, and frees the task for another question", async () => {
+      const f = await setup();
+      let stopped: AbortSignal | undefined;
+      const gone = deferred();
+      f.deps.runner.sideAnswer = vi.fn(async (_id, _question, signal, onEvent) => {
+        stopped = signal;
+        onEvent?.({ progress: "Reading…" });
+        signal.addEventListener("abort", () => gone.resolve());
+        await gone.promise;
+        throw signal.reason;
+      });
+      const reply = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+      await (reply.body as ReadableStream<Uint8Array>).cancel();
+      await gone.promise;
+      expect(stopped?.aborted).toBe(true);
+      f.deps.runner.sideAnswer = vi.fn(async () => ({
+        ...REPLY,
+        answer: "Again",
+        provider: "p",
+        model: "m",
+      }));
+      await vi.waitFor(async () => {
+        const next = await f.send("POST", endpoint("side-question"), { question: "Hi" });
+        expect(next.status).toBe(200);
+      });
+    });
   });
   it("a message hands control back and reaches the model as steering before it resumes", async () => {
     const f = await setup();
@@ -679,7 +895,7 @@ describe("agent user routes", () => {
       (await f.send("POST", endpoint("messages"), { kind: "followup", text: "next" })).status,
     ).toBe(202);
     expect(f.session.controlHeld).toBe(false);
-    expect(await taking).toEqual({ by: "user", note: "next" });
+    expect(await taking).toEqual({ by: "user", note: "next", movedOn: true });
     expect(f.events.findLast((event) => event.type === "message.user")?.data).toMatchObject({
       kind: "steer",
       text: "next",
@@ -816,9 +1032,9 @@ describe("research mode routes", () => {
     const f = await setup();
     const task = `/api/cells/${CELL}/agent`;
     expect((await f.send("POST", task, { task: "Compare", mode: "research" })).status).toBe(202);
-    expect(f.start.mock.calls[0]?.[3]).toEqual({ research: true });
+    expect(f.start.mock.calls[0]?.[3]).toEqual({ research: true, byOwner: true });
     expect((await f.send("POST", task, { task: "Book" })).status).toBe(202);
-    expect(f.start.mock.calls[1]).toHaveLength(3);
+    expect(f.start.mock.calls[1]?.[3]).toEqual({ byOwner: true });
     expect((await f.send("POST", task, { task: "Book", mode: "deep" })).status).toBe(400);
     expect(f.start).toHaveBeenCalledTimes(2);
   });
@@ -1819,7 +2035,7 @@ describe("private saved-key answer verification", () => {
 });
 
 describe("shared-link task enforcement", () => {
-  async function guest() {
+  async function guest(apps?: boolean) {
     const f = await setup();
     const links = new RemoteLinks(f.home);
     const model = {
@@ -1834,13 +2050,55 @@ describe("shared-link task enforcement", () => {
       maxTasks: 1,
       taskBudgetUSD: 2,
       model,
+      ...(apps === undefined ? {} : { apps }),
     });
     const stopRun = vi.fn(async (_id: string) => true);
     f.deps.runner.stopRun = stopRun;
+    const eventLog = new EventLog(f.home);
+    // The conversation the owner's app shows, which has only the owner's task; the link's own
+    // task (SESSION, once started) is a conversation of its own.
+    const owners = ulid();
+    const shown: { current: string | null } = { current: owners };
+    const begin = vi.fn(() => {
+      shown.current = null;
+    });
+    const select = vi.fn((id: string) => {
+      shown.current = id;
+      return true;
+    });
+    const entry = (id: string, title: string) => ({
+      sessionId: id,
+      firstTask: id,
+      title,
+      updatedAt: at,
+      tasks: 1,
+      sessions: [id],
+    });
+    f.deps.conversations = {
+      current: () => shown.current,
+      begin,
+      select,
+      has: (id: string) => id === owners || id === SESSION,
+      latest: (id: string) => id,
+      chain: (id: string) => ({ sessions: [id], more: false }),
+      snapshot: () => ({ sessions: shown.current ? [shown.current] : [], more: false }),
+      snapshotOf: (id: string | null) => ({ sessions: id ? [id] : [], more: false }),
+      list: (
+        _max?: number,
+        archived = false,
+        keep: (sessions: readonly string[]) => boolean = () => true,
+      ) => {
+        const all = [
+          entry(owners, archived ? "The owner's archived plans" : "The owner's private plans"),
+          entry(SESSION, archived ? "The guest's archived chat" : "The guest's chat"),
+        ].filter((each) => keep(each.sessions));
+        return { conversations: all, archivedCount: all.length };
+      },
+    } as unknown as NonNullable<AgentRoutesDeps["conversations"]>;
     const app = createApp({
       token: "o".repeat(43),
       port: 4750,
-      eventLog: new EventLog(f.home),
+      eventLog,
       agent: f.deps,
       remoteAccess: {
         links,
@@ -1853,8 +2111,175 @@ describe("shared-link task enforcement", () => {
         headers: { authorization: `Bearer ${issued.token}`, "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-    return { ...f, links, model, issued, send, stopRun };
+    const read = (path: string, bearer = issued.token) =>
+      app.request(`http://127.0.0.1:4750${path}`, {
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+    return {
+      ...f,
+      app,
+      eventLog,
+      ownerToken: "o".repeat(43),
+      links,
+      model,
+      issued,
+      send,
+      read,
+      shown,
+      owners,
+      begin,
+      select,
+      stopRun,
+    };
   }
+  it("lists a link only the conversations it started, archived or not, and leaves the owner's list alone", async () => {
+    const f = await guest();
+    for (const path of ["/api/conversations", "/api/conversations?archived=1"]) {
+      const none = await f.read(path);
+      expect(none.status, path).toBe(200);
+      expect(((await none.json()) as { conversations: unknown[] }).conversations, path).toEqual([]);
+    }
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    for (const path of ["/api/conversations", "/api/conversations?archived=1"]) {
+      const reply = await f.read(path);
+      expect(reply.status, path).toBe(200);
+      const text = await reply.text();
+      expect(text, path).toContain("guest's");
+      expect(text, path).not.toContain("plans");
+      const owner = await f.read(path, f.ownerToken);
+      expect(await owner.text(), path).toContain("plans");
+    }
+  });
+  it("keeps a link's conversation on show its own, never the owner's", async () => {
+    const f = await guest();
+    const sessions = async (token?: string) =>
+      ((await (await f.read("/api/conversation", token)).json()) as { sessions: string[] })
+        .sessions;
+    const shown = () => sessions();
+    // A link with no task of its own lands in a new conversation, whatever the owner shows.
+    expect(await shown()).toEqual([]);
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    // Its task starts a conversation of its own and leaves the owner's on show as it was.
+    expect(f.start).toHaveBeenCalledWith(
+      CELL,
+      "Hello",
+      expect.any(AbortSignal),
+      expect.objectContaining({ continues: null }),
+    );
+    expect(f.shown.current).toBe(f.owners);
+    expect(await shown()).toEqual([SESSION]);
+    // Its New chat and its choices are its own too.
+    expect((await f.send("/api/conversation/new", undefined)).status).toBe(200);
+    expect(await shown()).toEqual([]);
+    expect((await f.send("/api/conversation/continue", { sessionId: f.owners })).status).toBe(404);
+    expect((await f.send("/api/conversation/continue", { sessionId: SESSION })).status).toBe(200);
+    expect(await shown()).toEqual([SESSION]);
+    expect(f.begin).not.toHaveBeenCalled();
+    expect(f.select).not.toHaveBeenCalled();
+    expect(f.shown.current).toBe(f.owners);
+    // The owner's own app is unchanged.
+    expect(await sessions(f.ownerToken)).toEqual([f.owners]);
+  });
+  it("shows a link a task's state only for its own task, never the one the owner's app shows", async () => {
+    const f = await guest();
+    const snapshot = () => f.read(`/api/agent/sessions/${SESSION}`);
+    const refused = await snapshot();
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).not.toContain(CELL);
+    expect((await f.read(`/api/agent/sessions/${SESSION}`, f.ownerToken)).status).toBe(200);
+    f.shown.current = SESSION;
+    expect((await snapshot()).status).toBe(403);
+    for (const part of ["history", "events", "stream"])
+      expect((await f.read(`/api/sessions/${f.owners}/${part}`)).status, part).toBe(403);
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    expect((await snapshot()).status).toBe(200);
+  });
+  it("starts a link's task with the owner's apps only when the link allows them", async () => {
+    const f = await guest(true);
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    expect(f.start).toHaveBeenCalledWith(
+      CELL,
+      "Hello",
+      expect.any(AbortSignal),
+      expect.objectContaining({ guest: { apps: true } }),
+    );
+    expect(f.links.authenticate(f.issued.token)?.apps).toBe(true);
+  });
+  it("asks no side question for a link, even about its own task", async () => {
+    const f = await guest();
+    f.deps.runner.sideAnswer = vi.fn();
+    expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
+    expect(f.links.owns(f.issued.grant.id, SESSION)).toBe(true);
+    const asked = await f.send(`/api/agent/sessions/${SESSION}/side-question`, {
+      question: "What has it done so far?",
+    });
+    expect(asked.status).toBe(403);
+    expect(f.deps.runner.sideAnswer).not.toHaveBeenCalled();
+  });
+  it("lets a link continue only a task it may read, so it can't pull in another conversation", async () => {
+    const f = await guest();
+    const theirs = ulid();
+    expect(
+      (await f.send(`/api/cells/${CELL}/agent`, { task: "Hello", continues: theirs })).status,
+    ).toBe(403);
+    expect(f.start).not.toHaveBeenCalled();
+    expect(f.links.list()[0]?.tasks).toBe(0);
+    expect(
+      (await f.send(`/api/cells/${CELL}/agent`, { task: "Hello", continues: null })).status,
+    ).toBe(202);
+    expect(f.start).toHaveBeenCalledWith(
+      CELL,
+      "Hello",
+      expect.any(AbortSignal),
+      expect.objectContaining({ continues: null }),
+    );
+  });
+  it("names none of the owner's keys to a shared link's guest, whichever way the log is read", async () => {
+    const f = await guest();
+    const task = f.eventLog.createSession("task");
+    f.links.reserve(f.issued.grant.id).finish(task);
+    f.eventLog.append(task, {
+      type: "blocker.raise",
+      agent: "main",
+      data: {
+        blockerId: ulid(),
+        blocker: { kind: "key", id: "private-stripe", problem: "rejected" },
+        by: "localdot",
+      },
+    });
+    f.eventLog.append(task, {
+      type: "key.use",
+      agent: "keyd",
+      data: {
+        secretId: "private-github",
+        host: "api.example",
+        method: "GET",
+        path: "/",
+        decision: "allow",
+      },
+    });
+    const read = async (token: string, path: string, accept?: string) => {
+      const reply = await f.app.request(`http://127.0.0.1:4750${path}`, {
+        headers: { authorization: `Bearer ${token}`, ...(accept ? { accept } : {}) },
+      });
+      expect(reply.status).toBe(200);
+      return reply.text();
+    };
+    for (const [path, accept] of [
+      [`/api/sessions/${task}/events`, undefined],
+      [`/api/sessions/${task}/events`, "application/x-ndjson"],
+      [`/api/sessions/${task}/history`, undefined],
+    ] as const) {
+      const shown = await read(f.issued.token, path, accept);
+      expect(shown).toContain("blocker.raise");
+      expect(shown).toContain("key.use");
+      expect(shown).not.toContain("private-stripe");
+      expect(shown).not.toContain("private-github");
+      const owned = await read(f.ownerToken, path, accept);
+      expect(owned).toContain("private-stripe");
+      expect(owned).toContain("private-github");
+    }
+  });
   it("pins the owner's model and minimum budget, atomically counts successful tasks, and blocks owner session mutations", async () => {
     const f = await guest();
     f.settings.put({ taskBudgetUSD: 1 });
@@ -1865,9 +2290,11 @@ describe("shared-link task enforcement", () => {
     expect(f.start).not.toHaveBeenCalled();
     expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Hello" })).status).toBe(202);
     expect(f.start).toHaveBeenCalledWith(CELL, "Hello", expect.any(AbortSignal), {
+      continues: null,
       main: f.model,
       budgetUSD: 1,
       sender: f.issued.grant.id,
+      guest: { apps: false },
     });
     expect(f.links.owns(f.issued.grant.id, SESSION)).toBe(true);
     expect((await f.send(`/api/cells/${CELL}/agent`, { task: "Another" })).status).toBe(403);
@@ -1917,5 +2344,65 @@ describe("shared-link task enforcement", () => {
         data: expect.objectContaining({ state: "cancelled", reason: "stopped" }),
       }),
     );
+  });
+});
+
+describe("a shared link's models", () => {
+  it("offers every model the owner's Claude Code plan lists now, by name, and switches to one", async () => {
+    const plan = {
+      state: "signed_in" as const,
+      version: "2.1.322",
+      plan: "max",
+      models: [
+        { id: "default", name: "Default (recommended)" },
+        { id: "opus", name: "Opus 5.5" },
+        { id: "sonnet", name: "Sonnet 5.5" },
+      ],
+      checkedAt: 1,
+    };
+    const f = await setup({
+      claudeCode: { status: vi.fn(async () => plan), check: vi.fn(async () => plan) },
+    });
+    f.settings.put({ main: { provider: "claude-code", model: "default" } });
+    const links = new RemoteLinks(f.home);
+    const issued = links.create({
+      label: "Guest",
+      expiresInHours: null,
+      maxTasks: 3,
+      taskBudgetUSD: 2,
+      model: { provider: "claude-code", model: "default" },
+      chooseModel: true,
+      models: [{ provider: "claude-code", model: "default" }],
+    });
+    const app = createApp({
+      token: "o".repeat(43),
+      port: 4750,
+      eventLog: new EventLog(f.home),
+      agent: f.deps,
+      remoteAccess: {
+        links,
+        authenticate: (token?: string) => links.authenticate(token),
+      } as unknown as RemoteAccess,
+    });
+    const headers = { authorization: `Bearer ${issued.token}` };
+    const session = (await (
+      await app.request("http://127.0.0.1:4750/api/remote-session", { headers })
+    ).json()) as {
+      models: { provider: string; model: string }[];
+      names: { provider: string; model: string; name: string }[];
+    };
+    expect(session.models.map((row) => row.model)).toEqual(["default", "opus", "sonnet"]);
+    expect(session.names.map((row) => row.name)).toEqual([
+      "Default (recommended)",
+      "Opus 5.5",
+      "Sonnet 5.5",
+    ]);
+    const chosen = await app.request("http://127.0.0.1:4750/api/remote-session/model", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ index: 1 }),
+    });
+    expect(chosen.status).toBe(204);
+    expect(links.list()[0]?.model).toMatchObject({ provider: "claude-code", model: "opus" });
   });
 });

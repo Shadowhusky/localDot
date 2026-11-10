@@ -20,6 +20,7 @@ export interface ShareLink {
   replay: boolean;
   settings: boolean;
   chooseModel: boolean;
+  apps: boolean;
   model: AgentRoleChoice;
   models: AgentRoleChoice[];
 }
@@ -34,6 +35,7 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
   const [chooseModel, setChooseModel] = useState(false);
   const [replay, setReplay] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [apps, setApps] = useState(false);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -89,6 +91,7 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
         chooseModel,
         replay,
         settings,
+        apps,
       });
       setLinks((old) => [...old, link]);
       setUrl(link.url);
@@ -118,7 +121,7 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
         <GroupHead title="Links for other people" />
         <GroupNote>
           Recipients use the same computer, files and conversation. Share only with people you
-          trust. Keys stay private; tasks can use the services you have enabled.
+          trust. Their tasks never get your memory, contacts or routines.
         </GroupNote>
       </header>
       <Group>
@@ -167,9 +170,16 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
         <Switch
           className="ui-group-row"
           label="Allow replays"
-          description="Includes past recordings of this computer."
+          description="Every task's full record: what was said, dot's thinking and its files, archived ones too."
           checked={replay}
           onCheckedChange={setReplay}
+        />
+        <Switch
+          className="ui-group-row"
+          label="Use your apps, keys and browser"
+          description="Their tasks can use your connected apps, saved keys and the web browser you're signed in to. Sign-ins saved on the computer itself, such as gh or git, work for every link."
+          checked={apps}
+          onCheckedChange={setApps}
         />
         <Switch
           className="ui-group-row"
@@ -258,6 +268,7 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
                         : `Expires ${new Date(link.expiresAt).toLocaleString()}`}{" "}
                   · {link.tasks}
                   {link.maxTasks === null ? " tasks" : ` / ${link.maxTasks} tasks`}
+                  {link.apps && " · Your apps, keys and browser"}
                 </p>
               </div>
               {!ended && (

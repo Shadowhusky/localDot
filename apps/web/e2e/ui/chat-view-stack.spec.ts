@@ -307,13 +307,16 @@ test.describe("minimal mode", () => {
     await expect(tip).toContainText("dot is tucked away");
     await expect(tip).toContainText("Bring it back any time from this menu.");
     await shot(page, ui, "tucked");
-    await expect(page.locator(".dot-strip")).toHaveAttribute("data-hidden");
+    // A task at work still says so above the composer, in a typing bubble in dot's place.
+    await expect(page.locator(".dot-strip")).toHaveAttribute("data-typing");
+    await expect(page.locator(".dot-strip .dot-typing")).toHaveText(/\S/);
+    await expect(page.locator(".dot-strip .narrator-dot")).toHaveCount(0);
     await expect(page.locator(".phone-chat-bar .phone-title-sub-in")).toBeVisible();
     await page.mouse.click(180, 500);
     await expect(tip).toHaveCount(0);
 
     await page.reload();
-    await expect(page.locator(".dot-strip")).toHaveAttribute("data-hidden");
+    await expect(page.locator(".dot-strip")).toHaveAttribute("data-typing");
     // The list's dots stay.
     await page.getByRole("button", { name: "Back to conversations" }).click();
     await expect(page.locator(".phone-row .conversation-avatar").first()).toBeVisible();
@@ -324,7 +327,7 @@ test.describe("minimal mode", () => {
     await expect(more).toBeInViewport({ ratio: 1 });
     await more.click();
     await page.getByRole("menuitem", { name: "Show dot" }).click();
-    await expect(page.locator(".dot-strip")).not.toHaveAttribute("data-hidden");
+    await expect(page.locator(".dot-strip")).not.toHaveAttribute("data-typing");
     await expect(page.locator(".presence-frame[data-shown]")).toBeVisible();
   });
 

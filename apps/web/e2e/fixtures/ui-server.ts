@@ -1,5 +1,13 @@
 import { createECDH, webcrypto } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
@@ -39,6 +47,7 @@ import {
   type Sealed,
   SealedLogin,
   type SessionOrigin,
+  STALL,
   type TaskModelSelection,
   type ToolName,
   toBase64url,
@@ -71,7 +80,7 @@ import { PlanUsageStore } from "../../../daemon/src/agent/plan-usage.ts";
 import { RecentActivity } from "../../../daemon/src/agent/recent-activity.ts";
 import { ResearchLog } from "../../../daemon/src/agent/research.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
-import { AgentError } from "../../../daemon/src/agent/runner.ts";
+import { AgentError, computerUp } from "../../../daemon/src/agent/runner.ts";
 import {
   approvalDraft,
   authorizePrepared,
@@ -85,7 +94,6 @@ import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
-import { sideQuestionEvents, sideQuestionPrompt } from "../../../daemon/src/agent/side-question.ts";
 import { plainForm } from "../../../daemon/src/agent/tools/ask.ts";
 import { createApp } from "../../../daemon/src/app.ts";
 import { AppEvents, appEventsRoute } from "../../../daemon/src/app-events.ts";
@@ -131,17 +139,22 @@ import { createNotify } from "../../../daemon/src/notify/wiring.ts";
 import { writeManifest } from "../../../daemon/src/recorder/manifest.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
+import { linkConversation, RemoteLinks } from "../../../daemon/src/remote/links.ts";
+import type { RemoteAccess } from "../../../daemon/src/remote/manager.ts";
 import { stopAll } from "../../../daemon/src/routines/stop-all.ts";
 import { RoutineStore, scheduleOf, toRoutine } from "../../../daemon/src/routines/store.ts";
 import { SearchFeed } from "../../../daemon/src/search/search-feed.ts";
 import { SearchIndex } from "../../../daemon/src/search/search-index.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
+import { OverviewTracker } from "../../../daemon/src/sessions/overview.ts";
 import { Thumbnails } from "../../../daemon/src/sessions/thumbs.ts";
 import { readStatic } from "../../../daemon/src/static-files.ts";
 import { UI_CSP } from "../../../daemon/src/static-ui.ts";
 import { attachUpgradeRouter } from "../../../daemon/src/upgrade-router.ts";
 import { fakeDockerRoom } from "./fake-docker-room.ts";
 import { fakeDots } from "./fake-dots.ts";
+import { fixtureSideAgent } from "./side-agent.ts";
+import { speechFixture } from "./speech-fixture.ts";
 import {
   bootStep,
   type CellKind,
@@ -298,10 +311,23 @@ const SETTINGS: Record<string, AgentSettings> = {
 // A screen's client repaints one still frame, so the picture is steady while the stream stays
 // live. It asks the fixture whether its screen's picture is dropped (POST /__qa/picture/drop): then
 // its video goes, as Selkies' does while it reconnects, and comes back with a new track on resume.
-// It takes focus for its input as it starts, as Selkies' attach does.
+// It takes focus for its input as it starts, as Selkies' attach does. A load the fixture was told to
+// stall (POST /__qa/stream-stall) stops where Selkies' client would: `socket` with its socket never
+// open and the track WebKit's client makes as it starts, `refused` with its socket shut, `frame` with
+// its socket open and that track silent, `track` with its socket open and no track yet, as Chromium's
+// client until its first frame. `slow` gets there, a step each ?ms=.
 const clientJs = (paint: string) => `
 const keys=document.createElement('input');document.body.append(keys);keys.focus({preventScroll:true});
+const stalled=(stall)=>{
+  const transport={readyState:stall==='refused'?3:stall==='socket'||stall.startsWith('slow')?0:1,send(){},close(){this.readyState=3}};
+  window.selkiesTransport=transport;window.videoChunksReceived=0;
+  if(stall==='track'||stall.startsWith('slow'))return transport;
+  const silent=document.createElement('canvas');silent.width=64;silent.height=64;
+  video.srcObject=silent.captureStream(0);video.play().catch(()=>{});
+  return transport;
+};
 let seen={};
+window.videoChunksReceived=0;
 const canvas=document.createElement('canvas');canvas.width=2560;canvas.height=1600;
 const ctx=canvas.getContext('2d');${paint}
 const screen=location.pathname.includes('/browser/')?'browser':'desktop';
@@ -313,7 +339,14 @@ const show=(down)=>{
   video.srcObject=canvas.captureStream(10);video.play().catch(()=>{});
 };
 const ask=()=>fetch('/__qa/picture',{cache:'no-store'}).then((r)=>r.json()).then((s)=>{seen=s;show(s[screen])}).catch(()=>{});
-ask();setInterval(ask,1000);
+setInterval(()=>{if(video?.srcObject&&!window.fixtureStall)window.videoChunksReceived++},100);
+const stall=window.fixtureStall;
+if(stall&&!stall.startsWith('slow'))stalled(stall);
+else if(stall){
+  const step=Number(stall.slice(5));const transport=stalled(stall);
+  setTimeout(()=>{transport.readyState=1},step);
+  setTimeout(()=>{ask();setInterval(ask,1000)},step*2);
+}else{ask();setInterval(ask,1000);}
 `;
 // The desktop shows the last task's window, or (POST /__qa/desktop/home) its empty home screen,
 // with its dock as Plank draws it at 2x (cells/desktop's localdot-glass): a shelf from 774 to 1786
@@ -341,6 +374,14 @@ ctx.fillText('example.test/orders',360,90);ctx.fillStyle='#1f2a37';ctx.font='bol
 ctx.fillText('Orders',320,400);ctx.fillStyle='#c7ccd3';
 for(let n=0;n<8;n++)ctx.fillRect(320,500+n*120,1400-(n%3)*240,56);
 };setInterval(page,100);`);
+// A conversation's own web browser: another page, with a green toolbar, so which browser the stage
+// shows reads from one pixel.
+const OWN_BROWSER_JS = clientJs(`const page=()=>{
+ctx.fillStyle='#f6f7f4';ctx.fillRect(0,0,2560,1600);ctx.fillStyle='#cfe8d6';ctx.fillRect(0,0,2560,150);
+ctx.fillStyle='#ffffff';ctx.fillRect(320,40,1920,70);ctx.fillStyle='#5b6470';ctx.font='40px sans-serif';
+ctx.fillText('example.test/invoices',360,90);ctx.fillStyle='#1f2a37';ctx.font='bold 96px sans-serif';
+ctx.fillText('Invoices',320,400);
+};setInterval(page,100);`);
 
 let skew = 0;
 // While held, session time moves only by the seed's own steps, so a seeded task lasts the same
@@ -349,6 +390,8 @@ let heldAt: number | undefined;
 const base = monotonicClock();
 const clock = { nowMicros: () => (heldAt ?? base.nowMicros()) + skew };
 const log = new EventLog(HOME, clock);
+// Made before anything is seeded, as the daemon makes it before any task, so it follows every task.
+const overview = new OverviewTracker(log, (id) => index.card(id));
 const conversations = new Conversations(HOME, log);
 let lastTurnModel: string | undefined;
 const cells = new FakeOrchestrator();
@@ -357,20 +400,35 @@ const tickets = new TicketRegistry();
 // running (an instance) or not; a restart is one instance stopping and the next starting.
 const browserCellId = ulid();
 let browserInstance: string | null = null;
+// A conversation's own web browser, beside the computer's main one, and the tasks that use it.
+const ownSlot = ulid();
+const ownBrowserCellId = ulid();
+let ownInstance: string | null = null;
+const ownTasks = new Set<string>();
 const browserChanged = new Set<(parentCellId: string) => void>();
 const browserStreams = new BrowserStreams({
   parents: cells,
   browser: {
-    endpoints: (parentCellId): ReadyBrowser | undefined =>
-      parentCellId === cellId && browserInstance
+    keysOf: (parentCellId) => (parentCellId === cellId ? [cellId, ownSlot] : [parentCellId]),
+    endpoints: (key): ReadyBrowser | undefined =>
+      key === cellId && browserInstance
         ? {
             browserCellId,
-            parentCellId,
+            parentCellId: key,
             instance: browserInstance,
             browserd: { baseUrl: "http://owned-browser.invalid", token: "" },
             stream: { baseUrl: "http://owned-browser.invalid", authorization: "" },
           }
-        : undefined,
+        : key === ownSlot && ownInstance
+          ? {
+              browserCellId: ownBrowserCellId,
+              parentCellId: cellId,
+              slot: ownSlot,
+              instance: ownInstance,
+              browserd: { baseUrl: "http://own-browser.invalid", token: "" },
+              stream: { baseUrl: "http://own-browser.invalid", authorization: "" },
+            }
+          : undefined,
     subscribe(listener) {
       browserChanged.add(listener);
       return () => browserChanged.delete(listener);
@@ -382,8 +440,20 @@ function runBrowser(on: boolean): void {
   browserInstance = on ? ulid() : null;
   for (const listener of browserChanged) listener(cellId);
 }
+function runOwnBrowser(on: boolean): void {
+  ownInstance = on ? ulid() : null;
+  for (const listener of browserChanged) listener(cellId);
+}
 // Which screens' pictures are dropped (POST /__qa/picture/drop).
 const pictureDown = { desktop: false, browser: false };
+// What the next ticket requests, client pages and client loads of a screen meet
+// (POST /__qa/stream-stall), and when a restarting daemon answers again (POST /__qa/daemon/restart).
+const stalls = {
+  ticket: { desktop: 0, browser: 0 },
+  page: { desktop: 0, browser: 0 },
+  client: { desktop: [] as string[], browser: [] as string[] },
+};
+let daemonBackAt = 0;
 let desktopHome = false;
 const live = new LiveSessions();
 const frames = new FrameStore(HOME);
@@ -512,14 +582,38 @@ cells.start = async (id) => {
   startCell(id, "start");
 };
 
-// Update: the computer stops, comes back on the new version and is ready a moment later.
+// Update: the computer stops, comes back on the new version and is ready a moment later, or, after
+// POST /__qa/update?hold=1, waits for POST /__qa/update/step at each stage.
+const NO_STREAM = { connection: "none" as const, viewers: 0, lastUpstreamAt: null };
+let holdUpdate = false;
+let updateRefusal: string | undefined;
 async function updateCell(id: string): Promise<void> {
   const c = cells.get(id);
   if (!c?.updateAvailable) throw new ComputerUpdateRefused("Your computer is up to date.");
-  const { updateAvailable: _available, ...rest } = c;
-  const none = { connection: "none" as const, viewers: 0, lastUpstreamAt: null };
-  cells.emit({ ...rest, state: "stopping", updating: true, stream: none });
-  setTimeout(() => cells.emit({ ...rest, state: "starting", updating: true, stream: none }), 800);
+  const { updateAvailable: _available, updateFailure: _failure, ...rest } = c;
+  if (updateRefusal) throw new ComputerUpdateRefused(updateRefusal);
+  if (holdUpdate) {
+    cells.emit({ ...rest, updating: true });
+    return;
+  }
+  cells.emit({
+    ...rest,
+    state: "stopping",
+    updating: true,
+    updateProgress: { stage: "stop" },
+    stream: NO_STREAM,
+  });
+  setTimeout(
+    () =>
+      cells.emit({
+        ...rest,
+        state: "starting",
+        updating: true,
+        updateProgress: { stage: "start" },
+        stream: NO_STREAM,
+      }),
+    800,
+  );
   setTimeout(
     () =>
       cells.emit({
@@ -532,6 +626,8 @@ async function updateCell(id: string): Promise<void> {
 }
 
 let keys = SAMPLE_KEYS;
+// What the own endpoint (POST /__qa/own-endpoint) lists as its models.
+let endpointModels: { id: string }[] = [{ id: "gpt-6.1-sol" }, { id: "gpt-6.1-terra" }];
 const settingsStore = new SettingsStore(HOME);
 // QA_DOT_NAME names this localDot, as the user tells it apart from their others.
 settingsStore.put({
@@ -548,6 +644,10 @@ const ledger = { limit: 5, spent: 4 };
 let budgetHold: "task" | "day" | undefined;
 let raisedDuringPause = false;
 let session: AgentSession | undefined;
+// The computer coming back clears what waited on it, as the real runner hears it.
+cells.subscribe((cell) => {
+  if (computerUp(cell)) session?.clearBlockers((blocker) => blocker.kind === "computer");
+});
 // The user's own hold on the computer, with no task, while it is the live session.
 let holder: AgentSession | undefined;
 // The seeded running task's open step, which /__qa/step-end finishes.
@@ -1679,6 +1779,262 @@ function seedSeveral(s: AgentSession) {
   conversations.organize(s.id, { look: ["mortarboard", "round-glasses", "star-pin"] });
 }
 
+// QA_FLEET=<n> seeds n conversations beside the sample task for the overview, cycling through eight:
+// one on screen in the web browser, two waiting on the user (a send to approve, a question), others
+// at work, waiting for the computer and at rest, and two that ended today. Each has screenshots of
+// its own (ui-assets/overview), a look, and most a plan. POST /__qa/fleet?n= adds more, and
+// /__qa/fleet/run?every=<ms> has the tasks at work take a step with a new screenshot in turn.
+const FLEET_PICTURES = new Map(
+  readdirSync(join(ASSETS, "overview"))
+    .filter((name) => name.endsWith(".webp"))
+    .sort()
+    .map((name) => [name.replace(/\.webp$/, ""), readFileSync(join(ASSETS, "overview", name))]),
+);
+const FLEET_ROLL = [...FLEET_PICTURES.values()];
+interface FleetTask {
+  title: string;
+  picture: string;
+  look: Wearable[];
+  persona: PersonaId;
+  ago: number;
+  state?: ConversationLive["state"];
+  onScreen?: boolean;
+  screen: "desktop" | "browser";
+  doing?: string;
+  ending?: "done" | "error";
+  said: string;
+  plan?: { text: string; status: "todo" | "doing" | "done" }[];
+  needs?: "approval" | "question";
+  steps: number;
+}
+const FLEET: FleetTask[] = [
+  {
+    title: "Plan three autumn days in Kyoto",
+    picture: "screen-travel",
+    look: ["mortarboard", "round-glasses"],
+    persona: "research",
+    ago: 4,
+    state: "working",
+    onScreen: true,
+    screen: "browser",
+    doing: "Reading about Higashiyama's temples",
+    said: "Kyoto's sights sit in clusters, so each day can keep to one area on foot.",
+    plan: [
+      { text: "Read up on the districts", status: "done" },
+      { text: "Check hours and entry fees", status: "doing" },
+      { text: "Lay out the three days", status: "todo" },
+      { text: "Make the PDF", status: "todo" },
+    ],
+    steps: 14,
+  },
+  {
+    title: "Reply to the boiler engineer",
+    picture: "screen-mail",
+    look: ["suit", "bow"],
+    persona: "everyday",
+    ago: 2,
+    state: "needs-you",
+    screen: "browser",
+    said: "I've written back to Tom saying Tuesday morning works.",
+    needs: "approval",
+    steps: 6,
+  },
+  {
+    title: "Breakout, starring dot",
+    picture: "screen-code",
+    look: ["hoodie", "sunglasses"],
+    persona: "coder",
+    ago: 6,
+    state: "working",
+    screen: "desktop",
+    doing: "Playing a round to check the score",
+    said: "The game runs. Now I'm playing a round to check the bricks.",
+    plan: [
+      { text: "Draw the bricks and paddle", status: "done" },
+      { text: "Bounce the ball", status: "done" },
+      { text: "Keep the score", status: "done" },
+      { text: "Test the bricks", status: "doing" },
+      { text: "Add sound", status: "todo" },
+    ],
+    steps: 31,
+  },
+  {
+    title: "Find a plumber near me with good reviews",
+    picture: "screen-map",
+    look: ["beanie", "monocle"],
+    persona: "everyday",
+    ago: 1,
+    state: "needs-you",
+    screen: "browser",
+    said: "Four plumbers nearby have 4.6 stars or more.",
+    needs: "question",
+    steps: 9,
+  },
+  {
+    title: "A poster for Blue Hour",
+    picture: "screen-poster",
+    look: ["beret", "scarf"],
+    persona: "design",
+    ago: 3,
+    state: "waiting-for-computer",
+    screen: "desktop",
+    said: "I'll go with deep blue and brass, and a moon made of circles.",
+    steps: 12,
+  },
+  {
+    title: "Where my money went",
+    picture: "screen-chart",
+    look: ["suit", "bow-tie"],
+    persona: "finance",
+    ago: 12,
+    state: "idle",
+    screen: "browser",
+    said: "Rent and eating out are most of it. The chart is on the page.",
+    plan: [
+      { text: "Read the export", status: "done" },
+      { text: "Sort into categories", status: "done" },
+      { text: "Draw the chart", status: "done" },
+    ],
+    steps: 22,
+  },
+  {
+    title: "Standing desks under £400",
+    picture: "screen-shop",
+    look: ["cowboy-hat", "lei"],
+    persona: "everyday",
+    ago: 95,
+    ending: "done",
+    screen: "browser",
+    said: "The best five are in a table, cheapest first.",
+    steps: 18,
+  },
+  {
+    title: "Clean up my Downloads folder",
+    picture: "screen-terminal",
+    look: ["propeller-cap", "overalls"],
+    persona: "everyday",
+    ago: 180,
+    ending: "error",
+    screen: "desktop",
+    said: "The disk filled up before I could move the installers.",
+    steps: 7,
+  },
+];
+const fleetPicture = (name: string) => FLEET_PICTURES.get(name) ?? (FLEET_ROLL[0] as Buffer);
+// The fleet's tasks at work, and each one's next screenshot.
+const fleetWorking: { id: string; turn: number }[] = [];
+let fleetSeeded = 0;
+function seedFleet(count: number) {
+  for (let n = 0; n < count; n++) {
+    const at = fleetSeeded++;
+    const task = FLEET[at % FLEET.length] as FleetTask;
+    const round = Math.floor(at / FLEET.length);
+    const title = round ? `${task.title} (${round + 1})` : task.title;
+    backdated((task.ago + round * 7) * 60_000, () => {
+      const id = log.createSession(title);
+      const append = (type: string, data: Record<string, unknown>, step?: string) =>
+        log.append(id, { agent: "main", type, data, ...(step ? { step } : {}) } as never);
+      append("session.start", { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", title });
+      append("message.user", { messageId: ulid(), kind: "task", text: title });
+      append("persona.choice", { persona: task.persona, by: "auto" });
+      append("message.assistant", { messageId: ulid(), text: task.said });
+      if (task.plan)
+        append("plan.set", {
+          items: task.plan.map((item, index) => ({ id: `p${index}`, ...item })),
+        });
+      if (task.screen === "browser")
+        append("screen.switch", {
+          screen: "browser",
+          cellId: browserCellId,
+          geometry: { w: 1280, h: 800, scale: 2 },
+          by: "agent",
+          revision: 1,
+        });
+      for (let step = 1; step <= task.steps; step++) {
+        const stepId = ulid();
+        append(
+          "step.start",
+          { kind: "gui", ...(task.doing ? { intent: task.doing } : {}) },
+          stepId,
+        );
+        if (step === task.steps) {
+          const frameId = ulid();
+          frames.save(id, frameId, fleetPicture(task.picture));
+          append("observe", { frameId, width: 1280, height: 800 }, stepId);
+        }
+        append("step.end", { status: "ok" }, stepId);
+      }
+      if (task.needs === "approval")
+        append("approval.request", {
+          approvalId: ulid(),
+          generation: 1,
+          revision: 1,
+          expiresAt: Date.now() + 3_600_000,
+          actionClass: "send",
+          risk: "medium",
+          title: "Send the reply to Tom Hartley",
+          kind: "send",
+          preview: { fields: [] },
+        });
+      if (task.needs === "question")
+        append("ask.request", {
+          askId: ulid(),
+          question: "Weekday mornings or Saturday?",
+          options: [
+            { key: "A", text: "Weekday mornings" },
+            { key: "B", text: "Saturday" },
+          ],
+          allowText: true,
+        });
+      if (task.ending) {
+        append("message.assistant", { messageId: ulid(), text: task.said });
+        append("session.end", { reason: task.ending });
+      } else {
+        alongside.set(id, {
+          state: task.state ?? "working",
+          since: new Date().toISOString(),
+          onScreen: !!task.onScreen && round === 0,
+          ...(task.doing ? { activity: task.doing } : {}),
+          persona: task.persona,
+        });
+        if (task.state === "working") fleetWorking.push({ id, turn: 0 });
+      }
+      conversations.organize(id, { look: task.look });
+    });
+  }
+}
+if (Number(env.QA_FLEET ?? 0) > 0) seedFleet(Number(env.QA_FLEET));
+let fleetRun: ReturnType<typeof setInterval> | undefined;
+// One task of the fleet at work takes a step with a new screenshot, in turn, as the computer's one
+// lease hands its screen from task to task.
+function fleetStep() {
+  const next = fleetWorking.shift();
+  if (!next) return;
+  fleetWorking.push(next);
+  next.turn++;
+  const stepId = ulid();
+  const frameId = ulid();
+  frames.save(next.id, frameId, FLEET_ROLL[next.turn % FLEET_ROLL.length] as Buffer);
+  log.append(next.id, {
+    agent: "main",
+    type: "step.start",
+    data: { kind: "gui" },
+    step: stepId,
+  } as never);
+  log.append(next.id, {
+    agent: "main",
+    type: "observe",
+    data: { frameId, width: 1280, height: 800 },
+    step: stepId,
+  } as never);
+  log.append(next.id, {
+    agent: "main",
+    type: "step.end",
+    data: { status: "ok" },
+    step: stepId,
+  } as never);
+}
+
 // QA_LIBRARY=<n> seeds n ended tasks over the last four months for Replay's library: long and short
 // titles, every ending, and videos from a few megabytes to gigabytes (sparse files, so nothing is
 // written). As retention would have, a video older than 30 days is gone and its screenshots stay.
@@ -2142,7 +2498,7 @@ const agent: AgentRoutesDeps = {
     },
   ],
   conversations,
-  keyModels: { list: async () => [{ id: "gpt-6.1-sol" }, { id: "gpt-6.1-terra" }] },
+  keyModels: { list: async () => endpointModels },
   canChangeMemory: () => !session?.controlHeld && !killSwitch.isBusy(cellId),
   taskMutationReady: (owner) =>
     owner === session &&
@@ -2155,23 +2511,25 @@ const agent: AgentRoutesDeps = {
       await endLive();
       return true;
     },
-    // A side question answered from the task's own record, as the fast model reads it.
-    sideAnswer: async (id, question) => {
-      const { prompt } = sideQuestionPrompt(sideQuestionEvents(log.logFile(id)), question);
-      const step = /^\[\w+\] (.+)$/m.exec(prompt)?.[1];
-      return {
-        answer: step
-          ? `dot is still on its first step, **${step}**. Nothing has been bought or sent yet.`
-          : "Nothing has happened in this task yet.",
-        provider: "openai",
-        model: "gpt-6-luna",
-      };
-    },
+    // The real side agent, reading the task's own log and frames, with only its model scripted.
+    sideAnswer: fixtureSideAgent({ home: HOME, log, frames }),
     // A task's own model, kept as the real runner keeps it.
     taskModel: (id) => conversations.model(conversations.latest(id)),
     chooseTaskModel: (id, ref) => {
       conversations.chooseModel(conversations.latest(id), ref);
       return ref;
+    },
+    // The model card's choice, as the real runner takes a stalled task to it.
+    retryOnModel: async (id, ref) => {
+      if (!session || session.id !== id) throw new Error("no such task");
+      lastTurnModel = ref.model;
+      conversations.chooseModel(conversations.latest(id), ref);
+      effects.push(`model:${ref.model}`);
+      session.clearBlockers((blocker) => blocker.kind === "model" || blocker.kind === "key", {
+        movedTo: { provider: ref.provider, model: ref.model },
+      });
+      session.setStatus("running");
+      session.append("agent.state", { state: "thinking" });
     },
     messageTurn: async (id, ref) => {
       lastTurnModel = ref.model;
@@ -2191,7 +2549,11 @@ const agent: AgentRoutesDeps = {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
       await endLive();
-      const continues = conversations.current() ?? undefined;
+      // As the runner does: what the request names, else the conversation on show.
+      const continues =
+        options?.continues === undefined
+          ? (conversations.current() ?? undefined)
+          : (options.continues ?? undefined);
       session = newSession(
         task.slice(0, 60),
         task,
@@ -2200,7 +2562,8 @@ const agent: AgentRoutesDeps = {
         options?.revises,
         options?.research ? (settingsStore.get().research ?? DEFAULT_RESEARCH_BUDGET) : undefined,
       );
-      conversations.adopt(session.id);
+      // A shared link's task is a conversation of its own, never the owner's on show.
+      if (!options?.guest) conversations.adopt(session.id);
       budgetHold = undefined;
       raisedDuringPause = false;
       selection = planSelection();
@@ -2326,6 +2689,18 @@ const agent: AgentRoutesDeps = {
       session.append("agent.state", { state: "thinking" });
     },
   } as AgentRoutesDeps["runner"],
+  autoContinue: {
+    cancel: (id) => {
+      if (!session || id !== session.id) return false;
+      session.append("agent.state", {
+        state: "paused",
+        reason: "claude code plan limit reached",
+        autoContinue: { off: "cancelled" },
+      });
+      return true;
+    },
+    cancelAll: () => {},
+  },
   desktop: () => undefined,
   manual: (owner, _scope, screen) =>
     owner === session
@@ -2483,11 +2858,25 @@ const server: Server = createServer(
       return request.headers.get("cookie")?.includes("relay-access=fixture-only")
         ? Response.json({ token: TOKEN })
         : new Response("Unauthorized", { status: 401 });
+    if (Date.now() < daemonBackAt && !/^\/(__qa\/|owned-)/.test(url.pathname))
+      return new Response("restarting", { status: 503 });
+    const ticket = /\/(browser-)?stream-ticket$/.exec(url.pathname);
+    if (ticket && request.method === "POST") {
+      const screen = ticket[1] ? "browser" : "desktop";
+      if (stalls.ticket[screen] > 0) {
+        stalls.ticket[screen]--;
+        return new Response("not ready", { status: 503 });
+      }
+    }
     return app?.fetch(request, env) ?? new Response("starting", { status: 503 });
   }),
 );
 const upgraded = new Set<Duplex>();
 server.on("upgrade", (_req, peer) => {
+  if (Date.now() < daemonBackAt) {
+    peer.destroy();
+    return;
+  }
   upgraded.add(peer);
   peer.once("close", () => upgraded.delete(peer));
 });
@@ -2508,7 +2897,11 @@ const exportJobs = new ExportJobs({
       ? new ChromeRenderer({ origin: `http://127.0.0.1:${PORT}`, token: TOKEN })
       : fakeRenderer,
 });
-attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
+// QA_LINKS=1: shared links, kept as the daemon keeps them; POST /__qa/link makes one and answers
+// with its secret, which a guest's page signs in with.
+const links = env.QA_LINKS === "1" ? new RemoteLinks(HOME) : undefined;
+const guests = links && { links, authenticate: (given?: string) => links.authenticate(given) };
+attachUpgradeRouter(server, { port: PORT, token: TOKEN, ...(guests ? { guests } : {}) }, [
   exportsStreamRoute(exportJobs),
   cellStatusRoute(cells),
   cellStatusRoute(browserStreams, "browsers"),
@@ -2629,6 +3022,18 @@ const connectorHub = new ConnectorHub({
   links: connectorLinks,
   keys: async () => keys,
 });
+// dot takes up the message that moved on from its card, as it does for a question.
+log.subscribe((id, event) => {
+  if (event.type === "blocker.clear" && event.data.outcome === "moved_on" && session?.id === id)
+    readsMessage(session);
+});
+// A sign-in finishing clears what waited on it, as the real runner hears it from the hub.
+connectorHub.whenKeyChanges(() => {
+  session?.clearBlockers(
+    (blocker) => blocker.kind === "app" && connectorHub.isConnected(blocker.connector),
+  );
+});
+let dockerStarts = true;
 // An app's sign-in service, in memory: it answers discovery and registration as a real one does. The
 // page it hands the browser is recorded rather than opened, and GET /__qa/connect says where it
 // would send the user back, so a test approves by visiting that. The fixture stands in for keyd too,
@@ -2694,10 +3099,12 @@ const connectorSignIn = new ConnectorSignIn({
     return true;
   },
 });
+const speech = speechFixture();
 const routes = createApp({
   token: TOKEN,
   port: PORT,
   eventLog: log,
+  ...(guests ? { remoteAccess: guests as unknown as RemoteAccess } : {}),
   dots: dotsHere.deps,
   connectors: {
     hub: connectorHub,
@@ -2717,6 +3124,10 @@ const routes = createApp({
     update: updateCell,
     capacity: dotsHere.capacity,
     size: dockerRoom.sizes,
+    startRuntime: async () => {
+      effects.push("docker:start");
+      return dockerStarts;
+    },
   },
   desktop: realDesktop,
   accounts,
@@ -2730,7 +3141,11 @@ const routes = createApp({
     live,
     killSwitch,
     frames,
-    conversation: () => conversations.current(),
+    conversation: (link) =>
+      link && links
+        ? (linkConversation(links, conversations, link).sessions.at(-1) ?? null)
+        : conversations.current(),
+    owns: (link, sessionId) => !!links?.owns(link, sessionId),
   },
   agent,
   search: { index: searchIndex, feed: searchFeed },
@@ -2742,6 +3157,7 @@ const routes = createApp({
     recorder,
     index,
     thumbs: new Thumbnails(HOME, frames),
+    overview,
     live,
     publish: (event) => appEvents.publish(event),
   },
@@ -2749,8 +3165,9 @@ const routes = createApp({
   // QA_UI_DIR serves another build of the app, such as an earlier one to measure against.
   ui: { dir: env.QA_UI_DIR ?? fileURLToPath(new URL("../../dist", import.meta.url)) },
   notify: notify.routes,
-  // No speech model on the fixture's computer: the browser's own speech, or none, is used.
-  voice: { speech: () => null },
+  // No speech model on the fixture's computer until a test installs one: the browser's own speech,
+  // or none, is used.
+  voice: { speech: speech.speech, install: speech.install },
   routines: {
     store: routineStore,
     scheduler: { replan: planRoutines },
@@ -2998,37 +3415,61 @@ routes.post("/api/keys", async (c) => {
   const at = new Date().toISOString();
   const key = { ...binding, createdAt: at, updatedAt: at } as KeydRecord;
   keys = [...keys.filter((k) => k.id !== key.id), key];
+  const cleared = session?.clearBlockers(
+    (blocker) => blocker.kind === "key" && blocker.id === key.id,
+  );
+  if (cleared?.some((open) => open.required)) session?.post("resume", "");
   return c.json({ key, restart: false });
 });
 routes.delete("/api/keys/:id", (c) => {
   keys = keys.filter((k) => k.id !== c.req.param("id"));
   return c.body(null, 204);
 });
+// A client page: a page the fixture was told to fail answers 503 first.
+const clientPage = (
+  cell: string | undefined,
+  ticket: string | undefined,
+  screen: "desktop" | "browser",
+  script: string,
+) => {
+  if (!ticket || tickets.resolve(ticket) !== cell)
+    return new Response("unknown ticket", { status: 404 });
+  if (stalls.page[screen] > 0) {
+    stalls.page[screen]--;
+    return new Response("not ready", { status: 503 });
+  }
+  return new Response(
+    `<!doctype html><video id="videoStream" autoplay muted></video><script src="${script}"></script>`,
+    { headers: { "content-type": "text/html" } },
+  );
+};
+const clientScript = (screen: "desktop" | "browser", js: string) =>
+  new Response(
+    `window.fixtureStall=${JSON.stringify(stalls.client[screen].shift() ?? null)};${js}`,
+    {
+      headers: { "content-type": "text/javascript" },
+    },
+  );
 routes.get("/cells/:cell/desktop/:ticket/", (c) =>
-  tickets.resolve(c.req.param("ticket")) === c.req.param("cell")
-    ? c.html(
-        '<!doctype html><video id="videoStream" autoplay muted></video><script src="/owned-preview.js"></script>',
-      )
-    : c.text("unknown ticket", 404),
+  clientPage(c.req.param("cell"), c.req.param("ticket"), "desktop", "/owned-preview.js"),
 );
-routes.get("/owned-preview.js", (c) =>
-  c.body(DESKTOP_JS, 200, { "content-type": "text/javascript" }),
-);
+routes.get("/owned-preview.js", () => clientScript("desktop", DESKTOP_JS));
 browserViewerApi(routes, {
   cells: browserStreams,
   tickets,
   vendorDir: fileURLToPath(new URL("../../vendor/selkies", import.meta.url)),
+  browserOf: (sessionId) => (ownTasks.has(sessionId) ? ownSlot : cellId),
 });
 routes.get("/cells/:cell/browser/:ticket/", (c) =>
-  tickets.resolve(c.req.param("ticket")) === c.req.param("cell")
-    ? c.html(
-        '<!doctype html><video id="videoStream" autoplay muted></video><script src="/owned-browser.js"></script>',
-      )
-    : c.text("unknown ticket", 404),
+  clientPage(
+    c.req.param("cell"),
+    c.req.param("ticket"),
+    "browser",
+    c.req.param("cell") === ownBrowserCellId ? "/own-browser.js" : "/owned-browser.js",
+  ),
 );
-routes.get("/owned-browser.js", (c) =>
-  c.body(BROWSER_JS, 200, { "content-type": "text/javascript" }),
-);
+routes.get("/owned-browser.js", () => clientScript("browser", BROWSER_JS));
+routes.get("/own-browser.js", () => clientScript("browser", OWN_BROWSER_JS));
 routes.get("/__qa/picture", (c) => c.json({ ...pictureDown, home: desktopHome }));
 routes.get("/owned-desktop.webp", (c) =>
   c.body(readFileSync(env.QA_PICTURE ?? join(ASSETS, "frame-1.webp")), 200, {
@@ -3104,6 +3545,7 @@ function requestApproval(
   { always = false, repeat = 1, kind = "" } = {},
 ): string | undefined {
   if (!session?.generation) return "no brain";
+  const owned = session;
   if (kind === "port") {
     // An app's connection beyond the web, as the daemon asks about one keyd holds.
     void session.connections
@@ -3233,7 +3675,10 @@ function requestApproval(
           } as never),
       { signal: controller.signal, check: () => {}, revalidate: async () => true } as never,
     )
-    .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
+    .then((o) => {
+      effects.push(`approval:${JSON.stringify(o)}`);
+      if (o === "message" && owned) readsMessage(owned);
+    })
     .catch((e) => effects.push(`approval-error:${String(e)}`));
 }
 // Keyboard steps with the gateway's own labels: a key pressed five times, a held key, and a held
@@ -3542,6 +3987,17 @@ function liveActions(): string | undefined {
   );
   act(9000, "key", "Save the report", { kind: "key", combo: ["ctrl", "s"] });
 }
+// dot takes up a message that moved on from what it was waiting for, as the real brain does.
+function readsMessage(owned: AgentSession) {
+  setTimeout(() => {
+    if (owned.stopped) return;
+    owned.append("agent.state", { state: "thinking" });
+    owned.append("message.assistant", {
+      messageId: ulid(),
+      text: "Sample reply: I read your message and moved on.",
+    });
+  }, replyMs);
+}
 // A quick choice, asked as dot's ask_user tool asks one.
 function ask(): string | undefined {
   if (!session) return "no session";
@@ -3550,12 +4006,16 @@ function ask(): string | undefined {
     options: ["Markdown", "Plain text", "PDF"],
     recommended: 0,
   };
+  const owned = session;
   void session
     .askFields(
       plainForm(question, (text) => text),
       0,
     )
-    .then((a) => effects.push(`ask:${JSON.stringify(a)}`))
+    .then((a) => {
+      effects.push(`ask:${JSON.stringify(a)}`);
+      if (a.by === "message") readsMessage(owned);
+    })
     .catch((e) => effects.push(`ask-error:${String(e)}`));
 }
 // Questions with typed fields (design-v2/HITL.md §3), answered through the real answer route.
@@ -3759,14 +4219,16 @@ function askForm(name: string): string | undefined {
   const form = ASK_FORMS[name];
   if (!form) return `no question named ${name}; try ${Object.keys(ASK_FORMS).join(", ")}`;
   if (!session) return "no session";
+  const owned = session;
   void session
     .askFields(form, 0)
-    .then((a) =>
+    .then((a) => {
       effects.push(
         `ask:${JSON.stringify(a)}`,
         ...(a.secrets?.size ? [`ask-secrets:${a.secrets.size}`] : []),
-      ),
-    )
+      );
+      if (a.by === "message") readsMessage(owned);
+    })
     .catch((e) => effects.push(`ask-error:${String(e)}`));
 }
 // A field name, or a known localDot key, types into it through the real authorization.
@@ -3808,9 +4270,13 @@ function takeover(field?: string, known = false): string | undefined {
       .catch((e) => effects.push(`takeover-error:${String(e)}`));
     return;
   }
+  const owned = session;
   void session
     .takeover("login", "Please sign in to the sample site, then hand control back.")
-    .then((o) => effects.push(`takeover:${JSON.stringify(o)}`))
+    .then((o) => {
+      effects.push(`takeover:${JSON.stringify(o)}`);
+      if (o.movedOn) readsMessage(owned);
+    })
     .catch((e) => effects.push(`takeover-error:${String(e)}`));
 }
 function budget(scope: "task" | "day" = "task"): string | undefined {
@@ -3838,6 +4304,43 @@ function keysLocked(setup = false): string | undefined {
   });
   session.lockKeys();
 }
+// A card raised as the runner raises it: for a stall, nobody is left to hear about it.
+const STALLED_CARD = { required: true, tell: false } as const;
+// What stops the task for the user to fix, as the daemon notices it.
+function fix(kind: string): string | undefined {
+  if (!session) return "no session";
+  switch (kind) {
+    case "key":
+      session.raiseBlocker({ kind: "key", id: "anthropic-main", problem: "rejected" });
+      return;
+    case "app":
+      session.raiseBlocker({
+        kind: "app",
+        connector: "linear",
+        name: "Linear",
+        host: "mcp.linear.app",
+      });
+      return;
+    case "computer":
+      setCell("stopped");
+      session.raiseBlocker({ kind: "computer", state: "stopped" });
+      return;
+    case "computer-paused":
+      setCell("paused");
+      session.raiseBlocker({ kind: "computer", state: "paused" });
+      return;
+    case "runtime":
+      session.raiseBlocker({ kind: "runtime" });
+      return;
+    case "runtime-stalled":
+      session.setStatus("paused");
+      session.append("agent.state", { state: "paused", reason: STALL.runtime });
+      session.raiseBlocker({ kind: "runtime" }, STALLED_CARD);
+      return;
+    default:
+      return "unknown card";
+  }
+}
 // The ways a task stalls that the app must never leave silent.
 function stall(kind: string): string | undefined {
   if (!session) return "no session";
@@ -3855,16 +4358,50 @@ function stall(kind: string): string | undefined {
     session.setStatus("paused");
     session.append("agent.state", {
       state: "paused",
-      reason: "model refused",
+      reason: STALL.modelRefused,
       detail: "400: image input is not supported by this model",
     });
+    session.raiseBlocker(
+      {
+        kind: "model",
+        reason: STALL.modelRefused,
+        detail: "400: image input is not supported by this model",
+      },
+      STALLED_CARD,
+    );
+  } else if (kind === "plan-limit" || kind === "plan-limit-unknown") {
+    // As the daemon says it: the limit, then its wait for the plan to reset.
+    const reason = "claude code plan limit reached";
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason });
+    session.raiseBlocker({ kind: "model", reason }, STALLED_CARD);
+    session.append("agent.state", {
+      state: "paused",
+      reason,
+      autoContinue:
+        kind === "plan-limit"
+          ? { at: Date.now() + 95 * 60_000 }
+          : { at: Date.now() + 10 * 60_000, checking: true },
+    });
+  } else if (kind === "provider-limit") {
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: STALL.providerLimit });
+    session.raiseBlocker({ kind: "model", reason: STALL.providerLimit }, STALLED_CARD);
   } else if (kind === "key-reenter" || kind === "key-rebound") {
     session.setStatus("paused");
     session.append("agent.state", {
       state: "paused",
-      reason: kind === "key-rebound" ? "key changed outside localDot" : "key needs re-entering",
+      reason: kind === "key-rebound" ? STALL.keyRebound : STALL.keyReenter,
       detail: "anthropic-main",
     });
+    session.raiseBlocker(
+      {
+        kind: "key",
+        id: "anthropic-main",
+        problem: kind === "key-rebound" ? "rebound" : "reenter",
+      },
+      STALLED_CARD,
+    );
   } else if (kind === "keyd") {
     keydMode = "offline";
     session.setStatus("paused");
@@ -3926,6 +4463,13 @@ const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | un
   takeover: () => takeover(),
   budget: () => budget(),
   "keys-locked": () => keysLocked(),
+  "fix/key": () => fix("key"),
+  "fix/app": () => fix("app"),
+  "fix/computer": () => fix("computer"),
+  "fix/computer-paused": () => fix("computer-paused"),
+  "fix/runtime": () => fix("runtime"),
+  "fix/model": () => stall("model-refused"),
+  "fix/plan-limit": () => stall("plan-limit"),
   finish,
   "cell/starting": () => setCell("starting"),
   "cell/connecting": () => setCell("connecting"),
@@ -3944,11 +4488,92 @@ const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | un
 const reply = (problem: string | undefined) =>
   problem ? new Response(problem, { status: 409 }) : Response.json({ ok: true });
 
+// Moves the computer's speech install on; see speech-fixture.ts.
+routes.post("/__qa/speech", async (c) => {
+  speech.set(await c.req.json());
+  return reply(undefined);
+});
+
 // A new version of the computer becomes ready.
-routes.post("/__qa/update", () => {
-  const c = cells.get(cellId);
-  if (!c) return reply("no computer");
-  cells.emit({ ...c, updateAvailable: true });
+routes.post("/__qa/update", (c) => {
+  const cell = cells.get(cellId);
+  if (!cell) return reply("no computer");
+  holdUpdate = c.req.query("hold") === "1";
+  updateRefusal = c.req.query("refuse");
+  cells.emit({ ...cell, updateAvailable: true });
+  return reply(undefined);
+});
+// Moves a computer's update on by hand: ?stage=, with &share= and &detail=, while its state follows
+// (running through download, stopping or starting after). ?fail= ends it as that stage failing.
+routes.post("/__qa/update/step", (c) => {
+  const cell = cells.get(cellId);
+  if (!cell) return reply("no computer");
+  const stage = c.req.query("stage") as NonNullable<CellSummary["updateProgress"]>["stage"];
+  const share = c.req.query("share");
+  const detail = c.req.query("detail");
+  const fail = c.req.query("fail");
+  const {
+    updateAvailable: _a,
+    updating: _u,
+    updateProgress: _p,
+    updateFailure: _f,
+    operation: _o,
+    ...rest
+  } = cell;
+  if (fail) {
+    cells.emit({
+      ...rest,
+      state: (c.req.query("state") as CellSummary["state"]) ?? "ready",
+      ...(c.req.query("offered") === "0" ? {} : { updateAvailable: true as const }),
+      updateFailure: {
+        stage: fail as typeof stage,
+        message: c.req.query("message") ?? "Your computer couldn't be updated.",
+        at: Number(c.req.query("at") ?? 1000),
+      },
+    });
+    return reply(undefined);
+  }
+  if (!stage) {
+    cells.emit({
+      ...rest,
+      state: "ready",
+      stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
+    });
+    return reply(undefined);
+  }
+  const started = Number(c.req.query("elapsed") ?? 1000);
+  cells.emit({
+    ...rest,
+    state:
+      stage === "download" || stage === "reconnect"
+        ? "ready"
+        : stage === "stop" || stage === "keep" || stage === "replace"
+          ? "stopping"
+          : "starting",
+    ...(stage === "reconnect" ? {} : { updating: true as const }),
+    updateProgress: {
+      stage,
+      ...(share ? { share: Number(share) } : {}),
+      ...(detail ? { detail } : {}),
+    },
+    ...(stage === "download"
+      ? {}
+      : {
+          operation: {
+            kind: "update" as const,
+            step:
+              stage === "reconnect"
+                ? ("screen" as const)
+                : stage === "start"
+                  ? ("ready" as const)
+                  : ("install" as const),
+            startedAt: Date.now() - started,
+            elapsedMs: started,
+            expectedMs: 40_000,
+          },
+        }),
+    stream: stage === "download" ? rest.stream : NO_STREAM,
+  });
   return reply(undefined);
 });
 routes.post("/__qa/approval", async (c) => {
@@ -4073,6 +4698,31 @@ routes.post("/__qa/takeover", (c) =>
 );
 routes.post("/__qa/budget", (c) => reply(budget(c.req.query("scope") === "day" ? "day" : "task")));
 routes.post("/__qa/stall/:kind", (c) => reply(stall(c.req.param("kind"))));
+routes.post("/__qa/fix/:kind", (c) => reply(fix(c.req.param("kind"))));
+// The model answered again after a retry: what proves it worked.
+routes.post("/__qa/fix-model-answered", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.setStatus("running");
+  session.append("agent.state", { state: "thinking" });
+  session.append("model.usage", {
+    role: "main",
+    route: "anthropic",
+    model: "claude-sonnet-5-5",
+    inputTokens: 10,
+    outputTokens: 2,
+  });
+  session.clearBlockers((blocker) => blocker.kind === "model");
+  return c.json({ ok: true });
+});
+// Whether Start Docker can do it from here, and Docker coming back.
+routes.post("/__qa/fix-docker", (c) => {
+  dockerStarts = c.req.query("starts") !== "0";
+  return c.json({ ok: true });
+});
+routes.post("/__qa/fix-docker-up", (c) => {
+  session?.clearBlockers((blocker) => blocker.kind === "runtime");
+  return c.json({ ok: true });
+});
 routes.post("/__qa/keys-locked", (c) => reply(keysLocked(c.req.query("setup") === "1")));
 // keyd lists a key whose stored value has to be entered again (?id=, the main model's by default).
 routes.post("/__qa/reenter", (c) => {
@@ -4105,15 +4755,20 @@ routes.post("/__qa/pause-uncertain", (c) => {
 });
 let screenRevision = 0;
 // dot selects the desktop again, as a new task, a screen switch and a hand-back each do; with
-// ?to=browser it moves to the web browser, which starts first as the daemon's does.
+// ?to=browser it moves to the web browser, which starts first as the daemon's does, and with
+// &own=1 to its conversation's own web browser.
 routes.post("/__qa/screen", async (c) => {
   if (!session) return c.text("no session", 409);
   const retired = c.req.query("retired");
   const browser = c.req.query("to") === "browser";
-  if (browser && !browserInstance) runBrowser(true);
+  const own = browser && c.req.query("own") === "1";
+  if (own) {
+    ownTasks.add(session.id);
+    if (!ownInstance) runOwnBrowser(true);
+  } else if (browser && !browserInstance) runBrowser(true);
   session.append("screen.switch", {
     screen: retired === "browser" || browser ? "browser" : "desktop",
-    cellId: retired ? ulid() : browser ? browserCellId : cellId,
+    cellId: retired ? ulid() : own ? ownBrowserCellId : browser ? browserCellId : cellId,
     geometry: { w: 2560, h: 1600, scale: 2 },
     by: browser ? "agent" : "daemon",
     revision: ++screenRevision,
@@ -4123,6 +4778,11 @@ routes.post("/__qa/screen", async (c) => {
 });
 // The web browser is running, as it is once the computer has warmed it, with dot on the desktop.
 routes.post("/__qa/browser/start", (c) => {
+  // ?own=1: the task's conversation has a web browser of its own, running too.
+  if (c.req.query("own") === "1" && session) {
+    ownTasks.add(session.id);
+    runOwnBrowser(true);
+  }
   runBrowser(true);
   return c.json({ ok: true });
 });
@@ -4142,6 +4802,32 @@ routes.post("/__qa/picture/:state", (c) => {
   for (const name of ["desktop", "browser"] as const)
     if (!screen || screen === name) pictureDown[name] = state === "drop";
   return c.json(pictureDown);
+});
+// A screen's next connections stall: ?stage=ticket or page refuses the next ?times=, and socket,
+// refused, frame, track or slow (with ?ms=) stops the next ?times= client loads where it says.
+// ?stage=none clears them.
+routes.post("/__qa/stream-stall", (c) => {
+  const screen = c.req.query("screen") === "browser" ? "browser" : "desktop";
+  const stage = c.req.query("stage") ?? "none";
+  const times = Number(c.req.query("times") ?? 1);
+  if (stage === "none") {
+    stalls.ticket[screen] = stalls.page[screen] = 0;
+    stalls.client[screen] = [];
+  } else if (stage === "ticket" || stage === "page") stalls[stage][screen] = times;
+  else if (["socket", "refused", "frame", "track", "slow"].includes(stage))
+    stalls.client[screen] = Array.from({ length: times }, () =>
+      stage === "slow" ? `slow:${c.req.query("ms") ?? 2000}` : stage,
+    );
+  else return c.text("no such stage", 400);
+  return c.json(stalls);
+});
+// The daemon restarts under the page: its tickets and sockets end, and it answers nothing for ?ms=.
+routes.post("/__qa/daemon/restart", (c) => {
+  tickets.revoke(cellId);
+  tickets.revoke(browserCellId);
+  daemonBackAt = Date.now() + Number(c.req.query("ms") ?? 0);
+  for (const peer of upgraded) peer.destroy();
+  return c.json({ ok: true });
 });
 routes.post("/__qa/desktop/:shows", (c) => {
   const shows = c.req.param("shows");
@@ -4372,7 +5058,13 @@ routes.post("/__qa/stream", (c) => {
 // dot's turns as the brain reports them: thinking on each model call, acting on each tool call,
 // n of each, `ms` apart. Answers once the last has been sent.
 // A key saved for the user's own endpoint, whose model list the fixture answers.
+// `?models=<n>` has it list that many models, for a list longer than any screen.
 routes.post("/__qa/own-endpoint", (c) => {
+  const many = Number(c.req.query("models") ?? 0);
+  if (many > 0)
+    endpointModels = Array.from({ length: many }, (_, n) => ({
+      id: `relay-model-${String(n + 1).padStart(2, "0")}`,
+    }));
   keys = [
     ...keys,
     {
@@ -4418,6 +5110,20 @@ routes.post("/__qa/turns", async (c) => {
 // A task at work as a live run shows it, for `ms`: dot thinks and acts in turns of 300–600 ms,
 // streams a sentence every other turn, takes a step with a screenshot each turn (every third a
 // shell command), beats once a second and has two helpers at work. The turns repeat on every run.
+routes.post("/__qa/fleet", (c) => {
+  seedFleet(Number(c.req.query("n") ?? FLEET.length));
+  return c.json({ seeded: fleetSeeded, working: fleetWorking.length });
+});
+routes.post("/__qa/fleet/run", (c) => {
+  clearInterval(fleetRun);
+  const every = Number(c.req.query("every") ?? 1000);
+  if (every > 0) fleetRun = setInterval(() => !teardown && fleetStep(), every).unref();
+  return c.json({ every });
+});
+routes.post("/__qa/fleet/step", (c) => {
+  fleetStep();
+  return c.json({ working: fleetWorking.length });
+});
 routes.post("/__qa/live-run", (c) => {
   if (!session) return c.text("no session", 409);
   const owned = session;
@@ -4926,6 +5632,21 @@ routes.post("/__qa/scenario/:name", async (c) => {
   if (!wanted.step) return c.text(`start the fixture with --scenario ${name}`, 409);
   return reply(await STEPS[wanted.step]());
 });
+routes.post("/__qa/link", async (c) => {
+  if (!links) return c.text("start the fixture with QA_LINKS=1", 409);
+  const { token, grant } = links.create({
+    label: "Alex",
+    expiresInHours: 1,
+    maxTasks: 5,
+    taskBudgetUSD: 2,
+    model: { provider: "anthropic", model: "claude-sonnet-5-5" },
+    ...(await c.req.json().catch(() => ({}))),
+  });
+  return c.json({ token, id: grant.id });
+});
+routes.post("/__qa/link/revoke", (c) =>
+  links?.revoke(c.req.query("id") ?? "") ? c.json({ ok: true }) : c.text("no such link", 404),
+);
 routes.get("/__qa/manual-inputs", (c) => c.json(manualInputs));
 routes.get("/__qa/notify", (c) => c.json(notified));
 routes.get("/__qa/state", (c) =>

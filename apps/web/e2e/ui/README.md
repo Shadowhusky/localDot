@@ -37,7 +37,14 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   the page), `pin`, `code`, `choice`, `multichoice`, `setup` (one field that needs an answer and
   three that don't), `longtext`, `confirm`, `details` (number, date, phone and web address), `file`,
   `qr` (a link) or `pair` (plain text). Answers go through the real answer route; `GET /__qa/state`
-  lists them under `effects`, secret answers only counted.
+  lists them under `effects`, secret answers only counted. A message that moves on from a question,
+  an approval, a hand-over or a card has dot reply as soon as it reads the message.
+- **Cards in the conversation:** what stops dot and the user can fix. `POST /__qa/fix/<kind>` raises
+  one as the daemon does: `key`, `app`, `computer`, `computer-paused`, `runtime`; `/__qa/keys-locked`
+  and `/__qa/stall/model-refused`, `provider-limit`, `key-reenter` and `key-rebound` raise the rest.
+  `POST /__qa/fix-model-answered` is the model answering a retry, `/__qa/fix-docker?starts=0` has Start
+  Docker fail, and `/__qa/fix-docker-up` is Docker coming back. Saving a key, a sign-in and the computer
+  coming back clear theirs through the daemon's own routes.
 - **Connecting apps:** the fixture answers an app's sign-in discovery in memory and stands in for
   keyd's redeeming of the code. The page the daemon would open in the Mac's browser is recorded, not
   opened: `GET /__qa/connect` says where the app would send the user back, so a test approves by
@@ -53,8 +60,11 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   `POST /__qa/finish?done=1` ends the task as the real runner does, which raises a Done;
   `?markdown=1` gives the result a summary with a heading, a list and bold words, and
   `?preview=<url>` has the reply come with a preview of that address.
-- **Side questions:** `/btw` in the composer reaches the real side-question route, and the fixture
-  answers it from the task's own record, as the Fast model reads it, with no model.
+- **Side questions:** `/btw` in the composer reaches the real side-question route and the real side
+  agent, reading the task's own log, frames and files. Only its models are scripted
+  (`fixtures/side-agent.ts`): they pick a tool by the question's words. "terminal", "screen" and
+  "receipt" (which the fast model can't find, so it hands over) each show one path; "slowly" gives
+  time to see the steps or press Stop.
 - **Replies:** a new task's first reply comes 800 ms after it starts; `POST /__qa/reply?ms=<n>`
   makes dot take longer, so a Stop can come before it has done anything. `?wake=<n>` has dot's
   brain say nothing for n ms first, as a real one starting up, and then also take up a follow-up
@@ -66,9 +76,16 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   own browser streams, and `POST /__qa/screen` back to the desktop; `POST /__qa/browser/restart?ms=`
   starts the browser again in place. `POST /__qa/picture/drop` and `/resume` (`?screen=desktop` or
   `browser`, else both) take a screen's picture away and bring it back, as a lost stream does.
+  `POST /__qa/stream-stall?stage=` stalls a screen's next connections: `ticket` and `page` refuse the
+  next `?times=`, while `socket`, `refused`, `frame` and `track` stop the next client loads where
+  Selkies' client would sit, `slow&ms=` takes a step each `ms`, and `none` clears them.
+  `POST /__qa/daemon/restart?ms=` ends every ticket and socket and answers nothing for `ms`.
   `POST /__qa/desktop/home` empties the desktop to its home screen, as when the last task worked only
   in the web browser, and `/__qa/desktop/window` puts the spreadsheet window back. The fake
   desktopd's window stack follows: the spreadsheet window, maximised, covers the dock.
+- **Speech install:** `POST /__qa/speech` with JSON moves the computer's speech install on, or stands
+  in for what's already there: `{"job": {"stage": "model", "doneBytes": 1000}}`, `{"handInstalled": …}`,
+  `{"installed": …, "using": "installed"}`. It's in memory only; the real install has its own tests.
 - **Update:** `POST /__qa/update` makes a new version of the computer ready (the island's one-time
   notice and Settings' Update row); `QA_UPDATE_MS` sets how long the update then takes.
 - **Typing:** `typing.spec.ts` measures each key press to the frame that shows it while
@@ -77,6 +94,15 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   `POST /__qa/talk?turns=<n>&short=1` for more) with real wheels and touch drags, while `scroll-recorder.ts`
   notes what each painted frame shows. It fails on anything that moved further than the reader's input
   explains and on any row in view taken out of the page. `QA_SCROLL_OUT=<file>` appends each run's numbers.
+- **Unfolding:** `unfold-motion.spec.ts` and `unfold-file.spec.ts` read the frames as painted, with the
+  motion on, as a step, run or file opens: the page moves with the opening or not at all, and nothing
+  moves once it has opened.
+- **Scrollbars:** `scrollbars.spec.ts` walks the same states as the contrast sweep (`app-walk.ts`), and
+  what only long words show, at `c14` `c39` `w14` `w39` in light and dark. With classic scrollbars
+  forced on, it fails on anything that always draws a bar with nothing to scroll, overflows by a pixel
+  or two or only by what a `::before` or `::after` draws, or scrolls sideways without being meant to
+  (`SIDEWAYS` in `scrollbars.ts`). Each project walks in one view; `QA_SWEEP_VIEW=chat` or `studio`
+  walks every project in that view, and `QA_SWEEP_SIZE=1100x640` at that window size.
 - **Performance:** `perf-live-run.spec.ts` and `perf-stage.spec.ts` count what watching a task costs
   the page and the stage, under `POST /__qa/live-run?ms=<n>` and a GPU-decoded stand-in for the
   stream (`perf.ts`), with generous budgets. `QA_PERF_OUT=<file>` appends each run's numbers;

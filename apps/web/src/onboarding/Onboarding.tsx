@@ -9,6 +9,7 @@ import {
 import { providerById } from "@localdot/providers";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { BrowserEngineName } from "../../../../packages/protocol/src/browser-engine.ts";
+import type { SpeechTierId } from "../../../../packages/protocol/src/speech-install.ts";
 import { AUTONOMY_PRESETS, presetOf } from "../copy/autonomy.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import {
@@ -35,6 +36,8 @@ import { Button } from "../ui/Button.tsx";
 import { afterMotion } from "../ui/finished.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { speechSummary, tierForLanguage } from "../voice/speech-words.ts";
+import type { SpeechInstallControl } from "../voice/useSpeechInstall.ts";
 import { PersonaPicker } from "./PersonaPicker.tsx";
 import { saveSetup } from "./save.ts";
 import {
@@ -45,6 +48,7 @@ import {
   ModelStep,
   PermissionsStep,
   SizeRow,
+  SpeechStep,
   SummaryStep,
   ThinksStep,
   WelcomeStep,
@@ -59,6 +63,7 @@ import {
   previousStep,
   recommendedFast,
   recommendedMain,
+  speechOffered,
   stepNumber,
   stepTitle,
   type ThinkKind,
@@ -85,6 +90,9 @@ export interface OnboardingProps {
   turnOn: { run(): void; reason?: string } | null;
   showDot: boolean;
   view: Pick<ViewStyleControl, "value" | "recommended" | "choose">;
+  speech: SpeechInstallControl;
+  // The language this device talks in, which the suggested speech model should hear.
+  language: string;
 }
 
 export interface SetupDraft {
@@ -164,6 +172,10 @@ export function Onboarding(props: OnboardingProps) {
   const engine = useBrowserEngine(api, true);
   const [chosenBrowser, setBrowserChoice] = useState<BrowserEngineName | null>(null);
   const browserChoice = chosenBrowser ?? engine.status?.choice ?? "chrome";
+  const speechStatus = props.speech.status;
+  const [speechChoice, setSpeechChoice] = useState<SpeechTierId | null>(null);
+  const speechTier =
+    speechChoice ?? (speechStatus ? tierForLanguage(speechStatus, props.language) : null);
   const secret = useRef<HTMLInputElement>(null);
   const alive = useRef(true);
   useEffect(
@@ -244,10 +256,13 @@ export function Onboarding(props: OnboardingProps) {
 
   // An image that can't take Chrome, or that was built with it, has nothing to choose.
   const browserOffered = !!engine.status?.offered;
+  const speechAsked = speechOffered(speechStatus);
+  const passedOver = (candidate: WizardStep) =>
+    (candidate === "browser" && !browserOffered) || (candidate === "speech" && !speechAsked);
   const advance = (extra: Partial<WizardProgress> = {}) =>
     control.update((now) => {
-      const next = nextStep(now);
-      const to = next === "browser" && !browserOffered ? nextStep({ ...now, step: next }) : next;
+      let to = nextStep(now);
+      while (passedOver(to)) to = nextStep({ ...now, step: to });
       return { ...now, ...extra, step: to, back: to === now.back ? undefined : now.back };
     });
   const run = async (work: () => Promise<string | null>, then: () => void) => {
@@ -431,6 +446,8 @@ export function Onboarding(props: OnboardingProps) {
     icon?: "power";
     reason?: string;
     run(): void;
+    // A clear way past an optional step, which changes nothing.
+    skip?: { label: string; run(): void };
   };
   const view = ((): View => {
     switch (shown) {
@@ -626,6 +643,33 @@ export function Onboarding(props: OnboardingProps) {
           primary: browserChoice === "chrome" ? "Accept and continue" : "Continue",
           run: saveBrowser,
         };
+      case "speech": {
+        const computer = speechStatus?.host.computer ?? "computer";
+        const under = !!speechStatus?.job;
+        return {
+          title: "Talk to dot",
+          sub: `Talk instead of typing. Your words turn into text on your ${computer}, and your voice goes nowhere else.`,
+          body: speechStatus && speechTier && (
+            <SpeechStep
+              speech={props.speech}
+              status={speechStatus}
+              tier={speechTier}
+              onTier={setSpeechChoice}
+              language={props.language}
+              phone={phone}
+            />
+          ),
+          primary: under || !speechAsked ? "Continue" : "Download and continue",
+          run: () => {
+            if (under || !speechAsked || !speechTier) return advance();
+            void run(
+              async () => ((await props.speech.install(speechTier)) ? null : props.speech.failure),
+              () => advance(),
+            );
+          },
+          skip: under || !speechAsked ? undefined : { label: "Skip for now", run: () => advance() },
+        };
+      }
       case "turn-on":
         return {
           title: "You're all set.",
@@ -678,6 +722,16 @@ export function Onboarding(props: OnboardingProps) {
                         label: "Web browser",
                         value: engine.status?.choice === "chrome" ? "Google Chrome" : "Chromium",
                         change: () => go("browser", "turn-on"),
+                      },
+                    ]
+                  : []),
+                ...(speechStatus?.supported
+                  ? [
+                      {
+                        icon: "mic" as const,
+                        label: "Talk to dot",
+                        value: speechSummary(speechStatus),
+                        change: () => go("speech", "turn-on"),
                       },
                     ]
                   : []),
@@ -735,8 +789,24 @@ export function Onboarding(props: OnboardingProps) {
       {view.primary}
     </Button>
   );
+  const skip = view.skip && (
+    <Button
+      variant="quiet"
+      size={phone ? "xl" : "lg"}
+      className="onboarding-skip"
+      onClick={() => {
+        if (shown === step) view.skip?.run();
+      }}
+    >
+      {view.skip.label}
+    </Button>
+  );
   const before = previousStep(step);
-  const back = () => go(before === "browser" && !browserOffered ? previousStep(before) : before);
+  const back = () => {
+    let to = before;
+    while (passedOver(to)) to = previousStep(to);
+    go(to);
+  };
   const footer = (
     <div className="onboarding-footer">
       {!phone && shown !== "welcome" && (
@@ -750,6 +820,7 @@ export function Onboarding(props: OnboardingProps) {
           Back
         </Button>
       )}
+      {skip}
       {primary}
     </div>
   );
@@ -805,7 +876,12 @@ export function Onboarding(props: OnboardingProps) {
           {!phone && footer}
         </div>
       </div>
-      {phone && <div className="onboarding-foot">{primary}</div>}
+      {phone && (
+        <div className="onboarding-foot">
+          {primary}
+          {skip}
+        </div>
+      )}
     </div>
   );
 }

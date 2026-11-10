@@ -204,7 +204,11 @@ export class Conversations {
   }
 
   snapshot(): ConversationSnapshot {
-    const current = this.current();
+    return this.snapshotOf(this.current());
+  }
+
+  // The conversation that ends with this task, as the app shows it.
+  snapshotOf(current: string | null): ConversationSnapshot {
     if (!current) return { sessions: [], more: false };
     const chain = this.chain(current);
     const withdrawn = chain.sessions.flatMap((id) => this.#withdrawn(id));
@@ -353,22 +357,25 @@ export class Conversations {
           : [],
       ),
     );
-    const waiting = new Map<string, string>();
+    // What came through a shared link is never taken for the owner's own words.
+    const said = (data: { text: string; link?: string | undefined }) =>
+      `${data.link ? "Someone with a shared link" : "The user"}: ${clip(data.text)}`;
+    const waiting = new Map<string, { text: string; link?: string | undefined }>();
     for (const event of events) {
       switch (event.type) {
         case "message.user":
           if (unsaid.has(event.data.messageId)) break;
-          if (event.data.queued) waiting.set(event.data.messageId, event.data.text);
-          else turns.push(`The user: ${clip(event.data.text)}`);
+          if (event.data.queued) waiting.set(event.data.messageId, event.data);
+          else turns.push(said(event.data));
           break;
         case "message.delivery": {
-          const text = waiting.get(event.data.messageId);
+          const message = waiting.get(event.data.messageId);
           waiting.delete(event.data.messageId);
           if (
-            text !== undefined &&
+            message !== undefined &&
             (event.data.state === "sent" || event.data.state === "steering")
           )
-            turns.push(`The user: ${clip(text)}`);
+            turns.push(said(message));
           break;
         }
         case "message.assistant":
@@ -521,6 +528,13 @@ ${checkpoint}`),
     return { automatic: autoTitle ?? facts.title, ...(userTitle ? { user: userTitle } : {}) };
   }
 
+  // The shared link a task works for, as its session.start records it.
+  link(sessionId: string): { id: string; apps: boolean } | undefined {
+    if (!this.has(sessionId)) return undefined;
+    const start = this.#head(sessionId).find((event) => event.type === "session.start");
+    return start?.type === "session.start" ? start.data.link : undefined;
+  }
+
   isTask(sessionId: string): boolean {
     return (
       this.has(sessionId) && this.#head(sessionId).some((event) => event.type === "message.user")
@@ -535,12 +549,19 @@ ${checkpoint}`),
 
   // The recent conversations, newest first, or the archived ones, and how many are archived. Those
   // pinned are kept before the rest are counted.
-  list(max = CONVERSATION_LIST, archived = false): Required<ConversationList> {
+  // `keep`, given, lists only the conversations whose tasks it keeps, as a shared link's own.
+  list(
+    max = CONVERSATION_LIST,
+    archived = false,
+    keep?: (sessions: readonly string[]) => boolean,
+  ): Required<ConversationList> {
     const records = this.#organized();
-    const found = this.#found().map((conversation) => ({
-      ...conversation,
-      ...this.#organization(conversation.sessions[0] ?? "", records),
-    }));
+    const found = (keep ? this.#found().filter((each) => keep(each.sessions)) : this.#found()).map(
+      (conversation) => ({
+        ...conversation,
+        ...this.#organization(conversation.sessions[0] ?? "", records),
+      }),
+    );
     const shown = found.filter((conversation) => conversation.archived === archived);
     const kept = new Set(
       [...shown.filter((each) => each.pinned), ...shown.filter((each) => !each.pinned)].slice(

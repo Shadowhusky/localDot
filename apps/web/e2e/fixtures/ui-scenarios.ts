@@ -16,6 +16,13 @@ export type ScenarioStep =
   | "takeover"
   | "budget"
   | "keys-locked"
+  | "fix/key"
+  | "fix/app"
+  | "fix/computer"
+  | "fix/computer-paused"
+  | "fix/runtime"
+  | "fix/model"
+  | "fix/plan-limit"
   | "finish"
   | `cell/${Exclude<CellKind, "none">}`;
 
@@ -57,6 +64,10 @@ export const UI_SCENARIOS = {
     about: "dot is working in a conversation of three, with past conversations from the fortnight",
     boot: { QA_EARLIER: "2", QA_PAST: "1" },
   },
+  "shared-links": {
+    about: "The conversations scenario, where the owner can share links for guests to sign in with",
+    boot: { QA_PHASE: "finished", QA_EARLIER: "2", QA_PAST: "1", QA_LINKS: "1" },
+  },
   "chatgpt-plan": {
     about: "The main model runs on a signed-in ChatGPT plan; the computer is on with no task",
     boot: { QA_SESSION: "0", QA_SETTINGS: "chatgpt", QA_CHATGPT: "signed_in" },
@@ -75,6 +86,11 @@ export const UI_SCENARIOS = {
     step: "cell/live",
   },
   running: { about: "dot is working on the sample task" },
+  overview: {
+    about:
+      "dot works on the sample task with eight more conversations beside it: two need you, three at work, one ended badly",
+    boot: { QA_FLEET: "8" },
+  },
   "long-thread": {
     about: "dot is working in a long conversation: two earlier tasks full of steps and pictures",
     boot: { QA_EARLIER: "2", QA_EARLIER_TURNS: "30", QA_STEP_IMAGE: "1" },
@@ -95,6 +111,42 @@ export const UI_SCENARIOS = {
   "keys-locked": {
     about: "dot met the saved keys locked behind their passphrase, as after a restart",
     step: "keys-locked",
+    stepAtBoot: true,
+  },
+  "fix-key": {
+    about: "A service refused a saved key, and the task offers to take a new one",
+    step: "fix/key",
+    stepAtBoot: true,
+  },
+  "fix-app": {
+    about: "A connected app's sign-in ended, and the task offers to connect it",
+    step: "fix/app",
+    stepAtBoot: true,
+  },
+  "fix-model": {
+    about: "The provider refused the model's request, and the task offers another",
+    step: "fix/model",
+    stepAtBoot: true,
+  },
+  "plan-limit": {
+    about:
+      "The Claude plan's limit paused the task, which continues by itself when the plan resets in 95 minutes",
+    step: "fix/plan-limit",
+    stepAtBoot: true,
+  },
+  "fix-computer": {
+    about: "The computer went off under the task, which offers to turn it on",
+    step: "fix/computer",
+    stepAtBoot: true,
+  },
+  "fix-computer-paused": {
+    about: "The computer was paused under the task, which offers to resume it",
+    step: "fix/computer-paused",
+    stepAtBoot: true,
+  },
+  "fix-runtime": {
+    about: "Docker stopped under the task, which offers to start it",
+    step: "fix/runtime",
     stepAtBoot: true,
   },
   "image-output": {

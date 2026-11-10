@@ -32,6 +32,8 @@ export interface TopBarProps {
   // At the very end: what has no place of its own, such as Stop everything.
   more?: ReactNode;
   panels?: ReactNode;
+  // A shared link's bar: Settings and Keys are the owner's.
+  guest?: boolean;
 }
 
 // The wordmark and what is on the stage, then the modes, Settings and Keys. It redraws only when one
@@ -55,6 +57,7 @@ export const TopBar = memo(function TopBar({
   settingsRef,
   more,
   panels,
+  guest = false,
 }: TopBarProps) {
   const modes: SegmentItem[] = [
     { value: "watch", label: "Watch", attention: watchAttention },
@@ -90,29 +93,33 @@ export const TopBar = memo(function TopBar({
           onValueChange={(value) => onMode(value as Mode)}
           onReselect={onModeAgain}
         />
-        <IconButton
-          ref={settingsRef}
-          size={32}
-          icon="settings"
-          label="Settings"
-          aria-haspopup="dialog"
-          aria-expanded={settingsOpen}
-          aria-controls="settings-sheet"
-          onClick={(event) => onSettings(event.currentTarget)}
-        />
-        <IconButton
-          ref={keysRef}
-          size={32}
-          icon="key-round"
-          label={keys.spoken ?? keys.label}
-          attention={keys.state !== "ok" && keys.state !== "unknown"}
-          aria-haspopup="dialog"
-          aria-expanded={keysOpen}
-          aria-controls="keys-sheet"
-          data-testid="keys-button"
-          data-state={keys.state}
-          onClick={onKeys}
-        />
+        {!guest && (
+          <>
+            <IconButton
+              ref={settingsRef}
+              size={32}
+              icon="settings"
+              label="Settings"
+              aria-haspopup="dialog"
+              aria-expanded={settingsOpen}
+              aria-controls="settings-sheet"
+              onClick={(event) => onSettings(event.currentTarget)}
+            />
+            <IconButton
+              ref={keysRef}
+              size={32}
+              icon="key-round"
+              label={keys.spoken ?? keys.label}
+              attention={keys.state !== "ok" && keys.state !== "unknown"}
+              aria-haspopup="dialog"
+              aria-expanded={keysOpen}
+              aria-controls="keys-sheet"
+              data-testid="keys-button"
+              data-state={keys.state}
+              onClick={onKeys}
+            />
+          </>
+        )}
         {more}
       </div>
     </header>

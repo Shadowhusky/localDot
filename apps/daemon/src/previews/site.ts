@@ -9,6 +9,7 @@ import {
   type ServerResponse,
   STATUS_CODES,
 } from "node:http";
+import { connect, createServer as createNetServer, type Server as NetServer } from "node:net";
 import { type Duplex, pipeline, type Transform } from "node:stream";
 import { constants, createGzip } from "node:zlib";
 import { type PreviewTarget, previewTarget } from "@localdot/protocol";
@@ -30,9 +31,17 @@ export const ENTRY_PATH = "/__localdot/preview";
 const ENTRY_SCRIPT = `${ENTRY_PATH}.js`;
 const PAGE_STYLE = `${ENTRY_PATH}.css`;
 // Cookies ignore ports, so every preview on a host sees every other's cookie: each has a name of its
-// own, and every one of them is taken out of what a server receives.
+// own, and every one of them is taken out of what a server receives. On the Mac's plain-http
+// localhost a cookie can't be Secure, so it can't have the __Host- prefix.
 const COOKIE_PREFIX = "__Host-localdot-preview-";
-export const cookieName = (port: number) => `${COOKIE_PREFIX}${port}`;
+const LOCAL_COOKIE_PREFIX = "localdot-preview-";
+export const cookieName = (port: number, local = false) =>
+  `${local ? LOCAL_COOKIE_PREFIX : COOKIE_PREFIX}${port}`;
+const isPreviewCookie = (cookie: string) =>
+  cookie.startsWith(COOKIE_PREFIX) || cookie.startsWith(LOCAL_COOKIE_PREFIX);
+const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+// How long a server already listening on a Mac port has to say so.
+const ANSWER_MS = 1_000;
 const ENTRY_MS = 120_000;
 // How long a page the device opens may take to start answering before it is told why and offered
 // another try. Requests a page makes itself (events, long polls, uploads) have no limit.
@@ -107,6 +116,9 @@ export interface SiteOptions {
   hop(target: PreviewTarget, host: string): Promise<string>;
   // Another server used this port before, so a device's first visit clears what that one stored.
   reused: boolean;
+  // On the Mac's own loopback, at the app's own kind of address (http://localhost:<port>), rather
+  // than behind a tailnet front.
+  local?: boolean;
   now?: () => number;
   navigateMs?: number;
 }
@@ -124,6 +136,13 @@ export class PreviewSite {
   readonly #agents = new Map<string, Agent>();
   readonly #server: Server;
   readonly #now: () => number;
+  // A local preview's ::1 listener, which hands its connections to the same server.
+  #v6: NetServer | undefined;
+  #closed = Promise.resolve();
+  // Local only. The Mac's localhost cookies belong to all its servers: those the browser held when
+  // it signed in stay on the Mac, unless the app sets one of the same name itself.
+  readonly #foreign = new Set<string>();
+  readonly #own = new Set<string>();
   #busy = 0;
   #lastUsed: number;
 
@@ -142,21 +161,35 @@ export class PreviewSite {
     return this.options.target;
   }
 
+  get local(): boolean {
+    return !!this.options.local;
+  }
+
+  // Settles once its ports have been let go.
+  get closed(): Promise<void> {
+    return this.#closed;
+  }
+
   // How long nothing has used it: never idle while a request or a socket is open.
   idleFor(): number {
     return this.#busy || this.#upgraded.size ? 0 : this.#now() - this.#lastUsed;
   }
 
-  listen(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const failed = (error: Error) => reject(error);
-      this.#server.once("error", failed);
-      this.#server.listen(this.port, "127.0.0.1", () => {
-        this.#server.off("error", failed);
-        this.#server.on("error", () => {});
-        resolve();
-      });
-    });
+  // A local preview listens on both loopback addresses, as browsers try both for localhost, and never
+  // beside a server already there: on macOS a listener on 127.0.0.1 would take the loopback traffic
+  // of one listening everywhere.
+  async listen(): Promise<void> {
+    if (this.local && (await answers(this.port))) throw inUse();
+    await bind(this.#server, this.port, "127.0.0.1");
+    if (!this.local) return;
+    const v6 = createNetServer((socket) => this.#server.emit("connection", socket));
+    try {
+      await bind(v6, this.port, "::1");
+      this.#v6 = v6;
+    } catch (error) {
+      v6.close();
+      if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") throw error;
+    }
   }
 
   // A secret that signs one device in once, within two minutes, and then opens `path`.
@@ -171,7 +204,11 @@ export class PreviewSite {
   }
 
   close(): void {
-    this.#server.close();
+    const v6 = this.#v6;
+    this.#closed = Promise.all([
+      new Promise<void>((resolve) => this.#server.close(() => resolve())),
+      new Promise<void>((resolve) => (v6 ? v6.close(() => resolve()) : resolve())),
+    ]).then(() => undefined);
     this.#server.closeAllConnections();
     for (const socket of this.#upgraded) socket.destroy();
     this.#upgraded.clear();
@@ -207,8 +244,12 @@ export class PreviewSite {
     return host && this.options.hosts().has(host) ? host : undefined;
   }
 
+  #origin(host: string): string {
+    return `${this.local ? "http" : "https"}://${host}`;
+  }
+
   #signedIn(headers: IncomingHttpHeaders): boolean {
-    const given = cookies(headers.cookie).get(cookieName(this.port));
+    const given = cookies(headers.cookie).get(cookieName(this.port, this.local));
     if (!given) return false;
     const a = Buffer.from(given);
     const b = Buffer.from(this.#cookie);
@@ -216,7 +257,7 @@ export class PreviewSite {
   }
 
   async #enter(req: IncomingMessage, res: ServerResponse, host: string) {
-    if (req.headers.origin !== `https://${host}`) return plain(res, 403, "forbidden origin");
+    if (req.headers.origin !== this.#origin(host)) return plain(res, 403, "forbidden origin");
     if (!/^text\/plain(?:;|$)/i.test(req.headers["content-type"] ?? ""))
       return plain(res, 415, "text required");
     const secret = await readSmall(req);
@@ -224,14 +265,18 @@ export class PreviewSite {
     if (secret) this.#entries.delete(secret);
     if (!entry || entry.expires <= this.#now()) return plain(res, 401, "link used or expired");
     this.#lastUsed = this.#now();
+    if (this.local)
+      for (const name of cookies(req.headers.cookie).keys())
+        if (!isPreviewCookie(name) && !this.#own.has(name)) this.#foreign.add(name);
     res.writeHead(200, {
       ...PAGE_HEADERS,
       "content-type": "application/json",
-      "set-cookie": `${cookieName(this.port)}=${this.#cookie}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+      "set-cookie": `${cookieName(this.port, this.local)}=${this.#cookie}; Path=/; ${this.local ? "" : "Secure; "}HttpOnly; SameSite=Lax`,
       // Only "storage", which takes an old service worker with it: "cache" makes browsers walk their
       // whole disk cache first (seconds to tens of seconds). Answers a browser could keep without
-      // asking are told to ask again instead (deviceHeaders).
-      ...(this.options.reused && !this.#signedIn(req.headers)
+      // asking are told to ask again instead (deviceHeaders). The Mac's localhost keeps the owner's
+      // own, so a local preview never clears it.
+      ...(this.options.reused && !this.local && !this.#signedIn(req.headers)
         ? { "clear-site-data": '"storage"' }
         : {}),
     });
@@ -282,7 +327,43 @@ export class PreviewSite {
       target: this.target,
       computer: this.options.computer(),
       ...(via ? { via } : {}),
+      ...(this.local ? { local: true } : {}),
     };
+  }
+
+  // What the server receives: on the Mac the previewed server is asked by the address the browser
+  // has (a server-made callback then names it); a *.localhost name stays, as its proxy routes by it.
+  #headers(req: IncomingMessage, host: string, target: PreviewTarget) {
+    const asked = (to: PreviewTarget): PreviewTarget =>
+      this.local && LOOPBACK_NAMES.has(new URL(`http://${to.host}`).hostname)
+        ? { ...to, scheme: "http", host }
+        : to;
+    const page = asked(this.target);
+    return serverHeaders(
+      req.headers,
+      host,
+      target === this.target ? page : target,
+      page,
+      this.local ? { keeps: (name) => this.#keeps(name) } : undefined,
+    );
+  }
+
+  #keeps(name: string): boolean {
+    if (this.#foreign.has(name)) return false;
+    this.#own.add(name);
+    return true;
+  }
+
+  #setsCookies(raw: readonly string[]) {
+    if (!this.local) return;
+    for (let i = 0; i + 1 < raw.length; i += 2)
+      if ((raw[i] as string).toLowerCase() === "set-cookie") {
+        const name = (raw[i + 1] as string).split(";")[0]?.split("=")[0]?.trim();
+        if (name && !isPreviewCookie(name)) {
+          this.#foreign.delete(name);
+          this.#own.add(name);
+        }
+      }
   }
 
   #forward(
@@ -308,7 +389,7 @@ export class PreviewSite {
       agent: this.#agent(target),
       method: req.method,
       path,
-      headers: serverHeaders(req.headers, host, target, this.target),
+      headers: this.#headers(req, host, target),
       setHost: false,
     });
     const limit = this.options.navigateMs ?? NAVIGATE_MS;
@@ -330,6 +411,7 @@ export class PreviewSite {
       clearTimeout(slow);
       answer.on("error", () => res.destroy());
       const status = answer.statusCode ?? 502;
+      this.#setsCookies(answer.rawHeaders);
       const body = bodyRewrite(req.method, status, answer.headers);
       res.writeHead(
         status,
@@ -362,8 +444,9 @@ export class PreviewSite {
     if (!host) return refuseRaw(socket, 403);
     if (!this.#signedIn(req.headers)) return refuseRaw(socket, 401);
     // Another site's page could open a socket that carries the owner's cookie, and the server would
-    // take the rewritten Origin for its own: only this preview's own pages may.
-    if (req.headers.origin !== `https://${host}`) return refuseRaw(socket, 403);
+    // take the rewritten Origin for its own: only this preview's own pages may. On the Mac that
+    // includes the other servers on localhost, which share its cookies.
+    if (req.headers.origin !== this.#origin(host)) return refuseRaw(socket, 403);
     if (!req.url?.startsWith("/")) return refuseRaw(socket, 400);
     const via = req.url.startsWith(`${VIA_PATH}/`) ? viaOf(req.url) : undefined;
     const target = via
@@ -382,7 +465,7 @@ export class PreviewSite {
       method: req.method,
       path: via ? target.path : req.url,
       headers: {
-        ...serverHeaders(req.headers, host, target, this.target),
+        ...this.#headers(req, host, target),
         connection: "Upgrade",
         upgrade: req.headers.upgrade ?? "websocket",
       },
@@ -466,14 +549,16 @@ export function cookies(header: string | undefined): Map<string, string> {
 
 // What the server receives: the request as the browser sent it, addressed to the server itself,
 // without the hop's own headers, the previews' cookies or who the owner is. Origin and Referer name
-// the server whose page sent it (`page`), as they would in the computer's own browser.
+// the server whose page sent it (`page`), as they would in the computer's own browser. A `local`
+// preview is reached over http, and passes on only the cookies it `keeps`.
 export function serverHeaders(
   headers: IncomingHttpHeaders,
   host: string,
   target: PreviewTarget,
   page: PreviewTarget = target,
+  local?: { keeps(name: string): boolean },
 ): Record<string, string | string[]> {
-  const own = `https://${host}`;
+  const own = `${local ? "http" : "https"}://${host}`;
   const server = `${page.scheme}://${page.host}`;
   const hop = new Set([
     ...HOP,
@@ -493,7 +578,10 @@ export function serverHeaders(
   const kept = (headers.cookie ?? "")
     .split(";")
     .map((part) => part.trim())
-    .filter((part) => part && !part.startsWith(COOKIE_PREFIX));
+    .filter(
+      (part) =>
+        part && !isPreviewCookie(part) && (!local || local.keeps(part.split("=")[0]?.trim() ?? "")),
+    );
   if (kept.length) out.cookie = kept.join("; ");
   else delete out.cookie;
   return out;
@@ -516,7 +604,7 @@ export function deviceHeaders(
     const value = raw[i + 1] as string;
     const lower = name.toLowerCase();
     if (HOST_WIDE.has(lower) || (!upgrade && HOP.has(lower))) continue;
-    if (lower === "set-cookie" && value.trimStart().startsWith(COOKIE_PREFIX)) continue;
+    if (lower === "set-cookie" && isPreviewCookie(value.trimStart())) continue;
     if (body !== undefined && (lower === "content-length" || lower === "content-encoding"))
       continue;
     cached ||= lower === "cache-control" || lower === "expires";
@@ -603,6 +691,38 @@ function refuseRaw(socket: Duplex, status: number) {
   socket.end(
     `HTTP/1.1 ${status} ${STATUS_CODES[status] ?? ""}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`,
   );
+}
+
+function bind(server: NetServer, port: number, host: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const failed = (error: Error) => reject(error);
+    server.once("error", failed);
+    server.listen(port, host, () => {
+      server.off("error", failed);
+      server.on("error", () => {});
+      resolve();
+    });
+  });
+}
+
+// Whether something on this Mac already answers on a loopback port.
+function answers(port: number): Promise<boolean> {
+  const at = (host: string) =>
+    new Promise<boolean>((resolve) => {
+      const socket = connect({ host, port });
+      const done = (found: boolean) => {
+        socket.destroy();
+        resolve(found);
+      };
+      socket.setTimeout(ANSWER_MS, () => done(true));
+      socket.once("connect", () => done(true));
+      socket.once("error", () => done(false));
+    });
+  return Promise.all([at("127.0.0.1"), at("::1")]).then((found) => found.some(Boolean));
+}
+
+function inUse(): Error {
+  return Object.assign(new Error("address in use"), { code: "EADDRINUSE" });
 }
 
 async function readSmall(req: IncomingMessage): Promise<string | undefined> {

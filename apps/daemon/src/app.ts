@@ -33,6 +33,7 @@ import { type NotifyRoutesDeps, notifyRoutes } from "./notify/routes.ts";
 import type { Previews } from "./previews/previews.ts";
 import { previewRoutes } from "./previews/routes.ts";
 import type { Recorder } from "./recorder/recorder.ts";
+import { forGuest } from "./remote/guest-events.ts";
 import { publicGrant } from "./remote/links.ts";
 import { type RemoteAccess, remoteRoutes } from "./remote/manager.ts";
 import { revocableResponse } from "./remote/response.ts";
@@ -187,7 +188,12 @@ export function createApp({
       c.set("remoteGrant", grant);
       c.set("remoteValid", () => !!remoteAccess?.authenticate(given));
     }
-    if (appInstalling?.() && !["GET", "HEAD"].includes(c.req.method))
+    // Asking for the update again joins it, so a second device gets a plain answer.
+    if (
+      appInstalling?.() &&
+      !["GET", "HEAD"].includes(c.req.method) &&
+      !c.req.path.startsWith("/api/app-update/")
+    )
       return c.text("localDot is installing an update. Please wait.", 503);
     await next();
     const grant = c.get("remoteGrant");
@@ -205,11 +211,61 @@ export function createApp({
   if (appUpdater) appUpdateRoutes(app, appUpdater);
   if (remoteAccess) {
     remoteRoutes(app, remoteAccess, agent?.settings.get.bind(agent.settings));
-    app.get("/api/remote-session", (c) => {
+    // The models the owner has configured now, which a link that allows switching offers.
+    const configured = () => {
+      const saved = agent?.settings.get();
+      return [saved?.main, saved?.fast, saved?.local, ...(saved?.models ?? [])].filter(
+        (choice): choice is NonNullable<typeof choice> => !!choice && !choice.off,
+      );
+    };
+    // A plan the owner uses offers every model it lists now, as it does in the owner's own menu.
+    const planModels = async () => {
+      const used = new Set(configured().map((choice) => choice.provider));
+      const listed: { provider: string; model: string; name: string }[] = [];
+      if (used.has("claude-code") && agent?.claudeCode) {
+        const status = await agent.claudeCode.status().catch(() => null);
+        if (status?.state === "signed_in")
+          for (const row of status.models)
+            listed.push({ provider: "claude-code", model: row.id, name: row.name });
+      }
+      if (used.has("chatgpt") && agent?.chatgpt) {
+        const status = await agent.chatgpt.account.status().catch(() => null);
+        for (const row of status?.models ?? [])
+          listed.push({ provider: "chatgpt", model: row.id, name: row.name });
+      }
+      return listed;
+    };
+    const offered = async () => {
+      const plans = await planModels();
+      return {
+        plans,
+        choices: [...configured(), ...plans.map(({ provider, model }) => ({ provider, model }))],
+      };
+    };
+    app.get("/api/remote-session", async (c) => {
       const grant = c.get("remoteGrant");
-      return grant
-        ? c.json({ ...publicGrant(grant), ownedSessions: remoteAccess.links.sessions(grant.id) })
-        : c.text("Not a shared session", 400);
+      if (!grant) return c.text("Not a shared session", 400);
+      const { plans, choices } = await offered();
+      const models = remoteAccess.links.choices(grant, choices);
+      // The page has no catalog of its own: the link's models come with their names.
+      const catalog = agent?.catalog.get();
+      const names = models.flatMap(({ provider, model }) => {
+        const name =
+          plans.find((row) => row.provider === provider && row.model === model)?.name ??
+          (
+            catalog?.providers[provider]?.models[model] ??
+            Object.values(catalog?.providers ?? {}).find((each) => each.models[model])?.models[
+              model
+            ]
+          )?.name;
+        return name ? [{ provider, model, name }] : [];
+      });
+      return c.json({
+        ...publicGrant(grant),
+        models,
+        ownedSessions: remoteAccess.links.sessions(grant.id),
+        names,
+      });
     });
     app.post("/api/remote-session/model", async (c) => {
       const grant = c.get("remoteGrant");
@@ -217,7 +273,7 @@ export function createApp({
       try {
         const { index } = await c.req.json();
         if (!Number.isInteger(index)) return c.text("Invalid model", 400);
-        remoteAccess.links.select(grant.id, index);
+        remoteAccess.links.select(grant.id, index, (await offered()).choices);
         return c.body(null, 204);
       } catch {
         return c.text("Model not permitted", 403);
@@ -237,7 +293,13 @@ export function createApp({
     installCodeRoutes(app, installCodes, port, accessLinks, (code) =>
       remoteAccess?.authenticate(code) ? code : undefined,
     );
-  if (browser) browserViewerApi(app, browser);
+  if (browser)
+    browserViewerApi(app, {
+      ...browser,
+      ...(remoteAccess
+        ? { sees: (grant: string, session: string) => remoteAccess.links.owns(grant, session) }
+        : {}),
+    });
   if (accounts) accountsRoutes(app, accounts);
   if (browserStatus) browserStatusRoutes(app, browserStatus);
   if (browserEngine) browserEngineRoutes(app, browserEngine);
@@ -248,6 +310,7 @@ export function createApp({
     const id = c.req.param("id");
     if (!ULID_PATTERN.test(id)) return c.text("invalid session id", 400);
     const fromSeq = Math.max(0, Number(c.req.query("fromSeq")) || 0);
+    const guest = !!c.get("remoteGrant");
     try {
       if (
         c.req
@@ -261,9 +324,15 @@ export function createApp({
           return new Response(null, {
             headers: { "content-type": NDJSON_TYPE, "cache-control": "no-store" },
           });
-        return eventStreamResponse(file, fromSeq, c.req.raw.signal);
+        return eventStreamResponse(
+          file,
+          fromSeq,
+          c.req.raw.signal,
+          guest ? { project: forGuest } : undefined,
+        );
       }
-      return c.json(eventLog.read(id, fromSeq));
+      const events = eventLog.read(id, fromSeq);
+      return c.json(guest ? events.map(forGuest) : events);
     } catch (err) {
       if (err instanceof UnknownSessionError) return c.text("unknown session", 404);
       throw err;
@@ -278,7 +347,10 @@ export function createApp({
     const fromSeq = Math.max(0, Number(c.req.query("fromSeq")) || 0);
     if (!Number.isSafeInteger(fromSeq)) return c.text("invalid sequence", 400);
     try {
-      return eventStreamResponse(eventLog.logFile(id), fromSeq, c.req.raw.signal, { shown: true });
+      return eventStreamResponse(eventLog.logFile(id), fromSeq, c.req.raw.signal, {
+        shown: true,
+        ...(c.get("remoteGrant") ? { project: forGuest } : {}),
+      });
     } catch (err) {
       if (err instanceof UnknownSessionError) return c.text("unknown session", 404);
       throw err;

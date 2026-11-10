@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useRef } from "react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import type { CellSummary } from "./types.ts";
 
@@ -204,7 +204,7 @@ it("tells a refused update once, when the computer says it is blocked", async ()
   expect(toasts()).toEqual([]);
 });
 
-it("keeps a confirmed update busy when a remote proxy times out", async () => {
+it("keeps a confirmed update busy when a remote proxy times out, and says nothing false", async () => {
   const { api, answer } = control();
   const view = render(<Shell api={api} computer={cell({ updateAvailable: true })} idle={false} />);
   fireEvent.click(screen.getByRole("button", { name: "Update" }));
@@ -215,5 +215,226 @@ it("keeps a confirmed update busy when a remote proxy times out", async () => {
   expect(screen.getByTestId("error").textContent).toBe("");
   expect(screen.getByRole("button").textContent).toBe("Updating your computer…");
   await settle();
-  expect(toasts().join()).toContain("still updating");
+  expect(toasts().join()).not.toMatch(/couldn't|isn't answering/);
+});
+
+describe("what an update says", () => {
+  function Watch({
+    api,
+    computer,
+    details = () => {},
+  }: {
+    api: ReturnType<typeof createApi>;
+    computer: CellSummary;
+    details?: () => void;
+  }) {
+    const island = useRef<HTMLDivElement>(null);
+    const update = kit.useComputerUpdate(api, computer);
+    kit.useUpdateProgressNotice(computer, update, details);
+    return (
+      <div>
+        <div ref={island}>Island</div>
+        <p data-testid="stage">{update.stage ?? "none"}</p>
+        <p data-testid="line">{update.line ?? ""}</p>
+        <p data-testid="value">{String(update.value ?? "")}</p>
+        <p data-testid="note">{update.note ?? ""}</p>
+        <button type="button" onClick={update.run}>
+          {update.busy ? "Updating" : "Update"}
+        </button>
+        <kit.Toaster anchor={island} />
+      </div>
+    );
+  }
+  const updating = (progress?: CellSummary["updateProgress"], more: Partial<CellSummary> = {}) =>
+    cell({ state: "stopping", updating: true, updateProgress: progress, ...more });
+
+  it("shows a stage the moment Update is pressed, before the daemon has said anything", () => {
+    const { api } = control();
+    render(<Watch api={api} computer={cell({ updateAvailable: true })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    expect(screen.getByTestId("stage").textContent).toBe("download");
+    expect(screen.getByTestId("line").textContent).toBe("Step 1 of 6 · Getting the new version");
+  });
+
+  it("follows the daemon's stages with percent and bytes on a bar that doesn't run ahead", () => {
+    const { api } = control();
+    const view = render(
+      <Watch
+        api={api}
+        computer={cell({
+          updating: true,
+          updateProgress: {
+            stage: "download",
+            share: 0.45,
+            detail: "Downloading · 45% · 1.4 of 3.1 GB",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("line").textContent).toBe(
+      "Step 1 of 6 · Downloading · 45% · 1.4 of 3.1 GB",
+    );
+    expect(Number(screen.getByTestId("value").textContent)).toBeCloseTo(0.075);
+    view.rerender(<Watch api={api} computer={updating({ stage: "keep" })} />);
+    expect(screen.getByTestId("line").textContent).toBe(
+      "Step 3 of 6 · Keeping your apps and files",
+    );
+    expect(Number(screen.getByTestId("value").textContent)).toBeCloseTo(2 / 6);
+  });
+
+  it("follows on any device, wherever it is looking, with a way to the details", async () => {
+    const { api } = control();
+    const details = vi.fn();
+    render(<Watch api={api} computer={updating({ stage: "replace" })} details={details} />);
+    await settle();
+    expect(toasts().join()).toContain("Updating your computer · Step 4 of 6 · Installing");
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(details).toHaveBeenCalled();
+  });
+
+  it("says plainly when it runs long, from the daemon's clock", () => {
+    const { api } = control();
+    const operation = (elapsedMs: number) =>
+      ({
+        kind: "update",
+        step: "install",
+        startedAt: elapsedMs,
+        elapsedMs,
+        expectedMs: 40_000,
+      }) as const;
+    const view = render(
+      <Watch api={api} computer={updating({ stage: "keep" }, { operation: operation(60_000) })} />,
+    );
+    expect(screen.getByTestId("note").textContent).toBe("");
+    view.rerender(
+      <Watch api={api} computer={updating({ stage: "keep" }, { operation: operation(240_000) })} />,
+    );
+    expect(screen.getByTestId("note").textContent).toContain("taking longer than usual");
+    view.rerender(
+      <Watch
+        api={api}
+        computer={updating({ stage: "keep" }, { operation: operation(31 * 60_000) })}
+      />,
+    );
+    expect(screen.getByTestId("note").textContent).toContain("Your files are kept");
+  });
+
+  const failure = {
+    stage: "replace",
+    message: "Your computer couldn't be updated. It's back as it was, and your files are kept.",
+    at: 1234,
+  } as const;
+
+  it("tells every device an update failed, once, with Retry when it can be tried again", async () => {
+    const { api, calls } = control();
+    const view = render(
+      <Watch api={api} computer={cell({ updateAvailable: true, updateFailure: failure })} />,
+    );
+    await settle();
+    expect(toasts().join()).toContain("Your computer wasn't updated");
+    expect(toasts().join()).toContain("It's back as it was");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(calls.length).toBe(1);
+    view.unmount();
+    await settle(7000);
+    render(<Watch api={api} computer={cell({ updateAvailable: true, updateFailure: failure })} />);
+    await settle();
+    expect(toasts().join()).not.toContain("Your computer wasn't updated");
+  });
+
+  it("says so again when the same failure's words change", async () => {
+    const { api } = control();
+    const away = {
+      ...failure,
+      at: 77,
+      message:
+        "Your computer couldn't be updated. Your files are kept. It starts again by itself as soon as Docker answers.",
+    };
+    const view = render(
+      <Watch api={api} computer={cell({ state: "failed", updateFailure: away })} />,
+    );
+    await settle();
+    expect(toasts().join()).toContain("as soon as Docker answers");
+    view.rerender(
+      <Watch
+        api={api}
+        computer={cell({ updateAvailable: true, updateFailure: { ...failure, at: 77 } })}
+      />,
+    );
+    await settle(2000);
+    expect(toasts().join()).toContain("It's back as it was");
+    expect(toasts().join()).not.toContain("as soon as Docker answers");
+  });
+
+  it("offers no Retry when there is nothing left to try again", async () => {
+    const { api } = control();
+    render(
+      <Watch
+        api={api}
+        computer={cell({ state: "failed", updateFailure: { ...failure, stage: "start", at: 99 } })}
+      />,
+    );
+    await settle();
+    expect(toasts().join()).toContain("Your computer wasn't updated");
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("says it worked once the computer is back, and that the files are there", async () => {
+    const { api } = control();
+    const view = render(<Watch api={api} computer={updating({ stage: "start" })} />);
+    await settle();
+    view.rerender(<Watch api={api} computer={cell({ state: "ready" })} />);
+    await settle(2000);
+    expect(toasts().join()).toContain("Your computer is updated");
+    expect(toasts().join()).toContain("Your files and sign-ins are all still there.");
+  });
+
+  it("doesn't call it updated while the new version is still on offer", async () => {
+    const { api } = control();
+    const view = render(
+      <Watch
+        api={api}
+        computer={cell({ updating: true, updateProgress: { stage: "download" } })}
+      />,
+    );
+    await settle();
+    view.rerender(<Watch api={api} computer={cell({ updateAvailable: true })} />);
+    await settle(2000);
+    expect(toasts().join()).not.toContain("Your computer is updated");
+    view.rerender(<Watch api={api} computer={cell({})} />);
+    await settle(2000);
+    expect(toasts().join()).toContain("Your computer is updated");
+  });
+
+  it("doesn't call a refused press an update", async () => {
+    const { api, answer } = control();
+    render(<Watch api={api} computer={cell({ updateAvailable: true })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await act(async () =>
+      answer(new Response("Wait for dot to finish, or stop the task first.", { status: 409 })),
+    );
+    await settle(2000);
+    expect(toasts().join()).not.toContain("Your computer is updated");
+  });
+
+  it("says nothing of an update this page never saw", async () => {
+    const { api } = control();
+    render(<Watch api={api} computer={cell({ state: "ready" })} />);
+    await settle();
+    expect(toasts()).toEqual([]);
+  });
+
+  it("leaves a failure the summary reports to the summary, rather than saying it twice", async () => {
+    const { api, answer } = control();
+    render(<Shell api={api} computer={cell({ updateAvailable: true })} idle={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await act(async () =>
+      answer(
+        new Response("Your computer couldn't be updated. It's back as it was.", { status: 409 }),
+      ),
+    );
+    await settle();
+    expect(screen.getByTestId("error").textContent).toBe("");
+    expect(toasts()).toEqual([]);
+  });
 });

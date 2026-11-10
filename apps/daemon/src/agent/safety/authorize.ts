@@ -198,8 +198,9 @@ export async function authorizePrepared(
     // A held Pause refuses the hand-off before anything counts as signed in.
     if (ctx.session.safetyPause) throw new PausedStepError();
     if (reason !== "other") ctx.session.taskAutonomy.signIn(screenOf(ctx));
-    await ctx.session.takeover(reason, note, ctx.step, ctx.lease);
+    const { movedOn } = await ctx.session.takeover(reason, note, ctx.step, ctx.lease);
     ctx.check();
+    if (movedOn) ctx.session.movedOnFrom(ctx.callId);
     // Hand-back never authorizes automatic replay of the action that caused takeover.
     return undefined;
   };
@@ -302,7 +303,7 @@ export async function authorizePrepared(
     ctx.check();
     if (outcome === "take_control") {
       ctx.screen?.finish();
-      await ctx.session.takeover(
+      const { movedOn } = await ctx.session.takeover(
         "other",
         "Complete this action yourself, then hand control back.",
         ctx.step,
@@ -310,8 +311,11 @@ export async function authorizePrepared(
         true,
       );
       ctx.check();
+      if (movedOn) ctx.session.movedOnFrom(ctx.callId);
       return undefined;
     }
+    // Not done, and not failed: the user moved on from it.
+    if (outcome === "message") ctx.stepCancelled = true;
     if (outcome !== "approve") return undefined;
   }
   ctx.check();

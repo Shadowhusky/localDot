@@ -281,14 +281,28 @@ model stays selected. Catalog entries describe models, not your account’s acce
 ## Automatic updates
 
 Settings → Your computer → localDot updates shows the installed build, the last successful
-check and the new version. While an update downloads, a bar under it says how far it has got
-("Downloading · 212 of 640 MB", then "Preparing the computer · 1.4 of 3.1 GB") and never moves
-back; then it says "Ready to install". Under the group, "What's new in" shows the new version's
-release notes, with any versions it skips folded below. If an update fails, one sentence says so
-over the steps it went through, marking the one that failed. Installing shows "Restarting
-localDot…" until the new version answers, then the page reloads and says once "Updated to …",
-with its notes a tap away. A quiet notice appears once per version when dot is idle; dismissing
-it does not remove the update from Settings.
+check and the new version. **Update now** does the whole update from one press: it asks the channel
+for the newest release, downloads what isn't here yet, verifies it, installs it and restarts
+localDot. A list of those steps and a bar show how far it has got ("Downloading · 42% · 212 of
+640 MB", then "Preparing the computer · 1.4 of 3.1 GB"), on every device with localDot open and
+through a reload. While it downloads, a notice elsewhere in the app says so; through the install and
+restart a panel over the app does, because nothing else can act then. The page waits for the
+restart by itself, and once the new version has passed its checks it reloads and says once "Updated
+to …", with its notes a tap away. Under the group, "What's new in" shows the new version's release
+notes, with any versions it skips folded below. A quiet notice appears once per version when dot is
+idle; dismissing it does not remove the update from Settings.
+
+If an update can't finish, one sentence says what happened over the steps it went through, marking
+the one that failed, and **Retry** starts again. The previous version stays or comes back in every
+case: a new version that doesn't start or fails its checks is rolled back, and so is a swap the
+installer didn't live to finish. A task that's working holds the update back and Settings says so;
+nothing stops it. A dropped connection picks up where it stopped, including after a restart, and a
+download that stops moving for half a minute is tried again before it is reported. If localDot
+doesn't come back within five minutes the page says to run `localdot up` on the computer, and keeps
+trying. A page reloaded during the restart waits on a small page of its own, from the service worker
+localDot registers once an update starts; a device that has never seen one sees the browser's own
+error until localDot is back. A copy running from a source checkout says so, and that it updates
+from Git: pull, rebuild, then restart it.
 
 The installed daemon checks after a short startup delay, then about every six hours with jitter.
 Offline failures back off from five minutes to six hours. Checks are shared across tabs and phones,
@@ -297,24 +311,47 @@ Automatic checks and downloads can each be disabled. Neither shuts down a runnin
 
 For source installations, checks follow your configured Git branch over HTTPS. An exact
 commit or tag stays pinned. Download adds Git objects without modifying the running checkout.
-Install update asks before shutting down the computer and rebuilding the downloaded commit;
-it preserves the branch for future checks. Linux/WSL installation runs in a separate systemd user
-service so stopping the daemon cannot kill the installer. This source path is not a signed binary
-release. A build can still require dependency/image downloads and take several minutes.
+Update now asks first, then stops localDot and rebuilds the downloaded commit, keeping the branch
+for future checks. Linux/WSL installation runs in a separate systemd user service so stopping the
+daemon cannot kill the installer. A build that fails puts the commit that was running back and starts
+it. This source path is not a signed binary release. A build can still require dependency/image
+downloads and take several minutes, for all of which localDot is down.
 Existing installations need one `localdot update` to register the updater with their service.
 
 The public testing channel checks the signed catalog, archive inventory and image digests.
 Download fetches and checks the app package and then the computer's four pinned images, so that
 installing only swaps versions and restarts: the installer checks the kept package against the
-signed catalog again and skips images Docker already holds. With less than 10 GB free, the images
-are left for the installer and Settings says so. An update from 0.1.0-rc.31 or earlier still runs
-that version's installer, which downloads everything again.
+signed catalog again and skips images Docker already holds. An unchanged key service keeps running
+through it, so saved keys stay unlocked. With less than 10 GB free, the images are left for the
+installer and Settings says so. An update from 0.1.0-rc.31 or earlier still runs that version's
+installer, which downloads everything again.
 `localdot update` installs the newest testing package while keeping your settings and computer data.
 The separate signed desktop-release path verifies publisher provenance, helper signatures and image
 digests before marking a download ready. Its Install at next launch option applies a prepared
 release only after services have stopped; opening another tab or an idle conversation is not a
 restart. Failed activation uses the existing rollback transaction and does not repeat each launch.
 Packaged publication/signing/installed acceptance gates remain in [release packaging](release-packaging.md).
+
+### Updating your computer
+
+Settings → Your computer → Computer updates offers a new version of the computer itself, separately
+from localDot, whenever a newer image is on this machine or a pinned one is still to be downloaded.
+**Update** goes through six steps, shown in the same list and bar on every device with localDot open
+and through a reload: get the new version, stop your computer, keep your apps and files, install the
+new version, start your computer, reconnect the screen. A download says how far it has got when
+Docker reports it. Keeping your apps and files is usually the long step, and it says what it is doing.
+A notice elsewhere in the app and the panel over the computer say the same step, and that files and
+sign-ins stay.
+
+If it takes more than three minutes, or three times what the computer usually takes, the page says
+that is normal for a computer with many apps. After half an hour it says it is taking much longer
+than it should and what to do, and keeps watching. A task that's working holds the update back and
+says so; nothing stops it. A download that stops moving for five minutes is reported.
+
+If an update can't finish, every device says once what happened, and Settings marks the step that
+failed with **Retry**. The computer goes back as it was and your files stay. If Docker goes away
+part-way, localDot says so and brings the computer back by itself within half an hour of Docker
+returning, finishing the update if it had got past the swap.
 
 ## Several dots on one computer
 

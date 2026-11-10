@@ -131,3 +131,10 @@ describe("progressAt", () => {
     expect(progressAt(timing({ since: 5_000 }), 0)).toBe(0);
   });
 });
+
+it("keeps an update's bar at its stage however long the stage takes", () => {
+  const timing = { since: 0, expectedMs: 40_000, kind: "update" as const };
+  const bounds: [number, number] = [2 / 6, 3 / 6];
+  expect(progressAt({ ...timing, bounds }, 0)).toBeCloseTo(2 / 6);
+  expect(progressAt({ ...timing, bounds }, 600_000)).toBeCloseTo(3 / 6);
+});

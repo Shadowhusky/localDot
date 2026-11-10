@@ -3,8 +3,10 @@ import type {
   AskFieldRecord,
   AskFieldValue,
   AskRequestField,
+  Blocker,
   EventOf,
   GivenBack,
+  GuestAccess,
   MessageModel,
   PageElement,
   PauseSnapshot,
@@ -29,15 +31,25 @@ import {
   isOwnWords,
   MAX_SUBAGENT_BRIEFS,
   SessionRun,
+  STALL,
   type TranscriptAppend,
   ulid,
 } from "@localdot/protocol";
-import { KEYS_LOCKED_NOTE, KEYS_UNLOCKED_NOTE } from "@localdot/protocol/guidance";
 import type { ScreenName, ScreenSwitchData } from "../../../../packages/protocol/src/screens.ts";
 import type { ScreenController, ScreenLease, ScreenScope } from "../browser/screen-controller.ts";
+import { browserLane } from "../browser/slots.ts";
 import { NO_CONNECTORS as NO_TASK_CONNECTORS, type TaskConnectors } from "../connectors/hub.ts";
 import type { EventLog } from "../event-log.ts";
 import type { GuiAction, NativeActionIdentity } from "../gateway/gateway.ts";
+import {
+  BlockerDesk,
+  type BlockerOutcome,
+  type ClearedBlocker,
+  type ClearOptions,
+  type OpenBlocker,
+  type RaiseOptions,
+} from "./blockers.ts";
+import { GUEST_NO_BROWSER } from "./guest.ts";
 import type { ResearchLog } from "./research.ts";
 import {
   type ActionBinding,
@@ -75,7 +87,7 @@ export interface AskAnswer {
   declined?: true;
   // Never journaled: the ask tool types these into their fields and clears them.
   secrets?: SecretAnswers;
-  by: "user" | "timeout" | "stop" | "pause" | "control";
+  by: "user" | "timeout" | "stop" | "pause" | "control" | "message";
 }
 export interface AskForm {
   question: string;
@@ -94,6 +106,8 @@ export interface TakeoverOutcome {
   by: "user" | "stop";
   // The user said "Not now" to dot's hand-off.
   declined?: true;
+  // The user's message ended dot's hand-off, with what they did there unknown.
+  movedOn?: true;
 }
 export interface PlanItem {
   id: string;
@@ -320,6 +334,10 @@ export class AgentSession {
   research: ResearchLog | undefined;
   // The user's last few tasks when this one started.
   recent: readonly RecentLine[] = [];
+  // Present when the task came through a shared link: what of the owner's it may use.
+  guest: GuestAccess | undefined;
+  // The shared link the task works for.
+  link: string | undefined;
   // The connected apps' tools this task's model was shown.
   connectors: TaskConnectors = NO_TASK_CONNECTORS;
   readonly workProgress = new WorkProgress();
@@ -336,6 +354,10 @@ export class AgentSession {
   readonly #turns = new Map<string, MessageTurn>();
   readonly #withdrawn = new Map<string, string>();
   readonly #cancelledQueued = new Set<string>();
+  // The calls whose card the user's message ended, until dot's reply to them says so.
+  readonly #movedOn = new Set<string>();
+  // The message that last ended a wait waits for this task to finish: dot hears to finish for it.
+  messageWaits = false;
   // The user's messages dot has received and not acted on, by id: no words of its own and no tool
   // call since. Stop gives these back.
   readonly #unanswered = new Map<string, string>();
@@ -356,10 +378,19 @@ export class AgentSession {
   readonly #listeners = new Set<() => void>();
   // dot's next input waits for a fresh look at the screen, which the user has had.
   #lookFirst = false;
-  // The task met locked saved keys; the conversation offers to unlock them until they open.
-  #keysLocked = false;
-  // dot was told they were locked, so it is told when they open.
-  #keysTold = false;
+  // What the conversation offers the user to fix, for this task.
+  readonly #blockers = new BlockerDesk({
+    raised: (data) => this.append("blocker.raise", data),
+    cleared: (data) => this.append("blocker.clear", data),
+    tell: (text, wakes) => this.#note(text, wakes),
+    changed: () => this.#wake(),
+  });
+  // dot's own request_fix calls waiting on a card.
+  #fixWaits = 0;
+  readonly #refusedKeys = new Set<string>();
+  // A stall whose card was fixed from elsewhere: Continue or a message moves it on, nothing else.
+  #heldAfterFix = false;
+  #waitsEnded = 0;
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
   readonly #manual = new Map<ManualLease, ManualCall>();
@@ -486,6 +517,11 @@ export class AgentSession {
   get tainted(): boolean {
     return this.#tainted;
   }
+  // The task has read outside words at some point. Unlike tainted, the user's word doesn't clear it:
+  // what was read stays in dot's context.
+  get readOutside(): boolean {
+    return this.#heardOthers;
+  }
   set tainted(value: boolean) {
     this.#tainted = value;
     if (value) this.#heardOthers = true;
@@ -536,7 +572,16 @@ export class AgentSession {
         throw new SessionStoppedError();
       checks.check(value);
     };
-    return this.#approvals.request(binding, draft, { ...checks, check });
+    return this.#approvals.request(binding, draft, { ...checks, check }).then((outcome) => {
+      if (outcome === "message") this.movedOnFrom(binding.callId);
+      return outcome;
+    });
+  }
+  movedOnFrom(callId: string): void {
+    this.#movedOn.add(callId);
+  }
+  tookMovedOn(callId: string): boolean {
+    return this.#movedOn.delete(callId);
   }
   answerApproval(value: unknown): boolean {
     const generation = this.generation;
@@ -784,6 +829,18 @@ export class AgentSession {
   get screens(): ScreenController | undefined {
     return this.#screens;
   }
+  // The lane of the web browser this task picked, apart from its computer's; none before it picks
+  // or when every task shares the computer's lane.
+  get browserLane(): string | undefined {
+    const screens = this.#screens;
+    return screens?.browserPicked ? browserLane(screens.browserKey) : undefined;
+  }
+  // What the task's next action on its screen takes turns on: its browser's lane while it is in
+  // its browser, else its computer's.
+  get turnKey(): string {
+    const lane = this.browserLane;
+    return lane && this.#screens?.selection.screen === "browser" ? lane : this.cellId;
+  }
   #screenScope(
     generation: BrainGeneration,
     signal: AbortSignal,
@@ -840,6 +897,8 @@ export class AgentSession {
     options: { restart?: boolean; daemon?: boolean } = {},
   ): Promise<ScreenSwitchData> {
     lease.check();
+    // The web browser keeps the owner's sign-ins.
+    if (screen === "browser" && this.guest && !this.guest.apps) throw new Error(GUEST_NO_BROWSER);
     if (!this.#active.has(lease) || !this.#screens || this.#screenReady !== lease.generation)
       throw new SessionStoppedError();
     const releasing = this.releaseInput();
@@ -1083,7 +1142,7 @@ export class AgentSession {
     if (
       type === "agent.state" &&
       ["thinking", "acting", "observing", "idle", "done"].includes(String(data.state)) &&
-      (this.#ask || this.pendingApproval || this.#control || this.safetyPause)
+      (this.#ask || this.pendingApproval || this.#control || this.safetyPause || this.#fixWaits)
     )
       return;
     this.eventLog.append(this.id, {
@@ -1127,11 +1186,13 @@ export class AgentSession {
       text: this.task,
       kind: "task",
       ...(model ? { model } : {}),
+      ...(sender ? { link: sender } : {}),
     });
     this.#unanswered.set(messageId, this.task);
     this.#senders.set(messageId, sender ?? null);
   }
   post(kind: InboxItem["kind"], text: string, sender?: string, turn?: MessageTurn): InboxItem {
+    if (kind === "resume") this.#heldAfterFix = false;
     const messageId = ulid();
     // Known as the user's before it lands, so a wait it ends hears it as theirs.
     if (kind !== "resume") this.#senders.set(messageId, sender ?? null);
@@ -1147,12 +1208,14 @@ export class AgentSession {
     if (this.stopped) throw new SessionStoppedError();
     const item = Object.freeze(InboxItem.parse({ seq: this.#seq + 1, messageId, kind, text }));
     const turn = this.#turns.get(messageId);
+    const sender = this.#senders.get(messageId);
     if (announce && kind !== "resume")
       this.append("message.user", {
         messageId: item.messageId,
         text,
         kind,
         ...(turn ? { model: turn.model } : {}),
+        ...(sender ? { link: sender } : {}),
       });
     this.#seq = item.seq;
     this.#inbox.push(item);
@@ -1172,6 +1235,55 @@ export class AgentSession {
     if (kind === "followup" && this.research?.stopped) this.research.more();
     this.#wake();
     return { ...item };
+  }
+  // The user's message while dot waits on them moves on from what it waits on: a question closes
+  // unanswered, a step's approval counts as not given, a card closes as not done, and dot reads the
+  // message now, not after the wait. Moving dot ends what it left running, so a message for another
+  // model waits for the task then, as it does for a model this task can't run. False when dot waits
+  // on none of them: a card it wasn't waiting on still closes, and the message goes its usual way.
+  moveOn(text: string, sender?: string, turn?: MessageTurn): boolean {
+    if (this.stopped) throw new SessionStoppedError();
+    const stalled = this.#stalledOnCard || this.#heldAfterFix;
+    if (!this.#ask && !this.pendingApproval && !stalled && !this.#fixWaits) {
+      this.#blockers.moveOn();
+      return false;
+    }
+    const waits =
+      !!turn?.handOver ||
+      (!!turn?.moves() && (this.#leftRunning > 0 || this.#delegates.running().length > 0));
+    this.#endWait(waits);
+    if (waits) {
+      this.enqueue(text, sender, turn);
+      // A stalled model never finishes for it, so the task that runs that model takes over now.
+      if (stalled) turn?.handOver?.();
+    } else {
+      this.#endedWait(this.post("steer", text, sender, turn));
+      // A plan's harness stays stalled until a Resume, whatever is said; the brain takes either.
+      if (stalled) this.post("resume", "");
+    }
+    return true;
+  }
+  // The model stopped on a card: only the fix, or a message, moves it on.
+  get #stalledOnCard(): boolean {
+    return this.#blockers.open.some((open) => open.required);
+  }
+  #endWait(waits: boolean): boolean {
+    this.messageWaits = waits;
+    this.#waitsEnded++;
+    this.#heldAfterFix = false;
+    const onCard = this.#stalledOnCard || this.#fixWaits > 0;
+    this.#blockers.moveOn();
+    const asked = this.#ask?.finish({ by: "message" }) ?? false;
+    return this.#approvals.moveOn(this.id) || asked || onCard;
+  }
+  // As for a timed wait: the message shows it ended this wait, and a wait dot starts next runs on.
+  #endedWait(said: InboxItem): void {
+    if (this.#cut >= said.seq) return;
+    this.#cut = said.seq;
+    queueMicrotask(() => {
+      this.#announced = Math.max(this.#announced, said.seq);
+    });
+    this.append("message.delivery", { messageId: said.messageId, state: "woke" });
   }
   // Hold follow-ups outside the model inbox until its current task finishes. A queued
   // message can therefore be promoted without racing the model's inbox cursor.
@@ -1194,6 +1306,7 @@ export class AgentSession {
         : turn?.moves()
           ? { waitsFor: "switch" as const }
           : {}),
+      ...(sender ? { link: sender } : {}),
     });
     this.#queued.set(item.messageId, text);
     this.#senders.set(item.messageId, sender ?? null);
@@ -1214,15 +1327,19 @@ export class AgentSession {
     this.#queued.clear();
     return taken;
   }
-  steerQueued(messageId: string): boolean {
+  // `movesOn`: the user sent it now, which ends what dot waits on them for, as any message does.
+  steerQueued(messageId: string, movesOn = false): boolean {
     if (this.stopped) throw new SessionStoppedError();
     const text = this.#queued.get(messageId);
     if (text === undefined) return this.#inbox.some((item) => item.messageId === messageId);
+    const handOver = !!this.#turns.get(messageId)?.handOver;
+    const ended = movesOn && this.#endWait(handOver);
     // Its model can't run here, so it waits for this task to finish and hand it over.
-    if (this.#turns.get(messageId)?.handOver) return true;
+    if (handOver) return true;
     this.append("message.delivery", { messageId, state: "steering" });
-    this.#deliverInbox("steer", text, messageId, false);
+    const said = this.#deliverInbox("steer", text, messageId, false);
     this.#queued.delete(messageId);
+    if (ended) this.#endedWait(said);
     return true;
   }
   // Withdrawal and inbox delivery are synchronous: a message can only take one path.
@@ -1304,27 +1421,133 @@ export class AgentSession {
     this.#wake();
   }
   get keysLocked(): boolean {
-    return this.#keysLocked;
+    return this.#blockers.open.some(({ blocker }) => blocker.kind === "keys_locked");
   }
   // Once per lock: the conversation shows the Unlock card, and dot hears not to ask for the
   // passphrase. A task paused on its own model key needs no word; unlocking resumes it.
   lockKeys(tell = true): void {
-    if (this.stopped) return;
-    if (!this.#keysLocked) this.append("keys.lock", { locked: true });
-    this.#keysLocked = true;
-    if (!tell || this.#keysTold) return;
-    this.#keysTold = true;
-    this.#note(KEYS_LOCKED_NOTE);
+    this.raiseBlocker({ kind: "keys_locked" }, tell ? {} : { required: true, tell: false });
   }
-  // The vault opened: the card goes, and dot, if it was told, hears it, even from a turn it had
-  // ended.
-  keysUnlocked(): void {
-    if (this.stopped || !this.#keysLocked) return;
-    this.#keysLocked = false;
-    this.append("keys.lock", { locked: false });
-    if (!this.#keysTold) return;
-    this.#keysTold = false;
-    this.#note(KEYS_UNLOCKED_NOTE, true);
+  // The vault opened: the card goes, and dot, if it was told, hears it: at once if this task's own
+  // card opened it, otherwise with the user's next word.
+  keysUnlocked(): readonly ClearedBlocker[] {
+    return this.clearBlockers((blocker) => blocker.kind === "keys_locked");
+  }
+  get openBlockers(): readonly OpenBlocker[] {
+    return this.#blockers.open;
+  }
+  // Undefined once the task has stopped, or while the user's Not now holds.
+  raiseBlocker(blocker: Blocker, options?: RaiseOptions): OpenBlocker | undefined {
+    if (blocker.kind === "key" && options?.by !== "dot") this.#refusedKeys.add(blocker.id);
+    return this.stopped ? undefined : this.#blockers.raise(blocker, options);
+  }
+  // Whether localDot has seen this key refused in this task: what dot's own word for it is checked by.
+  keyRefused(id: string): boolean {
+    return this.#refusedKeys.has(id);
+  }
+  // A call with the key went through. That says nothing of what the user did, so dot, whose own call
+  // it was, hears nothing, and the card leaves a line saying only that.
+  keyWorked(id: string): void {
+    this.#refusedKeys.delete(id);
+    this.clearBlockers((blocker) => blocker.kind === "key" && blocker.id === id, {
+      outcome: "worked",
+    });
+  }
+  clearBlockers(
+    matches: (blocker: Blocker) => boolean,
+    options?: ClearOptions,
+  ): readonly ClearedBlocker[] {
+    if (this.stopped) return [];
+    const cleared = this.#blockers.clear(matches, options);
+    if (options?.outcome !== "worked" && cleared.some((one) => one.required && !one.ownCard)) {
+      this.#heldAfterFix = true;
+      this.#publishState("paused", STALL.fixedElsewhere);
+    }
+    return cleared;
+  }
+  useBlocker(blockerId: string): boolean {
+    return !this.stopped && this.#blockers.use(blockerId);
+  }
+  releaseBlocker(blockerId: string): boolean {
+    return this.#blockers.release(blockerId);
+  }
+  dismissBlocker(blockerId: string): boolean {
+    return !this.stopped && this.#blockers.dismiss(blockerId);
+  }
+  blockerDeclined(blocker: Blocker): boolean {
+    return this.#blockers.declined(blocker);
+  }
+  // Not now is the owner's to lift: a guest's message or a routine's follow-up doesn't.
+  ownerSpoke(): void {
+    this.#blockers.ownerSpoke();
+  }
+  withdrawBlockers(): void {
+    if (!this.stopped) this.#blockers.withdraw();
+  }
+  // The task itself waits, with no call of dot's under way.
+  async waitForBlockerToGo({ blockerId }: OpenBlocker): Promise<void> {
+    const from = this.#seq;
+    while (this.#blockers.isOpen(blockerId) && !this.stopped)
+      await this.#changed(25_000, this.abort.signal);
+    this.abort.signal.throwIfAborted();
+    if (this.#blockers.fixedElsewhere(blockerId) && !this.stopped)
+      await this.#untilSpoken(from, Number.POSITIVE_INFINITY, this.abort.signal);
+  }
+  // Fixed from elsewhere, so nothing restarts dot by itself: Continue or the user's next word does.
+  async #untilSpoken(
+    from: number,
+    deadline: number,
+    signal: AbortSignal,
+  ): Promise<"spoken" | "pause" | "timeout"> {
+    const ended = this.#waitsEnded;
+    for (;;) {
+      signal.throwIfAborted();
+      if (this.safetyPause) return "pause";
+      if (
+        ended !== this.#waitsEnded ||
+        this.#inbox.some((item) => item.seq > from && !this.#notes.has(item.seq))
+      )
+        return "spoken";
+      const left = deadline - Date.now();
+      if (left <= 0) return "timeout";
+      await this.#changed(Math.min(left, 25_000), signal);
+    }
+  }
+  // dot's call waits here for the card to go, as a question waits for its answer. The card stays up
+  // after a timeout or a Pause.
+  async waitForBlocker(
+    { blockerId }: OpenBlocker,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<BlockerOutcome | "timeout" | "pause" | "unheard"> {
+    this.#blockers.join(blockerId);
+    const deadline = Date.now() + timeoutMs;
+    const from = this.#seq;
+    this.#fixWaits++;
+    if (!this.safetyPause) {
+      this.setStatus("waiting_user");
+      this.#publishState("waiting_user", "fix");
+    }
+    try {
+      while (this.#blockers.isOpen(blockerId)) {
+        signal.throwIfAborted();
+        if (this.safetyPause) return "pause";
+        const left = deadline - Date.now();
+        if (left <= 0) return "timeout";
+        await this.#changed(left, signal);
+      }
+      const outcome = this.#blockers.outcome(blockerId) ?? "fixed";
+      if (!this.#blockers.fixedElsewhere(blockerId)) return outcome;
+      this.setStatus("paused");
+      this.#publishState("paused", STALL.fixedElsewhere);
+      const heard = await this.#untilSpoken(from, deadline, signal);
+      return heard === "spoken" ? outcome : heard === "pause" ? "pause" : "unheard";
+    } finally {
+      this.#fixWaits--;
+      this.#blockers.leave(blockerId);
+      if (!this.stopped && !this.#control && !this.safetyPause && !this.#ask)
+        this.status = "running";
+    }
   }
   // A word to dot from localDot rather than the user, heard with dot's next look at its inbox.
   remind(text: string): void {
@@ -1481,7 +1704,11 @@ export class AgentSession {
     this.check(generation, signal, true);
     if (!Number.isSafeInteger(after) || after < 0 || after > this.#seq)
       throw new Error("invalid inbox cursor");
-    const ready = () => this.#inbox.filter((i) => i.seq > after);
+    // A stopped brain goes on at anything it reads, so localDot's own words wait for the user's.
+    const ready = () => {
+      const items = this.#inbox.filter((i) => i.seq > after);
+      return this.status === "paused" && items.every((i) => this.#notes.has(i.seq)) ? [] : items;
+    };
     const combined = AbortSignal.any([
       this.abort.signal,
       generation.signal,
@@ -1893,12 +2120,13 @@ export class AgentSession {
     return this.#endControl(record, note);
   }
   // `declined`: the user said "Not now" to dot's hand-off; control they took themselves has nothing
-  // to decline.
+  // to decline. `movedOn`: the note is a message that ended dot's hand-off.
   async handback(
     requestId: string,
     note: string | undefined,
     signal?: AbortSignal,
     declined = false,
+    movedOn = false,
   ): Promise<boolean> {
     const record = this.#control;
     if (
@@ -1948,16 +2176,22 @@ export class AgentSession {
     // Native takeover can retire its brain. With no current generation, keep the physical
     // screens and recorder fenced until prepareScreens confirms the replacement's grant.
     if (this.#screens) this.lastFrameId = undefined;
-    return this.#endControl(record, note, declined && !record.user);
+    return this.#endControl(record, note, declined && !record.user, movedOn && !record.user);
   }
   // A hand-back that cannot finish leaves the user in control, free to try again.
   #keepControl(record: ControlRecord): false {
     if (this.#control === record && !this.stopped) record.returning = false;
     return false;
   }
-  #endControl(record: ControlRecord, note: string | undefined, declined = false): boolean {
+  #endControl(
+    record: ControlRecord,
+    note: string | undefined,
+    declined = false,
+    movedOn = false,
+  ): boolean {
     // Persist the user's hand-back note before waking any replacement brain.
-    if (note) this.post("steer", note);
+    const said = note ? this.post("steer", note) : undefined;
+    if (said && movedOn) this.#endedWait(said);
     this.append(
       "takeover.end",
       {
@@ -1966,6 +2200,7 @@ export class AgentSession {
         by: "user",
         ...(record.typed ? { typed: true } : {}),
         ...(declined ? { declined: true } : {}),
+        ...(movedOn ? { movedOn: true } : {}),
       },
       record.step,
     );
@@ -1986,6 +2221,7 @@ export class AgentSession {
       ...(note ? { note } : {}),
       by: "user",
       ...(declined ? { declined: true } : {}),
+      ...(movedOn ? { movedOn: true } : {}),
     });
     this.#wake();
     return true;

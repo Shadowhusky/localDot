@@ -1295,9 +1295,16 @@ describe("ActionGateway settle and zoom", () => {
     s.cells.emit(cell);
     await s.gateway.observe(ctx);
     expect(await s.gateway.zoom(s.sessionId, frameId, region)).toBeUndefined();
-    expect(s.fake.calls.filter((c) => c.path === "/zoom")).toHaveLength(1);
+    expect(s.fake.calls.filter(modelZoom)).toHaveLength(1);
   });
 });
+
+// A zoom the model asked for, not the whole screen the step pictures keep (covered as the
+// model's frame is: see "step pictures").
+const modelZoom = (call: { path: string; body: unknown }) =>
+  call.path === "/zoom" &&
+  JSON.stringify((call.body as { region?: unknown }).region) !==
+    JSON.stringify({ x: 0, y: 0, w: 1280, h: 800 });
 
 describe("ActionGateway on a computer tasks share", () => {
   it("covers another task's windows in the frame it keeps, and never zooms through them", async () => {
@@ -1346,7 +1353,69 @@ describe("ActionGateway on a computer tasks share", () => {
     expect(at(400, 300)).toBe(255);
     const region = { x: 0, y: 0, w: 100, h: 100 };
     expect(await s.gateway.zoom(s.sessionId, frameId, region)).toBeUndefined();
-    expect(s.fake.calls.some((c) => c.path === "/zoom")).toBe(false);
+    expect(s.fake.calls.some(modelZoom)).toBe(false);
+  });
+});
+
+describe("ActionGateway step pictures", () => {
+  // The model sees 1280x800; a 2x screen has twice that each way. What the step viewer shows
+  // keeps the screen's own pixels, covered where the model's frame is covered.
+  it("keeps the frame at the screen's resolution too, with another task's windows covered", async () => {
+    const device = await sharp({
+      create: { width: 2560, height: 1600, channels: 3, background: { r: 255, g: 255, b: 255 } },
+    })
+      .png()
+      .toBuffer();
+    const model = await sharp({
+      create: { width: 1280, height: 800, channels: 3, background: { r: 255, g: 255, b: 255 } },
+    })
+      .webp({ lossless: true })
+      .toBuffer();
+    const theirs = {
+      id: 9,
+      pid: 90,
+      cls: "Mousepad",
+      title: "b.txt",
+      rect: { x: 0, y: 0, w: 800, h: 600 },
+      frame: { x: 0, y: 0, w: 800, h: 600 },
+      active: false,
+    };
+    const s = setup({
+      observe: () => ({
+        frameId: ulid(),
+        width: 1280,
+        height: 800,
+        image: model.toString("base64"),
+        pointer: { x: 0, y: 0 },
+        windows: [theirs],
+      }),
+      zoom: () => device,
+    });
+    const { frameId } = await s.gateway.observe({
+      sessionId: s.sessionId,
+      cellId: s.cellId,
+      hidden: async (windows: readonly { frame: Rect }[]) => windows.map((w) => w.frame),
+    });
+    await vi.waitFor(() => expect(s.frames.fullPath(s.sessionId, frameId)).toBeDefined(), {
+      timeout: 15_000,
+    });
+    const zoomed = s.fake.calls.find((c) => c.path === "/zoom")?.body;
+    expect(zoomed).toEqual({ frameId, region: { x: 0, y: 0, w: 1280, h: 800 } });
+    const file = s.frames.fullPath(s.sessionId, frameId) as string;
+    expect(await sharp(file).metadata()).toMatchObject({ width: 2560, height: 1600 });
+    const pixels = await sharp(file).removeAlpha().raw().toBuffer();
+    const at = (x: number, y: number) => pixels[(y * 2560 + x) * 3] as number;
+    expect(Math.abs(at(10, 10) - 0x5b)).toBeLessThan(6);
+    expect(Math.abs(at(795, 595) - 0x5b)).toBeLessThan(6);
+    expect(at(820, 620)).toBeGreaterThan(245);
+  });
+
+  it("keeps only the model's frame on a 1x screen", async () => {
+    const s = setup({ zoom: () => Buffer.from("never") }, { scale: 1 });
+    const { frameId } = await s.gateway.observe({ sessionId: s.sessionId, cellId: s.cellId });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(s.frames.fullPath(s.sessionId, frameId)).toBeUndefined();
+    expect(s.fake.calls.some(modelZoom)).toBe(false);
   });
 });
 

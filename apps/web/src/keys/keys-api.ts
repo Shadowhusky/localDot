@@ -101,7 +101,10 @@ export async function saveKey(
   // sealing, and TypeScript alone cannot keep extra runtime fields off the wire.
   const checked = SecretBinding.safeParse(binding);
   if (!checked.success) throw new KeyProblem("Check the key's name and where it can be used.");
-  const problem = valueProblem(value, checked.data.kind);
+  const problem = valueProblem(value, checked.data.kind, {
+    ...(checked.data.kind === "llm" ? { provider: checked.data.provider } : {}),
+    ...(checked.data.kind === "http" ? { format: checked.data.format } : {}),
+  });
   if (problem) throw new KeyProblem(problem);
   const bound = checked.data;
   const details = metadata ? KeyMetadata.parse(metadata) : undefined;

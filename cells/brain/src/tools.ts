@@ -18,11 +18,13 @@ import {
   FOLLOW_UP_TOOL_DESCRIPTION,
   FollowUpAtInput,
   GenericComputerInput,
+  type GuestAccess,
   type ModelBinding,
   PeopleInput,
   RESEARCH_TOOL_DESCRIPTION,
   RecallInput,
   RememberInput,
+  RequestFixInput,
   RequestTakeoverInput,
   ResearchInput,
   ROUTINE_TOOL_DESCRIPTION,
@@ -36,12 +38,14 @@ import {
   WebSearchInput,
   WORK_CONTEXT_DESCRIPTION,
   WorkContextInput,
+  withheldTools,
 } from "@localdot/protocol";
 import {
   ASK_FORM_GUIDANCE,
   BROWSER_VERIFICATION_GUIDANCE,
   DONE_TOOL_DESCRIPTION,
   HUMAN_INPUT_GUIDANCE,
+  REQUEST_FIX_DESCRIPTION,
 } from "@localdot/protocol/guidance";
 import { asSchema, jsonSchema, type ToolSet, tool } from "ai";
 
@@ -85,12 +89,13 @@ export function toolSet(
   research = false,
   connectors: readonly ConnectorToolSpec[] = [],
   harnessTools: readonly ToolSchema[] = [],
+  guest?: GuestAccess,
 ): ToolSet {
   const computer = b.vision ? computerTool(b) : undefined;
   const result: ToolSet = {
     // The user's connected apps' tools, as the daemon described them; it checks every call.
     ...Object.fromEntries(
-      connectors.map((spec) => [
+      (guest && !guest.apps ? [] : connectors).map((spec) => [
         spec.name,
         tool({ description: spec.description, inputSchema: jsonSchema(spec.inputSchema as never) }),
       ]),
@@ -156,6 +161,7 @@ export function toolSet(
         " For passwords and codes, ask with ask_user fields instead. Hand over a sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",
       inputSchema: RequestTakeoverInput,
     }),
+    request_fix: tool({ description: REQUEST_FIX_DESCRIPTION, inputSchema: RequestFixInput }),
     remember: tool({
       description:
         "Save a lasting fact: USER.md for who the user is and their preferences, MEMORY.md for other facts worth keeping, or notes (append only) for today's daily notes, which recall can search but which are not loaded into later tasks. The user sees every change and can undo it.",
@@ -200,5 +206,14 @@ export function toolSet(
     });
   }
   if (harnessTools.some((entry) => entry.name === "todo_write")) delete result.update_plan;
+  for (const name of withheldTools(guest)) delete result[name];
   return result;
+}
+
+// What a delegated agent may use: reading and working on the computer, never acting as the user.
+export function delegatedTools(guest?: GuestAccess): string[] {
+  const withheld: readonly string[] = withheldTools(guest);
+  return ["shell", "files", "web_search", "web_fetch", "recall"].filter(
+    (name) => !withheld.includes(name),
+  );
 }

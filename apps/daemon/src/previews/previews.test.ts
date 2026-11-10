@@ -3,8 +3,8 @@ import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, request, type Server } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import { type AddressInfo, createServer as createTcpServer } from "node:net";
-import { tmpdir } from "node:os";
+import { type AddressInfo, createConnection, createServer as createTcpServer } from "node:net";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PreviewListener } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import { createPreviewForwarder } from "../../../../cells/desktop/desktopd/src/p
 import { type CellEndpoints, type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { type PreviewFronts, previewFronts } from "./fronts.ts";
 import { PreviewError, Previews } from "./previews.ts";
+import { REFUSED, signInApp, signInService } from "./testing/sign-in.ts";
 
 const CELL = "01JXYZ0000000000000000CELL";
 const SESSION = "01JXYZ0000000000000000TASK";
@@ -160,10 +161,11 @@ function fetchVia(
   headers: Record<string, string>,
   method = "GET",
   body?: string,
+  host = "127.0.0.1",
 ) {
   return new Promise<{ status: number; headers: IncomingHttpHeaders; body: string }>(
     (resolve, reject) => {
-      const req = request({ host: "127.0.0.1", port, path, method, headers }, (res) => {
+      const req = request({ host, port, path, method, headers }, (res) => {
         let text = "";
         res.on("data", (chunk) => {
           text += chunk;
@@ -178,22 +180,25 @@ function fetchVia(
   );
 }
 
-// What a device does with the link: open the entry page's secret, then the app.
-async function enter(link: string) {
+// What a device does with the link: open the entry page's secret, then the app. `held` is what the
+// browser already keeps for that host.
+async function enter(link: string, held?: string) {
   const url = new URL(link);
   const host = url.host;
   const answer = await fetchVia(
     Number(url.port),
     url.pathname,
-    { host, origin: `https://${host}`, "content-type": "text/plain" },
+    { host, origin: url.origin, "content-type": "text/plain", ...(held ? { cookie: held } : {}) },
     "POST",
     url.hash.slice(1),
   );
   return {
     port: Number(url.port),
     host,
+    origin: url.origin,
     next: JSON.parse(answer.body).next as string,
     cookie: String(answer.headers["set-cookie"]?.[0]).split(";")[0] ?? "",
+    setCookie: String(answer.headers["set-cookie"]?.[0]),
     clears: answer.headers["clear-site-data"],
   };
 }
@@ -647,6 +652,264 @@ describe("a web app through the computer's forwarder", () => {
     });
     expect(JSON.parse(there.body)).toEqual({ item: `https://${other.host}/items/1` });
     expect((await previews.status(SESSION, ASKED)).previews).toHaveLength(2);
+  });
+});
+
+// A loopback port nothing on this Mac answers on.
+const freePort = async () => (await block(1)).from;
+
+async function serviceAt(registered: () => string) {
+  const port = await listening(signInService(registered));
+  return `http://127.0.0.1:${port}`;
+}
+
+describe("opening a preview on this Mac at the app's own address", () => {
+  it("signs in where the provider sends the browser back only to the registered address", async () => {
+    const mac = await freePort();
+    const registered = `http://localhost:${mac}`;
+    const service = await serviceAt(() => registered);
+    const app = signInApp(() => service);
+    const port = await listening(app.server);
+    running.push({ address: "0.0.0.0", port, name: "node" });
+    const { previews } = await dot();
+
+    // Over the tailnet the page's address is the preview's own, which the provider refuses.
+    const tailnet = await enter((await previews.open(SESSION, { port }, ASKED)).open);
+    const refused = await fetchVia(
+      Number(new URL(service).port),
+      `/user_management/authorize?client_id=client_test&redirect_uri=${encodeURIComponent(`${tailnet.origin}/callback`)}`,
+      {},
+    );
+    expect(refused.status).toBe(400);
+    expect(JSON.parse(refused.body)).toEqual(REFUSED);
+
+    const opened = await previews.open(SESSION, { port, local: mac }, ASKED);
+    const link = new URL(opened.open);
+    expect(link.origin).toBe(registered);
+    expect(link.pathname).toBe("/__localdot/preview");
+    expect(opened.preview).toMatchObject({
+      target: `http://localhost:${port}/`,
+      origin: registered,
+      local: true,
+    });
+    const device = await enter(opened.open);
+    expect(device.setCookie).toMatch(/; HttpOnly; SameSite=Lax$/);
+    const page = await fetchVia(mac, "/", { host: device.host, cookie: device.cookie });
+    expect(page.body).toContain("<title>Thema (dev)</title>");
+    // The app is asked as the browser addresses it, so a server-made callback names it too.
+    expect(app.seen.at(-1)?.headers.host).toBe(`localhost:${mac}`);
+
+    const sent = await fetchVia(
+      Number(new URL(service).port),
+      `/user_management/authorize?client_id=client_test&redirect_uri=${encodeURIComponent(`${device.origin}/callback`)}`,
+      {},
+    );
+    expect(sent.status).toBe(302);
+    const back = new URL(sent.headers.location ?? "");
+    expect(back.origin).toBe(registered);
+    const callback = await fetchVia(mac, `${back.pathname}${back.search}`, {
+      host: back.host,
+      cookie: device.cookie,
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-dest": "document",
+      "sec-fetch-site": "cross-site",
+    });
+    expect(callback.status).toBe(200);
+    expect(app.seen.at(-1)?.url).toBe(`/callback${back.search}`);
+    const code = back.searchParams.get("code");
+    const traded = await fetchVia(
+      Number(new URL(service).port),
+      "/user_management/authenticate",
+      { origin: registered, "content-type": "application/json" },
+      "POST",
+      JSON.stringify({ code }),
+    );
+    expect(JSON.parse(traded.body)).toEqual({ user: { email: "owner@thema.test" } });
+  });
+
+  it("opens without Tailscale, and lists itself as on this Mac", async () => {
+    const dev = await devServer();
+    const mac = await freePort();
+    const { previews } = await dot({
+      fronts: previewFronts([], { state: "not-running", message: "Tailscale is off." }),
+    });
+    const opened = await previews.open(SESSION, {
+      url: `http://localhost:${dev.port}/docs`,
+      local: mac,
+    });
+    expect(opened.open).toMatch(
+      new RegExp(`^http://localhost:${mac}/__localdot/preview#[A-Za-z0-9_-]{43}$`),
+    );
+    expect((await enter(opened.open)).next).toBe("/docs");
+    const status = await previews.status(SESSION, "localhost:4750");
+    expect(status.state).toBe("needs-tailscale");
+    expect(status.previews).toEqual([
+      expect.objectContaining({ origin: `http://localhost:${mac}`, local: true }),
+    ]);
+  });
+
+  it("sends addresses back to the Mac's own address, over http, and other servers through it", async () => {
+    let webPort = 0;
+    const api = createServer((_req, res) => res.end("api"));
+    const apiPort = await listening(api);
+    const web = createServer((req, res) => {
+      if (req.url === "/") {
+        res.writeHead(302, { location: `http://localhost:${webPort}/home` });
+        return void res.end();
+      }
+      res.setHeader("content-type", "text/html");
+      res.end(
+        `<a href="http://127.0.0.1:${webPort}/a">a</a> <script>new WebSocket("ws://localhost:${webPort}/hmr"); fetch("http://localhost:${apiPort}/v1")</script>`,
+      );
+    });
+    webPort = await listening(web);
+    running.push(
+      { address: "127.0.0.1", port: webPort, name: "node" },
+      { address: "0.0.0.0", port: apiPort, name: "python3" },
+    );
+    const mac = await freePort();
+    const { previews } = await dot();
+    const device = await enter((await previews.open(SESSION, { port: webPort, local: mac })).open);
+    const get = (path: string) => fetchVia(mac, path, { host: device.host, cookie: device.cookie });
+    expect((await get("/")).headers.location).toBe(`http://localhost:${mac}/home`);
+    expect((await get("/home")).body).toBe(
+      `<a href="http://localhost:${mac}/a">a</a> <script>new WebSocket("ws://localhost:${mac}/hmr"); fetch("http://localhost:${mac}/__localdot/to/http/localhost/${apiPort}/v1")</script>`,
+    );
+    expect((await get(`/__localdot/to/http/localhost/${apiPort}/v1`)).body).toBe("api");
+    // A page opening the other server takes it to the Mac at that server's port, which here is
+    // already taken: it says so rather than taking it.
+    const hop = await fetchVia(mac, `/__localdot/to/http/localhost/${apiPort}/`, {
+      host: device.host,
+      cookie: device.cookie,
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-dest": "document",
+      "sec-fetch-site": "same-origin",
+    });
+    expect(hop.status).toBe(502);
+    expect(hop.body).toContain(`Something on this Mac already uses localhost:${apiPort}.`);
+  });
+
+  it("answers only the device it signed in, by its own loopback address", async () => {
+    const dev = await devServer();
+    const sockets = new WebSocketServer({ server: dev.server });
+    cleanup.push(() => sockets.close());
+    sockets.on("connection", (socket) => socket.send("hello"));
+    const mac = await freePort();
+    const { previews } = await dot();
+    const tailnet = await enter((await previews.open(SESSION, { port: dev.port }, ASKED)).open);
+    const device = await enter((await previews.open(SESSION, { port: dev.port, local: mac })).open);
+    expect(device.cookie.startsWith(`localdot-preview-${mac}=`)).toBe(true);
+
+    const get = (headers: Record<string, string>) => fetchVia(mac, "/", headers);
+    expect((await get({ host: `localhost:${mac}`, cookie: device.cookie })).status).toBe(200);
+    expect((await get({ host: `127.0.0.1:${mac}`, cookie: device.cookie })).status).toBe(200);
+    // A page that rebinds its own name to this Mac.
+    expect((await get({ host: `thema.example:${mac}`, cookie: device.cookie })).status).toBe(403);
+    expect((await get({ host: `localhost:${mac}` })).status).toBe(401);
+    expect((await get({ host: `localhost:${mac}`, cookie: tailnet.cookie })).status).toBe(401);
+    expect(
+      (await fetchVia(tailnet.port, "/", { host: tailnet.host, cookie: device.cookie })).status,
+    ).toBe(401);
+    const seen = dev.seen.at(-1);
+    expect(seen?.cookie).toBeUndefined();
+
+    // Another server on this Mac's localhost shares its cookies, but not its sockets.
+    const socketFrom = (origin: string) =>
+      new Promise<string>((resolve) => {
+        const socket = new WebSocket(`ws://127.0.0.1:${mac}/`, {
+          headers: { host: `localhost:${mac}`, cookie: device.cookie, origin },
+        });
+        cleanup.push(() => socket.terminate());
+        socket.once("message", (data) => resolve(String(data)));
+        socket.once("unexpected-response", (_req, res) => resolve(String(res.statusCode)));
+        socket.once("error", () => resolve("error"));
+      });
+    expect(await socketFrom("http://localhost:5173")).toBe("403");
+    expect(await socketFrom(`http://localhost:${mac}`)).toBe("hello");
+
+    const lan = Object.values(networkInterfaces())
+      .flat()
+      .find((entry) => entry && !entry.internal && entry.family === "IPv4")?.address;
+    if (lan)
+      await expect(
+        fetchVia(
+          mac,
+          "/",
+          { host: `localhost:${mac}`, cookie: device.cookie },
+          "GET",
+          undefined,
+          lan,
+        ),
+      ).rejects.toThrow();
+  });
+
+  it("keeps what this Mac's browser held for localhost out of the computer", async () => {
+    const seen: (string | undefined)[] = [];
+    const app = createServer((req, res) => {
+      seen.push(req.headers.cookie);
+      if (req.url === "/sign-in") res.setHeader("set-cookie", "sid=app; Path=/; HttpOnly");
+      res.end("ok");
+    });
+    const port = await listening(app);
+    running.push({ address: "127.0.0.1", port, name: "node" });
+    const mac = await freePort();
+    const { previews } = await dot();
+    const held = "jupyter-session=owner; theme=light";
+    const device = await enter((await previews.open(SESSION, { port, local: mac })).open, held);
+    const get = (path: string, cookie: string) =>
+      fetchVia(mac, path, { host: device.host, cookie });
+    await get("/", `${held}; ${device.cookie}`);
+    await get("/sign-in", `${held}; ${device.cookie}`);
+    // The app's own cookies, from its server or its pages, reach it; the Mac's earlier ones don't.
+    await get("/", `${held}; ${device.cookie}; sid=app; cart=3`);
+    expect(seen).toEqual([undefined, undefined, "sid=app; cart=3"]);
+  });
+
+  it("never takes a port something on this Mac answers on, nor one of localDot's", async () => {
+    const dev = await devServer();
+    const { previews, range } = await dot();
+    // Listening everywhere doesn't stop a narrower listener on macOS, which would take its
+    // loopback traffic: what answers is asked first.
+    // localDot's own check hangs up at once, which can reset the owner's side of it.
+    const owners = createTcpServer((socket) => socket.on("error", () => {}).end("owner's own"));
+    owners.listen(0, "0.0.0.0");
+    await once(owners, "listening");
+    cleanup.push(() => owners.close());
+    const taken = (owners.address() as AddressInfo).port;
+    for (const local of [taken, dev.port])
+      expect(await refusal(previews.open(SESSION, { port: dev.port, local }))).toEqual({
+        status: 409,
+        message: `Something on this Mac already uses localhost:${local}. Stop it, or choose another port.`,
+      });
+    expect(await refusal(previews.open(SESSION, { port: dev.port, local: range.from }))).toEqual({
+      status: 400,
+      message: `localDot keeps localhost:${range.from} for its own previews. Choose another port.`,
+    });
+    const answer = await new Promise<string>((resolve) => {
+      const socket = createConnection({ host: "127.0.0.1", port: taken });
+      socket.on("error", () => {});
+      socket.on("data", (data) => resolve(String(data)));
+    });
+    expect(answer).toBe("owner's own");
+  });
+
+  it("ends on Stop and gives the Mac's port back; another app there takes its place", async () => {
+    const one = await devServer();
+    const two = await devServer();
+    const mac = await freePort();
+    const { previews } = await dot();
+    const first = await previews.open(SESSION, { port: one.port, local: mac });
+    const second = await previews.open(SESSION, { port: two.port, local: mac });
+    expect(second.preview.id).not.toBe(first.preview.id);
+    expect((await previews.status(SESSION, ASKED)).previews).toEqual([
+      expect.objectContaining({ id: second.preview.id }),
+    ]);
+    const device = await enter(second.open);
+    expect((await fetchVia(mac, "/x", { host: device.host, cookie: device.cookie })).body).toBe(
+      "<p>dev /x</p>",
+    );
+    expect(previews.stop(SESSION, second.preview.id)).toBe(true);
+    await expect(fetchVia(mac, "/", { host: device.host })).rejects.toThrow();
   });
 });
 

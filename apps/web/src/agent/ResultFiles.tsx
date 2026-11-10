@@ -17,6 +17,7 @@ import { useProof } from "../deliverables/useProof.ts";
 import { FileViewerScope, type ViewerEntry } from "../deliverables/viewer/scope.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { PreviewCard } from "../previews/PreviewCard.tsx";
+import { useGuest } from "../remote/guest.ts";
 import { Button } from "../ui/Button.tsx";
 import { Card, FileRow } from "../ui/Card.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -301,7 +302,9 @@ export function ResultCard({
   previews,
 }: ResultCardProps) {
   const files = result.files;
-  const api = downloads.api;
+  // The computer's files are the owner's to hand out: a shared link sees their names.
+  const guest = useGuest();
+  const api = guest ? null : downloads.api;
   const task = result.sessionId ?? downloads.sessionId;
   const list = useId();
   const [unfolded, setUnfolded] = useState(false);
@@ -318,7 +321,7 @@ export function ResultCard({
     for (const file of files)
       if (valid(file) && !(await downloads.request(result.id, file))) return;
   };
-  const downloadAll = files.length > 1 && (
+  const downloadAll = !guest && files.length > 1 && (
     <Button
       size="sm"
       icon="download"
@@ -379,11 +382,13 @@ export function ResultCard({
                       meta={bytes(file.bytes)}
                       compact
                       actions={
-                        <IconButton
-                          icon="download"
-                          label={`Download ${file.name}`}
-                          disabledReason="This task is no longer available."
-                        />
+                        !guest && (
+                          <IconButton
+                            icon="download"
+                            label={`Download ${file.name}`}
+                            disabledReason="This task is no longer available."
+                          />
+                        )
                       }
                     />
                   </li>

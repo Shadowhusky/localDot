@@ -75,6 +75,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/cells/{id}", s.closeCell)
 	mux.HandleFunc("POST /v1/cells/{id}/revoke", s.revoke)
 	mux.HandleFunc("POST /v1/cells/{id}/surrogates", s.mint)
+	mux.HandleFunc("PUT /v1/cells/{id}/keys-held", s.holdKeys)
+	mux.HandleFunc("DELETE /v1/cells/{id}/keys-held", s.releaseKeys)
 	mux.HandleFunc("PUT /v1/secrets/{id}/metadata", s.putMetadata)
 	mux.HandleFunc("POST /v1/secrets/{id}/oauth", s.connectOAuth)
 	mux.HandleFunc("POST /v1/secrets/{id}/oauth/refresh", s.renewOAuth)
@@ -357,6 +359,23 @@ func (s *Server) closeCell(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	n, err := s.Manager.Revoke(r.PathValue("id"))
+	if err != nil {
+		managerFailure(w, err)
+		return
+	}
+	reply(w, http.StatusOK, map[string]any{"revoked": n})
+}
+
+func (s *Server) holdKeys(w http.ResponseWriter, r *http.Request) {
+	if err := s.Manager.HoldKeys(r.PathValue("id")); err != nil {
+		managerFailure(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) releaseKeys(w http.ResponseWriter, r *http.Request) {
+	n, err := s.Manager.ReleaseKeys(r.PathValue("id"))
 	if err != nil {
 		managerFailure(w, err)
 		return

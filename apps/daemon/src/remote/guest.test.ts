@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ulid } from "@localdot/protocol";
 import { afterEach, expect, it } from "vitest";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
@@ -12,21 +13,24 @@ const cleanup: (() => void)[] = [];
 afterEach(() => {
   for (const fn of cleanup.splice(0)) fn();
 });
-function fixture() {
+function fixture(replay = false) {
   const home = mkdtempSync(join(tmpdir(), "localdot-guest-")),
     owner = "o".repeat(43),
     port = 4750;
   const links = new RemoteLinks(home);
+  const eventLog = new EventLog(home);
   cleanup.push(() => {
     links.close();
+    eventLog.close();
     rmSync(home, { recursive: true, force: true });
   });
-  const token = links.create({
+  const { token, grant } = links.create({
     label: "Guest",
     expiresInHours: null,
     maxTasks: 3,
+    replay,
     model: { provider: "openai", model: "gpt-6.1-sol" },
-  }).token;
+  });
   const remote = {
     links,
     authenticate: (token?: string) => links.authenticate(token),
@@ -35,12 +39,64 @@ function fixture() {
   const app = createApp({
     token: owner,
     port,
-    eventLog: new EventLog(home),
+    eventLog,
     remoteAccess: remote,
     installCodes: codes,
   });
-  return { app, links, token, owner, codes, origin: `http://127.0.0.1:${port}` };
+  return { app, links, grant, token, owner, codes, eventLog, origin: `http://127.0.0.1:${port}` };
 }
+function task(eventLog: EventLog, text: string) {
+  const id = eventLog.createSession(text);
+  eventLog.append(id, {
+    type: "message.user",
+    agent: "main",
+    data: { messageId: ulid(), text, kind: "task" },
+  });
+  return id;
+}
+const NDJSON = { accept: "application/x-ndjson" };
+it("gives a link none of the owner's tasks it did not start, whatever the route", async () => {
+  const { app, links, grant, token, owner, eventLog, origin } = fixture();
+  const theirs = task(eventLog, "The owner's private task");
+  const own = task(eventLog, "The guest's task");
+  links.reserve(grant.id).finish(own);
+  const read = (path: string, bearer: string, headers: Record<string, string> = {}) =>
+    app.request(`${origin}${path}`, { headers: { authorization: `Bearer ${bearer}`, ...headers } });
+  for (const [path, headers] of [
+    [`/api/sessions/${theirs}/events`, {}],
+    [`/api/sessions/${theirs}/events?fromSeq=0`, NDJSON],
+    [`/api/sessions/${theirs}/history`, {}],
+    [`/api/sessions/${theirs}/clock`, {}],
+    [`/api/agent/sessions/${theirs}`, {}],
+    [`/api/sessions/${theirs}/card`, {}],
+    [`/api/sessions/${theirs}/recording`, {}],
+    ["/api/sessions", {}],
+    ["/api/session-index", {}],
+    [`/api/conversations/${theirs}/latest`, {}],
+  ] as const) {
+    const reply = await read(path, token, headers);
+    expect(reply.status, path).toBe(403);
+    expect(await reply.text(), path).not.toContain("private task");
+  }
+  for (const path of [`/api/sessions/${theirs}/events`, `/api/sessions/${theirs}/history`])
+    expect((await read(path, owner)).status, path).toBe(200);
+  const events = await read(`/api/sessions/${own}/events`, token);
+  expect(events.status).toBe(200);
+  expect(await events.text()).toContain("The guest's task");
+  const history = await read(`/api/sessions/${own}/history`, token);
+  expect(history.status).toBe(200);
+  expect(await history.text()).toContain("The guest's task");
+});
+it("opens every task's recordings to a link with Replay, but never another's live feed", async () => {
+  const { app, token, eventLog, origin } = fixture(true);
+  const theirs = task(eventLog, "The owner's task");
+  const read = (path: string) =>
+    app.request(`${origin}${path}`, { headers: { authorization: `Bearer ${token}` } });
+  expect((await read(`/api/sessions/${theirs}/events`)).status).toBe(200);
+  expect((await read(`/api/sessions/${theirs}/history`)).status).toBe(200);
+  expect((await read(`/api/sessions/${theirs}/clock`)).status).toBe(403);
+  expect((await read(`/api/agent/sessions/${theirs}`)).status).toBe(403);
+});
 it("guest exchange retains its own restricted token; owner exchange stays single use", async () => {
   const { app, token, owner, codes, origin } = fixture();
   const exchange = (code: string) =>
@@ -66,6 +122,25 @@ it("guest exchange retains its own restricted token; owner exchange stays single
       })
     ).status,
   ).toBe(403);
+});
+it("a shared link can't ask a side question, even about a task its guest started", async () => {
+  const { app, links, token, origin } = fixture();
+  const row = links.authenticate(token);
+  if (!row) throw new Error("the link did not authenticate");
+  const id = ulid();
+  links.reserve(row.id).finish(id);
+  // The guest's own task takes a message, so this refusal is the side question's own.
+  expect(links.permits(row, "POST", `/api/agent/sessions/${id}/messages`)).toBe(true);
+  const asked = await app.request(`${origin}/api/agent/sessions/${id}/side-question`, {
+    method: "POST",
+    headers: {
+      origin,
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ question: "What's in the owner's files?" }),
+  });
+  expect(asked.status).toBe(403);
 });
 it("guest exchange uses the same origin, body and content-type defenses as owner exchange", async () => {
   const { app, token, origin } = fixture();

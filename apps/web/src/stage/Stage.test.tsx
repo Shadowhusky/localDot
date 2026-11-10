@@ -700,13 +700,11 @@ describe("Stage in a Chromium browser", () => {
     await waitFor(() => expect(framesSent()).toHaveLength(2));
   });
 
-  it("mints again after 10 s without a video element in the client, and never while it has one", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+  it("mints again 10 s after a shown stream's client loses its video element, and never while it has one", async () => {
+    fakeTimers();
     const { api, calls } = daemon();
-    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
-    await waitFor(() => expect(client()).not.toBeNull());
+    await streaming(api);
     const before = client() as HTMLIFrameElement;
-    playInClient(before, "t1");
     await act(async () => vi.advanceTimersByTime(30_000));
     expect(calls).toHaveLength(1);
     before.contentDocument?.getElementById("videoStream")?.remove();
@@ -715,6 +713,28 @@ describe("Stage in a Chromium browser", () => {
     await act(async () => vi.advanceTimersByTime(1_500));
     await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
     expect(client()).not.toBe(before);
+  });
+
+  it("starts its stage again when the viewer tries again before a first picture, and hands the new one the stream", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    const { api, calls } = daemon();
+    const stage = createRef<StageHandle>();
+    render(<Stage ref={stage} cell={ready} api={api} reconnects={0} listed={[CELL]} />);
+    await waitFor(() => expect(client()).not.toBeNull());
+    const first = FakeWorker.instances.at(-1);
+    const canvas = screen.getByLabelText("The virtual computer");
+    act(() => stage.current?.retryStream());
+    const second = FakeWorker.instances.at(-1);
+    expect(second).not.toBe(first);
+    expect(first?.terminated).toBe(true);
+    expect(screen.getByLabelText("The virtual computer")).not.toBe(canvas);
+    await waitFor(() => expect(calls).toHaveLength(2));
+    await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
+    playInClient(client() as HTMLIFrameElement, "t1");
+    await act(async () => vi.advanceTimersByTime(500));
+    await waitFor(() =>
+      expect(second?.sent.some((row) => row.message.type === "frames")).toBe(true),
+    );
   });
 
   it("hands each new track of the client to the render worker once, seeded with its current frame", async () => {

@@ -38,7 +38,11 @@ export async function computerHearing(
         method: "POST",
         headers: { authorization: api.authorization(), "content-type": "audio/wav" },
         body: wavFile(samples),
-        signal: AbortSignal.any([cancelled, AbortSignal.timeout(TRANSCRIBE_MS)]),
+        signal: AbortSignal.any([
+          cancelled,
+          // A long recording takes longer, and the computer gives it longer too.
+          AbortSignal.timeout(TRANSCRIBE_MS + (samples.length / SPEECH_RATE) * 1000),
+        ]),
         credentials: "same-origin",
         cache: "no-store",
       },

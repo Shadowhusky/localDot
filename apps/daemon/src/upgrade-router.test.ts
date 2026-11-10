@@ -2,8 +2,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import type { Server } from "node:http";
 import { connect, createServer } from "node:net";
 import { serve } from "@hono/node-server";
+import { ulid } from "@localdot/protocol";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WebSocket } from "ws";
+import { EventLog } from "./event-log.ts";
+import { sessionStreamRoute } from "./event-stream.ts";
 import { WS_TOKEN_PREFIX } from "./guard.ts";
 import { RemoteLinks } from "./remote/links.ts";
 import { attachUpgradeRouter, refuse, type UpgradeRoute } from "./upgrade-router.ts";
@@ -160,6 +164,112 @@ describe("upgrade router", () => {
     expect(await upgrade(port, "http://[/x")).toBe("HTTP/1.1 400 Bad Request");
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
   });
+});
+
+it("names none of the owner's keys to a guest's live feed", async () => {
+  const home = mkdtempSync("/tmp/localdot-guest-feed-");
+  const links = new RemoteLinks(home);
+  const issued = links.create({
+    label: "Guest",
+    expiresInHours: null,
+    maxTasks: 1,
+    model: { provider: "openai", model: "gpt-6.1-sol" },
+  });
+  const eventLog = new EventLog(home);
+  const id = eventLog.createSession("task");
+  const raise = (key: string) =>
+    eventLog.append(id, {
+      type: "blocker.raise",
+      agent: "main",
+      data: {
+        blockerId: ulid(),
+        blocker: { kind: "key", id: key, problem: "rejected" },
+        by: "localdot",
+      },
+    });
+  raise("private-early");
+  links.reserve(issued.grant.id).finish(id);
+  const port = await freePort();
+  const server = serve({ fetch: new Hono().fetch, hostname: "127.0.0.1", port });
+  attachUpgradeRouter(
+    server as Server,
+    { port, token: TOKEN, guests: { links, authenticate: (token) => links.authenticate(token) } },
+    [sessionStreamRoute(eventLog)],
+  );
+  await new Promise((resolve) => server.once("listening", resolve));
+  const heard = async (token: string) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/api/sessions/${id}/stream`, [
+      "localdot.v1",
+      `${WS_TOKEN_PREFIX}${token}`,
+    ]);
+    const got: string[] = [];
+    socket.on("message", (data) => got.push(String(data)));
+    await new Promise((resolve) => socket.once("open", resolve));
+    return { socket, got };
+  };
+  const guest = await heard(issued.token);
+  const owner = await heard(TOKEN);
+  try {
+    raise("private-late");
+    await vi.waitFor(() => {
+      expect(guest.got).toHaveLength(2);
+      expect(owner.got).toHaveLength(2);
+    });
+    expect(guest.got.join("")).not.toContain("private-");
+    expect(owner.got.join("")).toContain("private-early");
+    expect(owner.got.join("")).toContain("private-late");
+  } finally {
+    guest.socket.close();
+    owner.socket.close();
+    server.close();
+    eventLog.close();
+    links.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+it("opens a task's live feed to a link only for its own task", async () => {
+  const home = mkdtempSync("/tmp/localdot-guest-ws-");
+  const links = new RemoteLinks(home);
+  const issued = links.create({
+    label: "Guest",
+    expiresInHours: null,
+    maxTasks: 1,
+    model: { provider: "openai", model: "gpt-6.1-sol" },
+  });
+  const own = "01JXYZ0000000000000000AAA1",
+    shown = "01JXYZ0000000000000000BBB2",
+    theirs = "01JXYZ0000000000000000CCC3";
+  links.reserve(issued.grant.id).finish(own);
+  const { route, opened } = spyRoute(/^\/api\/sessions\/([^/]+)\/stream$/, ["id"], "token");
+  const port = await freePort();
+  const server = serve({ fetch: new Hono().fetch, hostname: "127.0.0.1", port });
+  attachUpgradeRouter(
+    server as Server,
+    { port, token: TOKEN, guests: { links, authenticate: (token) => links.authenticate(token) } },
+    [route],
+  );
+  await new Promise((resolve) => server.once("listening", resolve));
+  const guest = `Sec-WebSocket-Protocol: localdot.v1, ${WS_TOKEN_PREFIX}${issued.token}`;
+  try {
+    expect(await upgrade(port, `/api/sessions/${theirs}/stream`, [guest])).toBe(
+      "HTTP/1.1 403 Forbidden",
+    );
+    expect(await upgrade(port, `/api/sessions/${theirs.toLowerCase()}/stream`, [guest])).toBe(
+      "HTTP/1.1 403 Forbidden",
+    );
+    expect(await upgrade(port, `/api/sessions/${shown}/stream`, [guest])).toBe(
+      "HTTP/1.1 403 Forbidden",
+    );
+    expect(opened).toEqual([]);
+    expect(await upgrade(port, `/api/sessions/${own}/stream?fromSeq=4`, [guest])).toBe(OPENED);
+    expect(await upgrade(port, `/api/sessions/${theirs}/stream`, [TOKEN_PROTOCOL])).toBe(OPENED);
+    expect(opened).toEqual([{ id: own }, { id: theirs }]);
+  } finally {
+    server.close();
+    links.close();
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 it("disconnects an already-open guest socket immediately on revocation, preserving the owner's socket", async () => {

@@ -83,6 +83,38 @@ scans before it records a candidate and `publish-images.mjs` refuses one without
 `scripts/distribution/verify.ts` checks the npm archive's inventory the same way. Never set
 `INSTALL_CHROME` when building an image to publish.
 
+## Speech downloads
+
+The speech program and models aren't in the package. localDot fetches them on the owner's press, from
+the URLs pinned by SHA-256 in `apps/daemon/src/voice/speech-catalog.ts`. That file ships inside
+`dist/daemon.mjs`, whose hash is in the signed catalog's inventory, so a release signs its speech pins
+without any new catalog field. Nothing is fetched from anywhere unpinned and nothing runs unverified.
+
+Each file is hosted by its upstream project today: the program at
+`github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/`, and the models at the same project's
+`asr-models` release. Before a release, confirm they still resolve to the pinned bytes:
+
+```sh
+node --experimental-transform-types scripts/release/speech-assets.mjs check          # sizes only
+node --experimental-transform-types scripts/release/speech-assets.mjs check --full   # every byte
+```
+
+**Mirroring, needed once before speech is switched on for everyone.** The upstream archives are
+`.tar.bz2`. macOS's tar reads those; a Linux host needs `bzip2`, which minimal images lack, and then gets
+an honest error. Mirroring also keeps speech working if an upstream release disappears and gives China a
+second route. It repacks each archive as `.tar.gz` with exactly the same files, so the per-file pins that
+decide what may run don't change:
+
+```sh
+node --experimental-transform-types scripts/release/speech-assets.mjs mirror /absolute/path/to/new-dir
+gh release create speech-assets-1 --repo Shadowhusky/localdot --prerelease --latest=false /absolute/path/to/new-dir/*.tar.gz /absolute/path/to/new-dir/THIRD-PARTY.md
+```
+
+Put each printed entry first in its bundle's `sources`, keeping the upstream entry after it as the
+fallback, and commit. To change a program or model version, download the new archive and use
+`speech-assets.mjs pin <archive> <url> <root> <file>...` for the entry to paste. The program's Mac builds
+carry upstream's ad-hoc signature, which is enough: a file written by the daemon has no quarantine flag.
+
 ## Release notes
 
 Each release needs `docs/releases/<version>.md` in the shape `docs/releases/README.md` describes.

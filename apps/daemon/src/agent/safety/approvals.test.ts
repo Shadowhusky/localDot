@@ -131,6 +131,22 @@ it("automatic timeout settles closed without extending the deadline", async () =
   expect(await waiting).toBe("deny");
   expect(h.revalidate).not.toHaveBeenCalled();
 });
+it("a message moving on consumes the card as not approved, and never revalidates", async () => {
+  const h = fixture(),
+    waiting = h.start(),
+    late = h.answer();
+  expect(h.broker.moveOn(h.sessionId)).toBe(true);
+  expect(await waiting).toBe("message");
+  expect(h.revalidate).not.toHaveBeenCalled();
+  expect(h.resolution).toHaveBeenCalledExactlyOnceWith({
+    approvalId: late.approvalId,
+    decision: "deny",
+    by: "message",
+  });
+  expect(h.broker.pending(h.sessionId)).toBeUndefined();
+  expect(h.broker.answer(h.sessionId, late)).toBe(false);
+  expect(h.broker.moveOn(h.sessionId)).toBe(false);
+});
 it("a counted permit covers its exact effect that many times and nothing else", () => {
   const permit = new CountedPermit("exact-input", 3);
   expect(permit.consume("changed")).toBe(false);

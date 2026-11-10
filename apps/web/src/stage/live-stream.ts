@@ -11,6 +11,8 @@ export interface StreamTarget {
   cellId: string;
   surface: "desktop" | "browser";
   parentId?: string;
+  // The task whose browser this is: a conversation's own browser is reached through its task.
+  session?: string;
 }
 
 // A held picture means a connection needs recovery. Suspended means this viewer deliberately
@@ -45,6 +47,14 @@ export const TUNE_MS = 1_000;
 const REPORT_EVERY_MS = 10_000;
 // A round trip the relay reported longer ago than this is no longer news.
 const STATS_FRESH_MS = 3_000;
+// A client that gets no further towards its first picture for this long is given up on, and each
+// try after it is given longer, for a link that is only slow.
+export const FIRST_STALL_MS = { min: 8_000, max: 30_000 };
+const FIRST_STALL_GROWTH = 1.5;
+// A socket that shut before any picture won't bring one, and its client only tries the same ticket
+// again in up to 5 s: Selkies refuses a viewer that connects within 500 ms of another, which each
+// try gets clear of. A client gets this share of its time.
+const FIRST_SHUT_SHARE = 1 / 8;
 const TICKET_PATH = /^\/cells\/[^/]+\/(?:desktop|browser)\/[A-Za-z0-9_-]{22}\/$/;
 const OPEN = 1;
 // HAVE_CURRENT_DATA: the client's video has shown a frame.
@@ -59,6 +69,11 @@ interface Client {
   decoded: number;
   // When its decoder last produced a frame.
   advancedAt: number;
+  // How far it has got towards a first picture, and when it last got further.
+  reached: number;
+  movedAt: number;
+  // When its socket was last seen open, or it was made.
+  openAt: number;
 }
 
 // Selkies' objects live in the client's realm, so they are read by shape.
@@ -106,6 +121,16 @@ function look(client: Client | null) {
   return { video, track, decoded, transport: view?.selkiesTransport, stats: view?.stream_stats };
 }
 
+// How far a client has got towards a first picture: its page, its socket, its video's track, its first
+// frame. A client that keeps starting over gets no further than it did. WebKit's client makes its
+// track as it starts, so a track is no sign of a socket.
+function reach({ video, transport, track, decoded }: ReturnType<typeof look>): number {
+  if (decoded > 0) return 4;
+  if (!video) return 0;
+  if (transport?.readyState !== OPEN) return 1;
+  return track ? 3 : 2;
+}
+
 // Selkies focuses its own input as it attaches, and `inert` does not stop a frame's own script, so
 // each new client would take the keys from whatever the user is typing in. Nothing in a client needs
 // focus. The frame's first window carries over to the same-origin page it navigates to.
@@ -135,6 +160,8 @@ export class LiveStream {
   #current: Client | null = null;
   #next: Client | null = null;
   #sink: ((source: FrameSource) => void) | null = null;
+  // Frames reached the stage and it showed none of them; `insist` is the viewer asking.
+  #stageStuck: ((insist: boolean) => void) | null = null;
   #timer: ReturnType<typeof setInterval> | undefined;
   #closed = false;
   #replacing = false;
@@ -142,6 +169,7 @@ export class LiveStream {
   #mintAt = 0;
   #polledAt = 0;
   #patience = STALE_MS;
+  #firstStall = FIRST_STALL_MS.min;
   #presentedAt = 0;
   #retapped = false;
   #awaiting = false;
@@ -205,13 +233,20 @@ export class LiveStream {
     const away = this.#hiddenAt === null ? 0 : Date.now() - this.#hiddenAt;
     this.#hiddenAt = null;
     if (away >= KEEP_MS) this.#suspend();
-    if (!this.#hidden) this.#resume();
+    if (!this.#hidden) this.#resume(TAP_STALL_MS);
   }
 
-  #resume(): void {
+  // `within`: a page that was hidden may have lost a socket that still reads as open, so a client with
+  // no picture to show for it has only this long to get further.
+  #resume(within = this.#firstStall): void {
     if (!this.#away || !this.#sink || this.#closed) return;
     this.#polledAt = Date.now();
     this.#mintAt = 0;
+    if (this.#current) {
+      this.#current.reached = Math.max(this.#current.reached, reach(look(this.#current)));
+      this.#current.movedAt =
+        this.#polledAt + Math.min(within, this.#firstStall) - this.#firstStall;
+    }
     this.#startPolling();
     this.refresh();
   }
@@ -299,16 +334,21 @@ export class LiveStream {
   };
 
   // Hands every new tap to `sink`, starting with one of the client already streaming, if any.
-  connect(sink: (source: FrameSource) => void): () => void {
+  connect(sink: (source: FrameSource) => void, stageStuck?: (insist: boolean) => void): () => void {
     this.#sink = sink;
+    this.#stageStuck = stageStuck ?? null;
     clearTimeout(this.#leaving);
-    if (this.#current) this.#current.tapped = null;
     this.#polledAt = Date.now();
+    if (this.#current) {
+      this.#current.tapped = null;
+      this.#current.movedAt = this.#polledAt;
+    }
     this.#startPolling();
     this.#poll();
     return () => {
       if (this.#sink !== sink) return;
       this.#sink = null;
+      this.#stageStuck = null;
       clearInterval(this.#timer);
       this.#timer = undefined;
       this.#counted = null;
@@ -324,12 +364,18 @@ export class LiveStream {
     if (this.#closed || this.#away || document.visibilityState === "hidden") return;
     this.#presentedCount = count;
     this.#hadPicture = true;
+    this.#firstStall = FIRST_STALL_MS.min;
     this.#presentedAt = Date.now();
     this.#awaiting = false;
     this.#retapped = false;
     if (this.#trackTap) trackReads = true;
     this.#troubleSince = null;
     this.#show("live");
+  }
+
+  // The stage started again, without the frames it was being handed.
+  retap(): void {
+    if (this.#current) this.#current.tapped = null;
   }
 
   // The daemon may have restarted, which ends its tickets: a different ticket gets a new client.
@@ -348,7 +394,7 @@ export class LiveStream {
     this.#polledAt = Date.now();
     if (this.#current) this.#current.tapped = null;
     const { transport, decoded } = look(this.#current);
-    if (this.#current && !this.#foreground)
+    if (this.#hadPicture && this.#current && !this.#foreground)
       this.#foreground = { client: this.#current, decoded, at: Date.now() };
     if (transport?.readyState === OPEN) {
       try {
@@ -358,16 +404,41 @@ export class LiveStream {
       this.#keyframeAt = Number.NEGATIVE_INFINITY;
       this.#keyframe(transport, Date.now());
     } else if (transport && (transport.readyState ?? OPEN) > OPEN) this.replace();
+    else if (transport && !this.#hadPicture) this.#restart();
     this.#poll();
   }
 
   // The viewer asked to try again: a ticket waiting out its backoff is asked for now, and a fresh
-  // client that never showed a frame makes way for another.
+  // client that never showed a frame makes way for another. With no picture yet it does all a refresh
+  // would: the stage starts again too.
   retry(): void {
     if (this.#closed) return;
     this.#mintFailures = 0;
+    this.#firstStall = FIRST_STALL_MS.min;
+    if (!this.#hadPicture) {
+      this.#stageStuck?.(true);
+      this.#restart();
+      return;
+    }
+    // Frames that reached the stage since it last showed one are its own trouble, not the stream's.
+    if ((this.#current?.advancedAt ?? 0) > this.#presentedAt) this.#stageStuck?.(true);
     this.#drop(this.#next);
     this.#next = null;
+    this.replace();
+  }
+
+  // Everything this viewer holds of its stream goes first, so the client of a fresh ticket never runs
+  // beside it.
+  #restart(): void {
+    this.#source?.stop();
+    this.#source = null;
+    this.#drop(this.#current);
+    this.#drop(this.#next);
+    this.#current = this.#next = null;
+    this.#counted = null;
+    this.#foreground = null;
+    this.#awaiting = false;
+    this.#retapped = false;
     this.replace();
   }
 
@@ -420,12 +491,12 @@ export class LiveStream {
   }
 
   async #mint(): Promise<string | null> {
-    const { api, cellId, surface, parentId } = this.target;
+    const { api, cellId, surface, parentId, session } = this.target;
     this.#mintAt = Date.now();
     try {
       const { path, cellId: physicalId } = await api.post<{ path?: unknown; cellId?: string }>(
         surface === "browser"
-          ? `/api/cells/${parentId}/browser-stream-ticket`
+          ? `/api/cells/${parentId}/browser-stream-ticket?browser=${cellId}${session ? `&task=${session}` : ""}`
           : `/api/cells/${cellId}/stream-ticket`,
       );
       if (this.#closed) return null;
@@ -465,6 +536,9 @@ export class LiveStream {
       tapped: null,
       decoded: 0,
       advancedAt: Date.now(),
+      reached: 0,
+      movedAt: Date.now(),
+      openAt: Date.now(),
     };
     this.#poll();
   }
@@ -490,7 +564,26 @@ export class LiveStream {
     const client = this.#current;
     const retry = Math.min(MINT_RETRY_MS.max, MINT_RETRY_MS.min * 2 ** this.#mintFailures);
     if (!client && !this.#next && now - this.#mintAt >= retry) this.replace();
-    const { video, track, decoded, transport } = look(client);
+    const seen = look(client);
+    const { video, track, decoded, transport } = seen;
+    if (client && !this.#hadPicture) {
+      const reached = reach(seen);
+      if (reached > client.reached) {
+        client.reached = reached;
+        client.movedAt = now;
+      } else if (
+        now - client.movedAt >=
+        this.#firstStall * ((transport?.readyState ?? OPEN) > OPEN ? FIRST_SHUT_SHARE : 1)
+      ) {
+        // Frames that reached a stage which showed none are its own trouble; and with nothing to lose,
+        // a second try does all a refresh would.
+        if ((decoded > 0 && track) || this.#firstStall > FIRST_STALL_MS.min)
+          this.#stageStuck?.(false);
+        this.#firstStall = Math.min(FIRST_STALL_MS.max, this.#firstStall * FIRST_STALL_GROWTH);
+        this.#restart();
+        return;
+      }
+    }
     const foreground = this.#foreground;
     if (foreground) {
       if (foreground.client !== client || decoded > foreground.decoded) this.#foreground = null;
@@ -504,13 +597,18 @@ export class LiveStream {
     // is healthy when it answers, and does not need a continuous high-frame-rate feed.
     if (client && decoded !== client.decoded) client.advancedAt = now;
     if (client && transport?.readyState === OPEN) {
+      client.openAt = now;
       const probe = this.#quietProbe;
       if (probe && (probe.client !== client || decoded !== probe.decoded)) this.#quietProbe = null;
       if (this.#quietProbe && now - this.#quietProbe.at >= TAP_STALL_MS) {
         this.#quietProbe = null;
         client.advancedAt = now;
         this.replace();
-      } else if (!this.#quietProbe && now - (client.advancedAt || client.seenAt) >= STALE_MS) {
+      } else if (
+        this.#hadPicture &&
+        !this.#quietProbe &&
+        now - (client.advancedAt || client.seenAt) >= STALE_MS
+      ) {
         try {
           transport.send?.("REQUEST_KEYFRAME");
           this.#quietProbe = { client, decoded, at: now };
@@ -518,20 +616,30 @@ export class LiveStream {
           this.replace();
         }
       }
+    } else if (
+      client &&
+      track &&
+      transport &&
+      this.#hadPicture &&
+      now - Math.max(client.openAt, client.advancedAt) >= STALE_MS
+    ) {
+      // Selkies' client gives up on some closes, and a socket that never opens never closes.
+      client.openAt = now;
+      this.replace();
     }
     // A key frame asked of a still screen above is a check, not trouble: over a slow link its
     // answer can take a second, and a screen that never answers is replaced.
     let delivering = false;
     if (client && !video) {
       // An error page, or a client that never loaded; one that keeps failing is given longer.
-      if (now - client.seenAt >= this.#patience) {
+      if (this.#hadPicture && now - client.seenAt >= this.#patience) {
         client.seenAt = now;
         this.#patience = Math.min(KEEP_MS, this.#patience * 2);
         this.replace();
       }
     } else if (client && video) {
       if (track) client.seenAt = now;
-      else if (now - client.seenAt >= STALE_MS) {
+      else if (this.#hadPicture && now - client.seenAt >= STALE_MS) {
         client.seenAt = now;
         this.replace();
       }
@@ -552,8 +660,13 @@ export class LiveStream {
       } else if (track && stalled && !this.#retapped) {
         this.#retapped = true;
         this.#tap(client, video, transport, now);
-      } else if (track && stalled && now - this.#presentedAt >= STALE_MS) {
+      } else if (
+        track &&
+        stalled &&
+        now - this.#presentedAt >= (this.#hadPicture ? STALE_MS : TAP_STALL_MS)
+      ) {
         this.#presentedAt = now;
+        this.#stageStuck?.(false);
         this.replace();
       } else delivering = !!track && !stalled && !this.#awaiting;
     }
@@ -571,13 +684,17 @@ export class LiveStream {
     );
   }
 
-  // A prepared client takes over once its video shows a frame, or at once when the current client
-  // has nothing to show.
+  // A prepared client takes over once its video shows a frame, or at once when there is no picture
+  // to keep or the current client has nothing to show.
   #promote(now: number): void {
     const next = this.#next;
     if (!next) return;
     const fresh = look(next);
-    if ((fresh.track && (fresh.video?.readyState ?? 0) >= SHOWING) || !look(this.#current).track) {
+    if (
+      !this.#hadPicture ||
+      (fresh.track && (fresh.video?.readyState ?? 0) >= SHOWING) ||
+      !look(this.#current).track
+    ) {
       this.#drop(this.#current);
       this.#current = next;
       this.#next = null;

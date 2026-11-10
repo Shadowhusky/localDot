@@ -30,6 +30,9 @@ export interface ComputerTurnsDeps {
   windows(cellId: string): ReadWindows | undefined;
   // A task on the web browser has its window brought forward there instead.
   browser?(sessionId: string): { enter(signal: AbortSignal): Promise<void> } | undefined;
+  // The lane of the web browser a task picked, when it has one of its own: the user's control on
+  // the task's behalf takes it too, and no other browser's.
+  lane?(sessionId: string): string | undefined;
   // Whose work the screens show, for the recordings: a turn on the desktop, or the user's control,
   // which may reach either screen.
   screens?: {
@@ -81,11 +84,23 @@ export class ComputerTurns {
       signal: waiting,
       user,
     });
+    const laneKey = user ? this.deps.lane?.(sessionId) : undefined;
+    let laneGrant: ComputerGrant | undefined;
+    if (laneKey && laneKey !== cellId)
+      try {
+        laneGrant = await this.deps.live
+          .lease(laneKey)
+          .acquire(sessionId, { signal: waiting, user });
+      } catch (error) {
+        grant.release();
+        throw error;
+      }
     if (user) this.deps.screens?.forUser(cellId, sessionId);
     try {
       await this.#raise(sessionId, cellId, signal, user);
     } catch (error) {
       grant.release();
+      laneGrant?.release();
       throw error;
     }
     const end = async () => {
@@ -135,7 +150,11 @@ export class ComputerTurns {
         await resume();
         return result;
       },
-      release: end,
+      release: async () => {
+        await end();
+        laneGrant?.release();
+        laneGrant = undefined;
+      },
     };
   }
 

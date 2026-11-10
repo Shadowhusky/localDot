@@ -89,9 +89,44 @@ export function pick(
   return next;
 }
 
+// Recordings being deleted behind the scenes: no read of the list shows them meanwhile, and the
+// list reads again once each delete is in, when any the daemon kept come back.
+const deleting = new Set<string>();
+const settledListeners = new Set<() => void>();
+export const beingDeleted = (id: string) => deleting.has(id);
+export function onDeletesSettled(listener: () => void): () => void {
+  settledListeners.add(listener);
+  return () => {
+    settledListeners.delete(listener);
+  };
+}
+async function whileDeleting<T>(ids: readonly string[], run: () => Promise<T>): Promise<T> {
+  for (const id of ids) deleting.add(id);
+  try {
+    return await run();
+  } finally {
+    for (const id of ids) deleting.delete(id);
+    for (const listener of [...settledListeners]) listener();
+  }
+}
+
+// One recording; rejects as the request does.
+export function deleteRecording(api: ApiClient, id: string): Promise<void> {
+  return whileDeleting([id], async () => {
+    await api.del(`/api/sessions/${id}`);
+  });
+}
+
 // Deletes in batches. A batch whose request fails stops the rest, and all of them count as failed:
 // the daemon may have deleted some, which a retry then finds already gone.
-export async function deleteRecordings(
+export function deleteRecordings(
+  api: ApiClient,
+  ids: readonly string[],
+): Promise<DeleteSessionsResult> {
+  return whileDeleting(ids, () => deleteInBatches(api, ids));
+}
+
+async function deleteInBatches(
   api: ApiClient,
   ids: readonly string[],
 ): Promise<DeleteSessionsResult> {

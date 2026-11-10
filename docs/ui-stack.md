@@ -837,6 +837,11 @@ gallery's `#looks` page; `e2e/ui/task-looks.spec.ts`.
 - **Cheap at any length.** Most rows are `DotAvatar`: a plate, two capsules and what it wears, with no
   engine, timer or canvas. Only rows under way (`working`, `needs-you`) are live `Dot`s, at the badge's
   rates, and the shared scheduler gives those off screen no frames. Each plate is fetched once.
+- **A live dot held still.** `DotAvatar` draws the eyes a live `Dot` of its size draws and turns its
+  plates by the same transforms (`plateTransform`), so glasses stay on the eyes wherever its seed has
+  it look and a row going live keeps its face. Eyewear keeps the eye at its true size
+  (`eyeScaleLimit`); `dot/render/wearables-fit.test.ts` measures every plate against the engine's
+  poses, and `tools/dot-plates/README.md` has the rules a new one must keep.
 - **Status.** A badge at the mark's corner, on the overlay colour with a hairline so it holds on any
   row in both houses, with the same glyph and tones as before.
 - **Arriving.** On a reload dot comes on to the page once, in its final look (`dot/arrival.ts`, and
@@ -849,6 +854,14 @@ gallery's `#looks` page; `e2e/ui/task-looks.spec.ts`.
 - **Plates.** All a dot shows comes in together (`whenImagesIn`, `whenPlatesIn` in `dot/plates.ts`): a
   dot or a row's mark waits until its whole set is decoded, a plain ball standing in only if that
   takes over 200 ms, and a change of outfit keeps the old one on until the new one can be drawn.
+- **Deleted.** The dot goes as a soap bubble does (`dot/pop.ts`): it shuts its eyes, squashes,
+  stretches and bursts into drops, and a hat is tossed up and hangs before it drops. A copy of its
+  plates plays over the page in transform and opacity, so the commit that takes the row away can't
+  stutter it. Nothing moves until the daemon has answered: a burst can't be taken back, and the
+  confirmation's busy button covers the wait. Several ripple, tightening to end within a second, and
+  leave in one commit (`shell/conversation-leave.ts`, `closeGap` in `ui/flip.ts`). Reduced motion
+  only fades; archiving fades with no burst; a short list's row folds (`foldAway` in `ui/leave.ts`).
+  `e2e/ui/delete-motion.spec.ts` plays them frame by frame.
 - **Rejected.** Tinting the body: dot is porcelain, and a tinted ball stops being dot. Hue-rotating
   plates in the browser: the shadows they carry go wrong. A shuffled look when the list changes: two
   neighbours would then never match, and no row would keep its face.

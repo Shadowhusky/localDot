@@ -68,6 +68,15 @@ const RULES: readonly { pattern: RegExp; hint: KeyHint; provider?: KeyMatch["pro
   { pattern: /^[rs]k_live_[A-Za-z0-9]{24,247}$/, hint: "Stripe" },
 ];
 
+// Whether a value has the shape of the provider's keys, for a provider whose shape is known.
+export function fitsProviderKey(provider: string, value: string): boolean | undefined {
+  const shapes = RULES.filter((rule) => rule.provider === provider).map((rule) => rule.pattern);
+  // Older OpenAI keys and DeepSeek's share a shape with no prefix of its own.
+  if (provider === "openai" || provider === "deepseek") shapes.push(/^sk-[A-Za-z0-9]{32,64}$/);
+  if (!shapes.length) return undefined;
+  return shapes.some((shape) => shape.test(value));
+}
+
 // No key shape is shorter than a Slack token's prefix and ten characters.
 const SHORTEST = 15;
 

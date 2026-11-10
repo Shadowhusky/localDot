@@ -4,13 +4,15 @@ import type { TicketRegistry } from "../cells/secrets.ts";
 import { type CellSummary, NO_STREAM, type StreamState } from "../cells/types.ts";
 
 interface Entry {
+  key: string;
   ready: ReadyBrowser;
   summary: CellSummary;
 }
 
 // Browser viewers have their own physical identity and health. A parent change or a
 // browser restart revokes the old ticket and closes its viewers before publishing a
-// fresh instance, including when a retained profile reuses the same browser cell ID.
+// fresh instance, including when a retained profile reuses the same browser cell ID. A computer
+// has its main browser and conversations' own, each with its own entry.
 export class BrowserStreams {
   readonly #entries = new Map<string, Entry>();
   readonly #listeners = new Set<(cell: CellSummary) => void>();
@@ -20,7 +22,8 @@ export class BrowserStreams {
   constructor(
     private readonly deps: {
       parents: Pick<CellApi, "get" | "list" | "subscribe">;
-      browser: Pick<BrowserOrchestrator, "endpoints" | "subscribe">;
+      browser: Pick<BrowserOrchestrator, "endpoints" | "subscribe"> &
+        Partial<Pick<BrowserOrchestrator, "keysOf">>;
       tickets: Pick<TicketRegistry, "revoke">;
     },
   ) {
@@ -50,7 +53,7 @@ export class BrowserStreams {
       parent.createdAt !== entry.summary.createdAt
     )
       return false;
-    const ready = this.deps.browser.endpoints(entry.ready.parentCellId);
+    const ready = this.deps.browser.endpoints(entry.key);
     return (
       ready?.browserCellId === entry.ready.browserCellId &&
       ready.instance === entry.ready.instance &&
@@ -71,14 +74,17 @@ export class BrowserStreams {
 
   #refresh(parentId: string): void {
     const parent = this.#available(parentId);
-    const ready = parent ? this.deps.browser.endpoints(parentId) : undefined;
-    const old = this.#entries.get(parentId);
+    const keys = parent ? (this.deps.browser.keysOf?.(parentId) ?? [parentId]) : [];
+    for (const [key, entry] of [...this.#entries])
+      if (entry.ready.parentCellId === parentId && !keys.includes(key)) this.#drop(key, entry);
+    for (const key of keys) this.#refreshKey(key, parent);
+  }
+
+  #refreshKey(key: string, parent: CellSummary | undefined): void {
+    const ready = parent ? this.deps.browser.endpoints(key) : undefined;
+    const old = this.#entries.get(key);
     if (old && ready && this.#current(old) && parent?.scale === old.summary.scale) return;
-    if (old) {
-      this.#entries.delete(parentId);
-      this.deps.tickets.revoke(old.summary.id);
-      this.#emit({ ...old.summary, state: "stopped", stream: { ...NO_STREAM } });
-    }
+    if (old) this.#drop(key, old);
     if (!parent || !ready) return;
     const summary: CellSummary = {
       id: ready.browserCellId,
@@ -87,8 +93,14 @@ export class BrowserStreams {
       createdAt: parent.createdAt,
       stream: { ...NO_STREAM },
     };
-    this.#entries.set(parentId, { ready, summary });
+    this.#entries.set(key, { key, ready, summary });
     this.#emit(summary);
+  }
+
+  #drop(key: string, entry: Entry): void {
+    this.#entries.delete(key);
+    this.deps.tickets.revoke(entry.summary.id);
+    this.#emit({ ...entry.summary, state: "stopped", stream: { ...NO_STREAM } });
   }
 
   #entry(id: string): Entry | undefined {
@@ -103,9 +115,20 @@ export class BrowserStreams {
     return entry ? structuredClone(entry.summary) : undefined;
   }
 
+  // The computer's main browser.
   forParent(id: string): CellSummary | undefined {
-    const entry = this.#entries.get(id);
+    return this.forKey(id);
+  }
+
+  forKey(key: string): CellSummary | undefined {
+    const entry = this.#entries.get(key);
     return entry && this.#current(entry) ? structuredClone(entry.summary) : undefined;
+  }
+
+  // The browser a stream belongs to, by its cell: its key and computer.
+  ownerOf(id: string): { key: string; parentCellId: string } | undefined {
+    const entry = this.#entry(id);
+    return entry ? { key: entry.key, parentCellId: entry.ready.parentCellId } : undefined;
   }
 
   endpoints(id: string) {
@@ -130,7 +153,10 @@ export class BrowserStreams {
   dispose(): void {
     this.#closed = true;
     for (const off of this.#off) off();
-    for (const parentId of [...this.#entries.keys()]) this.#refresh(parentId);
+    for (const parentId of new Set(
+      [...this.#entries.values()].map((entry) => entry.ready.parentCellId),
+    ))
+      this.#refresh(parentId);
     this.#listeners.clear();
   }
 }

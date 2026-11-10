@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { speechTranscriber } from "../../../daemon/src/voice/speech.ts";
 import { composer, expect, runAt, test } from "./harness.ts";
 
@@ -16,7 +17,10 @@ test("local capture hears successive Stop, Cancel, Send and reload turns", async
   test.skip(!model || !audio || !binary, "Requires the opt-in local speech fixture");
   if (!model || !audio || !binary) return;
   const encoded = (await readFile(audio)).toString("base64");
-  const speech = speechTranscriber({ model, binary, englishOnly: false });
+  const speech = speechTranscriber(
+    { model, binary, englishOnly: false },
+    { tmp: join(test.info().outputDir, "voice-audio") },
+  );
   let requests = 0;
   await page.addInitScript(
     ({ encoded }) => {

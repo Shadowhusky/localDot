@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { Curtain, type FreshStartAction } from "./Curtain.tsx";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Curtain, type FreshStartAction, type ScreenStuck } from "./Curtain.tsx";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
@@ -34,6 +34,87 @@ it("says the computer is updating through its stop and its start", () => {
   }
   curtain("starting", false);
   expect(screen.getByRole("heading").textContent).toBe("Starting your computer");
+});
+
+it("says which step of the update it is on, and that files stay", () => {
+  render(
+    <Curtain
+      phase="stopping"
+      first={false}
+      waking={false}
+      updating
+      updateLine="Step 3 of 6 · Keeping your apps and files"
+      caption=""
+      action={{ kind: "stop", enabled: false }}
+      onAction={() => {}}
+      showDot={false}
+    />,
+  );
+  expect(screen.getByRole("heading").textContent).toBe("Updating your computer");
+  expect(screen.getByText(/Step 3 of 6 · Keeping your apps and files\. Your files/)).toBeTruthy();
+});
+
+it("says when it is running long, in place of the step", () => {
+  render(
+    <Curtain
+      phase="starting"
+      first={false}
+      waking={false}
+      updating
+      updateLine="Step 3 of 6 · Keeping your apps and files"
+      updateNote="This is taking longer than usual, which is normal for a computer with many apps."
+      caption=""
+      action={{ kind: "stop", enabled: false }}
+      onAction={() => {}}
+      showDot={false}
+    />,
+  );
+  expect(screen.getByText(/taking longer than usual/)).toBeTruthy();
+});
+
+it("says what a failed update left, with the way back on, not a bare could-not-start", () => {
+  const onAction = vi.fn();
+  render(
+    <Curtain
+      phase="failed"
+      first={false}
+      waking={false}
+      updateFailure="Your computer couldn't be updated. Your files are kept. It starts again by itself as soon as Docker answers."
+      caption="Your computer could not start."
+      action={{ kind: "start", enabled: true }}
+      onAction={onAction}
+      showDot={false}
+    />,
+  );
+  expect(screen.getByRole("heading").textContent).toBe("Your computer wasn't updated");
+  expect(screen.getByText(/Your files are kept/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Start again" }));
+  expect(onAction).toHaveBeenCalled();
+});
+
+it("says how a replacement is going, with a clock, rather than only spinning", () => {
+  render(
+    <Curtain
+      phase="unavailable"
+      first={false}
+      waking={false}
+      caption=""
+      action={{ kind: "retry", enabled: false }}
+      replace={{
+        enabled: false,
+        busy: true,
+        note: "Step 1 of 3 · Saving the old computer. Your files are kept.",
+        run: () => {},
+      }}
+      onAction={() => {}}
+      showDot={false}
+    />,
+  );
+  expect(screen.getByRole("heading").textContent).toBe("Replacing your computer");
+  expect(document.querySelector(".curtain-sub")?.textContent).toMatch(
+    /^0:00 · Step 1 of 3 · Saving the old computer/,
+  );
+  expect(document.querySelector(".curtain-act")?.hasAttribute("data-progress")).toBe(true);
 });
 
 const stuck = (freshStart: FreshStartAction, onAction = () => {}) =>
@@ -178,4 +259,48 @@ it("shows Docker prerequisite rather than starting or destructive recovery contr
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   expect(retry).toHaveBeenCalledOnce();
   expect(reset).not.toHaveBeenCalled();
+});
+
+describe("a screen with no picture", () => {
+  const connecting = (stuck?: ScreenStuck) =>
+    render(
+      <Curtain
+        phase="connecting"
+        first={false}
+        waking={false}
+        caption=""
+        action={{ kind: "stop", enabled: false }}
+        onAction={() => {
+          throw new Error("this button doesn't stop the computer");
+        }}
+        showDot={false}
+        stuck={stuck}
+      />,
+    );
+
+  it("waits with a progress bar and offers nothing to press, at first", () => {
+    const { container } = connecting();
+    expect(screen.getByRole("heading").textContent).toBe("Connecting your screen");
+    expect(container.querySelector(".curtain-act[data-progress]")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("says so, in place of its progress, with a Retry that works", () => {
+    const retry = vi.fn();
+    const { container } = connecting({ browser: false, retry });
+    expect(screen.getByRole("heading").textContent).toBe("Can't show your screen yet");
+    expect(screen.getByText(/Your computer is running/)).toBeTruthy();
+    expect(container.querySelector(".curtain-act[data-progress]")).toBeNull();
+    expect(container.querySelector(".curtain-sub .num")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("offers the desktop while the web browser isn't up", () => {
+    const retry = vi.fn();
+    connecting({ browser: true, retry });
+    expect(screen.getByRole("heading").textContent).toBe("The web browser isn't ready");
+    fireEvent.click(screen.getByRole("button", { name: "Show the desktop" }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
 });

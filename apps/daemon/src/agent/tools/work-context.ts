@@ -5,6 +5,7 @@ import {
   type WorkContextInput,
 } from "@localdot/protocol";
 import { DesktopdError } from "../../desktopd/client.ts";
+import { usesOwnersAccounts } from "../guest.ts";
 import { untrusted } from "../untrusted.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
@@ -82,7 +83,9 @@ export async function workContextTool(
   const screens = ctx.session.screens?.availability();
   const browserStatus = await ctx.session.screens?.browserStatus().catch(() => undefined);
   ctx.check();
-  const browserScreen = Boolean(screens) && screens?.browser !== "unavailable";
+  // The web browser keeps the owner's sign-ins.
+  const browserScreen =
+    usesOwnersAccounts(ctx.session.guest) && Boolean(screens) && screens?.browser !== "unavailable";
   const browserState = browserStatus?.state;
   const snapshot = {
     observedAt: new Date().toISOString(),

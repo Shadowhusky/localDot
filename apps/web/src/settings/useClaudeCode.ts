@@ -2,7 +2,7 @@ import { CLAUDE_CODE_MODELS, type ClaudeCodeStatus } from "@localdot/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import type { SubscriptionModel } from "./choices.ts";
-import { loadClaudeCode } from "./settings-api.ts";
+import { chooseClaudeAccount, loadClaudeCode } from "./settings-api.ts";
 
 // Coming back from Terminal looks again, at most this often.
 const REFOCUS_MS = 5_000;
@@ -16,7 +16,7 @@ export function useClaudeCode(api: ApiClient, active: boolean) {
   const flight = useRef<AbortController | null>(null);
   const last = useRef(0);
   const run = useCallback(
-    async (fresh: boolean) => {
+    async (fresh: boolean, separate?: boolean) => {
       flight.current?.abort();
       const abort = new AbortController();
       flight.current = abort;
@@ -24,11 +24,18 @@ export function useClaudeCode(api: ApiClient, active: boolean) {
       setChecking(true);
       setError(null);
       try {
-        const next = await loadClaudeCode(api, fresh, abort.signal);
+        const next =
+          separate === undefined
+            ? await loadClaudeCode(api, fresh, abort.signal)
+            : await chooseClaudeAccount(api, separate, abort.signal);
         if (flight.current === abort) setStatus(next);
       } catch {
         if (flight.current === abort)
-          setError("localDot couldn't check Claude Code. Check that localDot is running.");
+          setError(
+            separate === undefined
+              ? "localDot couldn't check Claude Code. Check that localDot is running."
+              : "localDot couldn't change the Claude account. Try again.",
+          );
       } finally {
         if (flight.current === abort) {
           flight.current = null;
@@ -74,6 +81,7 @@ export function useClaudeCode(api: ApiClient, active: boolean) {
     models,
     canStart: ready,
     check: () => run(true),
+    chooseAccount: (separate: boolean) => run(true, separate),
   };
 }
 export type ClaudeCodeControls = ReturnType<typeof useClaudeCode>;

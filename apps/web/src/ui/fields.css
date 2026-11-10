@@ -179,6 +179,7 @@
     color: inherit;
     font: inherit;
     outline: none;
+    text-overflow: ellipsis;
   }
 
   .ui-input::placeholder,

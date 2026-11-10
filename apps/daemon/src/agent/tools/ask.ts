@@ -3,6 +3,7 @@ import {
   type AskFieldRecord,
   type AskRequestField,
   type AskUserInput,
+  isKeepGoing,
   isOwnWords,
   type RequestTakeoverInput,
   type ToolResult,
@@ -16,7 +17,17 @@ import { VaultLockedError } from "../../keyd/client.ts";
 import { addTaskSecret } from "../redact.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import { type AgentSession, type AskAnswer, type AskForm, SAVED_LOGIN_TAP } from "../session.ts";
-import { fail, frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import { asksSecretInPlainText, formWords } from "./card-words.ts";
+import {
+  fail,
+  frame,
+  MOVED_ON_COMPUTER,
+  movedOnQuestion,
+  type ToolCallContext,
+  type ToolDeps,
+  text,
+} from "./deps.ts";
+import { keysCardInstead } from "./request-fix.ts";
 import { accountOrigin, findSecretField, type SecretField, typeSecret } from "./secret-field.ts";
 
 const reusedLogins = new WeakMap<AgentSession, Set<string>>();
@@ -55,7 +66,12 @@ function keysLocked(ctx: ToolCallContext): ToolResult {
   );
 }
 
-function unanswered(answer: AskAnswer, timeoutMs: number): ToolResult | undefined {
+function unanswered(
+  session: AgentSession,
+  answer: AskAnswer,
+  timeoutMs: number,
+): ToolResult | undefined {
+  if (answer.by === "message") return { ok: true, content: [text(movedOnQuestion(session))] };
   if (answer.by === "pause")
     return {
       ok: false,
@@ -119,7 +135,7 @@ async function tapToFill(
     ctx.signal,
   );
   ctx.check();
-  const early = unanswered(answer, timeoutMs);
+  const early = unanswered(ctx.session, answer, timeoutMs);
   if (early) return early;
   tapped.add(page);
   return undefined;
@@ -154,18 +170,47 @@ function shownAnswer(field: Pick<AskRequestField, "kind">, value: AskFieldRecord
   return value;
 }
 
+const CARD_IS_UP =
+  "localDot's own card for this is on screen and says when it is done, so don't ask the user to confirm it. Call request_fix to wait for it, or carry on with what doesn't need it.";
+const NOT_IN_PLAIN_TEXT =
+  "A plain answer stays in the conversation and reaches you, so a secret can't be asked for this way. For a password or code on a page, use a secret field or code field aimed at its input; for a service key, use credentials action request. If this isn't a secret, name the field for what it is.";
+
+// A form can't stand in for localDot's own card, take a secret in plain text, or have the user confirm
+// what a card already says. Only the brain's own guard, in its fixed words, asks while a card is up.
+async function formRefused(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+  input: AskUserInput,
+): Promise<ToolResult | undefined> {
+  const card = await keysCardInstead(deps, ctx, formWords(input));
+  if (card) return card;
+  if (asksSecretInPlainText(input)) return fail(NOT_IN_PLAIN_TEXT);
+  const fields = input.fields ?? [];
+  const guard = ctx.callId.startsWith("guard-") && isKeepGoing(input);
+  if (
+    fields.length === 1 &&
+    fields[0]?.kind === "confirm" &&
+    !guard &&
+    ctx.session.openBlockers.length
+  )
+    return fail(CARD_IS_UP);
+  return undefined;
+}
+
 export async function askUserTool(
   deps: ToolDeps,
   ctx: ToolCallContext,
   input: AskUserInput,
 ): Promise<ToolResult> {
   ctx.check();
+  const refused = await formRefused(deps, ctx, input);
+  if (refused) return refused;
   if (input.fields) return askFields(deps, ctx, input, input.fields);
   const form = plainForm(input, ctx.redact);
   const timeoutMs = askTimeoutMs(deps, ctx);
   const answer = await ctx.session.askFields(form, timeoutMs, ctx.step, ctx.generation, ctx.signal);
   ctx.check();
-  const early = unanswered(answer, timeoutMs);
+  const early = unanswered(ctx.session, answer, timeoutMs);
   if (early) return early;
   // Read as the lettered choice dot has always been told, which older brains still look for.
   const given = answer.fields?.[ASK_ANSWER_ID];
@@ -189,6 +234,9 @@ async function askFields(
   input: AskUserInput,
   fields: NonNullable<AskUserInput["fields"]>,
 ): Promise<ToolResult> {
+  // A shared link's task fills the owner's saved sign-ins, when its link allows, but never saves
+  // or changes one: what its guest types is theirs.
+  const keeps = !!deps.logins && !ctx.session.guest;
   if (
     input.purpose === "sign_in" &&
     fields.length === 1 &&
@@ -304,12 +352,12 @@ async function askFields(
               ctx.signal,
             );
             ctx.check();
-            const early = unanswered(missing, askTimeoutMs(deps, ctx));
+            const early = unanswered(ctx.session, missing, askTimeoutMs(deps, ctx));
             if (early) return early;
             const account = loginFields[0] && missing.fields?.[loginFields[0].id];
             if (typeof account !== "string") return fail("The account name was not provided.");
             reused.username = account;
-            await deps.logins.saveLogin(reused.origin, reused.username, reused.password);
+            if (keeps) await deps.logins.saveLogin(reused.origin, reused.username, reused.password);
           }
           delivering = true;
           addTaskSecret(ctx.session, reused.password);
@@ -380,7 +428,7 @@ async function askFields(
       id: field.id,
       kind: field.kind,
       label: ctx.redact(field.label),
-      ...(where?.loginOrigin && deps.logins
+      ...(where?.loginOrigin && keeps
         ? {
             hint: `Saved securely for ${new URL(where.loginOrigin).host} and reused for future sign-ins.`,
           }
@@ -420,7 +468,7 @@ async function askFields(
   const typed = answer.secrets;
   try {
     ctx.check();
-    const early = unanswered(answer, timeoutMs);
+    const early = unanswered(ctx.session, answer, timeoutMs);
     if (early) return early;
     const answers: Record<string, unknown> = {};
     for (const field of fields) {
@@ -449,21 +497,24 @@ async function askFields(
           accountFields.length === 1 && accountFields[0]
             ? (knownAccount ?? answer.fields?.[accountFields[0].id])
             : undefined;
-        // A password-only retry retains the account saved with the original answer.
-        const prior =
-          typeof account === "string"
-            ? undefined
-            : await deps.logins.login(field.loginOrigin).catch(() => undefined);
-        ctx.check();
-        username = typeof account === "string" ? account : (prior?.username ?? "");
-        if (prior) prior.password = "";
-        try {
-          await deps.logins.saveLogin(field.loginOrigin, username ?? "", value);
-        } catch (error) {
-          saveFailed = true;
-          if (error instanceof VaultLockedError) ctx.session.lockKeys();
+        if (typeof account === "string") username = account;
+        if (keeps) {
+          // A password-only retry retains the account saved with the original answer.
+          const prior =
+            typeof account === "string"
+              ? undefined
+              : await deps.logins.login(field.loginOrigin).catch(() => undefined);
+          ctx.check();
+          username = typeof account === "string" ? account : (prior?.username ?? "");
+          if (prior) prior.password = "";
+          try {
+            await deps.logins.saveLogin(field.loginOrigin, username ?? "", value);
+          } catch (error) {
+            saveFailed = true;
+            if (error instanceof VaultLockedError) ctx.session.lockKeys();
+          }
+          ctx.check();
         }
-        ctx.check();
       }
       try {
         if (value !== undefined) landed = await typeSecret(deps, ctx, field, value, username);
@@ -508,7 +559,7 @@ async function askFields(
             secrets.size
               ? `\n${deliveries.join("\n")} Verification codes are never saved. The page may advance after the last character; inspect it and never replay a code after it advances. A rejected password needs a replacement; a different verification step needs the matching input form.`
               : ""
-          }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && deps.logins ? "\nThe sign-in was saved securely for future use on this site." : secrets.size && fields.some((field) => field.kind === "secret") && ![...secrets.values()].some((field) => field.loginOrigin) ? "\nThis password was entered once but was not saved: this surface did not provide a verified website sign-in form. Tell the user it will need to be provided again if this sign-in is lost." : ""}`,
+          }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && keeps ? "\nThe sign-in was saved securely for future use on this site." : secrets.size && fields.some((field) => field.kind === "secret") && ![...secrets.values()].some((field) => field.loginOrigin) ? "\nThis password was entered once but was not saved: this surface did not provide a verified website sign-in form. Tell the user it will need to be provided again if this sign-in is lost." : ""}`,
         ),
       ],
     };
@@ -523,6 +574,8 @@ export async function requestTakeoverTool(
   input: RequestTakeoverInput,
 ): Promise<ToolResult> {
   ctx.check();
+  const card = await keysCardInstead(deps, ctx, input.note);
+  if (card) return card;
   // A held Pause refuses the hand-off before anything counts as signed in.
   if (ctx.session.safetyPause) throw new PausedStepError();
   // The user gets every screen during a takeover, so a sign-in may land on the desktop.
@@ -551,9 +604,11 @@ export async function requestTakeoverTool(
     content: [
       text(
         ctx.redact(
-          outcome.declined
-            ? `The user said not now: they won't do this on the computer at the moment.${note} Don't hand the screen over again for it right away: find another way, or carry on with the rest and tell them what is left for them.`
-            : `The user handed the screen back.${note}`,
+          outcome.movedOn
+            ? MOVED_ON_COMPUTER
+            : outcome.declined
+              ? `The user said not now: they won't do this on the computer at the moment.${note} Don't hand the screen over again for it right away: find another way, or carry on with the rest and tell them what is left for them.`
+              : `The user handed the screen back.${note}`,
         ),
       ),
       image,

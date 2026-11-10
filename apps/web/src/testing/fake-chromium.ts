@@ -15,6 +15,7 @@ export class FakeWorker {
   static instances: FakeWorker[] = [];
   readonly sent: { message: { type: string; [key: string]: unknown }; transfer: unknown[] }[] = [];
   onmessage: ((e: { data: unknown }) => void) | null = null;
+  onerror: ((e: Event) => void) | null = null;
   terminated = false;
   constructor(
     readonly url: URL | string,

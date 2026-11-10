@@ -8,26 +8,8 @@ import { clock, type EntryView } from "./activity.ts";
 import { reducedMotion } from "./useFollowScroll.ts";
 import "./activity.css";
 
-// Long enough for a row's detail to finish opening before it is brought into view.
-const REVEAL_AFTER = 300;
-
 export function reveal(element: Element | null) {
   element?.scrollIntoView?.({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
-}
-
-// Brings a row that has just been opened into view once its detail has unfolded, unless the reader
-// has moved on by then.
-export function revealOpened(row: Element | null) {
-  const moved = ["wheel", "touchstart", "keydown"];
-  const settle = () => {
-    clearTimeout(timer);
-    for (const type of moved) window.removeEventListener(type, settle, true);
-  };
-  const timer = setTimeout(() => {
-    settle();
-    reveal(row);
-  }, REVEAL_AFTER);
-  for (const type of moved) window.addEventListener(type, settle, true);
 }
 
 // Chat reads a step as dot's own sentence and its time. Which tool did what, in which window, waits

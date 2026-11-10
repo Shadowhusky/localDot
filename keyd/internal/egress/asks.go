@@ -30,7 +30,7 @@ const (
 
 	// A held connection waits this long for the user, then is refused; the card stays.
 	DefaultAskHold = 2 * time.Minute
-	// Held connections keep their slot of the cell's 64, so only some may wait at once.
+	// Held connections keep their slot of the cell's 160, so only some may wait at once.
 	maxPendingAsks = 16
 	sourceHeader   = "X-Localdot-Source"
 )

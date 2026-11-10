@@ -21,6 +21,8 @@ export interface ApiClient {
   del(path: string): Promise<void>;
   socketUrl(path: string): string;
   socketProtocols(): string[];
+  // A shared link's client: whether the link may ask for this at all. The owner's has none.
+  permits?(method: string, path: string): boolean;
 }
 
 export interface ApiOptions {

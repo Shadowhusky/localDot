@@ -12,8 +12,11 @@ import {
   AddMemoryEntryRequest,
   AddPersonRequest,
   ApprovalAnswer,
+  BlockerModelChoice,
   BudgetRaiseRequest,
   CLAUDE_PLAN_REFUSAL,
+  ClaudeCodeAccountRequest,
+  type ClaudeCodeStatus,
   ContinueConversation,
   EditMemoryEntryRequest,
   EditPersonRequest,
@@ -68,6 +71,9 @@ import { DesktopdError } from "../desktopd/client.ts";
 import type { DesktopdTools } from "../desktopd/tools-client.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import type { KeyModels } from "../keyd/key-models.ts";
+import { linkConversation } from "../remote/links.ts";
+import { NDJSON_TYPE } from "../sessions/ndjson.ts";
+import type { AutoContinueScheduler } from "./auto-continue.ts";
 import {
   activeRoles,
   BindingError,
@@ -115,6 +121,7 @@ export interface AgentRoutesDeps {
     Partial<
       Pick<
         AgentRunner,
+        | "retryOnModel"
         | "selectionOf"
         | "terminalOf"
         | "pauseTask"
@@ -140,6 +147,7 @@ export interface AgentRoutesDeps {
     Conversations,
     | "current"
     | "snapshot"
+    | "snapshotOf"
     | "begin"
     | "select"
     | "has"
@@ -187,7 +195,10 @@ export interface AgentRoutesDeps {
     setup: ChatgptSetupControl;
   };
   claudeCode?: Pick<ClaudeCodeSetup, "status" | "check">;
+  // Switches between the Claude account on this Mac and this dot's own, then checks it.
+  claudeAccount?(separate: boolean): Promise<ClaudeCodeStatus>;
   planUsage?: Pick<PlanUsageStore, "reply" | "refresh">;
+  autoContinue?: Pick<AutoContinueScheduler, "cancel" | "cancelAll">;
 }
 
 const JSON_BYTES = 64 * 1024;
@@ -493,6 +504,16 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       }),
     );
   }
+  const claudeAccount = deps.claudeAccount;
+  if (claudeAccount)
+    app.put(
+      "/api/agent/claude-code/account",
+      route(async (c) => {
+        const { separate } = await json(c.req.raw, ClaudeCodeAccountRequest);
+        check(c.req.raw.signal);
+        return c.json(await claudeAccount(separate));
+      }),
+    );
   const planUsage = deps.planUsage;
   if (planUsage)
     // `fresh=1` also reads plans whose figures are not fresh from their own apps, in the background.
@@ -665,6 +686,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       }
       check(c.req.raw.signal);
       const saved = deps.settings.put(parsed);
+      if (saved.autoContinue === "off") deps.autoContinue?.cancelAll();
       // A task start retries this; until then keyd keeps the daily limit it had.
       await syncDayLimit(deps.keyd, saved.dayBudgetUSD).catch(() =>
         console.error("keyd's daily spending limit could not be updated"),
@@ -681,6 +703,10 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       check(c.req.raw.signal);
       const task = redact(parsed.task, undefined, cellId);
       const grant = c.get("remoteGrant");
+      // Continuing a task brings its conversation into the new one, for dot and for the link: a
+      // link continues only its own, and without one starts a new conversation, never the owner's.
+      if (grant && parsed.continues && !deps.remoteLinks?.owns(grant.id, parsed.continues))
+        throw new RouteError(403, "This link can continue only its own conversation.");
       let reservation: ReturnType<import("../remote/links.ts").RemoteLinks["reserve"]> | undefined;
       if (grant) {
         try {
@@ -705,7 +731,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           : c.req.raw.signal;
         const startOptions = {
           ...(parsed.mode === "research" ? { research: true } : {}),
-          ...(parsed.continues !== undefined ? { continues: parsed.continues } : {}),
+          ...(parsed.continues !== undefined || grant
+            ? { continues: parsed.continues ?? null }
+            : {}),
           // A shared link's model is the link's to set, never the request's.
           ...(parsed.model && !grant ? { model: parsed.model } : {}),
           ...(reservation
@@ -717,12 +745,15 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
                 ),
               }
             : {}),
-          ...(grant ? { sender: grant.id } : {}),
+          ...(grant
+            ? { sender: grant.id, guest: { apps: grant.apps } }
+            : { byOwner: true as const }),
         };
         result = Object.keys(startOptions).length
           ? await deps.runner.start(cellId, task, startSignal, startOptions)
           : await deps.runner.start(cellId, task, startSignal);
         reservation?.finish(result.id);
+        if (grant) deps.remoteLinks?.show(grant.id, result.id);
         if (grant && !deps.remoteLinks?.active(grant.id)) {
           await deps.runner.stopRun?.(result.id);
           throw new RouteError(403, "Shared access ended");
@@ -740,14 +771,29 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   const conversations = deps.conversations;
   if (conversations) {
     // Choosing a conversation only changes what the app shows: every task goes on.
+    // A link has conversations of its own: the one it shows is its own choice, never the owner's.
+    const links = deps.remoteLinks;
+    const own = (grant: { id: string } | undefined) =>
+      grant && links
+        ? (sessions: readonly string[]) => sessions.some((id) => links.owns(grant.id, id))
+        : undefined;
+    const linkSnapshot = (id: string) =>
+      links ? linkConversation(links, conversations, id) : { sessions: [], more: false };
     app.get(
       "/api/conversation",
-      route((c) => c.json(conversations.snapshot())),
+      route((c) => {
+        const grant = c.get("remoteGrant");
+        return c.json(grant ? linkSnapshot(grant.id) : conversations.snapshot());
+      }),
     );
     app.get(
       "/api/conversations",
       route((c) => {
-        const listed = conversations.list(undefined, c.req.query("archived") === "1");
+        const listed = conversations.list(
+          undefined,
+          c.req.query("archived") === "1",
+          own(c.get("remoteGrant")),
+        );
         return c.json({
           ...listed,
           conversations: listed.conversations.map((entry) => {
@@ -762,6 +808,11 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       "/api/conversation/new",
       route(async (c) => {
         await empty(c.req.raw);
+        const grant = c.get("remoteGrant");
+        if (grant) {
+          links?.show(grant.id, null);
+          return c.json(linkSnapshot(grant.id));
+        }
         conversations.begin();
         return c.json(conversations.snapshot());
       }),
@@ -770,6 +821,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       "/api/conversation/continue",
       route(async (c) => {
         const { sessionId } = await json(c.req.raw, ContinueConversation);
+        const grant = c.get("remoteGrant");
+        if (grant) {
+          if (!conversations.has(sessionId) || !links?.show(grant.id, sessionId))
+            throw new RouteError(404, "no such task");
+          return c.json(linkSnapshot(grant.id));
+        }
         if (!conversations.select(sessionId)) throw new RouteError(404, "no such task");
         return c.json(conversations.snapshot());
       }),
@@ -822,13 +879,16 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           : undefined;
       check(c.req.raw.signal);
       if (s.stopped) throw new RouteError(409, "task has stopped");
+      if (!grant) s.ownerSpoke();
       if (s.pendingTakeover) {
         turn?.reached();
         // A deliberate Send hands control back. Publish this instruction before
         // waking the model, so it cannot resume the old plan ahead of the message.
-        if (!(await s.handback(s.pendingTakeover, text, c.req.raw.signal)))
+        if (!(await s.handback(s.pendingTakeover, text, c.req.raw.signal, false, true)))
           throw new RouteError(409, "The computer is still changing hands. Try sending again.");
       }
+      // A shared link's guest answers for no one: what the owner was asked stays theirs to decide.
+      else if (!grant && s.moveOn(text, undefined, turn)) return c.body(null, 202);
       // A message for another model waits for the task to finish, steered or not: moving dot now
       // would end what it has running.
       else if (parsed.kind === "followup" || turn?.moves()) s.enqueue(text, grant?.id, turn);
@@ -857,7 +917,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({ choice: deps.runner.chooseTaskModel(id, ref) });
     }),
   );
-  // One at a time for each task; the answer goes back to the user alone.
+  // One at a time for each task; the answer goes back to the user alone, each step as it comes.
   const asking = new Set<string>();
   app.post(
     "/api/agent/sessions/:id/side-question",
@@ -869,37 +929,88 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!deps.runner.sideAnswer) throw new RouteError(503, "side questions are unavailable");
       if (asking.has(id)) throw new RouteError(409, "busy");
       asking.add(id);
-      const late = AbortSignal.timeout(90_000);
-      try {
-        const reply = await deps.runner.sideAnswer(
-          id,
-          text,
-          AbortSignal.any([c.req.raw.signal, late]),
-        );
-        return c.json(
-          reply.failed
-            ? {
-                ...reply,
-                failed: {
-                  ...reply.failed,
-                  reason: redact(reply.failed.reason, id, undefined, SIDE_QUESTION_CHARS),
+      const outward = (value: string) => deps.redactUserText(value, id);
+      const encoder = new TextEncoder();
+      const stopped = new AbortController();
+      const signal = AbortSignal.any([c.req.raw.signal, stopped.signal]);
+      let send: ((line: unknown) => void) | undefined;
+      const held: unknown[] = [];
+      const line = (value: unknown) => {
+        if (send) send(value);
+        else held.push(value);
+      };
+      // Refusals before anything is under way keep their own status; after that, the last line says.
+      const started = Promise.withResolvers<void>();
+      const answer = deps.runner
+        .sideAnswer(id, text, signal, (event) => {
+          line(
+            "progress" in event
+              ? { progress: outward(event.progress) }
+              : {
+                  handover: event.handover,
+                  ...(event.partial ? { partial: outward(event.partial) } : {}),
                 },
-              }
-            : reply,
-        );
+          );
+          started.resolve();
+        })
+        .then((reply) => {
+          const clean = {
+            ...reply,
+            answer: outward(reply.answer),
+            ...(reply.failed
+              ? { failed: { ...reply.failed, reason: outward(reply.failed.reason) } }
+              : {}),
+          };
+          line(clean);
+          started.resolve();
+        })
+        .finally(() => asking.delete(id));
+      try {
+        await Promise.race([started.promise, answer]);
       } catch (error) {
         if (error instanceof SideQuestionError)
           throw new RouteError(
             error.status,
-            error.reason
-              ? `${error.problem}\n${redact(error.reason, id, undefined, SIDE_QUESTION_CHARS)}`
-              : error.problem,
+            error.reason ? `${error.problem}\n${outward(error.reason)}` : error.problem,
           );
-        if (late.aborted) throw new RouteError(502, "no-answer");
         throw error;
-      } finally {
-        asking.delete(id);
       }
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const write = (value: unknown) =>
+            controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
+          for (const value of held.splice(0)) write(value);
+          send = write;
+          void answer
+            .catch((error: unknown) => {
+              if (signal.aborted) return;
+              write(
+                error instanceof SideQuestionError
+                  ? {
+                      problem: error.problem,
+                      status: error.status,
+                      ...(error.reason ? { reason: outward(error.reason) } : {}),
+                    }
+                  : { problem: "no-answer", status: 502 },
+              );
+            })
+            .finally(() => {
+              send = undefined;
+              try {
+                controller.close();
+              } catch {
+                // The reader has gone.
+              }
+            });
+        },
+        cancel() {
+          send = undefined;
+          stopped.abort();
+        },
+      });
+      return new Response(body, {
+        headers: { "content-type": NDJSON_TYPE, "cache-control": "no-store" },
+      });
     }),
   );
   app.post(
@@ -937,7 +1048,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const s = active(c.req.param("id") ?? "");
       const messageId = c.req.param("messageId") ?? "";
       if (!ULID_PATTERN.test(messageId)) throw new RouteError(400, "invalid message id");
-      if (!s.steerQueued(messageId)) throw new RouteError(404, "queued message not found");
+      if (!s.steerQueued(messageId, !c.get("remoteGrant")))
+        throw new RouteError(404, "queued message not found");
       return c.body(null, 204);
     }),
   );
@@ -1094,6 +1206,63 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         : !!parsed.fields &&
           s.answerFields(parsed.askId, parsed.fields, (text) => redact(text, s.id, s.cellId));
       return ok ? c.body(null, 204) : c.text("that question is not waiting", 409);
+    }),
+  );
+  // A card in the conversation: Not now, which tells dot, and for a model's the one to go on with.
+  // Both are the owner's, as unlocking and saving keys are: a shared link's guest sees the task,
+  // never decides what it is owed.
+  const ownerOnly = (c: { get(key: "remoteGrant"): unknown }) => {
+    if (c.get("remoteGrant"))
+      throw new RouteError(403, "Only the owner of this localDot can answer that");
+  };
+  app.post(
+    "/api/agent/sessions/:id/blockers/:blockerId/dismiss",
+    route(async (c) => {
+      ownerOnly(c);
+      const s = active(c.req.param("id") ?? "");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      return s.dismissBlocker(c.req.param("blockerId") ?? "")
+        ? c.body(null, 204)
+        : c.text("that card is not waiting", 409);
+    }),
+  );
+  // The user is starting a fix from this card, so the fix that follows carries the task on.
+  app.post(
+    "/api/agent/sessions/:id/blockers/:blockerId/use",
+    route(async (c) => {
+      ownerOnly(c);
+      const s = active(c.req.param("id") ?? "");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      return s.useBlocker(c.req.param("blockerId") ?? "")
+        ? c.body(null, 204)
+        : c.text("that card is not waiting", 409);
+    }),
+  );
+  app.delete(
+    "/api/agent/sessions/:id/blockers/:blockerId/use",
+    route(async (c) => {
+      ownerOnly(c);
+      const s = active(c.req.param("id") ?? "");
+      check(c.req.raw.signal);
+      s.releaseBlocker(c.req.param("blockerId") ?? "");
+      return c.body(null, 204);
+    }),
+  );
+  app.post(
+    "/api/agent/sessions/:id/blockers/:blockerId/model",
+    route(async (c) => {
+      ownerOnly(c);
+      const s = active(c.req.param("id") ?? "");
+      const { model } = await json(c.req.raw, BlockerModelChoice);
+      check(c.req.raw.signal);
+      const blockerId = c.req.param("blockerId") ?? "";
+      if (!s.openBlockers.some((open) => open.blockerId === blockerId))
+        throw new RouteError(409, "that card is not waiting");
+      if (!deps.runner.retryOnModel) throw new RouteError(503, "changing model is unavailable");
+      await deps.runner.retryOnModel(s.id, model, c.req.raw.signal);
+      return c.body(null, 204);
     }),
   );
   // The user takes the computer whatever dot is doing; the reply names the control to hand back.
@@ -1256,6 +1425,20 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       check(c.req.raw.signal);
       if (!deps.runner.pauseTask) throw new RouteError(503, "Pause is unavailable");
       return c.json(deps.runner.pauseTask(s.id, input.requestId), 202);
+    }),
+  );
+  // "Don't continue" for a task waiting on its plan's limit, live or ended by a restart.
+  app.post(
+    "/api/agent/sessions/:id/auto-continue/cancel",
+    route(async (c) => {
+      const id = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(id)) throw new RouteError(400, "invalid task id");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      if (c.get("remoteGrant")) throw new RouteError(403, "Only the owner can change this");
+      if (!deps.autoContinue?.cancel(id))
+        throw new RouteError(404, "The task isn't waiting to continue");
+      return c.body(null, 204);
     }),
   );
   app.post(

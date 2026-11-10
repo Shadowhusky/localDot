@@ -1,5 +1,5 @@
 import type { Page, Request } from "@playwright/test";
-import { composer, expect, runAt, test } from "./harness.ts";
+import { expect, runAt, test } from "./harness.ts";
 
 // dot's questions answered in the thread beside a wide screen and in a phone's sheet: the user's
 // own words for any choice, fields they may leave to dot, and a field that needs an answer.
@@ -109,24 +109,4 @@ test("a quick choice the user leaves to dot", async ({ page, ui }) => {
     expect.objectContaining({ by: "user", fields: {}, skipped: ["answer"] }),
   ]);
   await expect(page.getByText("Let dot decide", { exact: true })).toBeVisible();
-});
-
-test("a message answers a lone question in the user's own words", async ({ page, ui }) => {
-  const fixture = await ui.open("running");
-  const sent = answers(page);
-  expect((await page.request.post(`${fixture.origin}/__qa/ask`)).ok()).toBe(true);
-  await expect(page.locator("form.ask")).toBeVisible();
-  const card = await composer(page);
-  await card.getByRole("textbox", { name: "Message" }).fill("Word, with tracked changes");
-  await card.evaluate((element) => (element as HTMLFormElement).requestSubmit());
-  await expect(page.locator("form.ask")).toHaveCount(0);
-  expect(sent).toEqual([
-    { askId: expect.any(String), fields: { answer: "Word, with tracked changes" } },
-  ]);
-  expect(await recorded(page, fixture.origin)).toEqual([
-    expect.objectContaining({
-      by: "user",
-      fields: { answer: { other: "Word, with tracked changes" } },
-    }),
-  ]);
 });

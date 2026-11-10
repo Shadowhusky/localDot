@@ -59,6 +59,20 @@ export type AppUpdateAttempt = z.infer<typeof AppUpdateAttempt>;
 
 export const UPDATE_STEPS = ["download", "verify", "images", "install", "restart"] as const;
 export type UpdateStep = (typeof UPDATE_STEPS)[number];
+// What stopped an update, as far as the updater could tell. The daemon turns it into words.
+export const UPDATE_PROBLEMS = [
+  "network",
+  "stalled",
+  "disk",
+  "docker",
+  "channel",
+  "verify",
+  "busy",
+  "start",
+  "checks",
+  "interrupted",
+] as const;
+export type UpdateProblem = (typeof UPDATE_PROBLEMS)[number];
 export const AppUpdateProgress = z.strictObject({
   step: z.enum(UPDATE_STEPS),
   // The whole update's share done, 0–1, never lower than before; null while it can't be measured.
@@ -73,8 +87,32 @@ export const UpdateProgressLine = z.strictObject({
   share: z.number().min(0).max(1).optional(),
   done: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
   total: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+  problem: z.enum(UPDATE_PROBLEMS).optional(),
 });
 export type UpdateProgressLine = z.infer<typeof UpdateProgressLine>;
+
+// What the installer last recorded in the status file it was given. It outlives the daemon that
+// started it, so the daemon that comes up next can read where it got to.
+export const UPDATE_INSTALL_STAGES = [
+  "prepare",
+  "verify",
+  "images",
+  "stop",
+  "start",
+  "check",
+  "done",
+  "failed",
+] as const;
+export type UpdateInstallStage = (typeof UPDATE_INSTALL_STAGES)[number];
+export const UpdateInstallStatus = z.strictObject({
+  v: z.literal(1),
+  pid: z.number().int().positive(),
+  stage: z.enum(UPDATE_INSTALL_STAGES),
+  problem: z.enum(UPDATE_PROBLEMS).optional(),
+  // The previous version was put back after the swap began.
+  restored: z.boolean(),
+});
+export type UpdateInstallStatus = z.infer<typeof UpdateInstallStatus>;
 
 export const MAX_RELEASE_NOTES = 10;
 export const ReleaseNote = z.strictObject({
@@ -99,5 +137,9 @@ export const AppUpdateStatus = z.object({
   progress: AppUpdateProgress.nullable().default(null),
   // Newest first: the versions the pending update brings, or else the installed one's.
   notes: z.array(ReleaseNote).max(MAX_RELEASE_NOTES).default([]),
+  // The user asked for this update: every device shows how it goes, whatever else is on screen.
+  updating: z.boolean().default(false),
+  // Why this copy can't update itself, when it can't.
+  unsupported: z.enum(["source-checkout", "install-record"]).nullable().default(null),
 });
 export type AppUpdateStatus = z.infer<typeof AppUpdateStatus>;

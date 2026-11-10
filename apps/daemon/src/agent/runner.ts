@@ -5,7 +5,9 @@ import {
   type AgentLimits,
   type AgentRoleChoice,
   type AutonomyPolicy,
+  type Blocker,
   BootConfig,
+  blockerSubject,
   type CheckIns,
   type ClaudeCodeStatus,
   type ConversationLive,
@@ -14,10 +16,12 @@ import {
   DEFAULT_PERSONA,
   DEFAULT_RESEARCH_BUDGET,
   freezeAutonomy,
+  type GuestAccess,
   isJevKey,
   type KeydRecord,
   LIVE_ACTIVITY_CHARS,
   type MessageModel,
+  MODEL_BLOCKS,
   MODEL_SWITCH_ENTRY,
   type ModelBinding,
   type ModelOptions,
@@ -28,6 +32,7 @@ import {
   type ReasoningEffort,
   type RecentLine,
   ReviseLink,
+  SECRET_ID_PATTERN,
   SESSION_PAUSE_REASONS,
   SessionOrigin,
   SessionRun,
@@ -54,6 +59,8 @@ import type { StopOutcome } from "../gateway/kill-switch.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import { type KeydHealth, vaultLocked } from "../keyd/monitor.ts";
+import type { RemoteLinks } from "../remote/links.ts";
+import { PLAN_LIMITS } from "./auto-continue.ts";
 import {
   activeRoles,
   BindingError,
@@ -84,6 +91,7 @@ import {
   LOOK_MS,
   leastEffort,
 } from "./first-look.ts";
+import { bootMemory, usesOwnersAccounts } from "./guest.ts";
 import type { MemoryStore } from "./memory.ts";
 import { providerNotice } from "./provider-notice.ts";
 import type { RecentActivity } from "./recent-activity.ts";
@@ -107,10 +115,20 @@ import { visualNavigation } from "./safety/visual-target.ts";
 import { AgentSession, abortable, type MessageTurn, SessionStoppedError } from "./session.ts";
 import { AgentSettings, RoleChoice } from "./settings.ts";
 import {
+  runSideAgent,
+  type SideEvent,
+  type SideModel,
+  SideNoAnswer,
+  type SideReply,
+  type SideSpendLedger,
+} from "./side/agent.ts";
+import { sideModels } from "./side/models.ts";
+import type { SideReaders } from "./side/tools.ts";
+import {
   SideQuestionError,
-  sideAnswerText,
   sideQuestionEvents,
   sideQuestionPrompt,
+  sideState,
 } from "./side-question.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
 import { resumable, unfinishedIn } from "./subagents.ts";
@@ -125,6 +143,30 @@ const RESTART_BACKOFF_MS = [2000, 4000, 8000];
 const IDLE_MS = 30 * 60 * 1000;
 const TERMINAL_SNAPSHOTS = 256;
 const SESSION_PAUSES = new Set<string | undefined>(SESSION_PAUSE_REASONS);
+// What only a model that answered would have said.
+const ANSWERED: ReadonlySet<string> = new Set([
+  "model.usage",
+  "message.delta",
+  "message.assistant",
+  "thought.delta",
+  "step.start",
+]);
+const DOCKER_CHECK_MS = 5000;
+// What a task the user carried on after a move to another kind of model starts with.
+export const CARRY_ON = "Continue where you left off.";
+// A card waits this long at most for the user once dot has ended its turn on it.
+const CARD_WAIT_MS = 4 * 60 * 60_000;
+const CARD_STATES = new Set<CellSummary["state"]>(["stopped", "failed"]);
+// What a Start or Resume would bring back; nothing the computer is doing by itself, or that a
+// fence or replacement holds.
+export function computerDown(cell: CellSummary | undefined): "stopped" | "paused" | undefined {
+  if (!cell || cell.fenced || cell.replacementPending) return undefined;
+  // A stop that failed left it running: finishing the stop is the way on, not starting it.
+  if (cell.error?.startsWith("stop failed")) return undefined;
+  if (CARD_STATES.has(cell.state)) return "stopped";
+  return cell.state === "ready" && cell.paused ? "paused" : undefined;
+}
+export const computerUp = (cell: CellSummary): boolean => cell.state === "ready" && !cell.paused;
 export const RAISE_BUDGET_FIRST = "Raise this task's budget before resuming it.";
 export const CLAUDE_CODE_OFF = "Claude Code isn't available on this computer.";
 // Recovery waits own no user decision or desktop control. They can be retired
@@ -181,6 +223,11 @@ export interface TaskStartOptions {
   readonly continues?: string | null;
   // The shared link the task's message came through.
   readonly sender?: string;
+  // Present when the task came through a shared link: what of the owner's it may use.
+  readonly guest?: GuestAccess;
+  // The owner asked for this task themselves. Otherwise a task that carries on a shared link's
+  // task works for that link, within its limits.
+  readonly byOwner?: true;
 }
 export class AgentError extends Error {
   constructor(
@@ -208,7 +255,8 @@ export interface AgentRunnerDeps {
     | "busy"
     | "cellOf"
     | "lease"
-  >;
+  > &
+    Partial<Pick<LiveSessions, "subscribeLeases">>;
   // A task's live status changed; undefined once it has ended.
   liveChanged?(sessionId: string, live: ConversationLive | undefined): void;
   // Turns on the computer its tasks share, and which of its windows are whose.
@@ -233,12 +281,27 @@ export interface AgentRunnerDeps {
   memory: Pick<MemoryStore, "bootMemory">;
   // The connected apps' tools a task is shown, as the user's settings stand when its model starts.
   connectors?(): TaskConnectors;
+  // Whether an app is connected again, which clears the card that asked for it.
+  appConnected?(connector: string): boolean;
+  // Docker can't run the computer: its card, rather than the computer's own, is the way on.
+  runtimeDown?(): Promise<boolean>;
+  runtimeCheckMs?: number;
   recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
-    Partial<Pick<Conversations, "names" | "persona" | "model" | "chooseModel" | "latest">>;
+    Partial<Pick<Conversations, "names" | "persona" | "model" | "chooseModel" | "latest" | "link">>;
+  // The shared links whose tasks a carried-on task counts against.
+  links?: Pick<RemoteLinks, "reserve" | "active">;
+  // keyd's hold on a computer's web keys, and its release with fresh stand-ins for them.
+  keysHeld?: {
+    hold(cellId: string): Promise<void>;
+    release(cellId: string): Promise<void>;
+    held?(cellId: string): Promise<boolean>;
+  };
   installSkills(cellId: string, signal: AbortSignal, persona?: PersonaId): Promise<SkillSummary[]>;
   prepareDesktop?(session: AgentSession): Promise<void>;
+  // A task paused at its subscription plan's limit, which may go on by itself once it resets.
+  planLimited?(session: AgentSession, reason: string, detail?: string, auto?: boolean): void;
   waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
   // Must invoke M3's revoke/drain/freeze/fallback path, even if session.stop() already ran.
   stopSession(sessionId: string): Promise<StopOutcome | undefined>;
@@ -264,6 +327,13 @@ export interface AgentRunnerDeps {
     >;
     // Asks a task's fast model on the plan one question, with no tools.
     answer?(fast: { model: string; options?: ModelOptions }): ClaudeCodeAnswer;
+  };
+  // The side agent: what it can read and who can answer.
+  side?: {
+    api(role: ResolvedRole, side: SideModel["role"]): SideModel;
+    plan?(quick: { model: string; options?: ModelOptions }, side: SideModel["role"]): SideModel;
+    readers(sessionId: string, session: AgentSession | undefined, logFile: string): SideReaders;
+    ledger(logFile: string): SideSpendLedger;
   };
   // Asks a model billed per token one short question before the task's brain starts.
   quickModel?(
@@ -350,7 +420,9 @@ interface Runtime {
   completion?: "complete" | "blocked";
   providerNotice?: string;
   serial: Promise<void>;
-  pause?: "budget" | "keyd" | "model" | "auth" | "keys";
+  pause?: "budget" | "keyd" | "model" | "auth" | "keys" | "runtime";
+  // The card the model's stall raised, until the model answers again.
+  stalled?: string;
   budgetScope?: "task" | "day";
   authResumeAfter?: number;
   authGeneration?: number;
@@ -426,6 +498,10 @@ const native = (selection: ModelSelection) =>
 export class AgentRunner {
   readonly sessions = new Map<string, AgentSession>();
   readonly #runtime = new Map<string, Runtime>();
+  // The shared link's tasks holding each computer's keys, and keyd's hold and release calls for
+  // it, one at a time.
+  readonly #keyHolds = new Map<string, number>();
+  readonly #keyCalls = new Map<string, Promise<void>>();
   // Bounded daemon-lifetime history only: never keep AgentSession, leases, brain IDs or keys.
   readonly #terminal = new Map<string, TerminalTaskSnapshot>();
   readonly #starting = new Set<string>();
@@ -438,6 +514,7 @@ export class AgentRunner {
   #health: KeydHealth;
   #lastBoot: string | undefined;
   #closing = false;
+  #dockerWatch: ReturnType<typeof setTimeout> | undefined;
   #fastFailure: { provider: string; model: string; reason: string } | undefined;
   constructor(private readonly deps: AgentRunnerDeps) {
     this.#health = deps.keydHealth?.() ?? { online: true };
@@ -461,18 +538,34 @@ export class AgentRunner {
         rt.budgetScope = event.data.scope;
       }
       if (event.type === "task.result") rt.completion = event.data.outcome ?? "complete";
-      // keyd refused a saved key the task's computer asked for while the vault is locked.
-      if (event.type === "key.use" && event.data.decision === "deny" && vaultLocked(this.#health))
-        rt.session.lockKeys();
+      // keyd refused a saved key the task's computer asked for: the vault is locked, or the key
+      // itself needs the user.
+      if (event.type === "key.use" && event.data.decision === "deny") {
+        if (vaultLocked(this.#health)) rt.session.lockKeys();
+        else void this.#refusedKey(rt, event.data.secretId);
+      }
+      if (
+        ANSWERED.has(event.type) ||
+        (event.type === "agent.state" && event.data.state === "acting")
+      )
+        this.#modelAnswered(rt);
       if (event.type !== "agent.state") return;
       if (event.data.state === "error") rt.failure = event.data;
       else if (["thinking", "acting", "observing", "done"].includes(event.data.state))
         rt.failure = undefined;
       if (event.data.state === "paused") {
+        const { reason, detail } = event.data;
+        // The wait's own word is no new limit. A shared link's task waits for the owner.
+        if (reason && PLAN_LIMITS[reason] && !event.data.autoContinue)
+          queueMicrotask(() =>
+            this.deps.planLimited?.(rt.session, reason, detail, !rt.session.guest),
+          );
+        const card = this.#stallCard(rt, event.data.reason, event.data.detail);
         const notice = providerNotice(event.data.reason, event.data.detail);
         if (notice && rt.providerNotice !== notice) {
           rt.providerNotice = notice;
-          rt.session.append("message.assistant", { messageId: ulid(), text: notice });
+          // A card says it, with the way on; words in the thread as well would say it twice.
+          if (!card) rt.session.append("message.assistant", { messageId: ulid(), text: notice });
           // The brain's own log stays empty; this line is where a stalled model call is traced.
           console.warn(
             `task ${id} paused (${event.data.reason})${event.data.detail ? `: ${event.data.detail}` : ""}`,
@@ -488,8 +581,13 @@ export class AgentRunner {
           }
         } else if (event.data.reason === STALL.keysLocked) {
           rt.pause = "keys";
-          rt.session.lockKeys(false);
-        } else if (!SESSION_PAUSES.has(event.data.reason))
+          // The brain's word came from a model call's reply: keyd's own health says if it is so.
+          if (vaultLocked(this.#health)) rt.session.lockKeys(false);
+        } else if (event.data.reason === STALL.runtime) rt.pause = "runtime";
+        else if (
+          !SESSION_PAUSES.has(event.data.reason) &&
+          event.data.reason !== STALL.fixedElsewhere
+        )
           rt.pause =
             event.data.reason === "budget" ? "budget" : this.#health.online ? "model" : "keyd";
       } else if (["thinking", "acting", "observing"].includes(event.data.state)) {
@@ -500,6 +598,156 @@ export class AgentRunner {
           rt.authResumeAfter = undefined;
       }
     });
+  }
+  // The card a model's stall takes, when the user can fix it from the conversation. The task waits
+  // on it: nobody is left to hear about it, and only the fix or Stop moves it on.
+  #stallCard(rt: Runtime, reason: string | undefined, detail: string | undefined): boolean {
+    const required = { required: true, tell: false };
+    const raise = (blocker: Blocker) => {
+      rt.session.raiseBlocker(blocker, required);
+      rt.stalled = blockerSubject(blocker);
+      return true;
+    };
+    if (reason === STALL.keyReenter || reason === STALL.keyRebound) {
+      if (!detail || !SECRET_ID_PATTERN.test(detail)) return false;
+      void this.#stallOnKey(rt, detail, reason === STALL.keyReenter ? "reenter" : "rebound");
+      return true;
+    }
+    if (reason === STALL.modelRefused && detail?.startsWith("401:")) {
+      const main =
+        rt.selection.kind === "api"
+          ? rt.selection.roles.find((role) => role.role === "main")
+          : undefined;
+      if (main?.keyId) return raise({ kind: "key", id: main.keyId, problem: "rejected" });
+    }
+    const block = MODEL_BLOCKS.find((known) => known === reason);
+    if (!block) return false;
+    return raise({ kind: "model", reason: block, ...(detail ? { detail } : {}) });
+  }
+  // The brain's word for this came from a model call's reply, so it is checked with keyd itself.
+  async #stallOnKey(rt: Runtime, id: string, problem: "reenter" | "rebound"): Promise<void> {
+    const key = (await this.deps.keyd.secrets().catch(() => [])).find((k) => k.id === id);
+    if (!key?.[problem] || rt.session.status !== "paused") return;
+    rt.session.raiseBlocker({ kind: "key", id, problem }, { required: true, tell: false });
+    rt.stalled = `key:${id}`;
+  }
+  // The model's own answer is what proves a retry worked: a card holds through a try that fails.
+  #modelAnswered(rt: Runtime): void {
+    if (!rt.stalled) return;
+    const subject = rt.stalled;
+    rt.stalled = undefined;
+    rt.session.clearBlockers((blocker) => blockerSubject(blocker) === subject, {
+      outcome: "worked",
+    });
+  }
+  // A key refused for a reason of its own: one keyd says the user must enter again or deal with.
+  async #refusedKey(rt: Runtime, secretId: string): Promise<void> {
+    const key = (await this.deps.keyd.secrets().catch(() => [])).find((k) => k.id === secretId);
+    if (key?.reenter || key?.rebound)
+      rt.session.raiseBlocker({
+        kind: "key",
+        id: key.id,
+        problem: key.rebound ? "rebound" : "reenter",
+      });
+  }
+  // A key was saved or a sign-in finished, on any device: what waited on it goes on by itself if the
+  // fix came through its own card.
+  async keyChanged(secretId: string): Promise<void> {
+    const keys = await this.deps.keyd.secrets().catch(() => []);
+    const usable = keys.some((key) => key.id === secretId && !key.reenter && !key.rebound);
+    for (const rt of this.#runtime.values()) {
+      const { session } = rt;
+      if (session.stopped) continue;
+      session.clearBlockers(
+        (blocker) => blocker.kind === "app" && !!this.deps.appConnected?.(blocker.connector),
+      );
+      if (!usable) continue;
+      const cleared = session.clearBlockers(
+        (blocker) => blocker.kind === "key" && blocker.id === secretId,
+      );
+      if (rt.stalled === `key:${secretId}`) rt.stalled = undefined;
+      if (
+        cleared.some((open) => open.required && open.ownCard) &&
+        rt.pause === "model" &&
+        session.status === "paused" &&
+        !session.controlHeld
+      ) {
+        rt.pause = undefined;
+        session.post("resume", "");
+      }
+    }
+  }
+  // The computer went off or came back under a task. A task at rest asks nothing of it until it is
+  // asked something, and one Stop ended has gone already.
+  cellChanged(cell: CellSummary): void {
+    const down = computerDown(cell);
+    for (const id of this.deps.live.sessionsOn(cell.id)) {
+      const rt = this.#runtime.get(id);
+      if (!rt || rt.session.stopped) continue;
+      if (computerUp(cell)) rt.session.clearBlockers((blocker) => blocker.kind === "computer");
+      else if (down && rt.session.status !== "idle") void this.#computerWentDown(rt, down);
+    }
+  }
+  async #computerWentDown(rt: Runtime, state: "stopped" | "paused"): Promise<void> {
+    const docker = await this.#dockerDown();
+    if (docker) {
+      rt.session.raiseBlocker({ kind: "runtime" });
+      this.#watchDocker();
+    } else if (computerDown(this.deps.cell(rt.session.cellId))) {
+      rt.session.raiseBlocker({ kind: "computer", state });
+    }
+  }
+  #dockerDown(): Promise<boolean> {
+    return this.deps.runtimeDown?.().catch(() => false) ?? Promise.resolve(false);
+  }
+  // Docker has no change to subscribe to, so its cards ask until it answers.
+  #watchDocker(): void {
+    if (this.#dockerWatch) return;
+    const check = async () => {
+      this.#dockerWatch = undefined;
+      const waiting = [...this.#runtime.values()].filter((rt) =>
+        rt.session.openBlockers.some(({ blocker }) => blocker.kind === "runtime"),
+      );
+      if (!waiting.length) return;
+      if (await this.#dockerDown()) return this.#watchDocker();
+      for (const rt of waiting) rt.session.clearBlockers((blocker) => blocker.kind === "runtime");
+    };
+    this.#dockerWatch = setTimeout(() => void check(), this.deps.runtimeCheckMs ?? DOCKER_CHECK_MS);
+    this.#dockerWatch.unref?.();
+  }
+  // The model card's choice: the task goes on where it was, on that model. A model its runtime can't
+  // run takes the conversation's next task, as a message for it would.
+  async retryOnModel(id: string, ref: TaskModelRef, signal?: AbortSignal): Promise<void> {
+    const rt = this.#runtime.get(id);
+    if (!rt || rt.session.stopped) throw new AgentError(404, "no such live task");
+    const { session } = rt;
+    const turn = await this.messageTurn(id, ref, signal);
+    if (!turn || session.stopped) throw new AgentError(404, "no such live task");
+    // The same model is a retry, whose card holds until the model answers.
+    if (!turn.moves()) {
+      session.post("resume", "");
+      return;
+    }
+    const stalled = rt.stalled;
+    rt.stalled = undefined;
+    const cleared = session.clearBlockers((blocker) => blockerSubject(blocker) === stalled, {
+      movedTo: { provider: ref.provider, model: ref.model },
+      byCard: true,
+    });
+    if (turn.handOver) {
+      try {
+        await this.start(session.cellId, CARRY_ON, signal, { continues: id, model: ref });
+      } catch (error) {
+        // It stays the task's to fix: the card comes back as it was.
+        for (const { blocker } of cleared)
+          session.raiseBlocker(blocker, { required: true, tell: false });
+        rt.stalled = stalled;
+        throw error;
+      }
+      return;
+    }
+    rt.pause = undefined;
+    turn.reached();
   }
   resolveRoles(keys: KeydRecord[], settings = this.deps.settings()): ResolvedRole[] {
     const snapshot = AgentSettings.parse(settings);
@@ -552,10 +800,15 @@ export class AgentRunner {
     const revises =
       options.revises === undefined ? undefined : ReviseLink.safeParse(options.revises);
     if (revises && !revises.success) throw new AgentError(400, "invalid revised file");
-    const budget = options.budgetUSD;
+    const requested = options.budgetUSD;
     if (
-      budget !== undefined &&
-      !(Number.isFinite(budget) && budget > 0 && budget <= 10_000 && Math.round(budget * 1e6) >= 1)
+      requested !== undefined &&
+      !(
+        Number.isFinite(requested) &&
+        requested > 0 &&
+        requested <= 10_000 &&
+        Math.round(requested * 1e6) >= 1
+      )
     )
       throw new AgentError(400, "invalid task budget");
     const idle = options.idleMs;
@@ -594,12 +847,10 @@ export class AgentRunner {
       admittedNext();
       throw error;
     }
+    let reservation: ReturnType<RemoteLinks["reserve"]> | undefined;
+    let letKeysGo: (() => void) | undefined;
+    let running = false;
     try {
-      // Capture at request admission, before prior-task retirement or preflight can await.
-      const settings = AgentSettings.parse({
-        ...this.deps.settings(),
-        ...(options.main ? { main: options.main, fast: undefined, local: undefined } : {}),
-      });
       // A routine's run goes on in the routine's own conversation, never the one the user has open.
       // A conversation record that can't be read never keeps a task from starting.
       let continues: string | undefined;
@@ -612,9 +863,38 @@ export class AgentRunner {
         } catch {
           console.error("the earlier conversation could not be read");
         }
+      // Carrying a shared link's task on, by the owner's model card or a message for another model,
+      // is that link's task too: it counts against the link and keeps its limits.
+      const carried = options.guest || options.byOwner ? undefined : this.#linkOf(continues);
+      if (carried) {
+        try {
+          reservation = this.deps.links?.reserve(carried.id);
+        } catch {
+          reservation = undefined;
+        }
+        if (!reservation)
+          throw new AgentError(
+            409,
+            "The shared link this task works for has ended or used its tasks.",
+          );
+      }
+      const guest = options.guest ?? (carried && { apps: carried.apps });
+      const sender = options.sender ?? carried?.id;
+      const main = options.main ?? reservation?.model;
+      const budget = reservation
+        ? Math.min(
+            reservation.budgetUSD,
+            this.deps.settings().taskBudgetUSD ?? reservation.budgetUSD,
+          )
+        : requested;
+      // Capture at request admission, before prior-task retirement or preflight can await.
+      const settings = AgentSettings.parse({
+        ...this.deps.settings(),
+        ...(main ? { main, fast: undefined, local: undefined } : {}),
+      });
       // Settings holds the default: a task runs on what was chosen for it, and goes on with it.
       if (options.model) settings.main = this.#choiceOf(options.model, continues);
-      else if (!options.main && continues)
+      else if (!main && continues)
         settings.main = this.#conversationModel(continues) ?? settings.main;
       // The conversation's own task makes way for the new one; the computer's other tasks go on.
       const previous = continues ? this.sessions.get(continues) : undefined;
@@ -659,7 +939,7 @@ export class AgentRunner {
           continues = undefined;
         }
       let recent: RecentLine[] = [];
-      if (settings.recentActivity !== "off" && this.deps.recentActivity)
+      if (settings.recentActivity !== "off" && this.deps.recentActivity && !guest)
         try {
           recent = this.deps.recentActivity.list().map(({ sessionId: _, ...line }) => line);
         } catch {
@@ -687,6 +967,8 @@ export class AgentRunner {
           ? origin.data.name
           : (named?.automatic ?? messageName(task))
       ).slice(0, 200);
+      // Before the task exists, so not one step of it runs while the computer's keys still work.
+      if (guest && !guest.apps) letKeysGo = await this.#holdKeys(cellId);
       const id = this.deps.eventLog.createSession(title);
       const session = new AgentSession(
         id,
@@ -702,6 +984,8 @@ export class AgentRunner {
       );
       session.earlier = earlier;
       session.inherited = inherited;
+      session.guest = guest;
+      session.link = guest && sender;
       session.permissionMode = () => {
         // A routine set to ask first or only read keeps its own policy whatever the chat's mode.
         if (session.run && session.run.profile !== "act_within_rules") return "custom";
@@ -805,8 +1089,9 @@ export class AgentRunner {
           ...(revises?.success ? { revises: revises.data } : {}),
           ...(session.research ? { research: session.research.budget } : {}),
           persona: persona ?? DEFAULT_PERSONA,
+          ...(guest && sender ? { link: { id: sender, apps: guest.apps } } : {}),
         });
-        session.askTask(options.sender, settings.main && messageModel(settings.main));
+        session.askTask(sender, settings.main && messageModel(settings.main));
         if (settings.main)
           try {
             this.deps.conversations?.chooseModel?.(id, settings.main);
@@ -825,6 +1110,13 @@ export class AgentRunner {
           (stop) => this.#run(rt, stop),
           this.deps.prepareDesktop && alone ? (stop) => this.#prepareDesktop(rt, stop) : undefined,
         );
+        running = true;
+        const letGo = letKeysGo;
+        if (letGo)
+          void this.deps.live.settled(id).then(
+            () => letGo(),
+            () => letGo(),
+          );
       } catch (error) {
         session.stop();
         await session.screensSettled().catch(() => {});
@@ -832,16 +1124,99 @@ export class AgentRunner {
         this.#runtime.delete(id);
         throw error;
       }
-      // The user looking at a routine's conversation stays with it as a new run starts.
-      if (!origin || continues)
+      // The user looking at a routine's conversation stays with it as a new run starts. A shared
+      // link's own task leaves the owner's conversation as it was.
+      if ((!origin || continues) && !options.guest)
         try {
           this.deps.conversations?.adopt(id, continues ?? null);
         } catch {
           console.error("the current conversation could not be saved");
         }
+      if (carried && reservation) {
+        reservation.finish(id);
+        reservation = undefined;
+        if (!this.deps.links?.active(carried.id)) {
+          await this.stopRun(id);
+          throw new AgentError(409, "The shared link this task works for has ended.");
+        }
+      }
       return session;
+    } catch (error) {
+      reservation?.finish();
+      if (!running) letKeysGo?.();
+      throw error;
     } finally {
       admittedNext();
+    }
+  }
+  #keyCall(cellId: string, step: () => Promise<void>): Promise<void> {
+    const next = (this.#keyCalls.get(cellId) ?? Promise.resolve()).catch(() => {}).then(step);
+    this.#keyCalls.set(cellId, next);
+    return next;
+  }
+  holdsKeys(cellId: string): boolean {
+    return this.#keyHolds.has(cellId);
+  }
+  // After a restart, keyd may still hold a computer's keys for a shared link's task that no
+  // longer runs: the computer gets them back, fresh.
+  async releaseStrayHold(cellId: string): Promise<void> {
+    const keys = this.deps.keysHeld;
+    if (!keys?.held || this.#keyHolds.has(cellId)) return;
+    await this.#keyCall(cellId, async () => {
+      if (!this.#keyHolds.has(cellId) && (await keys.held?.(cellId))) await keys.release(cellId);
+    });
+  }
+  // A shared link's task without the owner's apps shares the computer's one proxy with every
+  // program on it, the owner's tasks' included: keyd refuses the computer's web keys until the
+  // last such task on it ends, then gives it fresh ones, so none the task could read still work.
+  async #holdKeys(cellId: string): Promise<() => void> {
+    const keys = this.deps.keysHeld;
+    if (!keys)
+      throw new AgentError(
+        503,
+        "This computer's saved keys can't be held for a shared link's task.",
+      );
+    const queued = (step: () => Promise<void>) => this.#keyCall(cellId, step);
+    this.#keyHolds.set(cellId, (this.#keyHolds.get(cellId) ?? 0) + 1);
+    let released = false;
+    // A hold keyd may not have made is never released here: the keys stay held, never open.
+    const letGo = (release = true) => {
+      if (released) return;
+      released = true;
+      const left = (this.#keyHolds.get(cellId) ?? 1) - 1;
+      if (left > 0) {
+        this.#keyHolds.set(cellId, left);
+        return;
+      }
+      this.#keyHolds.delete(cellId);
+      if (release)
+        void queued(() => keys.release(cellId)).catch(() =>
+          console.error("a computer's saved keys were not given back after a shared link's task"),
+        );
+    };
+    try {
+      await queued(() => keys.hold(cellId));
+    } catch {
+      letGo(false);
+      throw new AgentError(
+        503,
+        "This computer's saved keys couldn't be held for a shared link's task. Try again.",
+      );
+    }
+    return letGo;
+  }
+  // The shared link a task works for, from the task while it runs or from its record after.
+  #linkOf(sessionId: string | undefined): { id: string; apps: boolean } | undefined {
+    if (!sessionId) return undefined;
+    const running = this.sessions.get(sessionId);
+    if (running)
+      return running.link !== undefined && running.guest
+        ? { id: running.link, apps: running.guest.apps }
+        : undefined;
+    try {
+      return this.deps.conversations?.link?.(sessionId);
+    } catch {
+      return undefined;
     }
   }
   // What a task on these settings runs with, checked against what its plan or key offers now.
@@ -1089,7 +1464,6 @@ export class AgentRunner {
       const next = await this.start(session.cellId, first.text, undefined, {
         continues: session.id,
         ...(first.turn ? { model: first.turn.ref } : {}),
-        ...(first.sender ? { sender: first.sender } : {}),
       });
       for (const message of rest) {
         const turn = message.turn && (await this.messageTurn(next.id, message.turn.ref));
@@ -1310,6 +1684,16 @@ export class AgentRunner {
   // another takes up its windows.
   #share(session: AgentSession, continues?: string): void {
     const cellId = session.cellId;
+    // A task in a browser of its own waits on, and holds, that browser's lane.
+    if (!this.#watched.has("browser lanes") && this.deps.live.subscribeLeases)
+      this.#watched.set(
+        "browser lanes",
+        this.deps.live.subscribeLeases((key) => {
+          if (!key.startsWith("browser:")) return;
+          for (const rt of this.#runtime.values())
+            if (rt.session.browserLane === key) this.#told(rt);
+        }),
+      );
     if (!this.#watched.has(cellId))
       this.#watched.set(
         cellId,
@@ -1378,19 +1762,15 @@ export class AgentRunner {
       ),
     };
   }
-  // A side question about a task, answered with no tools by its fast model, or by its main model at
-  // its least thinking. The task never hears of it: nothing of the question or the answer reaches
-  // its transcript or its log. A task that has ended answers as its next one would.
+  // A side question about a task, for the side agent: read-only, on any model the user has set up.
+  // The task never hears of it: nothing of the question or the answer reaches its transcript, its
+  // log, its budget or its turn on the computer. A task that has ended answers as its next one would.
   async sideAnswer(
     sessionId: string,
     question: string,
     signal: AbortSignal,
-  ): Promise<{
-    answer: string;
-    provider: string;
-    model: string;
-    failed?: { model: string; reason: string };
-  }> {
+    onEvent?: (event: SideEvent) => void,
+  ): Promise<SideReply> {
     let file: string;
     try {
       file = this.deps.eventLog.logFile(sessionId);
@@ -1398,26 +1778,60 @@ export class AgentRunner {
       throw new AgentError(404, "no such task");
     }
     if (!existsSync(file)) throw new AgentError(404, "no such task");
+    const side = this.deps.side;
+    if (!side) throw new SideQuestionError(409, "no-spare-model");
     const live = this.#runtime.get(sessionId);
     const rt = live && !live.session.stopped && live.selection.kind !== "none" ? live : undefined;
-    const helpers = this.#helpers(
-      rt?.selection ?? (await this.#restingSelection(sessionId, signal)),
-      rt?.session,
+    let problem: SideQuestionError | undefined;
+    const selection =
+      rt?.selection ??
+      (await this.#restingSelection(sessionId, signal).catch((error: unknown) => {
+        if (!(error instanceof SideQuestionError)) throw error;
+        problem = error;
+        return { kind: "none" as const };
+      }));
+    const models = sideModels(selection, {
+      api: side.api,
+      ...(side.plan ? { plan: side.plan } : {}),
+    });
+    if (!models.length) throw problem ?? new SideQuestionError(409, "no-spare-model");
+    if (!models.some((model) => model.tools)) throw new SideQuestionError(409, "no-tool-model");
+    const readers = side.readers(sessionId, rt?.session, file);
+    const { system, prompt } = sideQuestionPrompt(
+      sideQuestionEvents(file),
+      question,
+      sideState(rt?.session, !!readers.desktop?.()),
     );
-    if (!helpers.length) throw new SideQuestionError(409, "no-spare-model");
-    const { system, prompt } = sideQuestionPrompt(sideQuestionEvents(file), question);
-    const { text, helper, failed } = await this.#answerFrom(helpers, system, prompt, signal);
-    return {
-      answer: sideAnswerText(text),
-      provider: helper.provider,
-      model: helper.model,
-      ...(failed ? { failed } : {}),
-    };
+    try {
+      return await runSideAgent({
+        models,
+        readers,
+        question,
+        system,
+        prompt,
+        signal,
+        spend: side.ledger(file),
+        ...(onEvent ? { onEvent } : {}),
+        onFailed: (model, reason) => {
+          if (model.role === "fast")
+            this.#fastFailure = { provider: model.provider, model: model.model, reason };
+        },
+        onAnswered: (model) => {
+          if (model.role === "fast") this.#fastFailure = undefined;
+        },
+      });
+    } catch (error) {
+      if (error instanceof SideNoAnswer)
+        throw new SideQuestionError(502, "no-answer", error.reason);
+      throw error;
+    }
   }
   async #restingSelection(sessionId: string, signal: AbortSignal): Promise<ModelSelection> {
     const saved = this.deps.settings();
     const main = this.taskModel(sessionId) ?? saved.main;
     if (!main) throw new SideQuestionError(409, "no-model");
+    // Its one Codex process would hold the account dot's next turn needs.
+    if (main.provider === CHATGPT) return { kind: "chatgpt" } as ModelSelection;
     try {
       return (await this.#selection(AgentSettings.parse({ ...saved, main }), undefined, signal))
         .selection;
@@ -1661,7 +2075,9 @@ export class AgentRunner {
   #told(rt: Runtime): ConversationLive | undefined {
     const { session } = rt;
     if (session.stopped || rt.selection.kind === "none") return undefined;
-    const lease = this.deps.live.lease(session.cellId);
+    const lanes = [session.cellId, ...(session.browserLane ? [session.browserLane] : [])].map(
+      (key) => this.deps.live.lease(key),
+    );
     const cell = this.deps.cell(session.cellId);
     const state: ConversationLive["state"] =
       session.safetyPause || rt.pause || session.status === "paused" || cell?.paused
@@ -1669,14 +2085,15 @@ export class AgentRunner {
         : session.pendingApproval ||
             session.pendingAsk ||
             session.controlHeld ||
-            session.connections.pending
+            session.connections.pending ||
+            session.openBlockers.length
           ? "needs-you"
-          : lease.waiting().includes(session.id)
+          : lanes.some((lane) => lane.waiting().includes(session.id))
             ? "waiting-for-computer"
             : session.status === "idle"
               ? "idle"
               : "working";
-    const onScreen = lease.holder === session.id;
+    const onScreen = lanes.some((lane) => lane.holder === session.id);
     const activity = state === "idle" ? undefined : rt.activity;
     const { persona } = rt;
     const before = rt.live;
@@ -1947,10 +2364,11 @@ export class AgentRunner {
         rt.pause = undefined;
         session.post("resume", "");
       } else if (!now.online && rt.pause === "model") rt.pause = "keyd";
+      if (vaultLocked(now) && rt.pause === "keys" && !session.keysLocked) session.lockKeys(false);
       if (now.online && !vaultLocked(now) && session.keysLocked) {
-        // dot hears the keys are open; a model that stopped on its own key also resumes.
-        session.keysUnlocked();
-        if (rt.pause === "keys" && session.status === "paused" && !session.controlHeld) {
+        // Only this task's own card carries it on. Keys opened elsewhere leave a stopped task stopped.
+        const ownCard = session.keysUnlocked().some((open) => open.ownCard);
+        if (ownCard && rt.pause === "keys" && session.status === "paused" && !session.controlHeld) {
           rt.pause = undefined;
           session.post("resume", "");
         }
@@ -2210,7 +2628,9 @@ export class AgentRunner {
           skills = await this.deps.installSkills(session.cellId, session.abort.signal, dressed);
           rt.skills = structuredClone(skills);
         }
-        session.connectors = this.deps.connectors?.() ?? NO_CONNECTORS;
+        session.connectors = usesOwnersAccounts(session.guest)
+          ? (this.deps.connectors?.() ?? NO_CONNECTORS)
+          : NO_CONNECTORS;
         const epoch = rt.epoch;
         let code: number | undefined;
         rt.completion = undefined;
@@ -2280,6 +2700,8 @@ export class AgentRunner {
                   : { state: "idle", reason: "gave up" },
           );
           session.setStatus("idle");
+          // dot says it got there: what it might have needed on the way asks nothing now.
+          if (rt.completion === "complete") session.withdrawBlockers();
           const idleWait = new AbortController();
           rt.idleWait = idleWait;
           try {
@@ -2290,6 +2712,10 @@ export class AgentRunner {
               await session.waitForControl(idleWait.signal);
               asked = await session.waitForUser(idleMs, idleWait.signal);
             }
+            // dot ended its turn on a card: fixing that card carries on from here. A task that ended
+            // blocked or gave up has said what is left, and gets no longer than any other.
+            if (!asked && complete && session.openBlockers.length)
+              asked = await session.waitForUser(CARD_WAIT_MS, idleWait.signal);
             if (!asked) break;
           } catch (error) {
             if (rt.released) break;
@@ -2297,6 +2723,13 @@ export class AgentRunner {
           } finally {
             if (rt.idleWait === idleWait) rt.idleWait = undefined;
           }
+        } else if (await this.#dockerDown()) {
+          // Docker took the brain with it: nothing to count against the task, and its card says so.
+          const open = session.raiseBlocker({ kind: "runtime" }, { required: true, tell: false });
+          session.setStatus("paused");
+          session.append("agent.state", { state: "paused", reason: STALL.runtime });
+          this.#watchDocker();
+          if (open) await session.waitForBlockerToGo(open);
         } else {
           const lost = code === BRAIN_LOST && rt.selection.kind === "api";
           const backoff = RESTART_BACKOFF_MS[lost ? 0 : crashes++];
@@ -2468,7 +2901,7 @@ export class AgentRunner {
         const models = Object.fromEntries(
           selection.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
         ) as Record<Role, ModelBinding>;
-        const memory = this.deps.memory.bootMemory(session.task, models.main.contextTokens);
+        const memory = bootMemory(this.deps.memory, session, models.main.contextTokens);
         taintMemory(session.taint, memory);
         let subagents: SubagentResume[] = [];
         try {
@@ -2497,6 +2930,7 @@ export class AgentRunner {
           ...(session.research ? { research: session.research.budget } : {}),
           ...(this.roleOf(session.id) ? { role: this.roleOf(session.id) } : {}),
           ...(subagents.length ? { subagents } : {}),
+          ...(session.guest ? { guest: session.guest } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,

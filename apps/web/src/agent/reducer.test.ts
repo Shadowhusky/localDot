@@ -1,6 +1,6 @@
 import { LocalDotEvent, ulidTime } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { emptyAgentModel, AGENT_LIMITS as L } from "./model.ts";
+import { emptyAgentModel, AGENT_LIMITS as L, openBlockers } from "./model.ts";
 import { createAgentFeed, parseAgentEvent, projectAgentEvent } from "./reducer.ts";
 
 const id = (n: number) => String(n).padStart(26, "0");
@@ -21,11 +21,60 @@ const message = id(10000),
   ask = id(20000),
   takeover = id(20001);
 describe("bounded agent projection", () => {
-  it("holds the Unlock card up from saved keys meeting a lock until they open again", () => {
+  const card = id(30000);
+  const raised = ev(0, "blocker.raise", {
+    blockerId: card,
+    blocker: { kind: "keys_locked" },
+    by: "localdot",
+  });
+  it("keeps only the latest cards of a task, however many are raised", () => {
+    let model = emptyAgentModel();
+    for (let seq = 0; seq < L.blockers + 8; seq++)
+      model = projectAgentEvent(
+        model,
+        ev(seq, "blocker.raise", {
+          blockerId: id(40000 + seq),
+          blocker: { kind: "keys_locked" },
+          by: "dot",
+        }),
+      );
+    expect(model.blockers.size).toBe(L.blockers);
+    expect(model.historyTruncated).toBe(true);
+  });
+  it("holds a card up from when it is raised until any device's fix clears it", () => {
+    const up = reduce([raised]);
+    expect(openBlockers(up).map((open) => open.blockerId)).toEqual([card]);
+    const fixed = projectAgentEvent(
+      up,
+      ev(1, "blocker.clear", { blockerId: card, outcome: "fixed" }),
+    );
+    expect(openBlockers(fixed)).toEqual([]);
+    expect(fixed.blockers.get(card)?.cleared?.outcome).toBe("fixed");
+    expect(openBlockers(emptyAgentModel())).toEqual([]);
+  });
+  it("draws one card for one blocker, even when it is raised again", () => {
+    const again = ev(1, "blocker.raise", {
+      blockerId: card,
+      blocker: { kind: "keys_locked" },
+      by: "localdot",
+      required: true,
+    });
+    const model = reduce([raised, again]);
+    expect(openBlockers(model)).toHaveLength(1);
+    expect(openBlockers(model)[0]).toMatchObject({ required: true, seq: 0 });
+  });
+  it("a card from a task that is over waits for nobody", () => {
+    const model = reduce([raised, ev(1, "session.end", { reason: "stopped" })]);
+    expect(openBlockers(model)).toEqual([]);
+    expect(model.blockers.get(card)?.cleared).toBeUndefined();
+  });
+  it("reads an old log's keys.lock as the same history", () => {
     const locked = reduce([ev(0, "keys.lock", { locked: true })]);
-    expect(locked.keysLocked).toBe(true);
-    expect(projectAgentEvent(locked, ev(1, "keys.lock", { locked: false })).keysLocked).toBe(false);
-    expect(emptyAgentModel().keysLocked).toBe(false);
+    expect(openBlockers(locked).map((open) => open.blocker)).toEqual([{ kind: "keys_locked" }]);
+    const open = projectAgentEvent(locked, ev(1, "keys.lock", { locked: false }));
+    expect(openBlockers(open)).toEqual([]);
+    expect([...open.blockers.values()][0]?.cleared?.outcome).toBe("fixed");
+    expect(openBlockers(emptyAgentModel())).toEqual([]);
   });
   it("correlates interleaved messages by ID; finals replace deltas and ignore later deltas/replay", () => {
     const events = [
@@ -129,6 +178,58 @@ describe("bounded agent projection", () => {
     expect(model.pendingAsk).toBe(other);
     expect(model.questions.get(ask)?.answer?.option).toBe("A");
     expect(model.pendingTakeover).toBe(takeover);
+  });
+  it("closes a question a message moved on from, keeping it as not answered", () => {
+    const model = reduce([
+      ev(0, "ask.request", { askId: ask, question: "Which?", options: [], allowText: true }),
+      ev(1, "ask.answer", { askId: ask, by: "message" }),
+    ]);
+    expect(model.pendingAsk).toBeNull();
+    expect(model.questions.get(ask)?.answer).toEqual({ askId: ask, by: "message" });
+  });
+  it("closes a card a message moved on from and keeps its question for the thread", () => {
+    const approvalId = id(77);
+    const model = reduce([
+      ev(0, "approval.request", {
+        approvalId,
+        generation: 1,
+        revision: 1,
+        expiresAt: 9_000_000,
+        kind: "send",
+        actionClass: "send",
+        risk: "high",
+        title: "Send this email?",
+        preview: { fields: [["To", "team@example.test"]] },
+      }),
+      ev(1, "approval.resolve", { approvalId, decision: "deny", by: "message" }),
+    ]);
+    expect(model.approval).toBeNull();
+    expect(model.unapproved.get(approvalId)).toMatchObject({
+      approvalId,
+      title: "Send this email?",
+      seq: 1,
+    });
+  });
+  it("keeps no such row for a card answered, or cancelled by Pause", () => {
+    const approvalId = id(78);
+    const card = {
+      approvalId,
+      generation: 1,
+      revision: 1,
+      expiresAt: 9_000_000,
+      kind: "send",
+      actionClass: "send",
+      risk: "high",
+      title: "Send this email?",
+      preview: { fields: [] },
+    };
+    for (const by of ["user", "timeout"])
+      expect(
+        reduce([
+          ev(0, "approval.request", card),
+          ev(1, "approval.resolve", { approvalId, decision: "deny", by }),
+        ]).unapproved.size,
+      ).toBe(0);
   });
   it("keeps a result and subsequent idle follow-up; only session end fences stale thinking", () => {
     const model = reduce([

@@ -55,6 +55,9 @@ const (
 	ReasonOAuthDown     = "oauth-unavailable"
 	ReasonNoAudit       = "audit-unavailable"
 	ReasonConnectionCap = "connection-cap"
+	// The daemon holds this computer's web keys while a shared link's task without the owner's
+	// apps runs on it: its programs share one proxy, so none of them may use one.
+	ReasonKeysHeld = "keys-held-for-shared-link"
 )
 
 const (
@@ -63,9 +66,10 @@ const (
 	// maxHeaderBytes caps a request's line and headers. API calls need a few KiB; the cap bounds
 	// what one request makes keyd search for surrogates (net/http's default is 1 MiB).
 	maxHeaderBytes = 64 << 10
-	// Enough parallel fetches for a desktop browser, while bounding unauthenticated sockets
-	// and hijacked tunnels to 64 accepted client sockets per cell.
-	maxCellConnections = 64
+	// Enough parallel fetches for a desktop browser, whose own cap through a proxy is raised to 99
+	// sockets (Chromium's default of 32 stalls busy sites: a few held tunnels starve every page),
+	// while bounding unauthenticated sockets and hijacked tunnels to 160 per cell.
+	maxCellConnections = 160
 )
 
 var ErrPortInUse = errors.New("egress: listener port in use")
@@ -85,6 +89,7 @@ type Cell struct {
 	gen            *generation
 	closed         bool
 	policyChanging bool
+	keysHeld       bool
 }
 
 func Open(cfg Config, deps Deps) (*Cell, error) {
@@ -175,6 +180,19 @@ func (c *Cell) Close() error {
 	}
 	g.stop()
 	return err
+}
+
+// HoldKeys refuses every surrogate swap the cell asks for until it is released.
+func (c *Cell) HoldKeys(held bool) {
+	c.mu.Lock()
+	c.keysHeld = held
+	c.mu.Unlock()
+}
+
+func (c *Cell) KeysHeld() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.keysHeld
 }
 
 // Revoke is the kill switch for one cell: every upstream connection and tunnel closes, in-flight

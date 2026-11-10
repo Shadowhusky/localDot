@@ -219,6 +219,79 @@ probes against the final sources; `check:codex-release` verified the resulting r
 The real-account acceptance suite was not run.
 
 
+## Fixing a blocker in the conversation
+
+When something stops dot that the user can fix inside localDot, the fix is a card in the thread, not
+directions. A blocker has a typed kind (`packages/protocol/src/blockers.ts`), a `blocker.raise` event,
+a card in `apps/web/src/agent/FixCards.tsx` and a `blocker.clear` event.
+
+| Kind | Noticed from | The card | Clears on |
+| --- | --- | --- | --- |
+| `keys_locked` | keyd's denial or 423 while the vault is locked, a saved login or connected app failing while it is, the model's own key | Passphrase, sealed to keyd | The vault opening |
+| `key` | keyd naming a key to re-enter or changed outside localDot, a service's or the model's 401 | The Keys form for that one key | The key saved and usable |
+| `app` | A connected app's sign-in ending | Connect | The sign-in finishing |
+| `model` | The provider refusing, not answering or out of quota | Try again, or another model | The model answering, or moving to another |
+| `computer` | The computer going off or pausing under a task at work | Turn on, or Resume | The computer ready |
+| `runtime` | Docker gone, with the computer or the brain | Start Docker | Docker answering |
+
+The daemon raises a card from the failure itself. Otherwise dot calls `request_fix`, which takes a kind
+and an id and no words, and the daemon checks the blocker first: the vault locked, keyd's flag on the
+key or a 401 for it in this task, a sign-in seen to end, the computer off, Docker down. Anything else is
+an error, so a page can't summon a card by telling dot to ask for one. A stall the brain reports is
+checked the same way, against `keyd.secrets()` and the vault's health, since its word comes from a model
+call's reply; keyd also removes `X-Keyd-*` from upstream replies. One thing has one card
+(`blockerSubject`). A card that ended with nothing fixed may come back once, then only after a wait that
+grows each time. The user's Not now holds until the owner's own message, not a guest's or a routine's.
+
+Secrets typed into a card go from the card to keyd, sealed in the page as in Keys: they never enter the
+task's log, transcript, the model's context or the daemon's log. Only the owner may answer:
+`/blockers/*` and `/api/runtime/start` refuse a shared link, as `/api/keyd/unlock` does. A guest reading
+the log (`/events`, `/history`, `/stream`) sees `unknown` for the key in `blocker.raise` and `key.use`.
+
+A card's sentences are localDot's, chosen by kind. Three things on it are not, and are set apart: a key's
+id, in a code style after "Saved as", which dot may have chosen when it asked for the key; a provider's
+refusal, quoted and marked as the provider's; and an app's name and host, from its saved configuration.
+A key's label stays off the card, since dot can write that. A card dot asked for says so beside the
+localDot mark.
+
+Keeping a form of dot's from passing for a card is a mitigation, not a guarantee.
+`apps/daemon/src/agent/tools/card-words.ts` normalises `ask_user`'s strings, `request_takeover`'s note
+and what `credentials` `request` would show (NFKC, format characters, marks on Latin letters, dashes,
+digits written for letters, and common Cyrillic, Greek, Armenian and Latin look-alikes) and reads them
+for words about unlocking localDot's keys or a secret named beside a vault, in English, Chinese,
+Spanish and French. Those get the real card while the vault is locked and a refusal otherwise, and a
+key request named like localDot or its key service is refused. A paraphrase ("the phrase you chose
+when you set up this app"), another language or a picture of the words gets past this. What holds
+regardless: the passphrase field is only ever on localDot's card; a form of dot's where the user can
+type, including a request for a service key and a choice with its own-words row, says in fixed words
+that localDot never asks for its passphrase there; and a plain answer that names a secret is refused,
+in a field's id, label or hint, in a choice, or in a question with no field or plain options, with or
+without a verb ("Password for example.com?"). Secrets read for this are passwords in these
+languages only: English, German, Dutch, Spanish, French, Italian, Portuguese, Polish, Turkish, Russian,
+Arabic, Hindi, Vietnamese, Chinese, Japanese and Korean; and, in English, "your pass", PINs, sign-in
+and one-time codes, API keys and tokens, card numbers, CVVs and social security numbers. A field's id,
+label and hint are read apart, and a question line by line. A negation passes over only the secret it
+is on, on the same line, and bare nouns joined to it by "or": "not an API key or client secret" is
+passed over, "not a PIN, your password" is not. That is a word list too, so a form that gets past it
+does land its answer in the log and in dot's context. A key request in a task that has ever read
+outside words, whatever the user has said since, loses dot's description and needs an OK before a key
+can go to a place no saved key goes to; that OK covers the one request and offers no "For this task".
+A lone confirm while a card is up is refused, except the brain's own guard, told by its call and its
+fixed words.
+
+A task carries on by itself only when the fix came through its own card, on any device: the card tells
+the daemon (`/blockers/:id/use`, owner only, holding nothing typed) as the user starts the fix. That
+counts for five minutes, and the card takes it back (`DELETE` on the same path) when the unlock or the
+key's save fails or the app's sign-in is given up. It holds for tasks that have read web pages too. Fixed any other way, such as from
+Keys or from another conversation's card, the card still closes and leaves its line, but nothing restarts:
+dot hears with the next message, a stalled task or a `request_fix` call waits with `fixed elsewhere`, and
+Continue or a message moves it on. This binds what a task does when it is stopped. A task still running
+can retry on its own and find the keys open. A task that ended blocked or gave up gets its ordinary idle
+time and no more; one that ended its turn on a card waits up to four hours for it. A call that goes through
+closes a card as `worked`, which doesn't claim the user did anything. A message moves on from a card as
+from any other wait (see "Messages while dot waits on the user"). A card still open when its task ends
+reads as history. `keys.lock` from before all this still loads, as the same history.
+
 ## External waiting and premature completion
 
 The game runs `01M4V5BRM1DTGEVJXNERKTBPMF` and `01M4V5KACPNE0PJE3XMH55TA51`
@@ -303,6 +376,50 @@ running tool holds back.
 Delegated agents don't hear the user, so their commands and waits run their course. A batch of
 commands answers only once each has ended or gone to the background.
 
+## Messages while dot waits on the user
+
+The message box works during any wait of dot's. It sends straight away, except while a field for a
+secret is up (a card that takes one, a question with a password, code or key): then Enter and Send only
+bring up a step that says "Send as a message — dot will read this", since the words may be that secret.
+This holds whatever else dot is waiting on beside it: a plain question or an approval next to the Unlock
+card still holds the box. While a field for a secret is up, long text isn't moved into a file (which
+would upload it at once): a paste of it is turned away, typing stops at the box's limit, and an attached
+file is held like words. A card or form takes the keys from
+an empty box, unless a key was pressed in the last three seconds; a key's field never takes them by
+itself, since what is typed there is saved over the key. Over a saved key, a model key or bearer token
+with spaces or a value that reads as a sentence is refused; a model key must look like its provider's
+where that is known (Anthropic, OpenAI, Google, xAI, Groq, OpenRouter, DeepSeek), and any other key or
+token must have a digit in it, after a raw header's scheme. A saved general secret, which can be any
+words, is replaced only with a "Replace the saved secret" tick as well as Save, and in Keys a new key
+under a saved key's ID with a "Replace the saved key with this ID" tick. No draft is kept during such a wait, one kept from before it is cleared, and whatever is typed
+during it is cleared when it ends. A message the owner sends
+moves on from the wait, on the daemon, whichever client sent it and whichever harness runs the
+task: the tool call blocked on the wait returns, and the message reaches dot as a steer, through the
+same inbox as any other. It is never taken for the wait's answer, and it isn't queued behind it.
+
+- A question (`ask.answer` with `by: "message"`) closes with no fields, however private: nothing is
+  typed or stored. dot hears that the question is closed and to ask again only if it still needs the
+  answer. A saved login's tap and a key's or an app's card close the same way.
+- A step's approval (`approval.resolve` with `decision: "deny"`, `by: "message"`) counts as not
+  given. The step doesn't run, no Always allow is saved, and dot hears that a new approval is needed
+  if it still wants the step. A late answer to either is refused with a 409, as for any closed card.
+- dot's hand-over keeps the older rule that a message hands the computer back, and says so
+  (`takeover.end` with `movedOn`). dot hears that the step may not be done. The computer the user
+  took themselves stays theirs: a phone's toolbar has no message field while they hold it, and a
+  message from elsewhere hands it back, as it always has.
+- A card that fixes a blocker closes as not done (`blocker.clear` with `moved_on`), keeping nothing
+  that was typed into it: `AgentSession.moveOn` is the one thing that ends dot's wait on it. A fix
+  that comes later clears nothing and resumes nothing. A stalled model takes the message as its way
+  on, and a new card comes up if it stalls again.
+- A connection's card isn't a wait of dot's, so it stays up. A shared link's guest moves on from
+  nothing: what the owner was asked stays theirs to decide.
+- A message for another model reaches dot at once when moving dot ends nothing. Otherwise (a model
+  this task can't run, or commands or delegated agents still running) it waits for the task as
+  usual, the wait still ends, and dot hears to finish.
+
+Each harness gets the same reply and the same inbox item: the built-in brain reads the message on its
+next request, Claude Code takes it from its input stream, and Codex from `turn/steer`.
+
 ## Carrying on after a restart
 
 | What restarted | What the model keeps |
@@ -358,3 +475,92 @@ Validation: 1,209 safety/tool tests passed, including real filesystem and dispat
 regressions for owned creation, edits, pre-existing data, changed targets, cross-session
 ownership, symlinks, compound destructive commands and byte-preserving recovery. A
 separate disposable-file check passed inside the installed Linux desktop.
+
+## Side questions
+
+`/btw` and the palette's **Ask a side question** run a read-only side agent beside the task
+(`apps/daemon/src/agent/side/`). The route is `POST /api/agent/sessions/<id>/side-question`, which
+answers refusals with their own status and otherwise streams NDJSON: `{"progress"}` lines, a
+`{"handover","partial"}` line when another model takes over, then the answer, or `{"problem"}` if it
+failed after starting. Shared links can't reach it.
+
+**What it can read** is one allowlist, `SIDE_TOOL_NAMES`: `search_log` and `read_log` (the task's
+log with its tool output, thinking and steps, but no typed text, key use, approval values, or
+messages the user took back), `look_at_screen`, `list_files` and `read_file` (`DesktopdTools`'s read
+paths, bounded, never a shell), `task_files` (what dot handed over), `recall`, `web_search`,
+`web_fetch`, and `finish`. Any other name is refused without reaching anything. Each read asks the
+same question as dot's (`runsUnasked`), and is refused if the user's settings would have dot ask,
+since a side question has nobody to ask. Everything read is redacted, then wrapped as untrusted.
+
+**It never disturbs the task.** It holds no lease or turn on the computer and no step of the task's
+queue, writes nothing to the task's log, transcript or taint, and dot never hears of it. Its cost is
+on a keyd listener of its own (`QuickModel.sideListener`), which counts against the day's limit and
+never the task's budget. What it spent is in `sessions/<id>/side-spend.jsonl`: amounts and models,
+no question or answer.
+
+**The screen** is the frames dot already looked at, read from the frame store: other tasks' windows
+and masked fields are covered in them exactly as dot saw them. One thing goes beyond that:
+when a live task's screen is the desktop, dot's newest frame is over 15 seconds old, nobody is acting
+on the computer and the user doesn't hold it, `freshDesktopLook` takes a new look, covering other
+tasks' windows and windows too new to tell whose they are. It isn't saved. The cost is that desktopd
+keeps only its newest capture for zooming, so a zoom dot makes on an older frame enlarges the stored
+frame instead, as it does whenever another look has come since. The web browser gets no new look:
+its observation needs a permit from dot's turn and refuses a second one at once, which could fail
+dot's own, so there the answer is the frame dot last took and says how old it is.
+
+**Models.** The fast model goes first, then the main one. A model that fails, is refused or can't use
+tools leaves the question to the next, and a model without images isn't offered the screen. `finish`
+reports `found`, `partial` or `not_found`, and that field alone decides what happens next, never the
+words of the answer. Anything short of `found` goes to the main model by itself, with what the first
+model found and what it checked. If there's no main model to go to, or no room left, the question
+ends with what it found and says so.
+
+Only the models the user chose for the task answer: its main model and, where the task uses them, its
+fast and local models, as its next message would run on them. The user already showed the task to
+each, so going from one to another takes nothing anywhere new. No other model, even one set up in
+Settings, is asked: that would take the task's record to a provider without the user choosing it. A
+task whose main model is local (LM Studio or Ollama) stays on this Mac: only its local models answer,
+and a fast model in the cloud is left out. A custom endpoint is never local: keyd binds its key only to
+a public name. A task none of whose models can answer says why instead.
+
+- **Claude Code:** a process of its own with no built-in tools, whose MCP server serves only the side
+  tools (`claude-code/side.ts`). It must start by naming its tools in the expected shape, all of them
+  side tools; a start that can't be read, a system message, reply or result before it, or a tool
+  outside them ends that model's go. dot's own Claude Code treats a start whose tools it can't read
+  as offering a tool it can't name, and stops the task.
+- **ChatGPT plan:** never asked. Every Codex turn is a fresh process that holds the account's
+  credentials, so one here could keep dot's next turn waiting. A ChatGPT task has no other model of
+  its own, so it says it can't take a side question.
+
+**Limits**, for both models together (`SIDE_LIMITS`): 120 seconds, 75 of them for any one model, 8
+reads per model, and $0.25, or 300,000 tokens on a plan, where no money is counted. keyd holds the
+money limit too: each model's listener gets only what is left, and when it closes, once keyd shows no
+call in flight on it (at most 2 seconds), what keyd counted on it replaces the replies' own count if
+that is more, which covers a reply that gave no usage and a call cut short. Near a limit a model is
+offered only `finish`, so it ends by saying what it found.
+
+**Web.** Nobody can be asked here, as dot's purpose check can ask, so the web tools are held to what
+the user wrote:
+
+- `web_fetch` opens only an address in the user's question or in this question's own search results,
+  never one a page named or the model composed.
+- A `web_search` is one run of words from the user's question, in their order, and is sent as
+  those words alone, lower case and joined by single spaces, never as the model wrote it: its
+  symbols, case and anything else it added don't go out. Everything a side question reads counts as
+  private from the start, the opening record too, so nothing it read can be searched for unless the
+  user wrote it in the question. A side question makes at most two searches, across both models.
+- What is left to the model is which run of the question's words to search for: about log2(n²) bits
+  for a question of n words, with two searches at most, and which of its own search results to open.
+- Every search, dot's too, stays on its engine's site (`WebGet.within`): a redirect elsewhere isn't
+  followed, and a page from elsewhere gives no results, nor addresses `web_fetch` may open.
+- In the answer, only those same addresses are links, and a link opens the address as it was found,
+  not as the model wrote it: a fragment, query or other spelling it added doesn't go with it. Any other
+  address shows as text, as it may carry what was read.
+
+Both tools go through the same keyd web cell as dot's, so the same egress rules hold.
+
+**The record** it opens with is what was said in the task and its plan, without messages the user
+took back, inside `<untrusted>` blocks: a line in it can't end the block or ask a question of its own.
+`untrusted()` defuses a tag written with look-alike brackets, slashes or letters, or with invisible
+characters or marks inside, for dot's tools as well, in time linear in the text: a page or file can't
+hold up the daemon with what follows a bracket.

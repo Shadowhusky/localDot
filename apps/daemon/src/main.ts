@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 import { constants, userInfo } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import { DEFAULT_AUTONOMY, TOOL_API_PORT } from "@localdot/protocol";
@@ -20,10 +20,12 @@ import { BrowserDownloadCollector } from "./browser/download-collector.ts";
 import { BrowserIdlePages } from "./browser/idle-pages.ts";
 import { QuarantineStore } from "./browser/quarantine.ts";
 import { SessionScreens } from "./browser/session-screens.ts";
+import { BrowserSlots, extraBrowsers } from "./browser/slots.ts";
 import { BrowserStreams } from "./browser/streams.ts";
 import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
 import { BrowserRecovery, credentialsChanged } from "./cells/browser-recovery.ts";
+import { pullPinnedImages } from "./cells/computer-image-pull.ts";
 import { ComputerSizes } from "./cells/computer-size.ts";
 import { ComputerUpdates, updateComputer } from "./cells/computer-update.ts";
 import { DockerClient } from "./cells/docker.ts";
@@ -52,7 +54,7 @@ import { deliverablesFor } from "./deliverables/wiring.ts";
 import { DesktopdRegistry } from "./desktopd/registry.ts";
 import { runDoctor } from "./doctor.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
-import { computerCapacity } from "./dots/capacity.ts";
+import { computerCapacity, dockerRoom } from "./dots/capacity.ts";
 import { computerImport } from "./dots/computer-import.ts";
 import { applyInstanceEnvironment, instanceOf } from "./dots/instance.ts";
 import { DotsRegistry, registryPath } from "./dots/registry.ts";
@@ -70,7 +72,7 @@ import { KillSwitch } from "./gateway/kill-switch.ts";
 import { LiveSessions } from "./gateway/live.ts";
 import { loadOnsetTable } from "./gateway/onset-table.ts";
 import { policyFromEnv } from "./gateway/ring-onset.ts";
-import { configuredAccessOrigins, setPublicOrigin } from "./guard.ts";
+import { configuredAccessOrigins, ownerOrigins, setPublicOrigin } from "./guard.ts";
 import { InstallCodes } from "./install-codes.ts";
 import { CellKeydWiring, refreshRunningCells } from "./keyd/cell-wiring.ts";
 import { KeydClient, keydSocketPath } from "./keyd/client.ts";
@@ -92,6 +94,7 @@ import { resumeCompactions } from "./recorder/compaction.ts";
 import { compactionFromEnv, DockerTrackEncoder, RecordingCompactor } from "./recorder/compactor.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
 import { ScreenRecordings } from "./recorder/screen-recordings.ts";
+import { linkConversation } from "./remote/links.ts";
 import { configuredRemoteDomain, RemoteAccess } from "./remote/manager.ts";
 import { type LiveSources, liveFacts } from "./reports/routes.ts";
 import { ReportStore } from "./reports/store.ts";
@@ -116,6 +119,7 @@ import { SearchIndex } from "./search/search-index.ts";
 import { retainManagedDaemonLease } from "./service-lease.ts";
 import { ManagedServiceReadiness, managedServiceFromEnv } from "./service-readiness.ts";
 import { SessionIndex } from "./sessions/index-store.ts";
+import { OverviewTracker } from "./sessions/overview.ts";
 import {
   framesMaxAgeFromEnv,
   retentionFromEnv,
@@ -129,7 +133,15 @@ import { loadOrCreateToken } from "./token.ts";
 import { installedAppUpdater } from "./updates/installed-updater.ts";
 import { sourceAppUpdater } from "./updates/source-updater.ts";
 import { attachUpgradeRouter } from "./upgrade-router.ts";
-import { installedSpeech } from "./voice/speech.ts";
+import {
+  findSpeechModel,
+  hostSpeechLookup,
+  installedSpeech,
+  sweepVoiceAudio,
+} from "./voice/speech.ts";
+import { SPEECH_CATALOG } from "./voice/speech-catalog.ts";
+import { hostOfThisComputer } from "./voice/speech-fit.ts";
+import { SpeechInstaller } from "./voice/speech-install.ts";
 
 timestampLogs();
 const home = localdotHome();
@@ -219,9 +231,14 @@ serviceReadiness = serviceIdentity
       (bootId) => browserRecovery.availableFor(bootId),
     )
   : undefined;
-const keydWiring = new CellKeydWiring({ keyd, docker });
+const keydWiring = new CellKeydWiring({
+  keyd,
+  docker,
+  held: (id) => agent?.runner.holdsKeys(id) ?? false,
+});
 let agent: ReturnType<typeof createAgent> | undefined;
 let browser: BrowserOrchestrator | undefined;
+let browserSlots: BrowserSlots | undefined;
 let idlePages: BrowserIdlePages | undefined;
 const store = new CellStore(home, keydPorts);
 const sizes = new ComputerSizes({
@@ -239,7 +256,8 @@ const updates = new ComputerUpdates({
   stream,
   relay,
   preflightSystem: (record, target) => migration.preflight(record, target),
-  migrateSystem: (record, target) => migration.prepare(record, target),
+  migrateSystem: (record, target, report) => migration.prepare(record, target, report),
+  pull: pullPinnedImages,
 });
 const orchestrator = new CellOrchestrator({
   updates,
@@ -250,8 +268,11 @@ const orchestrator = new CellOrchestrator({
     ...(browser?.reservedKeydPorts() ?? []),
   ],
   browser: {
-    stop: (id) => browser?.stop(id) ?? Promise.resolve(),
-    remove: (id, options) => browser?.remove(id, options) ?? Promise.resolve(),
+    stop: (id) => browser?.stopComputer(id) ?? Promise.resolve(),
+    remove: async (id, options) => {
+      await browser?.removeComputer(id, options);
+      browserSlots?.forget(id);
+    },
     reservedKeydPorts: () => browser?.reservedKeydPorts() ?? [],
   },
   browsersUnconfirmed: () => {
@@ -324,6 +345,25 @@ browser = new BrowserOrchestrator({
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],
 });
 const owned = browser;
+// A conversation that needs the web browser while another uses the computer's main one gets a
+// browser of its own, as many beside the main one as Docker's memory allows.
+let extraAllowed = extraBrowsers(undefined, process.env.LOCALDOT_SESSION_BROWSERS);
+void dockerRoom(docker)
+  .then((room) => {
+    extraAllowed = extraBrowsers(room?.memoryBytes, process.env.LOCALDOT_SESSION_BROWSERS);
+  })
+  .catch(() => {});
+const slots = new BrowserSlots({
+  home,
+  browser,
+  extra: () => extraAllowed,
+  computer: (id) => !!store.get(id),
+  viewers: (key) => browserStreams.forKey(key)?.stream.viewers ?? 0,
+  report: (message) => console.error(message),
+});
+browserSlots = slots;
+const rootOf = (sessionId: string) =>
+  agent?.routes.conversations?.chain(sessionId, Number.MAX_SAFE_INTEGER).sessions[0] ?? sessionId;
 // A browser recovery confirms every browser stopped, so it also lifts the computers' fences of
 // stops they could not confirm themselves.
 const browserRecovery = new BrowserRecovery(
@@ -346,9 +386,15 @@ const browserWarmer = new BrowserWarmer({
   report: (message) => console.error(message),
   notify: (id, text) => browserNotice(id, text),
 });
-// Tells the tasks running on a computer about its web browser; a finished or idle one hears nothing.
-const browserNotice = (parentCellId: string, text: string) => {
-  for (const sessionId of live.sessionsOn(parentCellId)) {
+// Tells the tasks using a web browser about it; a finished or idle one hears nothing. A computer's
+// main browser is that of every task on it with no browser of its own.
+const browserNotice = (key: string, text: string) => {
+  const parentCellId = owned.parentOfKey(key) ?? key;
+  const using =
+    key === parentCellId
+      ? live.sessionsOn(parentCellId).filter((id) => (slots.keyOf(id) ?? key) === key)
+      : slots.sessionsOn(key);
+  for (const sessionId of using) {
     const session = agent?.runner.get(sessionId);
     if (session && !session.stopped && session.status !== "idle" && session.status !== "ended")
       session.remind(text);
@@ -369,6 +415,8 @@ const browserViewer = {
   tickets: browserTickets,
   vendorDir: desktop.vendorDir,
   tuning,
+  browserOf: (sessionId: string, parentCellId: string) =>
+    slots.lastKey(sessionId) ?? slots.conversationKey(parentCellId, rootOf(sessionId)),
 };
 const registry = new DesktopdRegistry(orchestrator, clock);
 const onset = loadOnsetTable(home);
@@ -422,6 +470,8 @@ resumeCompactions(home);
 sessionIndex = new SessionIndex(home, {
   isLive: (id) => recorder.isLive(id) || live.cellOf(id) !== undefined,
 });
+const index = sessionIndex;
+const overview = new OverviewTracker(eventLog, (id) => index.card(id));
 sweepRecordings({
   home,
   policy: retentionPolicy,
@@ -457,6 +507,9 @@ keydMonitor.subscribe((now, before) => {
     void orchestrator
       .rewireIfLost(cell.id)
       .catch(() => console.error("keyd: a computer could not reconnect"));
+    void agent?.runner
+      .releaseStrayHold(cell.id)
+      .catch(() => console.error("keyd: a computer's saved keys could not be given back"));
   }
 });
 const searchIndex = new SearchIndex(home, { sessions: eventLog });
@@ -511,6 +564,19 @@ const systemClock = {
 };
 const offerScanner = new TaskScanner(eventLog);
 agent = createAgent({
+  links: {
+    reserve: (id) => remoteAccess.links.reserve(id),
+    active: (id) => remoteAccess.links.active(id),
+  },
+  keysHeld: {
+    hold: (id) => keyd.holdKeys(id),
+    held: async (id) => (await keyd.cell(id))?.keysHeld === true,
+    release: async (id) => {
+      await keyd.releaseKeys(id);
+      await orchestrator.refreshKeys(id);
+    },
+  },
+  dockerDown: () => runtimeStartup.snapshot().then(({ docker }) => docker === "unavailable"),
   previewOffers: (id, reply) =>
     turnOffers(
       {
@@ -526,6 +592,8 @@ agent = createAgent({
   sessionScreens: new SessionScreens({
     cells: orchestrator,
     browser,
+    slots,
+    conversationOf: rootOf,
     streams: browserStreams,
     recordings: recorder,
     registry,
@@ -551,7 +619,7 @@ agent = createAgent({
   shutdownFreezes,
   liveChanged: (sessionId, state) => {
     appEvents.publish({ type: "conversation.live", sessionId, ...(state ? { live: state } : {}) });
-    idlePages?.changed(live.cellOf(sessionId));
+    idlePages?.changed(slots.keyOf(sessionId) ?? live.cellOf(sessionId));
   },
   keydPorts,
   toolPort,
@@ -570,15 +638,21 @@ const running = agent;
 // Pages nobody uses in a computer's web browser freeze, until someone looks or a task needs them.
 // Opt-in until a task's own window can no longer freeze under it.
 if (process.env.LOCALDOT_IDLE_PAGES === "1")
+  // Each browser is its own: a computer's main one, by the computer's id, and conversations' own.
   idlePages = new BrowserIdlePages({
     browsers: () =>
-      orchestrator.list().flatMap((cell) => {
-        const ready = owned.endpoints(cell.id);
-        return ready ? [{ parentCellId: cell.id, instance: ready.instance }] : [];
-      }),
-    viewers: (id) => browserStreams.forParent(id)?.stream.viewers ?? 0,
-    tasks: (id) =>
-      live.sessionsOn(id).map((sessionId) => {
+      orchestrator.list().flatMap((cell) =>
+        owned.keysOf(cell.id).flatMap((key) => {
+          const ready = owned.endpoints(key);
+          return ready ? [{ parentCellId: key, instance: ready.instance }] : [];
+        }),
+      ),
+    viewers: (key) => browserStreams.forKey(key)?.stream.viewers ?? 0,
+    tasks: (key) =>
+      (owned.parentOfKey(key) === key
+        ? live.sessionsOn(key).filter((id) => (slots.keyOf(id) ?? key) === key)
+        : slots.sessionsOn(key)
+      ).map((sessionId) => {
         const state = running.runner.liveStatus(sessionId)?.state;
         return {
           id: sessionId,
@@ -606,8 +680,8 @@ if (process.env.LOCALDOT_IDLE_PAGES === "1")
     },
   });
 const idleWatches = [
-  browserStreams.subscribe((cell) => idlePages?.changed(owned.parentOf(cell.id))),
-  owned.subscribe((parent) => idlePages?.changed(parent)),
+  browserStreams.subscribe((cell) => idlePages?.changed(browserStreams.ownerOf(cell.id)?.key)),
+  owned.subscribe(() => idlePages?.changed()),
 ];
 const routineLauncher = new RoutineLauncher({
   store: routineStore,
@@ -740,6 +814,7 @@ shutdown.push(
   { name: "key events", stop: () => keydEvents.stop() },
   { name: "key monitor", stop: () => keydMonitor.stop() },
   { name: "browser warmer", stop: () => browserWarmer.dispose() },
+  { name: "conversation browsers", stop: slots.watch() },
   {
     name: "idle pages",
     stop: () => {
@@ -809,15 +884,17 @@ const dots = new DotsService({
   cli: serviceIdentity ? undefined : dotsCli(process.env, import.meta.url.endsWith(".ts")),
   env: process.env,
   busy: working,
-  origins: configuredAccessOrigins,
+  origins: ownerOrigins,
 });
 // One installation runs every dot on this computer, so an update restarts them all together.
-const installWait = async () => {
+const installWait = async (hold = true) => {
   const busy = await dots.busyOthers();
   if (busy.length)
     return `Finish or stop the tasks on ${busy.join(" and ")} before updating localDot.`;
-  if (working()) return "Finish or stop the task before updating localDot.";
-  appInstalling = true;
+  if (orchestrator.list().some((cell) => live.busy(cell.id)))
+    return "Finish or stop the task before updating localDot.";
+  if (working()) return "Your computer is starting, stopping or updating. Try again in a moment.";
+  if (hold) appInstalling = true;
   return null;
 };
 const installSettled = () => {
@@ -828,6 +905,21 @@ const appUpdater = serviceIdentity
   : await sourceAppUpdater(home, process.env.LOCALDOT_INSTALL_PREFIX, installWait, installSettled);
 appUpdater.start();
 shutdown.unshift({ name: "app updater", stop: () => appUpdater.close() });
+const voiceAudio = await sweepVoiceAudio(join(home, "voice-audio"));
+const speechInstaller = new SpeechInstaller({
+  home,
+  catalog: SPEECH_CATALOG,
+  host: hostOfThisComputer(),
+  handInstalled: () => {
+    const hand = findSpeechModel(hostSpeechLookup());
+    return hand
+      ? { model: basename(hand.model).slice(0, 128), englishOnly: hand.englishOnly }
+      : null;
+  },
+  handInstalledChosen: () =>
+    !!process.env.LOCALDOT_SPEECH_MODEL && !!findSpeechModel(hostSpeechLookup()),
+});
+shutdown.unshift({ name: "speech installer", stop: () => speechInstaller.close() });
 const accessLinks = new AccessLinks(port, home);
 void accessLinks.read().catch(() => {});
 // A task from before this daemon started is known only by its log; it ran on the one computer.
@@ -891,6 +983,7 @@ const app = createApp({
     recorder,
     index: sessionIndex,
     thumbs: new Thumbnails(home, frames),
+    overview,
     live,
     retention: retentionPolicy,
     framesMaxAgeDays,
@@ -916,6 +1009,7 @@ const app = createApp({
     importComputer: computerImport(home, docker),
     checkRuntime: () => docker.checkReady(),
     runtimeStatus: () => runtimeStartup.snapshot(),
+    startRuntime: () => startDockerDesktop(docker.socketPath),
     update: (id, signal) =>
       updateComputer({ cells: orchestrator, live, runner: agent.runner }, id, signal),
   },
@@ -935,7 +1029,14 @@ const app = createApp({
     live,
     killSwitch,
     prepareDesktopTask: agent.prepareDesktopTask,
-    conversation: () => running.routes.conversations?.current() ?? null,
+    conversation: (link) => {
+      const conversations = running.routes.conversations;
+      if (!conversations) return null;
+      return link
+        ? (linkConversation(remoteAccess.links, conversations, link).sessions.at(-1) ?? null)
+        : conversations.current();
+    },
+    owns: (link, sessionId) => remoteAccess.links.owns(link, sessionId),
   },
   keys: {
     keyd,
@@ -948,7 +1049,12 @@ const app = createApp({
   },
   connectors: { hub: agent.connectors, keyd, signIn: agent.connectorSignIn },
   notify: notify.routes,
-  voice: { speech: installedSpeech() },
+  voice: {
+    speech: installedSpeech(hostSpeechLookup, () => speechInstaller.model(), {
+      audio: voiceAudio,
+    }),
+    install: speechInstaller,
+  },
   previews,
   dots,
   reports: {

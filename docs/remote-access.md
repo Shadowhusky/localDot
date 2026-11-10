@@ -141,10 +141,13 @@ it was added with, so taking up either change means removing the old icon and ad
 
 ## Previews
 
-Servers dot starts in its computer open as previews on the owner's tailnet only, never on this
-Mac's `localhost` and not through the localdot.dev relay (a later version). Each open preview is a
-loopback port from the daemon's block (`LOCALDOT_PREVIEW_PORTS`, default `4900-4915`; each
-localDot on a machine needs a block of its own) and a separate HTTPS origin on the tailnet; see
+Servers dot starts in its computer open as previews on the owner's tailnet, not through the
+localdot.dev relay (a later version). An app whose sign-in accepts only its registered address can
+instead open on this Mac's own `localhost`, at a port the owner chooses; see
+[on this Mac](local-development-previews.md#on-this-mac-at-the-apps-own-address). Each preview
+on the tailnet is a loopback port from the daemon's block (`LOCALDOT_PREVIEW_PORTS`, default
+`4900-4915`; each localDot on a machine needs a block of its own) and a separate HTTPS origin on the
+tailnet; see
 [local development previews](local-development-previews.md#opening-previews-on-the-owners-devices)
 for the sign-in, the Host allowlist and the header rewrites.
 
@@ -168,9 +171,37 @@ for the sign-in, the Host allowlist and the header rewrites.
 
 The owner can create named links in Settings → Your computer → Links for other people. Each link can expire in an hour, day, week or month, or last until revoked. Several links can coexist. The URL is displayed once; the daemon stores only its hash in a private file. Revocation or expiry disconnects its open streams and stops tasks started by that link. The owner's connection and other links remain active.
 
-Each link fixes a configured model or allows selection from up to 32 saved choices, optionally exposes recordings and session settings, and caps successful task starts plus API dollars per task. The lower of owner and link budgets applies. Failed starts refund their task count. Native subscription plans use the provider's account allowance, not an API-dollar meter. Follow-ups share the original task's budget; the task quota counts task sessions, not messages. Turning remote access off invalidates all existing shared links.
+Each link fixes a configured model or allows switching between models, optionally exposes recordings and session settings, and caps successful task starts plus API dollars per task. With switching allowed, a link offers the models it was made with and every model the owner has configured now (main, fast, local and the other models in Settings that are on, up to 32), so a link made before a model was added offers it too; the guest's choice applies to its next task, and a message to a task at rest on another model starts one. The lower of owner and link budgets applies. Failed starts refund their task count. Native subscription plans use the provider's account allowance, not an API-dollar meter. Follow-ups share the original task's budget; the task quota counts task sessions, not messages. Turning remote access off invalidates all existing shared links.
 
-The guest page supports chat, progress, the current computer/browser screen and permitted replays. Owner settings, keys, link management, approvals and computer lifecycle changes are denied by the server, including for guests allowed to see session settings. This is shared access to the same computer, files and conversation, **not separate tenant isolation**. A task may use services configured by the owner; only share with trusted people. The older one-use sign-in link remains full owner access for the owner's own devices.
+The guest's page is the app itself in Chat view (`Theatre` with a `guest`, `apps/web/src/remote/`): the same list of conversations (beside the conversation on a wide screen), thread, steps, composer and its model menu, computer screen and Replay. A guest's list holds only the conversations the link started; it opens them and starts new ones, and it lands in its latest one, or a new one. Organizing (pin, archive, tags, rename, look, delete) stays the owner's, as do Settings, Keys, files, uploads, voice, takeover, approvals and anything that turns the computer on or off. Its ⋯ menu adds Chat settings (tasks used, budget, the link's end) with session settings, and Replay only with **Allow replays**. `guestPermits` mirrors `RemoteLinks.permits` in the page, so it asks for nothing the daemon would refuse (`guest.test.ts` holds the two together); the daemon still decides.
+
+A link reads and changes only its own tasks and conversations. A task it starts begins a conversation of its own or continues one of the link's, never the owner's, and never becomes the conversation the owner's app shows; the link's own choice of conversation (`/api/conversation`, `/new`, `/continue` answered per link) leaves the owner's alone. `/api/conversations` lists a link only its own conversations, archived or not, and `/api/cells/<id>/live` names only its own tasks. **Allow replays** adds the recordings of every task on this computer, past ones included; without it no recording, card or thumbnail is reachable, even of the link's own tasks. `RemoteLinks.permits` checks each request against this, for HTTP and WebSocket alike, and every path that names a task answers for that task whichever rule lets the path through. Owner settings, keys, link management, approvals and computer lifecycle changes are denied by the server, including for guests allowed to see session settings. This is shared access to the same computer and files, **not separate tenant isolation**; only share with trusted people. The older one-use sign-in link remains full owner access for the owner's own devices.
+
+### What a guest's dot can use
+
+A task started through a link (and any task its conversation moves to for another model) is marked with the link's access when it starts. The daemon never offers it the owner's own tools, and refuses them by name if the model asks anyway, in the brain, the ChatGPT plan's Codex and Claude Code alike:
+
+| | Every link | With **Use your apps, keys and browser** |
+| --- | --- | --- |
+| The computer: screen, shell, files, desktop Chromium, page reading, web search and fetch, plan, questions, takeover, fix-it cards for the computer or Docker, research | Yes | Yes |
+| Sign-ins saved on the computer itself, in its home folder: `gh auth`, git credentials, cloud and other command-line tools, and anything else an earlier task left there | **Yes** | Yes |
+| The conversation it continues: what was said in it | Yes | Yes |
+| The owner's memory (USER.md, MEMORY.md, past lessons) in its prompt, and memory recall | No | No |
+| Recent activity: the owner's last tasks | No | No |
+| `recall` (search of earlier tasks), `remember`, `people`, `routine`, `follow_up_at` | No | No |
+| Saving a lesson to the owner's memory when it finishes | No | No |
+| The owner's connected apps' tools | No | Yes |
+| Saved web keys from the computer's shell and programs (the `LOCALDOT_KEY_*` stand-ins) | No: keyd refuses them on that computer while the task runs | Yes |
+| `credentials`, `api_request` and fix-it cards for a key, an app or locked keys | No | Yes |
+| The owner's saved website sign-ins, filled after the owner's tap | No | Yes |
+| Saving what the guest types as a sign-in, or changing one of the owner's | No | No |
+| The web browser that keeps the owner's sign-ins: `switch_screen`, `browser_upload`, and public pages through `browser_navigate` | No: pages open in the desktop's Chromium, which keeps no sign-ins | Yes |
+
+Every program on a computer reaches keyd through one proxy, so keyd can't tell a link's task from the owner's. While a link's task without **Use your apps, keys and browser** runs on a computer, keyd refuses every saved web key that computer's programs send, the owner's own tasks there included, naming the reason `keys-held-for-shared-link`; the owner's tasks keep `api_request`, connected apps and the web browser, which don't go through that proxy. When the last such task on the computer ends, keyd drops the computer's stand-ins and the daemon writes it fresh ones, so none the task could read still works; a shell started before then keeps the old values, so start a new one. A task from such a link doesn't start while keyd can't hold the computer's keys, and a daemon that restarts gives back a hold no task needs any more.
+
+The computer is shared, and so is its home folder (`/config`, kept across restarts): whatever the owner or an earlier task signed in to there, a link's task can use from its shell, whatever the link allows. Sign out of command-line tools on the computer before sharing a link, or don't share one. The web browser counts as the owner's accounts because it is signed in as them: a page there acts as the owner just as a connected app does. Every link is off by default, links made before this setting included; the owner picks it when making the link. Links can't be edited: make a new one and revoke the old. Each link's row in Settings says when it has the owner's apps, keys and browser.
+
+The guest page has no side questions (`/btw`): a link is refused `/api/agent/sessions/<id>/side-question`, even on its own task.
 
 ## Terminal chat
 

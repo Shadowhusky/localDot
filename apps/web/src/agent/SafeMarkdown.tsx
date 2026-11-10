@@ -1,6 +1,15 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: Wide code and tables scroll sideways, so keyboard users can focus them.
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Immutable parsed text has no child state; source position identifies each text span.
-import { Fragment, memo, type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  Fragment,
+  memo,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { LocalAddress, PreviewChips } from "../previews/PreviewChip.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { CopyButton } from "./CopyButton.tsx";
@@ -14,6 +23,61 @@ export function linkHost(href: string): string {
   return new URL(href).hostname.replace(/^www\./, "");
 }
 
+// The address a link opens, or undefined for one that may not be opened, which shows as plain
+// text: its address may carry what the text was written from to whoever made it up.
+type LinkRule = (href: string) => string | undefined;
+const Links = createContext<LinkRule | undefined>(undefined);
+
+function Unopened({ text, href }: { text: string; href: string }) {
+  return (
+    <span className="md-unopened">
+      {text && text !== href ? `${text} (${linkHost(href)})` : href}
+    </span>
+  );
+}
+function LinkView({ node }: { node: Extract<Inline, { kind: "link" }> }) {
+  const rule = useContext(Links);
+  const href = rule ? rule(node.href) : node.href;
+  if (href === undefined) return <Unopened text={node.text} href={node.href} />;
+  return (
+    <LocalAddress href={href} text={node.text}>
+      <span className="md-link">
+        <a
+          href={href}
+          title={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          referrerPolicy="no-referrer"
+        >
+          {node.text}
+        </a>
+        <span className="md-host">
+          <Icon name="share" size={12} />
+          {linkHost(href)}
+        </span>
+      </span>
+    </LocalAddress>
+  );
+}
+function ImageView({ node }: { node: Extract<Inline, { kind: "image" }> }) {
+  const rule = useContext(Links);
+  const href = rule ? rule(node.href) : node.href;
+  if (href === undefined) return <Unopened text={node.text || "Image"} href={node.href} />;
+  return (
+    <a
+      className="md-host md-image"
+      href={href}
+      title={node.text || href}
+      target="_blank"
+      rel="noopener noreferrer"
+      referrerPolicy="no-referrer"
+    >
+      <Icon name="share" size={12} />
+      Image · {linkHost(href)}
+    </a>
+  );
+}
+
 function inlines(nodes: readonly Inline[]): ReactNode[] {
   return nodes.map((node, index) => {
     if (node.kind === "text") return node.text;
@@ -24,41 +88,8 @@ function inlines(nodes: readonly Inline[]): ReactNode[] {
           <PreviewChips text={node.text} limit={1} inline />
         </Fragment>
       );
-    if (node.kind === "link")
-      return (
-        <LocalAddress key={index} href={node.href} text={node.text}>
-          <span className="md-link">
-            <a
-              href={node.href}
-              title={node.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              referrerPolicy="no-referrer"
-            >
-              {node.text}
-            </a>
-            <span className="md-host">
-              <Icon name="share" size={12} />
-              {linkHost(node.href)}
-            </span>
-          </span>
-        </LocalAddress>
-      );
-    if (node.kind === "image")
-      return (
-        <a
-          key={index}
-          className="md-host md-image"
-          href={node.href}
-          title={node.text || node.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          referrerPolicy="no-referrer"
-        >
-          <Icon name="share" size={12} />
-          Image · {linkHost(node.href)}
-        </a>
-      );
+    if (node.kind === "link") return <LinkView key={index} node={node} />;
+    if (node.kind === "image") return <ImageView key={index} node={node} />;
     if (node.kind === "strong") return <strong key={index}>{inlines(node.children)}</strong>;
     return <em key={index}>{inlines(node.children)}</em>;
   });
@@ -183,6 +214,7 @@ export const SafeMarkdown = memo(function SafeMarkdown({
   compact = false,
   announce,
   shortened = "Message preview shortened.",
+  links,
 }: {
   text: string;
   // The message is still arriving.
@@ -192,15 +224,19 @@ export const SafeMarkdown = memo(function SafeMarkdown({
   announce?(text: string): void;
   // Said under text too long to show whole.
   shortened?: string;
+  // The address each link opens, if any; left out, every link opens as written.
+  links?: LinkRule;
 }) {
   const settled = useSettledText(text, streaming);
   const parsed = useMemo(() => parseMarkdown(settled), [settled]);
   return (
-    <div className="safe-markdown" data-compact={compact || undefined}>
-      {parsed.blocks.map((node, index) => (
-        <MarkdownBlock key={index} node={node} announce={announce} />
-      ))}
-      {parsed.truncated && <p className="thread-note">{shortened}</p>}
-    </div>
+    <Links.Provider value={links}>
+      <div className="safe-markdown" data-compact={compact || undefined}>
+        {parsed.blocks.map((node, index) => (
+          <MarkdownBlock key={index} node={node} announce={announce} />
+        ))}
+        {parsed.truncated && <p className="thread-note">{shortened}</p>}
+      </div>
+    </Links.Provider>
   );
 });

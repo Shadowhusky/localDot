@@ -91,6 +91,7 @@ type CellInfo struct {
 	Intercepts []string        `json:"intercepts"`
 	Surrogates []SurrogateInfo `json:"surrogates"`
 	Task       *llm.TaskInfo   `json:"task,omitempty"`
+	KeysHeld   bool            `json:"keysHeld,omitempty"`
 }
 
 type managed struct {
@@ -223,6 +224,36 @@ func (m *Manager) Revoke(cellID string) (int, error) {
 	m.d.Budget.End(cellID)
 	mc.cell.Revoke()
 	m.admin(cellID, mc.cell.Port(), "cell-revoke", fmt.Sprintf("%d surrogate(s) dropped, task ended", n))
+	return n, nil
+}
+
+// HoldKeys refuses every key the cell's programs send until ReleaseKeys: the daemon holds a
+// computer's keys while a shared link's task that may not use them runs on it.
+func (m *Manager) HoldKeys(cellID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mc, ok := m.cells[cellID]
+	if !ok {
+		return ErrUnknownCell
+	}
+	mc.cell.HoldKeys(true)
+	m.admin(cellID, mc.cell.Port(), "keys-hold", "")
+	return nil
+}
+
+// ReleaseKeys ends a hold and drops every surrogate the cell had, which its programs could have
+// read meanwhile; the daemon mints the computer fresh ones.
+func (m *Manager) ReleaseKeys(cellID string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mc, ok := m.cells[cellID]
+	if !ok {
+		return 0, ErrUnknownCell
+	}
+	mc.revision++
+	n := m.d.Registry.RevokeCell(cellID)
+	mc.cell.HoldKeys(false)
+	m.admin(cellID, mc.cell.Port(), "keys-release", fmt.Sprintf("%d surrogate(s) dropped", n))
 	return n, nil
 }
 
@@ -412,6 +443,7 @@ func (m *Manager) infoLocked(cellID string, mc *managed) CellInfo {
 	if t, ok := m.d.Budget.Task(cellID); ok {
 		info.Task = &t
 	}
+	info.KeysHeld = mc.cell.KeysHeld()
 	return info
 }
 

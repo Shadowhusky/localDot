@@ -48,6 +48,7 @@ import { useHandler } from "../ui/useHandler.ts";
 import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { ConversationMenu } from "./ConversationMenu.tsx";
 import { adds, SelectAll, SelectionActions } from "./ConversationSelection.tsx";
+import { fileConversations } from "./conversation-leave.ts";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import type { Layout } from "./layout.ts";
 import { RailSearch } from "./RailSearch.tsx";
@@ -76,6 +77,8 @@ export interface SessionRailProps {
   // Why a new conversation can't be started now.
   newReason?: string;
   onDeleted?(sessions: readonly string[]): void;
+  // The overview of every conversation: whether it is on show, and how to show it.
+  overview?: { open: boolean; onOpen(): void };
 }
 
 // "Plan the trip, blue tag, working, on screen, 2 min": what a screen reader calls a row.
@@ -129,6 +132,7 @@ export const SessionRail = memo(function SessionRail({
   onNew,
   newReason,
   onDeleted,
+  overview,
 }: SessionRailProps) {
   const recent = useRecentConversations(api, true);
   const [query, setQuery] = useState("");
@@ -324,7 +328,7 @@ export const SessionRail = memo(function SessionRail({
     event.preventDefault();
     if (selection.selecting) return;
     const item =
-      target?.closest<HTMLElement>("[data-flip]") ??
+      target?.closest<HTMLElement>(".sessions-item") ??
       rowLevelWith(event.currentTarget, event.clientY);
     const row = listed.find((each) => each.entry.sessionId === item?.dataset.flip);
     const trigger = row && buttons.current.get(row.entry.sessionId);
@@ -443,7 +447,12 @@ export const SessionRail = memo(function SessionRail({
           />
         </div>
       ) : (
-        <NewRow expanded={expanded} reason={newReason} onNew={onNew} />
+        <div className="sessions-new">
+          <NewRow expanded={expanded} reason={newReason} onNew={onNew} />
+          {overview && (
+            <OverviewRow expanded={expanded} open={overview.open} onOpen={overview.onOpen} />
+          )}
+        </div>
       )}
       <RailSearch
         expanded={expanded}
@@ -547,7 +556,12 @@ export const SessionRail = memo(function SessionRail({
           setEditing(action.entry.sessionId);
         }}
         onOrganize={(change) => {
-          if (action) void organize(action, change);
+          if (action)
+            fileConversations(
+              [action.entry.sessionId],
+              change,
+              () => void organize(action, change),
+            );
         }}
         onLook={(entry, look) => {
           organizeConversation(api, entry.sessionId, { look }).catch(() =>
@@ -567,10 +581,8 @@ export const SessionRail = memo(function SessionRail({
         conversations={deleting}
         anchor={actionAnchor}
         onClose={() => setDeleting(null)}
-        onDeleted={(sessions) => {
-          onDeleted?.(sessions);
-          selection.drop(sessions);
-        }}
+        onDeleted={onDeleted}
+        onRowsGone={selection.drop}
       />
     </nav>
   );
@@ -594,6 +606,7 @@ function ArchivedGroup({
         variant="quiet"
         size="sm"
         className="sessions-archived"
+        data-flip="archived"
         aria-expanded={open}
         aria-controls={id}
         onClick={onToggle}
@@ -621,7 +634,12 @@ function RailGroup({
   const id = useId();
   return (
     <div>
-      <div id={id} className="sessions-group-label" data-hidden={expanded ? undefined : ""}>
+      <div
+        id={id}
+        className="sessions-group-label"
+        data-flip={`group ${label}`}
+        data-hidden={expanded ? undefined : ""}
+      >
         <span className="sessions-group-name">{label}</span>
       </div>
       <ul className="sessions-list" aria-labelledby={id}>
@@ -644,7 +662,7 @@ function NewRow({
     content: expanded || reason ? undefined : "New conversation",
   });
   return (
-    <div className="sessions-new">
+    <>
       <Button
         {...tip.handlers}
         variant="quiet"
@@ -657,7 +675,39 @@ function NewRow({
         <span className="sessions-title">New conversation</span>
       </Button>
       {tooltip}
-    </div>
+    </>
+  );
+}
+
+// Every conversation's screen and progress at once, lit while on show as a conversation's row is.
+function OverviewRow({
+  expanded,
+  open,
+  onOpen,
+}: {
+  expanded: boolean;
+  open: boolean;
+  onOpen(): void;
+}) {
+  const { triggerProps: tip, tooltip } = useTooltip({
+    content: expanded ? undefined : "Overview",
+  });
+  return (
+    <>
+      <Button
+        {...tip.handlers}
+        variant="quiet"
+        className="sessions-row sessions-overview"
+        aria-label="Overview"
+        aria-current={open ? "page" : undefined}
+        data-current={open || undefined}
+        onClick={onOpen}
+      >
+        <Icon name="layout-dashboard" />
+        <span className="sessions-title">Overview</span>
+      </Button>
+      {tooltip}
+    </>
   );
 }
 
@@ -716,6 +766,7 @@ function RailRow({
     <li
       className="sessions-item"
       data-flip={row.entry.sessionId}
+      data-conversation={row.entry.sessionId}
       data-current={current || undefined}
       data-menu={menuOpen || undefined}
     >

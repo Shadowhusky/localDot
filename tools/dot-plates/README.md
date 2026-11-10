@@ -37,6 +37,19 @@ Twenty-six of them exist to tell tasks apart in the conversation list (`taskOutf
 frame (it has 8 units above the ball) and, right of the ball, within 32.5 units of its centre, where
 dot's sub-agents sit when it delegates. Asymmetric hats lean left for that reason.
 
+What sits near the face has rules of its own, which `apps/web/src/dot/render/wearables-fit.test.ts`
+measures on the shipped plates in every pose the engine makes:
+
+- Eyewear is drawn round the eye at its true size (5.4 x 10 units): behind a lens the eye doesn't grow
+  (`eyeScaleLimit`). Dark lenses are opaque, so they hide the eye; clear ones hold it inside the rim,
+  their centres a little outside the eyes, which are only 11 units apart. Rims and arms stay thick
+  enough to read at 24 px and short enough to stay on the ball when dot looks as far as it can.
+- A hat stays clear of the eyes: its front edge ends above y = 20.5 in the frame.
+- Where a hat's rim or crown meets the head it must lie on or outside the ball, at a height of at
+  least `sqrt(1 - r^2)` for a radius `r`. Anything inside it is held out, and the ball shows through
+  as a white band.
+- `crown` in `HEAD` is how far the plate really rises above the ball.
+
 ## Regenerate
 
 Render the 1024 px, 16-bit masters outside the repo (about 70 s with Cycles on Metal), then derive the
@@ -66,8 +79,8 @@ writes, into `--out`:
 - `wear-<name>.glb`: the wearable in place on the body, with its modifiers applied, decimated to a
   budget and baked with Cycles to WebP textures (`EXT_texture_webp`): base colour, and at half its
   size a tangent-space normal map and ORM (occlusion baked with the body present, roughness,
-  metalness). Sheen, coat and specular stay as material constants. Glass stays glass: the round
-  lenses transmit and the shades' lenses blend. Where the plates never needed more than the front,
+  metalness). Sheen, coat and specular stay as material constants. Glass stays glass: the clear
+  lenses transmit and the streaks across a lens blend. Where the plates never needed more than the front,
   the model adds what a turntable shows: a pin behind the star.
 - `shadow-<name>.webp`: the shadow the wearable casts on the body under the neutral rig, a linear
   factor that multiplies the body's colour (1 where it casts none), 512 x 256.

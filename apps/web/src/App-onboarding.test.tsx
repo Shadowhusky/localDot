@@ -55,7 +55,7 @@ it("opens setup on first run, and Finish later leaves what is left in the chat t
   render(<App fetchImpl={fetchImpl} />);
   fireEvent.click(await screen.findByRole("button", { name: "Get started" }));
   expect(await screen.findByRole("heading", { name: "How should dot think?" })).toBeTruthy();
-  expect(screen.getByRole("list", { name: "Step 1 of 8 · How dot thinks" })).toBeTruthy();
+  expect(screen.getByRole("list", { name: "Step 1 of 9 · How dot thinks" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Finish later" }));
   await waitFor(() =>
     expect(screen.queryByRole("heading", { name: "How should dot think?" })).toBeNull(),

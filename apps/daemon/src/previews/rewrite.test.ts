@@ -51,6 +51,22 @@ describe("an address in a header", () => {
     );
   });
 
+  it("keeps a preview on the Mac on its own http address, which a server may name itself", () => {
+    const mac = { ...route(), front: "localhost:3000", local: true };
+    expect(previewUrl("https://localhost:5173/login", mac)).toBe("http://localhost:3000/login");
+    expect(previewUrl("ws://127.0.0.1:5173/hmr", mac)).toBe("ws://localhost:3000/hmr");
+    // localhost:3000 is also a server in the computer, but on the Mac it is this preview.
+    expect(previewUrl("http://localhost:3000/callback?code=1", mac)).toBe(
+      "http://localhost:3000/callback?code=1",
+    );
+    expect(previewUrl("http://localhost:1355/x", mac)).toBe(
+      "http://localhost:3000/__localdot/to/http/localhost/1355/x",
+    );
+    expect(rewriteText('"http:\\/\\/localhost:5173\\/a" wss://localhost:5173/b', mac)).toBe(
+      '"http:\\/\\/localhost:3000\\/a" ws://localhost:3000/b',
+    );
+  });
+
   it("keeps each *.localhost name a site of its own", () => {
     const portless = route("https://thema.localhost:1355/");
     expect(previewUrl("https://thema.localhost:1355/app", portless)).toBe(`${PREVIEW}/app`);

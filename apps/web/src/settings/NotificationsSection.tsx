@@ -43,7 +43,7 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
     <>
       <p className="settings-lede">
         {banners
-          ? `dot nudges you when it needs you, finishes or fails: on the ${noun} running localDot when no tab is open, and on your phone.`
+          ? `dot nudges you when it needs you, finishes or fails: on the ${noun} running localDot whenever you aren't looking at localDot there, and on your phone.`
           : "dot nudges you when it needs you, finishes or fails: on your phone, and in a tab you keep open."}
       </p>
       {!banners && (
@@ -100,7 +100,8 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
             </Field>
           )}
         </GroupRow>
-        {view.device.kind === "this-mac" && view.tab === "default" && (
+        {/* A computer with banners of its own shows them itself (notify/policy.ts). */}
+        {!banners && view.device.kind === "this-mac" && view.tab === "default" && (
           <GroupRow
             leading={<IconTile icon="bell" />}
             label="Show them from this tab too"

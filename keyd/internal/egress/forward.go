@@ -86,6 +86,10 @@ func (c *Cell) forward(w http.ResponseWriter, r *http.Request, rt route) {
 		c.deny(w, line, http.StatusForbidden, v.Reason)
 		return
 	}
+	if len(v.Swaps) > 0 && c.KeysHeld() {
+		c.deny(w, line, http.StatusForbidden, ReasonKeysHeld)
+		return
+	}
 	if err := c.freshen(r.Context(), v.Swaps); err != nil {
 		c.refuseSecret(w, line, err)
 		return
@@ -107,6 +111,8 @@ func (c *Cell) forward(w http.ResponseWriter, r *http.Request, rt route) {
 // left unrecorded.
 var errNoAudit = errors.New("the audit log cannot be written")
 
+var errKeysHeld = errors.New("the cell's keys are held")
+
 // freshen makes sure the sign-ins behind these surrogates are good to send before they are swapped,
 // so that a value refreshed here is the one swap reads.
 func (c *Cell) freshen(ctx context.Context, swaps []keys.Entry) error {
@@ -125,6 +131,9 @@ func (c *Cell) freshen(ctx context.Context, swaps []keys.Entry) error {
 func (c *Cell) swap(h http.Header, swaps []keys.Entry) error {
 	if len(swaps) == 0 {
 		return nil
+	}
+	if c.KeysHeld() {
+		return errKeysHeld
 	}
 	if c.deps.Audit.Err() != nil {
 		return errNoAudit
@@ -149,6 +158,8 @@ func (c *Cell) refuseSecret(w http.ResponseWriter, l audit.Line, err error) {
 		c.deny(w, l, http.StatusServiceUnavailable, ReasonOAuthDown)
 	case errors.Is(err, errNoAudit):
 		c.deny(w, l, http.StatusServiceUnavailable, ReasonNoAudit)
+	case errors.Is(err, errKeysHeld):
+		c.deny(w, l, http.StatusForbidden, ReasonKeysHeld)
 	case errors.Is(err, vault.ErrLocked):
 		c.deny(w, l, http.StatusLocked, ReasonVaultLocked)
 	case errors.As(err, &reentry):
@@ -209,6 +220,8 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 		FlushInterval: -1,
 		ErrorLog:      log.New(io.Discard, "", 0),
 		ModifyResponse: func(resp *http.Response) error {
+			dropKeydFields(resp.Header)
+			dropKeydFields(resp.Trailer)
 			var usage io.Writer
 			if rt.meter != nil {
 				usage = rt.meter.start(resp)
@@ -244,7 +257,10 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 			}
 			resp.Body = &tally{
 				ReadCloser: body,
-				atEOF:      func() { scrubber.Header(resp.Trailer) },
+				atEOF: func() {
+					dropKeydFields(resp.Trailer)
+					scrubber.Header(resp.Trailer)
+				},
 				done: func(n int64, eof bool, err error) {
 					l.BytesOut = n
 					c.streamOutcome(&l, eof, err, r.Context(), rt.gen)
@@ -277,6 +293,16 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 	proxy.ServeHTTP(scrubbedWriter{ResponseWriter: w, s: scrubber}, r.WithContext(ctx))
 }
 
+// dropKeydFields removes what an upstream wrote in keyd's own name: the brain and the daemon read
+// X-Keyd-* as keyd's word, and a reply from a provider or service can't speak for it.
+func dropKeydFields(h http.Header) {
+	for name := range h {
+		if strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Keyd-") {
+			delete(h, name)
+		}
+	}
+}
+
 // scrubbedWriter scrubs the headers of informational responses, which ReverseProxy relays as they
 // arrive, before ModifyResponse sees anything.
 type scrubbedWriter struct {
@@ -286,6 +312,7 @@ type scrubbedWriter struct {
 
 func (w scrubbedWriter) WriteHeader(code int) {
 	if code < 200 {
+		dropKeydFields(w.ResponseWriter.Header())
 		w.s.Header(w.ResponseWriter.Header())
 	}
 	w.ResponseWriter.WriteHeader(code)

@@ -109,4 +109,17 @@
   .preview-app-state[data-state="not-answering"] {
     color: var(--color-attention);
   }
+
+  .preview-mac {
+    width: calc(var(--spacing) * 80);
+  }
+
+  .preview-mac-form {
+    display: grid;
+    gap: calc(var(--spacing) * 3);
+  }
+
+  .preview-mac-form .preview-notice-actions {
+    margin-top: 0;
+  }
 }

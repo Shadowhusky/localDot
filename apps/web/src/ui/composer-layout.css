@@ -46,6 +46,23 @@
     margin-inline-start: auto;
   }
 
+  /* Send's options, beside Send while a task works. Their room folds away with them (and while a
+     voice message records, whose strip runs up to the microphone). */
+  .composer-bar > .composer-more {
+    transition-property: width, border-width, margin-inline-start, opacity, visibility;
+    transition-duration: var(--dur-snappy);
+    transition-timing-function: var(--ease-standard);
+  }
+
+  .composer-bar > .composer-more:not([data-shown]),
+  .composer-card[data-voice] .composer-bar > .composer-more {
+    width: 0;
+    border-width: 0;
+    margin-inline-start: calc(var(--spacing) * -1);
+    opacity: 0;
+    visibility: hidden;
+  }
+
   .composer-card[data-layout="pill"] {
     --_field-start: var(--spacing);
     display: grid;
@@ -482,6 +499,10 @@
   }
   .model-config-actions .model-config-manage {
     margin-inline-start: 0;
+  }
+
+  .model-config-actions > :last-child {
+    margin-inline-start: auto;
   }
   /* Each plan's limits, under the model's settings: a name, a bar and when it resets. */
   .plan-usage-list {

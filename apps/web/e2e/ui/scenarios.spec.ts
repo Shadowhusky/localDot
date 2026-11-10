@@ -11,6 +11,8 @@ import { expect, isPhone, test } from "./harness.ts";
 const hud = (label: string) => (page: Page) =>
   expect(page.getByTestId("hud-status")).toHaveText(label);
 const shows = (find: (page: Page) => Locator) => (page: Page) => expect(find(page)).toBeVisible();
+const fixCard = (name: string | RegExp) => (page: Page) =>
+  page.locator(".thread-fix").getByRole("heading", { name });
 const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   "first-run": shows((page) => page.getByRole("heading", { name: "Your computer is off" })),
   "model-ready": hud("No computer"),
@@ -18,10 +20,12 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   ready: hud("Ready"),
   "slow-keys": hud("Ready"),
   conversations: hud("Done"),
+  "shared-links": hud("Done"),
   "conversations-working": hud("Select the Net total cell"),
   "chatgpt-plan": hud("Ready"),
   "plan-usage": hud("Ready"),
   running: hud("Select the Net total cell"),
+  overview: hud("Select the Net total cell"),
   "long-thread": hud("Select the Net total cell"),
   library: hud("Select the Net total cell"),
   approval: shows((page) => page.getByRole("dialog", { name: "Send this email?" })),
@@ -29,6 +33,13 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   takeover: hud("You're in control"),
   budget: hud("Spending limit reached"),
   "keys-locked": shows((page) => page.getByRole("heading", { name: "Unlock your saved keys" })),
+  "fix-key": shows(fixCard(/key was refused/)),
+  "fix-app": shows(fixCard("Connect Linear")),
+  "fix-model": shows(fixCard(/could not process/)),
+  "plan-limit": shows(fixCard(/^Paused until \d/)),
+  "fix-computer": shows(fixCard("Your computer is off")),
+  "fix-computer-paused": shows(fixCard("Your computer is paused")),
+  "fix-runtime": shows(fixCard("Docker isn't running")),
   "image-output": hud("Done"),
   narrated: hud("Done"),
   "long-run": hud("Fill the tail with brown"),

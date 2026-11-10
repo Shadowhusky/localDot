@@ -21,11 +21,11 @@ import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { ActivityDetail } from "./ActivityDetails.tsx";
-import { ActivityRow, PlainSteps, RunningTime, revealOpened } from "./ActivityRow.tsx";
+import { ActivityRow, PlainSteps, RunningTime } from "./ActivityRow.tsx";
 import { clock, groupReadSteps, hasDetails, modelMarks } from "./activity.ts";
 import { useStepPreviewEnvironment } from "./StepPreview.tsx";
 import type { ModelRef, WorkStep } from "./thread.ts";
-import { useFollowScroll } from "./useFollowScroll.ts";
+import { REVEAL_MARGIN, useFollowScroll } from "./useFollowScroll.ts";
 import { RunPicturesScope, WorkPictures } from "./WorkPictures.tsx";
 
 export interface LiveWork {
@@ -365,18 +365,25 @@ export const StepsCaption = memo(function StepsCaption({
 
 // A step with the details it unfolds in place, where there is a task to read them from. A step that
 // has not changed is not drawn again as the steps after it arrive.
-const StepRow = memo(function StepRow({
+export const StepRow = memo(function StepRow({
   id,
   step,
   sessionId,
   open,
   onToggle,
+  current,
+  runningFrom,
+  nowMs,
 }: {
   id: string;
   step: WorkStep;
   sessionId?: string;
   open: boolean;
   onToggle(key: string, trigger: HTMLButtonElement): void;
+  // The step at work now, with the time it has run.
+  current?: boolean;
+  runningFrom?: number;
+  nowMs?: number;
 }) {
   const preview = useStepPreviewEnvironment();
   const plain = useContext(PlainSteps);
@@ -387,6 +394,8 @@ const StepRow = memo(function StepRow({
       view={step.meta === step.title ? { ...step, meta: "" } : step}
       open={open}
       onToggle={detail ? (trigger) => onToggle(step.key, trigger) : undefined}
+      current={current}
+      {...(runningFrom !== undefined ? { runningFrom, nowMs } : {})}
     >
       {detail && preview && (
         <ActivityDetail
@@ -413,14 +422,11 @@ function OneStep({
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
-  const show = (_key: string, trigger: HTMLButtonElement) => {
-    setOpen(!open);
-    if (!open) revealOpened(trigger.closest(".activity-row"));
-  };
+  const toggle = () => setOpen(!open);
   return (
     <div className="thread-work" data-single="">
       {model && <p className="work-model-change">{model}</p>}
-      <StepRow id={id} step={step} sessionId={sessionId} open={open} onToggle={show} />
+      <StepRow id={id} step={step} sessionId={sessionId} open={open} onToggle={toggle} />
       <WorkPictures steps={[step]} sessionId={sessionId} />
     </div>
   );
@@ -447,10 +453,11 @@ const WorkHistory = memo(function WorkHistory({
   const now = useRef({ follow, opened });
   now.current = { follow, opened };
   const toggle = useCallback((key: string, trigger: HTMLButtonElement) => {
-    now.current.follow.anchorTo(trigger);
-    const opening = now.current.opened !== key;
-    setOpened(opening ? key : null);
-    if (opening) revealOpened(trigger.closest(".activity-row"));
+    const { follow: inList, opened: was } = now.current;
+    inList.anchorTo(trigger);
+    const row = trigger.closest<HTMLElement>(".activity-row");
+    setOpened(was === key ? null : key);
+    if (was !== key && row) inList.show(row, REVEAL_MARGIN);
   }, []);
   const list = useRef<HTMLOListElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());

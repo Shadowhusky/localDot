@@ -4,6 +4,7 @@ import type { AgentResult } from "../agent/model.ts";
 import { Button } from "../ui/Button.tsx";
 import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { macAddress, OpenOnMac, openOnMac } from "./OpenOnMac.tsx";
 import { type Previews, requestKey, usePreviews } from "./PreviewsContext.tsx";
 import "../ui/previews.css";
 
@@ -74,12 +75,19 @@ export function PreviewCard({ offer }: { offer: ResultPreview }) {
   const request = { url: offer.url };
   const address = shownAddress(offer.url);
   const opens = state === "running" || state === "quiet" || state === "checking";
+  const onMac = opens ? openOnMac(previews, offer.url) : undefined;
   return (
     <Group className="preview-card" data-state={state}>
       <GroupRow
         leading={<IconTile icon="app-window" />}
         label={offer.title ?? address}
-        detail={[offer.title ? address : offer.project, WORDS[state]].filter(Boolean).join(" · ")}
+        detail={[
+          offer.title ? address : offer.project,
+          WORDS[state],
+          onMac && `On this Mac at ${macAddress(onMac)}`,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
         trailing={
           opens && (
             <>
@@ -88,6 +96,14 @@ export function PreviewCard({ offer }: { offer: ResultPreview }) {
                 label={`Copy link to ${address}`}
                 aria-busy={previews.pending.has(`copy ${requestKey(request)}`) || undefined}
                 onClick={(event) => previews.copy(request, event.currentTarget)}
+              />
+              <OpenOnMac
+                previews={previews}
+                request={request}
+                target={offer.url}
+                address={address}
+                app={offer.project ?? offer.title ?? address}
+                port={offer.port}
               />
               <Button
                 size="sm"

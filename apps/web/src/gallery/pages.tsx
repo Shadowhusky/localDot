@@ -10,6 +10,7 @@ import { OverlaysPage } from "../ui/gallery/OverlaysPage.tsx";
 import { ActivityPage } from "./ActivityPage.tsx";
 import { HelpersPage } from "./HelpersPage.tsx";
 import { LooksPage } from "./LooksPage.tsx";
+import { OverviewPage } from "./OverviewPage.tsx";
 import { StillFrame } from "./StillFrame.tsx";
 import { SystemPage } from "./SystemPage.tsx";
 
@@ -125,6 +126,12 @@ export const GALLERY_PAGES: GalleryPage[] = [
     title: "Task looks",
     about: "What dots can wear, and tasks told apart by it",
     Page: LooksPage,
+  },
+  {
+    id: "overview",
+    title: "Overview",
+    about: "Every conversation's screen and progress, at each size and on a phone",
+    Page: OverviewPage,
   },
   { id: "stage", title: "Stage", about: "The lit stage around a still frame", Page: StagePage },
   {

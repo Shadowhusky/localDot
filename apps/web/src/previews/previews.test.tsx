@@ -514,3 +514,134 @@ describe("the preview a reply comes with", () => {
     expect(offers.get("third")).toEqual([shop]);
   });
 });
+
+describe("opening an app on this Mac at the address its sign-in expects", () => {
+  const SHOP = {
+    port: 5173,
+    url: "http://localhost:5173/",
+    name: "node",
+    title: "Thema (dev)",
+    project: "thema-app",
+    state: "answering" as const,
+    seenAt: "2026-10-08T09:00:00.000Z",
+  };
+  const ON_MAC: PreviewOpened = {
+    preview: { ...OPENED.preview, id: "m1", origin: "http://localhost:3000", local: true },
+    open: "http://localhost:3000/__localdot/preview#one-use-secret",
+  };
+  const mac = () =>
+    screen.getByRole("button", { name: "Open localhost:5173 at a localhost address on this Mac" });
+
+  function touchScreen(touch: boolean) {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: touch && query.includes("pointer: coarse"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("opens it at the port the owner gives, remembers it, and says where it is", async () => {
+    touchScreen(false);
+    let status: PreviewsStatus = { ...READY, servers: [SHOP] };
+    const { api, calls } = daemon({ status: () => json(status), open: () => json(ON_MAC) });
+    const tab = fakeTab();
+    vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    render(<Harness api={api} panel />);
+    await waitFor(() => mac());
+    fireEvent.click(mac());
+    const popover = await screen.findByRole("dialog", { name: "Open on this Mac" });
+    expect(popover.textContent).toContain("send you back only to the address registered");
+    const field = within(popover).getByRole("textbox", { name: "Address on this Mac" });
+    expect((field as HTMLInputElement).value).toBe("5173");
+    fireEvent.change(field, { target: { value: "80" } });
+    fireEvent.click(within(popover).getByRole("button", { name: "Open" }));
+    expect(within(popover).getByText("Use a port from 1024 to 65535.")).toBeTruthy();
+    fireEvent.change(field, { target: { value: "3000" } });
+    status = { ...status, previews: [ON_MAC.preview] };
+    fireEvent.click(within(popover).getByRole("button", { name: "Open at localhost:3000" }));
+    await waitFor(() => expect(tab.replaced).toEqual([ON_MAC.open]));
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({ port: 5173, local: 3000 });
+    const onMac = await screen.findByRole("region", { name: "On this Mac" });
+    expect(onMac.textContent).toContain("localhost:3000");
+    expect(onMac.textContent).toContain("Thema (dev) · localhost:5173");
+    fireEvent.click(
+      within(onMac).getByRole("button", { name: "Close localhost:3000 on this Mac" }),
+    );
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "DELETE" && call.path.endsWith("/m1"))).toBe(
+        true,
+      ),
+    );
+    fireEvent.click(mac());
+    const again = await screen.findByRole("dialog", { name: "Open on this Mac" });
+    expect(
+      (within(again).getByRole("textbox", { name: "Address on this Mac" }) as HTMLInputElement)
+        .value,
+    ).toBe("3000");
+  });
+
+  it("opens there without Tailscale, which only the tailnet previews need", async () => {
+    touchScreen(false);
+    const { api, calls } = daemon({
+      status: () => json({ ...READY, state: "needs-tailscale", servers: [SHOP] }),
+      open: () => json(ON_MAC),
+    });
+    const tab = fakeTab();
+    vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    render(<Harness api={api} panel />);
+    await screen.findByText("Previews open over Tailscale");
+    fireEvent.click(mac());
+    const popover = await screen.findByRole("dialog", { name: "Open on this Mac" });
+    fireEvent.change(within(popover).getByRole("textbox"), { target: { value: "3000" } });
+    fireEvent.click(within(popover).getByRole("button", { name: "Open at localhost:3000" }));
+    await waitFor(() => expect(tab.replaced).toEqual([ON_MAC.open]));
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+  });
+
+  it("says why beside the button when the Mac's port is taken", async () => {
+    touchScreen(false);
+    const message =
+      "Something on this Mac already uses localhost:3000. Stop it, or choose another port.";
+    const { api } = daemon({
+      status: () => json({ ...READY, servers: [SHOP] }),
+      open: () => json({ message }, 409),
+    });
+    const tab = fakeTab();
+    vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    render(<Harness api={api} panel />);
+    await waitFor(() => mac());
+    fireEvent.click(mac());
+    const popover = await screen.findByRole("dialog", { name: "Open on this Mac" });
+    fireEvent.change(within(popover).getByRole("textbox"), { target: { value: "3000" } });
+    fireEvent.click(within(popover).getByRole("button", { name: "Open at localhost:3000" }));
+    const notice = await screen.findByRole("dialog", { name: "Couldn't open the preview" });
+    expect(notice.textContent).toContain(message);
+    expect(tab.close).toHaveBeenCalled();
+  });
+
+  it("isn't offered on a phone, which has no way to the Mac's localhost", async () => {
+    touchScreen(true);
+    const { api } = daemon({
+      status: () => json({ ...READY, servers: [SHOP], previews: [ON_MAC.preview] }),
+    });
+    render(<Harness api={api} panel />);
+    await screen.findByRole("button", { name: "Open preview of localhost:5173" });
+    expect(
+      screen.queryByRole("button", {
+        name: "Open localhost:5173 at a localhost address on this Mac",
+      }),
+    ).toBeNull();
+    // One open on the Mac is listed, and can be closed from here, but not opened.
+    const onMac = screen.getByRole("region", { name: "On this Mac" });
+    expect(within(onMac).queryByRole("button", { name: "Open localhost:3000" })).toBeNull();
+    expect(
+      within(onMac).getByRole("button", { name: "Close localhost:3000 on this Mac" }),
+    ).toBeTruthy();
+  });
+});

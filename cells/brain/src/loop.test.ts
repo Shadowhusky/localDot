@@ -403,6 +403,7 @@ describe("Agent", () => {
         "people",
         "recall",
         "remember",
+        "request_fix",
         "request_takeover",
         "routine",
         "send_message",

@@ -7,7 +7,9 @@ import {
   type StartAtLoginState,
 } from "@localdot/protocol";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { COMPUTER_UPDATE_STAGES } from "../../../../packages/protocol/src/computer-operation.ts";
 import type { Knowledge } from "../agent/useKnowledge.ts";
+import { COMPUTER_STAGE_NAMES } from "../cells/computer-update-stage.ts";
 import type { ComputerUpdate } from "../cells/useComputerUpdate.ts";
 import type { FreshStart } from "../cells/useFreshStart.ts";
 import { spendText } from "../copy/format.ts";
@@ -35,12 +37,14 @@ import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { matches, PHONE, REDUCED_MOTION, TOUCH, useMediaQuery } from "../ui/media.ts";
+import { Progress } from "../ui/Progress.tsx";
 import { revealInvalid } from "../ui/reveal-field.ts";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet, SheetNavItem, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { speechSummary } from "../voice/speech-words.ts";
 import { routeLabel } from "../voice/words.ts";
 import { AccessLinksSettings } from "./AccessLinksSettings.tsx";
 import { AccessoryPicker } from "./AccessoryPicker.tsx";
@@ -93,6 +97,7 @@ import {
   type SettingsIssue,
   type SpendingDraft,
 } from "./settings-form.ts";
+import { UpdateSteps } from "./UpdateSteps.tsx";
 import type { AccountsView } from "./useAccounts.ts";
 import type { AppUpdateControl } from "./useAppUpdate.ts";
 import type { BrowserEngineView } from "./useBrowserEngine.ts";
@@ -191,6 +196,8 @@ export interface SettingsSheetProps {
   knowledge?: Knowledge;
   known?: WhatDotKnows;
   recentActivity?: RecentActivityControl;
+  // Whether a task a plan's limit paused continues by itself once the plan resets.
+  autoContinue?: { on: boolean; change(on: boolean): void };
   // Opens an earlier task's replay, from where a fact or a person came from.
   onOpenTask?(sessionId: string): void;
   notifications?: NotificationsView;
@@ -431,6 +438,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
     props.manualPrices,
     props.purposeCheck?.on,
     props.recentActivity?.on,
+    props.autoContinue?.on,
   ]);
   const canSave = !!props.save?.enabled && !props.error;
   // biome-ignore lint/correctness/useExhaustiveDependencies: each edit starts the wait again
@@ -644,6 +652,7 @@ function shownSections(props: SettingsSheetProps, phone = false): SettingsSectio
     computer:
       (!!props.stop && !(phone && props.stop.task)) ||
       !!props.update?.available ||
+      !!props.update?.failure ||
       !!props.appUpdate ||
       !!props.freshStart ||
       !!props.stream ||
@@ -705,7 +714,11 @@ function SectionList({
     rules: countValue(props.rules?.rules.length),
     spending: props.loading ? "" : spendingValue(props.spending?.value, planOnly(props.choices)),
     appearance: APPEARANCE_NAMES[props.appearance?.value ?? "graphite"],
-    voice: props.voice ? routeLabel(props.voice.route) : "",
+    voice: props.voice
+      ? props.voice.speech?.status?.job?.state === "running"
+        ? speechSummary(props.voice.speech.status)
+        : routeLabel(props.voice.route, props.voice.speech?.status?.host.computer)
+      : "",
     notifications: notificationsValue(props.notifications?.device),
     accounts: props.accounts?.phase === "ready" ? countValue(props.accounts.sites.length) : "",
     connectors:
@@ -847,7 +860,7 @@ export interface StopNote {
 // because it erases. On a phone, Shut down ends the page; a wide screen has it at the heading.
 function ComputerControls({ props }: { props: SettingsSheetProps }) {
   const { stream, freshStart, stopAll, startAtLogin: login } = props;
-  const update = props.update?.available ? props.update : undefined;
+  const update = props.update?.available || props.update?.failure ? props.update : undefined;
   const phone = useMediaQuery(PHONE);
   const shutDown = phone && props.stop && !props.stop.task ? props.stop : undefined;
   return (
@@ -943,34 +956,74 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
 }
 
 function UpdateRow({ update }: { update: ComputerUpdate }) {
+  const stage = update.stage;
+  const failure = update.failure;
+  const retry = !!failure && update.available;
   return (
     <GroupRow
       leading={<IconTile icon="download" />}
       label={
         <span className="settings-update-label" role="status">
-          <span data-shown={update.busy ? undefined : ""}>New version ready</span>
-          <span data-shown={update.busy ? "" : undefined}>Updating…</span>
+          {failure && !update.busy ? (
+            <span data-shown="">Not updated</span>
+          ) : (
+            <>
+              <span data-shown={update.busy ? undefined : ""}>New version ready</span>
+              <span data-shown={update.busy ? "" : undefined}>Updating…</span>
+            </>
+          )}
         </span>
       }
       detail={
         update.error && !update.busy ? (
           <span className="settings-computer-error">{update.error}</span>
         ) : (
-          "Updates the computer environment. Your files and sign-ins are kept."
+          "Restarts your computer once, usually within a few minutes. Your files, apps and sign-ins are kept."
         )
       }
       trailing={
-        <Button
-          size="sm"
-          variant="primary"
-          busy={update.busy}
-          disabledReason={update.busy ? undefined : update.waitReason}
-          onClick={update.run}
-        >
-          Update
-        </Button>
+        update.available && (
+          <Button
+            size="sm"
+            variant="primary"
+            busy={update.busy}
+            disabledReason={update.busy ? undefined : update.waitReason}
+            onClick={update.run}
+          >
+            {retry ? "Retry" : "Update"}
+          </Button>
+        )
       }
-    />
+    >
+      {stage && (
+        <div className="settings-update-progress">
+          <Progress
+            label="Update progress"
+            value={update.value ?? undefined}
+            valueText={update.line ?? undefined}
+          />
+          {update.line && <span className="settings-update-detail">{update.line}</span>}
+          {update.note && <span className="settings-update-detail">{update.note}</span>}
+          <UpdateSteps
+            stages={COMPUTER_UPDATE_STAGES}
+            names={COMPUTER_STAGE_NAMES}
+            at={stage}
+            failed={false}
+          />
+        </div>
+      )}
+      {failure && (
+        <div className="settings-update-progress">
+          <p className="settings-update-error">{failure.message}</p>
+          <UpdateSteps
+            stages={COMPUTER_UPDATE_STAGES}
+            names={COMPUTER_STAGE_NAMES}
+            at={failure.stage}
+            failed
+          />
+        </div>
+      )}
+    </GroupRow>
   );
 }
 
@@ -1089,6 +1142,17 @@ function SectionContent({
           )}
           {main === CLAUDE_CODE && props.claudeCode && (
             <ClaudeCodePanel id="models-claude-code" claude={props.claudeCode} />
+          )}
+          {props.autoContinue && (main === CHATGPT || main === CLAUDE_CODE) && (
+            <Group>
+              <Switch
+                className="ui-group-row"
+                label="Continue when a plan's limit resets"
+                description="When your Claude or ChatGPT plan reaches its limit, a paused task carries on by itself once the limit resets."
+                checked={props.autoContinue.on}
+                onCheckedChange={props.autoContinue.change}
+              />
+            </Group>
           )}
           {(["main", "fast", "local"] as const).map((role) => (
             <RoleCard

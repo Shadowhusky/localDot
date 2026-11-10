@@ -206,11 +206,42 @@ export function conversationLook(
   entry: ConversationEntry,
   persona: PersonaId | undefined = entry.live?.persona ?? entry.persona,
 ): readonly Wearable[] {
-  return entry.look ?? taskOutfit(lookSeed(entry), persona);
+  return entry.look ?? taskOutfit(drawSeed(entry), persona);
 }
 
 export const lookSeed = (entry: ConversationEntry) =>
   entry.firstTask ?? entry.sessions.at(-1) ?? entry.sessionId;
+
+// A conversation whose draw matches an older one's look draws again, so no two in the list look
+// alike while the outfits allow it. Oldest first by their first task's id (a ULID), so a look never
+// changes as newer conversations arrive, and every device draws the same.
+const redrawn = new Map<string, string>();
+const REDRAWS = 12;
+const drawSeed = (entry: ConversationEntry) => redrawn.get(lookSeed(entry)) ?? lookSeed(entry);
+
+export function spreadLooks(entries: readonly ConversationEntry[]): void {
+  redrawn.clear();
+  const taken = new Set<string>();
+  const oldestFirst = [...entries].sort((a, b) =>
+    lookSeed(a) < lookSeed(b) ? -1 : lookSeed(a) > lookSeed(b) ? 1 : 0,
+  );
+  for (const entry of oldestFirst) {
+    if (entry.look) {
+      taken.add(entry.look.join(" "));
+      continue;
+    }
+    const seed = lookSeed(entry);
+    const persona = entry.live?.persona ?? entry.persona;
+    let drawn = seed;
+    let worn = taskOutfit(drawn, persona).join(" ");
+    for (let n = 1; n <= REDRAWS && taken.has(worn); n++) {
+      drawn = `${seed}#${n}`;
+      worn = taskOutfit(drawn, persona).join(" ");
+    }
+    taken.add(worn);
+    if (drawn !== seed) redrawn.set(seed, drawn);
+  }
+}
 
 // An empty title gives the conversation back its own.
 export function renameConversation(
@@ -274,6 +305,25 @@ export function readConversationsAgain(api: ApiClient): void {
   for (const list of stores.get(api)?.values() ?? []) list.refresh();
 }
 
+// Shows a change to several at once, in one commit, however the saves that follow are spaced.
+export function showOrganized(api: ApiClient, ids: readonly string[], change: Organize): void {
+  for (const list of stores.get(api)?.values() ?? []) for (const id of ids) list.patch(id, change);
+}
+
+// While conversations are being deleted the lists keep their rows, whatever a read would say, so
+// each row stays until it has played out. Returns what lets go, when they read again.
+export function holdConversations(api: ApiClient): () => void {
+  const held = [...(stores.get(api)?.values() ?? [])].map((list) => list.hold());
+  return () => {
+    for (const release of held) release();
+  };
+}
+
+// Conversations the daemon has deleted leave every list at once.
+export function dropConversations(api: ApiClient, ids: readonly string[]): void {
+  for (const list of stores.get(api)?.values() ?? []) list.drop(ids);
+}
+
 // The recent conversations, or those archived.
 export type ConversationView = "recent" | "archived";
 
@@ -299,6 +349,9 @@ interface ListStore {
   // A read, or another once the one under way is in.
   refresh(): void;
   patch(sessionId: string, change: Filing): void;
+  // No read touches the rows until the returned function lets go, when the list reads again.
+  hold(): () => void;
+  drop(ids: readonly string[]): void;
   // While anyone uses it the list follows the daemon; the returned function lets go.
   use(): () => void;
 }
@@ -321,11 +374,13 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
   let users = 0;
   let reading: AbortController | null = null;
   let outdated = false;
+  let holds = 0;
   // States pushed while a read is on its way, which the daemon may have answered before them.
   let pushed = new Map<string, ConversationLive | undefined>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stop: (() => void) | null = null;
   const set = (state: ListState) => {
+    if (state.entries !== store.state.entries && state.entries) spreadLooks(state.entries);
     store.state = state;
     for (const listener of listeners) listener();
   };
@@ -334,6 +389,10 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
     if (users > 0 && !document.hidden) timer = setTimeout(read, CONVERSATIONS_POLL_MS);
   };
   const read = () => {
+    if (holds > 0) {
+      outdated = true;
+      return;
+    }
     reading?.abort();
     outdated = false;
     pushed = new Map();
@@ -390,6 +449,23 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
     if (store.state.entries && entry)
       set({ ...store.state, entries: store.state.entries.with(at, organized(entry, change)) });
   };
+  const hold = () => {
+    holds++;
+    outdated = true;
+    reading?.abort();
+    reading = null;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      if (--holds === 0) read();
+    };
+  };
+  const drop = (ids: readonly string[]) => {
+    const { entries } = store.state;
+    if (entries?.some((entry) => ids.includes(entry.sessionId)))
+      set({ ...store.state, entries: entries.filter((entry) => !ids.includes(entry.sessionId)) });
+  };
   const reorganized = ({ sessionId, tag, pinned, archived, look }: ConversationOrganizedEvent) => {
     const { entry } = held(sessionId);
     // One that comes into the view or leaves it, and the count of those archived, need a read.
@@ -399,28 +475,32 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
   };
   const start = () => {
     let opened = false;
-    const socket = openSocket({
-      url: api.socketUrl("/api/events"),
-      protocols: api.socketProtocols(),
-      handlers: {
-        onOpen: () => {
-          if (opened) refresh();
-          opened = true;
-        },
-        onMessage: (data) => {
-          let value: unknown;
-          try {
-            value = JSON.parse(data);
-          } catch {
-            return;
-          }
-          const live = ConversationLiveEvent.safeParse(value);
-          if (live.success) change(live.data);
-          const filed = ConversationOrganizedEvent.safeParse(value);
-          if (filed.success) reorganized(filed.data);
-        },
-      },
-    });
+    // A shared link hears no app events, which name the owner's conversations: it reads its own.
+    const socket =
+      api.permits?.("GET", "/api/events") === false
+        ? null
+        : openSocket({
+            url: api.socketUrl("/api/events"),
+            protocols: api.socketProtocols(),
+            handlers: {
+              onOpen: () => {
+                if (opened) refresh();
+                opened = true;
+              },
+              onMessage: (data) => {
+                let value: unknown;
+                try {
+                  value = JSON.parse(data);
+                } catch {
+                  return;
+                }
+                const live = ConversationLiveEvent.safeParse(value);
+                if (live.success) change(live.data);
+                const filed = ConversationOrganizedEvent.safeParse(value);
+                if (filed.success) reorganized(filed.data);
+              },
+            },
+          });
     const looked = () => {
       if (document.hidden) clearTimeout(timer);
       else refresh();
@@ -428,7 +508,7 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
     document.addEventListener("visibilitychange", looked);
     window.addEventListener("focus", looked);
     return () => {
-      socket.close();
+      socket?.close();
       document.removeEventListener("visibilitychange", looked);
       window.removeEventListener("focus", looked);
       clearTimeout(timer);
@@ -445,6 +525,8 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
     read,
     refresh,
     patch,
+    hold,
+    drop,
     use() {
       if (users++ === 0) stop = start();
       read();

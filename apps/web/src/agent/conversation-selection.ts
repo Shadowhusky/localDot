@@ -1,6 +1,12 @@
 import { count } from "../copy/format.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
-import { type ConversationRow, type Organize, organizeConversation } from "./conversation-list.ts";
+import {
+  type ConversationRow,
+  holdConversations,
+  type Organize,
+  organizeConversation,
+  showOrganized,
+} from "./conversation-list.ts";
 
 // Enough requests at once to hide the round trips over a phone's link, few enough that the
 // daemon's other requests keep moving.
@@ -97,17 +103,24 @@ export function removalProblem({ deleted, live, failed }: Removal): string {
     .join(" ");
 }
 
-// Files each the same way; resolves to how many the daemon refused.
+// Files each the same way; resolves to how many the daemon refused. All show the change at once,
+// and the lists read nothing until every save is in, so none comes back while the rest save.
 export async function organizeConversations(
   api: ApiClient,
   ids: readonly string[],
   change: Organize,
 ): Promise<number> {
   let refused = 0;
-  await inTurn(ids, (id) =>
-    organizeConversation(api, id, change).catch(() => {
-      refused++;
-    }),
-  );
+  showOrganized(api, ids, change);
+  const letGo = holdConversations(api);
+  try {
+    await inTurn(ids, (id) =>
+      organizeConversation(api, id, change).catch(() => {
+        refused++;
+      }),
+    );
+  } finally {
+    letGo();
+  }
   return refused;
 }

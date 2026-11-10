@@ -38,6 +38,7 @@ for (const scheme of ["graphite", "daylight"] as const)
       await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
       await page.getByRole("radio", { name: /Google Chrome/u }).click();
       await page.getByRole("button", { name: "Accept and continue" }).click();
+      await page.getByRole("button", { name: "Skip for now" }).click();
       await expect(page.getByRole("heading", { name: "You're all set." })).toBeVisible();
       await expect(page.getByText("Google Chrome", { exact: true })).toBeVisible();
     });

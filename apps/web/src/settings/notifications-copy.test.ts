@@ -4,7 +4,7 @@ import {
   deviceCopy,
   deviceDetail,
   errorLine,
-  SCRIPT_EDITOR_HINT,
+  MAC_BANNER_HINT,
   testResultLine,
 } from "./notifications-copy.ts";
 
@@ -17,13 +17,17 @@ const phone = (label: string, result: "sent" | "gone" | "failed") => ({
 describe("notifications copy", () => {
   it("always tells the user where to allow Mac banners after one was sent", () => {
     expect(testResultLine({ mac: "shown", phones: [] })).toBe(
-      `Sent to this Mac. ${SCRIPT_EDITOR_HINT}`,
+      `Sent to this Mac. ${MAC_BANNER_HINT}`,
     );
     expect(testResultLine({ mac: "shown", phones: [phone("iPhone", "sent")] })).toBe(
-      `Sent to this Mac and 1 phone. ${SCRIPT_EDITOR_HINT}`,
+      `Sent to this Mac and 1 phone. ${MAC_BANNER_HINT}`,
     );
     expect(testResultLine({ mac: "failed", phones: [phone("Old phone", "gone")] })).toBe(
-      `The Mac banner didn't show. Old phone stopped accepting notifications and was removed. ${SCRIPT_EDITOR_HINT}`,
+      `The Mac banner didn't show. Old phone stopped accepting notifications and was removed. ${MAC_BANNER_HINT}`,
+    );
+    // The banner comes from localDot's own helper app, which is what System Settings lists.
+    expect(MAC_BANNER_HINT).toBe(
+      "No banner on the Mac? Allow notifications for localDot in System Settings › Notifications.",
     );
   });
 

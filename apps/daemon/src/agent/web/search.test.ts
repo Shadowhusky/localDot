@@ -246,3 +246,24 @@ describe("reading a page or a picture", () => {
       );
   });
 });
+
+describe("a search that lands somewhere else", () => {
+  it("asks each engine to stay on its own site, and reads no results from another", async () => {
+    const asked: { url: string; within?: string }[] = [];
+    const web: WebAccess = {
+      get: async (url, options) => {
+        asked.push({ url: url.href, ...(options.within ? { within: options.within } : {}) });
+        return {
+          url: new URL("https://site.example/landing"),
+          status: 200,
+          contentType: "text/html; charset=utf-8",
+          body: fixture("duckduckgo-web.html"),
+          truncated: false,
+        };
+      },
+    };
+    const outcome = await webSearch(web, { query: "lisbon flights" }, signal);
+    expect(outcome.hits).toEqual([]);
+    expect(asked.map((a) => a.within)).toEqual(["duckduckgo.com", "bing.com"]);
+  });
+});

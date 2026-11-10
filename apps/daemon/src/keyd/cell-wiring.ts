@@ -38,7 +38,14 @@ export class KeyLayerError extends Error {
 }
 
 export class CellKeydWiring implements CellKeyd {
-  constructor(private readonly deps: { keyd: KeydClient; docker: DockerClient }) {}
+  constructor(
+    private readonly deps: {
+      keyd: KeydClient;
+      docker: DockerClient;
+      // A shared link's task on the computer still needs its keys held (AgentRunner.holdsKeys).
+      held?(cellId: string): boolean;
+    },
+  ) {}
 
   async wire(record: CellRecord): Promise<void> {
     await guard(async () => {
@@ -67,6 +74,7 @@ export class CellKeydWiring implements CellKeyd {
         });
         if (opened.cellId !== record.id || opened.port !== record.keydPort)
           throw new KeyLayerError("keyd opened a different cell or listener");
+        if (this.deps.held?.(record.id)) await keyd.holdKeys(record.id);
         const surrogates = opened.surrogates ?? {};
         requireSurrogates(surrogates, secrets);
         await this.#write(record, [

@@ -123,3 +123,25 @@ it("wakes the agents an earlier task left unfinished before dot's first request"
     [id, "completed", undefined],
   ]);
 });
+
+it("gives a shared link's delegated agents none of the owner's tools, and the computer's", async () => {
+  const t = run(
+    [
+      call("subagent", {
+        description: "Look it up",
+        prompt: "Find what the owner paid for rent",
+        run_in_background: false,
+      }),
+      call("done", { summary: "Nothing to report" }),
+    ],
+    [call("recall", { query: "rent" }), call("shell", { command: "pwd" }), say("Nothing found")],
+    { guest: { apps: true } },
+  );
+  expect(await t.outcome).toBe("done");
+  const delegated = JSON.stringify(
+    t.model.prompts.find((p) => JSON.stringify(p).includes("localDot subagent")),
+  );
+  expect(delegated).toBeDefined();
+  expect(t.f.toolCalls.map((c) => c.name)).toContain("shell");
+  expect(t.f.toolCalls.map((c) => c.name)).not.toContain("recall");
+});

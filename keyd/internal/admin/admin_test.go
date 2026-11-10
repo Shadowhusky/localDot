@@ -313,6 +313,18 @@ func TestCellLifecycle(t *testing.T) {
 	if code != 200 || info["task"].(map[string]any)["limitUSD"] != 2.0 || info["role"] != "desktop" {
 		t.Fatalf("get: %d %v", code, info)
 	}
+	if code, _ := f.call(t, "PUT", "/v1/cells/c1/keys-held", nil); code != 204 {
+		t.Fatalf("hold keys: %d", code)
+	}
+	if code, info := f.call(t, "GET", "/v1/cells/c1", nil); code != 200 || info["keysHeld"] != true {
+		t.Fatalf("held: %d %v", code, info)
+	}
+	if code, body := f.call(t, "DELETE", "/v1/cells/c1/keys-held", nil); code != 200 || body["revoked"] != 1.0 {
+		t.Fatalf("release keys: %d %v", code, body)
+	}
+	if code, _ := f.call(t, "POST", "/v1/cells/c1/surrogates", map[string]any{"secrets": []string{"weather"}}); code != 200 {
+		t.Fatalf("mint after release: %d", code)
+	}
 	if code, body := f.call(t, "POST", "/v1/cells/c1/revoke", nil); code != 200 || body["revoked"] != 1.0 {
 		t.Fatalf("revoke: %d %v", code, body)
 	}
@@ -329,6 +341,11 @@ func TestCellLifecycle(t *testing.T) {
 	}
 	if code, _ := f.call(t, "POST", "/v1/cells/c1/revoke", nil); code != 404 {
 		t.Fatalf("revoke after close: %d", code)
+	}
+	for _, method := range []string{"PUT", "DELETE"} {
+		if code, _ := f.call(t, method, "/v1/cells/c1/keys-held", nil); code != 404 {
+			t.Fatalf("%s keys-held after close: %d", method, code)
+		}
 	}
 }
 

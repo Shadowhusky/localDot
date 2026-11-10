@@ -30,11 +30,17 @@ import {
   AgentError,
   AgentRunner,
   type AgentRunnerDeps,
+  BRAIN_DONE,
+  BRAIN_GAVE_UP,
+  computerDown,
   SIGN_IN_BROWSER_WAIT_MS,
 } from "./runner.ts";
 import { ComputerFences } from "./safety/fences.ts";
+import { ModelAnswerError } from "./safety/judge-model.ts";
 import { type AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
+import type { SideGo, SideModel } from "./side/agent.ts";
+import { sideSpendLedger } from "./side/spend.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
 
@@ -363,7 +369,7 @@ describe("the user's own hold on the computer", () => {
     "provider limit reached",
     "chatgpt plan limit reached",
     "claude code plan limit reached",
-  ])("persists a reply when %s prevents any model output", async (reason) => {
+  ])("raises one card when %s prevents any model output", async (reason) => {
     const f = setup();
     f.run.mockImplementationOnce(async (session) => {
       session.append("agent.state", {
@@ -380,12 +386,35 @@ describe("the user's own hold on the computer", () => {
       return 0;
     });
     const session = await f.runner.start(f.cellId, "Say hello");
-    await until(() => f.log.read(session.id).some((e) => e.type === "message.assistant"));
-    const replies = f.log.read(session.id).filter((e) => e.type === "message.assistant");
-    expect(replies).toHaveLength(1);
-    expect(replies[0]?.data).toMatchObject({
-      text: expect.stringContaining("Usage resets later today."),
+    await until(() => f.log.read(session.id).some((e) => e.type === "blocker.raise"));
+    const log = f.log.read(session.id);
+    expect(log.filter((e) => e.type === "blocker.raise").map((e) => e.data)).toEqual([
+      {
+        blockerId: expect.any(String),
+        blocker: { kind: "model", reason, detail: "Usage resets later today." },
+        by: "localdot",
+        required: true,
+      },
+    ]);
+    expect(log.some((e) => e.type === "message.assistant")).toBe(false);
+  });
+  it("hands a plan's limit to what continues the task once the plan resets, once", async () => {
+    const f = setup();
+    const planLimited = vi.fn();
+    f.deps.planLimited = planLimited;
+    const reason = "claude code plan limit reached";
+    f.run.mockImplementationOnce(async (session) => {
+      session.setStatus("paused");
+      session.append("agent.state", { state: "paused", reason, detail: "Limit reached" });
+      // The wait's own word is no new limit.
+      session.append("agent.state", { state: "paused", reason, autoContinue: { at: 1 } });
+      await abortable(new Promise<never>(() => {}), session.abort.signal);
+      return 0;
     });
+    const session = await f.runner.start(f.cellId, "Help with my task");
+    await until(() => planLimited.mock.calls.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(planLimited.mock.calls).toEqual([[session, reason, "Limit reached", true]]);
   });
   it("retires a plan-limited task and starts the conversation on the newly selected model", async () => {
     const f = setup();
@@ -548,6 +577,24 @@ describe("the user's own hold on the computer", () => {
       session.stop();
       await f.live.settled(session.id);
     });
+  });
+
+  it("starts a shared link's task in a conversation of its own, leaving the owner's as it was", async () => {
+    const f = setup();
+    const conversations = new Conversations(f.home, f.log);
+    f.deps.conversations = conversations;
+    conversations.begin();
+    const session = await f.runner.start(f.cellId, "Water the plants", undefined, {
+      continues: null,
+      sender: "a".repeat(24),
+      guest: { apps: true },
+    });
+    expect(f.log.read(session.id).find((e) => e.type === "session.start")?.data).not.toHaveProperty(
+      "continues",
+    );
+    expect(conversations.current()).toBeNull();
+    session.stop();
+    await f.live.settled(session.id);
   });
 
   it("holds the computer for the user beside a task live on it", async () => {
@@ -1447,6 +1494,35 @@ describe("Claude Code (your plan)", () => {
     session.stop();
     await f.live.settled(session.id);
   });
+  // A plan's model as the side agent runs it, answering from what it is given.
+  const planModel = (asked: SideGo[], text = "It is comparing two flights.") =>
+    vi.fn(
+      (quick: { model: string }, role: SideModel["role"]): SideModel => ({
+        provider: "claude-code",
+        model: quick.model,
+        role,
+        tools: true,
+        images: true,
+        plan: true,
+        run: async (go) => {
+          asked.push(go);
+          go.used({ inputTokens: 40, outputTokens: 9 });
+          await go.tools.call("finish", { status: "found", answer: ` ${text} ` }, go.signal);
+        },
+      }),
+    );
+  const sideDeps = (plan: NonNullable<AgentRunnerDeps["side"]>["plan"]) => ({
+    api: () => {
+      throw new Error("no key should be asked for here");
+    },
+    ...(plan ? { plan } : {}),
+    readers: (sessionId: string, _session: unknown, logFile: string) => ({
+      sessionId,
+      logFile,
+      redact: (text: string) => text,
+    }),
+    ledger: sideSpendLedger,
+  });
   it("answers a side question on the plan's fast model from the task's record, which never hears of it", async () => {
     const f = claudeSetup();
     f.setSettings({
@@ -1454,53 +1530,47 @@ describe("Claude Code (your plan)", () => {
       fast: { provider: "claude-code", model: "haiku" },
     });
     f.secrets.mockResolvedValue([]);
-    const asked: { system: string; prompt: string }[] = [];
-    const answer = vi.fn(() => async (system: string, prompt: string) => {
-      asked.push({ system, prompt });
-      return { text: " It is comparing two flights. ", inputTokens: 40, outputTokens: 9 };
-    });
-    if (f.deps.claudeCode) f.deps.claudeCode.answer = answer;
+    const asked: SideGo[] = [];
+    f.deps.side = sideDeps(planModel(asked));
     const session = await f.runner.start(f.cellId, "Find flights to Lisbon");
     await until(() => session.status === "idle");
     const transcript = f.deps.transcripts.read(session.id);
     const delivered = session.delivered;
+    const before = f.log.read(session.id).length;
     const reply = await f.runner.sideAnswer(
       session.id,
       "Which airline is cheaper?",
       new AbortController().signal,
     );
-    expect(reply).toEqual({
+    expect(reply).toMatchObject({
       answer: "It is comparing two flights.",
       provider: "claude-code",
       model: "haiku",
+      status: "found",
+      spend: { plan: true, usd: 0, inputTokens: 40, outputTokens: 9 },
     });
-    // A new conversation's naming request goes to the same model first.
-    const side = asked.find((call) => call.prompt.includes("Side question:"));
-    expect(side?.prompt).toContain("The user: Find flights to Lisbon");
-    expect(side?.prompt).toContain("Side question: Which airline is cheaper?");
-    expect(side?.system).toContain("dot never sees this question or your answer");
+    expect(asked[0]?.prompt).toContain("The user: Find flights to Lisbon");
+    expect(asked[0]?.prompt).toContain("Side question: Which airline is cheaper?");
+    expect(asked[0]?.system).toContain("dot never sees this question or your answer");
     expect(f.deps.transcripts.read(session.id)).toEqual(transcript);
     expect(session.delivered).toBe(delivered);
+    expect(f.log.read(session.id)).toHaveLength(before);
     const log = JSON.stringify(f.log.read(session.id));
     expect(log).not.toContain("airline");
     expect(log).not.toContain("comparing two flights");
     session.stop();
     await f.live.settled(session.id);
-    // An ended task is asked about on the saved fast model; there is no task left to count it in.
+    // An ended task is asked about on the saved fast model.
     await expect(
       f.runner.sideAnswer(session.id, "Did it finish?", new AbortController().signal),
     ).resolves.toMatchObject({ answer: "It is comparing two flights.", model: "haiku" });
-    expect(asked.filter((call) => call.prompt.includes("Side question:"))).toHaveLength(2);
+    expect(asked).toHaveLength(2);
+    expect(asked[1]?.prompt).toContain("This task has ended.");
   });
   it("answers a side question on the main model without a fast one, and says when none can", async () => {
     const f = claudeSetup();
     f.secrets.mockResolvedValue([]);
-    const answer = vi.fn((quick: { model: string }) => async () => ({
-      text: `from ${quick.model}`,
-      inputTokens: 1,
-      outputTokens: 1,
-    }));
-    if (f.deps.claudeCode) f.deps.claudeCode.answer = answer;
+    f.deps.side = sideDeps(planModel([], "from sonnet"));
     const session = await f.runner.start(f.cellId, "Fixture task");
     await until(() => session.status === "idle");
     const signal = new AbortController().signal;
@@ -1510,7 +1580,7 @@ describe("Claude Code (your plan)", () => {
     });
     session.stop();
     await f.live.settled(session.id);
-    if (f.deps.claudeCode) delete f.deps.claudeCode.answer;
+    f.deps.side = sideDeps(undefined);
     await expect(f.runner.sideAnswer(session.id, "Why?", signal)).rejects.toMatchObject({
       status: 409,
       problem: "no-spare-model",
@@ -1518,6 +1588,151 @@ describe("Claude Code (your plan)", () => {
     await expect(f.runner.sideAnswer(ulid(), "Why?", signal)).rejects.toMatchObject({
       status: 404,
     });
+  });
+  it("keeps a ChatGPT-plan task's data on its own models: says why, and asks no other", async () => {
+    const f = setup();
+    f.setSettings({
+      main: { provider: "chatgpt", model: "gpt-6-astra" },
+      fast: { provider: "anthropic", model: "claude-haiku-4-5-20251001", key: "anthropic" },
+    });
+    f.secrets.mockResolvedValue([
+      {
+        id: "anthropic",
+        kind: "llm",
+        provider: "anthropic",
+        createdAt: "2026-10-03T00:00:00Z",
+        updatedAt: "2026-10-03T00:00:00Z",
+      },
+    ]);
+    const api = vi.fn();
+    f.deps.side = { ...sideDeps(undefined), api: api as never };
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => f.run.mock.calls.length === 1);
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).rejects.toMatchObject({ status: 409, problem: "no-spare-model" });
+    expect(api).not.toHaveBeenCalled();
+    session.stop();
+    await f.live.settled(session.id);
+  });
+  it("says honestly why a task on the ChatGPT plan alone can't take a side question", async () => {
+    const f = setup();
+    f.setSettings({ main: { provider: "chatgpt", model: "gpt-6-astra" } });
+    f.deps.side = sideDeps(undefined);
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => f.run.mock.calls.length === 1);
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).rejects.toMatchObject({ status: 409, problem: "no-spare-model" });
+    session.stop();
+    await f.live.settled(session.id);
+    // At rest it is the same, without even reading the account: that takes a Codex process, and
+    // one here would hold the account dot's next turn needs.
+    const read = f.account.status.mock.calls.length;
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).rejects.toMatchObject({ status: 409, problem: "no-spare-model" });
+    expect(f.account.status.mock.calls.length).toBe(read);
+    expect(f.run).toHaveBeenCalledOnce();
+  });
+  it("says why when the plan refuses, and asks no model the task doesn't use", async () => {
+    const f = claudeSetup();
+    f.setSettings({
+      main: { provider: "claude-code", model: "sonnet" },
+      fast: { provider: "anthropic", model: "claude-haiku-4-5-20251001", key: "anthropic" },
+    });
+    f.secrets.mockResolvedValue([]);
+    const plan = vi.fn(
+      (quick: { model: string }, role: SideModel["role"]): SideModel => ({
+        provider: "claude-code",
+        model: quick.model,
+        role,
+        tools: true,
+        images: true,
+        plan: true,
+        run: async () => {
+          throw new ModelAnswerError(undefined, "You've hit your usage limit");
+        },
+      }),
+    );
+    const api = vi.fn();
+    f.deps.side = { ...sideDeps(plan), api: api as never };
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).rejects.toMatchObject({ status: 502, reason: "You've hit your usage limit" });
+    expect(api).not.toHaveBeenCalled();
+    session.stop();
+    await f.live.settled(session.id);
+  });
+  it("keeps an ended task on a local model away from the cloud fast model in Settings", async () => {
+    const f = setup();
+    f.setSettings({
+      main: { provider: "ollama", model: "llama3.2" },
+      fast: { provider: "anthropic", model: "claude-haiku-4-5-20251001", key: "anthropic" },
+      taskBudgetUSD: 5,
+    } as AgentSettings);
+    f.secrets.mockResolvedValue([
+      {
+        id: "anthropic",
+        kind: "llm",
+        provider: "anthropic",
+        createdAt: "2026-10-03T00:00:00Z",
+        updatedAt: "2026-10-03T00:00:00Z",
+      },
+    ]);
+    const asked: string[] = [];
+    f.deps.side = {
+      ...sideDeps(undefined),
+      api: ((role: { providerId: string; model: { id: string } }, side: SideModel["role"]) => {
+        asked.push(`${side}:${role.providerId}`);
+        return {
+          provider: role.providerId,
+          model: role.model.id,
+          role: side,
+          tools: true,
+          images: false,
+          run: async (go: SideGo) => {
+            await go.tools.call("finish", { status: "found", answer: "x" }, go.signal);
+          },
+        };
+      }) as never,
+    };
+    const id = f.log.createSession("Summarise my private notes");
+    f.log.append(id, {
+      type: "message.user",
+      agent: "main",
+      data: { messageId: ulid(), text: "Summarise my private notes", kind: "task" },
+    } as never);
+    await expect(
+      f.runner.sideAnswer(id, "What did it find?", new AbortController().signal),
+    ).resolves.toMatchObject({ provider: "ollama" });
+    expect(asked).toEqual(["main:ollama"]);
+  });
+  it("says why when none of the task's models can use tools, and asks none of them", async () => {
+    const f = claudeSetup();
+    f.secrets.mockResolvedValue([]);
+    const run = vi.fn();
+    const plan = vi.fn(
+      (quick: { model: string }, role: SideModel["role"]): SideModel => ({
+        provider: "claude-code",
+        model: quick.model,
+        role,
+        tools: false,
+        images: false,
+        run,
+      }),
+    );
+    f.deps.side = sideDeps(plan);
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).rejects.toMatchObject({ status: 409, problem: "no-tool-model" });
+    expect(run).not.toHaveBeenCalled();
+    session.stop();
+    await f.live.settled(session.id);
   });
   it("checks where data goes as on the ChatGPT plan: with a Jev key, unsure without keys, off when off", async () => {
     const at = "2026-10-03T00:00:00Z";
@@ -2064,19 +2279,20 @@ describe("ChatGPT runner lifecycle", () => {
     const locks = () =>
       f.log
         .read(s.id)
-        .filter((event) => event.type === "keys.lock")
-        .map((event) => event.data);
+        .filter((event) => event.type === "blocker.raise" || event.type === "blocker.clear")
+        .map((event) => event.type);
     const seq = s.inboxSequence;
     f.log.append(s.id, refused);
     f.log.append(s.id, refused);
-    expect(locks()).toEqual([{ locked: true }]);
+    expect(locks()).toEqual(["blocker.raise"]);
     expect(s.keysLocked).toBe(true);
     // dot hears the card is up, but the note alone never wakes a finished turn.
     expect(s.inboxSequence).toBe(seq + 1);
     await new Promise<void>((r) => setImmediate(r));
     expect(f.run).toHaveBeenCalledTimes(1);
+    s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
     await f.runner.keydChanged(open, locked);
-    expect(locks()).toEqual([{ locked: true }, { locked: false }]);
+    expect(locks()).toEqual(["blocker.raise", "blocker.clear"]);
     await until(() => f.run.mock.calls.length === 2);
     expect(s.keysLocked).toBe(false);
   });
@@ -2095,7 +2311,7 @@ describe("ChatGPT runner lifecycle", () => {
         decision: "deny",
       },
     });
-    expect(f.log.read(s.id).some((event) => event.type === "keys.lock")).toBe(false);
+    expect(f.log.read(s.id).some((event) => event.type === "blocker.raise")).toBe(false);
   });
   it("resumes a task paused on its model's locked key once the keys open, telling only a told dot", async () => {
     const f = setup();
@@ -2111,6 +2327,7 @@ describe("ChatGPT runner lifecycle", () => {
     s.append("agent.state", { state: "paused", reason: "keys locked" });
     expect(s.keysLocked).toBe(true);
     const seq = s.inboxSequence;
+    s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
     await f.runner.keydChanged(
       { ...locked, vault: { backend: "file", state: "ready", key: "passphrase" } },
       locked,
@@ -2120,9 +2337,9 @@ describe("ChatGPT runner lifecycle", () => {
     expect(
       f.log
         .read(s.id)
-        .filter((event) => event.type === "keys.lock")
-        .map((event) => event.data),
-    ).toEqual([{ locked: true }, { locked: false }]);
+        .filter((event) => event.type === "blocker.raise" || event.type === "blocker.clear")
+        .map((event) => event.type),
+    ).toEqual(["blocker.raise", "blocker.clear"]);
     // keyd's refusal of the model call can reach the log first; dot, told then, is told again.
     await f.runner.keydChanged(locked, {
       ...locked,
@@ -2136,11 +2353,449 @@ describe("ChatGPT runner lifecycle", () => {
     s.setStatus("paused");
     s.append("agent.state", { state: "paused", reason: "keys locked" });
     const told = s.inboxSequence;
+    s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
     await f.runner.keydChanged(
       { ...locked, vault: { backend: "file", state: "ready", key: "passphrase" } },
       locked,
     );
     expect(s.inboxSequence).toBe(told + 2);
+  });
+  describe("a task's cards", () => {
+    const blockers = (f: ReturnType<typeof setup>, id: string) =>
+      f.log
+        .read(id)
+        .flatMap((event) =>
+          event.type === "blocker.raise" || event.type === "blocker.clear"
+            ? [event.type === "blocker.raise" ? event.data.blocker : event.data.outcome]
+            : [],
+        );
+    const refusal = (secretId: string) =>
+      ({
+        type: "key.use",
+        agent: "keyd",
+        data: { secretId, host: "api.example", method: "GET", path: "/", decision: "deny" },
+      }) as const;
+    const off = (f: ReturnType<typeof setup>, state: "stopped" | "failed") => {
+      const cell = f.deps.cell(f.cellId);
+      if (!cell) throw new Error("fixture missing cell");
+      f.deps.cell = () => ({ ...cell, state });
+      return { ...cell, state };
+    };
+    const working = async (f: ReturnType<typeof setup>) => {
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.status === "idle");
+      s.setStatus("running");
+      return s;
+    };
+
+    it("raises a key's card when keyd refuses it for a reason of its own", async () => {
+      const f = setup();
+      const s = await working(f);
+      f.secrets.mockResolvedValue([{ id: "github", kind: "http", reenter: true }] as never);
+      f.log.append(s.id, refusal("github"));
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]?.blocker).toEqual({
+        kind: "key",
+        id: "github",
+        problem: "reenter",
+      });
+      expect(s.openBlockers[0]?.required).toBe(false);
+    });
+
+    it("leaves a key refused for going somewhere it may not go to the task", async () => {
+      const f = setup();
+      const s = await working(f);
+      f.secrets.mockResolvedValue([{ id: "github", kind: "http" }] as never);
+      f.log.append(s.id, refusal("github"));
+      await new Promise<void>((r) => setImmediate(r));
+      expect(blockers(f, s.id)).toEqual([]);
+    });
+
+    it("carries a stalled task on by itself once its key is saved", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http", reenter: true }] as never);
+      s.append("agent.state", { state: "paused", reason: "key needs re-entering", detail: "gh" });
+      await until(() => s.openBlockers.length === 1);
+      expect(blockers(f, s.id)).toEqual([{ kind: "key", id: "gh", problem: "reenter" }]);
+      expect(s.openBlockers[0]?.required).toBe(true);
+      const seq = s.inboxSequence;
+      await f.runner.keyChanged("gh");
+      expect(s.openBlockers).toHaveLength(1);
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http" }] as never);
+      s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
+      await f.runner.keyChanged("gh");
+      expect(blockers(f, s.id).at(-1)).toBe("fixed");
+      // Only the Resume: the model retries the call that met the refusal.
+      expect(s.inboxSequence).toBe(seq + 1);
+    });
+
+    it("takes a key stall only as keyd itself has it, whoever reported it", async () => {
+      const f = setup();
+      const s = await working(f);
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http" }] as never);
+      s.setStatus("paused");
+      for (const reason of ["key needs re-entering", "key changed outside localDot"])
+        for (const detail of ["gh", "not-saved"]) {
+          s.append("agent.state", { state: "paused", reason, detail });
+          await new Promise<void>((r) => setImmediate(r));
+        }
+      expect(blockers(f, s.id)).toEqual([]);
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http", rebound: true }] as never);
+      s.append("agent.state", {
+        state: "paused",
+        reason: "key changed outside localDot",
+        detail: "gh",
+      });
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]?.blocker).toEqual({ kind: "key", id: "gh", problem: "rebound" });
+    });
+
+    it("takes a keys-locked stall only while the vault is locked", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "keys locked" });
+      expect(blockers(f, s.id)).toEqual([]);
+      const vault = { backend: "file", key: "passphrase" } as const;
+      const open = { online: true, bootId: "fixture-boot", vault: { ...vault, state: "ready" } };
+      const locked = { ...open, vault: { ...vault, state: "locked" } };
+      await f.runner.keydChanged(locked as never, open as never);
+      expect(blockers(f, s.id)).toEqual([{ kind: "keys_locked" }]);
+    });
+
+    it("leaves a stalled task stopped when its key is saved elsewhere", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http", reenter: true }] as never);
+      s.append("agent.state", { state: "paused", reason: "key needs re-entering", detail: "gh" });
+      await until(() => s.openBlockers.length === 1);
+      const seq = s.inboxSequence;
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http" }] as never);
+      await f.runner.keyChanged("gh");
+      expect(blockers(f, s.id).at(-1)).toBe("fixed");
+      expect(s.inboxSequence).toBe(seq);
+      expect(s.status).toBe("paused");
+    });
+
+    it("leaves a task stalled on locked keys stopped when they are unlocked elsewhere", async () => {
+      const f = setup();
+      const vault = { backend: "file", key: "passphrase" } as const;
+      const locked = { online: true, bootId: "fixture-boot", vault: { ...vault, state: "locked" } };
+      const open = { ...locked, vault: { ...vault, state: "ready" } };
+      await f.runner.keydChanged(locked as never, open as never);
+      const s = await working(f);
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "keys locked" });
+      const seq = s.inboxSequence;
+      await f.runner.keydChanged(open as never, locked as never);
+      expect(s.openBlockers).toEqual([]);
+      expect(s.inboxSequence).toBe(seq);
+      expect(s.status).toBe("paused");
+    });
+
+    it("goes on by itself when the task's own card unlocked the keys, whatever it has read", async () => {
+      const f = setup();
+      const vault = { backend: "file", key: "passphrase" } as const;
+      const locked = { online: true, bootId: "fixture-boot", vault: { ...vault, state: "locked" } };
+      const open = { ...locked, vault: { ...vault, state: "ready" } };
+      await f.runner.keydChanged(locked as never, open as never);
+      const s = await working(f);
+      s.tainted = true;
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "keys locked" });
+      s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
+      const seq = s.inboxSequence;
+      await f.runner.keydChanged(open as never, locked as never);
+      expect(s.inboxSequence).toBe(seq + 1);
+    });
+
+    it("gives no extra time to a card on a task that ended blocked or gave up", async () => {
+      for (const end of ["blocked", "gave up"] as const) {
+        const f = setup(5);
+        f.run.mockImplementationOnce(async (session) => {
+          const generation = session.beginBrain();
+          session.setStatus("running");
+          session.raiseBlocker({ kind: "key", id: "gh", problem: "rejected" });
+          if (end === "blocked")
+            session.append("task.result", { outcome: "blocked", summary: "Blocked", files: [] });
+          session.retireBrain(generation);
+          return end === "blocked" ? BRAIN_DONE : BRAIN_GAVE_UP;
+        });
+        const s = await f.runner.start(f.cellId, "Fixture task");
+        await until(() => f.log.read(s.id).some((event) => event.type === "session.end"));
+        expect(f.run).toHaveBeenCalledTimes(1);
+      }
+    });
+
+    it("a removed key clears nothing", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.raiseBlocker({ kind: "key", id: "gh", problem: "rejected" });
+      f.secrets.mockResolvedValue([]);
+      await f.runner.keyChanged("gh");
+      expect(s.openBlockers).toHaveLength(1);
+    });
+
+    it("clears an app's card once its sign-in finished, on any device", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.raiseBlocker({ kind: "app", connector: "github", name: "GitHub", host: "api.example" });
+      f.secrets.mockResolvedValue([]);
+      let connected = false;
+      f.deps.appConnected = () => connected;
+      await f.runner.keyChanged("connector-github");
+      expect(s.openBlockers).toHaveLength(1);
+      connected = true;
+      await f.runner.keyChanged("connector-github");
+      expect(s.openBlockers).toEqual([]);
+      expect(blockers(f, s.id).at(-1)).toBe("fixed");
+    });
+
+    it("offers another model for what only that fixes, holding through a retry that fails", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      const refused = { state: "paused", reason: "model refused", detail: "400: Bad" } as const;
+      s.append("agent.state", refused);
+      expect(blockers(f, s.id)).toEqual([
+        { kind: "model", reason: "model refused", detail: "400: Bad" },
+      ]);
+      s.append("agent.state", { state: "thinking" });
+      expect(s.openBlockers).toHaveLength(1);
+      s.append("agent.state", refused);
+      expect(blockers(f, s.id)).toHaveLength(1);
+      s.append("agent.state", { state: "thinking" });
+      s.append("model.usage", {
+        role: "main",
+        route: "anthropic",
+        model: "m",
+        inputTokens: 1,
+        outputTokens: 1,
+      });
+      expect(blockers(f, s.id).at(-1)).toBe("worked");
+      expect(s.openBlockers).toEqual([]);
+    });
+
+    it("raises no model card for a stall that clears by itself", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "model busy" });
+      s.append("agent.state", { state: "paused", reason: "budget" });
+      s.append("agent.state", { state: "paused", reason: "question" });
+      expect(blockers(f, s.id)).toEqual([]);
+    });
+
+    it("asks for the computer when it goes off under a task at work, and carries on when it's back", async () => {
+      const f = setup();
+      const s = await working(f);
+      const cell = f.deps.cell(f.cellId);
+      f.runner.cellChanged(off(f, "stopped"));
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]?.blocker).toEqual({ kind: "computer", state: "stopped" });
+      const seq = s.inboxSequence;
+      f.deps.cell = () => cell;
+      f.runner.cellChanged(cell as NonNullable<typeof cell>);
+      expect(s.openBlockers).toEqual([]);
+      expect(s.inboxSequence).toBe(seq + 1);
+      expect(s.status).toBe("running");
+    });
+
+    it("says the computer is paused when that is what it is", async () => {
+      const f = setup();
+      const s = await working(f);
+      f.state.paused = true;
+      const cell = f.deps.cell(f.cellId);
+      f.runner.cellChanged(cell as NonNullable<typeof cell>);
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]?.blocker).toEqual({ kind: "computer", state: "paused" });
+    });
+
+    it("asks a finished task nothing when the computer goes off", async () => {
+      const f = setup();
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.status === "idle");
+      f.runner.cellChanged(off(f, "stopped"));
+      await new Promise<void>((r) => setImmediate(r));
+      expect(s.openBlockers).toEqual([]);
+    });
+
+    it("asks for Docker rather than the computer when Docker has stopped", async () => {
+      const f = setup();
+      let down = true;
+      f.deps.runtimeDown = async () => down;
+      f.deps.runtimeCheckMs = 1;
+      const s = await working(f);
+      f.runner.cellChanged(off(f, "failed"));
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]?.blocker).toEqual({ kind: "runtime" });
+      down = false;
+      await until(() => s.openBlockers.length === 0);
+    });
+
+    it("keeps the card up while the computer is on its way back", async () => {
+      const f = setup();
+      const s = await working(f);
+      f.runner.cellChanged(off(f, "stopped"));
+      await until(() => s.openBlockers.length === 1);
+      const cell = f.deps.cell(f.cellId) as NonNullable<ReturnType<typeof f.deps.cell>>;
+      f.runner.cellChanged({ ...cell, state: "starting" });
+      expect(s.openBlockers).toHaveLength(1);
+      f.runner.cellChanged({ ...cell, state: "ready" });
+      expect(s.openBlockers).toEqual([]);
+    });
+
+    it("waits out Docker when it takes the brain with it, counting no crash", async () => {
+      const f = setup();
+      let down = false;
+      f.deps.runtimeDown = async () => down;
+      f.deps.runtimeCheckMs = 1;
+      f.run.mockImplementationOnce(async (session) => {
+        const generation = session.beginBrain();
+        session.setStatus("running");
+        down = true;
+        session.retireBrain(generation);
+        return 137;
+      });
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.openBlockers.length === 1);
+      expect(s.openBlockers[0]).toMatchObject({ blocker: { kind: "runtime" }, required: true });
+      expect(s.status).toBe("paused");
+      expect(f.sleep).not.toHaveBeenCalled();
+      expect(f.run).toHaveBeenCalledTimes(1);
+      s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
+      down = false;
+      await until(() => s.openBlockers.length === 0);
+      await until(() => f.run.mock.calls.length === 2);
+      expect(blockers(f, s.id).at(-1)).toBe("fixed");
+    });
+
+    it("a computer whose stop failed offers nothing to start", () => {
+      const cell = {
+        id: "c",
+        scale: 1,
+        createdAt: "",
+        stream: NO_STREAM,
+        state: "failed",
+      } as const;
+      expect(computerDown(cell)).toBe("stopped");
+      expect(computerDown({ ...cell, error: "stop failed: docker" })).toBeUndefined();
+      expect(computerDown({ ...cell, fenced: { revision: 1 } })).toBeUndefined();
+      expect(computerDown({ ...cell, state: "starting" })).toBeUndefined();
+      expect(computerDown({ ...cell, state: "ready", paused: true })).toBe("paused");
+      expect(computerDown({ ...cell, state: "ready" })).toBeUndefined();
+    });
+
+    it("a stopped task raises nothing, whatever happens to its computer", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.stop();
+      f.runner.cellChanged(off(f, "stopped"));
+      await new Promise<void>((r) => setImmediate(r));
+      expect(blockers(f, s.id)).toEqual([]);
+    });
+
+    it("resumes nothing when a blocker clears after a message moved the task on", async () => {
+      const f = setup();
+      const locked = {
+        online: true,
+        bootId: "fixture-boot",
+        vault: { backend: "file", state: "locked" as const, key: "passphrase" as const },
+      };
+      await f.runner.keydChanged(locked, { online: true, bootId: "fixture-boot" });
+      const s = await working(f);
+      s.setStatus("paused");
+      s.append("agent.state", { state: "paused", reason: "keys locked" });
+      s.raiseBlocker({ kind: "key", id: "gh", problem: "reenter" }, { required: true });
+      expect(s.moveOn("Never mind that, do this instead")).toBe(true);
+      expect(s.openBlockers).toEqual([]);
+      const seq = s.inboxSequence;
+      const closed = blockers(f, s.id).length;
+      f.secrets.mockResolvedValue([{ id: "gh", kind: "http" }] as never);
+      await f.runner.keyChanged("gh");
+      await f.runner.keydChanged(
+        { ...locked, vault: { ...locked.vault, state: "ready" as const } },
+        locked,
+      );
+      expect(s.inboxSequence).toBe(seq);
+      expect(blockers(f, s.id)).toHaveLength(closed);
+    });
+
+    it("raises a new card if the model stalls again after a message", async () => {
+      const f = setup();
+      const s = await working(f);
+      s.setStatus("paused");
+      const stall = { state: "paused", reason: "model refused", detail: "400: No" } as const;
+      s.append("agent.state", stall);
+      const first = s.openBlockers[0]?.blockerId;
+      expect(s.moveOn("Try it like this")).toBe(true);
+      s.append("agent.state", { state: "thinking" });
+      s.append("agent.state", stall);
+      expect(s.openBlockers).toHaveLength(1);
+      expect(s.openBlockers[0]?.blockerId).not.toBe(first);
+    });
+
+    it("takes its card down when dot says it finished without it", async () => {
+      const f = setup();
+      f.run.mockImplementationOnce(async (session) => {
+        const generation = session.beginBrain();
+        session.setStatus("running");
+        session.raiseBlocker({ kind: "key", id: "gh", problem: "rejected" });
+        session.append("task.result", { outcome: "complete", summary: "Done anyway", files: [] });
+        session.retireBrain(generation);
+        return 0;
+      });
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.status === "idle");
+      expect(s.openBlockers).toEqual([]);
+      expect(blockers(f, s.id).at(-1)).toBe("moot");
+    });
+
+    it("keeps its card up when dot says it is blocked, to carry on once it's fixed", async () => {
+      const f = setup();
+      f.run.mockImplementationOnce(async (session) => {
+        const generation = session.beginBrain();
+        session.setStatus("running");
+        session.raiseBlocker({ kind: "key", id: "gh", problem: "rejected" });
+        session.append("task.result", { outcome: "blocked", summary: "Needs the key", files: [] });
+        session.retireBrain(generation);
+        return 0;
+      });
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.status === "idle");
+      expect(s.openBlockers).toHaveLength(1);
+    });
+
+    it("waits past its idle time while a card is up, then goes on when it's fixed", async () => {
+      const f = setup(5);
+      const locked = {
+        online: true,
+        bootId: "fixture-boot",
+        vault: { backend: "file", state: "locked" as const, key: "passphrase" as const },
+      };
+      await f.runner.keydChanged(locked, { online: true, bootId: "fixture-boot" });
+      f.run.mockImplementationOnce(async (session) => {
+        const generation = session.beginBrain();
+        session.setStatus("running");
+        f.log.append(session.id, refusal("github"));
+        session.retireBrain(generation);
+        return 0;
+      });
+      const s = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => s.status === "idle");
+      await new Promise<void>((r) => setTimeout(r, 40));
+      expect(s.stopped).toBe(false);
+      s.useBlocker(s.openBlockers[0]?.blockerId ?? "");
+      await f.runner.keydChanged(
+        { ...locked, vault: { ...locked.vault, state: "ready" as const } },
+        locked,
+      );
+      await until(() => f.run.mock.calls.length === 2);
+      expect(s.keysLocked).toBe(false);
+    });
   });
   it("keeps an idle task paused after account change until explicit Resume", async () => {
     const f = setup(),

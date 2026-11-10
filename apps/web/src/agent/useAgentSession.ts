@@ -3,7 +3,13 @@ import type { CellSummary } from "../cells/types.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import type { LiveSession } from "../session/useLiveSession.ts";
 import { AgentResponseError, type AgentSnapshot, loadAgentSnapshot } from "./api.ts";
-import { type AgentModel, emptyAgentModel, interruptRunning } from "./model.ts";
+import {
+  type AgentBlocker,
+  type AgentModel,
+  emptyAgentModel,
+  interruptRunning,
+  openBlockers,
+} from "./model.ts";
 
 const EMPTY_AGENT_MODEL = emptyAgentModel();
 // A task at rest whose log stops short of its end (the daemon went away under it) is over all the
@@ -36,10 +42,14 @@ export interface AgentSessionView {
   readonly history?: boolean;
   // The task is over because localDot went away under it, not because it ended.
   readonly interrupted?: boolean;
+  // What the task waits on the user to fix, from its own log. A task can wait with its computer off,
+  // when the page otherwise reads it as at rest.
+  readonly fixes?: readonly AgentBlocker[];
   readonly connection: ReturnType<LiveSession["agentFeed"]["read"]>["connection"];
   reconcile(): void;
 }
 const STATUS_ERROR = "Task status is unavailable. Check the connection and try again.";
+const NO_FIXES: readonly AgentBlocker[] = [];
 
 // Reads snapshots from the existing event owner. No second socket, optimistic mutation or
 // text-based acknowledgement. An invalidation occurs synchronously before a fetch can commit.
@@ -254,6 +264,10 @@ export function useAgentSession(
   const atWork =
     owned && view.availability === "ready" && !!view.snapshot && view.snapshot.status !== "ended";
   const interrupted = matches && atRest && current.history && !current.model.ended && !atWork;
+  const fixes = useMemo(
+    () => (matches && !interrupted ? openBlockers(current.model) : NO_FIXES),
+    [matches, interrupted, current.model],
+  );
   const connection = matches ? current.connection : "connecting";
   // The same view while nothing in it changed, so what is drawn from it alone need not draw again.
   return useMemo(
@@ -267,6 +281,7 @@ export function useAgentSession(
       authorityEpoch,
       history,
       interrupted,
+      fixes,
       readFresh,
       fresh,
       connection,
@@ -282,6 +297,7 @@ export function useAgentSession(
       authorityEpoch,
       history,
       interrupted,
+      fixes,
       readFresh,
       fresh,
       connection,

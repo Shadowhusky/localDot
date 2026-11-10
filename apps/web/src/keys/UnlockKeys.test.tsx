@@ -2,7 +2,6 @@
 import { sealPassphrase } from "@localdot/protocol";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { KeysLockedCard } from "../agent/KeysLockedCard.tsx";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { KeysPanel } from "./KeysPanel.tsx";
 import { type KeydHealth, unlockKeys, unlockProblem } from "./keys-api.ts";
@@ -91,21 +90,6 @@ describe("unlocking saved keys in Keys", () => {
       />,
     );
     expect(screen.queryByRole("form", { name: "Unlock saved keys" })).toBeNull();
-  });
-});
-
-describe("the chat's Unlock card", () => {
-  it("unlocks in place, with Keys a button away", async () => {
-    const unlock = vi.fn(async () => {});
-    const onOpenKeys = vi.fn();
-    render(<KeysLockedCard setup={false} unlock={unlock} onOpenKeys={onOpenKeys} />);
-    expect(screen.getByRole("heading", { name: "Unlock your saved keys" })).toBeTruthy();
-    expect(screen.getByText(/dot carries on by itself/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open Keys" }));
-    expect(onOpenKeys).toHaveBeenCalledWith(screen.getByRole("button", { name: "Open Keys" }));
-    fireEvent.change(field("Passphrase"), { target: { value: PASSPHRASE } });
-    fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
-    await waitFor(() => expect(unlock).toHaveBeenCalledWith(PASSPHRASE));
   });
 });
 

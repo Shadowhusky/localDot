@@ -152,6 +152,13 @@
     outline-offset: calc(var(--focus-width) * -1);
   }
 
+  /* The overview on show is lit as the conversation on show is. */
+  .sessions-overview[data-current] {
+    --_bg: var(--color-selected);
+    --_bg-hover: var(--color-selected);
+    --_quiet-fg: var(--color-fg-1);
+  }
+
   /* Magnified (useDockMagnify.ts), the marks move under a still pointer while the browser keeps
      the hover on the one it last hit, so the lens marks the one under it, as the Dock does: with
      no plate, only brighter ink. */

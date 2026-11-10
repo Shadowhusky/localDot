@@ -46,6 +46,7 @@ export class LiveSessions {
     { cellId: string; controller: AbortController; done: Promise<void>; since: number }
   >();
   readonly #leases = new Map<string, ComputerLease>();
+  readonly #leaseListeners = new Set<(key: string) => void>();
   #starts = 0;
 
   lease(cellId: string): ComputerLease {
@@ -53,7 +54,18 @@ export class LiveSessions {
     if (existing) return existing;
     const created = new ComputerLease();
     this.#leases.set(cellId, created);
+    created.subscribe(() => {
+      for (const listener of [...this.#leaseListeners]) listener(cellId);
+    });
     return created;
+  }
+
+  // Hears every lane change, the web browsers' own lanes included, with the lane's key.
+  subscribeLeases(listener: (key: string) => void): () => void {
+    this.#leaseListeners.add(listener);
+    return () => {
+      this.#leaseListeners.delete(listener);
+    };
   }
 
   start(
@@ -125,7 +137,8 @@ export class LiveSessions {
       .finally(() => {
         if (this.#bySession.get(sessionId) === entry) this.#bySession.delete(sessionId);
         for (const [alias, id] of this.#aliases) if (id === sessionId) this.#aliases.delete(alias);
-        this.#leases.get(cellId)?.revoke(sessionId);
+        // A task that ends leaves no place on any lane, its browser's included.
+        for (const lease of this.#leases.values()) lease.revoke(sessionId);
         settle();
       });
   }

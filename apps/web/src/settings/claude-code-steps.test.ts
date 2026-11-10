@@ -45,4 +45,20 @@ describe("Claude Code setup steps", () => {
       "Version 2.1.100 is too old to use here",
     ]);
   });
+  it("says the sign-in belongs to this dot when it uses an account of its own", () => {
+    expect(states(status({ state: "signed_out", version: "2.1.290", separate: true }))[1]).toEqual([
+      "todo",
+      "This dot's account isn't signed in",
+    ]);
+    expect(
+      states(
+        status({
+          state: "signed_in",
+          plan: "pro",
+          separate: true,
+          models: [{ id: "sonnet", name: "Sonnet" }],
+        }),
+      )[1],
+    ).toEqual(["done", "Signed in on this dot · Pro plan"]);
+  });
 });

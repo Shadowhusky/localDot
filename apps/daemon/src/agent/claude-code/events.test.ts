@@ -227,6 +227,14 @@ describe("Claude Code events", () => {
       f.map.handle({ type: "system", subtype: "init", tools: ["Bash(rm *)", "Read"] }),
     ).toEqual([{ kind: "offered", tools: ["Read"], unnamed: true }]);
   });
+  it("treats a start whose tools it can't read as offering a tool it can't name", () => {
+    for (const init of [
+      { type: "system", subtype: "init", tools: [{ name: "Read" }] },
+      { type: "system", subtype: "init" },
+      { type: "system", subtype: "init", tool_names: ["Read"] },
+    ])
+      expect(mapper().map.handle(init)).toEqual([{ kind: "offered", tools: [], unnamed: true }]);
+  });
   it("goes on when Claude Code refuses a tool that is not localDot's", () => {
     const f = mapper();
     f.map.handle(recorded.init);

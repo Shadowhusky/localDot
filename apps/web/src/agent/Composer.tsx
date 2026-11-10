@@ -36,6 +36,7 @@ import {
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
+import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { FileButton } from "../ui/FileButton.tsx";
 import { focusWithoutScroll } from "../ui/focus.ts";
@@ -103,9 +104,11 @@ export interface ComposerProps {
   onTaskStarted?(): void;
   // A message is on its way (true) or failed to arrive (false), before the task says anything.
   onSending?(on: boolean): void;
-  // While dot waits on a question: a message answers it, or turns it down so dot reads the message
-  // and its files.
-  reply?(text: string, attached: boolean): Promise<ReplyOutcome>;
+  // What dot waits on the user for: a message moves on from it, and reaches dot straight away.
+  waitingOn?: DotWait;
+  // A field for a secret is up in this conversation, whatever else dot waits on: what is typed here
+  // may be meant for it, so nothing goes without one more step and none of it is kept.
+  secretField?: boolean;
   // A card in the rail, or one rounded field in a phone's toolbar with its controls inside it.
   layout?: "card" | "pill";
   // What the field says while empty, when it isn't the usual words.
@@ -125,10 +128,23 @@ export interface ComposerProps {
   modelAfter?: string;
   // What "/" lists: the actions with a command name.
   actions?: readonly Action[];
+  // A shared link's limits: its messages go to its own task or start one, and it attaches nothing.
+  link?: { own: boolean; reason?: string };
 }
-// What became of a message sent as a reply: it answered the question, it turned the question down
-// and goes on as a message, it did not arrive, or it was held with the reason why.
-export type ReplyOutcome = "answered" | "declined" | "failed" | { readonly hold: string };
+// `private`: a question with something that must not go in a message, such as a password.
+export type DotWait = "question" | "private" | "approval" | "computer" | "fix" | "private-fix";
+// A secret field is up, and a secret typed here by mistake would be a message: it takes one more step.
+const WAITS_FOR_A_SECRET: ReadonlySet<DotWait | undefined> = new Set(["private", "private-fix"]);
+const HELD = "Not sent. dot reads what you send here, and it stays in the conversation.";
+const SEND_HELD = "Send as a message — dot will read this";
+const MOVES_ON: Readonly<Record<DotWait, string>> = {
+  question: "Sending moves on from dot's question",
+  private: "Sending moves on from dot's question. Messages aren't kept secret",
+  approval: "Sending moves on without approving",
+  computer: "Sending hands the computer back",
+  fix: "Sending moves on without fixing this",
+  "private-fix": "Sending moves on without fixing this. Messages aren't kept secret",
+};
 export interface Delivery {
   readonly id: number;
   readonly request: TextDelivery;
@@ -156,7 +172,9 @@ const readyCell = (props: ComposerProps) =>
   !props.cell.paused &&
   ULID_PATTERN.test(props.cell.id);
 function modeFor(props: ComposerProps, selected: "steer" | "followup"): MessageMode {
+  if (props.link && !props.link.own) return "new";
   if (
+    !props.waitingOn &&
     props.agent.snapshot?.status === "paused" &&
     !props.agent.snapshot.pause &&
     !props.agent.model.pendingAsk &&
@@ -166,7 +184,8 @@ function modeFor(props: ComposerProps, selected: "steer" | "followup"): MessageM
     return "new";
   if (!props.agent.sessionId || props.agent.model.ended || props.agent.snapshot?.holder)
     return "new";
-  return props.agent.snapshot?.status === "idle" ? "followup" : selected;
+  if (props.agent.snapshot?.status === "idle") return "followup";
+  return props.waitingOn ? "steer" : selected;
 }
 // Why nothing can be sent to the computer now, in the order someone would fix it.
 function computerReason(props: ComposerProps): string | undefined {
@@ -187,6 +206,7 @@ function computerReason(props: ComposerProps): string | undefined {
 function blockedReason(props: ComposerProps, mode: MessageMode) {
   return (
     computerReason(props) ??
+    props.link?.reason ??
     (mode !== "new" && !props.agent.fresh ? "Reconnecting to the task…" : undefined)
   );
 }
@@ -220,9 +240,12 @@ function readDraft(): string {
     return "";
   }
 }
+// While dot waits for a secret, what is typed may be that secret, so none of it is kept.
+let draftsHeld = false;
 function keepDraft(text: string): void {
   try {
-    if (text.trim()) localStorage.setItem(DRAFT_KEY, JSON.stringify({ text, at: Date.now() }));
+    if (text.trim() && !draftsHeld)
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ text, at: Date.now() }));
     else localStorage.removeItem(DRAFT_KEY);
   } catch {
     /* A blocked store keeps the draft for this page only. */
@@ -249,6 +272,7 @@ const ComposerField = memo(function ComposerField({
   describedBy,
   menu,
   active,
+  limit,
   events,
 }: {
   label: string;
@@ -260,6 +284,8 @@ const ComposerField = memo(function ComposerField({
   // The command list the field drives, and its row in reach of Enter.
   menu?: string;
   active?: string;
+  // Typing stops here, rather than the words moving out to a file.
+  limit?: number;
   events: FieldEvents;
 }) {
   return (
@@ -277,6 +303,7 @@ const ComposerField = memo(function ComposerField({
       aria-autocomplete="list"
       aria-controls={menu}
       aria-activedescendant={active}
+      maxLength={limit}
       {...events}
     />
   );
@@ -315,7 +342,9 @@ function sameComposerProps(was: ComposerProps, now: ComposerProps): boolean {
         ? !sameTask(was.agent, now.agent)
         : key === "cell"
           ? !sameCell(was.cell, now.cell)
-          : was[key] !== now[key]
+          : key === "link"
+            ? was.link?.own !== now.link?.own || was.link?.reason !== now.link?.reason
+            : was[key] !== now[key]
     )
       return false;
   return true;
@@ -360,7 +389,14 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     sessionId: props.agent.sessionId,
   });
   const composing = useRef(false);
-  const replying = useRef(false);
+  // A message held back while dot waits for a secret, and the words the user has said may go.
+  const [held, setHeld] = useState(false);
+  const heldShown = useRef(held);
+  // The user said to send this as a message: it isn't held again on its way.
+  const sendConfirmed = useRef(false);
+  const secretNow = useRef(false);
+  const heldLater = useRef(false);
+  const accepted = useRef(0);
   const mounted = useRef(true);
   const wasKeysOpen = useRef(props.keysOpen);
   // Without a thread to wait in, a message waits above the composer.
@@ -372,6 +408,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     current.current = props;
     guardOwner.current = guard;
     problemShown.current = problem;
+    heldShown.current = held;
   });
   useLayoutEffect(() => {
     const previous = identity.current;
@@ -467,7 +504,16 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   const draft = useRef(0);
   // A long text moved out of the field as its message was sent goes once it has uploaded.
   const sendOnceUploaded = useRef<boolean | null>(null);
+  // Returns whether it was turned away: long text would be uploaded at once, before any send.
   const addLongText = (text: string, kind: LongText) => {
+    if (secretNow.current && !sendConfirmed.current) {
+      setProblem(
+        kind === "pasted"
+          ? "Long text isn't taken while a field for a secret is up. Nothing was pasted."
+          : "Long text isn't taken while a field for a secret is up. The message stops here.",
+      );
+      return true;
+    }
     const { clean, removed } = withoutKeyLike(text);
     if (removed)
       setProblem(
@@ -475,10 +521,11 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           ? "Keys were taken out of the pasted text. Paste keys straight into Keys."
           : "Keys were taken out of your text. Paste keys straight into Keys.",
       );
-    if (!clean.trim()) return;
+    if (!clean.trim()) return false;
     const { file, label } = longTextFile(clean, kind, pasteNames.current);
     uploads.addText(file, label, clean);
     announce("composer", "The long text is attached as a file.");
+    return false;
   };
   const addLongNow = useRef(addLongText);
   addLongNow.current = addLongText;
@@ -547,11 +594,13 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   // by the guard's own notice when it can read that much.
   const moveToFile = (input: HTMLTextAreaElement) => {
     if (input.value.length <= KEY_SCAN_CHARS) guardOwner.current.check(input);
-    addLongText(input.value, "typed");
-    input.value = "";
+    const refused = addLongText(input.value, "typed");
+    // Turned away, the words stay, up to where the box stops taking more.
+    input.value = refused ? input.value.slice(0, TEXT_BOUND) : "";
     revision.current += 1;
     keepDraft("");
     measure(input);
+    return refused;
   };
   // Text past what the guard can read never reaches it.
   const checked = (input: HTMLTextAreaElement) => {
@@ -744,6 +793,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     live: true,
     changed: (input, caret) => {
       revision.current += 1;
+      sendConfirmed.current = false;
+      if (heldShown.current) setHeld(false);
       if (caret !== undefined) {
         checked(input);
         keepDraft(input.value);
@@ -764,8 +815,33 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     },
   });
   const talking = voice.state.phase !== "idle";
+  const secretWait = WAITS_FOR_A_SECRET.has(props.waitingOn) || !!props.secretField;
+  secretNow.current = secretWait;
+  useLayoutEffect(() => {
+    if (!secretWait) return;
+    keepDraft("");
+    draftsHeld = true;
+    sendConfirmed.current = false;
+    accepted.current = revision.current;
+    return () => {
+      draftsHeld = false;
+      window.clearTimeout(draft.current);
+      unkeptDraft = null;
+      setHeld(false);
+      const box = form.current?.querySelector("textarea");
+      if (!box) return;
+      if (revision.current === accepted.current) keepDraft(box.value);
+      else if (box.value.trim()) {
+        box.value = "";
+        revision.current += 1;
+        measure(box);
+        setProblem("What you typed during that wait was cleared, in case it was a passphrase.");
+      }
+    };
+  }, [secretWait, measure]);
   // dot has the message: its files went with it, and the draft clears unless it changed since.
   const delivered = (record: Delivery) => {
+    sendConfirmed.current = false;
     announce(
       "composer",
       record.request.research
@@ -886,11 +962,22 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       if (pending.current === record) pending.current = null;
     }
   };
-  const submit = (later = false, voiceFinished = false) => {
+  const submit = (later = false, voiceFinished = false, sendsAnyway = false) => {
     const input = field();
     if (!input || composing.current || (talking && !voiceFinished)) return;
     if (commands.submit(input.value) === "handled") return;
-    if (pending.current || replying.current) return;
+    if (pending.current) return;
+    if (
+      secretWait &&
+      !sendsAnyway &&
+      !sendConfirmed.current &&
+      (input.value.trim() || uploads.rows.length)
+    ) {
+      heldLater.current = later;
+      setHeld(true);
+      announce("composer", HELD);
+      return;
+    }
     if (input.value.length > TEXT_BOUND) {
       moveToFile(input);
       sendOnceUploaded.current = later;
@@ -949,29 +1036,14 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       deliver(text, "new", false, link);
       return;
     }
-    const reply = now.reply;
-    if (reply && chosen !== "new") {
-      replying.current = true;
-      setProblem(null);
-      void reply(text, uploads.rows.length > 0).then((outcome) => {
-        replying.current = false;
-        if (!mounted.current) return;
-        const box = field();
-        if (outcome === "declined") {
-          if (box?.value === text) deliver(text, chosen, later);
-        } else if (outcome === "answered") {
-          if (box?.value === text) {
-            box.value = "";
-            measure(box);
-          }
-        } else
-          setProblem(
-            outcome === "failed" ? "Your reply didn't reach dot. Try again." : outcome.hold,
-          );
-      });
-      return;
-    }
     deliver(text, chosen, later);
+  };
+  const sendHeld = () => {
+    accepted.current = revision.current;
+    sendConfirmed.current = true;
+    setHeld(false);
+    if (!touch) field()?.focus();
+    submit(heldLater.current, false, true);
   };
   const sendVoice = async () => {
     if (voiceSubmission.current) return;
@@ -1088,7 +1160,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     field()?.focus();
   };
 
-  const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
+  const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle" && !props.waitingOn;
   // A phone's field has room for its text and Send only; its More menu has the choice instead.
   const pill = props.layout === "pill";
   const offersMenu = !pill && choosing && !props.modelAfter;
@@ -1139,13 +1211,17 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       },
       onInput: (event) => {
         revision.current += 1;
+        sendConfirmed.current = false;
+        if (heldShown.current) setHeld(false);
         sendOnceUploaded.current = null;
-        if (event.currentTarget.value.length > TEXT_BOUND && !composing.current)
+        const refused =
+          event.currentTarget.value.length > TEXT_BOUND &&
+          !composing.current &&
           moveNow.current(event.currentTarget);
         guardOwner.current.input(event.currentTarget, event.nativeEvent);
         measure(event.currentTarget, true);
         weigh(event.currentTarget);
-        if (problemShown.current !== null) setProblem(null);
+        if (!refused && problemShown.current !== null) setProblem(null);
         const input = event.currentTarget;
         window.clearTimeout(draft.current);
         unkeptDraft = () => keepDraft(guardOwner.current.notice ? "" : input.value);
@@ -1162,12 +1238,15 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           pasted.length + input.value.length - (input.selectionEnd - input.selectionStart) >
           LONG_TEXT
         ) {
+          sendConfirmed.current = false;
           if (problemShown.current !== null) setProblem(null);
           addLongNow.current(pasted, "pasted");
           return;
         }
         input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
         revision.current += 1;
+        sendConfirmed.current = false;
+        if (heldShown.current) setHeld(false);
         keepDraft(guardOwner.current.check(input) ? input.value : "");
         measure(input);
         weigh(input);
@@ -1218,20 +1297,22 @@ export const Composer = memo(function Composer(props: ComposerProps) {
                 : empty && !talking
                   ? "Write a message first."
                   : undefined));
-  const attachReason = guard.notice
-    ? "Discard the key or move it to Keys first."
-    : sending || uncertain
-      ? "Wait until your message is sent."
-      : reason;
+  const attachReason = props.link
+    ? "Files can't be attached on a shared link."
+    : guard.notice
+      ? "Discard the key or move it to Keys first."
+      : sending || uncertain
+        ? "Wait until your message is sent."
+        : reason;
   attach.current = (files) => {
     if (attachReason || !files.length) return false;
+    sendConfirmed.current = false;
     uploads.select(files);
     return true;
   };
   // A message to a conversation at rest starts its next task, but reads as any other message.
   const newConversation = mode === "new" && !props.agent.sessionId;
-  const researchReason =
-    researchWait(props.agent) ?? (props.reply ? "Answer dot's question first." : undefined);
+  const researchReason = researchWait(props.agent);
   const researching = research && !researchReason;
   // On a phone the line over the field folds away still saying what it last said.
   const researchLine = !researchReason && (research || suggested);
@@ -1247,11 +1328,11 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         ? "Send"
         : mode === "followup"
           ? "Send follow-up"
-          : props.modelAfter
+          : props.modelAfter && !props.waitingOn
             ? "Send after this task"
             : "Send now";
   const note =
-    mode === "new" || takeover
+    mode === "new" || takeover || props.waitingOn
       ? undefined
       : props.agent.snapshot?.status === "paused"
         ? TRIES_AGAIN.has(props.agent.model.state?.reason)
@@ -1265,6 +1346,14 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     choosing &&
       props.modelAfter &&
       !empty && { text: `Runs on ${props.modelAfter} after this task`, alert: false },
+    props.waitingOn &&
+      !empty && {
+        text:
+          props.secretField && !WAITS_FOR_A_SECRET.has(props.waitingOn)
+            ? `${MOVES_ON[props.waitingOn]}. Messages aren't kept secret`
+            : MOVES_ON[props.waitingOn],
+        alert: false,
+      },
   ].filter((notice) => !!notice);
   // The notices fold away holding their last words.
   const shownNotices = useRef(notices);
@@ -1333,6 +1422,19 @@ export const Composer = memo(function Composer(props: ComposerProps) {
             </p>
           ))}
         </Collapse>
+        <Collapse open={held} className="composer-notices">
+          {held && (
+            <div className="composer-held">
+              <p className="composer-notice" role="status">
+                <Icon name="circle-alert" size={12} className="composer-notice-icon" />
+                <span>{HELD}</span>
+              </p>
+              <Button size="sm" disabledReason={sendReason} onClick={sendHeld}>
+                {SEND_HELD}
+              </Button>
+            </div>
+          )}
+        </Collapse>
         <Collapse open={!!revising} className="composer-files">
           {shownRevising.current && (
             <RevisingChip draft={shownRevising.current} onClear={() => setRevising(null)} />
@@ -1363,27 +1465,30 @@ export const Composer = memo(function Composer(props: ComposerProps) {
               ? "What should dot research?"
               : newConversation && !pill
                 ? "Ask dot to do something"
-                : props.reply
-                  ? "Answer dot"
+                : props.waitingOn
+                  ? "Or message dot"
                   : (props.placeholder ?? "Message dot")
           }
           unavailable={!!unavailable}
           listening={talking}
           describedBy={guard.notice ? keyNotice : undefined}
           menu={commands.field["aria-controls"]}
+          limit={secretWait && !sendConfirmed.current ? TEXT_BOUND : undefined}
           active={commands.field["aria-activedescendant"]}
           events={events}
         />
         <div className="composer-bar">
-          <FileButton
-            label="Attach files"
-            icon="paperclip"
-            size={pill ? 36 : 28}
-            round={pill}
-            multiple
-            onFiles={(files) => uploads.select(files)}
-            disabledReason={attachReason}
-          />
+          {!props.link && (
+            <FileButton
+              label="Attach files"
+              icon="paperclip"
+              size={pill ? 36 : 28}
+              round={pill}
+              multiple
+              onFiles={(files) => attach.current([...files])}
+              disabledReason={attachReason}
+            />
+          )}
           {!pill && (
             <ResearchToggle
               on={research}
@@ -1398,13 +1503,20 @@ export const Composer = memo(function Composer(props: ComposerProps) {
               {note && <span className="composer-note">{note}</span>}
             </VoiceStrip>
           </div>
-          {offersMenu && (
+          {props.permissions}
+          {!props.link && <VoiceButton voice={voice} />}
+          {/* Send's own options, beside it. Mounted with the card, so its room folds in and out
+              and the controls around it glide rather than jump as a task starts and stops. */}
+          {!pill && (
             <IconButton
               ref={more}
               className="composer-more"
               icon="more-horizontal"
               size={24}
               label="Message options"
+              data-shown={offersMenu || undefined}
+              aria-hidden={offersMenu ? undefined : true}
+              inert={!offersMenu}
               {...triggerProps("menu", menu)}
               onClick={() => setMenu(true)}
             />
@@ -1425,8 +1537,6 @@ export const Composer = memo(function Composer(props: ComposerProps) {
               Send after this task
             </MenuItem>
           </Menu>
-          {props.permissions}
-          <VoiceButton voice={voice} />
           <IconButton
             type={talking || taskAction ? "button" : "submit"}
             onPointerDown={(event) => {

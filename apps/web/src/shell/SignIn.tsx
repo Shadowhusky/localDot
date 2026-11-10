@@ -5,14 +5,21 @@ import { isHomeScreenApp } from "../notify/this-device.ts";
 import { CommandChip } from "./CommandChip.tsx";
 import "./sign-in.css";
 
-export type SignInState = "first" | "checking" | "expired" | "signed-out" | "unconfirmed";
+export type SignInState =
+  | "first"
+  | "checking"
+  | "expired"
+  | "signed-out"
+  | "unconfirmed"
+  // A shared link that stopped working while its guest was using it.
+  | "ended";
 
 // A sign-in that finishes sooner than this shows nothing at all, so a quick one never flashes.
 export const CHECKING_REVEAL_MS = 600;
 
 const COMMAND = "localdot open";
 
-const MESSAGES: Record<Exclude<SignInState, "checking">, string> = {
+const MESSAGES: Record<Exclude<SignInState, "checking" | "ended">, string> = {
   unconfirmed:
     "Sign-in could not be confirmed. Check that localDot is running and try a fresh link:",
   first: "This page needs a sign-in link. Run this to get one:",
@@ -44,6 +51,18 @@ export function SignIn({
       </main>
     );
   }
+  if (state === "ended")
+    return (
+      <main className="sign-in" data-state={state}>
+        <div className="sign-in-body">
+          <Dot size={56} state="waiting" />
+          <h1 className="sign-in-title">This link has ended</h1>
+          <p className="sign-in-message" role="alert">
+            It expired or the computer’s owner ended it. Ask them for a new link.
+          </p>
+        </div>
+      </main>
+    );
   if (homeScreen)
     return (
       <main className="sign-in" data-state={state}>

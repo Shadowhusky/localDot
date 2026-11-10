@@ -29,3 +29,27 @@ export async function maskFrame(
     .webp({ lossless: true })
     .toBuffer();
 }
+
+// The same frame at the screen's device resolution, for people only: the screen-pixel parts
+// covered as in the model's frame, then lossy, which keeps it near the model's size on disk.
+export async function maskFullFrame(image: Buffer, hidden: readonly Rect[]): Promise<Buffer> {
+  const picture = await raster(image);
+  const { width = 0, height = 0 } = await picture.metadata();
+  const boxes = hidden.flatMap((r) => {
+    const x = Math.max(0, Math.floor(r.x));
+    const y = Math.max(0, Math.floor(r.y));
+    const w = Math.min(width, Math.ceil(r.x + r.w)) - x;
+    const h = Math.min(height, Math.ceil(r.y + r.h)) - y;
+    return w > 0 && h > 0 ? [{ x, y, w, h }] : [];
+  });
+  return picture
+    .composite(
+      boxes.map((b) => ({
+        input: { create: { width: b.w, height: b.h, channels: 3 as const, background: COVER } },
+        left: b.x,
+        top: b.y,
+      })),
+    )
+    .webp({ quality: 85, smartSubsample: true })
+    .toBuffer();
+}

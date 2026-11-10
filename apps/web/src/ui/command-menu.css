@@ -251,6 +251,33 @@
     font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
   }
 
+  .side-note-by,
+  .side-note-wait {
+    margin: 0;
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .side-note-steps {
+    display: grid;
+    gap: calc(var(--spacing) * 1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .side-note-steps:empty {
+    display: none;
+  }
+
+  .side-note-partial {
+    display: grid;
+    gap: calc(var(--spacing) * 1);
+    min-width: 0;
+    color: var(--color-fg-2);
+    overflow-wrap: anywhere;
+  }
+
   .side-note-problem {
     margin: 0;
     color: var(--color-fg-2);

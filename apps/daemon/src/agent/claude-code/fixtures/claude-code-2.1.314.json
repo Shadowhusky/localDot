@@ -21,6 +21,7 @@
       "mcp__localdot__people",
       "mcp__localdot__recall",
       "mcp__localdot__remember",
+      "mcp__localdot__request_fix",
       "mcp__localdot__request_takeover",
       "mcp__localdot__routine",
       "mcp__localdot__shell",

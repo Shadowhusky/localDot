@@ -15,7 +15,9 @@ import {
 import { bytes } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import { type ApiClient, ApiError } from "../lib/api.ts";
+import { useGuest } from "../remote/guest.ts";
 import { dayLabel } from "../settings/memory/memory-copy.ts";
+import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
@@ -26,7 +28,14 @@ import { Skeleton } from "../ui/Skeleton.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
-import { deletable, deleteBody, deleteTitle } from "./cleanup.ts";
+import {
+  beingDeleted,
+  deletable,
+  deleteBody,
+  deleteRecording,
+  deleteTitle,
+  onDeletesSettled,
+} from "./cleanup.ts";
 import { Highlight } from "./Highlight.tsx";
 import { ReplayImage } from "./ReplayImage.tsx";
 import {
@@ -76,6 +85,7 @@ export function useTaskIndex(api: ApiClient): TaskIndex {
   const [revision, setRevision] = useState(0);
   const [folding, setFolding] = useState<ReadonlySet<string>>(new Set());
   const loadMore = useRef<() => void>(() => {});
+  useEffect(() => onDeletesSettled(() => setRevision((value) => value + 1)), []);
   useEffect(() => {
     if (folding.size === 0) return;
     const timer = setTimeout(() => {
@@ -104,13 +114,11 @@ export function useTaskIndex(api: ApiClient): TaskIndex {
         );
         if (controller.signal.aborted) return;
         cursor = page.next;
+        const sessions = page.sessions.filter((card) => !beingDeleted(card.id));
         setCards((previous) =>
           initial
-            ? page.sessions
-            : [
-                ...previous,
-                ...page.sessions.filter((card) => !previous.some((p) => p.id === card.id)),
-              ],
+            ? sessions
+            : [...previous, ...sessions.filter((card) => !previous.some((p) => p.id === card.id))],
         );
         setMore(page.next !== null);
       } catch {
@@ -251,6 +259,7 @@ export function TaskList({
   // a swipe to delete; or the player's rail, where a row only opens its recording.
   variant?: "library" | "phone" | "rail";
 }) {
+  const guest = useGuest();
   const list = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const anchor = useRef<HTMLElement | null>(null);
@@ -333,7 +342,7 @@ export function TaskList({
         windowed.scrollTo(flat.findIndex((row) => row.key === next.id));
         setFocusKey(next.id);
       }
-    } else if (!picking && (event.key === "Backspace" || event.key === "Delete")) {
+    } else if (!picking && !guest && (event.key === "Backspace" || event.key === "Delete")) {
       const card = rows[at];
       if (!card) return;
       event.preventDefault();
@@ -516,6 +525,8 @@ function TaskRow({
   const verdict = verdictGlyph(card.verdict);
   const phone = variant === "phone";
   const wide = variant === "library";
+  // Deleting a recording is the owner's.
+  const guest = useGuest();
   const locked = picking && !deletable(card);
   return (
     <li
@@ -579,7 +590,7 @@ function TaskRow({
                     Continue
                   </Button>
                 )}
-                {wide && (
+                {wide && !guest && (
                   <IconButton
                     size={28}
                     icon="trash"
@@ -591,7 +602,7 @@ function TaskRow({
             )
           }
           swipe={
-            phone && !picking
+            phone && !picking && !guest
               ? { label: "Delete", accessibleLabel: `Delete ${title}`, onAction: onDelete }
               : undefined
           }
@@ -629,51 +640,34 @@ export function DeleteTask({
   card: SessionCard | null;
   anchor: RefObject<HTMLElement | null>;
   onClose(): void;
+  // As soon as it is confirmed, while the daemon deletes it; one it keeps comes back with a note.
   onDeleted(card: SessionCard): void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const opened = card?.id;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a newly opened card starts clean.
-  useEffect(() => {
-    setError(null);
-    setBusy(false);
-  }, [opened]);
-  const remove = async () => {
-    if (!card || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.del(`/api/sessions/${card.id}`);
-      onDeleted(card);
-    } catch (failure) {
-      setError(
+  const remove = () => {
+    if (!card) return;
+    void deleteRecording(api, card.id).catch((failure) =>
+      announce(
+        "replay-delete",
         failure instanceof ApiError && failure.status === 409
-          ? "This task is still running. Stop it before deleting its recording."
+          ? "That task is still running. Stop it before deleting its recording."
           : "The recording couldn't be deleted. Try again.",
-      );
-    } finally {
-      setBusy(false);
-    }
+        "assertive",
+      ),
+    );
+    onDeleted(card);
   };
   return (
     <Dialog
       open={card !== null}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
+      onClose={onClose}
       anchor={anchor}
       title={deleteTitle(1)}
-      description={error ? <span role="alert">{error}</span> : deleteBody(1)}
+      description={deleteBody(1)}
     >
-      <Button
-        variant="quiet"
-        disabledReason={busy ? "Deleting the recording…" : undefined}
-        onClick={onClose}
-      >
+      <Button variant="quiet" onClick={onClose}>
         Cancel
       </Button>
-      <Button variant="destructive" busy={busy} onClick={() => void remove()}>
+      <Button variant="destructive" onClick={remove}>
         Delete
       </Button>
     </Dialog>

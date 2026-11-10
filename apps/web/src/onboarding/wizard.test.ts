@@ -8,6 +8,7 @@ import {
   previousStep,
   recommendedFast,
   recommendedMain,
+  speechOffered,
   stepNumber,
   stepTitle,
   thinksWith,
@@ -19,6 +20,26 @@ const models = (id: string) =>
   providerFixture().providers.find((provider) => provider.id === id)?.models ?? [];
 
 describe("first-run setup", () => {
+  it("offers Talk to dot only where there's a choice to make", () => {
+    const status = { supported: true, installed: null, handInstalled: null };
+    expect(speechOffered(null)).toBe(false);
+    expect(speechOffered({ ...status, supported: false })).toBe(false);
+    expect(speechOffered(status)).toBe(true);
+    expect(
+      speechOffered({ ...status, handInstalled: { model: "ggml-base.bin", englishOnly: false } }),
+    ).toBe(false);
+    expect(
+      speechOffered({
+        ...status,
+        installed: { tier: "light", name: "Light", diskBytes: 1, damaged: false },
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps a place at Talk to dot through a reload", () => {
+    expect(parseProgress(JSON.stringify({ step: "speech" })).step).toBe("speech");
+  });
+
   it("shows on first run: settings known, no model chosen, never put off or finished", () => {
     expect(wizardShown({ known: true, configured: false, progress: FRESH })).toBe(true);
     // Never while it is unknown whether a model is chosen.
@@ -59,19 +80,23 @@ describe("first-run setup", () => {
     expect(nextStep({ step: "browser", back: "turn-on" })).toBe("turn-on");
     expect(nextStep({ step: "dot" })).toBe("view");
     expect(nextStep({ step: "view" })).toBe("browser");
-    expect(nextStep({ step: "browser" })).toBe("turn-on");
+    expect(nextStep({ step: "browser" })).toBe("speech");
+    expect(nextStep({ step: "speech" })).toBe("turn-on");
+    expect(nextStep({ step: "speech", back: "turn-on" })).toBe("turn-on");
     // A new way of thinking needs its key and model before it can return.
     expect(nextStep({ step: "thinks", back: "turn-on" })).toBe("key");
     expect(nextStep({ step: "key", back: "turn-on" })).toBe("model");
   });
 
-  it("counts eight steps after the welcome and names the credential for how dot thinks", () => {
+  it("counts nine steps after the welcome and names the credential for how dot thinks", () => {
     expect(stepNumber("welcome")).toBe(0);
     expect(stepNumber("thinks")).toBe(1);
     expect(stepNumber("dot")).toBe(5);
     expect(stepNumber("view")).toBe(6);
     expect(stepNumber("browser")).toBe(7);
-    expect(stepNumber("turn-on")).toBe(8);
+    expect(stepNumber("speech")).toBe(8);
+    expect(stepNumber("turn-on")).toBe(9);
+    expect(stepTitle("speech", "api")).toBe("Talk to dot");
     expect(stepTitle("key", "api")).toBe("Key");
     expect(stepTitle("key", "chatgpt")).toBe("Sign-in");
     expect(stepTitle("key", "local")).toBe("Server");

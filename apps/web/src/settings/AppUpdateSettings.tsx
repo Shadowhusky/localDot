@@ -1,9 +1,7 @@
 import { useId, useState } from "react";
-import {
-  type AppUpdateProgress,
-  type ReleaseNote,
-  UPDATE_STEPS,
-  type UpdateStep,
+import type {
+  AppUpdateProgress,
+  ReleaseNote,
 } from "../../../../packages/protocol/src/app-update.ts";
 import { SafeMarkdown } from "../agent/SafeMarkdown.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -11,18 +9,18 @@ import { Dialog } from "../ui/Dialog.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Progress } from "../ui/Progress.tsx";
-import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { StableText } from "./StableText.tsx";
+import { UpdateSteps } from "./UpdateSteps.tsx";
+import {
+  failedStage,
+  STAGE_NAMES,
+  stageOf,
+  UPDATE_STAGES,
+  type UpdateStage,
+} from "./update-stage.ts";
 import type { AppUpdateControl } from "./useAppUpdate.ts";
 
-const STEP_NAMES: Record<UpdateStep, string> = {
-  download: "Download",
-  verify: "Check the download",
-  images: "Prepare the computer",
-  install: "Install",
-  restart: "Restart",
-};
 const shown = (version: string) => (version.length === 40 ? version.slice(0, 8) : version);
 
 function UpdateProgress({ progress }: { progress: AppUpdateProgress }) {
@@ -38,27 +36,27 @@ function UpdateProgress({ progress }: { progress: AppUpdateProgress }) {
   );
 }
 
+function AppUpdateSteps({ at, failed }: { at: UpdateStage; failed: boolean }) {
+  return <UpdateSteps stages={UPDATE_STAGES} names={STAGE_NAMES} at={at} failed={failed} />;
+}
+
 // What failed, in one sentence, over the steps the update went through.
-function UpdateFailure({ error, failed }: { error: string; failed: UpdateStep }) {
-  const at = UPDATE_STEPS.indexOf(failed);
+function UpdateFailure({ error, failed }: { error: string; failed: UpdateStage }) {
   return (
     <div className="settings-update-progress">
       <p className="settings-update-error">{error}</p>
-      <ol className="settings-steps settings-update-steps" aria-label="Update steps">
-        {UPDATE_STEPS.map((step, index) => {
-          const state = index < at ? "done" : index === at ? "failed" : "todo";
-          return (
-            <li key={step} className="settings-step" data-state={state}>
-              <StatusGlyph state={state} className="settings-step-glyph" />
-              <span className="settings-step-text">
-                <span className="settings-step-name">{STEP_NAMES[step]}</span>
-              </span>
-            </li>
-          );
-        })}
-      </ol>
+      <AppUpdateSteps at={failed} failed />
     </div>
   );
+}
+
+// What's going on while localDot restarts and this page has nothing else to go on.
+export function restartWords(update: AppUpdateControl, version: string | null) {
+  if (update.wait === "lost")
+    return "localDot hasn't come back. On the computer running it, run localdot up. This page keeps trying.";
+  if (update.wait === "slow") return "This is taking longer than usual. This page keeps trying.";
+  if (update.reconnecting) return `Checking localDot ${version ?? ""}`.trim();
+  return version ? `Starting localDot ${version}` : "Reconnecting to localDot";
 }
 
 // The newest version's notes open, any it skips folded under them.
@@ -85,46 +83,74 @@ function ReleaseNotes({ notes }: { notes: ReleaseNote[] }) {
   );
 }
 
+const UNSUPPORTED = {
+  "source-checkout": {
+    title: "This copy runs from source",
+    detail:
+      "It updates from its Git checkout, not from here: pull, rebuild, then restart localDot.",
+  },
+  "install-record": {
+    title: "Update localDot manually",
+    detail: "This copy can’t update itself. Run localdot update in Terminal.",
+  },
+};
+
 export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
   const { status, busy } = update;
   const [confirm, setConfirm] = useState(false);
   if (!status) return update.error ? <GroupNote>{update.error}</GroupNote> : null;
-  const restarting = status.phase === "installing" || update.restarting;
-  const working = restarting || status.phase === "checking" || status.phase === "downloading";
+  const stage = stageOf({ ...update, status });
+  const failed = stage ? null : failedStage(status);
   const version = status.availableVersion;
   const displayVersion = version && shown(version);
-  const title = restarting
-    ? "Restarting localDot…"
-    : !status.supported
-      ? "Update localDot manually"
-      : status.phase === "checking"
-        ? "Checking for updates…"
-        : status.phase === "downloading"
-          ? `Downloading localDot ${displayVersion}…`
-          : version
-            ? `localDot ${displayVersion} ${status.phase === "ready" ? "is ready" : "is available"}`
-            : status.checkedAt
-              ? "localDot is up to date"
-              : "Check for a new version";
+  const unsupported = UNSUPPORTED[status.unsupported ?? "install-record"];
+  const installingTitle = `Installing localDot${displayVersion ? ` ${displayVersion}` : ""}…`;
+  const downloadingTitle = `Downloading localDot${displayVersion ? ` ${displayVersion}` : ""}…`;
+  const title = !status.supported
+    ? unsupported.title
+    : stage === "check"
+      ? "Checking for updates…"
+      : stage === "download" || stage === "verify" || stage === "images"
+        ? downloadingTitle
+        : stage === "install"
+          ? installingTitle
+          : stage === "restart"
+            ? "Restarting localDot…"
+            : stage === "reconnect"
+              ? "Reconnecting to localDot…"
+              : failed
+                ? "The update didn't finish"
+                : version
+                  ? `localDot ${displayVersion} ${status.phase === "ready" ? "is ready" : "is available"}`
+                  : status.checkedAt
+                    ? "localDot is up to date"
+                    : "Check for a new version";
   const titles = [
     "Restarting localDot…",
+    "Reconnecting to localDot…",
     "Checking for updates…",
+    "The update didn't finish",
     "localDot is up to date",
     "Check for a new version",
+    downloadingTitle,
+    installingTitle,
     ...(version
-      ? [
-          `Downloading localDot ${displayVersion}…`,
-          `localDot ${displayVersion} is ready`,
-          `localDot ${displayVersion} is available`,
-        ]
+      ? [`localDot ${displayVersion} is ready`, `localDot ${displayVersion} is available`]
       : []),
   ];
-  const failed = status.error && status.progress ? status.progress.step : null;
   // Once localDot stops answering, the restart is under way.
   const progress: AppUpdateProgress | null =
-    update.restarting && version
-      ? { step: "restart", value: null, detail: `Starting localDot ${displayVersion}` }
+    stage === "restart" || stage === "reconnect"
+      ? {
+          step: "restart",
+          value: status.progress?.value ?? null,
+          detail:
+            update.restarting || update.reconnecting
+              ? restartWords(update, displayVersion)
+              : (status.progress?.detail ?? null),
+        }
       : status.progress;
+  const canUpdate = !!version || status.phase === "ready";
   return (
     <div>
       <GroupHead title="localDot updates" />
@@ -139,30 +165,18 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
           detail={
             status.supported
               ? `Installed ${status.currentVersion.length === 40 ? `build ${shown(status.currentVersion)}` : `version ${status.currentVersion}`}`
-              : "This copy can’t update itself. Run localdot update in Terminal, or rebuild it if you run from source."
+              : unsupported.detail
           }
           trailing={
             status.supported && (
               <Button
                 size="sm"
-                busy={busy || working}
-                onClick={
-                  status.phase === "ready"
-                    ? () => setConfirm(true)
-                    : version
-                      ? update.download
-                      : update.check
-                }
+                busy={busy || !!stage}
+                onClick={failed ? update.update : canUpdate ? () => setConfirm(true) : update.check}
               >
                 <StableText
-                  choices={["Install update", "Download update", "Check now"]}
-                  value={
-                    status.phase === "ready"
-                      ? "Install update"
-                      : version && status.phase !== "checking"
-                        ? "Download update"
-                        : "Check now"
-                  }
+                  choices={["Update now", "Retry", "Check now"]}
+                  value={failed ? "Retry" : canUpdate ? "Update now" : "Check now"}
                 />
               </Button>
             )
@@ -171,7 +185,14 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
           {failed && status.error ? (
             <UpdateFailure error={status.error} failed={failed} />
           ) : (
-            progress && <UpdateProgress progress={progress} />
+            <>
+              {progress && <UpdateProgress progress={progress} />}
+              {stage && (
+                <div className="settings-update-progress">
+                  <AppUpdateSteps at={stage} failed={false} />
+                </div>
+              )}
+            </>
           )}
         </GroupRow>
         {status.supported && (
@@ -214,22 +235,22 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
       {(update.error || (status.error && !failed)) && (
         <GroupNote>{update.error ?? status.error}</GroupNote>
       )}
-      {status.phase === "ready" && !failed && (
+      {status.phase === "ready" && !failed && !stage && (
         <GroupNote>
           <StableText
             choices={[
-              "The source update is downloaded. Install when you’re ready; building it may take a few minutes.",
-              "The update is downloaded. Installing it restarts localDot once.",
-              "Ready for your next launch. Install now when you’re finished, or leave it for after you quit localDot. Closing this browser tab does not quit the app.",
+              "The source update is downloaded. Update when you’re ready; building it may take a few minutes.",
+              "The update is downloaded. Updating restarts localDot once.",
+              "Ready for your next launch. Update now when you’re finished, or leave it for after you quit localDot. Closing this browser tab does not quit the app.",
               "Your download is saved. Turn on Install at next launch when you’re ready to update.",
             ]}
             value={
               status.currentVersion.length === 40
-                ? "The source update is downloaded. Install when you’re ready; building it may take a few minutes."
+                ? "The source update is downloaded. Update when you’re ready; building it may take a few minutes."
                 : !status.installOnLaunchSupported
-                  ? "The update is downloaded. Installing it restarts localDot once."
+                  ? "The update is downloaded. Updating restarts localDot once."
                   : status.preferences.installOnLaunch
-                    ? "Ready for your next launch. Install now when you’re finished, or leave it for after you quit localDot. Closing this browser tab does not quit the app."
+                    ? "Ready for your next launch. Update now when you’re finished, or leave it for after you quit localDot. Closing this browser tab does not quit the app."
                     : "Your download is saved. Turn on Install at next launch when you’re ready to update."
             }
           />{" "}
@@ -252,8 +273,8 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
       <Dialog
         open={confirm}
         onClose={() => setConfirm(false)}
-        title="Shut down and update?"
-        description="This shuts down your computer and restarts localDot to install the update. Save any unsaved work first. Your saved files and sign-ins stay."
+        title="Update localDot now?"
+        description="localDot restarts to install the update, and this page reconnects by itself. It usually takes about a minute. A task that's working holds the update back. Your computer, files and sign-ins stay."
       >
         <Button variant="quiet" onClick={() => setConfirm(false)}>
           Later
@@ -262,12 +283,51 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
           variant="primary"
           onClick={() => {
             setConfirm(false);
-            update.install();
+            update.update();
           }}
         >
-          Shut down and update
+          Update now
         </Button>
       </Dialog>
     </div>
+  );
+}
+
+// While localDot installs and restarts, nothing else on the page can act, so it says what is going
+// on over everything, on every device. It can be put aside; Settings keeps following the update.
+export function AppUpdateOverlay({ update }: { update: AppUpdateControl }) {
+  const { status } = update;
+  const [hidden, setHidden] = useState(false);
+  const underway = !!status?.supported && (status.phase === "installing" || update.restarting);
+  if (!underway && hidden) setHidden(false);
+  if (!status) return null;
+  const stage = stageOf({ ...update, status }) ?? "install";
+  const version = status.availableVersion ?? status.currentVersion;
+  const name = shown(version);
+  const line =
+    update.restarting || update.reconnecting
+      ? restartWords(update, name)
+      : (status.progress?.detail ?? `Installing localDot ${name}`);
+  return (
+    <Dialog
+      open={underway && !hidden}
+      onClose={() => setHidden(true)}
+      title={`Updating localDot to ${name}`}
+      body={
+        <div className="settings-update-overlay" role="status">
+          <Progress
+            label="Update progress"
+            value={status.progress?.value ?? undefined}
+            valueText={line}
+          />
+          <p className="settings-update-detail">{line}</p>
+          <AppUpdateSteps at={stage} failed={false} />
+        </div>
+      }
+    >
+      <Button variant="quiet" onClick={() => setHidden(true)}>
+        Hide
+      </Button>
+    </Dialog>
   );
 }

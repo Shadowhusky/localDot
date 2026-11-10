@@ -61,6 +61,8 @@ export interface ActionsInput {
   };
   readonly replay: Doable;
   readonly watch: Doable;
+  // Every conversation's screen and progress at once.
+  readonly overview: Doable;
   readonly models: {
     readonly groups: readonly ModelGroup[];
     readonly current?: string;
@@ -129,6 +131,7 @@ export function useActions(input: ActionsInput): {
   const newReason = input.newConversation.reason;
   const replayReason = input.replay.reason;
   const watchReason = input.watch.reason;
+  const overviewReason = input.overview.reason;
   const filesReason = input.files.reason;
   const previewsReason = input.previews.reason;
   const fullReason = input.fullScreen.reason;
@@ -186,11 +189,12 @@ export function useActions(input: ActionsInput): {
         id: "btw",
         command: "btw",
         title: "Ask a side question",
-        description: "Ask about this task without interrupting it. dot never sees it.",
+        description:
+          "Look into this task, its log, screen and files, without interrupting it. dot never sees it.",
         hint: "<question>",
         group: "Task",
         icon: "message-circle",
-        keywords: "by the way aside side question quick",
+        keywords: "by the way aside side question quick look check",
         input: "required",
         placeholder: "Ask about this task…",
         unavailable: sessionId ? undefined : "Start a task first",
@@ -546,6 +550,16 @@ export function useActions(input: ActionsInput): {
         run: doable((i) => i.watch),
       },
       {
+        id: "overview",
+        title: "Show the overview",
+        description: "Every dot's screen and progress at once",
+        group: "Go to",
+        icon: "layout-dashboard",
+        keywords: "grid tiles all dots conversations tasks screens dashboard",
+        unavailable: overviewReason,
+        run: doable((i) => i.overview),
+      },
+      {
         id: "view-chat",
         title: "Show the chat",
         description: "This conversation",
@@ -725,6 +739,7 @@ export function useActions(input: ActionsInput): {
     newReason,
     replayReason,
     watchReason,
+    overviewReason,
     filesReason,
     previewsReason,
     fullReason,

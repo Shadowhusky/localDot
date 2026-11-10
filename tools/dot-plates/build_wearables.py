@@ -74,6 +74,8 @@ def material(name, base, roughness=0.5, **extra):
         "specular": ["Specular IOR Level"],
         "anisotropic": ["Anisotropic"],
         "alpha": ["Alpha"],
+        "emission": ["Emission Strength"],
+        "glow": ["Emission Color"],
     }
     for key, value in extra.items():
         bp.set_input(bsdf, names[key], value)
@@ -492,54 +494,80 @@ def smoothstep(lo, hi, x):
     return t * t * (3 - 2 * t)
 
 
-def frame_shape(name, centre, hw, hh, radius, mat, bevel, lens_mat=None):
-    """A spectacle rim facing the camera about world point `centre`."""
-    m = bpy.context.scene.camera.matrix_world.to_3x3()
-    right, up = m @ Vector((1, 0, 0)), m @ Vector((0, 1, 0))
-    pts = []
-    steps = 10
-    r = min(radius, hw, hh)
-    for qx, qy, start in ((hw - r, hh - r, 0), (-(hw - r), hh - r, 90), (-(hw - r), -(hh - r), 180), (hw - r, -(hh - r), 270)):
-        for k in range(steps + 1):
-            a = math.radians(start + 90 * k / steps)
-            pts.append(centre + right * (qx + r * math.cos(a)) + up * (qy + r * math.sin(a)))
-    rim = tube(f"{name}-rim", pts, mat, bevel, closed=True)
-    if lens_mat:
-
-        def build(bm):
-            verts = [bm.verts.new(p) for p in pts]
-            bm.faces.new(verts)
-
-        mesh_object(f"{name}-lens", build, lens_mat)
-    return rim
-
-
 # --- wearables ----------------------------------------------------------------------------------
 
 
-def eye_point(i, lift):
-    x, y = EYES[i]
-    return toward_camera(on_sphere(x, y), lift)
+def on_face(x, y, lift):
+    """Frame point (x, y) off the sphere by `lift`, so eyewear follows the head's curve and still shows
+    exactly where its outline says."""
+    return on_sphere(x, y, 1.0 + lift)
 
 
-def spectacles(rim, hw, hh, corner, bevel, lift):
-    """Two rims about the eyes with clear lenses, which cast no shadow so the eyes stay bright."""
-    lens = material("lens", (0.9, 0.95, 1.0), 0.02, transmission=1.0, ior=1.45, specular=0.6)
-    centres = [eye_point(i, lift) for i in range(2)]
-    for i, c in enumerate(centres):
-        frame_shape(f"rim{i}", c, hw * U, hh * U, corner * U, rim, bevel, lens)
-        bpy.data.objects[f"rim{i}-lens"].visible_shadow = False
-    m = bpy.context.scene.camera.matrix_world.to_3x3()
-    return centres, m @ Vector((1, 0, 0)), m @ Vector((0, 1, 0))
+def circle_outline(cx, cy, r, steps=64):
+    return [(cx + r * math.cos(2 * math.pi * k / steps), cy + r * math.sin(2 * math.pi * k / steps)) for k in range(steps)]
+
+
+def rim(name, outline, mat, bevel, lift):
+    """A closed spectacle rim through frame-unit points."""
+    return tube(name, [on_face(x, y, lift) for x, y in outline], mat, bevel, closed=True)
+
+
+def lens(name, outline, mat, lift, shadow=True):
+    """A lens filling a frame-unit outline, curved with the head."""
+    ob = patch(name, outline, mat, 1.0 + lift, 0.0, 0)
+    ob.modifiers.clear()
+    ob.visible_shadow = shadow
+    return ob
+
+
+def vertical_tint(mat, top, bottom, lo=0.1, hi=0.62):
+    """A lens's colour from `bottom` to `top` up its height, in the body's axes."""
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    sep = nodes.new("ShaderNodeSeparateXYZ")
+    links.new(object_coords(nodes), sep.inputs[0])
+    ramp = nodes.new("ShaderNodeMapRange")
+    ramp.inputs["From Min"].default_value = lo
+    ramp.inputs["From Max"].default_value = hi
+    links.new(sep.outputs["Z"], ramp.inputs["Value"])
+    links.new(mix(nodes, links, ramp.outputs["Result"], bottom, top), bp.principled(mat).inputs["Base Color"])
+
+
+def glints(name, cx, cy, parts, lift, strength=0.6, slope=0.55):
+    """Slanted streaks of the softbox across a lens, each (across, width, length) in frame units."""
+    glow = material(name, (1.0, 1.0, 1.0), 0.3, alpha=strength, emission=1.0, glow=(1.0, 1.0, 1.0, 1.0))
+    for i, (across, width, length) in enumerate(parts):
+        corners = [
+            (cx + across - slope * length, cy - length),
+            (cx + across + width - slope * length, cy - length),
+            (cx + across + width + slope * length, cy + length),
+            (cx + across + slope * length, cy + length),
+        ]
+        lens(f"{name}{i}", corners, glow, lift + 0.004, shadow=False)
+
+
+GLASS_LENS = dict(transmission=1.0, ior=1.45, specular=0.6)
+# Behind a clear lens the eye stays its true size (Wardrobe), so a lens this wide holds it with air
+# around it; the lens centres sit a little outside the eyes, which are only 11 units apart.
+ROUND_INNER = 5.85
+ROUND_RIM = 0.62
+ROUND_AT = 7.0
 
 
 def glasses_round():
-    gold = material("gold-wire", (0.83, 0.62, 0.3), 0.18, metallic=1.0)
-    (left, right), rt, up = spectacles(gold, 5.3, 5.3, 5.3, 0.0105, 0.065)
-    ends = []
-    for side, eye in ((1, left), (-1, right)):
-        ends.append(eye + rt * (side * 5.3 * U * math.cos(0.5)) + up * (5.3 * U * math.sin(0.5)))
-    tube("bridge", [ends[0], (ends[0] + ends[1]) / 2 + up * (0.9 * U), ends[1]], gold, 0.009)
+    """Round scholar's glasses in dark tortoiseshell, big enough for dot's eyes to sit inside."""
+    shell = material("round-frame", (0.035, 0.016, 0.009), 0.3, coat=0.5, coat_roughness=0.2, specular=0.35)
+    glass = material("lens", (0.9, 0.95, 1.0), 0.02, **GLASS_LENS)
+    y = EYES[0][1]
+    lift = 0.07
+    for i, side in enumerate((-1, 1)):
+        cx = 32 + side * ROUND_AT
+        outline = circle_outline(cx, y, ROUND_INNER + ROUND_RIM)
+        rim(f"rim{i}", outline, shell, ROUND_RIM * U, lift)
+        lens(f"rim{i}-lens", outline, glass, lift, shadow=False)
+        glints(f"round-glint{i}", cx + side * 4.05, y - 2.3, ((0.0, 0.62, 1.5),), lift, 0.55, slope=-side * 0.55)
+        out = cx + side * (ROUND_INNER + ROUND_RIM)
+        blobs(f"hinge{i}", [ball(on_face(out + side * 0.25, y - 1.6, lift + 0.01), 0.032)], shell, 24)
+    tube("bridge", [on_face(32 - 2.05, y - 3.7, lift), on_face(32, y - 4.55, lift + 0.012), on_face(32 + 2.05, y - 3.7, lift)], shell, 0.024)
 
 
 MUSTACHE = (
@@ -594,7 +622,7 @@ def heather(name, dark, light, sheen, ribs=0.0):
     return mat
 
 
-HEATHER = ((0.019, 0.02, 0.022), (0.055, 0.057, 0.061))
+HEATHER = ((0.045, 0.048, 0.054), (0.115, 0.12, 0.13))
 
 
 def hoodie():
@@ -622,7 +650,7 @@ def hoodie():
         crease = front * smoothstep(4.0, 12.0, below) * (1 - smoothstep(26.0, 44.0, below)) * (abs(math.sin(math.radians(8.0 * az + 20.0))) ** 0.5 - 0.7)
         side = smoothstep(6.0, 28.0, below) * (0.6 * math.sin(math.radians(4.0 * az) + 0.8) + 0.4 * math.sin(math.radians(7.0 * az) + 2.3))
         v.co += v.co.normalized() * (0.02 * ripple + 0.01 * crease + 0.007 * side)
-    collar = heather("hoodie-collar", (0.016, 0.017, 0.019), (0.046, 0.048, 0.053), 0.35, ribs=70.0)
+    collar = heather("hoodie-collar", (0.036, 0.038, 0.044), (0.09, 0.095, 0.105), 0.35, ribs=70.0)
     sweep("collar", [sphere_at(neck(az), az, 1.004) for az in range(0, 360, 3)], lambda s: 0.028, lambda s: 0.05, collar, closed=True, sides=24, profile=1.0)
 
     # The hood's opening edge, bunched in a roll that rides higher behind the neck and thins toward
@@ -798,62 +826,68 @@ def scarf():
 
 
 def headphones():
-    plastic = material("plastic", (0.02, 0.022, 0.026), 0.42, coat=0.2, coat_roughness=0.3)
-    leather = material("leather", (0.03, 0.03, 0.034), 0.6, sheen=0.2)
-    metal = material("metal", (0.55, 0.57, 0.6), 0.28, metallic=1.0)
-    # The band rests on the head: its inner face meets the body at radius 1.
-    bpy.ops.mesh.primitive_torus_add(major_radius=1.045, minor_radius=0.045, rotation=(math.radians(90), 0, 0), major_segments=128, minor_segments=24)
-    band = bpy.context.active_object
-    band.data.materials.append(plastic)
-    bpy.ops.object.shade_smooth()
-    bm = bmesh.new()
-    bm.from_mesh(band.data)
-    bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], plane_co=(0, -0.02, 0), plane_no=(0, -1, 0), clear_outer=True)
-    bm.to_mesh(band.data)
-    bm.free()
+    """Over-ear headphones: a padded band over the crown and big cups on the sides of the head, turned
+    a little toward the viewer so their faces read at any size."""
+    shell = gloss("phones", (0.028, 0.03, 0.036), 0.32)
+    leather = material("leather", (0.012, 0.012, 0.015), 0.62, sheen=0.25)
+    metal = material("metal", (0.72, 0.74, 0.78), 0.28, metallic=1.0)
+    face = gloss("phones-face", (0.5, 0.52, 0.56), 0.34)
+    accent = gloss("phones-accent", (0.86, 0.14, 0.05), 0.24)
+    arc = [Vector((1.075 * math.sin(math.radians(a)), 0.0, -0.08 + 1.075 * math.cos(math.radians(a)))) for a in range(-78, 79, 3)]
+    tube("band", arc, shell, 0.042)
+    pad = [Vector((1.09 * math.sin(math.radians(a)), 0.0, -0.08 + 1.09 * math.cos(math.radians(a)))) for a in range(-34, 35, 3)]
+    tube("band-pad", pad, leather, 0.056)
     for side in (-1, 1):
-        x = side * 1.06
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.22, depth=0.16, location=(x, 0.0, -0.08), rotation=(0, math.radians(90), 0), vertices=64)
-        cup = bpy.context.active_object
-        cup.data.materials.append(plastic)
-        modifier(cup, "BEVEL", width=0.04, segments=6)
-        bpy.ops.object.shade_smooth()
-        bpy.ops.mesh.primitive_torus_add(major_radius=0.17, minor_radius=0.055, location=(side * 0.985, 0.0, -0.08), rotation=(0, math.radians(90), 0), major_segments=64, minor_segments=20)
-        pad = bpy.context.active_object
-        pad.data.materials.append(leather)
-        bpy.ops.object.shade_smooth()
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.03, depth=0.2, location=(side * 1.075, 0.0, 0.16), vertices=32)
-        slider = bpy.context.active_object
-        slider.data.materials.append(metal)
-        bpy.ops.object.shade_smooth()
+        at = Vector((side * 0.99, -0.06, -0.07))
+        turn = Matrix.Rotation(math.radians(-side * 44.0), 4, "Z") @ Matrix.Rotation(math.radians(side * 90.0), 4, "Y")
+
+        def part(kind, r, depth, along, mat, bevel=0.0, name="cup"):
+            m = Matrix.Translation(at) @ turn @ Matrix.Translation((0, 0, along))
+            if kind == "disc":
+                bpy.ops.mesh.primitive_cylinder_add(radius=r, depth=depth, vertices=96)
+            else:
+                bpy.ops.mesh.primitive_torus_add(major_radius=r, minor_radius=depth, major_segments=96, minor_segments=20)
+            ob = bpy.context.active_object
+            ob.name = f"{name}{side}"
+            ob.matrix_world = m
+            ob.data.materials.append(mat)
+            if bevel:
+                modifier(ob, "BEVEL", width=bevel, segments=6)
+            bpy.ops.object.shade_smooth()
+            return ob
+
+        part("disc", 0.3, 0.17, 0.05, shell, 0.04)
+        part("torus", 0.255, 0.062, -0.06, leather, name="pad")
+        part("torus", 0.2, 0.024, 0.14, accent, name="ring")
+        part("disc", 0.17, 0.02, 0.135, face, 0.006, name="face")
+        tube(f"yoke{side}", [Vector((side * 1.075 * math.sin(math.radians(78)), 0.0, -0.08 + 1.075 * math.cos(math.radians(78)))), Vector((side * 1.06, -0.005, 0.17))], metal, 0.022)
 
 
 def mortarboard():
-    black = felt("mortar", (0.012, 0.012, 0.015))
-    cap = mesh_object("skull", lambda bm: bmesh.ops.create_icosphere(bm, subdivisions=6, radius=1.03), black)
-    bm = bmesh.new()
-    bm.from_mesh(cap.data)
-    bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], plane_co=(0, 0, 0.66), plane_no=(0, 0, -1), clear_outer=True)
-    bm.to_mesh(cap.data)
-    bm.free()
-    modifier(cap, "SOLIDIFY", thickness=0.03, offset=1.0)
-    # Seen almost edge on, felt or any strong specular turns the board white; this one stays black.
+    """A graduate's cap: a snug skull under a big square board tipped toward the viewer, so it reads as
+    a diamond, with a gold tassel falling to one side."""
+    black = material("mortar", (0.016, 0.016, 0.022), 0.72, sheen=0.1, specular=0.2)
+    revolve("skull", smooth_profile([(0.71, 0.715), (0.725, 0.8), (0.62, 0.95), (0.3, 1.02), (0.001, 1.03)], 8), black)
     card = material("board", (0.014, 0.014, 0.017), 0.8, specular=0.08)
-    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0, 0, 1.055))
+    tip = math.radians(12.0)
+    tipped = Matrix.Rotation(tip, 4, "X")
+    at = Vector((0, 0, 1.0))
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
     board = bpy.context.active_object
-    board.scale = (1.02, 1.02, 0.03)
-    board.rotation_euler = (math.radians(-6), 0, math.radians(45))
+    board.matrix_world = Matrix.Translation(at) @ tipped @ Matrix.Rotation(math.radians(45), 4, "Z") @ Matrix.Diagonal((1.24, 1.24, 0.034, 1.0))
     board.data.materials.append(card)
     modifier(board, "BEVEL", width=0.012, segments=3)
-    gold = material("gold", (0.85, 0.6, 0.18), 0.32, metallic=1.0)
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.035, location=(0, 0, 1.085))
-    bpy.context.active_object.data.materials.append(gold)
-    bpy.ops.object.shade_smooth()
-    tip = Vector((0.66, -0.02, 1.02))
-    tube("cord", [Vector((0, 0, 1.09)), Vector((0.3, -0.05, 1.085)), tip, tip + Vector((0.02, -0.08, -0.12)), tip + Vector((0.03, -0.1, -0.26))], gold, 0.008)
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.04, depth=0.2, location=tip + Vector((0.03, -0.1, -0.36)), vertices=24)
-    bpy.context.active_object.data.materials.append(gold)
-    bump(gold, 0.6, 0.01, lambda n, l: ribs(n, l, 260.0))
+    metal = material("gold", (0.92, 0.64, 0.14), 0.3, metallic=1.0)
+    lay = lambda x, y, up=0.03: at + tipped @ Vector((x, y, up))
+    blobs("button", [Matrix.Translation(lay(0, 0, 0.035)) @ Matrix.Diagonal((0.05, 0.05, 0.024, 1.0))], metal, 32)
+    end = lay(0.62, -0.26)
+    tube("cord", [lay(0, 0, 0.036), lay(0.32, -0.12), end, end + Vector((0.04, -0.03, -0.12))], metal, 0.014)
+    hang = end + Vector((0.04, -0.03, -0.12))
+    blobs("knot", [ball(hang, 0.042)], metal, 24)
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.056, depth=0.27, location=hang + Vector((0, 0, -0.165)), vertices=32)
+    fringe = bpy.context.active_object
+    fringe.data.materials.append(metal)
+    bump(metal, 0.5, 0.012, lambda n, l: ribs(n, l, 180.0))
 
 
 def beret():
@@ -894,157 +928,162 @@ def cap_twill():
     return twill
 
 
-CAP_EDGE = 46.0
+# A structured crown, from where it grips the head to its top.
+CAP_DOME = [(0.66, 0.765), (0.685, 0.86), (0.655, 1.0), (0.5, 1.115), (0.25, 1.18), (0.001, 1.195)]
 
 
-def cap_rim(az):
-    """Where the cap meets the head: level in front over the eyes, lower round the sides and back."""
-    return CAP_EDGE - 9.0 * (1 - math.cos(math.radians(az))) / 2
-
-
-def cap_brim(twill):
-    """The cap's curved bill, forward over the eyes."""
+def cap_bill(mat, reach=0.62):
+    """A cap's curved bill, out over the eyes and clear of them, falling away at its sides."""
 
     def build(bm):
-        steps_u, steps_v = 32, 8
+        steps_u, steps_v = 48, 10
         grid = []
         for i in range(steps_u + 1):
             u = -1 + 2 * i / steps_u
-            az = 44.0 * u
-            inner = on_body(cap_rim(az) + 0.5, az, 0.03)
-            out = Vector((math.sin(math.radians(az)) * 0.6, -math.cos(math.radians(az)), -0.18)).normalized()
-            reach = 0.5 * math.sqrt(max(0.0, 1 - u * u)) ** 0.6
+            a = math.radians(66.0 * u)
+            radial = Vector((math.sin(a), -math.cos(a), 0.0))
+            at = Vector((0.66 * math.sin(a), -0.66 * math.cos(a), 0.8))
+            out = reach * (1 - u * u) ** 0.55
             row = []
             for j in range(steps_v + 1):
                 k = j / steps_v
-                row.append(bm.verts.new(inner + out * (reach * k) + Vector((0, 0, -0.1 * u * u * k))))
+                row.append(bm.verts.new(at + radial * (out * k) + Vector((0, 0, -(0.045 + 0.24 * u * u) * k))))
             grid.append(row)
         for i in range(steps_u):
             for j in range(steps_v):
                 bm.faces.new((grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]))
 
-    brim = mesh_object("brim", build, twill)
-    modifier(brim, "SOLIDIFY", thickness=0.026, offset=0.0)
-    modifier(brim, "BEVEL", width=0.01, segments=3, limit_method="ANGLE")
-    modifier(brim, "SUBSURF", levels=2, render_levels=2)
+    bill = mesh_object("brim", build, mat)
+    modifier(bill, "SOLIDIFY", thickness=0.03, offset=0.0)
+    modifier(bill, "BEVEL", width=0.012, segments=3, limit_method="ANGLE")
+    modifier(bill, "SUBSURF", levels=2, render_levels=2)
+    return bill
 
 
 def cap():
-    """A baseball cap above the eyes: a tall six-panel crown with a button, and the bill forward."""
+    """A baseball cap above the eyes: a round six-panel crown with a button, and a two-tone bill."""
     twill = cap_twill()
-    # The crown rises above the head the way a structured cap's front panels stand up.
-    lift = lambda lat: 0.16 * max(0.0, min(1.0, (lat - 40.0) / 50.0)) ** 1.4
-
-    crown = region("cap", cap_rim, lambda az: 89.5, twill, 1.012, 0.03, rows=48)
-    for v in crown.data.vertices:
-        lat = math.degrees(math.asin(max(-1.0, min(1.0, v.co.z / v.co.length))))
-        v.co += v.co.normalized() * (lift(lat) + 0.03 * math.sin(math.pi * max(0.0, min(1.0, (lat - 38.0) / 52.0))))
+    dome = smooth_profile(CAP_DOME, 10)
+    revolve("cap", dome, twill)
     seam = material("cap-seam", (0.01, 0.03, 0.2), 0.7)
     for az in range(-150, 181, 60):
-        points = []
-        for k in range(9):
-            lat = cap_rim(az) + 3 + (86 - cap_rim(az) - 3) * k / 8
-            points.append(on_body(lat, az, 0.046 + lift(lat) + 0.03 * math.sin(math.pi * k / 8)))
-        tube(f"seam{az}", points, seam, 0.004)
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.035, location=(0, 0, 1.012 + 0.03 + 0.16 + 0.012), segments=32, ring_count=16)
+        a = math.radians(az)
+        tube(f"seam{az}", [Vector((r * 1.008 * math.sin(a), -r * 1.008 * math.cos(a), h)) for r, h in dome[3:-1:2]], seam, 0.004)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.04, location=(0, 0, 1.195), segments=32, ring_count=16)
     button = bpy.context.active_object
     button.scale = (1, 1, 0.5)
     button.data.materials.append(twill)
     bpy.ops.object.shade_smooth()
-    cap_brim(twill)
+    peak = material("cap-peak", (0.008, 0.024, 0.15), 0.72, sheen=0.3, sheen_roughness=0.5)
+    bump(peak, 0.2, 0.003, lambda n, l: weave(n, l, 260.0))
+    cap_bill(peak)
 
 
-def wayfarer(centre, rt, up, top, bottom, height, corner, steps=6):
-    """A wayfarer lens outline about a world point: wider at the brow than at the cheek."""
+def wayfarer(cx, cy, top, bottom, height, corner, steps=8):
+    """A wayfarer lens outline about a frame point: wider at the brow than at the cheek."""
     points = []
     corners = (
-        (top - corner, height / 2 - corner, 0),
-        (-(top - corner), height / 2 - corner, 90),
-        (-(bottom - corner), -height / 2 + corner, 180),
-        (bottom - corner, -height / 2 + corner, 270),
+        (top - corner, -height / 2 + corner, 270),
+        (bottom - corner, height / 2 - corner, 0),
+        (-(bottom - corner), height / 2 - corner, 90),
+        (-(top - corner), -height / 2 + corner, 180),
     )
-    for cx, cy, start in corners:
+    for qx, qy, start in corners:
         for k in range(steps + 1):
             a = math.radians(start + 90 * k / steps)
-            points.append(centre + rt * ((cx + corner * math.cos(a)) * U) + up * ((cy + corner * math.sin(a)) * U))
+            points.append((cx + qx + corner * math.cos(a), cy + qy + corner * math.sin(a)))
     return points
 
 
 def sunglasses():
-    """Wayfarer sunglasses over the eyes, tinted so dot's eyes still show through them."""
-    acetate = material("shades-frame", (0.01, 0.011, 0.013), 0.16, coat=0.8, coat_roughness=0.05)
-    tint = material("shades-lens", (0.01, 0.014, 0.022), 0.04, coat=1.0, coat_roughness=0.02, specular=0.9, alpha=0.58)
-    m = bpy.context.scene.camera.matrix_world.to_3x3()
-    rt, up = m @ Vector((1, 0, 0)), m @ Vector((0, 1, 0))
-    centres = []
-    for i, x in enumerate((25.0, 39.0)):
-        centre = toward_camera(on_sphere(x, 27.2), 0.075)
-        centres.append(centre)
-        outline = wayfarer(centre, rt, up, 5.8, 4.7, 10.6, 2.2)
-        tube(f"rim{i}", outline + outline[:1], acetate, 0.03)
-
-        def lens(bm, outline=outline):
-            bm.faces.new([bm.verts.new(p) for p in outline])
-
-        glass = mesh_object(f"lens{i}", lens, tint)
-        glass.visible_shadow = False
-        brow = [centre + rt * ((-5.8 + 11.6 * k / 10) * U) + up * ((5.3 - 0.2 * math.sin(math.pi * k / 10)) * U) for k in range(11)]
-        tube(f"brow{i}", brow, acetate, 0.034)
-    a, b = centres[0] + rt * (5.6 * U) + up * (2.6 * U), centres[1] - rt * (5.6 * U) + up * (2.6 * U)
-    tube("bridge", [a, (a + b) / 2 + up * (0.8 * U), b], acetate, 0.026)
+    """Big glossy wayfarers, dark enough to hide dot's eyes, with the softbox streaked across them."""
+    acetate = material("shades-frame", (0.012, 0.013, 0.016), 0.3, coat=0.5, coat_roughness=0.22, specular=0.35)
+    tint = material("shades-lens", (0.01, 0.014, 0.022), 0.34, coat=0.12, coat_roughness=0.3, specular=0.12)
+    vertical_tint(tint, (0.004, 0.005, 0.009), (0.03, 0.05, 0.1), 0.06, 0.55)
+    y = EYES[0][1]
+    lift = 0.07
+    for i, side in enumerate((-1, 1)):
+        cx = 32 + side * 7.5
+        outline = wayfarer(cx, y, 6.85, 6.0, 11.6, 3.0)
+        rim(f"rim{i}", outline, acetate, 0.037, lift)
+        lens(f"lens{i}", outline, tint, lift)
+        brow = [(cx - 6.4 + 12.8 * k / 12, y - 5.7 + 0.25 * ((k - 6) / 6) ** 2) for k in range(13)]
+        tube(f"brow{i}", [on_face(px, py, lift + 0.012) for px, py in brow], acetate, 0.048)
+        glints(f"shades-glint{i}", cx, y + 0.3, ((-3.7, 1.25, 2.5), (-1.85, 0.5, 2.0)), lift, 0.34)
+    tube("bridge", [on_face(32 - 1.2, y - 3.2, lift), on_face(32, y - 3.9, lift + 0.015), on_face(32 + 1.2, y - 3.2, lift)], acetate, 0.04)
     steel = material("hinge", (0.75, 0.76, 0.78), 0.25, metallic=1.0)
-    for side, centre in ((-1, centres[0]), (1, centres[1])):
-        at = toward_camera(centre + rt * (side * 4.6 * U) + up * (4.4 * U), 0.03)
-        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.012, location=at, segments=24, ring_count=12)
-        bpy.context.active_object.data.materials.append(steel)
-        bpy.ops.object.shade_smooth()
+    for i, side in enumerate((-1, 1)):
+        at = on_face(32 + side * 13.7, y - 4.3, lift + 0.05)
+        blobs(f"hinge{i}", [ball(at, 0.02)], steel, 24)
 
 
 def bow():
-    """A satin bow on the upper left of the head."""
-    satin = material("bow", (0.55, 0.02, 0.09), 0.32, sheen=0.5, sheen_roughness=0.3, coat=0.3, coat_roughness=0.2)
-    centre = on_body(50.0, -40.0, 0.07)
+    """A big satin bow on the upper left of the head: two full loops, a knot and two short tails."""
+    satin = material("bow", (0.66, 0.02, 0.13), 0.3, sheen=0.5, sheen_roughness=0.3, coat=0.35, coat_roughness=0.18)
+    centre = on_body(61.0, -42.0, 0.09)
     n = centre.normalized()
     across = Vector((0, 0, 1)).cross(n).normalized()
     up = n.cross(across).normalized()
     turn = Matrix((across, up, n)).transposed()
+
+    def loop(bm, side):
+        rings = []
+        sides = 48
+        steps = 40
+        for i in range(steps + 1):
+            t = i / steps
+            # Pinched at the knot, fullest two thirds out, with a soft dent in its end.
+            w = 0.056 + 0.185 * math.sin(math.pi * min(1.0, t * 0.62 + 0.02)) ** 1.1 * (1 - 0.32 * t**6)
+            ring = []
+            for k in range(sides):
+                a = 2 * math.pi * k / sides
+                local = Vector((side * (0.015 + 0.32 * t), math.sin(a) * w + side * 0.1 * t, math.cos(a) * w * 0.6 + 0.05))
+                ring.append(bm.verts.new(centre + turn @ local))
+            rings.append(ring)
+        for a, b in zip(rings, rings[1:]):
+            for k in range(sides):
+                bm.faces.new((a[k], a[(k + 1) % sides], b[(k + 1) % sides], b[k]))
+        bm.faces.new(rings[0])
+        bm.faces.new(rings[-1])
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
     for side in (-1, 1):
-        bpy.ops.mesh.primitive_uv_sphere_add(radius=1.0, segments=64, ring_count=32)
-        loop = bpy.context.active_object
-        tilt = Matrix.Rotation(math.radians(side * 18), 4, "Z")
-        loop.matrix_world = Matrix.Translation(centre + across * (side * 0.2)) @ turn.to_4x4() @ tilt @ Matrix.Diagonal((0.22, 0.14, 0.08, 1.0))
-        loop.data.materials.append(satin)
-        bpy.ops.object.shade_smooth()
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=1.0, segments=48, ring_count=24)
-    knot = bpy.context.active_object
-    knot.matrix_world = Matrix.Translation(centre + n * 0.03) @ turn.to_4x4() @ Matrix.Diagonal((0.08, 0.095, 0.07, 1.0))
-    knot.data.materials.append(satin)
-    bpy.ops.object.shade_smooth()
+        ob = mesh_object(f"loop{side}", lambda bm, side=side: loop(bm, side), satin)
+        modifier(ob, "SUBSURF", levels=1, render_levels=1)
+    blobs("knot", [Matrix.Translation(centre + n * 0.06) @ turn.to_4x4() @ Matrix.Diagonal((0.078, 0.095, 0.068, 1.0))], satin, 48)
     for side in (-1, 1):
-        start = centre - up * 0.06
-        tube(f"tail{side}", [start, start - up * 0.13 + across * (side * 0.07), start - up * 0.25 + across * (side * 0.13)], satin, 0.03)
+        start = centre - up * 0.04 + n * 0.015
+        along = (-up + across * (side * 0.62)).normalized()
+        side_axis = n.cross(along).normalized()
+        blade(f"tail{side}", start, along, side_axis, n, 0.3, lambda t: 0.038 + 0.034 * t, satin, thickness=0.02, curl=-0.02, rows=16, cols=6, subdivide=1)
 
 
 def star_pin():
-    """A small gold star pinned low on the chest, over whatever dot wears."""
-    gold = material("star", (0.86, 0.6, 0.16), 0.22, metallic=1.0)
-    centre = on_sphere(41.5, 50.0, 1.075)
-    n = centre.normalized()
-    across = Vector((0, 0, 1)).cross(n).normalized()
-    up = n.cross(across).normalized()
-    points = []
-    for k in range(10):
-        a = math.pi / 2 + k * math.pi / 5
-        r = 0.12 if k % 2 == 0 else 0.05
-        points.append(centre + (across * math.cos(a) + up * math.sin(a)) * r)
+    """A gold star pinned high on the chest over whatever dot wears, faceted so it catches the light."""
+    metal = gloss("star", (0.98, 0.62, 0.05), 0.2)
+    centre = on_sphere(41.5, 46.0, 1.03)
+    outward = (centre.normalized() + Vector((0, -1.6, 0.16))).normalized()
+    across = Vector((0, 0, 1)).cross(outward).normalized()
+    up = outward.cross(across).normalized()
+    apex = centre + outward * 0.1
 
     def build(bm):
-        fill(bm, points)
+        rim_verts = []
+        back_verts = []
+        for k in range(10):
+            a = math.pi / 2 + k * math.pi / 5
+            r = 0.235 if k % 2 == 0 else 0.105
+            p = centre + (across * math.cos(a) + up * math.sin(a)) * r
+            rim_verts.append(bm.verts.new(p))
+            back_verts.append(bm.verts.new(p - outward * 0.03))
+        top = bm.verts.new(apex)
+        for k in range(10):
+            bm.faces.new((rim_verts[k], rim_verts[(k + 1) % 10], top))
+            bm.faces.new((back_verts[k], back_verts[(k + 1) % 10], rim_verts[(k + 1) % 10], rim_verts[k]))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
 
-    star = mesh_object("star", build, gold, smooth=False)
-    modifier(star, "SOLIDIFY", thickness=0.03, offset=1.0)
-    modifier(star, "BEVEL", width=0.008, segments=3, limit_method="ANGLE")
-
+    star = mesh_object("star", build, metal, smooth=False)
+    modifier(star, "BEVEL", width=0.007, segments=2, limit_method="ANGLE", angle_limit=math.radians(20))
 
 
 # --- for telling tasks apart ---------------------------------------------------------------------
@@ -1172,13 +1211,18 @@ def party_hat():
 
 
 def top_hat():
-    """A small silk top hat, tipped to the left, with a magenta band."""
-    tilt = lean(-15, 8)
-    silk = material("silk", (0.022, 0.022, 0.028), 0.22, coat=0.8, coat_roughness=0.12, specular=0.7)
-    crown_at = smooth_profile([(0.001, 1.27), (0.24, 1.27), (0.3, 1.255), (0.29, 1.12), (0.3, 1.0)], 8)
-    revolve("crown", [*crown_at, (0.34, 0.965), (0.52, 0.955), (0.575, 0.975), (0.585, 0.955), (0.52, 0.925), (0.3, 0.915)], silk, tilt)
-    ribbon = material("ribbon", (0.62, 0.03, 0.26), 0.36, sheen=0.5, coat=0.2)
-    revolve("ribbon", [(0.303, 1.0), (0.3, 1.085)], ribbon, tilt)
+    """A proper silk top hat perched on the crown of the head, tipped a little to the left, with a
+    broad crimson band."""
+    tilt = lean(-9, 5)
+    silk = material("silk", (0.022, 0.022, 0.03), 0.36, coat=0.25, coat_roughness=0.2, specular=0.3)
+    crown_at = smooth_profile([(0.001, 1.235), (0.37, 1.235), (0.445, 1.22), (0.415, 1.05), (0.435, 0.885)], 8)
+    revolve("crown", crown_at, silk, tilt)
+    # Seen almost edge on, anything glossier turns the brim white.
+    card = material("brim", (0.012, 0.012, 0.016), 0.82, specular=0.06)
+    brim = smooth_profile([(0.42, 0.915), (0.6, 0.875), (0.73, 0.86), (0.785, 0.885), (0.79, 0.865), (0.72, 0.835), (0.58, 0.84), (0.42, 0.875)], 6)
+    revolve("brim", brim, card, tilt)
+    ribbon = material("ribbon", (0.72, 0.03, 0.12), 0.34, sheen=0.5, coat=0.25)
+    revolve("ribbon", [(0.428, 0.895), (0.43, 0.905), (0.418, 1.0), (0.416, 1.01)], ribbon, tilt)
 
 
 def crown():
@@ -1222,17 +1266,18 @@ def crown():
     revolve("band", [(0.668, 0.74), (0.682, 0.755), (0.682, 0.775), (0.668, 0.79)], metal, tilt)
 
 
-WIZARD_CONE = [(0.82, 0.7), (0.76, 0.78), (0.62, 0.9), (0.44, 1.02), (0.22, 1.2), (0.012, 1.33)]
+WIZARD_CONE = [(0.58, 0.82), (0.48, 0.94), (0.36, 1.06), (0.23, 1.17), (0.11, 1.27), (0.012, 1.36)]
 
 
 def wizard_hat():
-    """A navy felt hat with a bent point, a wide brim, a gold band and stars."""
-    tilt = lean(-5, 8)
-    felted = sheen_felt("wizard", (0.03, 0.045, 0.24))
+    """A tall navy felt hat with a floppy point, a gold band and stars, on a modest wavy brim."""
+    tilt = lean(-4, 6)
+    felted = material("wizard", (0.03, 0.05, 0.3), 0.85, sheen=0.12, sheen_roughness=0.4, specular=0.2)
+    bump(felted, 0.3, 0.003, lambda n, l: weave(n, l, 240.0))
 
     def bend(h):
-        k = max(0.0, (h - 0.72) / 0.62)
-        return Vector((-0.3 * k * k, 0.0, 0.0))
+        k = max(0.0, (h - 0.96) / 0.4)
+        return Vector((-0.34 * k**2.2, 0.0, -0.03 * k**3))
 
     def cone_r(h):
         for (r0, h0), (r1, h1) in zip(WIZARD_CONE, WIZARD_CONE[1:]):
@@ -1241,15 +1286,15 @@ def wizard_hat():
         return 0.0
 
     revolve("cone", smooth_profile(WIZARD_CONE, 10), felted, tilt, bend=bend)
-    brim = smooth_profile([(0.78, 0.72), (0.9, 0.69), (1.0, 0.65), (1.07, 0.6), (1.06, 0.585), (0.98, 0.63), (0.78, 0.68)], 6)
-    revolve("brim", brim, felted, tilt, ripple=lambda a, h: 1 + 0.018 * math.sin(3 * a + 0.6))
-    metal = gold("wizard-gold")
-    revolve("band", [(0.836, 0.7), (0.82, 0.74), (0.78, 0.775)], metal, tilt)
+    brim = smooth_profile([(0.55, 0.85), (0.72, 0.81), (0.88, 0.765), (0.98, 0.715), (0.97, 0.7), (0.86, 0.745), (0.55, 0.815)], 6)
+    revolve("brim", brim, felted, tilt, ripple=lambda a, h: 1 + 0.02 * math.sin(3 * a + 0.6))
+    metal = gloss("wizard-gold", (0.95, 0.62, 0.08), 0.28)
+    revolve("band", [(0.585, 0.825), (0.588, 0.84), (0.505, 0.925), (0.49, 0.93)], metal, tilt)
     m = tilt.to_matrix()
 
     def star(name, deg, h, size):
         a = math.radians(deg)
-        n = (m @ Vector((math.cos(a), math.sin(a), 0.65))).normalized()
+        n = (m @ Vector((math.cos(a), math.sin(a), 0.5))).normalized()
         at = m @ (Vector(((cone_r(h) + 0.012) * math.cos(a), (cone_r(h) + 0.012) * math.sin(a), h)) + bend(h))
         across = Vector((0, 0, 1)).cross(n).normalized()
         up = n.cross(across).normalized()
@@ -1257,7 +1302,7 @@ def wizard_hat():
         ob = mesh_object(name, lambda bm: fill(bm, points), metal, smooth=False)
         modifier(ob, "SOLIDIFY", thickness=0.012, offset=1.0)
 
-    for i, (deg, h, size) in enumerate(((-104, 0.9, 0.082), (-66, 0.84, 0.056), (-126, 1.06, 0.056))):
+    for i, (deg, h, size) in enumerate(((-108, 0.99, 0.095), (-62, 0.97, 0.065), (-122, 1.11, 0.058))):
         star(f"star{i}", deg, h, size)
 
 
@@ -1338,16 +1383,16 @@ def rib_knit(name, base, ribs_round):
 def beanie():
     """A ribbed teal beanie with a turned-up cuff and a cream pompom."""
     tilt = lean(-4, 6)
-    dome = smooth_profile([(0.85, 0.56), (0.83, 0.7), (0.73, 0.86), (0.54, 1.01), (0.27, 1.1), (0.001, 1.12)], 10)
+    dome = smooth_profile([(0.76, 0.74), (0.75, 0.84), (0.66, 0.97), (0.49, 1.08), (0.25, 1.15), (0.001, 1.165)], 10)
     revolve("beanie", dome, rib_knit("beanie", TEAL, 54), tilt, sides=320)
-    cuff = smooth_profile([(0.875, 0.5), (0.885, 0.53), (0.88, 0.62), (0.85, 0.69), (0.82, 0.71)], 6)
+    cuff = smooth_profile([(0.795, 0.645), (0.805, 0.67), (0.8, 0.76), (0.775, 0.82), (0.75, 0.835)], 6)
     revolve("cuff", cuff, rib_knit("beanie-cuff", (0.016, 0.36, 0.39), 90), tilt, sides=320)
     pom = material("pompom", (0.84, 0.79, 0.68), 0.95, sheen=1.0, sheen_roughness=0.6, specular=0.15)
     bump(pom, 1.0, 0.03, lambda n, l: weave(n, l, 60.0))
-    at = tilt.to_matrix() @ Vector((0, 0, 1.17))
+    at = tilt.to_matrix() @ Vector((0, 0, 1.185))
 
     def build(bm):
-        bmesh.ops.create_icosphere(bm, subdivisions=5, radius=0.125, matrix=Matrix.Translation(at))
+        bmesh.ops.create_icosphere(bm, subdivisions=5, radius=0.115, matrix=Matrix.Translation(at))
 
     ball_of_wool = mesh_object("pompom", build, pom)
     tex = bpy.data.textures.new("fluff", "CLOUDS")
@@ -1355,30 +1400,33 @@ def beanie():
     modifier(ball_of_wool, "DISPLACE", texture=tex, strength=0.03, mid_level=0.5)
 
 
-def ear(side, lat, az, width, height, felted, inner):
-    base = on_body(lat, side * az, -0.03)
+def ear(side, width, height, fur):
+    """A soft thick ear growing from behind the head's outline, leaning out and facing the viewer."""
+    base = Vector((side * 0.56, 0.1, 0.62))
     m = bpy.context.scene.camera.matrix_world.to_3x3()
     toward = -(m @ Vector((0, 0, -1)))
-    up = (base.normalized() * 0.55 + Vector((side * 0.12, 0, 1)) * 0.75).normalized()
+    up = Vector((side * 0.42, 0, 1)).normalized()
     across = up.cross(toward).normalized()
     normal = across.cross(up).normalized()
     if normal.dot(toward) < 0:
         normal = -normal
 
     def shape(t):
-        return width * (1 - t) ** 0.72 * (1 - 0.16 * math.sin(math.pi * t))
+        return width * (1 - t**1.25) ** 0.85 * (1 - 0.08 * math.sin(math.pi * t))
 
-    blade(f"ear{side}", base, up, across, normal, height, shape, felted, thickness=0.05, bulge=0.1, curl=-0.035, rows=24, cols=20, subdivide=2)
-    return base + normal * 0.03, up, across, normal, shape
+    ob = blade(f"ear{side}", base, up, across, normal, height, shape, fur, thickness=0.09, bulge=0.16, rows=28, cols=20, subdivide=2)
+    ob.visible_shadow = False
+    return base + normal * 0.105, up, across, normal, shape
 
 
 def cat_ears():
-    """Soft ginger ears, pink inside."""
-    fur = sheen_felt("ears", (0.62, 0.26, 0.05), 0.95)
-    inside = sheen_felt("ears-inside", (0.8, 0.32, 0.36), 0.95)
+    """Big soft ginger ears, pink inside."""
+    fur = sheen_felt("ears", (0.8, 0.31, 0.035), 0.92)
+    inside = sheen_felt("ears-inside", (0.92, 0.26, 0.34), 0.95)
     for side in (-1, 1):
-        at, up, across, normal, shape = ear(side, 49.0, 36.0, 0.25, 0.44, fur, inside)
-        blade(f"inner{side}", at + up * 0.05, up, across, normal, 0.3, lambda t: 0.62 * shape(t), inside, thickness=0.012, bulge=0.1, curl=-0.03, rows=20, cols=16, subdivide=2)
+        at, up, across, normal, shape = ear(side, 0.33, 0.68, fur)
+        inner = blade(f"inner{side}", at + up * 0.16, up, across, normal, 0.4, lambda t: 0.64 * shape(0.24 + t * 0.7) * (1 - t**3), inside, thickness=0.008, bulge=0.08, curl=-0.06, rows=20, cols=16, subdivide=2)
+        inner.visible_shadow = False
 
 
 def sprout():
@@ -1461,13 +1509,15 @@ def antenna():
     tube("spring", coil, steel, 0.0095)
     top = root + up * 0.2
     tube("rod", [root + up * 0.13, root + up * 0.165, top], steel, 0.0105)
-    blobs("bead", [ball(top + up * 0.06, 0.085)], gloss("bead", (0.72, 0.03, 0.03), 0.12))
+    blobs("bead", [ball(top + up * 0.07, 0.105)], gloss("bead", (0.78, 0.03, 0.03), 0.12))
 
 
 def halo():
-    """A gold ring afloat above the head, tipped toward the viewer."""
-    metal = material("halo", (0.95, 0.68, 0.2), 0.2, metallic=1.0)
-    bpy.ops.mesh.primitive_torus_add(major_radius=0.5, minor_radius=0.04, location=(0, 0, 1.06), rotation=(math.radians(-18), 0, 0), major_segments=128, minor_segments=24)
+    """A bright gold ring afloat above the head, tipped toward the viewer."""
+    metal = gloss("halo", (1.0, 0.56, 0.03), 0.24)
+    bp.set_input(bp.principled(metal), ["Emission Color"], (1.0, 0.52, 0.02, 1.0))
+    bp.set_input(bp.principled(metal), ["Emission Strength"], 0.18)
+    bpy.ops.mesh.primitive_torus_add(major_radius=0.52, minor_radius=0.05, location=(0, 0.0, 1.09), rotation=(math.radians(13), 0, 0), major_segments=128, minor_segments=24)
     ring = bpy.context.active_object
     ring.data.materials.append(metal)
     ring.visible_shadow = False
@@ -1475,10 +1525,10 @@ def halo():
 
 
 def horn(side, bone):
-    points = [Vector((side * 0.68, -0.06, 0.76)), Vector((side * 0.84, -0.06, 0.82)), Vector((side * 0.85, -0.06, 0.96)), Vector((side * 0.7, -0.06, 1.15))]
+    points = [Vector((side * 0.66, -0.04, 0.72)), Vector((side * 0.98, -0.04, 0.74)), Vector((side * 1.08, -0.04, 0.94)), Vector((side * 0.94, -0.04, 1.24))]
     path = smooth_path(points, 16)
     length = sum((path[i] - path[i - 1]).length for i in range(1, len(path)))
-    width = lambda s: 0.092 * (1 - s / length) ** 0.8 + 0.006
+    width = lambda s: 0.135 * (1 - s / length) ** 0.75 + 0.006
 
     def build(bm):
         rings = []
@@ -1498,22 +1548,26 @@ def horn(side, bone):
 
 
 def viking_helmet():
-    """A rounded steel helmet with a bronze band and two short horns."""
-    steel = material("viking-steel", (0.56, 0.58, 0.6), 0.34, metallic=1.0)
+    """A rounded steel helmet with a broad bronze band, a nose ridge and two big ivory horns."""
+    steel = material("viking-steel", (0.42, 0.46, 0.5), 0.46, metallic=0.55)
     bump(steel, 0.08, 0.002, lambda n, l: weave(n, l, 120.0))
-    edge = 42.0
+    edge = 41.0
 
     def rim(az):
         return edge - 8.0 * (1 - math.cos(math.radians(az))) / 2
 
     dome = region("viking", rim, lambda az: 89.5, steel, 1.02, 0.03)
-    bronze = material("viking-bronze", (0.62, 0.36, 0.13), 0.3, metallic=1.0)
-    sweep("band", [sphere_at(rim(az) + 2.2, az, 1.05) for az in range(0, 360, 3)], lambda s: 0.058, lambda s: 0.03, bronze, closed=True, sides=24, profile=0.7)
-    ridge = [sphere_at(lat, 0.0, 1.05) for lat in range(int(rim(0)) + 4, 90, 3)] + [sphere_at(90 - k, 180.0, 1.05) for k in range(3, 40, 3)]
-    sweep("ridge", ridge, lambda s: 0.04, lambda s: 0.028, bronze, sides=20, cap=True, profile=0.7)
-    studs = [ball(sphere_at(rim(az) + 2.2, az, 1.083), 0.016) for az in range(-90, 91, 20)]
+    for v in dome.data.vertices:
+        lat = math.degrees(math.asin(max(-1.0, min(1.0, v.co.z / v.co.length))))
+        v.co += v.co.normalized() * 0.06 * math.sin(math.pi * max(0.0, min(1.0, (lat - 38.0) / 52.0)))
+    bronze = material("viking-bronze", (0.72, 0.42, 0.13), 0.34, metallic=0.85)
+    sweep("band", [sphere_at(rim(az) + 3.0, az, 1.048) for az in range(0, 360, 3)], lambda s: 0.078, lambda s: 0.04, bronze, closed=True, sides=24, profile=0.7)
+    ridge = [sphere_at(lat, 0.0, 1.08 + 0.06 * math.sin(math.pi * max(0.0, min(1.0, (lat - 38.0) / 52.0)))) for lat in range(int(rim(0)) + 4, 90, 3)]
+    ridge += [sphere_at(90 - k, 180.0, 1.13) for k in range(3, 40, 3)]
+    sweep("ridge", ridge, lambda s: 0.05, lambda s: 0.032, bronze, sides=20, cap=True, profile=0.7)
+    studs = [ball(sphere_at(rim(az) + 3.0, az, 1.095), 0.021) for az in range(-90, 91, 20)]
     blobs("studs", studs, gold("viking-studs"), 16)
-    bone = material("horn", (0.8, 0.7, 0.5), 0.42, coat=0.3, coat_roughness=0.3)
+    bone = material("horn", (0.88, 0.78, 0.56), 0.4, coat=0.3, coat_roughness=0.3)
     bump(bone, 0.12, 0.003, lambda n, l: ribs(n, l, 55.0))
     for side in (-1, 1):
         horn(side, bone)
@@ -1609,27 +1663,24 @@ def propeller_cap():
     left.inputs[1].default_value = 0.0
     both = mix(nodes, links, right.outputs[0], blue, red)
     links.new(mix(nodes, links, left.outputs[0], yellow, both), bp.principled(cloth).inputs["Base Color"])
-    dome = region("propeller-cap", cap_rim, lambda az: 89.5, cloth, 1.012, 0.03, rows=48)
-    for v in dome.data.vertices:
-        lat = math.degrees(math.asin(max(-1.0, min(1.0, v.co.z / v.co.length))))
-        v.co += v.co.normalized() * 0.05 * math.sin(math.pi * max(0.0, min(1.0, (lat - 38.0) / 52.0)))
+    revolve("propeller-cap", smooth_profile(CAP_DOME, 10), cloth)
     peak = material("propeller-peak", blue, 0.7, sheen=0.3)
-    cap_brim(peak)
+    cap_bill(peak, 0.54)
     steel = material("propeller-steel", (0.74, 0.76, 0.78), 0.25, metallic=1.0)
-    tube("spindle", [Vector((0, 0, 1.04)), Vector((0, 0, 1.13)), Vector((0, 0, 1.2))], steel, 0.016)
-    blobs("hub", [Matrix.Translation((0, 0, 1.2)) @ Matrix.Diagonal((0.034, 0.034, 0.024, 1.0))], steel, 24)
-    vane = material("propeller-vane", (0.8, 0.8, 0.78), 0.3, coat=0.5)
-    for side in (-1, 1):
-        along = Vector((side, -0.25, 0.02)).normalized()
-        across = Vector((0.25 * side, side, -0.28 * side)).normalized()
+    tube("spindle", [Vector((0, 0, 1.17)), Vector((0, 0, 1.24)), Vector((0, 0, 1.285))], steel, 0.02)
+    blobs("hub", [Matrix.Translation((0, 0, 1.285)) @ Matrix.Diagonal((0.05, 0.05, 0.034, 1.0))], steel, 24)
+    for side, colour in ((-1, (0.86, 0.1, 0.06)), (1, (0.02, 0.2, 0.72))):
+        vane = gloss(f"propeller-vane{side}", colour, 0.28)
+        along = Vector((side, -0.2, 0.0)).normalized()
+        across = Vector((0.2 * side, side, -0.55 * side)).normalized()
         normal = along.cross(across).normalized()
-        blade(f"vane{side}", Vector((0, 0, 1.2)), along, across, normal, 0.36, lambda t: 0.024 + 0.05 * math.sin(math.pi * min(1.0, t * 1.02)) ** 0.7, vane, thickness=0.012, rows=16, cols=6, subdivide=2)
+        blade(f"vane{side}", Vector((0, 0, 1.285)), along, across, normal, 0.43, lambda t: 0.03 + 0.07 * math.sin(math.pi * min(1.0, t * 1.02)) ** 0.7, vane, thickness=0.014, rows=16, cols=6, subdivide=2)
 
 
 def headband():
     """A terry sweatband round the forehead, coral with a white stripe, tied at the left."""
-    coral = (0.76, 0.14, 0.11)
-    terry = material("headband", coral, 0.92, sheen=0.7, sheen_roughness=0.5, specular=0.2)
+    coral = (0.82, 0.075, 0.05)
+    terry = material("headband", coral, 0.92, sheen=0.15, sheen_roughness=0.5, specular=0.2)
     nodes, links = terry.node_tree.nodes, terry.node_tree.links
     bump(terry, 0.5, 0.006, lambda n, l: weave(n, l, 190.0))
     low = lambda az: 37.0 - 7.0 * (1 - math.cos(math.radians(az))) / 2
@@ -1637,7 +1688,7 @@ def headband():
     band = stripes(nodes, links, object_coords(nodes), "Z", 1.0, 0.055, 0.285)
     links.new(mix(nodes, links, band, coral, (0.86, 0.85, 0.82)), bp.principled(terry).inputs["Base Color"])
     region("headband", low, high, terry, 1.012, 0.03)
-    tail = material("headband-tail", coral, 0.9, sheen=0.7, sheen_roughness=0.5, specular=0.2)
+    tail = material("headband-tail", coral, 0.9, sheen=0.15, sheen_roughness=0.5, specular=0.2)
     knot_at = sphere_at(40.0, -72.0, 1.06)
     blobs("knot", [Matrix.Translation(knot_at) @ frame_at(knot_at).to_4x4() @ Matrix.Diagonal((0.075, 0.09, 0.05, 1.0))], tail)
     for i, (drop, out) in enumerate(((1.0, 0.72), (1.0, 0.28))):
@@ -1647,53 +1698,53 @@ def headband():
 
 
 def monocle():
-    """A gold-rimmed lens over dot's right eye, with a fine chain falling off to its side."""
+    """A thick gold monocle round dot's right eye, with a short chain falling to its cheek."""
     metal = gold("monocle")
-    lens = material("monocle-lens", (0.92, 0.96, 1.0), 0.02, transmission=1.0, ior=1.45, specular=0.6)
-    centre = eye_point(1, 0.07)
-    frame_shape("rim", centre, 6.3 * U, 6.3 * U, 6.3 * U, metal, 0.018, lens)
-    bpy.data.objects["rim-lens"].visible_shadow = False
-    m = bpy.context.scene.camera.matrix_world.to_3x3()
-    rt, up = m @ Vector((1, 0, 0)), m @ Vector((0, 1, 0))
-    start = centre + rt * (6.3 * U * 0.7) - up * (6.3 * U * 0.7)
-    points = [start]
-    for x, y in ((44.8, 36.5), (47.0, 41.0), (49.0, 46.0), (52.5, 49.0)):
-        points.append(toward_camera(on_sphere(x, y, 1.004), 0.004))
-    tube("chain", smooth_path(points, 10), metal, 0.0055)
+    glass = material("monocle-lens", (0.92, 0.96, 1.0), 0.02, **GLASS_LENS)
+    cx, cy = EYES[1]
+    lift = 0.07
+    outline = circle_outline(cx, cy, 6.55)
+    rim("rim", outline, metal, 0.03, lift)
+    lens("rim-lens", outline, glass, lift, shadow=False)
+    glints("monocle-glint", cx - 4.25, cy - 2.2, ((0.0, 0.62, 1.5),), lift, 0.55)
+    start = (cx + 4.7, cy + 4.7)
+    points = [on_face(*start, lift), on_face(cx + 6.6, cy + 7.6, 0.03), on_face(cx + 6.4, cy + 10.2, 0.012), on_face(cx + 7.7, cy + 12.6, 0.01), on_face(cx + 7.1, cy + 14.2, 0.01)]
+    tube("chain", smooth_path(points, 10), metal, 0.011)
+    blobs("clip", [ball(on_face(cx + 7.1, cy + 14.2, 0.02), 0.03)], metal, 24)
 
 
-def heart_outline(centre, rt, up, size, steps=64):
+def heart_outline(cx, cy, size, turn, steps=96):
+    """A heart about frame point (cx, cy), `size` units from its middle to its widest, leaning `turn`
+    degrees: positive sends its point toward the middle of the face."""
+    c, s = math.cos(math.radians(turn)), math.sin(math.radians(turn))
     points = []
     for k in range(steps):
         t = 2 * math.pi * k / steps
-        x = 16 * math.sin(t) ** 3
-        y = 13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)
-        points.append(centre + rt * (x / 16 * size * U) + up * ((y + 2.0) / 16 * size * U))
+        x = size * math.sin(t) ** 3
+        y = -(13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)) * size / 16
+        points.append((cx + x * c - y * s, cy + x * s + y * c))
     return points
 
 
 def heart_glasses():
-    """Heart-shaped glasses in glossy pink, tinted so dot's eyes still show through them."""
-    frame_mat = gloss("hearts-frame", (0.8, 0.07, 0.34), 0.2)
-    tint = material("hearts-lens", (0.86, 0.14, 0.42), 0.05, coat=1.0, coat_roughness=0.02, specular=0.8, alpha=0.4)
-    m = bpy.context.scene.camera.matrix_world.to_3x3()
-    rt, up = m @ Vector((1, 0, 0)), m @ Vector((0, 1, 0))
-    centres = []
-    for i, x in enumerate((25.2, 38.8)):
-        centre = toward_camera(on_sphere(x, 27.4), 0.075)
-        centres.append(centre)
-        outline = heart_outline(centre, rt, up, 6.6)
-        tube(f"rim{i}", [*outline, outline[0]], frame_mat, 0.026)
-        lens = mesh_object(f"lens{i}", lambda bm, outline=outline: bm.faces.new([bm.verts.new(p) for p in outline]), tint)
-        lens.visible_shadow = False
-    a, b = centres[0] + rt * (5.9 * U) + up * (2.1 * U), centres[1] - rt * (5.9 * U) + up * (2.1 * U)
-    tube("bridge", [a, (a + b) / 2 + up * (0.9 * U), b], frame_mat, 0.022)
+    """Heart-shaped shades in glossy pink: full hearts that hide dot's eyes, leaning out from the bridge."""
+    frame_mat = gloss("hearts-frame", (0.72, 0.03, 0.26), 0.18)
+    tint = gloss("hearts-lens", (0.9, 0.2, 0.46), 0.12)
+    vertical_tint(tint, (0.96, 0.27, 0.5), (0.62, 0.035, 0.2), 0.08, 0.56)
+    lift = 0.07
+    for i, (side, turn) in enumerate(((-1, -15.0), (1, 15.0))):
+        cx, cy = 32 + side * 7.9, 28.7
+        outline = heart_outline(cx, cy, 8.15, turn)
+        rim(f"rim{i}", outline, frame_mat, 0.027, lift)
+        lens(f"lens{i}", outline, tint, lift)
+        glints(f"hearts-glint{i}", cx - 1.7, cy - 2.2, ((-1.0, 1.25, 1.7),), lift, 0.55)
+    tube("bridge", [on_face(32 - 2.1, 25.1, lift), on_face(32, 24.3, lift + 0.015), on_face(32 + 2.1, 25.1, lift)], frame_mat, 0.03)
 
 
 def clown_nose():
-    """A round, shiny red nose."""
-    at = toward_camera(on_sphere(32.0, 34.0), 0.075)
-    blobs("nose", [ball(at, 0.17)], gloss("nose", (0.72, 0.025, 0.03), 0.14), 48)
+    """A round, shiny red nose, on the middle of the face and clear of the eyes."""
+    at = toward_camera(on_sphere(32.0, 37.2), 0.075)
+    blobs("nose", [ball(at, 0.175)], gloss("nose", (0.78, 0.022, 0.03), 0.14), 48)
 
 
 def blush():
@@ -1702,7 +1753,7 @@ def blush():
     mat.use_nodes = True
     nodes, links = mat.node_tree.nodes, mat.node_tree.links
     bsdf = bp.principled(mat)
-    bp.set_input(bsdf, ["Base Color"], (0.9, 0.16, 0.24, 1.0))
+    bp.set_input(bsdf, ["Base Color"], (0.95, 0.09, 0.2, 1.0))
     bp.set_input(bsdf, ["Roughness"], 0.7)
     uv = nodes.new("ShaderNodeTexCoord").outputs["UV"]
     length = nodes.new("ShaderNodeVectorMath")
@@ -1712,7 +1763,7 @@ def blush():
     ramp.interpolation_type = "SMOOTHERSTEP"
     ramp.inputs["From Min"].default_value = 0.15
     ramp.inputs["From Max"].default_value = 1.0
-    ramp.inputs["To Min"].default_value = 0.62
+    ramp.inputs["To Min"].default_value = 0.9
     ramp.inputs["To Max"].default_value = 0.0
     links.new(length.outputs["Value"], ramp.inputs["Value"])
     bp.set_input(bsdf, ["Alpha"], 1.0)
@@ -1726,7 +1777,7 @@ def blush():
             row = []
             for j in range(rows + 1):
                 u, v = -1 + 2 * i / rows, -1 + 2 * j / rows
-                row.append((bm.verts.new(on_sphere(x + u * 5.8, y + v * 3.9, 1.003)), (u, v)))
+                row.append((bm.verts.new(on_sphere(x + u * 6.2, y + v * 4.1, 1.003)), (u, v)))
             grid.append(row)
         for i in range(rows):
             for j in range(rows):
@@ -1735,50 +1786,51 @@ def blush():
                 for loop, (_, coord) in zip(face.loops, corners):
                     loop[layer].uv = coord
 
-    for side, x in ((0, 20.8), (1, 43.2)):
+    for side, x in ((0, 20.2), (1, 43.8)):
         ob = mesh_object(f"cheek{side}", lambda bm, x=x: build(bm, x, 36.0), mat)
         ob.visible_shadow = False
 
 
 def bow_tie():
     """A purple satin bow tie at the neck."""
-    satin = material("bow-tie", (0.19, 0.03, 0.42), 0.3, sheen=0.5, sheen_roughness=0.3, coat=0.35, coat_roughness=0.2)
-    centre = on_body(-21.0, 0.0, 0.06)
+    satin = material("bow-tie", (0.26, 0.03, 0.62), 0.3, sheen=0.5, sheen_roughness=0.3, coat=0.35, coat_roughness=0.2)
+    centre = on_body(-19.0, 0.0, 0.06)
     m = frame_at(centre)
     across, up, n = m.col[0], m.col[1], m.col[2]
     for side in (-1, 1):
         along = across * side + up * 0.02
-        blade(f"wing{side}", centre - n * 0.01, along.normalized(), up, n, 0.3, lambda t: (0.042 + 0.13 * t**0.75) * math.sqrt(max(0.0, 1 - t**9)), satin, thickness=0.05, bulge=0.32, curl=-0.03, rows=24, cols=14, subdivide=2)
-    blobs("knot", [Matrix.Translation(centre + n * 0.038) @ m.to_4x4() @ Matrix.Diagonal((0.056, 0.066, 0.045, 1.0))], satin)
+        blade(f"wing{side}", centre - n * 0.01, along.normalized(), up, n, 0.37, lambda t: (0.05 + 0.16 * t**0.75) * math.sqrt(max(0.0, 1 - t**9)), satin, thickness=0.05, bulge=0.32, curl=-0.03, rows=24, cols=14, subdivide=2)
+    blobs("knot", [Matrix.Translation(centre + n * 0.038) @ m.to_4x4() @ Matrix.Diagonal((0.068, 0.08, 0.052, 1.0))], satin)
 
 
 def medal():
-    """A gold medal on a striped ribbon round the neck."""
-    red = material("ribbon-red", (0.62, 0.04, 0.05), 0.42, sheen=0.5, sheen_roughness=0.35)
-    white = material("ribbon-white", (0.85, 0.85, 0.82), 0.45, sheen=0.4)
-    hang = -36.0
+    """A big gold medal on a broad striped ribbon that hangs from round the neck."""
+    red = material("ribbon-red", (0.7, 0.03, 0.05), 0.42, sheen=0.5, sheen_roughness=0.35)
+    white = material("ribbon-white", (0.88, 0.88, 0.85), 0.45, sheen=0.4)
+    hang = -32.0
     for side in (-1, 1):
-        lats = [-6.0 + (hang + 6.0) * k / 16 for k in range(17)]
-        azs = [side * (40.0 - 38.0 * ((lat + 6.0) / (hang + 6.0)) ** 0.85) for lat in lats]
+        steps = 28
+        lats = [-3.0 + (hang + 3.0) * (k / steps) ** 1.25 for k in range(steps + 1)]
+        azs = [side * (92.0 - 90.0 * (k / steps) ** 0.8) for k in range(steps + 1)]
         path = [sphere_at(lat, az, 1.006) for lat, az in zip(lats, azs)]
-        sweep(f"strap{side}", path, lambda s: 0.058, lambda s: 0.01, red, sides=16, cap=True, profile=0.5)
-        path = [sphere_at(lat, az, 1.016) for lat, az in zip(lats, azs)]
-        sweep(f"stripe{side}", path, lambda s: 0.02, lambda s: 0.006, white, sides=12, cap=True, profile=0.5)
+        sweep(f"strap{side}", path, lambda s: 0.08, lambda s: 0.012, red, sides=16, cap=True, profile=0.5)
+        path = [sphere_at(lat, az, 1.018) for lat, az in zip(lats, azs)]
+        sweep(f"stripe{side}", path, lambda s: 0.027, lambda s: 0.006, white, sides=12, cap=True, profile=0.5)
     metal = gold("medal")
-    at = on_body(hang - 8.5, 0.0, 0.03)
-    n = at.normalized()
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.135, depth=0.032, location=at, vertices=96)
+    at = on_body(hang - 10.0, 0.0, 0.05)
+    n = (at.normalized() + Vector((0, -0.55, 0.25))).normalized()
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.205, depth=0.04, location=at, vertices=96)
     disc = bpy.context.active_object
     disc.rotation_euler = n.to_track_quat("Z", "Y").to_euler()
     disc.data.materials.append(metal)
-    modifier(disc, "BEVEL", width=0.012, segments=4)
+    modifier(disc, "BEVEL", width=0.016, segments=4)
     bpy.ops.object.shade_smooth()
-    m = frame_at(at)
-    across, up = m.col[0], m.col[1]
-    points = [at + n * 0.018 + (across * math.cos(math.pi / 2 + k * math.pi / 5) + up * math.sin(math.pi / 2 + k * math.pi / 5)) * (0.082 if k % 2 == 0 else 0.034) for k in range(10)]
-    star = mesh_object("medal-star", lambda bm: fill(bm, points), material("medal-star", (0.62, 0.38, 0.08), 0.3, metallic=1.0), smooth=False)
+    across = Vector((0, 0, 1)).cross(n).normalized()
+    up = n.cross(across).normalized()
+    points = [at + n * 0.024 + (across * math.cos(math.pi / 2 + k * math.pi / 5) + up * math.sin(math.pi / 2 + k * math.pi / 5)) * (0.135 if k % 2 == 0 else 0.056) for k in range(10)]
+    star = mesh_object("medal-star", lambda bm: fill(bm, points), material("medal-star", (0.5, 0.26, 0.04), 0.32, metallic=1.0), smooth=False)
     modifier(star, "SOLIDIFY", thickness=0.012, offset=1.0)
-    bpy.ops.mesh.primitive_torus_add(major_radius=0.026, minor_radius=0.008, location=on_body(hang - 0.4, 0.0, 0.034), rotation=(math.radians(90), 0, 0), major_segments=24, minor_segments=8)
+    bpy.ops.mesh.primitive_torus_add(major_radius=0.04, minor_radius=0.012, location=on_body(hang + 0.6, 0.0, 0.04), rotation=(math.radians(90), 0, 0), major_segments=24, minor_segments=8)
     loop = bpy.context.active_object
     loop.data.materials.append(metal)
     bpy.ops.object.shade_smooth()
@@ -1791,7 +1843,7 @@ def neck_dip(az, top, depth, width=62.0):
 def pearls():
     """A strand of pearls round the neck with a ruby drop."""
     pearl = material("pearl", (0.84, 0.81, 0.76), 0.2, coat=1.0, coat_roughness=0.06, specular=0.7, sheen=0.3)
-    size = 0.046
+    size = 0.058
     points = []
     az = -112.0
     while az <= 112.0:
@@ -1802,10 +1854,10 @@ def pearls():
         step = (sphere_at(lat2, az + 1.0, 1.0) - sphere_at(lat, az, 1.0)).length
         az += 2.05 * size / step
     blobs("pearls", points, pearl, 32)
-    drop = on_body(neck_dip(0, -8.0, 34.0) - 9.0, 0.0, 0.045)
+    drop = on_body(neck_dip(0, -8.0, 34.0) - 11.0, 0.0, 0.05)
     ruby = gloss("ruby", (0.55, 0.012, 0.07), 0.08)
     m = frame_at(drop)
-    blobs("ruby", [Matrix.Translation(drop) @ m.to_4x4() @ Matrix.Diagonal((0.058, 0.08, 0.04, 1.0))], ruby, 40)
+    blobs("ruby", [Matrix.Translation(drop) @ m.to_4x4() @ Matrix.Diagonal((0.075, 0.1, 0.05, 1.0))], ruby, 40)
 
 
 
@@ -1865,10 +1917,10 @@ def overalls():
     tube("pocket", [*points, points[0]], stitch, 0.0034)
     brass = material("brass", (0.78, 0.52, 0.16), 0.28, metallic=1.0)
     for side in (-1, 1):
-        lats = [bib_top - 1.0 + (42.0 - bib_top) * k / 20 for k in range(21)]
-        azs = [side * (bib_half - 7.0 + 62.0 * (k / 20) ** 1.3) for k in range(21)]
+        lats = [bib_top - 1.0 + (20.0 - bib_top) * (k / 20) ** 0.9 for k in range(21)]
+        azs = [side * (bib_half - 7.0 + 76.0 * (k / 20) ** 0.9) for k in range(21)]
         path = [sphere_at(lat, az, 1.022) for lat, az in zip(lats, azs)]
-        sweep(f"strap{side}", path, lambda s: 0.058, lambda s: 0.016, denim, sides=16, cap=True, profile=0.5)
+        sweep(f"strap{side}", path, lambda s: 0.07, lambda s: 0.016, denim, sides=16, cap=True, profile=0.5)
         at = on_body(bib_top - 2.5, side * (bib_half - 7.0), 0.055)
         bpy.ops.mesh.primitive_cylinder_add(radius=0.032, depth=0.016, location=at, vertices=32)
         button = bpy.context.active_object

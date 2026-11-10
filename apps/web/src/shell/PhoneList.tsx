@@ -34,6 +34,7 @@ import { searchConversations } from "../agent/conversation-search.ts";
 import { markdownToPlain } from "../agent/markdown.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import { type ApiClient, ApiError } from "../lib/api.ts";
+import { useGuest } from "../remote/guest.ts";
 import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
@@ -55,6 +56,7 @@ import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { ConversationMenu } from "./ConversationMenu.tsx";
 import { ConversationPeek, type Peek } from "./ConversationPeek.tsx";
 import { adds, SelectAll, SelectionActions } from "./ConversationSelection.tsx";
+import { fileConversations } from "./conversation-leave.ts";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import { useConversationSelection } from "./useConversationSelection.ts";
 import "../ui/conversations-layout.css";
@@ -81,6 +83,8 @@ export interface PhoneListProps {
   onNew(): void;
   newReason?: string;
   onReplay(): void;
+  // Every conversation's screen and progress at once.
+  onOverview?(): void;
   onDeleted?(sessions: readonly string[]): void;
   // This computer's name on the pill, and what the pill opens.
   computer: { name: string; onOpen?(): void; menu: ReactNode };
@@ -148,7 +152,13 @@ function RailItem({
     });
   }, []);
   return (
-    <li ref={host} className="phone-rail-item" data-holding={holding || undefined}>
+    <li
+      ref={host}
+      className="phone-rail-item"
+      data-flip={row.entry.sessionId}
+      data-conversation={row.entry.sessionId}
+      data-holding={holding || undefined}
+    >
       <Button
         variant="quiet"
         className="phone-rail-button"
@@ -181,6 +191,7 @@ export function PhoneList({
   onNew,
   newReason,
   onReplay,
+  onOverview,
   onDeleted,
   computer,
   notice,
@@ -206,6 +217,8 @@ export function PhoneList({
     return () => clearInterval(timer);
   }, []);
   const all = useMemo(() => conversationRows(recent.entries, facts), [recent.entries, facts]);
+  // A shared link's own conversations: opened and started, never organized, which is the owner's.
+  const guest = useGuest();
   const [tag, setTag] = useState<ConversationTag | null>(null);
   const tags = useMemo(() => tagsInUse(all), [all]);
   const tagged = tag && tags.includes(tag) ? tag : null;
@@ -240,7 +253,7 @@ export function PhoneList({
     [attention],
   );
   const body = useRef<HTMLDivElement>(null);
-  useFlip(body, rows.map((row) => row.entry.sessionId).join(" "));
+  useFlip(body, [...pinned, ...rows].map((row) => row.entry.sessionId).join(" "));
 
   const running = (row: ConversationRow) =>
     row.active || !!row.entry.live || row.entry.sessions.includes(facts.live ?? "");
@@ -278,11 +291,12 @@ export function PhoneList({
   // Where the list fills the screen a hold lifts the row into its preview; beside the conversation
   // it opens the same menu a right click, the menu key and More do.
   const hold = (row: ConversationRow, from: HTMLElement, trigger = from) => {
+    if (guest) return;
     if (selecting) openMenu(row, trigger);
     else openPeek(row, from);
   };
   const menuKey = (row: ConversationRow) => (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (!isMenuKey(event)) return;
+    if (guest || !isMenuKey(event)) return;
     event.preventDefault();
     openMenu(row, event.currentTarget);
   };
@@ -300,6 +314,7 @@ export function PhoneList({
     rowElement(row)?.focus();
   });
   const swipes = (row: ConversationRow) => {
+    if (guest) return {};
     const isPinned = !!row.entry.pinned;
     const pin: SwipeAction = {
       label: isPinned ? "Unpin" : "Pin",
@@ -501,16 +516,20 @@ export function PhoneList({
                 <SwipeActions
                   className="phone-row-swipe"
                   {...swipes(row)}
-                  onHold={() => {
-                    const from = rowElement(row);
-                    if (from) hold(row, from);
-                  }}
+                  onHold={
+                    guest
+                      ? undefined
+                      : () => {
+                          const from = rowElement(row);
+                          if (from) hold(row, from);
+                        }
+                  }
                 >
                   {button}
                 </SwipeActions>
               )}
               <TagMark tag={row.entry.tag} />
-              {!choosing && (
+              {!choosing && !guest && (
                 <IconButton
                   className="phone-row-actions"
                   icon="more-horizontal"
@@ -545,6 +564,8 @@ export function PhoneList({
               chosen={selection.picked.length}
               onChange={selection.all}
             />
+          ) : guest ? (
+            <span className="phone-pill-spacer" />
           ) : (
             <>
               <Button
@@ -575,7 +596,7 @@ export function PhoneList({
               </Menu>
             </>
           )}
-          {(selection.selecting || all.length > 0) && (
+          {!guest && (selection.selecting || all.length > 0) && (
             <Button
               ref={selectToggle}
               variant="quiet"
@@ -584,6 +605,16 @@ export function PhoneList({
             >
               {selection.selecting ? "Cancel" : "Select"}
             </Button>
+          )}
+          {!selection.selecting && onOverview && (
+            <IconButton
+              size={36}
+              round
+              icon="layout-dashboard"
+              label="Overview"
+              className="phone-overview"
+              onClick={onOverview}
+            />
           )}
           {!selection.selecting && (
             <IconButton
@@ -655,7 +686,11 @@ export function PhoneList({
           )}
           {content}
           {!selection.selecting && (
-            <div className="conversations-foot" data-loading={recent.loading || undefined}>
+            <div
+              className="conversations-foot"
+              data-flip="foot"
+              data-loading={recent.loading || undefined}
+            >
               {view === "archived" ? (
                 <Button
                   variant="quiet"
@@ -667,9 +702,11 @@ export function PhoneList({
                 </Button>
               ) : (
                 <>
-                  <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
-                    See all in Replay
-                  </Button>
+                  {(!guest || guest.grant.replay) && (
+                    <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
+                      See all in Replay
+                    </Button>
+                  )}
                   {recent.archivedCount > 0 && (
                     <Button
                       variant="quiet"
@@ -723,7 +760,12 @@ export function PhoneList({
             setRenaming({ id: action.entry.sessionId, name: action.title, was: action.title });
         }}
         onOrganize={(change) => {
-          if (action) void organize(action, change);
+          if (action)
+            fileConversations(
+              [action.entry.sessionId],
+              change,
+              () => void organize(action, change),
+            );
         }}
         onLook={(entry, look) => {
           organizeConversation(api, entry.sessionId, { look }).catch(() =>
@@ -752,10 +794,8 @@ export function PhoneList({
         conversations={deleting}
         anchor={actionAnchor}
         onClose={() => setDeleting(null)}
-        onDeleted={(sessions) => {
-          onDeleted?.(sessions);
-          selection.drop(sessions);
-        }}
+        onDeleted={onDeleted}
+        onRowsGone={selection.drop}
       />
     </section>
   );

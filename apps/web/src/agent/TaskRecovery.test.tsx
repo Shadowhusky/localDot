@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { STALL } from "@localdot/protocol";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
 import { raiseChoice, raiseSteps, spendingText, TaskRecovery } from "./TaskRecovery.tsx";
@@ -147,6 +148,17 @@ it("works out the new limit from a step or an amount", () => {
     expect(typeof raiseChoice("other", custom, 5)).toBe("string");
 });
 
+it("says a stopped task's card was fixed elsewhere, and offers to go on", () => {
+  render(
+    <TaskRecovery
+      agent={agentWith(STALL.fixedElsewhere)}
+      controls={{ ...controls, canResumeTask: true }}
+      onSettings={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "That's fixed now" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
+});
 it("starts from the first step that covers a refusal that arrives after the card", () => {
   const agent = budgetAgent();
   const later = { ...agent, model: { ...agent.model, budget: null } };
@@ -278,6 +290,42 @@ it("offers to carry on a task localDot went away under, and says when that can't
     />,
   );
   expect(screen.queryByRole("region", { name: "Task recovery" })).toBeNull();
+});
+
+it("keeps a restart's task waiting on its plan's reset, with Continue now and Don't continue", async () => {
+  const at = Date.UTC(2026, 10, 10, 15, 30);
+  const waiting: AgentSessionView = {
+    ...agentWith("user"),
+    interrupted: true,
+    model: {
+      ...emptyAgentModel(),
+      state: { state: "paused", reason: "claude code plan limit reached", autoContinue: { at } },
+    },
+    snapshot: { sessionId, cellId: "01JXYZ0000000000000000CE11", status: "ended", toolCalls: 0 },
+  };
+  const carryOn = vi.fn(async () => true);
+  const dontContinue = vi.fn(async () => true);
+  render(
+    <TaskRecovery
+      agent={waiting}
+      controls={controls}
+      onSettings={vi.fn()}
+      onCarryOn={carryOn}
+      onDontContinue={dontContinue}
+    />,
+  );
+  const region = screen.getByRole("region", { name: "Task recovery" });
+  expect(region.querySelector("h3")?.textContent).toMatch(/^Paused until/);
+  expect(region.textContent).toContain("dot continues by itself when it resets.");
+  fireEvent.click(screen.getByRole("button", { name: "Don't continue" }));
+  expect(dontContinue).toHaveBeenCalledOnce();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Continue now" }).getAttribute("aria-busy")).not.toBe(
+      "true",
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Continue now" }));
+  expect(carryOn).toHaveBeenCalledOnce();
 });
 
 it("names the key to enter again and opens Keys at it, with Continue for after", () => {

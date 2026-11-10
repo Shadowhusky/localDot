@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASK_FORM_GUIDANCE,
   DONE_TOOL_DESCRIPTION,
+  guestSection,
   HUMAN_INPUT_GUIDANCE,
   researchSection,
   thisRunSection,
@@ -9,6 +10,19 @@ import {
 } from "./guidance.ts";
 
 const MODES = ["batch", "calls", "none"] as const;
+
+describe("a shared link's task", () => {
+  it("is told what of the owner's it has, and an owner's task is told nothing", () => {
+    expect(guestSection(undefined)).toBe("");
+    const closed = guestSection({ apps: false });
+    expect(closed).toContain("shared link");
+    expect(closed).toContain("memory");
+    expect(closed).toContain("desktop's Chromium");
+    const open = guestSection({ apps: true });
+    expect(open).toContain("shared link");
+    expect(open).not.toContain("desktop's Chromium");
+  });
+});
 
 describe("dot's working rules", () => {
   it("act first and fast: a brief plan, the most direct route, a new approach after two failures", () => {

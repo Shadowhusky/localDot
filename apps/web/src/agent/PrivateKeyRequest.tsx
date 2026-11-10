@@ -1,11 +1,12 @@
 import { sameCredential } from "@localdot/protocol";
 import { useEffect, useRef, useState } from "react";
+import { valueProblem } from "../keys/binding.ts";
 import { problemText } from "../keys/keys-api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
 import { TextArea } from "../ui/TextArea.tsx";
 import { TextField } from "../ui/TextField.tsx";
-import type { AskFormProps } from "./AskForm.tsx";
+import { type AskFormProps, DotWroteThis } from "./AskForm.tsx";
 import { useAskState } from "./ask-draft.ts";
 
 export function PrivateKeyRequest({ draft, answer, saveKey, reason }: AskFormProps) {
@@ -62,6 +63,11 @@ export function PrivateKeyRequest({ draft, answer, saveKey, reason }: AskFormPro
               throw new Error(
                 binding.kind === "secret" ? "Enter a key or secret." : "Enter an API key.",
               );
+            const bad = valueProblem(value, binding.kind, {
+              ...(binding.kind === "llm" ? { provider: binding.provider } : {}),
+              ...(binding.kind === "http" ? { format: binding.format } : {}),
+            });
+            if (bad) throw new Error(bad);
             const result = await saveKey(binding, value, request.metadata);
             value = "";
             if (!alive.current) return;
@@ -124,6 +130,7 @@ export function PrivateKeyRequest({ draft, answer, saveKey, reason }: AskFormPro
           )}
         </Field>
       )}
+      <DotWroteThis />
       {(error || state.failed) && <p role="alert">{error || state.failed}</p>}
       <div className="keys-actions">
         <Button

@@ -15,9 +15,13 @@ import {
   EARLIER_CHARS,
   earlierRecord,
   isToolName,
+  KEEP_GOING_DECLINE,
+  KEEP_GOING_FIELD,
+  KEEP_GOING_SUBMIT,
   KEYD_REBOUND,
   KEYD_REENTER,
   KEYD_VAULT_LOCKED,
+  keepGoingQuestion,
   RESUME_WAIT_REASON,
   SECRET_ID_PATTERN,
   STALL,
@@ -62,7 +66,7 @@ import {
 import { type PlanLine, reminder, screenHands, systemPrompt } from "./prompt.ts";
 import { failureMessage, providerFailure } from "./provider-failure.ts";
 import type { ToolClient } from "./tool-client.ts";
-import { toolSet } from "./tools.ts";
+import { delegatedTools, toolSet } from "./tools.ts";
 
 export type RunOutcome = "done" | "gave_up" | "stopped";
 
@@ -387,11 +391,11 @@ export class Agent {
     await this.#persist(signal);
     let outcome: RunOutcome | undefined;
     let batch: ToolBatch | undefined;
-    const delegatedTools = toolSet(this.#binding(), !!boot.research, boot.connectors);
-    const allowed = ["shell", "files", "web_search", "web_fetch", "recall"];
+    const offered = toolSet(this.#binding(), !!boot.research, boot.connectors, [], boot.guest);
+    const allowed = delegatedTools(boot.guest);
     const schemas = await Promise.all(
       allowed.map(async (name) => {
-        const definition = delegatedTools[name];
+        const definition = offered[name];
         if (!definition) throw new Error(`Missing delegated tool ${name}`);
         return {
           name,
@@ -509,24 +513,14 @@ export class Agent {
         await this.#waitSafety(requestSignal);
         const limits = boot.limits;
         if (limits.maxTurns !== undefined && this.#turns >= limits.maxTurns) {
-          if (
-            !(await this.#keepGoing(
-              `This task has taken ${this.#turns} steps. Keep going?`,
-              requestSignal,
-            ))
-          ) {
+          if (!(await this.#keepGoing(keepGoingQuestion.steps(this.#turns), requestSignal))) {
             outcome = "gave_up";
             return undefined;
           }
           this.#turns = 0;
         }
         if (limits.maxFailedCalls !== undefined && this.#failed >= limits.maxFailedCalls) {
-          if (
-            !(await this.#keepGoing(
-              `My last ${this.#failed} actions failed. Keep trying?`,
-              requestSignal,
-            ))
-          ) {
+          if (!(await this.#keepGoing(keepGoingQuestion.failures(this.#failed), requestSignal))) {
             outcome = "gave_up";
             return undefined;
           }
@@ -748,9 +742,9 @@ export class Agent {
         callId("guard"),
         {
           question,
-          fields: [{ id: "keep_going", kind: "confirm", label: "Keep going" }],
-          submit: "Keep going",
-          decline: "Stop here",
+          fields: [KEEP_GOING_FIELD],
+          submit: KEEP_GOING_SUBMIT,
+          decline: KEEP_GOING_DECLINE,
         },
         signal,
       );
@@ -816,7 +810,13 @@ export class Agent {
         const result = streamText({
           model: this.#model(),
           ...prompt,
-          tools: toolSet(binding, !!boot.research, boot.connectors, this.#harnessRequest.tools),
+          tools: toolSet(
+            binding,
+            !!boot.research,
+            boot.connectors,
+            this.#harnessRequest.tools,
+            boot.guest,
+          ),
           // The provider routes a request by this key to the server that has its prefix cached.
           providerOptions: cacheKeyOptions(binding, boot.sessionId),
           maxOutputTokens: binding.maxOutputTokens,

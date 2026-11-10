@@ -14,7 +14,7 @@ export interface Overlap {
   readonly score: number;
 }
 
-function words(text: string): string[] {
+export function words(text: string): string[] {
   return (
     text
       .normalize("NFKC")

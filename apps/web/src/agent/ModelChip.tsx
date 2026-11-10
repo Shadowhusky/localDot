@@ -34,8 +34,9 @@ export interface ModelMenuProps {
   // What runs the task now, when one does: a model elsewhere is a move, not a switch in place.
   runtime?: string;
   onChoose(option: ModelOption): void;
-  // Given what the menu opened from, which takes the focus back when Settings closes.
-  onManage(trigger: HTMLElement): void;
+  // Given what the menu opened from, which takes the focus back when Settings closes; none where
+  // the models are not this person's to manage, as on a shared link.
+  onManage?(trigger: HTMLElement): void;
   // How much of each subscription plan is used, shown for the plan the chosen model runs on.
   usage?: PlanUsageFeed;
 }
@@ -126,17 +127,19 @@ function ModelMenuBody({
       )}
       {usage?.reply && plan && <PlanUsageList reply={usage.reply} providers={[plan]} />}
       <div className="model-config-actions">
-        <Button
-          variant="quiet"
-          size="sm"
-          className="model-config-manage"
-          onClick={() => {
-            props.onClose();
-            if (props.anchor.current) onManage(props.anchor.current);
-          }}
-        >
-          Manage models…
-        </Button>
+        {onManage && (
+          <Button
+            variant="quiet"
+            size="sm"
+            className="model-config-manage"
+            onClick={() => {
+              props.onClose();
+              if (props.anchor.current) onManage(props.anchor.current);
+            }}
+          >
+            Manage models…
+          </Button>
+        )}
         <Button
           variant="primary"
           size="sm"

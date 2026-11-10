@@ -7,6 +7,7 @@ import {
   STALL,
   ulidTime,
 } from "@localdot/protocol";
+import { decisionWords } from "../copy/decision.ts";
 import {
   type AgentChild,
   type AgentConnection,
@@ -46,6 +47,8 @@ const RELEVANT = new Set<LocalDotEvent["type"]>([
   "ask.answer",
   "takeover.request",
   "takeover.end",
+  "blocker.raise",
+  "blocker.clear",
   "session.end",
   "control.change",
   "pause.change",
@@ -219,6 +222,23 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           ...(card ? { actionClass: card.actionClass } : {}),
           ...(e.data.note ? { note: e.data.note } : {}),
         },
+        ...(card && e.data.by === "message"
+          ? {
+              unapproved: put(
+                model.unapproved,
+                card.approvalId,
+                {
+                  approvalId: card.approvalId,
+                  title: decisionWords(card).title,
+                  seq: e.seq,
+                  time: ulidTime(e.id),
+                  at: e.t,
+                },
+                L.unapproved,
+              ),
+              historyTruncated: next.historyTruncated || model.unapproved.size >= L.unapproved,
+            }
+          : {}),
       };
       break;
     }
@@ -318,9 +338,73 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "budget.exceeded":
       next = { ...next, budget: { id: e.id, at: e.t, data: { ...e.data } } };
       break;
-    case "keys.lock":
-      next = { ...next, keysLocked: e.data.locked };
+    case "blocker.raise": {
+      const was = model.blockers.get(e.data.blockerId);
+      next = {
+        ...next,
+        blockers: put(
+          model.blockers,
+          e.data.blockerId,
+          {
+            ...(was ?? { seq: e.seq, at: e.t, time: ulidTime(e.id) }),
+            ...e.data,
+          },
+          L.blockers,
+        ),
+        historyTruncated: next.historyTruncated || model.blockers.size >= L.blockers,
+      };
       break;
+    }
+    case "blocker.clear": {
+      const was = model.blockers.get(e.data.blockerId);
+      if (was)
+        next = {
+          ...next,
+          blockers: new Map(model.blockers).set(e.data.blockerId, {
+            ...was,
+            cleared: { ...e.data, seq: e.seq, at: e.t, time: ulidTime(e.id) },
+          }),
+        };
+      break;
+    }
+    // From before blockers: only an old log holds it, and it reads as the same history.
+    case "keys.lock": {
+      const open = [...model.blockers.values()].find(
+        (one) => one.blocker.kind === "keys_locked" && !one.cleared,
+      );
+      if (e.data.locked && !open)
+        next = {
+          ...next,
+          blockers: put(
+            model.blockers,
+            e.id,
+            {
+              blockerId: e.id,
+              blocker: { kind: "keys_locked" },
+              by: "localdot",
+              seq: e.seq,
+              at: e.t,
+              time: ulidTime(e.id),
+            },
+            L.blockers,
+          ),
+        };
+      else if (!e.data.locked && open)
+        next = {
+          ...next,
+          blockers: new Map(model.blockers).set(open.blockerId, {
+            ...open,
+            cleared: {
+              blockerId: open.blockerId,
+              outcome: "fixed",
+              seq: e.seq,
+              at: e.t,
+              time: ulidTime(e.id),
+            },
+          }),
+        };
+      break;
+    }
     case "model.spend": {
       const estimated = e.data.basis === "estimated";
       const call = {

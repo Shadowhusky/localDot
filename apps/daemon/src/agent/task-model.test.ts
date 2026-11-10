@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { LiveSessions } from "../gateway/live.ts";
+import { RemoteLinks } from "../remote/links.ts";
 import type { ResolvedRole } from "./bindings.ts";
 import type { BrainCell, OpenBrain } from "./brain-cell.ts";
 import { Conversations } from "./conversation.ts";
@@ -13,6 +14,8 @@ import { MemoryStore } from "./memory.ts";
 import { AgentRunner } from "./runner.ts";
 import type { AgentSession } from "./session.ts";
 import { type AgentSettings, SettingsStore } from "./settings.ts";
+import type { SideGo } from "./side/agent.ts";
+import { sideSpendLedger } from "./side/spend.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
 
@@ -110,6 +113,7 @@ function setup(initial: AgentSettings = { main: SONNET, models: [HAIKU, OPUS] })
     const answer = answers.get(role.model.id);
     return answer ? answer() : `from ${role.model.id}`;
   });
+  const sideAsked: SideGo[] = [];
   const claudeRuns: { model: string; resume: boolean }[] = [];
   const claudeRun = vi.fn(
     async (session: AgentSession, input: { model: string; resume: boolean }) => {
@@ -141,8 +145,11 @@ function setup(initial: AgentSettings = { main: SONNET, models: [HAIKU, OPUS] })
     inputTokens: 1,
     outputTokens: 1,
   }));
+  const links = new RemoteLinks(home);
   const runner = new AgentRunner({
     home,
+    links,
+    keysHeld: { hold: async () => {}, release: async () => {} },
     eventLog: log,
     live,
     cell: (id) =>
@@ -175,10 +182,51 @@ function setup(initial: AgentSettings = { main: SONNET, models: [HAIKU, OPUS] })
       answer,
     },
     quickModel,
+    side: {
+      api: (role, side) => ({
+        provider: role.providerId,
+        model: role.model.id,
+        role: side,
+        tools: true,
+        images: true,
+        run: async (go) => {
+          sideAsked.push(go);
+          const answer = await quickModel(role);
+          await go.tools.call("finish", { status: "found", answer }, go.signal);
+        },
+      }),
+      readers: (sessionId, _session, logFile) => ({ sessionId, logFile, redact: (text) => text }),
+      ledger: sideSpendLedger,
+    },
   });
   fixtures.push({ runner, log, home });
+  // A task a shared link starts, as its route starts one.
+  const guestTask = async (
+    task: string,
+    link: { maxTasks?: number; apps?: boolean } = {},
+  ): Promise<{ session: AgentSession; link: string }> => {
+    const { grant } = links.create({
+      label: "Alex",
+      expiresInHours: null,
+      maxTasks: link.maxTasks ?? 5,
+      taskBudgetUSD: 0.5,
+      apps: link.apps ?? false,
+      model: SONNET,
+    });
+    const reservation = links.reserve(grant.id);
+    const session = await runner.start(cellId, task, undefined, {
+      sender: grant.id,
+      guest: { apps: grant.apps },
+      main: reservation.model,
+      budgetUSD: reservation.budgetUSD,
+    });
+    reservation.finish(session.id);
+    return { session, link: grant.id };
+  };
   return {
     home,
+    links,
+    guestTask,
     log,
     live,
     runner,
@@ -188,6 +236,7 @@ function setup(initial: AgentSettings = { main: SONNET, models: [HAIKU, OPUS] })
     opened,
     boots,
     quickModel,
+    sideAsked,
     claudeRuns,
     answer,
     answers,
@@ -290,6 +339,73 @@ describe("a message's model", () => {
     expect(f.runner.selectionOf(session.id)).toMatchObject({
       roles: [{ role: "main", model: OPUS.model }],
     });
+  });
+
+  it("the model card moves a stalled task to the chosen model, in place, with its history", async () => {
+    const f = setup();
+    f.hold(true);
+    const session = await f.runner.start(f.cellId, "First");
+    await until(() => f.boots.length === 1);
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "model refused", detail: "400: No" });
+    expect(session.openBlockers).toHaveLength(1);
+    await f.runner.retryOnModel(session.id, { ...OPUS });
+    expect(session.openBlockers).toEqual([]);
+    expect(f.events(session.id, "blocker.clear").at(-1)?.data).toMatchObject({
+      outcome: "fixed",
+      movedTo: { provider: OPUS.provider, model: OPUS.model },
+    });
+    await until(() => f.boots.length === 2);
+    expect(f.boots[1]).toEqual({ main: OPUS.model, resume: true });
+    expect(f.runner.get(session.id)).toBe(session);
+    expect(session.stopped).toBe(false);
+  });
+
+  it("the model card's same model retries it, and holds until the model answers", async () => {
+    const f = setup();
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "model unavailable" });
+    const seq = session.inboxSequence;
+    await f.runner.retryOnModel(session.id, { ...SONNET });
+    expect(session.inboxSequence).toBe(seq + 1);
+    expect(session.openBlockers).toHaveLength(1);
+    expect(f.events(session.id, "blocker.clear")).toEqual([]);
+  });
+
+  it("the model card hands over to the conversation's next task for another kind of model", async () => {
+    const f = setup();
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "provider limit reached" });
+    const start = vi.spyOn(f.runner, "start").mockImplementation(async () => session);
+    const turn = vi.spyOn(f.runner, "messageTurn").mockResolvedValue({
+      model: { provider: "chatgpt", model: "gpt-6-sol" },
+      ref: { provider: "chatgpt", model: "gpt-6-sol" },
+      moves: () => true,
+      reached: () => {},
+      handOver: () => {},
+    });
+    await f.runner.retryOnModel(session.id, { provider: "chatgpt", model: "gpt-6-sol" });
+    expect(start).toHaveBeenCalledWith(
+      f.cellId,
+      "Continue where you left off.",
+      undefined,
+      expect.objectContaining({
+        continues: session.id,
+        model: { provider: "chatgpt", model: "gpt-6-sol" },
+      }),
+    );
+    start.mockRejectedValueOnce(new Error("no"));
+    session.append("agent.state", { state: "paused", reason: "provider limit reached" });
+    await expect(
+      f.runner.retryOnModel(session.id, { provider: "chatgpt", model: "gpt-6-sol" }),
+    ).rejects.toThrow("no");
+    expect(session.openBlockers).toHaveLength(1);
+    turn.mockRestore();
+    start.mockRestore();
   });
 
   it("keeps going on the same model without restarting anything extra", async () => {
@@ -427,6 +543,108 @@ describe("a message's model", () => {
     expect(f.events(nextId, "message.user")[1]?.data).toMatchObject({ text: "And this" });
   });
 
+  it("keeps a shared link's task its link's, limits and all, on the task it moves to", async () => {
+    const f = setup();
+    f.hold(true);
+    const { session, link } = await f.guestTask("First");
+    await until(() => f.boots.length === 1);
+    const ref = { provider: "claude-code", model: "opus" };
+    session.enqueue("On Claude Code", link, await f.runner.messageTurn(session.id, ref));
+    f.hold(false);
+    f.finish();
+    await until(() => f.claudeRuns.length > 0);
+    const next = f.conversations.current() as string;
+    expect(next).not.toBe(session.id);
+    expect(f.runner.get(next)?.guest).toEqual({ apps: false });
+    expect(f.links.owns(link, next)).toBe(true);
+    expect(f.links.list()[0]?.tasks).toBe(2);
+    expect(f.events(next, "session.start")[0]?.data.link).toEqual({ id: link, apps: false });
+    expect(f.events(next, "message.user")[0]?.data.link).toBe(link);
+  });
+
+  it("keeps a shared link's task its link's when the owner's model card moves it on", async () => {
+    const f = setup();
+    f.hold(true);
+    const { session, link } = await f.guestTask("Find me a flight");
+    await until(() => f.boots.length === 1);
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "provider limit reached" });
+    expect(session.openBlockers).toHaveLength(1);
+    await f.runner.retryOnModel(session.id, { provider: "claude-code", model: "opus" });
+    f.hold(false);
+    f.finish();
+    await until(() => f.claudeRuns.length > 0);
+    const next = f.conversations.current() as string;
+    expect(next).not.toBe(session.id);
+    const moved = f.runner.get(next);
+    expect(moved?.guest).toEqual({ apps: false });
+    expect(moved?.recent).toEqual([]);
+    expect(f.links.owns(link, next)).toBe(true);
+    expect(f.links.list()[0]?.tasks).toBe(2);
+    expect(f.events(next, "session.start")[0]?.data.link).toEqual({ id: link, apps: false });
+  });
+
+  it("moves no shared link's task on once its link has ended or used its tasks", async () => {
+    for (const ended of ["revoked", "used"] as const) {
+      const f = setup();
+      f.hold(true);
+      const { session, link } = await f.guestTask("Find me a flight", { maxTasks: 1 });
+      await until(() => f.boots.length === 1);
+      if (ended === "revoked") f.links.revoke(link);
+      session.setStatus("paused");
+      session.append("agent.state", { state: "paused", reason: "provider limit reached" });
+      await expect(
+        f.runner.retryOnModel(session.id, { provider: "claude-code", model: "opus" }),
+      ).rejects.toThrow(/link/);
+      expect(session.openBlockers).toHaveLength(1);
+      expect(f.conversations.current()).toBe(session.id);
+      expect(f.links.list()[0]?.tasks).toBe(1);
+    }
+  });
+
+  it("starts the owner's own follow-up to a shared link's task as theirs", async () => {
+    const f = setup();
+    const { session, link } = await f.guestTask("Find me a flight");
+    await until(() => f.boots.length === 1);
+    session.stop();
+    await f.live.settled(session.id);
+    const next = await f.runner.start(f.cellId, "Book the cheapest", undefined, {
+      continues: session.id,
+      byOwner: true,
+    });
+    expect(next.guest).toBeUndefined();
+    expect(f.links.owns(link, next.id)).toBe(false);
+    expect(f.events(next.id, "session.start")[0]?.data.link).toBeUndefined();
+  });
+
+  it("carries a shared link's task on from its record when it is no longer running", async () => {
+    const f = setup();
+    const { grant } = f.links.create({
+      label: "Alex",
+      expiresInHours: null,
+      maxTasks: 5,
+      model: SONNET,
+    });
+    const earlier = f.log.createSession("Earlier");
+    f.log.append(earlier, {
+      type: "session.start",
+      agent: "main",
+      data: {
+        screen: { w: 1280, h: 800, scale: 1 },
+        os: "linux",
+        link: { id: grant.id, apps: false },
+      },
+    });
+    f.log.append(earlier, {
+      type: "message.user",
+      agent: "main",
+      data: { messageId: ulid(), text: "Find me a flight", kind: "task", link: grant.id },
+    });
+    const next = await f.runner.start(f.cellId, "Carry on", undefined, { continues: earlier });
+    expect(next.guest).toEqual({ apps: false });
+    expect(f.links.owns(grant.id, next.id)).toBe(true);
+  });
+
   it("stays on the model at hand, and says so, when another runtime can't start", async () => {
     const f = setup();
     f.hold(true);
@@ -470,18 +688,81 @@ describe("what steps record", () => {
   });
 });
 
-describe("short questions with no tools", () => {
+describe("side questions", () => {
   it("answers on the main model when there is no fast model", async () => {
     const f = setup();
     const session = await f.runner.start(f.cellId, "First");
     await idle(session);
     await expect(
       f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       answer: `from ${SONNET.model}`,
       provider: "anthropic",
       model: SONNET.model,
+      status: "found",
     });
+  });
+
+  it("asks the fast model first, and only it when it finds the answer", async () => {
+    const f = setup({ main: SONNET, fast: HAIKU });
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    f.quickModel.mockClear();
+    await expect(
+      f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
+    ).resolves.toMatchObject({ model: HAIKU.model });
+    expect(f.quickModel).toHaveBeenCalledOnce();
+  });
+
+  it("takes no turn on the computer, and leaves the task exactly as it was", async () => {
+    const f = setup({ main: SONNET, fast: HAIKU });
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    const lease = f.live.lease(f.cellId);
+    const acquire = vi.spyOn(lease, "acquire");
+    const admit = vi.spyOn(session, "admit");
+    const admitCall = vi.spyOn(session, "admitCall");
+    const before = {
+      events: f.log.read(session.id).length,
+      delivered: session.delivered,
+      tainted: session.tainted,
+      taint: session.taint.sources.length,
+      lastFrameId: session.lastFrameId,
+      status: session.status,
+      toolCalls: session.toolCalls,
+      actions: session.actionsSinceUser,
+      transcript: f.transcripts.read(session.id),
+    };
+    let holderDuring: string | undefined = "unset";
+    f.answers.set(HAIKU.model, async () => {
+      holderDuring = lease.holder;
+      return "An answer.";
+    });
+    await f.runner.sideAnswer(session.id, "Why?", new AbortController().signal);
+    expect(holderDuring).toBeUndefined();
+    expect(acquire).not.toHaveBeenCalled();
+    expect(admit).not.toHaveBeenCalled();
+    expect(admitCall).not.toHaveBeenCalled();
+    expect({
+      events: f.log.read(session.id).length,
+      delivered: session.delivered,
+      tainted: session.tainted,
+      taint: session.taint.sources.length,
+      lastFrameId: session.lastFrameId,
+      status: session.status,
+      toolCalls: session.toolCalls,
+      actions: session.actionsSinceUser,
+      transcript: f.transcripts.read(session.id),
+    }).toEqual(before);
+  });
+
+  it("tells the model where the task stands", async () => {
+    const f = setup();
+    const session = await f.runner.start(f.cellId, "First");
+    await idle(session);
+    await f.runner.sideAnswer(session.id, "Why?", new AbortController().signal);
+    expect(f.sideAsked.at(-1)?.prompt).toContain("Its computer is off");
+    expect(f.sideAsked.at(-1)?.prompt).toContain("Side question: Why?");
   });
 
   it("falls back to the main model when the fast one fails, and tells the real reason", async () => {
@@ -494,7 +775,7 @@ describe("short questions with no tools", () => {
     await idle(session);
     await expect(
       f.runner.sideAnswer(session.id, "Why?", new AbortController().signal),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       answer: `from ${SONNET.model}`,
       provider: "anthropic",
       model: SONNET.model,

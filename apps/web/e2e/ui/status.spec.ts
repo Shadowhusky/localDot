@@ -23,6 +23,7 @@ const STATUS: Record<
   ready: { shape: "ready", control: /^Take control$/, label: "Ready" },
   "slow-keys": { shape: "ready", control: /^Take control$/, label: "Ready" },
   conversations: { shape: "ready", control: /^Take control$/, label: "Done" },
+  "shared-links": { shape: "ready", control: /^Take control$/, label: "Done" },
   "conversations-working": {
     shape: "task",
     control: /^Stop$/,
@@ -32,6 +33,7 @@ const STATUS: Record<
   "chatgpt-plan": { shape: "ready", control: /^Take control$/, label: "Ready" },
   "plan-usage": { shape: "ready", control: /^Take control$/, label: "Ready" },
   running: { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
+  overview: { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
   "long-thread": {
     shape: "task",
     control: /^Stop$/,
@@ -52,6 +54,18 @@ const STATUS: Record<
   },
   budget: { shape: "task", control: /^(Stop|Continue)$/, label: "Spending limit reached" },
   "keys-locked": {
+    shape: "task",
+    control: /^Stop$/,
+    label: "Select the Net total cell",
+    light: "dot",
+  },
+  "fix-key": { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
+  "fix-app": { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
+  "fix-model": { shape: "task", control: /^Stop$/, label: "Provider request failed" },
+  "plan-limit": { shape: "task", control: /^Stop$/, label: "Paused" },
+  "fix-computer": { shape: "hidden", label: "Stopped", curtain: "Turn on" },
+  "fix-computer-paused": { shape: "computer", control: /^Resume$/, label: "Paused" },
+  "fix-runtime": {
     shape: "task",
     control: /^Stop$/,
     label: "Select the Net total cell",

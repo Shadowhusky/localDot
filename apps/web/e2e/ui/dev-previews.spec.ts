@@ -6,7 +6,7 @@ import { expect, isPhone, runAt, test } from "./harness.ts";
 
 // Servers dot starts in its computer, opened on the owner's devices. The fixture has no computer, so
 // the daemon's previews routes answer here; a tapped chip's new tab records where it was sent.
-runAt("c14", "c39", "w39");
+runAt("c14", "c39", "w14", "w39");
 
 const HOST = "https://richards-mac-studio.tail849a6b.ts.net";
 const VITE = "http://localhost:5173/";
@@ -38,11 +38,22 @@ async function previewsDaemon(page: Page, status: PreviewsStatus): Promise<Daemo
   await page.route("**/api/sessions/*/previews", (route: Route) => {
     const request = route.request();
     if (request.method() === "GET") return route.fulfill({ json: daemon.status });
-    const body = request.postDataJSON() as { url?: string; port?: number };
+    const body = request.postDataJSON() as { url?: string; port?: number; local?: number };
     daemon.requests.push(body);
     if (daemon.refusal)
       return route.fulfill({ status: daemon.refusal.status, json: daemon.refusal.body });
     const target = body.url ?? `http://localhost:${body.port}/`;
+    if (body.local) {
+      const origin = `http://localhost:${body.local}`;
+      const preview = { ...opened(target, body.local).preview, id: `m${body.local}`, origin };
+      daemon.status = {
+        ...daemon.status,
+        previews: [...daemon.status.previews, { ...preview, local: true }],
+      };
+      return route.fulfill({
+        json: { preview: { ...preview, local: true }, open: `${origin}/__localdot/preview#secret` },
+      });
+    }
     // A server already open keeps its preview; the answer is a new link to it.
     const open = daemon.status.previews.find((preview) => preview.target === target);
     const answer = opened(target, open ? Number(new URL(open.origin).port) : ++daemon.port);
@@ -274,6 +285,33 @@ test("a computer without the preview service says to update it, and a chip opens
   expect(daemon.requests).toEqual([]);
 });
 
+test("Update from the previews panel follows the same steps as Settings", async ({ page, ui }) => {
+  await previewsDaemon(page, {
+    ...READY,
+    state: "needs-update",
+    message: "Update your computer to open the servers dot starts in it.",
+    addresses: [],
+  });
+  const fixture = await ui.open("done");
+  expect((await page.request.post(`${fixture.origin}/__qa/update?hold=1`)).ok()).toBe(true);
+  const panel = await previewsTab(page);
+  const answered = page.waitForResponse(
+    (r) => r.url().endsWith("/update") && r.request().method() === "POST",
+  );
+  await panel.getByRole("button", { name: "Update", exact: true }).click();
+  await answered;
+  const notices = page.getByRole("region", { name: /notifications/i });
+  await expect(notices.getByText(/Updating your computer · Step 1 of 6/)).toBeVisible();
+  expect(
+    (
+      await page.request.post(
+        `${fixture.origin}/__qa/update/step?stage=keep&share=0.3&detail=Comparing+it+with+the+new+version`,
+      )
+    ).ok(),
+  ).toBe(true);
+  await expect(notices.getByText(/Step 3 of 6 · Comparing it with the new version/)).toBeVisible();
+});
+
 test("without Tailscale a chip says how to turn it on, opens no tab, and leads to Settings", async ({
   page,
   ui,
@@ -332,4 +370,62 @@ test("a reply comes with a preview of the app its turn left running, until it st
   await expect(card).toContainText("Stopped. Ask dot to start it again.", { timeout: 10_000 });
   await expect(card.getByRole("button", { name: /Open preview/ })).toHaveCount(0);
   await shoot(page, ui, "preview-card-stopped");
+});
+
+test("an app whose sign-in expects its own address opens on this Mac at it", async ({
+  page,
+  ui,
+}) => {
+  const daemon = await previewsDaemon(page, {
+    ...READY,
+    servers: [
+      {
+        port: 5173,
+        url: VITE,
+        name: "node",
+        title: "Thema (dev)",
+        project: "thema-app",
+        state: "answering",
+        seenAt: NOW,
+      },
+    ],
+  });
+  await ui.open("running");
+  await recordTabs(page);
+  const panel = await previewsTab(page);
+  const list = panel.getByRole("region", { name: "Web apps in dot's computer" });
+  await expect(list.getByText("Thema (dev)")).toBeVisible();
+  const onMac = list.getByRole("button", {
+    name: "Open localhost:5173 at a localhost address on this Mac",
+  });
+  if (isPhone(page)) {
+    // A phone has no way to the Mac's localhost.
+    await expect(
+      list.getByRole("button", { name: "Open preview of localhost:5173" }),
+    ).toBeVisible();
+    await expect(onMac).toHaveCount(0);
+    return;
+  }
+  await onMac.click();
+  const popover = page.getByRole("dialog", { name: "Open on this Mac" });
+  await expect(popover).toContainText("send you back only to the address registered for the app");
+  const field = popover.getByRole("textbox", { name: "Address on this Mac" });
+  await expect(field).toHaveValue("5173");
+  await field.fill("3000");
+  await expect(popover.getByRole("button", { name: "Open at localhost:3000" })).toBeVisible();
+  await shoot(page, ui, "previews-on-mac");
+  await popover.getByRole("button", { name: "Open at localhost:3000" }).click();
+  await expect(html(page)).toHaveAttribute(
+    "data-preview-tab",
+    "http://localhost:3000/__localdot/preview#secret",
+  );
+  expect(daemon.requests).toEqual([{ port: 5173, local: 3000 }]);
+  await expect(popover).toHaveCount(0);
+  const opened = panel.getByRole("region", { name: "On this Mac" });
+  await expect(opened).toContainText("localhost:3000");
+  await expect(opened).toContainText("Thema (dev) · localhost:5173");
+  await shoot(page, ui, "previews-on-mac-open");
+  await opened.getByRole("button", { name: "Close localhost:3000 on this Mac" }).click();
+  await expect.poll(() => daemon.stopped).toEqual(["m3000"]);
+  await expect(opened).toHaveCount(0);
 });

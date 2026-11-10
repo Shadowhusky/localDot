@@ -65,6 +65,8 @@ export interface SettingsDraft {
   // On is Auto.
   purposeCheck: boolean;
   recentActivity: boolean;
+  // A task a plan's limit paused continues by itself once the plan resets.
+  autoContinue: boolean;
   persona: PersonaId;
   autoPersona: boolean;
   // This localDot's name, as typed, the accessory its dot wears, and the user's others.
@@ -115,6 +117,7 @@ export function formOf(settings: AgentSettingsDocument): SettingsDraft {
     },
     purposeCheck: settings.purposeCheck !== "off",
     recentActivity: settings.recentActivity !== "off",
+    autoContinue: settings.autoContinue !== "off",
   };
 }
 export function pickerKeys(index: ProviderIndex): PickerKey[] {
@@ -275,6 +278,8 @@ export function validateForm(
   else document.purposeCheck = "off";
   if (draft.recentActivity) delete document.recentActivity;
   else document.recentActivity = "off";
+  if (draft.autoContinue) delete document.autoContinue;
+  else document.autoContinue = "off";
   if (problems.length) return { ok: false, problems };
   if (
     draft.autonomy !== undefined &&

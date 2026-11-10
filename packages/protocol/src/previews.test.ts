@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  PreviewItem,
   PreviewRequest,
   PreviewServer,
   PreviewsStatus,
@@ -109,6 +110,24 @@ describe("the previews API", () => {
     expect(PreviewRequest.safeParse({ port: 0 }).success).toBe(false);
     expect(PreviewRequest.safeParse({ url: "http://localhost/", port: 80 }).success).toBe(false);
     expect(PreviewRequest.safeParse({ url: "" }).success).toBe(false);
+  });
+
+  it("takes a port on the Mac to open it at, the address its sign-in may expect", () => {
+    expect(PreviewRequest.safeParse({ port: 5173, local: 3000 }).success).toBe(true);
+    expect(PreviewRequest.safeParse({ url: "http://localhost:5173/", local: 4173 }).success).toBe(
+      true,
+    );
+    for (const local of [0, 80, 1023, 65536, 3000.5, "3000"])
+      expect(PreviewRequest.safeParse({ port: 5173, local }).success, String(local)).toBe(false);
+    expect(
+      PreviewItem.safeParse({
+        id: "p",
+        target: "http://localhost:5173/",
+        origin: "http://localhost:3000",
+        openedAt: "2026-11-09T09:00:00.000Z",
+        local: true,
+      }).success,
+    ).toBe(true);
   });
 
   it("describes what can be opened", () => {
