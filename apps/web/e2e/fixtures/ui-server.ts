@@ -4472,6 +4472,11 @@ routes.post("/__qa/screen", async (c) => {
 });
 // The web browser is running, as it is once the computer has warmed it, with dot on the desktop.
 routes.post("/__qa/browser/start", (c) => {
+  // ?own=1: the task's conversation has a web browser of its own, running too.
+  if (c.req.query("own") === "1" && session) {
+    ownTasks.add(session.id);
+    runOwnBrowser(true);
+  }
   runBrowser(true);
   return c.json({ ok: true });
 });
