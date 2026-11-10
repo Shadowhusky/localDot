@@ -51,10 +51,13 @@ export const ISOLATION: Readonly<Record<string, string>> = Object.freeze({
   ENABLE_CLAUDEAI_MCP_SERVERS: "false",
   DISABLE_AUTOUPDATER: "1",
 });
+// `account`: the folder of this dot's own Claude account. Claude Code keeps its sign-in apart for
+// each such folder, so this dot's tasks use that account and not the one on this Mac.
 export function claudeCodeEnv(
   base: NodeJS.ProcessEnv,
   home: string,
   executable: string,
+  account?: string,
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const name of PASSED) {
@@ -63,7 +66,16 @@ export function claudeCodeEnv(
   }
   env.HOME = home;
   env.PATH = [dirname(executable), base.PATH].filter(Boolean).join(delimiter);
+  if (account) env.CLAUDE_CONFIG_DIR = account;
   return { ...env, ...ISOLATION };
+}
+
+const shellQuote = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
+// What the user runs in Terminal to sign in to the account this dot uses.
+export function claudeSignInCommand(account?: string): string {
+  return account
+    ? `CLAUDE_CONFIG_DIR=${shellQuote(account)} ${CLAUDE_CODE_SIGN_IN}`
+    : CLAUDE_CODE_SIGN_IN;
 }
 
 const SYSTEM_DIRS = ["/opt/homebrew/bin", "/usr/local/bin"];
@@ -130,6 +142,9 @@ export interface ClaudeCodeSetupDeps {
   find(): string | undefined;
   readonly run: Run;
   readonly env: NodeJS.ProcessEnv;
+  // The folder of this dot's own Claude account, made on demand; undefined while the dot uses the
+  // account signed in on this Mac.
+  account?(): string | undefined;
   // The models the user's own Claude Code offers, read without a model call.
   listModels(launch: ClaudeCodeLaunch, signal: AbortSignal): Promise<readonly ClaudeCodeModel[]>;
   readonly now?: () => number;
@@ -141,6 +156,8 @@ export class ClaudeCodeSetup {
   readonly #deps: ClaudeCodeSetupDeps;
   readonly #abort = new AbortController();
   #status: ClaudeCodeStatus | undefined;
+  // The account folder the last check ran with.
+  #checkedAccount: string | undefined;
   #launch: ClaudeCodeLaunch | undefined;
   // One flight per kind: "Check again" lists the models afresh, and a task start never waits on it.
   readonly #flights = new Map<boolean, Promise<ClaudeCodeStatus>>();
@@ -149,7 +166,11 @@ export class ClaudeCodeSetup {
   }
   async status(): Promise<ClaudeCodeStatus> {
     const now = this.#deps.now?.() ?? Date.now();
-    if (this.#status?.checkedAt !== undefined && now - this.#status.checkedAt < CHECK_TTL_MS)
+    if (
+      this.#status?.checkedAt !== undefined &&
+      now - this.#status.checkedAt < CHECK_TTL_MS &&
+      this.#checkedAccount === this.#account()
+    )
       return this.#status;
     return this.check();
   }
@@ -166,6 +187,13 @@ export class ClaudeCodeSetup {
   close(): void {
     this.#abort.abort();
   }
+  #account(): string | undefined {
+    try {
+      return this.#deps.account?.();
+    } catch {
+      return undefined;
+    }
+  }
   #run(listing: boolean): Promise<ClaudeCodeStatus> {
     let flight = this.#flights.get(listing);
     if (!flight) {
@@ -175,14 +203,24 @@ export class ClaudeCodeSetup {
     return flight;
   }
   async #check(listing: boolean): Promise<ClaudeCodeStatus> {
-    const known = this.#status?.state === "signed_in" ? this.#status.models : [];
+    const account = this.#account();
+    const known =
+      this.#status?.state === "signed_in" && this.#checkedAccount === account
+        ? this.#status.models
+        : [];
     const checkedAt = this.#deps.now?.() ?? Date.now();
     const result = (
       fields: Omit<ClaudeCodeStatus, "models" | "checkedAt">,
       models: ClaudeCodeModel[] = [],
     ) => {
-      const status = ClaudeCodeStatus.parse({ ...fields, models, checkedAt });
+      const status = ClaudeCodeStatus.parse({
+        ...fields,
+        ...(account ? { separate: true } : {}),
+        models,
+        checkedAt,
+      });
       this.#status = status;
+      this.#checkedAccount = account;
       if (status.state !== "signed_in") this.#launch = undefined;
       return status;
     };
@@ -210,7 +248,7 @@ export class ClaudeCodeSetup {
     }
     const launch: ClaudeCodeLaunch = {
       executable,
-      env: claudeCodeEnv(this.#deps.env, this.#deps.home, executable),
+      env: claudeCodeEnv(this.#deps.env, this.#deps.home, executable, account),
       cwd,
     };
     const run = (args: readonly string[]) =>
@@ -249,8 +287,10 @@ export class ClaudeCodeSetup {
       return result({
         state: "signed_out",
         version,
-        reason: "Sign in to Claude Code, then check again.",
-        command: CLAUDE_CODE_SIGN_IN,
+        reason: account
+          ? "Sign in to the Claude account for this dot in Terminal, then check again."
+          : "Sign in to Claude Code, then check again.",
+        command: claudeSignInCommand(account),
       });
     let models: ClaudeCodeModel[] = listing ? [] : known;
     if (listing || !models.length)

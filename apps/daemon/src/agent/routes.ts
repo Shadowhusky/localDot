@@ -15,6 +15,8 @@ import {
   BlockerModelChoice,
   BudgetRaiseRequest,
   CLAUDE_PLAN_REFUSAL,
+  ClaudeCodeAccountRequest,
+  type ClaudeCodeStatus,
   ContinueConversation,
   EditMemoryEntryRequest,
   EditPersonRequest,
@@ -192,6 +194,8 @@ export interface AgentRoutesDeps {
     setup: ChatgptSetupControl;
   };
   claudeCode?: Pick<ClaudeCodeSetup, "status" | "check">;
+  // Switches between the Claude account on this Mac and this dot's own, then checks it.
+  claudeAccount?(separate: boolean): Promise<ClaudeCodeStatus>;
   planUsage?: Pick<PlanUsageStore, "reply" | "refresh">;
 }
 
@@ -498,6 +502,16 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       }),
     );
   }
+  const claudeAccount = deps.claudeAccount;
+  if (claudeAccount)
+    app.put(
+      "/api/agent/claude-code/account",
+      route(async (c) => {
+        const { separate } = await json(c.req.raw, ClaudeCodeAccountRequest);
+        check(c.req.raw.signal);
+        return c.json(await claudeAccount(separate));
+      }),
+    );
   const planUsage = deps.planUsage;
   if (planUsage)
     // `fresh=1` also reads plans whose figures are not fresh from their own apps, in the background.

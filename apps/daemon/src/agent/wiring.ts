@@ -79,6 +79,7 @@ import type { ScreenRecordings } from "../recorder/screen-recordings.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
+import { ClaudeAccountChoice } from "./claude-code/account.ts";
 import { claudeCodeAnswer } from "./claude-code/answer.ts";
 import { ClaudeCodeCleanupError, ClaudeCodeDriver } from "./claude-code/driver.ts";
 import { claudeCodeInstructions } from "./claude-code/instructions.ts";
@@ -772,6 +773,7 @@ export function createAgent(d: AgentWiringDeps) {
         })),
     );
   const claudeHome = d.claudeCode?.realHome;
+  const claudeAccount = claudeHome ? new ClaudeAccountChoice(d.home) : undefined;
   const claudeSetup = claudeHome
     ? new ClaudeCodeSetup({
         home: claudeHome,
@@ -779,6 +781,7 @@ export function createAgent(d: AgentWiringDeps) {
         find: () => findClaudeCode(claudeHome),
         run: runFile,
         env: process.env,
+        account: () => claudeAccount?.folder(),
         listModels: claudeModels,
       })
     : undefined;
@@ -1261,6 +1264,18 @@ export function createAgent(d: AgentWiringDeps) {
       ? { chatgpt: { account: auth, installer, availability: platform, setup } }
       : {}),
     ...(claudeSetup ? { claudeCode: claudeSetup } : {}),
+    ...(claudeSetup && claudeAccount
+      ? {
+          claudeAccount: (separate: boolean) => {
+            if (claudeAccount.separate !== separate) {
+              claudeAccount.set(separate);
+              // What the plan said belonged to the other account.
+              planUsage.forget("claude-code");
+            }
+            return claudeSetup.check();
+          },
+        }
+      : {}),
     planUsage,
     redactUserText: (text, id, cellId) =>
       forText(

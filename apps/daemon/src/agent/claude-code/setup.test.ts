@@ -7,6 +7,7 @@ import {
   type ClaudeCodeSetupDeps,
   ClaudeCodeUnavailable,
   claudeCodeEnv,
+  claudeSignInCommand,
   findClaudeCode,
   ISOLATION,
   type Run,
@@ -38,7 +39,11 @@ const TOKENS = {
   CLAUDE_CONFIG_DIR: "/somewhere/else",
   NODE_OPTIONS: "--require /tmp/evil.js",
 };
-function fixture(answers: Partial<Record<"version" | "auth", string>> = {}, find = true) {
+function fixture(
+  answers: Partial<Record<"version" | "auth", string>> = {},
+  find = true,
+  account: () => string | undefined = () => undefined,
+) {
   const calls: { file: string; args: readonly string[]; env: Record<string, string> }[] = [];
   const run = vi.fn<Run>(async (file, args, { env }) => {
     calls.push({ file, args, env });
@@ -60,6 +65,7 @@ function fixture(answers: Partial<Record<"version" | "auth", string>> = {}, find
     find: () => (find ? "/Users/person/.local/bin/claude" : undefined),
     run,
     env: { PATH: "/usr/bin:/bin", HOME: "/elsewhere", LANG: "en_GB.UTF-8", ...TOKENS },
+    account,
     listModels,
     now: () => 1_000,
   });
@@ -175,6 +181,53 @@ describe("Claude Code detection", () => {
     expect(await f.setup.launch()).toMatchObject({ executable: "/Users/person/.local/bin/claude" });
     held.resolve([{ id: "sonnet", name: "Sonnet" }]);
     await checked;
+  });
+});
+
+describe("a dot's own Claude account", () => {
+  const FOLDER = "/Users/person/.localdot-sub/claude-code/account";
+  it("points every check, model listing and task at this dot's account folder", async () => {
+    const f = fixture({}, true, () => FOLDER);
+    const status = await f.setup.check();
+    expect(status).toMatchObject({ state: "signed_in", separate: true });
+    const launch = await f.setup.launch();
+    const envs = [...f.calls.map((call) => call.env), f.listModels.mock.calls[0]?.[0].env];
+    for (const env of [...envs, launch.env])
+      expect(env).toMatchObject({ HOME: "/Users/person", CLAUDE_CONFIG_DIR: FOLDER });
+  });
+  it("keeps the Mac's account by default, never passing a config folder on", async () => {
+    const f = fixture();
+    expect(await f.setup.check()).not.toHaveProperty("separate");
+    expect((await f.setup.launch()).env).not.toHaveProperty("CLAUDE_CONFIG_DIR");
+  });
+  it("asks the user to sign in to that folder's account, quoted for the shell", async () => {
+    const signedOut = JSON.stringify({ loggedIn: false });
+    expect(await fixture({ auth: signedOut }, true, () => FOLDER).setup.check()).toMatchObject({
+      state: "signed_out",
+      separate: true,
+      command: `CLAUDE_CONFIG_DIR='${FOLDER}' claude auth login`,
+    });
+    expect(claudeSignInCommand("/Users/o'neil/dot home")).toBe(
+      "CLAUDE_CONFIG_DIR='/Users/o'\\''neil/dot home' claude auth login",
+    );
+    expect(claudeSignInCommand()).toBe(CLAUDE_CODE_SIGN_IN);
+  });
+  it("checks again when the dot changes account, rather than answering from the last check", async () => {
+    let folder: string | undefined;
+    const f = fixture({}, true, () => folder);
+    expect(await f.setup.status()).not.toHaveProperty("separate");
+    folder = FOLDER;
+    expect(await f.setup.status()).toMatchObject({ separate: true });
+    expect(f.listModels).toHaveBeenCalledTimes(2);
+  });
+  it("adds only the account folder to the environment", () => {
+    expect(
+      claudeCodeEnv({ CLAUDE_CONFIG_DIR: "/else" }, "/Users/person", "/bin/claude"),
+    ).not.toHaveProperty("CLAUDE_CONFIG_DIR");
+    expect(
+      claudeCodeEnv({ CLAUDE_CONFIG_DIR: "/else" }, "/Users/person", "/bin/claude", FOLDER)
+        .CLAUDE_CONFIG_DIR,
+    ).toBe(FOLDER);
   });
 });
 
