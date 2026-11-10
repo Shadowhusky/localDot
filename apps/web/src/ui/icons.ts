@@ -470,6 +470,12 @@ export const ICONS = {
     ["rect", { x: "14", y: "14", width: "7", height: "7", rx: "1" }],
     ["rect", { x: "3", y: "14", width: "7", height: "7", rx: "1" }],
   ],
+  "layout-dashboard": [
+    ["rect", { x: "3", y: "3", width: "7", height: "9", rx: "1" }],
+    ["rect", { x: "14", y: "3", width: "7", height: "5", rx: "1" }],
+    ["rect", { x: "14", y: "12", width: "7", height: "9", rx: "1" }],
+    ["rect", { x: "3", y: "16", width: "7", height: "5", rx: "1" }],
+  ],
   smile: [
     ["circle", { cx: "12", cy: "12", r: "10" }],
     ["path", { d: "M8 14s1.5 2 4 2 4-2 4-2" }],
