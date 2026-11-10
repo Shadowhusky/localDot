@@ -1503,13 +1503,20 @@ export const Composer = memo(function Composer(props: ComposerProps) {
               {note && <span className="composer-note">{note}</span>}
             </VoiceStrip>
           </div>
-          {offersMenu && (
+          {props.permissions}
+          {!props.link && <VoiceButton voice={voice} />}
+          {/* Send's own options, beside it. Mounted with the card, so its room folds in and out
+              and the controls around it glide rather than jump as a task starts and stops. */}
+          {!pill && (
             <IconButton
               ref={more}
               className="composer-more"
               icon="more-horizontal"
               size={24}
               label="Message options"
+              data-shown={offersMenu || undefined}
+              aria-hidden={offersMenu ? undefined : true}
+              inert={!offersMenu}
               {...triggerProps("menu", menu)}
               onClick={() => setMenu(true)}
             />
@@ -1530,8 +1537,6 @@ export const Composer = memo(function Composer(props: ComposerProps) {
               Send after this task
             </MenuItem>
           </Menu>
-          {props.permissions}
-          {!props.link && <VoiceButton voice={voice} />}
           <IconButton
             type={talking || taskAction ? "button" : "submit"}
             onPointerDown={(event) => {

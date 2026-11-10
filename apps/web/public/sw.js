@@ -86,6 +86,8 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(copy.title, {
       body: title ?? copy.body,
       tag: `${kind ?? "other"}:${sessionId ?? "none"}`,
+      // A notification that replaces one with its tag shows again; without this it is silent.
+      renotify: true,
       icon: "/icons/icon-192.png?v=mascot-1",
       data: { sessionId },
     }),

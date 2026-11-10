@@ -9,8 +9,8 @@ export const EVENT_ROWS: readonly { event: NotifyEvent; label: string; descripti
   { event: "routine", label: "Routine results", description: "When a routine has something" },
 ];
 
-export const SCRIPT_EDITOR_HINT =
-  "No banner on the Mac? Allow notifications for Script Editor in System Settings › Notifications.";
+export const MAC_BANNER_HINT =
+  "No banner on the Mac? Allow notifications for localDot in System Settings › Notifications.";
 
 export type DeviceAction = "turn-on" | "turn-off" | "copy-link";
 
@@ -74,7 +74,7 @@ export function testResultLine(result: NotifyTestResult, banner: BannerKind = "m
       parts.push(`${phone.label} didn't get it. Check its connection and try again.`);
   }
   if (!parts.length) return "Nothing was sent: no phones are set up yet.";
-  if (result.mac !== "unavailable" && banner === "mac") parts.push(SCRIPT_EDITOR_HINT);
+  if (result.mac !== "unavailable" && banner === "mac") parts.push(MAC_BANNER_HINT);
   return parts.join(" ");
 }
 

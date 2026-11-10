@@ -56,12 +56,16 @@ export function inQuietHours(quiet: QuietHours, now: Date, timeZone: string): bo
   return start < end ? minute >= start && minute < end : minute >= start || minute < end;
 }
 
+// ownBanner: the computer shows banners of its own. Those are what Send a test shows, so they stay
+// the way in: a page can't tell whether its browser's notifications reach the screen, so a hidden
+// tab shows one itself only where the computer has none.
 export function decide(
   notice: Notice,
   settings: NotifySettings,
   presence: PresenceSnapshot,
   now: Date,
   timeZone: string,
+  ownBanner = true,
 ): Delivery | null {
   const channels = settings.events[notice.event];
   const quiet =
@@ -70,7 +74,7 @@ export function decide(
   const mac: MacRoute =
     !channels.mac || quiet || presence.localVisible
       ? "none"
-      : presence.localHiddenCanNotify
+      : !ownBanner && presence.localHiddenCanNotify
         ? "page"
         : "banner";
   const phone = channels.phone && !quiet;

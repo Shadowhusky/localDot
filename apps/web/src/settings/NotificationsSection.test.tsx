@@ -130,6 +130,24 @@ describe("Settings › Notifications", () => {
     setup(thisMac, undefined, "none");
     expect(await screen.findByText("Notifications show here while this tab is open.")).toBeTruthy();
   });
+
+  // A Mac's own banner is what reaches the screen; a tab's would only stand in for it where the
+  // computer has none.
+  it("offers this tab's notifications only where the computer has no banners", async () => {
+    const tab = {
+      ...thisMac,
+      notification: {
+        permission: () => "default" as const,
+        request: async () => "granted" as const,
+      },
+    };
+    setup(tab);
+    expect(await screen.findByText(/whenever you aren't looking at localDot there/)).toBeTruthy();
+    expect(screen.queryByText("Show them from this tab too")).toBeNull();
+    cleanup();
+    setup(tab, undefined, "none");
+    expect(await screen.findByText("Show them from this tab too")).toBeTruthy();
+  });
 });
 
 it("names the Windows client and explains why a test cannot send while notifications are off", async () => {

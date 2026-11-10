@@ -31,7 +31,7 @@ import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "./frames.ts";
 import { animationKeepsTarget, frameLuma, lumaRegionChanged } from "./freshness.ts";
 import { type NativeActionIdentity, partOf, sameNativeIdentity } from "./identity.ts";
-import { maskFrame } from "./mask.ts";
+import { maskFrame, maskFullFrame } from "./mask.ts";
 import { type OnsetTable, onsetKind } from "./onset-table.ts";
 import type { RingOnsetPolicy } from "./ring-onset.ts";
 import {
@@ -297,6 +297,9 @@ export class ActionGateway {
   // A move that put the cursor where it is, by screen, until the next action.
   readonly #placed = new Map<string, Placed>();
   // Each screen's newest frame: its desktopd keeps that frame's device-resolution pixels.
+  // Cells whose full-resolution step picture is being taken, so a quick run of observes never
+  // queues a pile of them.
+  readonly #keepingFull = new Set<string>();
   readonly #lastFrame = new Map<
     string,
     { frameId: string; sessionId: string; device: NativeDevice; digest: string; masked?: boolean }
@@ -518,7 +521,25 @@ export class ActionGateway {
       digest: createHash("sha256").update(image).digest("hex"),
       masked: hidden.length > 0,
     });
+    if (scale === 2) this.#keepFull(ctx, d, o.frameId, hidden);
     return { frameId: o.frameId, pointer: o.pointer };
+  }
+
+  // The frame as the 2x screen showed it, for the step pictures people look at, taken while the
+  // model thinks: desktopd keeps only its newest capture, so a later observe simply goes without.
+  #keepFull(ctx: ActionContext, d: NativeDevice, frameId: string, hidden: readonly Rect[]): void {
+    const zoom = d.client.zoom;
+    if (!zoom || this.#keepingFull.has(ctx.cellId)) return;
+    this.#keepingFull.add(ctx.cellId);
+    const region = { x: 0, y: 0, w: MODEL_SCREEN.width, h: MODEL_SCREEN.height };
+    void zoom
+      .call(d.client, { frameId, region })
+      .then(async (png) => {
+        if (png)
+          this.deps.frames.saveFull(ctx.sessionId, frameId, await maskFullFrame(png, hidden));
+      })
+      .catch(() => {})
+      .finally(() => this.#keepingFull.delete(ctx.cellId));
   }
 
   // A model-pixel region of the session's frame at the screen's device resolution (PNG), while
