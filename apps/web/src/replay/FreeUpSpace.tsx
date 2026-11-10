@@ -1,5 +1,5 @@
 import type { DeleteSessionsResult, SessionCard } from "@localdot/protocol";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type RefObject, useRef, useState } from "react";
 import { bytes } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
@@ -12,7 +12,6 @@ import {
   CLEANUPS,
   type Cleanup,
   deleteBody,
-  deleteProblem,
   deleteRecordings,
   deleteTitle,
   totalBytes,
@@ -88,6 +87,7 @@ export function DeleteRecordings({
   cleanup,
   anchor,
   onClose,
+  onDeleting,
   onDeleted,
 }: {
   api: ApiClient;
@@ -97,49 +97,32 @@ export function DeleteRecordings({
   cleanup?: Cleanup;
   anchor: RefObject<HTMLElement | null>;
   onClose(): void;
+  // As soon as they are confirmed: they leave the list while the daemon deletes them.
+  onDeleting(ids: readonly string[]): void;
+  // Once the daemon has answered; any it kept come back.
   onDeleted(result: DeleteSessionsResult): void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  const open = cards !== null;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: each opening starts clean.
-  useEffect(() => {
-    setProblem(null);
-    setBusy(false);
-  }, [open]);
   const n = cards?.length ?? 0;
-  const remove = async () => {
-    if (!cards || busy || n === 0) return;
-    setBusy(true);
-    setProblem(null);
-    const result = await deleteRecordings(
-      api,
-      cards.map((card) => card.id),
-    );
-    setBusy(false);
-    onDeleted(result);
-    if (result.live.length > 0 || result.failed.length > 0) setProblem(deleteProblem(result));
-    else onClose();
+  const remove = () => {
+    if (!cards || n === 0) return;
+    const ids = cards.map((card) => card.id);
+    void deleteRecordings(api, ids).then(onDeleted);
+    onDeleting(ids);
+    onClose();
   };
   return (
     <Dialog
-      open={open}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
+      open={cards !== null}
+      onClose={onClose}
       anchor={anchor}
-      title={cleanup && !problem ? cleanup.title(n) : deleteTitle(n)}
-      description={problem ? <span role="alert">{problem}</span> : deleteBody(n)}
+      title={cleanup ? cleanup.title(n) : deleteTitle(n)}
+      description={deleteBody(n)}
       facts={n > 0 ? [["Frees", bytes(totalBytes(cards ?? []))]] : undefined}
     >
-      <Button
-        variant="quiet"
-        disabledReason={busy ? "Deleting the recordings…" : undefined}
-        onClick={onClose}
-      >
+      <Button variant="quiet" onClick={onClose}>
         Cancel
       </Button>
-      <Button variant="destructive" busy={busy} onClick={() => void remove()}>
+      <Button variant="destructive" onClick={remove}>
         Delete
       </Button>
     </Dialog>

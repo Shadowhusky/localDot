@@ -163,7 +163,7 @@ it("counts what each Free up space choice frees, and leaves its picks to review 
   expect(bar().textContent).toContain("2 selected · 1.5 GB");
 });
 
-it("keeps what stayed picked and says why when some recordings can't go", async () => {
+it("lets the chosen go at once, then brings back and says why some recordings couldn't go", async () => {
   const f = fixture((ids) => ({
     deleted: ids.slice(0, 1),
     live: ids.slice(1, 2),
@@ -175,33 +175,27 @@ it("keeps what stayed picked and says why when some recordings can't go", async 
   fireEvent.click(row("Book the hotel"), { shiftKey: true });
   fireEvent.click(within(bar()).getByRole("button", { name: "Delete…" }));
   const confirm = await screen.findByRole("alertdialog", { name: "Delete 3 recordings?" });
-  await act(async () => {
-    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
-  });
-  expect(await within(confirm).findByRole("alert")).toHaveProperty(
-    "textContent",
-    "1 recording was deleted. 1 is still running. Stop it before deleting. 1 couldn't be deleted. Try again.",
-  );
-  await waitFor(() =>
-    expect(screen.queryByRole("button", { name: "Sort the downloads" })).toBeNull(),
-  );
-  expect(screen.getByRole("alertdialog", { name: "Delete 2 recordings?" })).toBe(confirm);
-  expect(picked("Plan the trip") && picked("Book the hotel")).toBe(true);
+  fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(
+    await screen.findByText(
+      "1 recording was deleted. 1 is still running. Stop it before deleting. 1 couldn't be deleted. Try again.",
+    ),
+  ).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Plan the trip" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Book the hotel" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Sort the downloads" })).toBeNull();
 });
 
-it("deletes nothing it can't confirm when the request fails", async () => {
+it("brings a recording back when the request to delete it fails", async () => {
   const f = fixture(() => new Response("down", { status: 500 }));
   await open(f);
   fireEvent.click(screen.getByRole("button", { name: "Select" }));
   fireEvent.click(row("Old notes"));
   fireEvent.click(within(bar()).getByRole("button", { name: "Delete…" }));
   const confirm = await screen.findByRole("alertdialog", { name: "Delete this recording?" });
-  await act(async () => {
-    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
-  });
-  expect(await within(confirm).findByRole("alert")).toHaveProperty(
-    "textContent",
-    "The recordings couldn't be deleted. Try again.",
-  );
-  expect(row("Old notes").getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(await screen.findByText("The recordings couldn't be deleted. Try again.")).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Old notes" })).toBeTruthy();
 });

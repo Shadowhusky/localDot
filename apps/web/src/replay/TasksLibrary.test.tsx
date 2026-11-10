@@ -6,6 +6,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { type ContinueTask, TaskList, TasksSearch, useTaskIndex } from "./TasksLibrary.tsx";
 
+const spoken = vi.hoisted(() => ({ announce: vi.fn(), withdraw: vi.fn() }));
+vi.mock("../ui/Announcer.tsx", () => spoken);
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -156,7 +159,7 @@ it("moves between rows with the arrow keys", async () => {
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "Second" }));
 });
 
-it("deletes a recording only after an anchored confirmation, and says why one cannot go", async () => {
+it("deletes a recording at once after an anchored confirmation, and brings back one that can't go", async () => {
   const onDeleted = vi.fn();
   const running = card("Still running", 0, "live");
   const { api } = daemon([[running, card("Old notes", 1000)]], (id) =>
@@ -167,22 +170,19 @@ it("deletes a recording only after an anchored confirmation, and says why one ca
   first.focus();
   fireEvent.keyDown(first, { key: "Backspace" });
   let confirm = await screen.findByRole("alertdialog", { name: "Delete this recording?" });
-  await act(async () => {
-    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
-  });
-  expect(await within(confirm).findByRole("alert")).toHaveProperty(
-    "textContent",
-    "This task is still running. Stop it before deleting its recording.",
+  fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+  await waitFor(() =>
+    expect(spoken.announce).toHaveBeenCalledWith(
+      "replay-delete",
+      "That task is still running. Stop it before deleting its recording.",
+      "assertive",
+    ),
   );
-  expect(onDeleted).not.toHaveBeenCalled();
-  fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+  expect(await row("Still running")).toBeTruthy();
 
   fireEvent.click(screen.getByRole("button", { name: "Delete Old notes" }));
   confirm = await screen.findByRole("alertdialog", { name: "Delete this recording?" });
-  await act(async () => {
-    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
-  });
-  await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
+  fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(screen.queryByRole("button", { name: "Old notes" })).toBeNull());
 });
 
@@ -218,7 +218,7 @@ it("asks once for a page a search needs when it fails, then waits for Try again"
   expect(asked).toEqual(["", "?before=1", "?before=1"]);
 });
 
-it("keeps the delete confirmation open while the recording is being deleted", async () => {
+it("lets a recording go at once, and keeps it out of the list while the daemon deletes it", async () => {
   let finish = () => {};
   const { api } = daemon([[card("Old notes", 0)]], () => new Response(null, { status: 204 }));
   const slow = {
@@ -235,12 +235,11 @@ it("keeps the delete confirmation open while the recording is being deleted", as
   fireEvent.keyDown(first, { key: "Backspace" });
   const confirm = await screen.findByRole("alertdialog", { name: "Delete this recording?" });
   fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
-  const cancel = within(confirm).getByRole("button", { name: "Cancel" });
-  await waitFor(() => expect(cancel.getAttribute("aria-disabled")).toBe("true"));
-  fireEvent.click(cancel);
-  expect(screen.getByRole("alertdialog", { name: "Delete this recording?" })).toBe(confirm);
+  expect(onDeleted).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Old notes" })).toBeNull());
+  await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+  expect(screen.queryByRole("button", { name: "Old notes" })).toBeNull();
   await act(async () => finish());
-  await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
 });
 
 it("continues a task's conversation from its row, and says why when it has to wait", async () => {

@@ -121,6 +121,9 @@ test("Free up space deletes what it counted, and never a running task", async ({
   });
   await confirm.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(confirm).toBeHidden();
+  await expect(page.locator(".replay-library-bar")).toContainText(
+    `Deleted ${old.length} recordings · freed`,
+  );
   const after = await library(page, origin);
   expect(after.filter((card) => old.some((gone) => gone.id === card.id))).toEqual([]);
   expect(after.some((card) => card.verdict === "live")).toBe(true);

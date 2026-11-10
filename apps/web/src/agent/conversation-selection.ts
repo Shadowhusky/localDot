@@ -2,6 +2,7 @@ import { count } from "../copy/format.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import {
   type ConversationRow,
+  holdConversations,
   type Organize,
   organizeConversation,
   showOrganized,
@@ -102,7 +103,8 @@ export function removalProblem({ deleted, live, failed }: Removal): string {
     .join(" ");
 }
 
-// Files each the same way; resolves to how many the daemon refused.
+// Files each the same way; resolves to how many the daemon refused. All show the change at once,
+// and the lists read nothing until every save is in, so none comes back while the rest save.
 export async function organizeConversations(
   api: ApiClient,
   ids: readonly string[],
@@ -110,10 +112,15 @@ export async function organizeConversations(
 ): Promise<number> {
   let refused = 0;
   showOrganized(api, ids, change);
-  await inTurn(ids, (id) =>
-    organizeConversation(api, id, change).catch(() => {
-      refused++;
-    }),
-  );
+  const letGo = holdConversations(api);
+  try {
+    await inTurn(ids, (id) =>
+      organizeConversation(api, id, change).catch(() => {
+        refused++;
+      }),
+    );
+  } finally {
+    letGo();
+  }
   return refused;
 }

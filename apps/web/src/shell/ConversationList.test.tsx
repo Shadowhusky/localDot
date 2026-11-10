@@ -7,6 +7,12 @@ import { createApi } from "../lib/api.ts";
 import { FakeWebSocket } from "../testing/fake-websocket.ts";
 import { ConversationList } from "./ConversationList.tsx";
 
+const spoken = vi.hoisted(() => ({ announce: vi.fn(), withdraw: vi.fn() }));
+vi.mock("../ui/Announcer.tsx", async (actual) => ({
+  ...(await actual<typeof import("../ui/Announcer.tsx")>()),
+  ...spoken,
+}));
+
 beforeEach(() => vi.stubGlobal("WebSocket", FakeWebSocket));
 afterEach(() => {
   cleanup();
@@ -376,7 +382,7 @@ it("chooses several from Select, with Return and with Cmd or Shift, and Escape l
   expect(onPick).not.toHaveBeenCalled();
 });
 
-it("deletes the chosen after one confirmation, and keeps one the daemon finds under way", async () => {
+it("lets the chosen go once confirmed, and brings back one the daemon finds under way", async () => {
   const [a, b, c] = ["Alpha", "Bravo", "Charlie"].map((title, n) => entry(title, (n + 1) * HOUR));
   const deleted: string[] = [];
   const api = createApi("fixture", {
@@ -404,12 +410,16 @@ it("deletes the chosen after one confirmation, and keeps one the daemon finds un
   const dialog = await screen.findByRole("alertdialog", { name: "Delete 2 conversations?" });
   expect(deleted).toEqual([]);
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
-  await within(dialog).findByText(
-    "1 conversation was deleted. 1 has a task under way. Stop it before deleting.",
+  expect(onDeleted).toHaveBeenCalledWith([...(a?.sessions ?? []), ...(b?.sessions ?? [])]);
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() =>
+    expect(spoken.announce).toHaveBeenCalledWith(
+      "conversation",
+      "1 conversation was deleted. 1 has a task under way. Stop it before deleting.",
+      "assertive",
+    ),
   );
   expect(deleted).toEqual([`/api/conversations/${a?.sessionId}`]);
-  expect(onDeleted).toHaveBeenCalledWith(a?.sessions);
-  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-  await waitFor(() => expect(ticked()).toEqual(["Bravo"]));
-  expect(screen.getByText("1 selected")).toBeTruthy();
+  expect(await screen.findByText("Bravo")).toBeTruthy();
+  expect(screen.queryByText("Alpha")).toBeNull();
 });

@@ -148,6 +148,10 @@ const heard = (page: Page, text: string) =>
   expect(page.locator("[role='status'][aria-live='polite']").filter({ hasText: text })).toHaveCount(
     1,
   );
+const alerted = (page: Page, text: string) =>
+  expect(
+    page.locator("[role='alert'][aria-live='assertive']").filter({ hasText: text }),
+  ).toHaveCount(1);
 const expandedAtStart = (page: Page) =>
   page.addInitScript(() =>
     localStorage.setItem("localdot.panels.v1", JSON.stringify({ sessions: true })),
@@ -282,7 +286,10 @@ test.describe("a phone's list", () => {
     await heard(page, "Deleted 3 conversations.");
   });
 
-  test("a refused deletion never moves", async ({ page, ui }) => {
+  test("a refused deletion leaves at once, then comes back whole and says why", async ({
+    page,
+    ui,
+  }) => {
     const fixture = await ui.open("conversations");
     const screen = page.getByRole("region", { name: "Conversations" });
     await expect(screen.getByRole("button", { name: /^Find a plumber/ })).toBeVisible();
@@ -290,13 +297,9 @@ test.describe("a phone's list", () => {
     await refuse(page, id);
     await fromMenuByFinger(page, row(screen, id), /Delete/);
     const remove = await confirm(page);
-    await recordFrames(page);
     await remove.tap();
-    await expect(page.getByRole("alertdialog")).toContainText(REFUSED);
-    await page.waitForTimeout(600);
-    const frames = await stopFrames(page);
-    expect(frames.every((frame) => frame.pops === 0 && frame.gone.length === 0)).toBe(true);
-    await page.getByRole("button", { name: "Cancel" }).tap();
+    await expect(page.getByRole("alertdialog")).toBeHidden();
+    await alerted(page, REFUSED);
     await expect(row(screen, id)).toHaveCSS("opacity", "1");
     await expect(row(screen, id).locator(".dot-avatar")).toBeVisible();
   });
@@ -424,7 +427,7 @@ test.describe("Studio's rail", () => {
     await expect(list.getByRole("button", { name: "New conversation" })).toBeFocused();
   });
 
-  test("a refused deletion never moves: the row stays whole and the confirmation says why", async ({
+  test("a refused deletion leaves at once, then comes back whole and says why", async ({
     page,
     ui,
   }) => {
@@ -436,22 +439,15 @@ test.describe("Studio's rail", () => {
     await refuse(page, id);
     await fromMenuByHover(page, row(list, id), /Delete/);
     const remove = await confirm(page);
-    await recordFrames(page);
     await remove.click();
-    const dialog = page.getByRole("alertdialog");
-    await expect(dialog).toContainText(REFUSED);
-    await page.waitForTimeout(700);
-    const frames = await stopFrames(page);
-    expect(frames.every((frame) => frame.pops === 0 && frame.gone.length === 0)).toBe(true);
-    expect(new Set(frames.map((frame) => frame.rows[id]?.top)).size).toBe(1);
-    await page.getByRole("button", { name: "Cancel" }).click();
-    await expect(dialog).toBeHidden();
+    await expect(page.getByRole("alertdialog")).toBeHidden();
+    await alerted(page, REFUSED);
     await expect(row(list, id)).toHaveCSS("opacity", "1");
     await expect(row(list, id)).not.toHaveAttribute("inert");
     await expect(row(list, id).locator(".dot-avatar")).toBeVisible();
   });
 
-  test("some refused: those gone burst, the rest stay chosen and the confirmation says so", async ({
+  test("some refused: all burst at once, the refused come back and a note says so", async ({
     page,
     ui,
   }) => {
@@ -469,14 +465,13 @@ test.describe("Studio's rail", () => {
     const remove = await confirm(page);
     await recordFrames(page);
     await remove.click();
-    await expect(page.getByRole("alertdialog")).toContainText("has a task under way");
-    await expect(row(list, lost)).toHaveCount(0);
+    await expect(page.getByRole("alertdialog")).toBeHidden();
     await expect(page.locator(".dot-pop-layer")).toHaveCount(0);
     const frames = await stopFrames(page);
-    expect(Math.max(...frames.map((frame) => frame.pops))).toBe(1);
-    expect(frames.every((frame) => !frame.gone.includes(kept))).toBe(true);
+    expect(Math.max(...frames.map((frame) => frame.pops))).toBe(2);
+    await alerted(page, "has a task under way");
+    await expect(row(list, lost)).toHaveCount(0);
     await expect(row(list, kept)).toHaveCSS("opacity", "1");
-    await expect(list.getByRole("checkbox", { name: /^Find a plumber/ })).toBeChecked();
   });
 
   test("at the end of a long list, what the scroller gives back moves smoothly too", async ({

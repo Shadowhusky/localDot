@@ -50,7 +50,7 @@ import { Select } from "../ui/Select.tsx";
 import { useEscape } from "../ui/useEscape.ts";
 import { WorkView } from "../work/WorkView.tsx";
 import { CompareView } from "./CompareView.tsx";
-import { type Cleanup, deletable, pick, totalBytes } from "./cleanup.ts";
+import { type Cleanup, deletable, deleteProblem, pick, totalBytes } from "./cleanup.ts";
 import { DeleteRecordings, FreeUpSpace } from "./FreeUpSpace.tsx";
 import { GapCard, type GapKind } from "./GapCard.tsx";
 import { LOADING, ReplayControls } from "./ReplayControls.tsx";
@@ -311,6 +311,8 @@ function Library({
   const [counting, setCounting] = useState(false);
   const [reveal, setReveal] = useState<{ id: string }>();
   const [freed, setFreed] = useState<string | null>(null);
+  // What the recordings being deleted take up, for the line that says so once they are gone.
+  const freeing = useRef(0);
   useWholeIndex(tasks, picking || counting);
   const pickable = shown.filter((entry) => deletable(entry) && !tasks.folding.has(entry.id));
   const pickedCards = pickable.filter((entry) => picked.has(entry.id));
@@ -328,17 +330,22 @@ function Library({
     const timer = setTimeout(() => setFreed(null), FREED_MS);
     return () => clearTimeout(timer);
   }, [freed]);
+  // Confirmed: they fold away and choosing ends while the daemon deletes them.
+  const deleting = (ids: readonly string[]) => {
+    const going = new Set(ids);
+    freeing.current = totalBytes(tasks.cards.filter((entry) => going.has(entry.id)));
+    tasks.fold(ids);
+    setPicked((was) => new Set([...was].filter((id) => !going.has(id))));
+    setPicking(false);
+  };
   const deleted = (result: DeleteSessionsResult) => {
-    if (result.deleted.length === 0) return;
-    const gone = new Set(result.deleted);
-    const freedBytes = totalBytes(tasks.cards.filter((entry) => gone.has(entry.id)));
-    const line = `Deleted ${count(gone.size, "recording", "recordings")} · freed ${bytes(freedBytes)}`;
-    tasks.fold(result.deleted);
-    setPicked((was) => new Set([...was].filter((id) => !gone.has(id))));
     for (const id of result.deleted) onDeleted(id);
+    if (result.live.length > 0 || result.failed.length > 0)
+      announce("replay-delete", deleteProblem(result), "assertive");
+    if (result.deleted.length === 0) return;
+    const line = `Deleted ${count(result.deleted.length, "recording", "recordings")} · freed ${bytes(freeing.current)}`;
     setFreed(line);
     announce("replay-delete", line);
-    if (result.live.length === 0 && result.failed.length === 0) setPicking(false);
   };
   const all = pickable.length > 0 && pickedCards.length === pickable.length;
   return (
@@ -481,6 +488,7 @@ function Library({
           cleanup={confirming?.cleanup}
           anchor={barAction}
           onClose={() => setConfirming(null)}
+          onDeleting={deleting}
           onDeleted={deleted}
         />
       </main>

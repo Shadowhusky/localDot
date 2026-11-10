@@ -1,5 +1,4 @@
 import { clsx } from "clsx";
-import { useState } from "react";
 import type { ConversationRow, Organize } from "../agent/conversation-list.ts";
 import { organizeConversations, selectedLabel, underWay } from "../agent/conversation-selection.ts";
 import { count } from "../copy/format.ts";
@@ -62,29 +61,26 @@ export function SelectionActions({
   onDone,
   className,
 }: SelectionActionsProps) {
-  const [busy, setBusy] = useState(false);
   const n = picked.length;
-  const none = n === 0 ? "Select conversations first." : busy ? "Saving…" : undefined;
+  const none = n === 0 ? "Select conversations first." : undefined;
   const pin = n === 0 || picked.some((row) => !row.entry.pinned);
   const archive = n === 0 || picked.some((row) => !row.entry.archived);
   const conversations = (k: number) => count(k, "conversation", "conversations");
-  const file = async (change: Organize, done: string, undone: string) => {
-    setBusy(true);
+  // The change shows at once and selecting ends; the saves go on behind, and only a refusal says so.
+  const file = (change: Organize, done: string, undone: string) => {
     const ids = picked.map((row) => row.entry.sessionId);
-    const refused = await new Promise<number>((settled) =>
-      fileConversations(ids, change, () => settled(organizeConversations(api, ids, change))),
-    );
-    setBusy(false);
-    if (refused > 0)
-      announce(
-        "conversation",
-        `${conversations(refused)} couldn't be ${undone}. Try again.`,
-        "assertive",
-      );
-    else {
-      announce("conversation", `${conversations(n)} ${done}.`);
+    fileConversations(ids, change, () => {
+      announce("conversation", `${conversations(ids.length)} ${done}.`);
       onDone();
-    }
+      void organizeConversations(api, ids, change).then((refused) => {
+        if (refused > 0)
+          announce(
+            "conversation",
+            `${conversations(refused)} couldn't be ${undone}. Try again.`,
+            "assertive",
+          );
+      });
+    });
   };
   return (
     // biome-ignore lint/a11y/useSemanticElements: a row of actions, not a form's fieldset.
@@ -101,9 +97,9 @@ export function SelectionActions({
           label={pin ? "Pin" : "Unpin"}
           disabledReason={none}
           onClick={() =>
-            void (pin
+            pin
               ? file({ pinned: true }, "pinned", "pinned")
-              : file({ pinned: false }, "unpinned", "unpinned"))
+              : file({ pinned: false }, "unpinned", "unpinned")
           }
         />
         <Action
@@ -121,9 +117,9 @@ export function SelectionActions({
               : undefined)
           }
           onClick={() =>
-            void (archive
+            archive
               ? file({ archived: true }, "archived", "archived")
-              : file({ archived: false }, "unarchived", "unarchived"))
+              : file({ archived: false }, "unarchived", "unarchived")
           }
         />
         <Action
