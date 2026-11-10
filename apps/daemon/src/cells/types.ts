@@ -99,6 +99,8 @@ export interface BrowserCellRecord {
   kind: "browser";
   id: string;
   parentCellId: string;
+  // A conversation's own browser; absent for the computer's main one.
+  slot?: string;
   createdAt: string;
   scale: Scale;
   keydPort: number;

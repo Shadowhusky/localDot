@@ -87,8 +87,14 @@ export function decodeRecord(
   const keys = ["v", "id", "createdAt", "scale", "keydPort", "tokens", "docker"];
   if (!legacy) keys.push("kind");
   if (browser) keys.push("parentCellId");
-  if (!exactKeys(value, keys, ["ownership"])) return undefined;
+  if (!exactKeys(value, keys, browser ? ["ownership", "slot"] : ["ownership"])) return undefined;
   if (browser && (!matches(ULID_PATTERN, value.parentCellId) || value.parentCellId === id))
+    return undefined;
+  if (
+    browser &&
+    value.slot !== undefined &&
+    (!matches(ULID_PATTERN, value.slot) || value.slot === id || value.slot === value.parentCellId)
+  )
     return undefined;
   const fields = browser ? BROWSER_DOCKER_FIELDS : DOCKER_FIELDS;
   const service = browser ? "browserd" : "desktopd";
@@ -179,13 +185,15 @@ export class CellStore {
     return record?.kind === "browser" ? record : undefined;
   }
 
-  browserFor(parentCellId: string): BrowserCellRecord | undefined {
-    if (!ULID_PATTERN.test(parentCellId)) throw new Error("invalid browser parent");
+  // The computer's main browser, or with `slot` a conversation's own.
+  browserFor(parentCellId: string, slot?: string): BrowserCellRecord | undefined {
+    if (!ULID_PATTERN.test(parentCellId) || (slot !== undefined && !ULID_PATTERN.test(slot)))
+      throw new Error("invalid browser parent");
     const { records, skipped } = this.inventoryAll();
     if (skipped.length) throw new Error("browser profile association cannot be confirmed");
     const matches = records.filter(
       (record): record is BrowserCellRecord =>
-        record.kind === "browser" && record.parentCellId === parentCellId,
+        record.kind === "browser" && record.parentCellId === parentCellId && record.slot === slot,
     );
     if (matches.length > 1) throw new Error("browser profile association is ambiguous");
     return matches[0];
@@ -239,11 +247,12 @@ export class CellStore {
       existing &&
       (existing.kind !== "browser" ||
         existing.parentCellId !== record.parentCellId ||
+        existing.slot !== record.slot ||
         existing.docker.profileVolume !== record.docker.profileVolume)
     )
       throw new Error("cell identity is already owned");
     if (!this.get(record.parentCellId)) throw new Error("browser parent is unavailable");
-    const associated = this.browserFor(record.parentCellId);
+    const associated = this.browserFor(record.parentCellId, record.slot);
     if (associated && associated.id !== record.id)
       throw new Error("browser profile already exists");
     this.#write(checked);

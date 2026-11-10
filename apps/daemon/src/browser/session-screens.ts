@@ -2,7 +2,7 @@ import { ManualInput } from "@localdot/protocol";
 import type { ScreenName } from "../../../../packages/protocol/src/screens.ts";
 import { type ManualDesktop, ManualInputRejected } from "../agent/manual-input.ts";
 import type { AgentSession } from "../agent/session.ts";
-import type { BrowserOrchestrator } from "../cells/browser-orchestrator.ts";
+import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import type { CellApi } from "../cells/orchestrator.ts";
 import type { CellSummary } from "../cells/types.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
@@ -13,10 +13,19 @@ import { BrowserClient, type BrowserScope, checkManualBrowserInput } from "./cli
 import type { BrowserDownloadCollector } from "./download-collector.ts";
 import { BrowserDownloadPump } from "./download-pump.ts";
 import { screenGatewayBinding } from "./gateway-binding.ts";
-import { ScreenController, type ScreenLease } from "./screen-controller.ts";
+import {
+  ScreenController,
+  type ScreenControllerDeps,
+  type ScreenLease,
+} from "./screen-controller.ts";
+import { type BrowserSlots, browserLane, NoBrowserRoom } from "./slots.ts";
 import type { BrowserStreams } from "./streams.ts";
 
 const KEPT_REVISIONS = 16;
+
+// What dot hears when its conversation's own browser can't run and it shares the main one.
+export const SHARED_BROWSER =
+  "localDot: this conversation's own web browser couldn't run now, so you share the computer's main web browser, in a window of your own, with another task; you take turns with it. Its sign-ins are the main browser's.";
 
 export class SessionScreens {
   readonly #revisions = new Map<string, number>();
@@ -26,6 +35,11 @@ export class SessionScreens {
       cells: Pick<CellApi, "get" | "subscribe" | "stop">;
       browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get"> &
         Partial<Pick<BrowserOrchestrator, "health">>;
+      // A browser per conversation; without it every task shares the computer's main browser.
+      slots?: Pick<BrowserSlots, "claim" | "admit" | "share" | "release" | "sessionsOn" | "keyOf">;
+      // The first task of the conversation a task belongs to.
+      conversationOf?(sessionId: string): string;
+      client?(endpoint: ReadyBrowser): ReturnType<NonNullable<ScreenControllerDeps["client"]>>;
       streams: BrowserStreams;
       recordings: Pick<ScreenRecordings, "attach" | "fence"> &
         Partial<Pick<ScreenRecordings, "coming" | "up">>;
@@ -38,26 +52,75 @@ export class SessionScreens {
     },
   ) {}
 
+  // The live tasks using the same web browser as this one, itself included.
+  sharing(sessionId: string): string[] {
+    const key = this.deps.slots?.keyOf(sessionId);
+    return key ? (this.deps.slots?.sessionsOn(key) ?? [sessionId]) : [sessionId];
+  }
+
   async startBrowser(cellId: string): Promise<void> {
     await this.deps.browser.start(cellId);
   }
 
   workEndpoint(session: AgentSession): { baseUrl: string; token: string } | undefined {
     if (session.screens?.selection.screen !== "browser") return undefined;
-    const endpoint = this.deps.browser.endpoints(session.cellId);
+    const endpoint = this.deps.browser.endpoints(session.screens.browserKey);
     return endpoint?.browserCellId === session.screens.selection.cellId
       ? endpoint.browserd
       : undefined;
   }
 
+  // The browser a task uses, picked at its first use, and room made for it. A conversation's own
+  // browser that can't run leaves the task sharing the main one, told so.
+  #lane(session: AgentSession, cell: CellSummary): ScreenControllerDeps["lane"] {
+    const slots = this.deps.slots;
+    if (!slots) return undefined;
+    return {
+      claim: async (signal) => {
+        const key = slots.claim({
+          sessionId: session.id,
+          parentCellId: cell.id,
+          conversation: this.deps.conversationOf?.(session.id) ?? session.id,
+          guest: !!session.guest,
+        });
+        if (key === cell.id) return key;
+        try {
+          await slots.admit(key);
+          signal.throwIfAborted();
+          await this.deps.browser.start(key, signal);
+          return key;
+        } catch (error) {
+          signal.throwIfAborted();
+          const shared = slots.share(session.id);
+          this.deps.report?.(
+            `a conversation's own web browser couldn't run (${
+              error instanceof NoBrowserRoom
+                ? "no room"
+                : error instanceof Error
+                  ? error.message
+                  : "unknown"
+            }); its task shares the main one`,
+          );
+          session.remind(SHARED_BROWSER);
+          return shared;
+        }
+      },
+      release: () => slots.release(session.id),
+    };
+  }
+
   install(session: AgentSession, cell: CellSummary, freshTab = false, continues?: string): void {
     if (session.cellId !== cell.id) throw new Error("The session computer changed.");
+    const lane = this.#lane(session, cell);
+    const slots = this.deps.slots;
     session.attachScreens(
       new ScreenController({
         sessionId: session.id,
         parentCellId: cell.id,
         freshTab,
         ...(continues ? { continues } : {}),
+        ...(lane ? { lane } : {}),
+        ...(this.deps.client ? { client: this.deps.client } : {}),
         desktopGeometry: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
         desktopReady: () => {
           const current = this.deps.cells.get(cell.id);
@@ -121,17 +184,25 @@ export class SessionScreens {
         remind: (text) => session.remind(text),
         ...(this.deps.live
           ? {
-              turn: (signal: AbortSignal) =>
+              turn: (signal: AbortSignal, key: string) =>
                 (this.deps.live as NonNullable<typeof this.deps.live>)
-                  .lease(cell.id)
+                  .lease(slots ? browserLane(key) : cell.id)
                   .acquire(session.id, { signal }),
-              coming: (screen: ScreenName) =>
-                this.deps.recordings.coming?.(
-                  cell.id,
-                  session.id,
-                  screen,
-                  this.deps.live?.sessionsOn(cell.id) ?? [],
-                ),
+              // With a browser per conversation, a browser's recordings are of the tasks using it.
+              coming: (screen: ScreenName, key: string) =>
+                screen === "browser" && slots
+                  ? this.deps.recordings.coming?.(
+                      browserLane(key),
+                      session.id,
+                      screen,
+                      slots.sessionsOn(key),
+                    )
+                  : this.deps.recordings.coming?.(
+                      cell.id,
+                      session.id,
+                      screen,
+                      this.deps.live?.sessionsOn(cell.id) ?? [],
+                    ),
               up: (screen: ScreenName) => this.deps.recordings.up?.(session.id, screen),
             }
           : {}),
@@ -175,7 +246,7 @@ export class SessionScreens {
         stream: (selection) => {
           const cell =
             selection.screen === "browser"
-              ? this.deps.streams.forParent(session.cellId)
+              ? this.deps.streams.get(selection.cellId)
               : this.deps.cells.get(session.cellId);
           if (cell?.id !== selection.cellId) throw new Error("The selected screen changed.");
           return cell.stream;

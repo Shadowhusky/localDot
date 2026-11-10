@@ -41,10 +41,14 @@ export function useStageFront(
   const [wasHolding, setWasHolding] = useState(holding);
   // The screen the task on show last used on this computer.
   const [last, setLast] = useState<{ key: string; screen: ScreenName } | null>(null);
-  // The web browser the computer has running: dot's, until a ticket says (`checked`) which runs now.
-  const [found, setFound] = useState<{ parentId: string; cellId: string; checked: boolean } | null>(
-    null,
-  );
+  // The web browser of the task on show: dot's, until a ticket says (`checked`) which runs now. A
+  // conversation may have a browser of its own, so it is the task's, not only the computer's.
+  const [found, setFound] = useState<{
+    parentId: string;
+    session: string;
+    cellId: string;
+    checked: boolean;
+  } | null>(null);
   // The computer whose web browser wasn't running when the stage last looked.
   const [missing, setMissing] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -59,12 +63,16 @@ export function useStageFront(
   const used = dot ?? (sessionId && last?.key === task ? last.screen : null);
   if (sessionId && used && (last?.key !== task || last.screen !== used))
     setLast({ key: task, screen: used });
+  const viewing = sessionId ?? "";
   if (
     parentId &&
     selection?.screen === "browser" &&
-    (found?.parentId !== parentId || found.cellId !== selection.cellId || found.checked)
+    (found?.parentId !== parentId ||
+      found.session !== viewing ||
+      found.cellId !== selection.cellId ||
+      found.checked)
   ) {
-    setFound({ parentId, cellId: selection.cellId, checked: false });
+    setFound({ parentId, session: viewing, cellId: selection.cellId, checked: false });
     setMissing(null);
   }
   const current = picked?.key === key ? picked.screen : null;
@@ -75,24 +83,30 @@ export function useStageFront(
   const wanted = current ?? used ?? "desktop";
   // Without dot in it, the web browser shows once the stage has found it running; the one dot left
   // stays on show while a ticket says whether it still runs.
-  const known = !!parentId && found?.parentId === parentId;
+  const known = !!parentId && found?.parentId === parentId && found.session === viewing;
   const seek =
     wanted === "browser" && dot !== "browser" && !(known && found?.checked) && missing !== parentId;
   const screen = wanted === "browser" && dot !== "browser" && !known ? "desktop" : wanted;
   useEffect(() => {
     if (!seek || !parentId) return;
     let live = true;
-    // A ticket says which browser the computer has, if it has one running.
-    void api.post<{ cellId?: unknown }>(`/api/cells/${parentId}/browser-stream-ticket`).then(
-      ({ cellId }) => {
-        if (!live) return;
-        if (typeof cellId === "string") setFound({ parentId, cellId, checked: true });
-        else gone(parentId);
-      },
-      () => {
-        if (live) gone(parentId);
-      },
-    );
+    // A ticket says which browser the task on show has, if one is running: its conversation's own,
+    // else the computer's.
+    void api
+      .post<{ cellId?: unknown }>(
+        `/api/cells/${parentId}/browser-stream-ticket${sessionId ? `?task=${sessionId}` : ""}`,
+      )
+      .then(
+        ({ cellId }) => {
+          if (!live) return;
+          if (typeof cellId === "string")
+            setFound({ parentId, session: sessionId ?? "", cellId, checked: true });
+          else gone(parentId);
+        },
+        () => {
+          if (live) gone(parentId);
+        },
+      );
     const gone = (id: string) => {
       setMissing(id);
       setFound(null);
@@ -100,18 +114,25 @@ export function useStageFront(
     return () => {
       live = false;
     };
-  }, [api, seek, parentId]);
+  }, [api, seek, parentId, sessionId]);
   const scale = parent?.scale;
   const browser = useMemo<ScreenSelectionSnapshot | undefined>(() => {
     if (selection?.screen === "browser") return selection;
-    if (screen !== "browser" || !scale || !found || found.parentId !== parentId) return undefined;
+    if (
+      screen !== "browser" ||
+      !scale ||
+      !found ||
+      found.parentId !== parentId ||
+      found.session !== viewing
+    )
+      return undefined;
     return {
       screen: "browser",
       cellId: found.cellId,
       geometry: { w: 1280 * scale, h: 800 * scale, scale },
       revision: 1,
     };
-  }, [selection, screen, scale, found, parentId]);
+  }, [selection, screen, scale, found, parentId, viewing]);
   const pick = useCallback(
     (next: ScreenName) => {
       setProblem(null);

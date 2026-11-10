@@ -386,16 +386,18 @@ async function dispatchAdmitted(
     if (refusal) return { status: 200, result: fail(refusal) };
     const stopped = researchRefusal(session, name, frozen);
     if (stopped) return { status: 200, result: fail(stopped) };
+    // A task in a web browser of its own takes turns on that browser's lane, not its computer's.
+    let turnOn = session.turnKey;
     if (ON_SCREEN.has(name) && deps.tools.computer) {
       const waiting = untilPaused(session, ctx.signal);
       // Another task's turn can be long; the user's message ends the wait for it, not a turn.
-      const queued = deps.tools.computer.busy(session.id, session.cellId)
+      const queued = deps.tools.computer.busy(session.id, turnOn)
         ? listenForUser(ctx, waiting.signal)
         : undefined;
       try {
         ctx.turn = await deps.tools.computer.take(
           session.id,
-          session.cellId,
+          turnOn,
           waiting.signal,
           false,
           queued?.signal,
@@ -456,6 +458,14 @@ async function dispatchAdmitted(
       ctx.check();
     } else if (page && !opensInWebBrowser(page) && shown === "browser") {
       await session.switchScreen("desktop", lease);
+      ctx.check();
+    }
+    // Moved to the other screen: the rest of the call takes turns on that one's lane.
+    if (ctx.turn && deps.tools.computer && turnOn !== session.turnKey) {
+      await ctx.turn.release().catch(() => {});
+      ctx.turn = undefined;
+      turnOn = session.turnKey;
+      ctx.turn = await deps.tools.computer.take(session.id, turnOn, ctx.signal);
       ctx.check();
     }
     if (

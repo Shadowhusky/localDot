@@ -2898,6 +2898,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           fields={replayId ? undefined : askMarks}
           cell={stageCell}
           parentId={cell?.id}
+          {...(agent.sessionId ? { session: agent.sessionId } : {})}
           parent={cell}
           front={stageFront}
           browserEngine={runningEngine(stageEngine.status)}

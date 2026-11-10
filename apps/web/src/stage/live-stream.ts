@@ -11,6 +11,8 @@ export interface StreamTarget {
   cellId: string;
   surface: "desktop" | "browser";
   parentId?: string;
+  // The task whose browser this is: a conversation's own browser is reached through its task.
+  session?: string;
 }
 
 // A held picture means a connection needs recovery. Suspended means this viewer deliberately
@@ -489,12 +491,12 @@ export class LiveStream {
   }
 
   async #mint(): Promise<string | null> {
-    const { api, cellId, surface, parentId } = this.target;
+    const { api, cellId, surface, parentId, session } = this.target;
     this.#mintAt = Date.now();
     try {
       const { path, cellId: physicalId } = await api.post<{ path?: unknown; cellId?: string }>(
         surface === "browser"
-          ? `/api/cells/${parentId}/browser-stream-ticket`
+          ? `/api/cells/${parentId}/browser-stream-ticket?browser=${cellId}${session ? `&task=${session}` : ""}`
           : `/api/cells/${cellId}/stream-ticket`,
       );
       if (this.#closed) return null;

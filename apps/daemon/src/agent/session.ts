@@ -37,6 +37,7 @@ import {
 } from "@localdot/protocol";
 import type { ScreenName, ScreenSwitchData } from "../../../../packages/protocol/src/screens.ts";
 import type { ScreenController, ScreenLease, ScreenScope } from "../browser/screen-controller.ts";
+import { browserLane } from "../browser/slots.ts";
 import { NO_CONNECTORS as NO_TASK_CONNECTORS, type TaskConnectors } from "../connectors/hub.ts";
 import type { EventLog } from "../event-log.ts";
 import type { GuiAction, NativeActionIdentity } from "../gateway/gateway.ts";
@@ -827,6 +828,18 @@ export class AgentSession {
   }
   get screens(): ScreenController | undefined {
     return this.#screens;
+  }
+  // The lane of the web browser this task picked, apart from its computer's; none before it picks
+  // or when every task shares the computer's lane.
+  get browserLane(): string | undefined {
+    const screens = this.#screens;
+    return screens?.browserPicked ? browserLane(screens.browserKey) : undefined;
+  }
+  // What the task's next action on its screen takes turns on: its browser's lane while it is in
+  // its browser, else its computer's.
+  get turnKey(): string {
+    const lane = this.browserLane;
+    return lane && this.#screens?.selection.screen === "browser" ? lane : this.cellId;
   }
   #screenScope(
     generation: BrainGeneration,

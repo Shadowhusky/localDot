@@ -170,7 +170,7 @@ export interface AgentWiringDeps {
   claudeCode?: { realHome: string };
   recordings?: Pick<ScreenRecordings, "coming" | "up" | "forUser">;
   sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual" | "startBrowser"> &
-    Partial<Pick<SessionScreens, "workEndpoint">>;
+    Partial<Pick<SessionScreens, "workEndpoint" | "sharing">>;
   transfers?: Transfers;
   quarantine?: QuarantineStore;
   // Earlier tasks for the recall tool, from the search index.
@@ -482,13 +482,20 @@ export function createAgent(d: AgentWiringDeps) {
       return client?.windows ? (request, signal) => client.windows(request, signal) : undefined;
     },
     browser: (id) => runner.get(id)?.browserTurn,
+    lane: (id) => runner.get(id)?.browserLane,
     ...(d.recordings
       ? {
           screens: {
             coming: (cellId, id) =>
               d.recordings?.coming(cellId, id, "desktop", d.live.sessionsOn(cellId)),
             up: (id) => d.recordings?.up(id, "desktop"),
-            forUser: (cellId, id) => d.recordings?.forUser(cellId, id, d.live.sessionsOn(cellId)),
+            forUser: (cellId, id) => {
+              const lane = runner.get(id)?.browserLane;
+              if (!lane) return d.recordings?.forUser(cellId, id, d.live.sessionsOn(cellId));
+              // The user's control reaches the desktop and this task's own browser, not another's.
+              d.recordings?.coming(cellId, id, "desktop", d.live.sessionsOn(cellId));
+              d.recordings?.coming(lane, id, "browser", d.sessionScreens?.sharing?.(id) ?? [id]);
+            },
           },
         }
       : {}),
@@ -586,7 +593,7 @@ export function createAgent(d: AgentWiringDeps) {
     };
     try {
       // Reading the desktop waits for nobody; the web browser's one display takes turns.
-      if (session.browserTurn) turn = await turns.take(session.id, session.cellId, lease.signal);
+      if (session.browserTurn) turn = await turns.take(session.id, session.turnKey, lease.signal);
       screen = session.screens ? session.screenLease(lease) : undefined;
       if (screen) await session.screens?.refreshBrowser(screen);
       const binding = screen ? d.sessionScreens?.bind(session, screen) : undefined;

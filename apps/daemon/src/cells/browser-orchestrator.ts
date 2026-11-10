@@ -29,6 +29,7 @@ import {
   BrowserLedgerStore,
   BrowserLifecycleError,
   BrowserStartCancelled,
+  browserKey,
 } from "./browser-ledger.ts";
 import {
   browserLabels,
@@ -44,6 +45,7 @@ import { type DockerClient, DockerError, dockerLogLines } from "./docker.ts";
 import type { BrowserImages } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
 import { allocateKeydPort } from "./ports.ts";
+import { ProfileSlots, SlotPauseStuck } from "./profile-slots.ts";
 import { type GateRelay, HOST_RELAY } from "./relay.ts";
 import { captureComputerResetSource } from "./reset-source.ts";
 import { newCellToken } from "./secrets.ts";
@@ -95,6 +97,8 @@ const dockerId = (value: unknown): string => {
 export interface ReadyBrowser {
   browserCellId: string;
   parentCellId: string;
+  // A conversation's own browser; absent for the computer's main one.
+  slot?: string;
   instance: string;
   browserd: { baseUrl: string; token: string };
   stream: { baseUrl: string; authorization: string };
@@ -124,8 +128,8 @@ export interface BrowserOrchestratorDeps {
   unavailable?(parentCellId: string): BrowserBlock | undefined;
   // keyd's saved-keys vault waits for its passphrase.
   keysLocked?(): boolean;
-  // A word to the task running on this computer.
-  notify?(parentCellId: string, text: string): void;
+  // A word to the tasks using this browser: its computer's id for the main one, else its slot.
+  notify?(key: string, text: string): void;
   // The dot's computer size, which each new web browser takes its share of.
   size?(): ComputerSize;
 }
@@ -168,6 +172,9 @@ export class BrowserOrchestrator {
   readonly #outages = new Set<string>();
   readonly #startedAt = new Map<string, number>();
   readonly #accounts: AccountsProfile;
+  readonly #slots: ProfileSlots;
+  // Each conversation browser's computer, from when it is opened until its record says so.
+  readonly #parents = new Map<string, string>();
   readonly #engine: BrowserEngine;
   // The image each running browser was created from, to tell when one is behind.
   readonly #images = new Map<string, string>();
@@ -180,7 +187,9 @@ export class BrowserOrchestrator {
     };
   }
 
-  #changed(parentCellId: string): void {
+  // Listeners hear the computer whose browsers changed.
+  #changed(key: string): void {
+    const parentCellId = this.#parentOf(key) ?? key;
     for (const listener of this.#listeners) {
       try {
         listener(parentCellId);
@@ -197,6 +206,11 @@ export class BrowserOrchestrator {
       docker: deps.docker,
       prefix: deps.namePrefix ?? NAME_PREFIX,
       image: () => deps.images.browser,
+    });
+    this.#slots = new ProfileSlots({
+      docker: deps.docker,
+      image: () => deps.images.browser,
+      report: (message) => console.error(message),
     });
     this.#engine = new BrowserEngine({
       home: deps.home,
@@ -226,11 +240,13 @@ export class BrowserOrchestrator {
   }
 
   // Back to Chromium and the sign-ins as they were before Chrome: every browser lets go of the
-  // profile first, and the warmer starts them again.
+  // profile first, and the warmer starts them again. Conversations' slots copied from a profile
+  // Chrome opened can't go back, so they go.
   restoreEngineBackup(): Promise<void> {
-    const parents = this.#ledger.list().map((record) => record.parentCellId);
+    const keys = this.#ledger.list().map(browserKey);
     return this.#exclusive(new AbortController().signal, async () => {
-      await Promise.all(parents.map((parent) => this.#stop(parent, false)));
+      await Promise.all(keys.map((key) => this.#stop(key, false)));
+      await this.#dropSlots();
       await this.#engine.restore();
     });
   }
@@ -249,26 +265,104 @@ export class BrowserOrchestrator {
   }
 
   // The computer whose browser has the saved sign-ins open, is opening them, or still has a
-  // container that may hold them.
+  // container that may hold them. Conversations' browsers have slots of their own.
   profileHolder(): string | undefined {
-    const [active] = [...this.#ready.keys(), ...this.#starting.keys()];
+    const [active] = [...this.#ready.keys(), ...this.#starting.keys()].filter((key) =>
+      this.#isMain(key),
+    );
     if (active) return active;
     try {
-      return this.#ledger.list().find((record) => record.resources.browser)?.parentCellId;
+      return this.#ledger.list().find((record) => !record.slot && record.resources.browser)
+        ?.parentCellId;
     } catch {
       return undefined;
     }
   }
 
   // Signs out of every site: each browser lets go of the profile, which is then made again empty,
-  // and the profiles computers kept for themselves before sign-ins were shared are deleted.
+  // and the profiles computers kept for themselves before sign-ins were shared are deleted, and so
+  // are conversations' own.
   clearAccounts(): Promise<void> {
-    const parents = this.#ledger.list().map((record) => record.parentCellId);
+    const keys = this.#ledger.list().map(browserKey);
     return this.#exclusive(new AbortController().signal, async () => {
-      await Promise.all(parents.map((parent) => this.#stop(parent, true)));
+      await Promise.all(keys.map((key) => this.#stop(key, true)));
+      await this.#dropSlots();
       await this.#accounts.wipe();
       this.#engine.signedOut();
     });
+  }
+
+  async #dropSlots(): Promise<void> {
+    const slots = this.#ledger.list().filter((record) => record.slot);
+    const results = await Promise.allSettled(
+      slots.map((record) => this.remove(browserKey(record), { purgeProfile: true })),
+    );
+    if (results.some((result) => result.status === "rejected"))
+      throw new BrowserLifecycleError("A conversation's browser could not be removed");
+  }
+
+  // Makes a conversation's own browser known before its first start; its record keeps it after.
+  openSlot(parentCellId: string, slot: string): void {
+    if (!ULID_PATTERN.test(parentCellId) || !ULID_PATTERN.test(slot) || slot === parentCellId)
+      throw new BrowserLifecycleError();
+    const known = this.#parentOf(slot);
+    if (known !== undefined && known !== parentCellId) throw new BrowserLifecycleError();
+    this.#parents.set(slot, parentCellId);
+  }
+
+  // The browsers of a computer: its main one, and conversations' own.
+  keysOf(parentCellId: string): string[] {
+    const slots = new Set<string>();
+    for (const [slot, parent] of this.#parents) if (parent === parentCellId) slots.add(slot);
+    try {
+      for (const record of this.#ledger.slotsOf(parentCellId)) slots.add(browserKey(record));
+    } catch {}
+    return [parentCellId, ...slots];
+  }
+
+  // Every conversation browser with a record, whatever its computer.
+  slots(): { key: string; parentCellId: string }[] {
+    try {
+      return this.#ledger
+        .list()
+        .filter((record) => record.slot)
+        .map((record) => ({ key: browserKey(record), parentCellId: record.parentCellId }));
+    } catch {
+      return [];
+    }
+  }
+
+  // The computer a browser belongs to; the key itself for a computer's main browser.
+  parentOfKey(key: string): string | undefined {
+    return this.#parentOf(key);
+  }
+
+  #isMain(key: string): boolean {
+    return this.#parentOf(key) === key;
+  }
+
+  #parentOf(key: string): string | undefined {
+    if (!ULID_PATTERN.test(key)) return undefined;
+    if (this.deps.store.get(key)) return key;
+    const opened = this.#parents.get(key);
+    if (opened) return opened;
+    try {
+      const record = this.#ledger.forKey(key);
+      if (record) return record.parentCellId;
+    } catch {}
+    return undefined;
+  }
+
+  #parentLive(key: string): boolean {
+    const parent = this.#parentOf(key);
+    return !!parent && this.deps.parentAvailable(parent) && !!this.deps.store.get(parent);
+  }
+
+  // The parent a lifecycle step needs: one that can't be found is a computer gone.
+  #parent(key: string): string {
+    const parent = this.#parentOf(key);
+    if (!parent) throw new BrowserStartCancelled();
+    return parent;
   }
 
   reservedKeydPorts(): number[] {
@@ -298,33 +392,40 @@ export class BrowserOrchestrator {
     }
   }
 
-  get(parentCellId: string): { id: string; parentCellId: string; state: CellState } | undefined {
-    const record = this.#ledger.forParent(parentCellId);
+  get(key: string): { id: string; parentCellId: string; state: CellState } | undefined {
+    const record = this.#ledger.forKey(key);
     return record
       ? {
           id: record.id,
-          parentCellId,
+          parentCellId: record.parentCellId,
           state:
-            this.#state.get(parentCellId) ??
+            this.#state.get(key) ??
             (record.phase === "stopped" || record.phase === "retained" ? "stopped" : "failed"),
         }
       : undefined;
   }
 
-  endpoints(parentCellId: string): ReadyBrowser | undefined {
-    const ready = this.#ready.get(parentCellId);
-    if (!ready || !this.deps.parentAvailable(parentCellId) || !this.deps.store.get(parentCellId))
+  endpoints(key: string): ReadyBrowser | undefined {
+    const ready = this.#ready.get(key);
+    if (
+      !ready ||
+      !this.deps.parentAvailable(ready.parentCellId) ||
+      !this.deps.store.get(ready.parentCellId)
+    )
       return undefined;
     return structuredClone(ready);
+  }
+
+  // The browsers of a computer running now.
+  running(parentCellId: string): ReadyBrowser[] {
+    return this.keysOf(parentCellId).flatMap((key) => this.endpoints(key) ?? []);
   }
 
   // How the running browser answers now: "silent" when it doesn't, "restarting" while browserd
   // starts its Chromium again in place, "unready" when it can no longer be controlled; undefined
   // when none is running.
-  async health(
-    parentCellId: string,
-  ): Promise<"ready" | "restarting" | "unready" | "silent" | undefined> {
-    const ready = this.#ready.get(parentCellId);
+  async health(key: string): Promise<"ready" | "restarting" | "unready" | "silent" | undefined> {
+    const ready = this.#ready.get(key);
     if (!ready) return undefined;
     let value: unknown;
     try {
@@ -337,12 +438,12 @@ export class BrowserOrchestrator {
       return "silent";
     }
     if (answersReady(value, ready)) return "ready";
-    return (await this.supervisor(parentCellId))?.state === "restarting" ? "restarting" : "unready";
+    return (await this.supervisor(key))?.state === "restarting" ? "restarting" : "unready";
   }
 
   // browserd's report on its Chromium; undefined from an older image or a browser not running.
-  async supervisor(parentCellId: string): Promise<BrowserSupervisorState | undefined> {
-    const ready = this.#ready.get(parentCellId);
+  async supervisor(key: string): Promise<BrowserSupervisorState | undefined> {
+    const ready = this.#ready.get(key);
     if (!ready) return undefined;
     try {
       return BrowserSupervisorState.parse(
@@ -358,34 +459,35 @@ export class BrowserOrchestrator {
   }
 
   // Records why the browser failed or was restarted, in words for the user and the agent.
-  noteProblem(parentCellId: string, text: string): void {
-    this.#problems.set(parentCellId, { text: text.slice(0, 600), at: new Date().toISOString() });
+  noteProblem(key: string, text: string): void {
+    this.#problems.set(key, { text: text.slice(0, 600), at: new Date().toISOString() });
   }
 
-  problem(parentCellId: string): string | undefined {
-    return this.#problems.get(parentCellId)?.text;
+  problem(key: string): string | undefined {
+    return this.#problems.get(key)?.text;
   }
 
   // When the failed browser is started again by itself; `undefined` once that was given up.
-  noteRetry(parentCellId: string, at: Date | undefined): void {
-    this.#retries.set(parentCellId, at ? { at: at.toISOString() } : {});
+  noteRetry(key: string, at: Date | undefined): void {
+    this.#retries.set(key, at ? { at: at.toISOString() } : {});
   }
 
   // Someone could not have the browser; when it runs again, the task is told.
-  noteOutage(parentCellId: string): void {
-    this.#outages.add(parentCellId);
+  noteOutage(key: string): void {
+    this.#outages.add(key);
   }
 
-  async status(parentCellId: string): Promise<BrowserStatus> {
-    const noted = this.#problems.get(parentCellId);
+  async status(key: string): Promise<BrowserStatus> {
+    const parentCellId = this.#parentOf(key) ?? key;
+    const noted = this.#problems.get(key);
     const problem = noted ? { problem: noted.text, problemAt: noted.at } : {};
     const blocked =
       this.deps.unavailable?.(parentCellId) ??
       (this.deps.parentAvailable(parentCellId) ? undefined : COMPUTER_STOPPED);
     if (blocked) return { state: "off", ...blocked };
     const locked = this.deps.keysLocked?.() ? KEYS_LOCKED : undefined;
-    if (this.#ready.has(parentCellId)) {
-      const supervisor = await this.supervisor(parentCellId);
+    if (this.#ready.has(key)) {
+      const supervisor = await this.supervisor(key);
       const failure = supervisor?.lastFailure;
       const restarting = supervisor?.state === "restarting";
       return {
@@ -403,9 +505,9 @@ export class BrowserOrchestrator {
             : {})),
       };
     }
-    const state = this.get(parentCellId)?.state;
+    const state = this.get(key)?.state;
     if (state === "failed") {
-      const retry = this.#retries.get(parentCellId);
+      const retry = this.#retries.get(key);
       return {
         state: "failed",
         reason: "failed",
@@ -420,7 +522,7 @@ export class BrowserOrchestrator {
             }),
       };
     }
-    const startedAt = this.#startedAt.get(parentCellId);
+    const startedAt = this.#startedAt.get(key);
     return {
       state: state === "starting" ? "starting" : state === "stopping" ? "restarting" : "stopped",
       ...problem,
@@ -438,56 +540,92 @@ export class BrowserOrchestrator {
     };
   }
 
-  // Stops this computer's browser and starts it again on the same profile.
-  async restart(parentCellId: string, reason: string): Promise<ReadyBrowser> {
-    this.noteProblem(parentCellId, reason);
-    await this.stop(parentCellId);
-    return this.start(parentCellId);
+  // Stops this browser and starts it again on the same profile.
+  async restart(key: string, reason: string): Promise<ReadyBrowser> {
+    this.noteProblem(key, reason);
+    await this.stop(key);
+    return this.start(key);
   }
 
-  start(parentCellId: string, signal = new AbortController().signal): Promise<ReadyBrowser> {
-    if (!ULID_PATTERN.test(parentCellId)) return Promise.reject(new BrowserLifecycleError());
-    const epoch = this.#epochs.get(parentCellId) ?? 0;
-    const started = this.#queued(parentCellId, () => this.#start(parentCellId, epoch, signal));
-    void started.catch(() => this.#outages.add(parentCellId));
+  start(key: string, signal = new AbortController().signal): Promise<ReadyBrowser> {
+    if (!ULID_PATTERN.test(key)) return Promise.reject(new BrowserLifecycleError());
+    const epoch = this.#epochs.get(key) ?? 0;
+    const started = this.#queued(key, () => this.#start(key, epoch, signal));
+    void started.catch(() => this.#outages.add(key));
     return started;
   }
 
-  stop(parentCellId: string): Promise<void> {
-    return this.#stop(parentCellId, false);
+  stop(key: string): Promise<void> {
+    return this.#stop(key, false);
   }
 
-  #stop(parentCellId: string, purgeProfile: boolean): Promise<void> {
-    this.#fence(parentCellId);
-    return this.#queued(parentCellId, async () => {
-      const record = this.#ledger.forParent(parentCellId);
-      if (record) await this.#contain(record, purgeProfile);
-      else if (this.deps.store.browserFor(parentCellId))
+  // Every browser of a computer, as the computer stops.
+  async stopComputer(parentCellId: string): Promise<void> {
+    const results = await Promise.allSettled(
+      this.keysOf(parentCellId).map((key) => this.stop(key)),
+    );
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) throw failed.reason;
+  }
+
+  // Every browser of a computer, as the computer goes: conversations' slots go with it, and the
+  // main browser keeps the saved sign-ins unless told otherwise.
+  async removeComputer(
+    parentCellId: string,
+    options: { purgeProfile?: boolean } = {},
+  ): Promise<void> {
+    const results = await Promise.allSettled(
+      this.keysOf(parentCellId).map((key) =>
+        this.remove(key, key === parentCellId ? options : { purgeProfile: true }),
+      ),
+    );
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) throw failed.reason;
+  }
+
+  #stop(key: string, purgeProfile: boolean): Promise<void> {
+    this.#fence(key);
+    return this.#queued(key, async () => {
+      const record = this.#ledger.forKey(key);
+      if (record) await this.#contain(record, purgeProfile && !record.slot);
+      else if (this.#storedFor(key))
         throw new BrowserLifecycleError("Browser recovery ownership is missing");
-      this.#state.set(parentCellId, "stopped");
-      this.#changed(parentCellId);
+      this.#state.set(key, "stopped");
+      this.#changed(key);
     });
   }
 
-  remove(parentCellId: string, options: { purgeProfile?: boolean } = {}): Promise<void> {
-    this.#fence(parentCellId);
-    return this.#queued(parentCellId, async () => {
-      const record = this.#ledger.forParent(parentCellId);
+  // A conversation's browser that goes takes its slot with it.
+  remove(key: string, options: { purgeProfile?: boolean } = {}): Promise<void> {
+    this.#fence(key);
+    return this.#queued(key, async () => {
+      const record = this.#ledger.forKey(key);
       if (!record) {
-        if (this.deps.store.browserFor(parentCellId))
+        if (this.#storedFor(key))
           throw new BrowserLifecycleError("Browser recovery ownership is missing");
+        this.#parents.delete(key);
         return;
       }
-      await this.#contain(record, options.purgeProfile === true);
+      const purge = options.purgeProfile === true || record.slot !== undefined;
+      await this.#contain(record, purge);
       this.#association(record);
       this.deps.store.remove(record.id);
-      if (options.purgeProfile) this.#ledger.remove(record);
-      else {
+      if (purge) {
+        this.#ledger.remove(record);
+        this.#parents.delete(key);
+      } else {
         record.phase = "retained";
         this.#ledger.save(record);
       }
-      this.#state.set(parentCellId, "removed");
+      this.#state.set(key, "removed");
+      this.#changed(record.parentCellId);
     });
+  }
+
+  #storedFor(key: string): BrowserCellRecord | undefined {
+    const parent = this.#parentOf(key);
+    if (!parent) return undefined;
+    return this.deps.store.browserFor(parent, parent === key ? undefined : key);
   }
 
   resetSource(parent: string): ComputerResetSource["browser"] {
@@ -524,6 +662,13 @@ export class BrowserOrchestrator {
     const retired = this.#queued(parent, async () => {
       if (this.deps.parentAvailable(parent))
         throw new BrowserLifecycleError("Reset parent admission is not held");
+      const slots = await Promise.allSettled(
+        this.keysOf(parent)
+          .filter((key) => key !== parent)
+          .map((key) => this.remove(key, { purgeProfile: true })),
+      );
+      if (slots.some((result) => result.status === "rejected"))
+        throw new BrowserLifecycleError("A conversation's browser could not be removed");
       const record = this.#ledger.forParent(parent);
       if (record) {
         if (
@@ -573,7 +718,7 @@ export class BrowserOrchestrator {
     for (const parent of this.#ready.keys()) this.#outages.add(parent);
     for (const parent of current) this.#fence(parent);
     const records = this.#ledger.list();
-    for (const record of records) this.#fence(record.parentCellId);
+    for (const record of records) this.#fence(browserKey(record));
     const inventory = this.deps.store.inventoryAll();
     const unknown =
       inventory.skipped.length > 0 ||
@@ -581,12 +726,13 @@ export class BrowserOrchestrator {
         (record) =>
           record.kind === "browser" &&
           !records.some(
-            (owner) => owner.id === record.id && owner.parentCellId === record.parentCellId,
+            (owner) =>
+              owner.id === record.id &&
+              owner.parentCellId === record.parentCellId &&
+              owner.slot === record.slot,
           ),
       );
-    const result = await Promise.allSettled(
-      records.map((record) => this.stop(record.parentCellId)),
-    );
+    const result = await Promise.allSettled(records.map((record) => this.stop(browserKey(record))));
     const failed = result.find((entry) => entry.status === "rejected");
     if (unknown || failed)
       throw new BrowserLifecycleError(
@@ -610,8 +756,11 @@ export class BrowserOrchestrator {
   }
 
   // This install's profiles from before sign-ins were shared, the given computer's first.
-  #legacyProfiles(first: BrowserLedger): string[] {
-    return [first, ...this.#ledger.list().filter((record) => record.id !== first.id)].map(
+  // Conversations' slots are never one.
+  #legacyProfiles(first: BrowserLedger | undefined): string[] {
+    const main = this.#ledger.list().filter((record) => !record.slot);
+    const own = first && !first.slot ? [first] : [];
+    return [...own, ...main.filter((record) => record.id !== first?.id)].map(
       (record) => browserNames(record.id, record.prefix).profileVolume,
     );
   }
@@ -636,7 +785,9 @@ export class BrowserOrchestrator {
 
   async #attachProfile(parent: string, check: () => void): Promise<void> {
     for (const holder of await this.#accounts.holders()) {
-      const owner = this.#ledger.list().find((record) => record.resources.browser === holder);
+      const owner = this.#ledger
+        .list()
+        .find((record) => !record.slot && record.resources.browser === holder);
       if (!owner || owner.parentCellId === parent)
         throw new BrowserLifecycleError("Saved sign-ins are in use");
       await this.stop(owner.parentCellId);
@@ -646,46 +797,104 @@ export class BrowserOrchestrator {
       throw new BrowserLifecycleError("Saved sign-ins are in use");
   }
 
-  #fence(parent: string): void {
-    if (!ULID_PATTERN.test(parent)) throw new BrowserLifecycleError();
-    this.#epochs.set(parent, (this.#epochs.get(parent) ?? 0) + 1);
-    this.#ready.delete(parent);
-    this.#state.set(parent, "stopping");
-    this.#starting.get(parent)?.abort();
-    this.#resets.get(parent)?.abort();
-    this.#changed(parent);
+  // A conversation's slot is copied once, from the main one, the first time its browser starts;
+  // after that it is its own. The main browser is paused for the part that changes while it runs.
+  async #fillSlot(record: BrowserLedger, check: () => void): Promise<void> {
+    const found = (await inspectBrowserResources(this.deps.docker, record)).find(
+      (entry) => entry.kind === "volumes",
+    );
+    if (found) return;
+    const holders = await this.#accounts.holders();
+    const main = this.#ledger
+      .list()
+      .find((entry) => !entry.slot && entry.resources.browser === holders[0]);
+    if (holders.length > 1 || (holders.length === 1 && !main))
+      throw new BrowserLifecycleError("Saved sign-ins are in use");
+    let running: string | undefined;
+    if (main?.resources.browser) {
+      const inspected = await this.deps.docker.request<Raw>({
+        method: "GET",
+        path: browserObjectPath("containers", main.resources.browser, "json"),
+      });
+      const state = raw(inspected?.State) ? inspected.State : undefined;
+      if (state?.Running === true && state.Paused !== true) running = main.resources.browser;
+    }
+    check();
+    const volume = browserNames(record.id, record.prefix).profileVolume;
+    await this.deps.docker.request({
+      method: "POST",
+      path: "/volumes/create",
+      body: { Name: volume, Labels: browserLabels(record, "profile") },
+    });
+    try {
+      const { cookiesLeftOut } = await this.#slots.fill(
+        volume,
+        this.#accounts.volume,
+        browserLabels(record, "profile-copy"),
+        running,
+      );
+      if (cookiesLeftOut)
+        console.error(
+          `a conversation's browser started from the saved sign-ins, without ${cookiesLeftOut} cookies of sites that allow one browser at a time`,
+        );
+    } catch (error) {
+      if (main && error instanceof SlotPauseStuck)
+        void this.restart(
+          main.parentCellId,
+          "The web browser was stuck after a copy of its sign-ins; localDot started it again.",
+        ).catch(() => {});
+      await this.deps.docker
+        .request({ method: "DELETE", path: browserObjectPath("volumes", volume) })
+        .catch(() => {});
+      throw error;
+    }
   }
 
-  #queued<T>(parent: string, run: () => Promise<T>): Promise<T> {
-    const previous = this.#queues.get(parent) ?? Promise.resolve();
+  #fence(key: string): void {
+    if (!ULID_PATTERN.test(key)) throw new BrowserLifecycleError();
+    this.#epochs.set(key, (this.#epochs.get(key) ?? 0) + 1);
+    this.#ready.delete(key);
+    this.#state.set(key, "stopping");
+    this.#starting.get(key)?.abort();
+    this.#resets.get(key)?.abort();
+    this.#changed(key);
+  }
+
+  #queued<T>(key: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.#queues.get(key) ?? Promise.resolve();
     const next = previous.catch(() => {}).then(run);
-    this.#queues.set(parent, next);
+    this.#queues.set(key, next);
     void next
       .finally(() => {
-        if (this.#queues.get(parent) === next) this.#queues.delete(parent);
+        if (this.#queues.get(key) === next) this.#queues.delete(key);
       })
       .catch(() => {});
     return next;
   }
 
-  #check(parent: string, epoch: number, signal: AbortSignal): void {
+  #check(key: string, epoch: number, signal: AbortSignal): void {
+    const parent = this.#parentOf(key);
     if (
+      !parent ||
       signal.aborted ||
-      (this.#epochs.get(parent) ?? 0) !== epoch ||
+      (this.#epochs.get(key) ?? 0) !== epoch ||
       !this.deps.parentAvailable(parent) ||
       !this.deps.store.get(parent)
     )
       throw new BrowserStartCancelled();
   }
 
-  #allocate(parent: string): BrowserLedger {
+  #allocate(key: string): BrowserLedger {
+    const parent = this.#parent(key);
+    const slot = key === parent ? undefined : key;
     const desktop = this.deps.store.get(parent);
-    if (!desktop || this.deps.store.browserFor(parent))
+    if (!desktop || this.deps.store.browserFor(parent, slot))
       throw new BrowserLifecycleError("Browser association needs recovery");
     const record: BrowserLedger = {
       v: 1,
       id: ulid(),
       parentCellId: parent,
+      ...(slot ? { slot } : {}),
       owner: randomUUID(),
       prefix: this.deps.namePrefix ?? NAME_PREFIX,
       createdAt: new Date().toISOString(),
@@ -710,6 +919,7 @@ export class BrowserOrchestrator {
       (stored &&
         (stored.kind !== "browser" ||
           stored.parentCellId !== record.parentCellId ||
+          stored.slot !== record.slot ||
           stored.docker.profileVolume !== browserNames(record.id, record.prefix).profileVolume)) ||
       this.deps.store.inventoryAll().skipped.includes(record.id)
     )
@@ -718,28 +928,30 @@ export class BrowserOrchestrator {
 
   // Before the readiness clock, since neither depends on the browser: Chrome's install if one is
   // under way, and the one-way hand-over of the sign-ins to it, with no browser holding them.
-  async #imageForStart(parent: string, epoch: number, signal: AbortSignal): Promise<string> {
+  async #imageForStart(key: string, epoch: number, signal: AbortSignal): Promise<string> {
     if (this.#engine.pinned) return this.deps.images.browser;
     await this.#engine.settled(signal);
-    this.#check(parent, epoch, signal);
+    this.#check(key, epoch, signal);
     if (await this.#engine.handOverPending())
       await this.#exclusive(signal, async () => {
-        this.#check(parent, epoch, signal);
+        this.#check(key, epoch, signal);
+        const parent = this.#parent(key);
         const own = this.#ledger.forParent(parent);
         if (own) {
           this.#association(own);
           await this.#contain(own);
         }
-        await this.#attachProfile(parent, () => this.#check(parent, epoch, signal));
+        await this.#attachProfile(parent, () => this.#check(key, epoch, signal));
         await this.#engine.handOver();
       });
-    this.#check(parent, epoch, signal);
+    this.#check(key, epoch, signal);
     return this.#engine.image();
   }
 
   async #contain(record: BrowserLedger, purge = false): Promise<void> {
-    this.#ready.delete(record.parentCellId);
-    this.#images.delete(record.parentCellId);
+    const key = browserKey(record);
+    this.#ready.delete(key);
+    this.#images.delete(key);
     this.#changed(record.parentCellId);
     const [keyd, docker] = await Promise.allSettled([
       closeBrowserKeyd(this.deps.keyd, record),
@@ -747,7 +959,7 @@ export class BrowserOrchestrator {
     ]);
     if (keyd.status === "rejected" || docker.status === "rejected") {
       record.phase = "failed";
-      this.#state.set(record.parentCellId, "failed");
+      this.#state.set(key, "failed");
       this.#ledger.save(record);
       const unconfirmed = [
         keyd.status === "rejected" ? "the key service did not confirm its connection closed" : "",
@@ -762,43 +974,44 @@ export class BrowserOrchestrator {
     this.#ledger.save(record);
   }
 
-  async #start(parent: string, epoch: number, caller: AbortSignal): Promise<ReadyBrowser> {
-    this.#check(parent, epoch, caller);
-    const current = this.endpoints(parent);
+  async #start(key: string, epoch: number, caller: AbortSignal): Promise<ReadyBrowser> {
+    this.#check(key, epoch, caller);
+    const current = this.endpoints(key);
     if (current) return current;
     const cancel = new AbortController();
-    this.#starting.set(parent, cancel);
-    this.#state.set(parent, "starting");
+    this.#starting.set(key, cancel);
+    this.#state.set(key, "starting");
     let image: string;
     try {
-      image = await this.#imageForStart(parent, epoch, AbortSignal.any([caller, cancel.signal]));
+      image = await this.#imageForStart(key, epoch, AbortSignal.any([caller, cancel.signal]));
     } catch (error) {
       const cancelled =
         caller.aborted || cancel.signal.aborted || error instanceof BrowserStartCancelled;
-      if (this.#starting.get(parent) === cancel) this.#starting.delete(parent);
-      if (this.#state.get(parent) === "starting")
-        this.#state.set(parent, cancelled ? "stopped" : "failed");
-      this.#changed(parent);
+      if (this.#starting.get(key) === cancel) this.#starting.delete(key);
+      if (this.#state.get(key) === "starting")
+        this.#state.set(key, cancelled ? "stopped" : "failed");
+      this.#changed(key);
       if (cancelled) throw new BrowserStartCancelled();
       throw new BrowserLifecycleError(
         "Browser start failed while preparing Chrome; its profile has been retained",
       );
     }
-    this.#startedAt.set(parent, Date.now());
+    this.#startedAt.set(key, Date.now());
     const readyTimeoutMs = this.deps.readyTimeoutMs ?? READY_TIMEOUT_MS;
     const timeout = AbortSignal.timeout(readyTimeoutMs);
     const signal = AbortSignal.any([caller, cancel.signal, timeout]);
-    const check = () => this.#check(parent, epoch, signal);
+    const check = () => this.#check(key, epoch, signal);
     let record: BrowserLedger | undefined;
     let material: Buffer | undefined;
     let stage = "ownership recovery";
     try {
-      record = this.#ledger.forParent(parent);
+      const parent = this.#parent(key);
+      record = this.#ledger.forKey(key);
       if (record) {
         this.#association(record);
         await this.#contain(record);
       } else {
-        record = this.#allocate(parent);
+        record = this.#allocate(key);
         await requireFreshBrowserNames(this.deps.docker, record);
       }
       check();
@@ -846,6 +1059,7 @@ export class BrowserOrchestrator {
         kind: "browser",
         id: record.id,
         parentCellId: parent,
+        ...(record.slot ? { slot: record.slot } : {}),
         createdAt: record.createdAt,
         scale: record.scale,
         keydPort: record.keydPort,
@@ -881,20 +1095,26 @@ export class BrowserOrchestrator {
         gateSpec(cell, this.deps.images.gate, await (this.deps.relay?.() ?? HOST_RELAY)),
       );
       stage = "profile attachment";
+      const limits = browserLimits(this.deps.size?.() ?? DEFAULT_COMPUTER_SIZE);
+      const stream = { fullcolor: this.deps.streamFullcolor ?? false };
       await this.#exclusive(signal, async () => {
         check();
-        await this.#accounts.ensure(this.#legacyProfiles(owned));
+        await this.#accounts.ensure(this.#legacyProfiles(this.#ledger.forParent(parent)));
         check();
-        await this.#attachProfile(parent, check);
+        if (owned.slot) {
+          stage = "profile copy";
+          await this.#fillSlot(owned, check);
+        } else await this.#attachProfile(parent, check);
+        check();
         stage = "container creation";
         await create(
           "browser",
           browserSpec(
             cell,
             image,
-            { fullcolor: this.deps.streamFullcolor ?? false },
-            this.#accounts.volume,
-            browserLimits(this.deps.size?.() ?? DEFAULT_COMPUTER_SIZE),
+            stream,
+            owned.slot ? names.profileVolume : this.#accounts.volume,
+            limits,
           ),
         );
       });
@@ -1001,6 +1221,7 @@ export class BrowserOrchestrator {
       const ready: ReadyBrowser = {
         browserCellId: record.id,
         parentCellId: parent,
+        ...(record.slot ? { slot: record.slot } : {}),
         instance,
         browserd: { baseUrl: `http://127.0.0.1:${ports.service}`, token: cell.tokens.browserd },
         stream: {
@@ -1008,29 +1229,28 @@ export class BrowserOrchestrator {
           authorization: `Basic ${Buffer.from(`localdot:${cell.tokens.stream}`).toString("base64")}`,
         },
       };
-      this.#ready.set(parent, ready);
-      this.#images.set(parent, image);
-      this.#state.set(parent, "ready");
-      this.#retries.delete(parent);
-      this.#changed(parent);
-      if (this.#outages.delete(parent)) this.deps.notify?.(parent, BROWSER_BACK);
+      this.#ready.set(key, ready);
+      this.#images.set(key, image);
+      this.#state.set(key, "ready");
+      this.#retries.delete(key);
+      this.#changed(key);
+      if (this.#outages.delete(key)) this.deps.notify?.(key, BROWSER_BACK);
       return structuredClone(ready);
     } catch (error) {
-      this.#ready.delete(parent);
+      this.#ready.delete(key);
       if (
         !timeout.aborted &&
         (caller.aborted ||
           cancel.signal.aborted ||
-          (this.#epochs.get(parent) ?? 0) !== epoch ||
-          !this.deps.parentAvailable(parent) ||
-          !this.deps.store.get(parent))
+          (this.#epochs.get(key) ?? 0) !== epoch ||
+          !this.#parentLive(key))
       ) {
         if (record)
           try {
             await this.#contain(record);
           } catch {}
-        if (this.#state.get(parent) === "starting") this.#state.set(parent, "stopped");
-        this.#changed(parent);
+        if (this.#state.get(key) === "starting") this.#state.set(key, "stopped");
+        this.#changed(key);
         throw new BrowserStartCancelled();
       }
       const cause = [
@@ -1050,26 +1270,26 @@ export class BrowserOrchestrator {
           this.#ledger.save(record);
         } catch {}
       }
-      this.#state.set(parent, "failed");
-      this.#changed(parent);
+      this.#state.set(key, "failed");
+      this.#changed(key);
       throw new BrowserLifecycleError(
         `Browser start failed during ${stage}${cause ? ` (${cause})` : ""}; its profile has been retained`,
       );
     } finally {
       material?.fill(0);
-      if (this.#starting.get(parent) === cancel) {
-        this.#starting.delete(parent);
-        this.#startedAt.delete(parent);
+      if (this.#starting.get(key) === cancel) {
+        this.#starting.delete(key);
+        this.#startedAt.delete(key);
       }
     }
   }
 
   // Why a running browser failed, as far as anything can tell: browserd's own report when it
   // answers, else its container's.
-  async failure(parentCellId: string): Promise<string | undefined> {
-    const reported = (await this.supervisor(parentCellId))?.lastFailure;
+  async failure(key: string): Promise<string | undefined> {
+    const reported = (await this.supervisor(key))?.lastFailure;
     if (reported) return describeBrowserFailure(reported);
-    const record = this.#ledger.forParent(parentCellId);
+    const record = this.#ledger.forKey(key);
     return record ? this.#evidence(record).catch(() => undefined) : undefined;
   }
 
