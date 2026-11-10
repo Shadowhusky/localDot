@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "555481f152b37a7aa90dd94af7cf908f2f92dfc942b08870d36485347150f796",
+  "inputSha256": "653c373b1780a7c4c42a3bb4a09f95da2d8f07c44a756d6b0b5de0db6d853c1a",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -722,7 +722,7 @@
     "apps/daemon/src/gateway/frames.ts": "52d198c3f0038db44f57afafdd4edbf10cdfa8049c7ce3ee76b60b8bf51fd6d1",
     "apps/daemon/src/gateway/freshness.test.ts": "f97e9d34301a4a2b0ce4b09d3747ec87246ed67cd51b0449674be17751cc63cd",
     "apps/daemon/src/gateway/freshness.ts": "2d5a9a2076543817b7b10db738e2ed9905e7b03e151fd306643888f2e465a84d",
-    "apps/daemon/src/gateway/gateway.test.ts": "a87f7c466479bf65d3f3efa232b1a7f883f78dafb7cdc33e268a139386d0eba9",
+    "apps/daemon/src/gateway/gateway.test.ts": "9b73c3f7bff8dbde19fd2f4f6d724208bb1ed0edc2ebf478582c46ead131b76d",
     "apps/daemon/src/gateway/gateway.ts": "4ad4e14964482e53f141871e187d36d8a317eaf1315c7e0bd26ab16c7563fe18",
     "apps/daemon/src/gateway/identity.test.ts": "2c375bd15b04b3cbfaf2a09b2b0ed09e4597071bbc4b3da07040904d1cee7d91",
     "apps/daemon/src/gateway/identity.ts": "f242e5414130f5bf68ef4ecba3dfd6a835300eb330321426d26c8c6ce991a2d1",
@@ -1300,7 +1300,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "931b80351fe2eb85433e93bfd48121e83f9d2cf10d02df1ef1655895f0121d6d",
+  "reportSha256": "b0f19802abd8a84cdfce599679304c2b38ffa80185b50c42d4a99254cfad54e6",
   "exit": {
     "code": 0,
     "signal": null

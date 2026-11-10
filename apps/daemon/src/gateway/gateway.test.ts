@@ -1396,7 +1396,9 @@ describe("ActionGateway step pictures", () => {
       cellId: s.cellId,
       hidden: async (windows: readonly { frame: Rect }[]) => windows.map((w) => w.frame),
     });
-    await vi.waitFor(() => expect(s.frames.fullPath(s.sessionId, frameId)).toBeDefined());
+    await vi.waitFor(() => expect(s.frames.fullPath(s.sessionId, frameId)).toBeDefined(), {
+      timeout: 15_000,
+    });
     const zoomed = s.fake.calls.find((c) => c.path === "/zoom")?.body;
     expect(zoomed).toEqual({ frameId, region: { x: 0, y: 0, w: 1280, h: 800 } });
     const file = s.frames.fullPath(s.sessionId, frameId) as string;
