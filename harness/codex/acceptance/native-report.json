@@ -24,113 +24,131 @@
     "updated": 0,
     "didUpdate": false
   },
-  "startTime": 1794065336941,
+  "startTime": 1794349534096,
   "success": true,
   "testResults": [
     {
       "assertionResults": [
         {
-          "ancestorTitles": ["native macOS Codex confinement"],
+          "ancestorTitles": [
+            "native macOS Codex confinement"
+          ],
           "fullName": "native macOS Codex confinement allows owned home/work while denying protected config writes and user/data reads",
           "status": "passed",
           "title": "allows owned home/work while denying protected config writes and user/data reads",
-          "duration": 538.2919999999999,
+          "duration": 640.9942920000001,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["native macOS Codex confinement"],
+          "ancestorTitles": [
+            "native macOS Codex confinement"
+          ],
           "fullName": "native macOS Codex confinement denies all protected home writes with writable owned positive controls",
           "status": "passed",
           "title": "denies all protected home writes with writable owned positive controls",
-          "duration": 358.4927090000001,
+          "duration": 379.5577910000002,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["native macOS Codex confinement"],
+          "ancestorTitles": [
+            "native macOS Codex confinement"
+          ],
           "fullName": "native macOS Codex confinement denies parent canaries and both shared-temp spellings while private temp stays writable",
           "status": "passed",
           "title": "denies parent canaries and both shared-temp spellings while private temp stays writable",
-          "duration": 224.86633400000028,
+          "duration": 240.057542,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["native macOS Codex confinement"],
+          "ancestorTitles": [
+            "native macOS Codex confinement"
+          ],
           "fullName": "native macOS Codex confinement denies the owned real-home canary through natural and Data-volume spellings",
           "status": "passed",
           "title": "denies the owned real-home canary through natural and Data-volume spellings",
-          "duration": 126.24979200000007,
+          "duration": 132.55237499999976,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["native macOS Codex confinement"],
+          "ancestorTitles": [
+            "native macOS Codex confinement"
+          ],
           "fullName": "native macOS Codex confinement grants only the owned UDS and exact proxy ports",
           "status": "passed",
           "title": "grants only the owned UDS and exact proxy ports",
-          "duration": 126.71512500000017,
+          "duration": 133.12412499999982,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["native macOS Codex confinement"],
+          "ancestorTitles": [
+            "native macOS Codex confinement"
+          ],
           "fullName": "native macOS Codex confinement denies every task/account listener and refuses the unavailable browser profile",
           "status": "passed",
           "title": "denies every task/account listener and refuses the unavailable browser profile",
-          "duration": 776.5248750000001,
+          "duration": 801.6989169999997,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["native macOS Codex confinement"],
+          "ancestorTitles": [
+            "native macOS Codex confinement"
+          ],
           "fullName": "native macOS Codex confinement receives the scrubbed production environment",
           "status": "passed",
           "title": "receives the scrubbed production environment",
-          "duration": 29.173291999999947,
+          "duration": 31.104249999999865,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["native macOS Codex confinement"],
+          "ancestorTitles": [
+            "native macOS Codex confinement"
+          ],
           "fullName": "native macOS Codex confinement authenticates to the owned default proxy and rejects a foreign CONNECT host",
           "status": "passed",
           "title": "authenticates to the owned default proxy and rejects a foreign CONNECT host",
-          "duration": 4.471625000000131,
+          "duration": 5.522667000000183,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["native macOS Codex confinement"],
+          "ancestorTitles": [
+            "native macOS Codex confinement"
+          ],
           "fullName": "native macOS Codex confinement denies native sandbox reinitialization with an unsandboxed positive control",
           "status": "passed",
           "title": "denies native sandbox reinitialization with an unsandboxed positive control",
-          "duration": 38.412874999999985,
+          "duration": 44.8252080000002,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         }
       ],
-      "startTime": 1794065338368,
-      "endTime": 1794065340591.4128,
+      "startTime": 1794349535688,
+      "endTime": 1794349538097.8252,
       "status": "passed",
       "message": "",
       "name": "apps/daemon/src/agent/codex/sandbox.codex.test.ts"
