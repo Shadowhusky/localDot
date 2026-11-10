@@ -107,7 +107,7 @@ decide what may run don't change:
 
 ```sh
 node --experimental-transform-types scripts/release/speech-assets.mjs mirror /absolute/path/to/new-dir
-gh release create speech-assets-1 --repo Shadowhusky/localdot-downloads /absolute/path/to/new-dir/*.tar.gz /absolute/path/to/new-dir/THIRD-PARTY.md
+gh release create speech-assets-1 --repo Shadowhusky/localdot --prerelease --latest=false /absolute/path/to/new-dir/*.tar.gz /absolute/path/to/new-dir/THIRD-PARTY.md
 ```
 
 Put each printed entry first in its bundle's `sources`, keeping the upstream entry after it as the

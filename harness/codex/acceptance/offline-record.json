@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "66fba65af6424a2c02a589fcbd48eeea4c6bd710e8a37aaa4f61caae8a2072fa",
+  "inputSha256": "555481f152b37a7aa90dd94af7cf908f2f92dfc942b08870d36485347150f796",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -1030,7 +1030,7 @@
     "apps/daemon/src/upgrade-router.ts": "d0b2fa3ce2939328ff7b7bc6571e60ad492028f3b2d80bb10313b4ba20154c5c",
     "apps/daemon/src/voice/routes.test.ts": "210245d9963ec83a0f2ae64e76cf415463ecb506f9d39fb3e6f5eb670e6b5a6f",
     "apps/daemon/src/voice/routes.ts": "5589db05a85d8aec544b09ea6ab1090b8c3d766cef5d01378bef1e3fb782a8a6",
-    "apps/daemon/src/voice/speech-catalog.ts": "9af324c7799b87b32f762bc93ca33baca43f721bbdfa3cf70b00f3bd7b71cce5",
+    "apps/daemon/src/voice/speech-catalog.ts": "10208f19f5c62fe2bb6624eff8681a10574eb8c199683a2a45c58f3f278cf677",
     "apps/daemon/src/voice/speech-chunks.test.ts": "a5de88f25097967c3428a7d9ebc60e021676cd6e35f8796233f78391d9ab5df2",
     "apps/daemon/src/voice/speech-chunks.ts": "c376b48cd2d03410150080809911f0acad56fdecef378dc4ab751147ba811d40",
     "apps/daemon/src/voice/speech-download.test.ts": "489153165f86f3799a8d40974a8c6aa568d3c5e4c8197cb9685c73a8a0a196bc",
@@ -1300,7 +1300,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "1984dcaeb4df7d3893728fe9eac16923aefd5a950bcbe7e75c72254eceedfb9e",
+  "reportSha256": "931b80351fe2eb85433e93bfd48121e83f9d2cf10d02df1ef1655895f0121d6d",
   "exit": {
     "code": 0,
     "signal": null

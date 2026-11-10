@@ -98,7 +98,7 @@ export const SPEECH_CATALOG: SpeechCatalog = {
         },
         sources: [
           {
-            url: "https://github.com/Shadowhusky/localdot-downloads/releases/download/speech-assets-1/engine-2.0.1-darwin-arm64.tar.gz",
+            url: "https://github.com/Shadowhusky/localdot/releases/download/speech-assets-1/engine-2.0.1-darwin-arm64.tar.gz",
             sha256: "8c92cc3c20a55cf434ffd5ab1d6eb6d445bc6e56a7a75d4b3a0c7d750b08f6d9",
             bytes: 8442726,
             root: "sherpa-onnx-v2.0.1-osx-arm64-shared",
@@ -125,7 +125,7 @@ export const SPEECH_CATALOG: SpeechCatalog = {
         },
         sources: [
           {
-            url: "https://github.com/Shadowhusky/localdot-downloads/releases/download/speech-assets-1/engine-2.0.1-darwin-x64.tar.gz",
+            url: "https://github.com/Shadowhusky/localdot/releases/download/speech-assets-1/engine-2.0.1-darwin-x64.tar.gz",
             sha256: "f911ecced539a78733ffdea9a3fec1e45d1dc133aed26a8f0e249e2d8de020a1",
             bytes: 9840792,
             root: "sherpa-onnx-v2.0.1-osx-x64-shared",
@@ -152,7 +152,7 @@ export const SPEECH_CATALOG: SpeechCatalog = {
         },
         sources: [
           {
-            url: "https://github.com/Shadowhusky/localdot-downloads/releases/download/speech-assets-1/engine-2.0.1-linux-x64.tar.gz",
+            url: "https://github.com/Shadowhusky/localdot/releases/download/speech-assets-1/engine-2.0.1-linux-x64.tar.gz",
             sha256: "fb1ccb3c5f963e80398df7133b1c92704f09c5f70d6c659da731fbae10a40903",
             bytes: 9476011,
             root: "sherpa-onnx-v2.0.1-linux-x64-shared",
@@ -179,7 +179,7 @@ export const SPEECH_CATALOG: SpeechCatalog = {
         },
         sources: [
           {
-            url: "https://github.com/Shadowhusky/localdot-downloads/releases/download/speech-assets-1/engine-2.0.1-linux-arm64.tar.gz",
+            url: "https://github.com/Shadowhusky/localdot/releases/download/speech-assets-1/engine-2.0.1-linux-arm64.tar.gz",
             sha256: "4c0decfa5dd20404d37a24ef9a7812c2e671144d3c06f47f75e445f50f635441",
             bytes: 12174089,
             root: "sherpa-onnx-v2.0.1-linux-aarch64-shared-cpu",
@@ -220,7 +220,7 @@ export const SPEECH_CATALOG: SpeechCatalog = {
       },
       sources: [
         {
-          url: "https://github.com/Shadowhusky/localdot-downloads/releases/download/speech-assets-1/model-light.tar.gz",
+          url: "https://github.com/Shadowhusky/localdot/releases/download/speech-assets-1/model-light.tar.gz",
           sha256: "3c05c1813fdcc373911f299e631a4fe185ba62e55433403e4b57a8d161df8975",
           bytes: 160306666,
           root: "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17",
@@ -271,7 +271,7 @@ export const SPEECH_CATALOG: SpeechCatalog = {
       },
       sources: [
         {
-          url: "https://github.com/Shadowhusky/localdot-downloads/releases/download/speech-assets-1/model-balanced.tar.gz",
+          url: "https://github.com/Shadowhusky/localdot/releases/download/speech-assets-1/model-balanced.tar.gz",
           sha256: "81de15cfebb004d1d4d12618ee1edafd63782a265c1ea6b4ffc9cd70d87630af",
           bytes: 132533835,
           root: "sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03",
@@ -330,7 +330,7 @@ export const SPEECH_CATALOG: SpeechCatalog = {
       },
       sources: [
         {
-          url: "https://github.com/Shadowhusky/localdot-downloads/releases/download/speech-assets-1/model-languages.tar.gz",
+          url: "https://github.com/Shadowhusky/localdot/releases/download/speech-assets-1/model-languages.tar.gz",
           sha256: "c72df2bb172d7b857e3deee77ba83be03172dc3e4edb9cea465a666681f5977c",
           bytes: 844896332,
           root: "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25",

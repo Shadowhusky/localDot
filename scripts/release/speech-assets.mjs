@@ -20,7 +20,7 @@ import { promisify } from "node:util";
 
 const exec = promisify(nodeExecFile);
 export const MIRROR_BASE =
-  "https://github.com/Shadowhusky/localdot-downloads/releases/download/speech-assets-1";
+  "https://github.com/Shadowhusky/localdot/releases/download/speech-assets-1";
 
 export async function sha256Of(path) {
   const hash = createHash("sha256");
@@ -196,7 +196,7 @@ async function main([command, ...rest]) {
     const entries = await mirror(await shippedCatalog(), rest[0]);
     console.log(JSON.stringify(entries, null, 2));
     console.log(
-      `\nThen: gh release create speech-assets-1 --repo Shadowhusky/localdot-downloads ${rest[0]}/*.tar.gz ${rest[0]}/THIRD-PARTY.md`,
+      `\nThen: gh release create speech-assets-1 --repo Shadowhusky/localdot --prerelease --latest=false ${rest[0]}/*.tar.gz ${rest[0]}/THIRD-PARTY.md`,
     );
     console.log("and put each entry first in its bundle's sources in speech-catalog.ts.");
     return;
