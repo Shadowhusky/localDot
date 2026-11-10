@@ -71,6 +71,19 @@ describe("service worker", () => {
     }
   });
 
+  // One notification per task and kind replaces the last, as a phone stacks them; a browser does
+  // that silently unless asked to alert again, so a second question from the same task would
+  // arrive with no banner.
+  it("alerts again when the same task needs you again", async () => {
+    const sw = load();
+    await sw.push({ kind: "needs_you", sessionId: SESSION });
+    await sw.push({ kind: "needs_you", sessionId: SESSION });
+    expect(sw.shown.map((n) => n.options)).toEqual([
+      expect.objectContaining({ tag: `needs_you:${SESSION}`, renotify: true }),
+      expect.objectContaining({ tag: `needs_you:${SESSION}`, renotify: true }),
+    ]);
+  });
+
   it("shows the task's title only when the payload carries one", async () => {
     const sw = load();
     await sw.push({ kind: "done", sessionId: SESSION, title: "Pay the electricity bill" });

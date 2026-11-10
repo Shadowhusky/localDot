@@ -21,6 +21,7 @@ function fixture(
   presence = { localVisible: false, localHiddenCanNotify: false },
   confirms = true,
   expires?: number,
+  ownBanner = true,
 ) {
   const listeners = new Set<(item: AttentionItem) => void>();
   let current: AttentionItem | undefined;
@@ -40,10 +41,10 @@ function fixture(
     },
     store: { settings: () => DEFAULT_NOTIFY_SETTINGS },
     mac: {
-      available: true,
+      available: ownBanner,
       show: async (title, body) => {
         banners.push([title, body]);
-        return "shown";
+        return ownBanner ? "shown" : "unavailable";
       },
     },
     push: {
@@ -108,23 +109,24 @@ describe("Notifier", () => {
     expect(f.banners).toEqual([["Task done", "Pay the electricity bill"]]);
   });
 
-  it("lets a hidden tab on this Mac show it instead of a banner", async () => {
+  it("shows the Mac's own banner while a hidden tab could show one", async () => {
     const f = fixture({ localVisible: false, localHiddenCanNotify: true });
     f.notifier.start();
     f.emit(item("approval:a:1:1"));
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
-    expect(f.banners).toEqual([]);
-    expect(f.published.map((e) => e.page)).toEqual([false, true]);
+    expect(f.banners).toEqual([["dot needs you", "Pay the electricity bill"]]);
+    expect(f.published.map((e) => e.page)).toEqual([false]);
     expect(f.pushes).toHaveLength(1);
   });
 
-  it("falls back to the banner when the hidden tab never confirms", async () => {
-    const f = fixture({ localVisible: false, localHiddenCanNotify: true }, false);
+  it("lets a hidden tab show it on a computer with no banner of its own", async () => {
+    const f = fixture({ localVisible: false, localHiddenCanNotify: true }, true, undefined, false);
     f.notifier.start();
     f.emit(item("approval:a:1:1"));
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
     expect(f.published.map((e) => e.page)).toEqual([false, true]);
-    expect(f.banners).toEqual([["dot needs you", "Pay the electricity bill"]]);
+    expect(f.banners).toEqual([]);
+    expect(f.pushes).toHaveLength(1);
   });
 
   it("lets an approval's push live as long as its card", async () => {

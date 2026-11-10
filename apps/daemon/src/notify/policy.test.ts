@@ -74,15 +74,15 @@ describe("delivery policy", () => {
         "UTC",
       )?.mac,
     ).toBe("none");
-    expect(
-      decide(
-        needsYou,
-        DEFAULT_NOTIFY_SETTINGS,
-        { localVisible: false, localHiddenCanNotify: true },
-        noon,
-        "UTC",
-      )?.mac,
-    ).toBe("page");
+  });
+
+  it("keeps the computer's own banner, the one a test shows, while a tab could show one", () => {
+    const hiddenTab = { localVisible: false, localHiddenCanNotify: true };
+    expect(decide(needsYou, DEFAULT_NOTIFY_SETTINGS, hiddenTab, noon, "UTC")?.mac).toBe("banner");
+    expect(decide(needsYou, DEFAULT_NOTIFY_SETTINGS, hiddenTab, noon, "UTC", false)?.mac).toBe(
+      "page",
+    );
+    expect(decide(needsYou, DEFAULT_NOTIFY_SETTINGS, away, noon, "UTC", false)?.mac).toBe("banner");
   });
 
   it("follows each event's switches", () => {
