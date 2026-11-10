@@ -1,6 +1,7 @@
 import {
   type Blocker,
   blockerLine,
+  type EventOf,
   modelBlock,
   STALL,
   type TaskModelRef,
@@ -23,6 +24,7 @@ import type { DotWait } from "./Composer.tsx";
 import { emptyMessageBoxHasKeys, typedLately } from "./message-box.ts";
 import type { AgentBlocker } from "./model.ts";
 import { timeLabel } from "./thread.ts";
+import { resetTime } from "./UsageFooter.tsx";
 import { useAppConnect } from "./useAppConnect.ts";
 
 const TOUCH = "(hover: none) and (pointer: coarse)";
@@ -44,7 +46,7 @@ export interface FixDeps {
     remember(option: ModelOption): Promise<boolean>;
   };
   // What the task's own state says of its model, newer than the card's own words.
-  stall?: { reason?: string; detail?: string };
+  stall?: { reason?: string; detail?: string; autoContinue?: AutoContinue };
   planResets?: string | null;
   local: boolean;
   retry: { run(): Promise<boolean>; reason?: string };
@@ -374,6 +376,39 @@ const MODEL_WORDS: Record<string, { title: string; text: string }> = {
   "claude code plan limit reached": PLAN_LIMIT("Claude"),
 };
 
+type AutoContinue = NonNullable<EventOf<"agent.state">["data"]["autoContinue"]>;
+// A plan's limit: the task waits for the plan to reset and goes on by itself, unless told not to.
+function planWait(reason: string | undefined, wait: AutoContinue | undefined) {
+  const plan =
+    reason === "chatgpt plan limit reached"
+      ? "ChatGPT"
+      : reason === "claude code plan limit reached"
+        ? "Claude"
+        : undefined;
+  if (!plan || !wait) return undefined;
+  if ("at" in wait)
+    return {
+      waiting: true,
+      // The title says when, so the plan's own reset time needn't.
+      known: !wait.checking,
+      title: wait.checking
+        ? "Paused at your plan's limit"
+        : (resetTime(Math.round(wait.at / 1000))?.replace(/^Resets/, "Paused until") ??
+          "Paused at your plan's limit"),
+      text: wait.checking
+        ? `Your ${plan} plan is at its limit and didn't say when it resets. dot checks it every few minutes and continues by itself once it has.`
+        : `Your ${plan} plan is at its limit. dot continues by itself when it resets.`,
+    };
+  if (wait.off === "gave_up")
+    return {
+      waiting: false,
+      known: false,
+      title: "Paused at your plan's limit",
+      text: `Your ${plan} plan is still at its limit, so dot stopped waiting for it. Try again once it resets, ${ANOTHER}.`,
+    };
+  return undefined;
+}
+
 const refOf = ({ choice }: ModelOption): TaskModelRef => ({
   provider: choice.provider,
   model: choice.model,
@@ -394,11 +429,25 @@ function ModelFix({ open, deps }: { open: BlockerOf<"model">; deps: FixDeps }) {
   const trying = !deps.stall;
   const reason = modelBlock(deps.stall?.reason) ? deps.stall?.reason : blocker.reason;
   const detail = deps.stall?.detail ?? blocker.detail;
-  const words = MODEL_WORDS[reason ?? blocker.reason] ?? MODEL_WORDS[STALL.modelUnavailable];
+  const wait = planWait(reason ?? blocker.reason, deps.stall?.autoContinue);
+  const words =
+    wait ?? MODEL_WORDS[reason ?? blocker.reason] ?? MODEL_WORDS[STALL.modelUnavailable];
   const text =
     deps.local && reason === STALL.modelUnavailable
       ? `The local model isn't answering. Start its server and load the model, then try again, ${ANOTHER}.`
       : words?.text;
+  const [stopping, setStopping] = useState(false);
+  const dontContinue = async () => {
+    setStopping(true);
+    setProblem(null);
+    try {
+      await deps.api.post(`/api/agent/sessions/${deps.sessionId}/auto-continue/cancel`);
+    } catch {
+      setProblem("That didn't go through. Try again.");
+    } finally {
+      setStopping(false);
+    }
+  };
   const go = async () => {
     setSending(true);
     setProblem(null);
@@ -429,7 +478,7 @@ function ModelFix({ open, deps }: { open: BlockerOf<"model">; deps: FixDeps }) {
           <p className="thread-recovery-reason">{detail}</p>
         </blockquote>
       )}
-      {deps.planResets && (
+      {deps.planResets && !wait?.known && (
         <p className="thread-recovery-reason">
           {deps.planResets.replace(/^Resets/, "Your plan's limit resets")}.
         </p>
@@ -457,8 +506,19 @@ function ModelFix({ open, deps }: { open: BlockerOf<"model">; deps: FixDeps }) {
           disabledReason={moving ? undefined : deps.retry.reason}
           onClick={() => void go()}
         >
-          {trying ? "Trying again…" : moving ? `Continue with ${option?.name}` : "Try again"}
+          {trying
+            ? "Trying again…"
+            : moving
+              ? `Continue with ${option?.name}`
+              : wait?.waiting
+                ? "Continue now"
+                : "Try again"}
         </Button>
+        {wait?.waiting && (
+          <Button variant="quiet" busy={stopping} onClick={() => void dontContinue()}>
+            Don't continue
+          </Button>
+        )}
       </div>
     </Shell>
   );

@@ -398,6 +398,24 @@ describe("the user's own hold on the computer", () => {
     ]);
     expect(log.some((e) => e.type === "message.assistant")).toBe(false);
   });
+  it("hands a plan's limit to what continues the task once the plan resets, once", async () => {
+    const f = setup();
+    const planLimited = vi.fn();
+    f.deps.planLimited = planLimited;
+    const reason = "claude code plan limit reached";
+    f.run.mockImplementationOnce(async (session) => {
+      session.setStatus("paused");
+      session.append("agent.state", { state: "paused", reason, detail: "Limit reached" });
+      // The wait's own word is no new limit.
+      session.append("agent.state", { state: "paused", reason, autoContinue: { at: 1 } });
+      await abortable(new Promise<never>(() => {}), session.abort.signal);
+      return 0;
+    });
+    const session = await f.runner.start(f.cellId, "Help with my task");
+    await until(() => planLimited.mock.calls.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(planLimited.mock.calls).toEqual([[session, reason, "Limit reached", true]]);
+  });
   it("retires a plan-limited task and starts the conversation on the newly selected model", async () => {
     const f = setup();
     const conversations = new Conversations(f.home, f.log);

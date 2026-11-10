@@ -2395,6 +2395,18 @@ const agent: AgentRoutesDeps = {
       session.append("agent.state", { state: "thinking" });
     },
   } as AgentRoutesDeps["runner"],
+  autoContinue: {
+    cancel: (id) => {
+      if (!session || id !== session.id) return false;
+      session.append("agent.state", {
+        state: "paused",
+        reason: "claude code plan limit reached",
+        autoContinue: { off: "cancelled" },
+      });
+      return true;
+    },
+    cancelAll: () => {},
+  },
   desktop: () => undefined,
   manual: (owner, _scope, screen) =>
     owner === session
@@ -4055,6 +4067,20 @@ function stall(kind: string): string | undefined {
       },
       STALLED_CARD,
     );
+  } else if (kind === "plan-limit" || kind === "plan-limit-unknown") {
+    // As the daemon says it: the limit, then its wait for the plan to reset.
+    const reason = "claude code plan limit reached";
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason });
+    session.raiseBlocker({ kind: "model", reason }, STALLED_CARD);
+    session.append("agent.state", {
+      state: "paused",
+      reason,
+      autoContinue:
+        kind === "plan-limit"
+          ? { at: Date.now() + 95 * 60_000 }
+          : { at: Date.now() + 10 * 60_000, checking: true },
+    });
   } else if (kind === "provider-limit") {
     session.setStatus("paused");
     session.append("agent.state", { state: "paused", reason: STALL.providerLimit });
@@ -4141,6 +4167,7 @@ const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | un
   "fix/computer-paused": () => fix("computer-paused"),
   "fix/runtime": () => fix("runtime"),
   "fix/model": () => stall("model-refused"),
+  "fix/plan-limit": () => stall("plan-limit"),
   finish,
   "cell/starting": () => setCell("starting"),
   "cell/connecting": () => setCell("connecting"),

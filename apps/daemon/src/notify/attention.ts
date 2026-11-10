@@ -7,6 +7,7 @@ import {
   keyLikePresent,
   type LocalDotEvent,
 } from "@localdot/protocol";
+import { PLAN_LIMITS } from "../agent/auto-continue.ts";
 
 const MAX_SESSIONS = 200;
 const TASK_CHARS = 80;
@@ -125,6 +126,10 @@ export class AttentionLedger {
           ? item("working", "working", String(event.seq))
           : undefined;
       case "blocker.raise":
+        // A plan's limit is told by what its wait says next, so a task that goes on by itself
+        // once the plan resets bothers nobody.
+        if (event.data.blocker.kind === "model" && PLAN_LIMITS[event.data.blocker.reason])
+          return undefined;
         return item("fix", "needs_you", `${event.data.blockerId}:0`);
       case "blocker.clear":
         return waitingOn("fix", event.data.blockerId)
@@ -136,6 +141,14 @@ export class AttentionLedger {
         if (event.data.state === "done") return item("done", "done", String(event.seq));
         if (event.data.state === "idle" && event.data.reason === "gave up")
           return item("gave_up", "failed", String(event.seq));
+        // A plan's limit needs the user only once nothing continues the task by itself.
+        if (
+          event.data.state === "paused" &&
+          event.data.autoContinue &&
+          "off" in event.data.autoContinue &&
+          event.data.autoContinue.off !== "cancelled"
+        )
+          return item("plan_limit", "needs_you", String(event.seq));
         if (["thinking", "acting", "observing"].includes(event.data.state) && settled)
           return item("working", "working", String(event.seq));
         return undefined;

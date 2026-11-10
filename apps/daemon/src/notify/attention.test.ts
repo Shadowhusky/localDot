@@ -218,3 +218,36 @@ describe("a card in the conversation", () => {
     expect(ledger.current(id)).toMatchObject({ reason: "fix", level: "needs_you" });
   });
 });
+
+describe("a plan's limit", () => {
+  const reason = "claude code plan limit reached";
+  const paused = (autoContinue?: unknown) =>
+    draft("agent.state", { state: "paused", reason, ...(autoContinue ? { autoContinue } : {}) });
+
+  it("asks for nobody while the task waits to continue by itself", () => {
+    const id = session();
+    log.append(id, paused());
+    log.append(
+      id,
+      draft("blocker.raise", {
+        blockerId: ulid(),
+        blocker: { kind: "model", reason },
+        by: "localdot",
+        required: true,
+      }),
+    );
+    log.append(id, paused({ at: 5_000 }));
+    expect(changes.filter((item) => item.level === "needs_you")).toEqual([]);
+  });
+
+  it("asks for the user once dot gives up waiting, or when it doesn't wait at all", () => {
+    for (const off of ["gave_up", "disabled"]) {
+      const id = session();
+      log.append(id, paused({ off }));
+      expect(ledger.current(id)).toMatchObject({ reason: "plan_limit", level: "needs_you" });
+    }
+    const id = session();
+    log.append(id, paused({ off: "cancelled" }));
+    expect(ledger.current(id)?.level).not.toBe("needs_you");
+  });
+});

@@ -428,6 +428,41 @@ describe("a card for each kind", () => {
     }
   });
 
+  it("says when a task paused at its plan's limit continues by itself, and stops on request", async () => {
+    const { deps, post } = setup();
+    const reason = "claude code plan limit reached";
+    const at = new Date(2026, 10, 10, 15, 40).getTime();
+    const now = vi.spyOn(Date, "now").mockReturnValue(new Date(2026, 10, 10, 12).getTime());
+    const { rerender } = show(
+      { kind: "model", reason },
+      { ...deps, stall: { reason, autoContinue: { at } } },
+      {
+        required: true,
+      },
+    );
+    const region = screen.getByRole("region", { name: /^Paused until 3:40/ });
+    expect(region.textContent).toContain("dot continues by itself when it resets");
+    fireEvent.click(within(region).getByRole("button", { name: "Don't continue" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        `/api/agent/sessions/${deps.sessionId}/auto-continue/cancel`,
+      ),
+    );
+    fireEvent.click(within(region).getByRole("button", { name: "Continue now" }));
+    await waitFor(() => expect(deps.retry.run).toHaveBeenCalledOnce());
+    now.mockRestore();
+    rerender(
+      <FixCards
+        blockers={[card({ kind: "model", reason }, { required: true })]}
+        deps={{ ...deps, stall: { reason, autoContinue: { off: "gave_up" } } }}
+      />,
+    );
+    const gaveUp = screen.getByRole("region", { name: "Paused at your plan's limit" });
+    expect(gaveUp.textContent).toContain("stopped waiting");
+    expect(within(gaveUp).queryByRole("button", { name: "Don't continue" })).toBeNull();
+    expect(within(gaveUp).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
   it("holds the model card while it tries again", () => {
     const { deps } = setup({ stall: undefined });
     show({ kind: "model", reason: STALL.modelRefused }, deps, { required: true });

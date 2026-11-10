@@ -73,6 +73,7 @@ export const AttentionReason = z.enum([
   "budget",
   "done",
   "gave_up",
+  "plan_limit",
   "error",
   "routine",
   "working",
@@ -132,6 +133,7 @@ const ROUTES: Partial<Record<AttentionReason, { event: NotifyEvent; kind: PushKi
   budget: { event: "failed", kind: "blocked" },
   done: { event: "done", kind: "done" },
   gave_up: { event: "failed", kind: "failed" },
+  plan_limit: { event: "needs_you", kind: "needs_you" },
   error: { event: "failed", kind: "failed" },
 };
 // Which Settings row an attention reason belongs to, and what a notification calls it. Working and

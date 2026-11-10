@@ -125,6 +125,18 @@ export const AgentState = event(
     detail: z.string().max(200).optional(),
     // What the user can do about an error whose cause is known.
     next: z.string().max(200).optional(),
+    // A plan's limit paused the task: when it goes on by itself (epoch ms), or, with `checking`,
+    // when dot next looks at a plan that didn't say when it resets. `off` when it won't: the user
+    // said not to, dot gave up waiting, or it is turned off.
+    autoContinue: z
+      .union([
+        z.strictObject({
+          at: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+          checking: z.literal(true).optional(),
+        }),
+        z.strictObject({ off: z.enum(["cancelled", "gave_up", "disabled"]) }),
+      ])
+      .optional(),
   }),
 );
 // What to fix when a provider refuses a request, read from the status that leads the refusal's

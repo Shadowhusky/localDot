@@ -400,6 +400,10 @@ export function useSettings(
     const d = current.current.draft;
     if (d) edit({ ...d, recentActivity: on });
   };
+  const autoContinue = (on: boolean) => {
+    const d = current.current.draft;
+    if (d) edit({ ...d, autoContinue: on });
+  };
   const save = async () => {
     const owner = current.current,
       captured = owner.draft,
@@ -664,6 +668,7 @@ export function useSettings(
     research,
     purposeCheck,
     recentActivity,
+    autoContinue,
     save,
     refresh: () => refreshCatalogIndex(),
     refreshModels: () => refreshCatalogIndex(true),

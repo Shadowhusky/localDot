@@ -3230,6 +3230,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                       ? {
                           ...(agent.model.state.reason ? { reason: agent.model.state.reason } : {}),
                           ...(agent.model.state.detail ? { detail: agent.model.state.detail } : {}),
+                          ...(agent.model.state.autoContinue
+                            ? { autoContinue: agent.model.state.autoContinue }
+                            : {}),
                         }
                       : undefined,
                   planResets: planResets(agent.model),
@@ -3976,6 +3979,11 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               recentActivity={
                 settings.draft
                   ? { on: settings.draft.recentActivity, change: settings.recentActivity }
+                  : undefined
+              }
+              autoContinue={
+                settings.draft
+                  ? { on: settings.draft.autoContinue, change: settings.autoContinue }
                   : undefined
               }
               onOpenTask={(id) => {

@@ -118,6 +118,8 @@ export const AgentSettingsDocument = z.strictObject({
   purposeCheck: PurposeCheck.optional(),
   // On when absent: each task starts knowing the user's last few tasks.
   recentActivity: z.enum(["on", "off"]).optional(),
+  // On when absent: a task a plan's limit paused continues by itself once the limit resets.
+  autoContinue: z.enum(["on", "off"]).optional(),
   // How far a research task reads before it writes; DEFAULT_RESEARCH_BUDGET when absent.
   research: ResearchBudget.optional(),
   // Which dot works the next task; the everyday dot when absent.

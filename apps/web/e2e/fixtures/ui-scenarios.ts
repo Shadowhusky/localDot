@@ -22,6 +22,7 @@ export type ScenarioStep =
   | "fix/computer-paused"
   | "fix/runtime"
   | "fix/model"
+  | "fix/plan-limit"
   | "finish"
   | `cell/${Exclude<CellKind, "none">}`;
 
@@ -120,6 +121,12 @@ export const UI_SCENARIOS = {
   "fix-model": {
     about: "The provider refused the model's request, and the task offers another",
     step: "fix/model",
+    stepAtBoot: true,
+  },
+  "plan-limit": {
+    about:
+      "The Claude plan's limit paused the task, which continues by itself when the plan resets in 95 minutes",
+    step: "fix/plan-limit",
     stepAtBoot: true,
   },
   "fix-computer": {
