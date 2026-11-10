@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ULID_PATTERN } from "@localdot/protocol";
 
 const DIGESTS_KEPT = 256;
+const FULL = ".full";
 
 const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
@@ -24,6 +25,22 @@ export class FrameStore {
       const [oldest] = this.#digests.keys();
       if (oldest !== undefined) this.#digests.delete(oldest);
     }
+    return this.#write(sessionId, file, bytes);
+  }
+
+  // The same moment at the screen's device resolution, for people to look at: the model reads
+  // only the frame save() keeps.
+  saveFull(sessionId: string, frameId: string, bytes: Buffer): string {
+    return this.#write(sessionId, this.#file(sessionId, frameId, FULL), bytes);
+  }
+
+  fullPath(sessionId: string, frameId: string): string | undefined {
+    if (!ULID_PATTERN.test(sessionId) || !ULID_PATTERN.test(frameId)) return undefined;
+    const file = this.#file(sessionId, frameId, FULL);
+    return existsSync(file) ? file : undefined;
+  }
+
+  #write(sessionId: string, file: string, bytes: Buffer): string {
     mkdirSync(join(this.#root, sessionId, "frames"), { recursive: true, mode: 0o700 });
     const temp = `${file}.${randomBytes(6).toString("hex")}.tmp`;
     writeFileSync(temp, bytes, { mode: 0o600, flag: "wx" });
@@ -48,9 +65,9 @@ export class FrameStore {
     return existsSync(file) ? file : undefined;
   }
 
-  #file(sessionId: string, frameId: string): string {
+  #file(sessionId: string, frameId: string, suffix = ""): string {
     if (!ULID_PATTERN.test(sessionId) || !ULID_PATTERN.test(frameId))
       throw new RangeError("invalid session or frame id");
-    return join(this.#root, sessionId, "frames", `${frameId}.webp`);
+    return join(this.#root, sessionId, "frames", `${frameId}${suffix}.webp`);
   }
 }

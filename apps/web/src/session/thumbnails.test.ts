@@ -46,7 +46,7 @@ describe("step thumbnails", () => {
       arrive = resolve;
     });
     const { api, revoked } = frames(async (input) => {
-      if (String(input).endsWith("/slow")) await slow;
+      if (String(input).includes("/frames/slow?")) await slow;
       return new Response(new Blob(["frame"]));
     });
     const loading = thumbnailUrl(api, "s", "slow");

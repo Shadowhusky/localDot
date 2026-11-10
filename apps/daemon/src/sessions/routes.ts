@@ -295,7 +295,12 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
   app.get("/api/sessions/:id/thumbs/:frameId", async (c) => {
     const frameId = c.req.param("frameId");
     if (!ULID_PATTERN.test(frameId)) return c.text("invalid frame id", 400);
-    const file = await deps.thumbs.path(c.req.param("id"), frameId);
+    const width = c.req.query("w");
+    const file = await deps.thumbs.path(
+      c.req.param("id"),
+      frameId,
+      width === undefined ? undefined : Number(width),
+    );
     if (!file) return c.text("unknown frame", 404);
     return new Response(readFileSync(file), {
       headers: {

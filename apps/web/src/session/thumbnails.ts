@@ -23,7 +23,8 @@ async function decoded(url: string): Promise<string> {
   return url;
 }
 
-// An <img> cannot send the install token. Scope authenticated blob URLs to their API client.
+// An <img> cannot send the install token. Scope authenticated blob URLs to their API client. The
+// frame comes at the screen's own resolution where it was kept: these are drawn large, or cropped.
 export function thumbnailUrl(api: ApiClient, sessionId: string, frameId: string): Promise<string> {
   const cache = cacheOf(api);
   const key = `${sessionId}/${frameId}`;
@@ -35,7 +36,7 @@ export function thumbnailUrl(api: ApiClient, sessionId: string, frameId: string)
   const entry: CachedFrame = { references: 1, promise: Promise.resolve("") };
   entry.promise = api
     .fetch(
-      `${api.socketUrl("").replace(/^ws/, "http")}/api/sessions/${sessionId}/frames/${frameId}`,
+      `${api.socketUrl("").replace(/^ws/, "http")}/api/sessions/${sessionId}/frames/${frameId}?size=full`,
       { headers: { authorization: api.authorization() }, signal: AbortSignal.timeout(15_000) },
     )
     .then(async (res) => {

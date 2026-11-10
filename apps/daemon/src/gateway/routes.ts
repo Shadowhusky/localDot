@@ -196,8 +196,13 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     return c.body(null, 204);
   });
 
+  // ?size=full: the screen's own resolution where it was kept, else the model's frame.
   app.get("/api/sessions/:id/frames/:frameId", (c) => {
-    const file = deps.frames?.path(c.req.param("id") ?? "", c.req.param("frameId") ?? "");
+    const id = c.req.param("id") ?? "";
+    const frameId = c.req.param("frameId") ?? "";
+    const file =
+      (c.req.query("size") === "full" && deps.frames?.fullPath(id, frameId)) ||
+      deps.frames?.path(id, frameId);
     if (!file) return c.text("not found", 404);
     return c.body(readFileSync(file), 200, {
       "content-type": "image/webp",
