@@ -297,7 +297,7 @@ export function createApp({
     browserViewerApi(app, {
       ...browser,
       ...(remoteAccess
-        ? { sees: (grant: string, session: string) => remoteAccess.links.sees(grant, session) }
+        ? { sees: (grant: string, session: string) => remoteAccess.links.owns(grant, session) }
         : {}),
     });
   if (accounts) accountsRoutes(app, accounts);

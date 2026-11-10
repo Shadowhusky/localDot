@@ -1,0 +1,431 @@
+/* The overview (overview/OverviewGrid.tsx): every conversation's screen, dot, status and progress
+   as a grid of tiles. In the utilities layer, as the other lists of conversations are, so the kit
+   button's own layout stays beneath a tile's. */
+@layer utilities {
+  /* Where it sits: in Studio beside the conversations rail, under the top bar, in place of the
+     stage and the panels, which stay as they were out of sight; on a phone and in Chat over
+     everything, as Replay does. */
+  .app > .overview-col {
+    grid-area: 2 / 1 / -1 / -1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .app > .overview-col[hidden] {
+    display: none;
+  }
+
+  .app[data-overview]:not([data-stack]) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--bar-h) minmax(0, 1fr);
+  }
+
+  .app[data-overview]
+    > .watch
+    > :is(
+      .stage-col,
+      .rail-chat,
+      .rail-resize-chat,
+      .rail-activity,
+      .rail-resize-activity,
+      .mobile-screen-restore
+    ) {
+    display: none;
+  }
+
+  .app[data-stack] > .overview-col {
+    position: absolute;
+    z-index: 30;
+    inset: 0;
+  }
+
+  @media (width < 700px), (pointer: coarse) and (orientation: landscape) and (height < 500px) {
+    .app > .overview-col {
+      grid-area: 1 / 1 / -1 / -1;
+    }
+
+    .app[data-overview]:not([data-stack]) {
+      grid-template-rows: minmax(0, 1fr);
+    }
+  }
+
+  .overview {
+    --_pad: calc(var(--spacing) * 6);
+    --_gap: calc(var(--spacing) * 4);
+    --_dot: calc(var(--spacing) * 9);
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    background-color: var(--color-void);
+  }
+
+  .overview[data-density="s"] {
+    --_gap: calc(var(--spacing) * 3);
+    --_dot: calc(var(--spacing) * 7);
+  }
+
+  .overview[data-density="l"] {
+    --_gap: calc(var(--spacing) * 5);
+    --_dot: calc(var(--spacing) * 11);
+  }
+
+  /* What to show at the start, the size at the end. On a page of its own (Chat, and Studio on a
+     phone) the title leads with the size beside it, and what to show goes under them. */
+  .overview-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "filter size";
+    align-items: center;
+    gap: calc(var(--spacing) * 3);
+    padding: calc(var(--spacing) * 4) var(--_pad) calc(var(--spacing) * 3);
+  }
+
+  .overview-bar[data-page] {
+    grid-template-areas:
+      "heading size"
+      "filter filter";
+    row-gap: calc(var(--spacing) * 3);
+    padding-top: calc(var(--spacing) * 3 + env(safe-area-inset-top));
+    padding-inline: calc(var(--_pad) + env(safe-area-inset-left))
+      calc(var(--_pad) + env(safe-area-inset-right));
+  }
+
+  .overview-filter {
+    grid-area: filter;
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  .overview-density {
+    grid-area: size;
+  }
+
+  .overview-heading {
+    display: flex;
+    grid-area: heading;
+    align-items: center;
+    gap: calc(var(--spacing) * 1);
+    min-width: 0;
+  }
+
+  .overview-heading-title {
+    margin: 0;
+    color: var(--color-fg-1);
+    font:
+      var(--text-large-title--font-weight) var(--text-large-title) /
+      var(--text-large-title--line-height) var(--font-ui);
+    letter-spacing: var(--text-large-title--letter-spacing);
+  }
+
+  .overview-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(var(--_cols), minmax(0, 1fr));
+    gap: var(--_gap);
+    margin: 0;
+    padding: calc(var(--spacing) * 1) var(--_pad) calc(var(--spacing) * 8);
+    list-style: none;
+  }
+
+  .overview-bar[data-page] ~ .overview-scroll .overview-grid {
+    padding-bottom: calc(var(--spacing) * 8 + env(safe-area-inset-bottom));
+  }
+
+  .overview-cell {
+    position: relative;
+    display: grid;
+    min-width: 0;
+    transition: scale var(--dur-snappy) var(--ease-spring);
+  }
+
+  .overview-cell:has(> .overview-tile[data-pressed]) {
+    scale: 0.98;
+    transition-duration: var(--dur-press);
+  }
+
+  .overview-tile.ui-button {
+    --_bg: var(--color-raised);
+    --_bg-hover: var(--color-raised-2);
+    --_bg-pressed: var(--color-raised-2);
+    --_fg: var(--color-fg-1);
+    --_shadow: var(--shadow-edge);
+    display: grid;
+    align-content: stretch;
+    justify-content: stretch;
+    height: auto;
+    padding: calc(var(--spacing) * 2);
+    border-radius: var(--radius-lg);
+    text-align: start;
+    white-space: normal;
+  }
+
+  .overview[data-density="s"] .overview-tile.ui-button {
+    padding: calc(var(--spacing) * 1.5);
+    border-radius: var(--radius-md);
+  }
+
+  .overview-tile.ui-button > .ui-button-content {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    align-content: start;
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* The screen as dot last looked at it, at the computer's own 16:10. */
+  .overview-picture {
+    position: relative;
+    display: block;
+    aspect-ratio: 8 / 5;
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    background-color: var(--color-stage-void);
+    box-shadow: inset 0 0 0 1px var(--color-hairline);
+  }
+
+  .overview[data-density="s"] .overview-picture {
+    border-radius: var(--radius-sm);
+  }
+
+  .overview-picture-image {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .overview-cell[data-ended] .overview-picture-image {
+    opacity: 0.72;
+  }
+
+  .overview-picture-empty {
+    position: absolute;
+    inset: 0;
+    display: none;
+    place-items: center;
+    color: var(--color-fg-4);
+  }
+
+  .overview-picture[data-empty] > .overview-picture-empty {
+    display: grid;
+  }
+
+  /* dot has the computer: its screen is lit, as the stage is. */
+  .overview-tile[data-on-screen] .overview-picture {
+    box-shadow:
+      inset 0 0 0 var(--stroke-ring) var(--color-xenon),
+      0 0 0 1px var(--color-xenon-a40);
+  }
+
+  .overview-chips {
+    position: absolute;
+    top: calc(var(--spacing) * 2);
+    left: calc(var(--spacing) * 2);
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 1);
+  }
+
+  .overview[data-density="s"] .overview-chips {
+    top: calc(var(--spacing) * 1.5);
+    left: calc(var(--spacing) * 1.5);
+  }
+
+  .overview-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 1);
+    min-height: calc(var(--spacing) * 5);
+    padding: 0 calc(var(--spacing) * 2);
+    border-radius: var(--radius-full);
+    background-color: var(--color-stage-glass);
+    color: var(--color-stage-fg-1);
+    font:
+      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+    white-space: nowrap;
+  }
+
+  .overview[data-density="s"] .overview-chip {
+    padding: 0 calc(var(--spacing) * 1.5);
+  }
+
+  .overview-lamp {
+    width: calc(var(--spacing) * 1.5);
+    height: calc(var(--spacing) * 1.5);
+    border-radius: var(--radius-full);
+    background-color: var(--color-stage-xenon);
+    box-shadow: 0 0 0 calc(var(--spacing) * 0.75) var(--color-xenon-a40);
+  }
+
+  /* The dot sits over the picture's foot, beside its name, as it sits by the screen in Studio. */
+  .overview-head {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--_dot) minmax(0, 1fr);
+    column-gap: calc(var(--spacing) * 2.5);
+    align-items: start;
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 1) 0;
+  }
+
+  .overview[data-density="s"] .overview-head {
+    column-gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 0.5) calc(var(--spacing) * 0.5);
+  }
+
+  .overview-dot {
+    display: grid;
+    place-items: center;
+    width: var(--_dot);
+    height: var(--_dot);
+    margin-top: calc(var(--_dot) * -0.5 - var(--spacing) * 1);
+  }
+
+  .overview-dot > .conversation-avatar {
+    margin-block: 0;
+  }
+
+  .overview-name {
+    display: grid;
+    gap: calc(var(--spacing) * 0.5);
+    min-width: 0;
+  }
+
+  .overview-title {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--color-fg-1);
+    font: var(--font-weight-medium) var(--text-row) / var(--text-row--line-height) var(--font-ui);
+    letter-spacing: var(--text-row--letter-spacing);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow-wrap: anywhere;
+  }
+
+  .overview[data-density="s"] .overview-title {
+    -webkit-line-clamp: 1;
+  }
+
+  .overview[data-density="l"] .overview-title {
+    font:
+      var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-3--letter-spacing);
+  }
+
+  .overview-status {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 1.5);
+    min-width: 0;
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+  }
+
+  .overview-word {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .overview-cell[data-status="needs-you"] .overview-word {
+    color: var(--color-fg-1);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .overview-when {
+    flex: none;
+    margin-inline-start: auto;
+    color: var(--color-fg-3);
+    font-weight: var(--font-weight-normal);
+  }
+
+  .overview-body {
+    display: grid;
+    align-content: start;
+    gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 1) calc(var(--spacing) * 1);
+  }
+
+  .overview-progress {
+    display: grid;
+    gap: calc(var(--spacing) * 1.5);
+    min-width: 0;
+  }
+
+  .overview-progress-text {
+    overflow: hidden;
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .overview-line {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow-wrap: anywhere;
+  }
+
+  .overview-line[data-needs] {
+    color: var(--color-fg-1);
+  }
+
+  .overview-needs-word {
+    margin-inline-end: calc(var(--spacing) * 1.5);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .overview-needs-word::before {
+    content: "";
+    display: inline-block;
+    width: calc(var(--spacing) * 2);
+    height: calc(var(--spacing) * 2);
+    margin-inline-end: calc(var(--spacing) * 1.5);
+    border-radius: var(--radius-full);
+    background-color: var(--color-attention);
+    vertical-align: 1px;
+  }
+
+  /* A colour tag at the tile's leading edge, beside its name. */
+  .overview-head > .ui-tag-mark {
+    top: calc(var(--spacing) * 2.5);
+    left: calc(var(--spacing) * -2);
+    height: calc(var(--spacing) * 5);
+    translate: none;
+  }
+
+  .overview[data-density="s"] .overview-head > .ui-tag-mark {
+    top: calc(var(--spacing) * 1.5);
+    left: calc(var(--spacing) * -1.5);
+    height: calc(var(--spacing) * 4);
+  }
+
+  /* A phone: one column or two, edge to edge on its gutter. */
+  @media (width < 760px) {
+    .overview {
+      --_pad: calc(var(--spacing) * 4);
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -7,6 +8,7 @@ import {
   type DeleteSessionsResult,
   emptyManifest,
   LookConversation,
+  OverviewIds,
   PinConversation,
   RenameConversation,
   recordingDirectory,
@@ -25,8 +27,9 @@ import type { Recorder } from "../recorder/recorder.ts";
 import { NoFragmentsError, openRecordingView, type RecordingView } from "../recorder/view.ts";
 import type { SessionIndex } from "./index-store.ts";
 import { NDJSON_TYPE, streamEventLines } from "./ndjson.ts";
+import type { OverviewTracker } from "./overview.ts";
 import { type RetentionPolicy, recordingStorage } from "./retention.ts";
-import type { Thumbnails } from "./thumbs.ts";
+import { isThumbWidth, THUMB_W, type Thumbnails } from "./thumbs.ts";
 export interface ReplayRoutesDeps {
   home: string;
   eventLog: EventLog;
@@ -37,6 +40,7 @@ export interface ReplayRoutesDeps {
   retention?: RetentionPolicy;
   framesMaxAgeDays?: number;
   publish?(event: ConversationOrganizedEvent): void;
+  overview?: Pick<OverviewTracker, "tile">;
 }
 function requestedScreen(request: Request): ScreenName | null {
   const values = new URL(request.url).searchParams.getAll("screen");
@@ -295,12 +299,10 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
   app.get("/api/sessions/:id/thumbs/:frameId", async (c) => {
     const frameId = c.req.param("frameId");
     if (!ULID_PATTERN.test(frameId)) return c.text("invalid frame id", 400);
-    const width = c.req.query("w");
-    const file = await deps.thumbs.path(
-      c.req.param("id"),
-      frameId,
-      width === undefined ? undefined : Number(width),
-    );
+    const raw = c.req.query("w");
+    const width = raw === undefined ? THUMB_W : /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+    if (!isThumbWidth(width)) return c.text("invalid thumbnail width", 400);
+    const file = await deps.thumbs.path(c.req.param("id"), frameId, width);
     if (!file) return c.text("unknown frame", 404);
     return new Response(readFileSync(file), {
       headers: {
@@ -309,6 +311,30 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
       },
     });
   });
+  const { overview } = deps;
+  // What the overview shows of each task asked about. The owner's alone: a shared link's guest has
+  // no list of conversations to look over.
+  if (overview)
+    app.get("/api/overview", async (c) => {
+      if (c.get("remoteGrant")) return c.text("Only the owner sees the overview", 403);
+      const ids = OverviewIds.safeParse(c.req.query("ids") ?? "");
+      if (!ids.success) return c.text("invalid task ids", 400);
+      const known = [...new Set(ids.data)].filter((id) => deps.eventLog.hasSession(id));
+      const tiles = await Promise.all(
+        known.map((id) =>
+          overview.tile(id).catch((error) => {
+            if (error instanceof UnknownSessionError) return null;
+            throw error;
+          }),
+        ),
+      );
+      const body = JSON.stringify({ tiles: tiles.filter((tile) => tile !== null) });
+      const tag = `"${createHash("sha256").update(body).digest("base64url").slice(0, 22)}"`;
+      const headers = { etag: tag, "cache-control": "no-store" };
+      if (c.req.header("if-none-match") === tag)
+        return new Response(null, { status: 304, headers });
+      return new Response(body, { headers: { ...headers, "content-type": "application/json" } });
+    });
   // Where a notification about this task leads: a routine's run opens in its conversation.
   app.get("/api/conversations/:id/latest", (c) => {
     if (c.get("remoteGrant")) return c.text("Only the owner opens conversations", 403);

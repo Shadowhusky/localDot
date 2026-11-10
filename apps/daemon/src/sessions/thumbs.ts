@@ -10,6 +10,9 @@ export const THUMB_W = 320,
 // The widths a page may ask for: a thumbnail as wide as it is drawn on a 1x, 2x or 3x display,
 // rounded up to one of these so each frame keeps at most three.
 export const THUMB_WIDTHS = [THUMB_W, 640, 1280] as const;
+export type ThumbWidth = (typeof THUMB_WIDTHS)[number];
+export const isThumbWidth = (width: number): width is ThumbWidth =>
+  (THUMB_WIDTHS as readonly number[]).includes(width);
 export class Thumbnails {
   readonly #home: string;
   readonly #frames: FrameStore;
@@ -33,11 +36,7 @@ export class Thumbnails {
     else this.#active--;
   }
   path(id: string, frameId: string, width: number = THUMB_W): Promise<string | undefined> {
-    if (
-      !ULID_PATTERN.test(id) ||
-      !ULID_PATTERN.test(frameId) ||
-      !(THUMB_WIDTHS as readonly number[]).includes(width)
-    )
+    if (!ULID_PATTERN.test(id) || !ULID_PATTERN.test(frameId) || !isThumbWidth(width))
       return Promise.resolve(undefined);
     const key = `${id}/${frameId}@${width}`;
     const pending = this.#pending.get(key);

@@ -37,13 +37,16 @@ import { BrowserSignIn } from "./agent/BrowserSignIn.tsx";
 import { Composer, type DotWait, keepDraftNow } from "./agent/Composer.tsx";
 import { endTaskRun } from "./agent/control-api.ts";
 import {
+  type ConversationRow,
   conversationLook,
+  conversationRows,
   conversationTitle,
   knownConversation,
   organizeConversation,
   readConversationsAgain,
   renameConversation,
   STATUS_LABEL,
+  useRecentConversations,
 } from "./agent/conversation-list.ts";
 import { conversationBlockReason } from "./agent/conversation-state.ts";
 import { FixCards, fixesToShow, fixWait, takesSecret } from "./agent/FixCards.tsx";
@@ -130,6 +133,7 @@ import { setupSteps } from "./onboarding/setup.ts";
 import { useAppearance } from "./onboarding/useAppearance.ts";
 import { useOnboarding } from "./onboarding/useOnboarding.ts";
 import { STEP_DOT } from "./onboarding/wizard.ts";
+import { Overview } from "./overview/Overview.tsx";
 import { PreviewNotice } from "./previews/PreviewNotice.tsx";
 import { usePreviewsState } from "./previews/PreviewsContext.tsx";
 import {
@@ -240,7 +244,7 @@ import { type RailView, usePanelPreferences } from "./shell/panel-preferences.ts
 import { CHAT_WIDTH, SESSIONS_FOLDED, SESSIONS_WIDTH } from "./shell/panel-width.ts";
 import { usePhoneConversation } from "./shell/phone-conversation.ts";
 import { Flyer } from "./shell/phone-flyer.ts";
-import { parsePhoneRoute, usePhoneAddress, usePhoneRoute } from "./shell/phone-route.ts";
+import { parsePhoneRoute, phoneHash, usePhoneAddress, usePhoneRoute } from "./shell/phone-route.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { ResizeHandle } from "./shell/ResizeHandle.tsx";
 import { SessionRail, useRailExpandedByDefault } from "./shell/SessionRail.tsx";
@@ -318,6 +322,9 @@ const FROM_LIBRARY = { fromLibrary: true };
 const LIBRARY = "library";
 const replayAddress = (selected: string | null) =>
   selected && (selected === LIBRARY || ULID_PATTERN.test(selected)) ? selected : null;
+// The overview is in the address too, so Back, a reload and a link all find it.
+const OVERVIEW = "overview";
+const overviewAddress = () => new URLSearchParams(window.location.search).has(OVERVIEW);
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
 const LIST_DETENTS = ["medium", "large"] as const;
 // A chosen conversation that never comes on show once the daemon has taken the choice (another
@@ -525,8 +532,11 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     if (id && !canReplay) return;
     const was = replayIdRef.current;
     const address = new URL(window.location.href);
-    if (id) address.searchParams.set("replay", id);
-    else address.searchParams.delete("replay");
+    if (id) {
+      address.searchParams.set("replay", id);
+      address.searchParams.delete(OVERVIEW);
+      setOverviewOpen(false);
+    } else address.searchParams.delete("replay");
     if (id !== was) address.searchParams.delete("t");
     if (atMs !== undefined) address.searchParams.set("t", String(Math.round(atMs)));
     const leaving = id === null && was !== null;
@@ -560,6 +570,30 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
   }, []);
+  // Opening the overview adds one marked entry, and closing it steps back over that entry, so Back
+  // leaves it as it came; a conversation opened from it is an entry of its own above it.
+  const [overviewOpen, setOverviewOpen] = useState(overviewAddress);
+  useEffect(() => {
+    const restore = () => setOverviewOpen(overviewAddress());
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
+  const showOverview = (open: boolean) => {
+    if (open === overviewAddress()) return setOverviewOpen(open);
+    const address = new URL(window.location.href);
+    if (open) {
+      address.searchParams.set(OVERVIEW, "1");
+      address.searchParams.delete("replay");
+      address.searchParams.delete("t");
+      window.history.pushState({ ...window.history.state, overview: true }, "", address);
+      setReplayId(null);
+    } else if (window.history.state?.overview) window.history.back();
+    else {
+      address.searchParams.delete(OVERVIEW);
+      window.history.replaceState(window.history.state, "", address);
+    }
+    setOverviewOpen(open);
+  };
   const {
     cell,
     status,
@@ -2023,6 +2057,37 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     if (replayId) selectReplay(null);
     pickConversation(id);
   };
+  const overviewShown = overviewOpen && !replayId && !onboarding.open;
+  const overviewList = useRecentConversations(api, overviewShown);
+  const overviewRows = useMemo(
+    () => conversationRows(overviewList.entries, liveFacts),
+    [overviewList.entries, liveFacts],
+  );
+  const openOverview = useHandler(() => {
+    if (fullScreen.on) fullScreen.exit();
+    showOverview(true);
+  });
+  const closeOverview = useHandler(() => showOverview(false));
+  // Once opened it stays, out of sight, so coming back finds it as it was left.
+  const [overviewMounted, setOverviewMounted] = useState(overviewShown);
+  if (overviewShown && !overviewMounted) setOverviewMounted(true);
+  const railOverview = useMemo(
+    () => ({ open: overviewShown, onOpen: openOverview }),
+    [overviewShown, openOverview],
+  );
+  // A tile opens its conversation in an entry of its own, so Back comes back to the overview.
+  const openFromOverview = useHandler((row: ConversationRow) => {
+    const id = row.entry.sessionId;
+    const address = new URL(window.location.href);
+    address.searchParams.delete(OVERVIEW);
+    if (stack) address.hash = phoneHash({ level: 1, id });
+    window.history.pushState(stack ? { phone: 1 } : null, "", address);
+    setOverviewOpen(false);
+    if (!stack) return pickConversation(id, row.entry.sessions);
+    takeUpConversation(id, row.entry.sessions);
+    nav.asked.current = id;
+    nav.replace({ level: 1, id });
+  });
   const conversationList = {
     api,
     current: switching ? switching.to : (viewedConversation?.id ?? currentTask),
@@ -2263,8 +2328,11 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const panelsToggle = useMemo(
     () =>
       !sheets &&
-      !replayId && <ChatToggle buttonRef={panelsButton} chat={chatVisible} onChat={toggleChat} />,
-    [sheets, replayId, chatVisible, toggleChat],
+      !replayId &&
+      !overviewShown && (
+        <ChatToggle buttonRef={panelsButton} chat={chatVisible} onChat={toggleChat} />
+      ),
+    [sheets, replayId, overviewShown, chatVisible, toggleChat],
   );
   const aside = useAside(api, agent.sessionId ?? null);
   const usageShown = aside.aside?.kind === "usage";
@@ -2344,6 +2412,10 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     watch: {
       reason: replayId ? undefined : "You're watching already",
       run: () => selectReplay(null),
+    },
+    overview: {
+      reason: overviewShown ? "The overview is on show already" : undefined,
+      run: openOverview,
     },
     models: {
       groups: modelChoices,
@@ -2908,7 +2980,12 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           listed={listed}
           onPicture={onPicture}
           connection={connection}
-          covered={stageAway || (!replayId && mobileScreen.minimized) || (sheets && settings.open)}
+          covered={
+            stageAway ||
+            overviewShown ||
+            (!replayId && mobileScreen.minimized) ||
+            (sheets && settings.open)
+          }
           manual={
             yours && manualGeometry && !agent.model.ended
               ? {
@@ -3080,9 +3157,14 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   ]
                 : []),
               {
+                label: "Overview",
+                icon: "layout-dashboard",
+                startsGroup: true,
+                run: openOverview,
+              },
+              {
                 label: "Replay",
                 icon: "history",
-                startsGroup: true,
                 disabledReason: hasRecordings ? undefined : "No recordings yet",
                 run: () => selectReplay(LIBRARY),
               },
@@ -3372,6 +3454,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           }}
           newReason={conversationReason}
           onReplay={() => selectReplay(LIBRARY)}
+          onOverview={openOverview}
           onDeleted={conversationList.onDeleted}
           computer={{
             name: settings.saved?.name || "This computer",
@@ -3653,6 +3736,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         data-chat-hidden={(!chatVisible && !replayId) || undefined}
         data-activity-hidden={wide || undefined}
         data-replaying={replayId ? "" : undefined}
+        data-overview={overviewShown ? "" : undefined}
         data-focus={focus ? "" : undefined}
         data-full={full ? "" : undefined}
         data-still={still ? "" : undefined}
@@ -3669,7 +3753,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 ? "Replay"
                 : replayId
                   ? (shownRecording?.title ?? RECORDED_TASK)
-                  : (watchTitle ?? listedTitle)
+                  : overviewShown
+                    ? "Overview"
+                    : (watchTitle ?? listedTitle)
             }
             note={
               shownRecording?.note ??
@@ -3697,7 +3783,11 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             panels={guest ? undefined : panelsToggle}
           />
         )}
-        <div className="watch" hidden={!!replayId} inert={!!replayId}>
+        <div
+          className="watch"
+          hidden={!!replayId || (sheets && overviewShown)}
+          inert={!!replayId || (sheets && overviewShown)}
+        >
           {stack ? (
             phoneStack
           ) : (
@@ -3705,7 +3795,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               {railShown && (
                 <SessionRail
                   api={api}
-                  current={conversationList.current}
+                  current={overviewShown ? null : conversationList.current}
                   facts={liveFacts}
                   reason={conversationList.reason}
                   expanded={railExpanded}
@@ -3714,6 +3804,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   onNew={newFromRail}
                   newReason={newConversation.reason}
                   onDeleted={deletedFromRail}
+                  overview={railOverview}
                 />
               )}
               {railShown && railExpanded && (wide || layout === "laptop") && (
@@ -3786,6 +3877,33 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             </>
           )}
         </div>
+        {overviewMounted && (
+          <ErrorBoundary className="overview-failed">
+            <main className="overview-col" aria-label="Overview" hidden={!overviewShown}>
+              <Overview
+                api={api}
+                rows={overviewRows}
+                shown={overviewShown}
+                current={conversationList.current}
+                reason={conversationList.reason}
+                heading={
+                  sheets ? (
+                    <div className="overview-heading">
+                      <IconButton
+                        icon="chevron-left"
+                        size={36}
+                        label={stack ? "Conversations" : "Back"}
+                        onClick={closeOverview}
+                      />
+                      <h1 className="overview-heading-title">Overview</h1>
+                    </div>
+                  ) : undefined
+                }
+                onOpen={openFromOverview}
+              />
+            </main>
+          </ErrorBoundary>
+        )}
         {replayId && (
           <ErrorBoundary className="replay-failed">
             <ReplayView

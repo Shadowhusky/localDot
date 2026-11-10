@@ -451,7 +451,9 @@
 }
 
 .sessions-new {
+  display: grid;
   flex: none;
+  gap: 2px;
   padding: 0 calc(var(--spacing) * 2);
 }
 

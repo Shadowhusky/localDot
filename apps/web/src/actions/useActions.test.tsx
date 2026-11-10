@@ -67,6 +67,7 @@ function setup(
     replay: doable(),
     viewStyle: { label: "Switch to Chat view", run: vi.fn() },
     watch: doable("You're watching already"),
+    overview: doable(),
     models: {
       groups: [
         {

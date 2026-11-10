@@ -33,6 +33,7 @@ const STATUS: Record<
   "chatgpt-plan": { shape: "ready", control: /^Take control$/, label: "Ready" },
   "plan-usage": { shape: "ready", control: /^Take control$/, label: "Ready" },
   running: { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
+  overview: { shape: "task", control: /^Stop$/, label: "Select the Net total cell", light: "dot" },
   "long-thread": {
     shape: "task",
     control: /^Stop$/,

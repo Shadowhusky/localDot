@@ -296,3 +296,42 @@
   flex-wrap: wrap;
   gap: var(--spacing-rail-gap);
 }
+
+/* The overview at a desktop's width in each size and at a phone's, each in a frame of that size. */
+.gallery[data-gallery-page="overview"] {
+  max-width: none;
+}
+
+.gallery-overviews {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: calc(var(--spacing) * 8);
+}
+
+.gallery-overview {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  margin: 0;
+}
+
+.gallery-overview-frame {
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 0 0 1px var(--color-hairline);
+}
+
+.gallery-overview-frame[data-size="1160x760"] {
+  width: 1160px;
+  height: 760px;
+}
+
+.gallery-overview-frame[data-size="1160x520"] {
+  width: 1160px;
+  height: 520px;
+}
+
+.gallery-overview-frame[data-size="390x844"] {
+  width: 390px;
+  height: 844px;
+}

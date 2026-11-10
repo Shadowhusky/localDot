@@ -111,6 +111,8 @@ const PLANNED: IconName[] = [
   "library",
   // Activity: the agents dot delegates to, on a tab too narrow for its name.
   "bot",
+  // The overview of every conversation's screen and progress.
+  "layout-dashboard",
   // The conversations rail's toggle, and each conversation's status in it.
   "panel-left",
   "status-working",

@@ -30,6 +30,7 @@ export * from "./manual-input.ts";
 export * from "./memory-entries.ts";
 export * from "./model-options.ts";
 export * from "./notify.ts";
+export * from "./overview.ts";
 export * from "./patch.ts";
 export * from "./people.ts";
 export * from "./personas.ts";

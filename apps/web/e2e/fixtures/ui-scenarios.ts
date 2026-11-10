@@ -85,6 +85,11 @@ export const UI_SCENARIOS = {
     step: "cell/live",
   },
   running: { about: "dot is working on the sample task" },
+  overview: {
+    about:
+      "dot works on the sample task with eight more conversations beside it: two need you, three at work, one ended badly",
+    boot: { QA_FLEET: "8" },
+  },
   "long-thread": {
     about: "dot is working in a long conversation: two earlier tasks full of steps and pictures",
     boot: { QA_EARLIER: "2", QA_EARLIER_TURNS: "30", QA_STEP_IMAGE: "1" },
