@@ -57,6 +57,7 @@ import { giveBack, sendAfter } from "./agent/queued-draft.ts";
 import { requestResearch, researchWait } from "./agent/research.ts";
 import { uploadFile } from "./agent/resumable-upload.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
+import { StepPreviewScope } from "./agent/StepPreview.tsx";
 import { planResets, TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
@@ -311,7 +312,7 @@ const RETRY_CHECK_MS = 2000;
 // Slow restoration offers recovery; elapsed time never means the history is ready.
 const OPENING_NOTICE_MS = 10_000;
 // How long the task's feed may be out of touch before the island says it is reconnecting.
-const LINK_LOST_MS = 1500;
+const LINK_LOST_MS = 3000;
 const FROM_WATCH = { fromWatch: true };
 const FROM_LIBRARY = { fromLibrary: true };
 // Replay's address names the recording that plays, or this for the library of recordings.
@@ -1407,6 +1408,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const linkLost = useHeldFor(
     !!session.sessionId && (agent.connection === "lost" || agent.availability === "error"),
     LINK_LOST_MS,
+    true,
   );
   const baseStatus = statusFor({
     computer: {
@@ -3165,6 +3167,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             live={!!foot && (sentThinking || !session.ended)}
             hidden={!showDot.value}
             band={level < 2 && phoneBand}
+            status={level < 2 && statusWord}
             thumb={
               holding && showDot.value && level > 0 && !switching
                 ? {
@@ -3457,12 +3460,20 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           band={level === 2 && showDot.value && phoneBand}
           steps={
             level === 2 && (
-              <LatestSteps
-                rows={rows}
-                model={agent.model}
-                live={!!foot && !session.ended}
-                nowMs={now}
-              />
+              <StepPreviewScope
+                api={api}
+                sessionId={agent.sessionId ?? null}
+                results={agent.model.results}
+                scale={cell?.scale ?? 2}
+              >
+                <LatestSteps
+                  rows={rows}
+                  model={agent.model}
+                  live={!!foot && !session.ended}
+                  nowMs={now}
+                  sessionId={agent.sessionId ?? undefined}
+                />
+              </StepPreviewScope>
             )
           }
           controls={
