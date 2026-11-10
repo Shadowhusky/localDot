@@ -218,17 +218,46 @@ export function createApp({
         (choice): choice is NonNullable<typeof choice> => !!choice && !choice.off,
       );
     };
-    app.get("/api/remote-session", (c) => {
+    // A plan the owner uses offers every model it lists now, as it does in the owner's own menu.
+    const planModels = async () => {
+      const used = new Set(configured().map((choice) => choice.provider));
+      const listed: { provider: string; model: string; name: string }[] = [];
+      if (used.has("claude-code") && agent?.claudeCode) {
+        const status = await agent.claudeCode.status().catch(() => null);
+        if (status?.state === "signed_in")
+          for (const row of status.models)
+            listed.push({ provider: "claude-code", model: row.id, name: row.name });
+      }
+      if (used.has("chatgpt") && agent?.chatgpt) {
+        const status = await agent.chatgpt.account.status().catch(() => null);
+        for (const row of status?.models ?? [])
+          listed.push({ provider: "chatgpt", model: row.id, name: row.name });
+      }
+      return listed;
+    };
+    const offered = async () => {
+      const plans = await planModels();
+      return {
+        plans,
+        choices: [...configured(), ...plans.map(({ provider, model }) => ({ provider, model }))],
+      };
+    };
+    app.get("/api/remote-session", async (c) => {
       const grant = c.get("remoteGrant");
       if (!grant) return c.text("Not a shared session", 400);
-      const models = remoteAccess.links.choices(grant, configured());
+      const { plans, choices } = await offered();
+      const models = remoteAccess.links.choices(grant, choices);
       // The page has no catalog of its own: the link's models come with their names.
       const catalog = agent?.catalog.get();
       const names = models.flatMap(({ provider, model }) => {
-        const name = (
-          catalog?.providers[provider]?.models[model] ??
-          Object.values(catalog?.providers ?? {}).find((each) => each.models[model])?.models[model]
-        )?.name;
+        const name =
+          plans.find((row) => row.provider === provider && row.model === model)?.name ??
+          (
+            catalog?.providers[provider]?.models[model] ??
+            Object.values(catalog?.providers ?? {}).find((each) => each.models[model])?.models[
+              model
+            ]
+          )?.name;
         return name ? [{ provider, model, name }] : [];
       });
       return c.json({
@@ -244,7 +273,7 @@ export function createApp({
       try {
         const { index } = await c.req.json();
         if (!Number.isInteger(index)) return c.text("Invalid model", 400);
-        remoteAccess.links.select(grant.id, index, configured());
+        remoteAccess.links.select(grant.id, index, (await offered()).choices);
         return c.body(null, 204);
       } catch {
         return c.text("Model not permitted", 403);

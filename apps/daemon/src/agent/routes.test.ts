@@ -2346,3 +2346,63 @@ describe("shared-link task enforcement", () => {
     );
   });
 });
+
+describe("a shared link's models", () => {
+  it("offers every model the owner's Claude Code plan lists now, by name, and switches to one", async () => {
+    const plan = {
+      state: "signed_in" as const,
+      version: "2.1.322",
+      plan: "max",
+      models: [
+        { id: "default", name: "Default (recommended)" },
+        { id: "opus", name: "Opus 5.5" },
+        { id: "sonnet", name: "Sonnet 5.5" },
+      ],
+      checkedAt: 1,
+    };
+    const f = await setup({
+      claudeCode: { status: vi.fn(async () => plan), check: vi.fn(async () => plan) },
+    });
+    f.settings.put({ main: { provider: "claude-code", model: "default" } });
+    const links = new RemoteLinks(f.home);
+    const issued = links.create({
+      label: "Guest",
+      expiresInHours: null,
+      maxTasks: 3,
+      taskBudgetUSD: 2,
+      model: { provider: "claude-code", model: "default" },
+      chooseModel: true,
+      models: [{ provider: "claude-code", model: "default" }],
+    });
+    const app = createApp({
+      token: "o".repeat(43),
+      port: 4750,
+      eventLog: new EventLog(f.home),
+      agent: f.deps,
+      remoteAccess: {
+        links,
+        authenticate: (token?: string) => links.authenticate(token),
+      } as unknown as RemoteAccess,
+    });
+    const headers = { authorization: `Bearer ${issued.token}` };
+    const session = (await (
+      await app.request("http://127.0.0.1:4750/api/remote-session", { headers })
+    ).json()) as {
+      models: { provider: string; model: string }[];
+      names: { provider: string; model: string; name: string }[];
+    };
+    expect(session.models.map((row) => row.model)).toEqual(["default", "opus", "sonnet"]);
+    expect(session.names.map((row) => row.name)).toEqual([
+      "Default (recommended)",
+      "Opus 5.5",
+      "Sonnet 5.5",
+    ]);
+    const chosen = await app.request("http://127.0.0.1:4750/api/remote-session/model", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ index: 1 }),
+    });
+    expect(chosen.status).toBe(204);
+    expect(links.list()[0]?.model).toMatchObject({ provider: "claude-code", model: "opus" });
+  });
+});
