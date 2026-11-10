@@ -1,5 +1,13 @@
 import { createECDH, webcrypto } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
@@ -138,6 +146,7 @@ import { RoutineStore, scheduleOf, toRoutine } from "../../../daemon/src/routine
 import { SearchFeed } from "../../../daemon/src/search/search-feed.ts";
 import { SearchIndex } from "../../../daemon/src/search/search-index.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
+import { OverviewTracker } from "../../../daemon/src/sessions/overview.ts";
 import { Thumbnails } from "../../../daemon/src/sessions/thumbs.ts";
 import { readStatic } from "../../../daemon/src/static-files.ts";
 import { UI_CSP } from "../../../daemon/src/static-ui.ts";
@@ -373,6 +382,8 @@ let heldAt: number | undefined;
 const base = monotonicClock();
 const clock = { nowMicros: () => (heldAt ?? base.nowMicros()) + skew };
 const log = new EventLog(HOME, clock);
+// Made before anything is seeded, as the daemon makes it before any task, so it follows every task.
+const overview = new OverviewTracker(log, (id) => index.card(id));
 const conversations = new Conversations(HOME, log);
 let lastTurnModel: string | undefined;
 const cells = new FakeOrchestrator();
@@ -1739,6 +1750,262 @@ function seedSeveral(s: AgentSession) {
   conversations.organize(s.id, { look: ["mortarboard", "round-glasses", "star-pin"] });
 }
 
+// QA_FLEET=<n> seeds n conversations beside the sample task for the overview, cycling through eight:
+// one on screen in the web browser, two waiting on the user (a send to approve, a question), others
+// at work, waiting for the computer and at rest, and two that ended today. Each has screenshots of
+// its own (ui-assets/overview), a look, and most a plan. POST /__qa/fleet?n= adds more, and
+// /__qa/fleet/run?every=<ms> has the tasks at work take a step with a new screenshot in turn.
+const FLEET_PICTURES = new Map(
+  readdirSync(join(ASSETS, "overview"))
+    .filter((name) => name.endsWith(".webp"))
+    .sort()
+    .map((name) => [name.replace(/\.webp$/, ""), readFileSync(join(ASSETS, "overview", name))]),
+);
+const FLEET_ROLL = [...FLEET_PICTURES.values()];
+interface FleetTask {
+  title: string;
+  picture: string;
+  look: Wearable[];
+  persona: PersonaId;
+  ago: number;
+  state?: ConversationLive["state"];
+  onScreen?: boolean;
+  screen: "desktop" | "browser";
+  doing?: string;
+  ending?: "done" | "error";
+  said: string;
+  plan?: { text: string; status: "todo" | "doing" | "done" }[];
+  needs?: "approval" | "question";
+  steps: number;
+}
+const FLEET: FleetTask[] = [
+  {
+    title: "Plan three autumn days in Kyoto",
+    picture: "screen-travel",
+    look: ["mortarboard", "round-glasses"],
+    persona: "research",
+    ago: 4,
+    state: "working",
+    onScreen: true,
+    screen: "browser",
+    doing: "Reading about Higashiyama's temples",
+    said: "Kyoto's sights sit in clusters, so each day can keep to one area on foot.",
+    plan: [
+      { text: "Read up on the districts", status: "done" },
+      { text: "Check hours and entry fees", status: "doing" },
+      { text: "Lay out the three days", status: "todo" },
+      { text: "Make the PDF", status: "todo" },
+    ],
+    steps: 14,
+  },
+  {
+    title: "Reply to the boiler engineer",
+    picture: "screen-mail",
+    look: ["suit", "bow"],
+    persona: "everyday",
+    ago: 2,
+    state: "needs-you",
+    screen: "browser",
+    said: "I've written back to Tom saying Tuesday morning works.",
+    needs: "approval",
+    steps: 6,
+  },
+  {
+    title: "Breakout, starring dot",
+    picture: "screen-code",
+    look: ["hoodie", "sunglasses"],
+    persona: "coder",
+    ago: 6,
+    state: "working",
+    screen: "desktop",
+    doing: "Playing a round to check the score",
+    said: "The game runs. Now I'm playing a round to check the bricks.",
+    plan: [
+      { text: "Draw the bricks and paddle", status: "done" },
+      { text: "Bounce the ball", status: "done" },
+      { text: "Keep the score", status: "done" },
+      { text: "Test the bricks", status: "doing" },
+      { text: "Add sound", status: "todo" },
+    ],
+    steps: 31,
+  },
+  {
+    title: "Find a plumber near me with good reviews",
+    picture: "screen-map",
+    look: ["beanie", "monocle"],
+    persona: "everyday",
+    ago: 1,
+    state: "needs-you",
+    screen: "browser",
+    said: "Four plumbers nearby have 4.6 stars or more.",
+    needs: "question",
+    steps: 9,
+  },
+  {
+    title: "A poster for Blue Hour",
+    picture: "screen-poster",
+    look: ["beret", "scarf"],
+    persona: "design",
+    ago: 3,
+    state: "waiting-for-computer",
+    screen: "desktop",
+    said: "I'll go with deep blue and brass, and a moon made of circles.",
+    steps: 12,
+  },
+  {
+    title: "Where my money went",
+    picture: "screen-chart",
+    look: ["suit", "bow-tie"],
+    persona: "finance",
+    ago: 12,
+    state: "idle",
+    screen: "browser",
+    said: "Rent and eating out are most of it. The chart is on the page.",
+    plan: [
+      { text: "Read the export", status: "done" },
+      { text: "Sort into categories", status: "done" },
+      { text: "Draw the chart", status: "done" },
+    ],
+    steps: 22,
+  },
+  {
+    title: "Standing desks under £400",
+    picture: "screen-shop",
+    look: ["cowboy-hat", "lei"],
+    persona: "everyday",
+    ago: 95,
+    ending: "done",
+    screen: "browser",
+    said: "The best five are in a table, cheapest first.",
+    steps: 18,
+  },
+  {
+    title: "Clean up my Downloads folder",
+    picture: "screen-terminal",
+    look: ["propeller-cap", "overalls"],
+    persona: "everyday",
+    ago: 180,
+    ending: "error",
+    screen: "desktop",
+    said: "The disk filled up before I could move the installers.",
+    steps: 7,
+  },
+];
+const fleetPicture = (name: string) => FLEET_PICTURES.get(name) ?? (FLEET_ROLL[0] as Buffer);
+// The fleet's tasks at work, and each one's next screenshot.
+const fleetWorking: { id: string; turn: number }[] = [];
+let fleetSeeded = 0;
+function seedFleet(count: number) {
+  for (let n = 0; n < count; n++) {
+    const at = fleetSeeded++;
+    const task = FLEET[at % FLEET.length] as FleetTask;
+    const round = Math.floor(at / FLEET.length);
+    const title = round ? `${task.title} (${round + 1})` : task.title;
+    backdated((task.ago + round * 7) * 60_000, () => {
+      const id = log.createSession(title);
+      const append = (type: string, data: Record<string, unknown>, step?: string) =>
+        log.append(id, { agent: "main", type, data, ...(step ? { step } : {}) } as never);
+      append("session.start", { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", title });
+      append("message.user", { messageId: ulid(), kind: "task", text: title });
+      append("persona.choice", { persona: task.persona, by: "auto" });
+      append("message.assistant", { messageId: ulid(), text: task.said });
+      if (task.plan)
+        append("plan.set", {
+          items: task.plan.map((item, index) => ({ id: `p${index}`, ...item })),
+        });
+      if (task.screen === "browser")
+        append("screen.switch", {
+          screen: "browser",
+          cellId: browserCellId,
+          geometry: { w: 1280, h: 800, scale: 2 },
+          by: "agent",
+          revision: 1,
+        });
+      for (let step = 1; step <= task.steps; step++) {
+        const stepId = ulid();
+        append(
+          "step.start",
+          { kind: "gui", ...(task.doing ? { intent: task.doing } : {}) },
+          stepId,
+        );
+        if (step === task.steps) {
+          const frameId = ulid();
+          frames.save(id, frameId, fleetPicture(task.picture));
+          append("observe", { frameId, width: 1280, height: 800 }, stepId);
+        }
+        append("step.end", { status: "ok" }, stepId);
+      }
+      if (task.needs === "approval")
+        append("approval.request", {
+          approvalId: ulid(),
+          generation: 1,
+          revision: 1,
+          expiresAt: Date.now() + 3_600_000,
+          actionClass: "send",
+          risk: "medium",
+          title: "Send the reply to Tom Hartley",
+          kind: "send",
+          preview: { fields: [] },
+        });
+      if (task.needs === "question")
+        append("ask.request", {
+          askId: ulid(),
+          question: "Weekday mornings or Saturday?",
+          options: [
+            { key: "A", text: "Weekday mornings" },
+            { key: "B", text: "Saturday" },
+          ],
+          allowText: true,
+        });
+      if (task.ending) {
+        append("message.assistant", { messageId: ulid(), text: task.said });
+        append("session.end", { reason: task.ending });
+      } else {
+        alongside.set(id, {
+          state: task.state ?? "working",
+          since: new Date().toISOString(),
+          onScreen: !!task.onScreen && round === 0,
+          ...(task.doing ? { activity: task.doing } : {}),
+          persona: task.persona,
+        });
+        if (task.state === "working") fleetWorking.push({ id, turn: 0 });
+      }
+      conversations.organize(id, { look: task.look });
+    });
+  }
+}
+if (Number(env.QA_FLEET ?? 0) > 0) seedFleet(Number(env.QA_FLEET));
+let fleetRun: ReturnType<typeof setInterval> | undefined;
+// One task of the fleet at work takes a step with a new screenshot, in turn, as the computer's one
+// lease hands its screen from task to task.
+function fleetStep() {
+  const next = fleetWorking.shift();
+  if (!next) return;
+  fleetWorking.push(next);
+  next.turn++;
+  const stepId = ulid();
+  const frameId = ulid();
+  frames.save(next.id, frameId, FLEET_ROLL[next.turn % FLEET_ROLL.length] as Buffer);
+  log.append(next.id, {
+    agent: "main",
+    type: "step.start",
+    data: { kind: "gui" },
+    step: stepId,
+  } as never);
+  log.append(next.id, {
+    agent: "main",
+    type: "observe",
+    data: { frameId, width: 1280, height: 800 },
+    step: stepId,
+  } as never);
+  log.append(next.id, {
+    agent: "main",
+    type: "step.end",
+    data: { status: "ok" },
+    step: stepId,
+  } as never);
+}
+
 // QA_LIBRARY=<n> seeds n ended tasks over the last four months for Replay's library: long and short
 // titles, every ending, and videos from a few megabytes to gigabytes (sparse files, so nothing is
 // written). As retention would have, a video older than 30 days is gone and its screenshots stay.
@@ -2840,6 +3107,7 @@ const routes = createApp({
     recorder,
     index,
     thumbs: new Thumbnails(HOME, frames),
+    overview,
     live,
     publish: (event) => appEvents.publish(event),
   },
@@ -4754,6 +5022,20 @@ routes.post("/__qa/turns", async (c) => {
 // A task at work as a live run shows it, for `ms`: dot thinks and acts in turns of 300–600 ms,
 // streams a sentence every other turn, takes a step with a screenshot each turn (every third a
 // shell command), beats once a second and has two helpers at work. The turns repeat on every run.
+routes.post("/__qa/fleet", (c) => {
+  seedFleet(Number(c.req.query("n") ?? FLEET.length));
+  return c.json({ seeded: fleetSeeded, working: fleetWorking.length });
+});
+routes.post("/__qa/fleet/run", (c) => {
+  clearInterval(fleetRun);
+  const every = Number(c.req.query("every") ?? 1000);
+  if (every > 0) fleetRun = setInterval(() => !teardown && fleetStep(), every).unref();
+  return c.json({ every });
+});
+routes.post("/__qa/fleet/step", (c) => {
+  fleetStep();
+  return c.json({ working: fleetWorking.length });
+});
 routes.post("/__qa/live-run", (c) => {
   if (!session) return c.text("no session", 409);
   const owned = session;
