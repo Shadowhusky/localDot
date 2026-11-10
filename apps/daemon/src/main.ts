@@ -117,6 +117,7 @@ import { SearchIndex } from "./search/search-index.ts";
 import { retainManagedDaemonLease } from "./service-lease.ts";
 import { ManagedServiceReadiness, managedServiceFromEnv } from "./service-readiness.ts";
 import { SessionIndex } from "./sessions/index-store.ts";
+import { OverviewTracker } from "./sessions/overview.ts";
 import {
   framesMaxAgeFromEnv,
   retentionFromEnv,
@@ -432,6 +433,8 @@ resumeCompactions(home);
 sessionIndex = new SessionIndex(home, {
   isLive: (id) => recorder.isLive(id) || live.cellOf(id) !== undefined,
 });
+const index = sessionIndex;
+const overview = new OverviewTracker(eventLog, (id) => index.card(id));
 sweepRecordings({
   home,
   policy: retentionPolicy,
@@ -919,6 +922,7 @@ const app = createApp({
     recorder,
     index: sessionIndex,
     thumbs: new Thumbnails(home, frames),
+    overview,
     live,
     retention: retentionPolicy,
     framesMaxAgeDays,
