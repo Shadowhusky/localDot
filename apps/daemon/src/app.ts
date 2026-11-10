@@ -219,9 +219,21 @@ export function createApp({
     remoteRoutes(app, remoteAccess, agent?.settings.get.bind(agent.settings));
     app.get("/api/remote-session", (c) => {
       const grant = c.get("remoteGrant");
-      return grant
-        ? c.json({ ...publicGrant(grant), ownedSessions: remoteAccess.links.sessions(grant.id) })
-        : c.text("Not a shared session", 400);
+      if (!grant) return c.text("Not a shared session", 400);
+      // The page has no catalog of its own: the link's models come with their names.
+      const catalog = agent?.catalog.get();
+      const names = [grant.model, ...grant.models].flatMap(({ provider, model }) => {
+        const name = (
+          catalog?.providers[provider]?.models[model] ??
+          Object.values(catalog?.providers ?? {}).find((each) => each.models[model])?.models[model]
+        )?.name;
+        return name ? [{ provider, model, name }] : [];
+      });
+      return c.json({
+        ...publicGrant(grant),
+        ownedSessions: remoteAccess.links.sessions(grant.id),
+        names,
+      });
     });
     app.post("/api/remote-session/model", async (c) => {
       const grant = c.get("remoteGrant");
