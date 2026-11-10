@@ -66,9 +66,10 @@ const (
 	// maxHeaderBytes caps a request's line and headers. API calls need a few KiB; the cap bounds
 	// what one request makes keyd search for surrogates (net/http's default is 1 MiB).
 	maxHeaderBytes = 64 << 10
-	// Enough parallel fetches for a desktop browser, while bounding unauthenticated sockets
-	// and hijacked tunnels to 64 accepted client sockets per cell.
-	maxCellConnections = 64
+	// Enough parallel fetches for a desktop browser, whose own cap through a proxy is raised to 99
+	// sockets (Chromium's default of 32 stalls busy sites: a few held tunnels starve every page),
+	// while bounding unauthenticated sockets and hijacked tunnels to 160 per cell.
+	maxCellConnections = 160
 )
 
 var ErrPortInUse = errors.New("egress: listener port in use")

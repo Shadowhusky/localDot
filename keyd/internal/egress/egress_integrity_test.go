@@ -1201,7 +1201,7 @@ func TestCellConnectionCapRefusesAtAcceptAndRecovers(t *testing.T) {
 			conn.Close()
 		}
 	}()
-	for range 64 {
+	for range maxCellConnections {
 		conn, err := dialListener(c)
 		if err != nil {
 			t.Fatal(err)
