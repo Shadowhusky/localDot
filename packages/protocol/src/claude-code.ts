@@ -32,7 +32,9 @@ export const ClaudeCodeStatus = z
       .regex(/^[a-z0-9_-]{1,32}$/)
       .optional(),
     reason: line(300).optional(),
-    command: line(200).optional(),
+    command: line(600).optional(),
+    // This dot signs in to a Claude account of its own rather than the one on this Mac.
+    separate: z.literal(true).optional(),
     models: z
       .array(
         z.strictObject({
@@ -52,3 +54,6 @@ export const ClaudeCodeStatus = z
   })
   .refine((status) => status.state !== "signed_in" || status.models.length > 0);
 export type ClaudeCodeStatus = z.infer<typeof ClaudeCodeStatus>;
+
+export const ClaudeCodeAccountRequest = z.strictObject({ separate: z.boolean() });
+export type ClaudeCodeAccountRequest = z.infer<typeof ClaudeCodeAccountRequest>;

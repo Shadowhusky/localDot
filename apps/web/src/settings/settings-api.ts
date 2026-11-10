@@ -255,6 +255,18 @@ export async function loadClaudeCode(
   if (!parsed.success) throw new SettingsFailure(false);
   return parsed.data;
 }
+// Switches this dot between the Claude account on this Mac and one of its own, then checks it.
+export async function chooseClaudeAccount(
+  api: ApiClient,
+  separate: boolean,
+  signal?: AbortSignal,
+): Promise<ClaudeCodeStatus> {
+  const parsed = ClaudeCodeStatus.safeParse(
+    await request(api, "PUT", "/api/agent/claude-code/account", 16 * 1024, signal, { separate }),
+  );
+  if (!parsed.success) throw new SettingsFailure(false);
+  return parsed.data;
+}
 // The models a saved key reaches, as its provider or endpoint lists them.
 export async function loadKeyModels(
   api: ApiClient,

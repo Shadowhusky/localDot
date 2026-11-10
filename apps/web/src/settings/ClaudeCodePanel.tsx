@@ -1,6 +1,7 @@
 import { CommandChip } from "../shell/CommandChip.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { RadioCards } from "../ui/RadioCards.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { claudeCodeSteps } from "./claude-code-steps.ts";
 import type { ClaudeCodeControls } from "./useClaudeCode.ts";
@@ -8,6 +9,20 @@ import type { ClaudeCodeControls } from "./useClaudeCode.ts";
 // The main model on the user's own Claude Code: what's set up, what's left to do in Terminal, and
 // a check that looks again. localDot never handles the Claude sign-in itself.
 // Under a page that already names it, as in setup, the card goes without its own heading.
+// Each dot can sign in to a Claude account of its own; the one on this Mac is the default.
+const ACCOUNTS = [
+  {
+    value: "mac",
+    label: "Use the Claude account signed in on this Mac",
+    description: "The same account as Claude Code in Terminal.",
+  },
+  {
+    value: "dot",
+    label: "Use a separate Claude account for this dot",
+    description: "You sign in to it once for this dot. Your other dots don't use it.",
+  },
+] as const;
+
 export function ClaudeCodePanel({
   claude,
   titled = true,
@@ -19,6 +34,7 @@ export function ClaudeCodePanel({
 }) {
   const status = claude.status;
   const ready = status?.state === "signed_in";
+  const installed = status?.state === "signed_in" || status?.state === "signed_out";
   return (
     <section
       id={id}
@@ -36,6 +52,19 @@ export function ClaudeCodePanel({
             </p>
           </div>
         </header>
+      )}
+      {installed && (
+        <RadioCards
+          aria-label="Claude account"
+          value={status.separate ? "dot" : "mac"}
+          onValueChange={(value) => {
+            if (!claude.checking) void claude.chooseAccount(value === "dot");
+          }}
+          options={ACCOUNTS.map((option) => ({
+            ...option,
+            ...(claude.checking ? { disabledReason: "Checking Claude Code…" } : {}),
+          }))}
+        />
       )}
       <ol className="settings-steps" aria-label="Setup">
         {claudeCodeSteps(status, claude.checking).map((step) => (
@@ -56,7 +85,9 @@ export function ClaudeCodePanel({
       )}
       {ready && (
         <p className="settings-note">
-          Uses your plan's limits. localDot never sees your Claude sign-in.
+          {status.separate
+            ? "Uses this dot's own Claude account and its plan's limits. localDot never sees your Claude sign-in."
+            : "Uses your plan's limits. localDot never sees your Claude sign-in."}
         </p>
       )}
       <div className="settings-actions">

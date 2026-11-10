@@ -28,10 +28,12 @@ afterEach(() => {
 function fixture(first: unknown) {
   let status = first;
   const calls: string[] = [];
+  const bodies: unknown[] = [];
   const api = createApi("fixture", {
     origin: "https://fixture.test",
     fetchImpl: async (url, init) => {
       calls.push(`${init?.method ?? "GET"} ${new URL(String(url)).pathname}`);
+      if (typeof init?.body === "string") bodies.push(JSON.parse(init.body));
       return Response.json(status);
     },
   });
@@ -47,6 +49,7 @@ function fixture(first: unknown) {
   }
   return {
     calls,
+    bodies,
     Harness,
     set(next: unknown) {
       status = next;
@@ -97,5 +100,29 @@ describe("Claude Code in Settings", () => {
     await screen.findByText("Signed in · Max plan");
     fireEvent.click(screen.getByRole("button", { name: "Check again" }));
     await waitFor(() => expect(f.calls).toContain("POST /api/agent/claude-code/check"));
+  });
+  it("switches this dot to a Claude account of its own, with the sign-in for that account", async () => {
+    const f = fixture(signedIn);
+    render(<f.Harness active />);
+    await screen.findByText("Signed in · Max plan");
+    const mac = screen.getByRole("radio", { name: /Use the Claude account signed in on this Mac/ });
+    expect((mac as HTMLInputElement).checked).toBe(true);
+    const command =
+      "CLAUDE_CONFIG_DIR='/Users/person/.localdot-sub/claude-code/account' claude auth login";
+    f.set({ ...signedOut, separate: true, command });
+    fireEvent.click(
+      screen.getByRole("radio", { name: /Use a separate Claude account for this dot/ }),
+    );
+    await screen.findByText(command);
+    expect(f.calls.at(-1)).toBe("PUT /api/agent/claude-code/account");
+    expect(f.bodies.at(-1)).toEqual({ separate: true });
+    expect(screen.getByText("This dot's account isn't signed in")).toBeTruthy();
+    expect(
+      (screen.getByRole("radio", { name: /Use a separate Claude account/ }) as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    f.set({ ...signedIn, separate: true });
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await screen.findByText("Signed in on this dot · Max plan");
   });
 });

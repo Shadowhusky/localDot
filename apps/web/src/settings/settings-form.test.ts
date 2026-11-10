@@ -511,6 +511,19 @@ describe("configuration validation before explicit save", () => {
       ),
     ).toEqual({ ok: true, document: { main } });
   });
+  it("continues tasks after a plan's limit unless the user turned it off, and saves only Off", () => {
+    const main = { provider: "ollama", model: "custom" } as const;
+    const d = formOf({ main });
+    expect(d.autoContinue).toBe(true);
+    expect(formOf({ main, autoContinue: "off" }).autoContinue).toBe(false);
+    expect(validateForm({ ...d, autoContinue: false }, { main }, providerFixture())).toEqual({
+      ok: true,
+      document: { main, autoContinue: "off" },
+    });
+    expect(
+      validateForm({ ...d, autoContinue: true }, { main, autoContinue: "off" }, providerFixture()),
+    ).toEqual({ ok: true, document: { main } });
+  });
   it("leaves Auto's dot off until the user turns it on, and saves only On", () => {
     const main = { provider: "ollama", model: "custom" } as const;
     const d = formOf({ main });

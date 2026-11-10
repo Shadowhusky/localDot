@@ -77,8 +77,10 @@ import { QuickModel } from "../keyd/quick-model.ts";
 import { ServiceKeys } from "../keyd/service-keys.ts";
 import type { ScreenRecordings } from "../recorder/screen-recordings.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
+import { AutoContinueScheduler } from "./auto-continue.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
+import { ClaudeAccountChoice } from "./claude-code/account.ts";
 import { claudeCodeAnswer } from "./claude-code/answer.ts";
 import { ClaudeCodeCleanupError, ClaudeCodeDriver } from "./claude-code/driver.ts";
 import { claudeCodeInstructions } from "./claude-code/instructions.ts";
@@ -115,13 +117,13 @@ import { PrivateFiles } from "./private-files.ts";
 import { RecentActivity } from "./recent-activity.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
-import { AgentError, AgentRunner, type AgentRunnerDeps, computerDown } from "./runner.ts";
+import { AgentError, AgentRunner, type AgentRunnerDeps, CARRY_ON, computerDown } from "./runner.ts";
 import { ConnectionApprovals } from "./safety/connections.ts";
 import { NativeTasks } from "./safety/native-tasks.ts";
 import { PurposeService } from "./safety/purpose-service.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { taintMemory } from "./safety/taint.ts";
-import type { AgentSession, BrainGeneration } from "./session.ts";
+import { AGENT, type AgentSession, type BrainGeneration } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
 import { apiSideModel } from "./side/api-model.ts";
 import { sideReaders } from "./side/readers.ts";
@@ -779,6 +781,7 @@ export function createAgent(d: AgentWiringDeps) {
         })),
     );
   const claudeHome = d.claudeCode?.realHome;
+  const claudeAccount = claudeHome ? new ClaudeAccountChoice(d.home) : undefined;
   const claudeSetup = claudeHome
     ? new ClaudeCodeSetup({
         home: claudeHome,
@@ -786,6 +789,7 @@ export function createAgent(d: AgentWiringDeps) {
         find: () => findClaudeCode(claudeHome),
         run: runFile,
         env: process.env,
+        account: () => claudeAccount?.folder(),
         listModels: claudeModels,
       })
     : undefined;
@@ -834,6 +838,32 @@ export function createAgent(d: AgentWiringDeps) {
   const stopPlanUsageFeed = d.eventLog.subscribe((_, event) => {
     if (event.type === "subscription.usage") planUsage.record(event.data, Date.now());
   });
+  const modelKey = (sessionId: string) => {
+    const choice = conversations.model(sessionId);
+    return choice ? `${choice.provider}/${choice.model}` : undefined;
+  };
+  // A task a plan's limit paused goes on by itself once the plan resets.
+  const autoContinue = new AutoContinueScheduler({
+    home: d.home,
+    enabled: () => settings.get().autoContinue !== "off",
+    plan: (provider) => planUsage.list().find((plan) => plan.provider === provider),
+    refresh: () => planUsage.refresh(),
+    live: (sessionId) => runner.sessions.get(sessionId),
+    latest: (sessionId) => conversations.latest(sessionId),
+    model: modelKey,
+    announce: (sessionId, paused) =>
+      d.eventLog.append(sessionId, {
+        type: "agent.state",
+        agent: AGENT,
+        data: { state: "paused", ...paused },
+      }),
+    resume: (task) => runner.sessions.get(task.id)?.post("resume", ""),
+    carryOn: async ({ sessionId, cellId }) =>
+      (await runner.start(cellId, CARRY_ON, undefined, { continues: sessionId, byOwner: true })).id,
+  });
+  const stopAutoContinueFeed = d.eventLog.subscribe((sessionId, event) =>
+    autoContinue.observe(sessionId, event),
+  );
   const claudeDriver = claudeSetup
     ? new ClaudeCodeDriver({
         onRetired: nativeRetired,
@@ -902,6 +932,8 @@ export function createAgent(d: AgentWiringDeps) {
     catalog: () => catalog.get(),
     memory,
     connectors: () => connectors.forTask(),
+    planLimited: (session, reason, detail, auto) =>
+      autoContinue.limited(session, reason, detail, auto),
     appConnected: (id) => connectors.isConnected(id),
     runtimeDown,
     recentActivity,
@@ -1268,7 +1300,20 @@ export function createAgent(d: AgentWiringDeps) {
       ? { chatgpt: { account: auth, installer, availability: platform, setup } }
       : {}),
     ...(claudeSetup ? { claudeCode: claudeSetup } : {}),
+    ...(claudeSetup && claudeAccount
+      ? {
+          claudeAccount: (separate: boolean) => {
+            if (claudeAccount.separate !== separate) {
+              claudeAccount.set(separate);
+              // What the plan said belonged to the other account.
+              planUsage.forget("claude-code");
+            }
+            return claudeSetup.check();
+          },
+        }
+      : {}),
     planUsage,
+    autoContinue,
     redactUserText: (text, id, cellId) =>
       forText(
         id ? runner.get(id) : undefined,
@@ -1404,6 +1449,7 @@ export function createAgent(d: AgentWiringDeps) {
           throw new Error("agent is closed");
         }
         ready = true;
+        autoContinue.start();
         // Check provider metadata on every daemon launch without delaying the computer/UI.
         void tracked(catalog.refresh().catch(() => undefined));
       })();
@@ -1417,6 +1463,9 @@ export function createAgent(d: AgentWiringDeps) {
       unsubscribe();
       stopKeyWatch();
       stopExperienceFeed();
+      // Before the tasks end, so the schedule outlives them for the next start.
+      const autoContinueClosed = autoContinue.close();
+      stopAutoContinueFeed();
       stopPlanUsageFeed();
       planUsage.close();
       transfers.close();
@@ -1460,6 +1509,7 @@ export function createAgent(d: AgentWiringDeps) {
           ),
           ...containments,
           frozen,
+          autoContinueClosed,
           runner.close(),
           judgeCell.close(),
           webCell.close(),

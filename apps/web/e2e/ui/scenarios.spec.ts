@@ -36,6 +36,7 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   "fix-key": shows(fixCard(/key was refused/)),
   "fix-app": shows(fixCard("Connect Linear")),
   "fix-model": shows(fixCard(/could not process/)),
+  "plan-limit": shows(fixCard(/^Paused until \d/)),
   "fix-computer": shows(fixCard("Your computer is off")),
   "fix-computer-paused": shows(fixCard("Your computer is paused")),
   "fix-runtime": shows(fixCard("Docker isn't running")),

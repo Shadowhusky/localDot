@@ -60,6 +60,7 @@ import type { LiveSessions } from "../gateway/live.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import { type KeydHealth, vaultLocked } from "../keyd/monitor.ts";
 import type { RemoteLinks } from "../remote/links.ts";
+import { PLAN_LIMITS } from "./auto-continue.ts";
 import {
   activeRoles,
   BindingError,
@@ -152,7 +153,7 @@ const ANSWERED: ReadonlySet<string> = new Set([
 ]);
 const DOCKER_CHECK_MS = 5000;
 // What a task the user carried on after a move to another kind of model starts with.
-const CARRY_ON = "Continue where you left off.";
+export const CARRY_ON = "Continue where you left off.";
 // A card waits this long at most for the user once dot has ended its turn on it.
 const CARD_WAIT_MS = 4 * 60 * 60_000;
 const CARD_STATES = new Set<CellSummary["state"]>(["stopped", "failed"]);
@@ -299,6 +300,8 @@ export interface AgentRunnerDeps {
   };
   installSkills(cellId: string, signal: AbortSignal, persona?: PersonaId): Promise<SkillSummary[]>;
   prepareDesktop?(session: AgentSession): Promise<void>;
+  // A task paused at its subscription plan's limit, which may go on by itself once it resets.
+  planLimited?(session: AgentSession, reason: string, detail?: string, auto?: boolean): void;
   waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
   // Must invoke M3's revoke/drain/freeze/fallback path, even if session.stop() already ran.
   stopSession(sessionId: string): Promise<StopOutcome | undefined>;
@@ -551,6 +554,12 @@ export class AgentRunner {
       else if (["thinking", "acting", "observing", "done"].includes(event.data.state))
         rt.failure = undefined;
       if (event.data.state === "paused") {
+        const { reason, detail } = event.data;
+        // The wait's own word is no new limit. A shared link's task waits for the owner.
+        if (reason && PLAN_LIMITS[reason] && !event.data.autoContinue)
+          queueMicrotask(() =>
+            this.deps.planLimited?.(rt.session, reason, detail, !rt.session.guest),
+          );
         const card = this.#stallCard(rt, event.data.reason, event.data.detail);
         const notice = providerNotice(event.data.reason, event.data.detail);
         if (notice && rt.providerNotice !== notice) {

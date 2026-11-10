@@ -13,8 +13,8 @@ export const FILE_CATEGORIES: readonly FileCategory[] = [
 ];
 
 // Never copied, whatever is chosen: the dot's identity and sign-in token, its remote-access
-// identity, phone notification subscriptions, its ChatGPT sign-in, and the key service's own
-// files, audit and spending records. Keys move only key service to key service.
+// identity, phone notification subscriptions, its ChatGPT sign-in and Claude account, and the key
+// service's own files, audit and spending records. Keys move only key service to key service.
 export const NEVER_COPY: readonly string[] = [
   "instance.json",
   "daemon-token",
@@ -25,6 +25,7 @@ export const NEVER_COPY: readonly string[] = [
   "tailscale-serve.json",
   "notify/subscriptions.json",
   "codex",
+  "claude-code",
   "keyd",
   "audit",
   "safety",

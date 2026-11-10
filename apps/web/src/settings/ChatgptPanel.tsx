@@ -10,7 +10,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { Meter } from "../ui/Meter.tsx";
-import { MiddleTruncate } from "../ui/MiddleTruncate.tsx";
+import { MiddleTruncate, tailOf } from "../ui/MiddleTruncate.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
 import { Progress } from "../ui/Progress.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -55,7 +55,10 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
           <h4 id="chatgpt-title" className="settings-card-title">
             ChatGPT plan
           </h4>
-          <p className="settings-card-note">The main model runs on your ChatGPT account.</p>
+          <p className="settings-card-note">
+            The main model runs on the ChatGPT account signed in on this dot. Each of your dots
+            signs in on its own.
+          </p>
         </div>
         <IconButton
           ref={more}
@@ -330,7 +333,14 @@ function SignedIn({ account }: { account: ChatgptControls }) {
         </span>
         <span className="settings-account-text">
           <span className="settings-account-email">
-            {email ? <MiddleTruncate text={`Signed in as ${email}`} /> : "Signed in"}
+            {email ? (
+              <MiddleTruncate
+                text={`Signed in as ${email} on this dot`}
+                tail={tailOf(email) + " on this dot".length}
+              />
+            ) : (
+              "Signed in on this dot"
+            )}
           </span>
           <span className="settings-note">{checkedAt(status.checkedAt)}</span>
         </span>

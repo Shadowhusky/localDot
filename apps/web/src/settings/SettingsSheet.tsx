@@ -196,6 +196,8 @@ export interface SettingsSheetProps {
   knowledge?: Knowledge;
   known?: WhatDotKnows;
   recentActivity?: RecentActivityControl;
+  // Whether a task a plan's limit paused continues by itself once the plan resets.
+  autoContinue?: { on: boolean; change(on: boolean): void };
   // Opens an earlier task's replay, from where a fact or a person came from.
   onOpenTask?(sessionId: string): void;
   notifications?: NotificationsView;
@@ -436,6 +438,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
     props.manualPrices,
     props.purposeCheck?.on,
     props.recentActivity?.on,
+    props.autoContinue?.on,
   ]);
   const canSave = !!props.save?.enabled && !props.error;
   // biome-ignore lint/correctness/useExhaustiveDependencies: each edit starts the wait again
@@ -1139,6 +1142,17 @@ function SectionContent({
           )}
           {main === CLAUDE_CODE && props.claudeCode && (
             <ClaudeCodePanel id="models-claude-code" claude={props.claudeCode} />
+          )}
+          {props.autoContinue && (main === CHATGPT || main === CLAUDE_CODE) && (
+            <Group>
+              <Switch
+                className="ui-group-row"
+                label="Continue when a plan's limit resets"
+                description="When your Claude or ChatGPT plan reaches its limit, a paused task carries on by itself once the limit resets."
+                checked={props.autoContinue.on}
+                onCheckedChange={props.autoContinue.change}
+              />
+            </Group>
           )}
           {(["main", "fast", "local"] as const).map((role) => (
             <RoleCard

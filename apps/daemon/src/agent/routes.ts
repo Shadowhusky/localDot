@@ -15,6 +15,8 @@ import {
   BlockerModelChoice,
   BudgetRaiseRequest,
   CLAUDE_PLAN_REFUSAL,
+  ClaudeCodeAccountRequest,
+  type ClaudeCodeStatus,
   ContinueConversation,
   EditMemoryEntryRequest,
   EditPersonRequest,
@@ -71,6 +73,7 @@ import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import type { KeyModels } from "../keyd/key-models.ts";
 import { linkConversation } from "../remote/links.ts";
 import { NDJSON_TYPE } from "../sessions/ndjson.ts";
+import type { AutoContinueScheduler } from "./auto-continue.ts";
 import {
   activeRoles,
   BindingError,
@@ -192,7 +195,10 @@ export interface AgentRoutesDeps {
     setup: ChatgptSetupControl;
   };
   claudeCode?: Pick<ClaudeCodeSetup, "status" | "check">;
+  // Switches between the Claude account on this Mac and this dot's own, then checks it.
+  claudeAccount?(separate: boolean): Promise<ClaudeCodeStatus>;
   planUsage?: Pick<PlanUsageStore, "reply" | "refresh">;
+  autoContinue?: Pick<AutoContinueScheduler, "cancel" | "cancelAll">;
 }
 
 const JSON_BYTES = 64 * 1024;
@@ -498,6 +504,16 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       }),
     );
   }
+  const claudeAccount = deps.claudeAccount;
+  if (claudeAccount)
+    app.put(
+      "/api/agent/claude-code/account",
+      route(async (c) => {
+        const { separate } = await json(c.req.raw, ClaudeCodeAccountRequest);
+        check(c.req.raw.signal);
+        return c.json(await claudeAccount(separate));
+      }),
+    );
   const planUsage = deps.planUsage;
   if (planUsage)
     // `fresh=1` also reads plans whose figures are not fresh from their own apps, in the background.
@@ -670,6 +686,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       }
       check(c.req.raw.signal);
       const saved = deps.settings.put(parsed);
+      if (saved.autoContinue === "off") deps.autoContinue?.cancelAll();
       // A task start retries this; until then keyd keeps the daily limit it had.
       await syncDayLimit(deps.keyd, saved.dayBudgetUSD).catch(() =>
         console.error("keyd's daily spending limit could not be updated"),
@@ -1408,6 +1425,20 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       check(c.req.raw.signal);
       if (!deps.runner.pauseTask) throw new RouteError(503, "Pause is unavailable");
       return c.json(deps.runner.pauseTask(s.id, input.requestId), 202);
+    }),
+  );
+  // "Don't continue" for a task waiting on its plan's limit, live or ended by a restart.
+  app.post(
+    "/api/agent/sessions/:id/auto-continue/cancel",
+    route(async (c) => {
+      const id = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(id)) throw new RouteError(400, "invalid task id");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      if (c.get("remoteGrant")) throw new RouteError(403, "Only the owner can change this");
+      if (!deps.autoContinue?.cancel(id))
+        throw new RouteError(404, "The task isn't waiting to continue");
+      return c.body(null, 204);
     }),
   );
   app.post(
