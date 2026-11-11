@@ -136,3 +136,43 @@ test("a run of steps opened high in the chat moves it only as far as the run nee
     expect(Math.round(after.top)).toBe(Math.round(before.top));
   }
 });
+
+test("the run's glyph, its thread and every step's glyph share one column", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("running");
+  await page.request.post(`${fixture.origin}/__qa/steps?n=3`);
+  await page.request.post(`${fixture.origin}/__qa/finish?done=1`);
+  const run = page.locator(".thread-work-steps").last();
+  const toggle = run.locator(":scope > .ui-disclosure-trigger");
+  if ((await toggle.getAttribute("aria-expanded")) === "false") await press(page, toggle);
+  await expect(run.locator(".thread-work-window-row").nth(1)).toBeVisible();
+  const columns = await run.evaluate((node) => {
+    const centre = (element: Element) => {
+      const box = element.getBoundingClientRect();
+      return box.left + box.width / 2;
+    };
+    // A 1 px pseudo-element's centre, from its containing block's padding edge.
+    const thread = (element: HTMLElement, which: "::before" | "::after") => {
+      const style = getComputedStyle(element, which);
+      return (
+        element.getBoundingClientRect().left +
+        Number.parseFloat(getComputedStyle(element).borderLeftWidth) +
+        Number.parseFloat(style.left)
+      );
+    };
+    const trigger = node.querySelector<HTMLElement>(":scope > .ui-disclosure-trigger");
+    const rows = [...node.querySelectorAll<HTMLElement>(".thread-work-window-row")];
+    if (!trigger) throw new Error("Run trigger required");
+    return [
+      centre(trigger.querySelector(".thread-work-glyph") as Element),
+      thread(trigger, "::after"),
+      ...rows.flatMap((row) => [
+        thread(row, "::before"),
+        centre(row.querySelector(".ui-status-glyph") as Element),
+      ]),
+    ].map(Math.round);
+  });
+  expect(new Set(columns).size).toBe(1);
+});
