@@ -64,6 +64,21 @@ describe("done hands over versioned files", () => {
       readFileSync(join(h.home, outputPath(h.session.id, "totals.csv", 2) as string), "utf8"),
     ).toContain("12311");
   });
+  it("keeps a file's name in any script, and only what a name can't hold becomes _", async () => {
+    const h = setup();
+    h.desktop.files.set("Documents/季度报告 v2.docx", "report");
+    h.desktop.files.set("Documents/notes:draft?.txt", "notes");
+    await h.call("done", {
+      summary: "Done.",
+      files: ["Documents/季度报告 v2.docx", "Documents/notes:draft?.txt"],
+    });
+    const result = h.events().find((e) => e.type === "task.result");
+    const names = result?.type === "task.result" ? result.data.files.map((f) => f.name) : [];
+    expect(names).toEqual(["季度报告 v2.docx", "notes_draft_.txt"]);
+    expect(
+      readFileSync(join(h.home, outputPath(h.session.id, "季度报告 v2.docx", 1) as string), "utf8"),
+    ).toBe("report");
+  });
   it("collects a video for Files and keeps the task open if collection fails", async () => {
     const h = setup();
     const path = "/config/Desktop/promo/film.mp4";

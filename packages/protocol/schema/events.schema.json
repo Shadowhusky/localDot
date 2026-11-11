@@ -157,10 +157,7 @@
                   "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
                 },
                 "name": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200,
-                  "pattern": "^[-\\w. ]+$"
+                  "type": "string"
                 },
                 "version": {
                   "anyOf": [

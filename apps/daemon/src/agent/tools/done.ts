@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { DoneInput, ToolResult } from "@localdot/protocol";
+import { type DoneInput, outputName, type ToolResult } from "@localdot/protocol";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import { abortable } from "../session.ts";
 import {
@@ -87,10 +87,7 @@ export async function doneTool(
       if (!desktop) throw new Error("The computer is not running");
       stream = await desktop.fetchFile(path, ctx.signal);
       ctx.check();
-      const base = ctx
-        .redact(basename(path))
-        .replace(/[^\w.\- ]/g, "_")
-        .slice(0, 180);
+      const base = outputName(ctx.redact(basename(path)));
       let name = base && base !== "." && base !== ".." ? base : "file";
       for (let n = 2; taken.has(name); n++) name = `${n}-${base}`;
       taken.add(name);
