@@ -12,6 +12,7 @@ import {
 import {
   chatItems,
   controlLine,
+  restates,
   type ThreadItem,
   threadItems,
   threadRows,
@@ -845,5 +846,63 @@ describe("a message dot hasn't answered", () => {
       unanswered(threadItems([...asked, message("again", 3), message("on it", 4, "assistant")])),
     ).toBe(false);
     expect(unanswered([])).toBe(false);
+  });
+});
+
+describe("a reply and the result that restates it", () => {
+  const reply =
+    "Yes, PR #1202 is good to approve. Both of your 29 Oct comments are properly fixed, and I didn't find anything wrong. Your second comment (relative imports): fixed. A component importing ../../api/client now fails lint. Test files are still exempt as a group, because they import @api to mock it. It's only waiting on your approval. I haven't posted anything on GitHub.";
+  const summary =
+    "Yes, PR #1202 is good to approve. Both of your 29 Oct comments are properly fixed, and I didn't find anything wrong. Your second comment (relative imports): fixed. A component importing ../../api/client now fails lint. It's only waiting on your approval. I haven't posted anything on GitHub.";
+  const kinds = (items: ThreadItem[]) =>
+    items.map((item) =>
+      item.kind === "result" ? `result:${item.result.summary.length > 0}` : item.key,
+    );
+
+  it("shows once: the fuller reply stays, and the result keeps only its files", () => {
+    const result: AgentResult = { id: "r", seq: 3, summary, files: [] };
+    const items = threadItems(
+      [message("ask", 1), message("reply", 2, "assistant", { text: reply })],
+      [],
+      [result],
+    );
+    expect(kinds(items)).toEqual(["message-ask", "message-reply", "result:false"]);
+    // The same result is drawn again without a new one each time.
+    const again = threadItems(
+      [message("ask", 1), message("reply", 2, "assistant", { text: reply })],
+      [],
+      [result],
+    );
+    const [was, now] = [items.at(-1), again.at(-1)];
+    expect(was?.kind === "result" && now?.kind === "result" && was.result === now.result).toBe(
+      true,
+    );
+  });
+
+  it("keeps the result's words when they are the fuller ones", () => {
+    const result: AgentResult = { id: "r", seq: 3, summary: reply, files: [] };
+    const items = threadItems([message("reply", 2, "assistant", { text: summary })], [], [result]);
+    expect(kinds(items)).toEqual(["result:true"]);
+  });
+
+  it("tells restatements in Chinese, and leaves a different summary, a short one or one the user came between alone", () => {
+    expect(
+      restates(
+        "已经检查完毕：两条评论都已修复，没有发现其他问题，可以批准这个合并请求。",
+        "两条评论都已修复，没有发现其他问题，可以批准这个合并请求。",
+      ),
+    ).toBe(true);
+    expect(restates(reply, "Approved after the lint and type checks; nothing else needed.")).toBe(
+      false,
+    );
+    expect(restates(reply, "Done.")).toBe(false);
+    expect(restates("Done.", "done")).toBe(true);
+    const result: AgentResult = { id: "r", seq: 4, summary, files: [] };
+    const between = threadItems(
+      [message("reply", 2, "assistant", { text: reply }), message("thanks", 3)],
+      [],
+      [result],
+    );
+    expect(kinds(between)).toEqual(["message-reply", "message-thanks", "result:true"]);
   });
 });
