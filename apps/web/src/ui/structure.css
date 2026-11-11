@@ -152,8 +152,11 @@
     text-align: start;
   }
 
+  /* Pressed, the row tints and keeps its size: the legacy press scale would pull a wide row's edge
+     from under the finger, and a press there would be lost. */
   button.ui-file-main {
     cursor: pointer;
+    transform: none;
     -webkit-tap-highlight-color: transparent;
   }
 
@@ -984,6 +987,7 @@
   }
 
   button.ui-group-row:active {
+    transform: none;
     background-color: var(--color-state-pressed);
     transition-duration: var(--dur-press);
   }
