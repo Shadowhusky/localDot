@@ -352,10 +352,14 @@ describe("the Previews list", () => {
     const writeText = vi.fn(async (_text: string) => {});
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     render(<Harness api={api} panel />);
-    fireEvent.click(await screen.findByRole("button", { name: "Copy link to localhost:5173" }));
+    const copy = async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "More for localhost:5173" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Copy link" }));
+    };
+    await copy();
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(OPENED.open));
     writeText.mockRejectedValueOnce(new Error("denied"));
-    fireEvent.click(screen.getByRole("button", { name: "Copy link to localhost:5173" }));
+    await copy();
     const notice = await screen.findByRole("dialog", { name: "Copy the link" });
     expect(notice.textContent).toContain(OPENED.open);
     Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
@@ -433,6 +437,21 @@ describe("the preview a reply comes with", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open preview of localhost:5173" }));
     await waitFor(() => expect(tab.replaced).toEqual([OPENED.open]));
     expect(calls.find((call) => call.method === "POST")?.body).toEqual({ url: offer.url });
+  });
+
+  it("opens from a press anywhere on the card, and not from one on its menu", async () => {
+    const { api, calls } = daemon({ status: () => json({ ...READY, servers: [running] }) });
+    const tab = fakeTab();
+    vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    render(<Card api={api} />);
+    await screen.findByText("localhost:5173 · Running");
+    fireEvent.click(screen.getByRole("button", { name: "More for localhost:5173" }));
+    await screen.findByRole("menuitem", { name: "Copy link" });
+    expect(calls.filter((call) => call.method === "POST")).toEqual([]);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    fireEvent.click(screen.getByText("Shop"));
+    await waitFor(() => expect(tab.replaced).toEqual([OPENED.open]));
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
   });
 
   it.each([
@@ -529,8 +548,12 @@ describe("opening an app on this Mac at the address its sign-in expects", () => 
     preview: { ...OPENED.preview, id: "m1", origin: "http://localhost:3000", local: true },
     open: "http://localhost:3000/__localdot/preview#one-use-secret",
   };
-  const mac = () =>
-    screen.getByRole("button", { name: "Open localhost:5173 at a localhost address on this Mac" });
+  const more = () => screen.getByRole("button", { name: "More for localhost:5173" });
+  // The row's menu, then its localhost item, which opens the address form.
+  const mac = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "More for localhost:5173" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open at a localhost address…" }));
+  };
 
   function touchScreen(touch: boolean) {
     vi.stubGlobal("matchMedia", (query: string) => ({
@@ -553,10 +576,9 @@ describe("opening an app on this Mac at the address its sign-in expects", () => 
     const tab = fakeTab();
     vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
     render(<Harness api={api} panel />);
-    await waitFor(() => mac());
-    fireEvent.click(mac());
-    const popover = await screen.findByRole("dialog", { name: "Open on this Mac" });
-    expect(popover.textContent).toContain("send you back only to the address registered");
+    await mac();
+    const popover = await screen.findByRole("dialog", { name: "Open at a localhost address" });
+    expect(popover.textContent).toContain("only work at their own localhost address");
     const field = within(popover).getByRole("textbox", { name: "Address on this Mac" });
     expect((field as HTMLInputElement).value).toBe("5173");
     fireEvent.change(field, { target: { value: "80" } });
@@ -578,8 +600,8 @@ describe("opening an app on this Mac at the address its sign-in expects", () => 
         true,
       ),
     );
-    fireEvent.click(mac());
-    const again = await screen.findByRole("dialog", { name: "Open on this Mac" });
+    await mac();
+    const again = await screen.findByRole("dialog", { name: "Open at a localhost address" });
     expect(
       (within(again).getByRole("textbox", { name: "Address on this Mac" }) as HTMLInputElement)
         .value,
@@ -596,8 +618,8 @@ describe("opening an app on this Mac at the address its sign-in expects", () => 
     vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
     render(<Harness api={api} panel />);
     await screen.findByText("Previews open over Tailscale");
-    fireEvent.click(mac());
-    const popover = await screen.findByRole("dialog", { name: "Open on this Mac" });
+    await mac();
+    const popover = await screen.findByRole("dialog", { name: "Open at a localhost address" });
     fireEvent.change(within(popover).getByRole("textbox"), { target: { value: "3000" } });
     fireEvent.click(within(popover).getByRole("button", { name: "Open at localhost:3000" }));
     await waitFor(() => expect(tab.replaced).toEqual([ON_MAC.open]));
@@ -615,9 +637,8 @@ describe("opening an app on this Mac at the address its sign-in expects", () => 
     const tab = fakeTab();
     vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
     render(<Harness api={api} panel />);
-    await waitFor(() => mac());
-    fireEvent.click(mac());
-    const popover = await screen.findByRole("dialog", { name: "Open on this Mac" });
+    await mac();
+    const popover = await screen.findByRole("dialog", { name: "Open at a localhost address" });
     fireEvent.change(within(popover).getByRole("textbox"), { target: { value: "3000" } });
     fireEvent.click(within(popover).getByRole("button", { name: "Open at localhost:3000" }));
     const notice = await screen.findByRole("dialog", { name: "Couldn't open the preview" });
@@ -632,11 +653,9 @@ describe("opening an app on this Mac at the address its sign-in expects", () => 
     });
     render(<Harness api={api} panel />);
     await screen.findByRole("button", { name: "Open preview of localhost:5173" });
-    expect(
-      screen.queryByRole("button", {
-        name: "Open localhost:5173 at a localhost address on this Mac",
-      }),
-    ).toBeNull();
+    fireEvent.click(more());
+    await screen.findByRole("menuitem", { name: "Copy link" });
+    expect(screen.queryByRole("menuitem", { name: "Open at a localhost address…" })).toBeNull();
     // One open on the Mac is listed, and can be closed from here, but not opened.
     const onMac = screen.getByRole("region", { name: "On this Mac" });
     expect(within(onMac).queryByRole("button", { name: "Open localhost:3000" })).toBeNull();

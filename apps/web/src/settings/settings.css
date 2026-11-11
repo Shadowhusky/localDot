@@ -870,6 +870,25 @@
   padding: calc(var(--spacing) * 2) 0 var(--spacing) calc(var(--spacing) * 10);
 }
 
+.settings-update-holders {
+  display: grid;
+  gap: calc(var(--spacing) / 2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.settings-update-holder {
+  color: var(--color-fg-1);
+}
+
+.settings-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing);
+}
+
 .settings-update-detail,
 .settings-update-error {
   margin: 0;

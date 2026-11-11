@@ -230,3 +230,49 @@ describe("completion waits for external progress", () => {
     );
   });
 });
+
+describe("a plan left unfinished when dot says done", () => {
+  const plan = (second: "todo" | "doing" | "done" | "skipped") => ({
+    items: [
+      { text: "Find the bill", status: "done" },
+      { text: "Pay it", status: second },
+    ],
+  });
+  const results = (h: ReturnType<typeof setup>) =>
+    h.events().filter((event) => event.type === "task.result");
+
+  it("is brought up to date first: done is turned back once, naming what is open", async () => {
+    const h = setup();
+    await h.call("update_plan", plan("doing"));
+    const first = await h.call("done", { summary: "Paid." });
+    expect(first.body.ok).toBe(false);
+    expect(text(first.body)).toContain('1 of 2 items unfinished ("Pay it")');
+    expect(results(h)).toEqual([]);
+    await h.call("update_plan", plan("done"));
+    expect((await h.call("done", { summary: "Paid." })).body.ok).toBe(true);
+    expect(results(h)).toHaveLength(1);
+  });
+
+  it("never holds the result back twice, and leaves a settled or blocked plan alone", async () => {
+    const stubborn = setup();
+    await stubborn.call("update_plan", plan("todo"));
+    expect((await stubborn.call("done", { summary: "Paid." })).body.ok).toBe(false);
+    expect((await stubborn.call("done", { summary: "Paid." })).body.ok).toBe(true);
+    const settled = setup();
+    await settled.call("update_plan", plan("skipped"));
+    expect(
+      (await settled.call("done", { summary: "Found it; paying was not needed." })).body.ok,
+    ).toBe(true);
+    const blocked = setup();
+    await blocked.call("update_plan", plan("todo"));
+    expect(
+      (
+        await blocked.call("done", {
+          summary: "The bank refused the card.",
+          completion: { status: "blocked", evidence: "Card declined twice" },
+          input_request: null,
+        })
+      ).body.ok,
+    ).toBe(true);
+  });
+});

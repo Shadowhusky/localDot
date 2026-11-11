@@ -395,9 +395,10 @@ test("an app whose sign-in expects its own address opens on this Mac at it", asy
   const panel = await previewsTab(page);
   const list = panel.getByRole("region", { name: "Web apps in dot's computer" });
   await expect(list.getByText("Thema (dev)")).toBeVisible();
-  const onMac = list.getByRole("button", {
-    name: "Open localhost:5173 at a localhost address on this Mac",
-  });
+  const more = list.getByRole("button", { name: "More for localhost:5173" });
+  const onMac = page.getByRole("menuitem", { name: "Open at a localhost address…" });
+  await more.click();
+  await expect(page.getByRole("menuitem", { name: "Copy link" })).toBeVisible();
   if (isPhone(page)) {
     // A phone has no way to the Mac's localhost.
     await expect(
@@ -407,8 +408,8 @@ test("an app whose sign-in expects its own address opens on this Mac at it", asy
     return;
   }
   await onMac.click();
-  const popover = page.getByRole("dialog", { name: "Open on this Mac" });
-  await expect(popover).toContainText("send you back only to the address registered for the app");
+  const popover = page.getByRole("dialog", { name: "Open at a localhost address" });
+  await expect(popover).toContainText("only work at their own localhost address");
   const field = popover.getByRole("textbox", { name: "Address on this Mac" });
   await expect(field).toHaveValue("5173");
   await field.fill("3000");

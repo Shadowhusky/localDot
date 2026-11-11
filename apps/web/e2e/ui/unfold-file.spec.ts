@@ -153,3 +153,24 @@ test("folding a file away keeps its row where it is", async ({ page, ui }) => {
   expect(await place()).toBe(before);
   await expect(row.getByRole("region", { name: "First rows of totals.csv" })).toHaveCount(0);
 });
+
+test("a file's row opens from a press at its very edge, and keeps its size while pressed", async ({
+  page,
+  ui,
+}) => {
+  test.skip(isPhone(page), "A held mouse button is how the pressed size is read.");
+  const fixture = await ui.open("running");
+  const card = await resultAtEnd(page, fixture.origin);
+  const row = card.locator('.deliverable[aria-label="totals.csv"] button.ui-file-main');
+  const box = await row.boundingBox();
+  if (!box) throw new Error("File row required");
+  // Held down a pixel inside its left edge: a row that shrank would no longer be under the pointer.
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(200);
+  const pressed = await row.boundingBox();
+  expect(pressed?.width).toBe(box.width);
+  expect(pressed?.x).toBe(box.x);
+  await page.mouse.up();
+  await expect(row).toHaveAttribute("aria-expanded", "true");
+});

@@ -171,14 +171,14 @@ export function PlanStrip({
                 </span>
               </>
             )}
-            <span className="plan-strip-count num">
-              {done} of {total}
-            </span>
             <span
               className="plan-strip-bar"
               aria-hidden="true"
               style={{ "--_done": total ? done / total : 0 } as CSSProperties}
             />
+            <span className="plan-strip-count num">
+              {done} of {total}
+            </span>
           </span>
         }
       >

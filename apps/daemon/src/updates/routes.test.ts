@@ -46,6 +46,7 @@ it("sends progress and notes only to pages that ask, as older pages refuse unkno
   appUpdateRoutes(app, new AppUpdater(null));
   const legacy = await (await app.request("/api/app-update")).json();
   expect(legacy).not.toHaveProperty("progress");
+  expect(legacy).not.toHaveProperty("holders");
   expect(legacy).not.toHaveProperty("notes");
   expect(await (await app.request("/api/app-update?v=2")).json()).toMatchObject({
     progress: null,
@@ -77,4 +78,25 @@ it("leaves notes out of the fast polls a page keeps its copy through", async () 
   const legacy = await (await app.request("/api/app-update")).json();
   expect(legacy).not.toHaveProperty("updating");
   expect(legacy).not.toHaveProperty("unsupported");
+});
+
+it("stops what holds the update back only with the shutdown confirmed, and calls a waiting update off", async () => {
+  const updater = new AppUpdater(null);
+  const stopAndUpdate = vi.spyOn(updater, "stopAndUpdate").mockResolvedValue();
+  const cancel = vi.spyOn(updater, "cancel").mockResolvedValue();
+  const app = new Hono();
+  appUpdateRoutes(app, updater);
+  const post = (path: string, body?: unknown) =>
+    app.request(path, {
+      method: "POST",
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  expect((await post("/api/app-update/stop-and-update", {})).status).toBe(400);
+  expect(stopAndUpdate).not.toHaveBeenCalled();
+  expect((await post("/api/app-update/stop-and-update", { confirmShutdown: true })).status).toBe(
+    202,
+  );
+  expect(stopAndUpdate).toHaveBeenCalledOnce();
+  expect((await post("/api/app-update/cancel")).status).toBe(200);
+  expect(cancel).toHaveBeenCalledOnce();
 });

@@ -1031,10 +1031,14 @@
       opacity var(--dur-fade) var(--ease-standard);
   }
 
-  /* What scrolls under dot's line fades into it over a long edge, never cut off at a hard one. */
+  /* What scrolls under dot's line fades into it over a long edge, never cut off at a hard one. At
+     the end of the thread the last words rest above that fade, not under it: the strip keeps the
+     fade's height clear over itself. */
   .dot-strip[data-live] {
+    --_fade: calc(var(--spacing) * 8);
     position: sticky;
     bottom: 0;
+    margin-top: var(--_fade);
     background: var(--color-void);
   }
 
@@ -1043,7 +1047,7 @@
     position: absolute;
     inset-inline: 0;
     bottom: 100%;
-    height: calc(var(--spacing) * 12);
+    height: var(--_fade);
     background: linear-gradient(
       color-mix(in srgb, var(--color-void) 0%, transparent),
       color-mix(in srgb, var(--color-void) 55%, transparent) 50%,

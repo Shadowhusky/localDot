@@ -61,6 +61,8 @@ it("does not clear fresh browser taint in the question continuation after user a
   expect((await asking).result.ok).toBe(true);
   const tainted = h.session.tainted;
   const apply = vi.spyOn(h.tools.memory, "apply");
+  // The save asks the user, who isn't there to answer.
+  h.tools.askTimeoutMs = 20;
   const remembered = await h.call("remember", {
     file: "USER.md",
     op: "append",

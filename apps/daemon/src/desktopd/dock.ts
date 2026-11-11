@@ -45,14 +45,19 @@ export function dockCovered(
 export interface DockRoutesDeps {
   cells: Pick<CellApi, "get">;
   registry: { for(cellId: string): Pick<CellDesktopd, "client"> | undefined };
+  // Whether the computer's web browser has a window: the stage's item stands in the dock only then.
+  browserRunning?(cellId: string): boolean | Promise<boolean>;
   now?(): number;
 }
 
-// Whether the computer's dock is covered, for the stage's own item in it: a yes or no, and nothing
-// of what the windows are.
+// Whether the computer's dock is covered and its web browser running, for the stage's own item in
+// it: a yes or no each, and nothing of what the windows are.
 export function dockRoutes(app: Hono, deps: DockRoutesDeps): void {
   const now = deps.now ?? Date.now;
-  const kept = new Map<string, { at: number; covered: Promise<boolean> }>();
+  const kept = new Map<
+    string,
+    { at: number; covered: Promise<boolean>; browser: Promise<boolean> }
+  >();
   app.get("/api/cells/:id/dock", async (c) => {
     const id = c.req.param("id");
     if (!ULID_PATTERN.test(id)) return c.text("invalid computer id", 400);
@@ -69,6 +74,8 @@ export function dockRoutes(app: Hono, deps: DockRoutesDeps): void {
         covered: desktopd.client
           .windows({}, AbortSignal.timeout(READ_MS))
           .then((stack) => dockCovered(stack.windows, screen)),
+        // Unknown counts as running: the item then behaves as it always has.
+        browser: Promise.resolve(deps.browserRunning?.(id) ?? true).catch(() => true),
       };
       read.covered.catch(() => {
         if (kept.get(id) === read) kept.delete(id);
@@ -77,7 +84,9 @@ export function dockRoutes(app: Hono, deps: DockRoutesDeps): void {
       reading = read;
     }
     try {
-      return c.json({ covered: await reading.covered }, 200, { "cache-control": "no-store" });
+      return c.json({ covered: await reading.covered, browser: await reading.browser }, 200, {
+        "cache-control": "no-store",
+      });
     } catch {
       return c.text("the computer's windows can't be read", 502);
     }

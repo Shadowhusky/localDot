@@ -254,16 +254,25 @@ it("keeps a download installable after its installer fails while localDot runs",
   );
   expect(await f.host.attempts.read()).toBeNull();
 });
-it("refuses installation while work is active, and shuts down independently only after explicit install", async () => {
+it("waits for active work before installing, then shuts down independently once it is clear", async () => {
   const f = fixture();
   await f.updater.check();
   f.host.installWait.mockReturnValue("Finish the task first.");
-  await expect(f.updater.install()).rejects.toThrow("Finish");
+  await f.updater.install();
+  await vi.waitFor(async () =>
+    expect(await f.updater.status()).toMatchObject({
+      updating: true,
+      waiting: "Finish the task first.",
+      error: null,
+    }),
+  );
   expect(f.host.install).not.toHaveBeenCalled();
   f.host.installWait.mockReturnValue(null);
   f.host.install.mockImplementation(() => new Promise(() => {}));
-  await f.updater.install();
+  // Asked again, as after stopping the task, it looks at once.
+  await f.updater.update();
   await vi.waitFor(async () => expect((await f.updater.status()).phase).toBe("installing"));
+  expect((await f.updater.status()).waiting).toBeNull();
   await f.updater.close(); // Must not deadlock waiting for the child that is restarting us.
 });
 it("Update now shows work at once, then checks, downloads and installs in one go", async () => {
@@ -324,16 +333,64 @@ it("a second click or device joins the update, and only one install starts", asy
   expect(f.host.install).toHaveBeenCalledTimes(1);
   expect(f.host.latest).toHaveBeenCalledTimes(1);
 });
-it("says why a working task holds Update now back, and still prepares the download", async () => {
+it("waits while a working task holds Update now, prepares the download meanwhile, and can be called off", async () => {
   const f = fixture();
   f.host.installWait.mockReturnValue("Finish or stop the task before updating localDot.");
-  await expect(f.updater.update()).rejects.toThrow("Finish or stop the task");
-  await vi.waitFor(async () => expect((await f.updater.status()).phase).toBe("ready"));
+  await f.updater.update();
+  await vi.waitFor(async () =>
+    expect(await f.updater.status()).toMatchObject({
+      phase: "ready",
+      updating: true,
+      waiting: "Finish or stop the task before updating localDot.",
+    }),
+  );
   expect(f.host.install).not.toHaveBeenCalled();
-  expect((await f.updater.status()).updating).toBe(false);
-  expect(f.host.installWait).toHaveBeenCalledWith(false);
+  await f.updater.cancel();
+  expect(await f.updater.status()).toMatchObject({
+    phase: "ready",
+    updating: false,
+    waiting: null,
+  });
+  await f.updater.close();
 });
-it("says so when a task starts during the download, and leaves the update ready", async () => {
+it("installs by itself once the task that held it finishes", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  f.host.install.mockImplementation(() => new Promise(() => {}));
+  f.host.installWait.mockReturnValue("Finish or stop the task before updating localDot.");
+  await f.updater.update();
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.waitFor(async () => expect((await f.updater.status()).waiting).not.toBeNull());
+  f.host.installWait.mockReturnValue(null);
+  await vi.advanceTimersByTimeAsync(10_000);
+  await vi.waitFor(() => expect(f.host.install).toHaveBeenCalledWith("1.1.0"));
+  vi.useRealTimers();
+});
+it("stops what holds it back only when asked to, then updates", async () => {
+  const f = fixture();
+  let holding = true;
+  const stop = vi.fn(async () => {
+    holding = false;
+  });
+  f.updater.holdersFrom(
+    () => (holding ? [{ sessionId: null, title: "Pay the bills", state: "Waiting for you" }] : []),
+    stop,
+  );
+  f.host.install.mockImplementation(() => new Promise(() => {}));
+  f.host.installWait.mockImplementation(() => (holding ? "Finish the task first." : null));
+  expect((await f.updater.status()).holders).toEqual([
+    { sessionId: null, title: "Pay the bills", state: "Waiting for you" },
+  ]);
+  await f.updater.update();
+  await vi.waitFor(async () => expect((await f.updater.status()).waiting).not.toBeNull());
+  expect(stop).not.toHaveBeenCalled();
+  await f.updater.stopAndUpdate();
+  expect(stop).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(f.host.install).toHaveBeenCalled());
+  expect((await f.updater.status()).holders).toEqual([]);
+  await f.updater.close();
+});
+it("waits, rather than failing, when a task starts during the download", async () => {
   const f = fixture();
   let downloaded: () => void = () => {};
   f.host.prepare.mockImplementation(
@@ -345,19 +402,18 @@ it("says so when a task starts during the download, and leaves the update ready"
   await f.updater.update();
   await vi.waitFor(() => expect(f.host.prepare).toHaveBeenCalled());
   f.host.prepared.mockResolvedValue(true);
-  f.host.installWait.mockImplementation((hold) =>
-    hold === false ? null : "Finish or stop the task before updating localDot.",
-  );
+  f.host.installWait.mockReturnValue("Finish or stop the task before updating localDot.");
   downloaded();
   await vi.waitFor(async () =>
     expect(await f.updater.status()).toMatchObject({
       phase: "ready",
-      updating: false,
-      error: "Finish or stop the task before updating localDot.",
-      progress: null,
+      updating: true,
+      waiting: "Finish or stop the task before updating localDot.",
+      error: null,
     }),
   );
   expect(f.host.install).not.toHaveBeenCalled();
+  await f.updater.close();
 });
 it.each([
   ["disk", "There isn't enough free disk space."],
@@ -401,9 +457,9 @@ it("holds localDot only once it is about to install, not for the download before
   const f = fixture();
   f.host.install.mockImplementation(() => new Promise(() => {}));
   await f.updater.update();
-  expect(f.host.installWait.mock.calls).toEqual([[false]]);
+  expect(f.host.installWait).not.toHaveBeenCalled();
   await vi.waitFor(() => expect(f.host.install).toHaveBeenCalled());
-  expect(f.host.installWait.mock.calls).toEqual([[false], []]);
+  expect(f.host.installWait.mock.calls).toEqual([[]]);
 });
 it("follows the installer through its stages, on one bar that never falls", async () => {
   vi.useFakeTimers();

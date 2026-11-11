@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ULID_PATTERN } from "./ids.ts";
 import { ReleaseIdentity } from "./install-update.ts";
 import { RELEASE_VERSION } from "./release.ts";
 import { RELEASE_NOTES_MAX_BYTES } from "./release-notes.ts";
@@ -123,6 +124,15 @@ export type ReleaseNote = z.infer<typeof ReleaseNote>;
 
 // Not strict, so a page keeps reading the status when a newer daemon adds to it. Pages from
 // 0.1.0-rc.31 and earlier parse it strictly; the route sends them only the fields they know.
+// What holds an install back, since localDot restarts to update: a task, named and with what it
+// is doing, or another dot's tasks (no task of this one's, so nothing here can stop them).
+export const AppUpdateHolder = z.strictObject({
+  sessionId: z.string().regex(ULID_PATTERN).nullable(),
+  title: z.string().max(200).nullable(),
+  state: z.string().max(60).nullable(),
+});
+export type AppUpdateHolder = z.infer<typeof AppUpdateHolder>;
+
 export const AppUpdateStatus = z.object({
   supported: z.boolean(),
   installOnLaunchSupported: z.boolean().default(true),
@@ -141,5 +151,9 @@ export const AppUpdateStatus = z.object({
   updating: z.boolean().default(false),
   // Why this copy can't update itself, when it can't.
   unsupported: z.enum(["source-checkout", "install-record"]).nullable().default(null),
+  // What the update the user asked for waits for before it installs, such as a task finishing.
+  waiting: z.string().max(240).nullable().default(null),
+  // The tasks that would hold an install back now.
+  holders: z.array(AppUpdateHolder).max(8).default([]),
 });
 export type AppUpdateStatus = z.infer<typeof AppUpdateStatus>;

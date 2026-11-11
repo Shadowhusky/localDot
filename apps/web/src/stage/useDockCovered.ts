@@ -4,10 +4,19 @@ import type { ApiClient } from "../lib/api.ts";
 // How often the stage asks whether a window covers the computer's dock, while it shows the desktop.
 export const DOCK_ASK_MS = 1000;
 
-// Whether an application window lies over the desktop's dock, for the stage's own item in it: null
-// until the computer has said, or while it can't, when the item keeps out of the way as if covered.
-export function useDockCovered(api: ApiClient, cellId: string | null): boolean | null {
-  const [state, setState] = useState<{ cellId: string; covered: boolean | null } | null>(null);
+export interface DockReading {
+  // An application window lies over the desktop's dock: null until the computer has said, or while
+  // it can't, when the stage's item keeps out of the way as if covered.
+  covered: boolean | null;
+  // The web browser is running, so the item has a window to bring forward: null from a computer
+  // that doesn't say, when the item stands as it always has.
+  browser: boolean | null;
+}
+const UNREAD: DockReading = { covered: null, browser: null };
+
+// What the stage's own item in the desktop's dock goes by.
+export function useDockCovered(api: ApiClient, cellId: string | null): DockReading {
+  const [state, setState] = useState<({ cellId: string } & DockReading) | null>(null);
   // An answer from before the stage last looked away says nothing of the desktop now.
   if (!cellId && state) setState(null);
   useEffect(() => {
@@ -22,15 +31,24 @@ export function useDockCovered(api: ApiClient, cellId: string | null): boolean |
       busy = true;
       reading = new AbortController();
       api
-        .get<{ covered?: unknown }>(`/api/cells/${cellId}/dock`, { signal: reading.signal })
+        .get<{ covered?: unknown; browser?: unknown }>(`/api/cells/${cellId}/dock`, {
+          signal: reading.signal,
+        })
         .then(
-          ({ covered }) => (typeof covered === "boolean" ? covered : null),
-          () => null,
+          ({ covered, browser }): DockReading => ({
+            covered: typeof covered === "boolean" ? covered : null,
+            browser: typeof browser === "boolean" ? browser : null,
+          }),
+          () => UNREAD,
         )
-        .then((covered) => {
+        .then((read) => {
           busy = false;
           if (closed) return;
-          setState({ cellId, covered });
+          setState((was) =>
+            was?.cellId === cellId && was.covered === read.covered && was.browser === read.browser
+              ? was
+              : { cellId, ...read },
+          );
           timer = setTimeout(ask, DOCK_ASK_MS);
         });
     };
@@ -46,5 +64,5 @@ export function useDockCovered(api: ApiClient, cellId: string | null): boolean |
       document.removeEventListener("visibilitychange", shown);
     };
   }, [api, cellId]);
-  return cellId && state?.cellId === cellId ? state.covered : null;
+  return cellId && state?.cellId === cellId ? state : UNREAD;
 }

@@ -26,6 +26,8 @@ const base: AppUpdateStatus = {
   notes: [{ version: "0.1.0-rc.91", markdown: "## Fixes\n\n- Better." }],
   updating: false,
   unsupported: null,
+  waiting: null,
+  holders: [],
 };
 let reload: ReturnType<typeof vi.fn>;
 beforeEach(() => {

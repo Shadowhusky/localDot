@@ -686,6 +686,25 @@ describe("what steps record", () => {
       { route: "ollama", model: "qwen" },
     ]);
   });
+  it("keeps the chosen model's name when its provider reports the same model under its own", async () => {
+    const f = setup();
+    f.hold(true);
+    const session = await f.runner.start(f.cellId, "First");
+    await until(() => f.boots.length === 1);
+    session.append("step.start", { kind: "think" }, "s1");
+    session.append("model.usage", {
+      role: "main",
+      route: "anthropic",
+      model: `${SONNET.model}-20261001`,
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    session.append("step.start", { kind: "think" }, "s2");
+    expect(f.events(session.id, "step.start").map((event) => event.data.model)).toEqual([
+      { route: "anthropic", model: SONNET.model },
+      { route: "anthropic", model: SONNET.model },
+    ]);
+  });
 });
 
 describe("side questions", () => {

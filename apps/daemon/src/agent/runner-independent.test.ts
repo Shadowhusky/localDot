@@ -355,7 +355,7 @@ describe("conversation continuity", () => {
     expect(second.tainted).toBe(true);
     const memory = new MemoryStore(h.home);
     const people = new PeopleStore(h.home);
-    const tools = { memory, people } as Partial<ToolDeps> as ToolDeps;
+    const tools = { memory, people, askTimeoutMs: 20 } as Partial<ToolDeps> as ToolDeps;
     const call = async (name: string, input: unknown) =>
       (await dispatchTool({ tools, policy: actPolicy }, second, name, ulid(), input, redactor([])))
         .result;
@@ -366,7 +366,7 @@ describe("conversation continuity", () => {
     });
     expect(remembered).toMatchObject({
       ok: false,
-      content: [{ text: expect.stringContaining("Memory can only be saved") }],
+      content: [{ text: expect.stringContaining("did not answer") }],
     });
     const saved = await call("people", {
       op: "save",

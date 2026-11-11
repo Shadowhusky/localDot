@@ -226,6 +226,25 @@ export async function askUserTool(
           : `The user skipped the question.\n${SKIPPED}`;
   return { ok: true, content: [text(ctx.redact(said))] };
 }
+// A question localDot itself puts to the user, with set answers: the one picked by its place, or
+// what dot is told when none was (a message instead, a pause, no answer in time, own words).
+export async function askChoice(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+  question: string,
+  options: readonly string[],
+): Promise<number | ToolResult> {
+  ctx.check();
+  const form = plainForm({ question, options: [...options], recommended: 0 }, ctx.redact);
+  const timeoutMs = askTimeoutMs(deps, ctx);
+  const answer = await ctx.session.askFields(form, timeoutMs, ctx.step, ctx.generation, ctx.signal);
+  ctx.check();
+  const early = unanswered(ctx.session, answer, timeoutMs);
+  if (early) return early;
+  const given = answer.fields?.[ASK_ANSWER_ID];
+  const picked = typeof given === "string" ? (form.fields[0]?.options ?? []).indexOf(given) : -1;
+  return picked >= 0 ? picked : options.length - 1;
+}
 // A question answered per field. Secret answers are typed into the fields dot named and come back
 // to the model only as { provided: true }; a field that moved meanwhile gets nothing typed.
 async function askFields(

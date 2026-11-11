@@ -478,7 +478,8 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
           front={front}
           holding={manualActive}
           engine={browserEngine}
-          covered={dockCovered}
+          covered={dockCovered.covered}
+          running={dockCovered.browser}
         />
       )}
       {mode === "live" && connection && (

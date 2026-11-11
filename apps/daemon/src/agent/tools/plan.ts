@@ -17,6 +17,8 @@ export function updatePlanTool(ctx: ToolCallContext, input: UpdatePlanInput): To
     next.length === session.plan.length &&
     next.every((item, i) => item.text === session.plan[i]?.text);
   if (!same) {
+    // A new plan is asked about afresh when the task finishes.
+    session.planReminded = false;
     append(ctx, "plan.set", { items: next });
   } else {
     next.forEach((item, i) => {

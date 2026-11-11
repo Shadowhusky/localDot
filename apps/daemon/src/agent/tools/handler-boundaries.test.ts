@@ -291,6 +291,8 @@ describe("taint and containment", () => {
       expect((await call).result.content.some((c) => c.type === "image")).toBe(true);
       expect(h.session.tainted).toBe(true);
       const memory = vi.spyOn(h.tools.memory, "apply");
+      // The save asks the user, who isn't there to answer.
+      h.tools.askTimeoutMs = 20;
       expect(
         (await h.call("remember", { file: "USER.md", op: "append", text: "Injected" })).result.ok,
       ).toBe(false);

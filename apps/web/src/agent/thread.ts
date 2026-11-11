@@ -1,5 +1,5 @@
 import type { PremiumSpeed, SessionOrigin } from "@localdot/protocol";
-import { microsToMs, ULID_PATTERN, ulidTime } from "@localdot/protocol";
+import { microsToMs, sameRunningModel, ULID_PATTERN, ulidTime } from "@localdot/protocol";
 import type { KeyUseRowView, TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import {
@@ -719,8 +719,7 @@ export function withModelChanges(items: readonly ThreadItem[]): ThreadItem[] {
   return items.map((item) => {
     if (item.kind !== "work") return item;
     const first = item.steps.find((step) => step.model)?.model;
-    const changed =
-      first && last && (first.route !== last.route || first.model !== last.model) ? first : null;
+    const changed = first && last && !sameRunningModel(first, last) ? first : null;
     last = item.steps.findLast((step) => step.model)?.model ?? last;
     return changed ? { ...item, changedTo: changed } : item;
   });

@@ -155,6 +155,13 @@ export class LiveSessions {
     return on.at(-1);
   }
 
+  // Everything that keeps a computer busy: its live tasks, and the one it is put down to.
+  holding(cellId: string): string[] {
+    const alias = this.#aliases.get(cellId);
+    const on = this.sessionsOn(cellId);
+    return alias && !on.includes(alias) ? [...on, alias] : on;
+  }
+
   // The computer's live tasks, oldest first.
   sessionsOn(cellId: string): string[] {
     return [...this.#bySession]
