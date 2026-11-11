@@ -1028,7 +1028,12 @@ const app = createApp({
   browserStatus: { cells: orchestrator, browser, report: (message) => console.error(message) },
   browserEngine: browser,
   ui: { dir: webDir("dist") },
-  dock: { cells: orchestrator, registry },
+  dock: {
+    cells: orchestrator,
+    registry,
+    browserRunning: async (id) =>
+      ["ready", "starting", "restarting"].includes((await browser.status(id)).state),
+  },
   gateway: {
     registry,
     clock,

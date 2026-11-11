@@ -75,6 +75,7 @@ export function BrowserWindow({
   holding,
   engine,
   covered,
+  running = null,
 }: {
   // What is in front.
   screen: ScreenName;
@@ -86,8 +87,11 @@ export function BrowserWindow({
   engine?: BrowserEngineName;
   // A desktop window lies over the dock; null while the computer hasn't said.
   covered: boolean | null;
+  // The web browser isn't running when false: its dock item then has no window to bring forward.
+  running?: boolean | null;
 }) {
   const open = screen === "browser";
+  const docked = !!front && (open || front.dot === "browser" || running !== false);
   const name = browserName(engine);
   const crossed = useRef(screen);
   useEffect(() => {
@@ -150,7 +154,7 @@ export function BrowserWindow({
             <span className="browser-title">{name}</span>
           </div>
         )}
-        {front && (
+        {front && docked && (
           <div
             className="browser-dock"
             data-shown={!dodging || raised ? "" : undefined}
@@ -184,7 +188,7 @@ export function BrowserWindow({
             {tooltip}
           </div>
         )}
-        {front && dodging && (
+        {front && docked && dodging && (
           <div
             className="browser-dock-edge"
             aria-hidden="true"

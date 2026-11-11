@@ -50,12 +50,15 @@ const fakeTimers = () =>
   });
 
 // `dock.covered`: what the computer says of its dock; null, that it can't say.
-function daemon(dock: { covered: boolean | null } = { covered: false }) {
+function daemon(dock: { covered: boolean | null; browser?: boolean } = { covered: false }) {
   const fetchImpl = vi.fn<typeof fetch>(async (input) => {
     if (String(input).endsWith("/dock"))
       return dock.covered === null
         ? new Response("the computer's windows can't be read", { status: 502 })
-        : Response.json({ covered: dock.covered });
+        : Response.json({
+            covered: dock.covered,
+            ...(dock.browser === undefined ? {} : { browser: dock.browser }),
+          });
     const browser = String(input).includes("browser-stream-ticket");
     const id = browser ? BROWSER : DESKTOP;
     const path = `/cells/${id}/${browser ? "browser" : "desktop"}/${"T".repeat(22)}/`;
@@ -179,6 +182,21 @@ describe("the stage's one screen", () => {
     const asked = (fetchImpl: ReturnType<typeof daemon>["fetchImpl"]) =>
       fetchImpl.mock.calls.filter(([url]) => String(url).endsWith(`/api/cells/${DESKTOP}/dock`))
         .length;
+
+    it("stands in the dock only while the web browser runs, as an item with a window to bring forward", async () => {
+      const dock: { covered: boolean | null; browser?: boolean } = {
+        covered: false,
+        browser: false,
+      };
+      const { api } = daemon(dock);
+      fakeTimers();
+      desktopFront(api);
+      await act(() => vi.advanceTimersByTimeAsync(10));
+      expect(document.querySelector(".browser-dock")).toBeNull();
+      dock.browser = true;
+      await act(() => vi.advanceTimersByTimeAsync(DOCK_ASK_MS + 10));
+      await waitFor(() => expect(shown()).toBe(true));
+    });
 
     it("stays up over an empty dock, and out of the way of a window over it", async () => {
       const dock = { covered: false as boolean | null };

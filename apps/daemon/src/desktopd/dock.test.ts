@@ -80,9 +80,26 @@ describe("GET /api/cells/:id/dock", () => {
     const { ask, read } = setup(covered);
     const reply = await ask();
     expect(reply.status).toBe(200);
-    expect(await reply.json()).toEqual({ covered: true });
+    expect(await reply.json()).toEqual({ covered: true, browser: true });
     expect(reply.headers.get("cache-control")).toBe("no-store");
     expect(read).toHaveBeenCalledWith({}, expect.any(AbortSignal));
+  });
+
+  it("says whether the web browser runs, and takes it as running when that can't be told", async () => {
+    for (const [running, said] of [
+      [() => false, false],
+      [() => true, true],
+      [() => Promise.reject(new Error("unknown")), true],
+    ] as const) {
+      const app = new Hono();
+      dockRoutes(app, {
+        cells: { get: () => cell() },
+        registry: { for: () => ({ client: { windows: covered } as never }) },
+        browserRunning: running,
+      });
+      const reply = await app.request(`/api/cells/${id}/dock`);
+      expect(await reply.json()).toEqual({ covered: true, browser: said });
+    }
   });
 
   it("reads the windows once for every viewer asking within a moment", async () => {
