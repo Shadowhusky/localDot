@@ -472,14 +472,20 @@ describe.skipIf(process.platform !== "darwin")("the in-app update, installed", (
     f.version = 91;
     f.control("busy", "Finish or stop the task before updating localDot.");
     const services = readFileSync(join(f.root, "h/launchctl.log"), "utf8");
-    const answer = await f.post("update", CONFIRM);
-    expect(answer).toEqual({
-      status: 409,
-      text: "Finish or stop the task before updating localDot.",
-    });
-    await f.reached((status) => status.phase === "ready");
+    // Asked for, the update gets ready and waits for the task; it is not refused.
+    expect((await f.post("update", CONFIRM)).status).toBe(202);
+    await f.reached(
+      (status) =>
+        status.phase === "ready" &&
+        status.updating &&
+        status.waiting === "Finish or stop the task before updating localDot.",
+    );
     expect(f.running()).toBe(version(90));
     expect(readFileSync(join(f.root, "h/launchctl.log"), "utf8")).toBe(services);
+    // Called off, it stays downloaded and nothing is under way.
+    expect((await f.post("cancel", {})).status).toBe(200);
+    await f.reached((status) => status.phase === "ready" && !status.updating && !status.waiting);
+    expect(f.running()).toBe(version(90));
   }, 120_000);
 
   it("takes a second click and a second device as the same update", async () => {
