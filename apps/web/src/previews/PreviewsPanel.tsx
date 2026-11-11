@@ -12,7 +12,7 @@ import { EmptyState } from "../ui/EmptyState.tsx";
 import { Group, GroupHead, GroupRow } from "../ui/Group.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { TOUCH, useMediaQuery } from "../ui/media.ts";
-import { macAddress, OpenOnMac } from "./OpenOnMac.tsx";
+import { macAddress, PreviewActions } from "./OpenOnMac.tsx";
 import { type Previews, requestKey, unavailable, usePreviews } from "./PreviewsContext.tsx";
 import "../ui/previews.css";
 
@@ -214,13 +214,7 @@ function AppRow({ app, previews }: { app: App; previews: Previews }) {
       }
       trailing={
         <>
-          <IconButton
-            icon="copy"
-            label={`Copy link to ${address}`}
-            aria-busy={previews.pending.has(`copy ${requestKey(request)}`) || undefined}
-            onClick={(event) => previews.copy(request, event.currentTarget)}
-          />
-          <OpenOnMac
+          <PreviewActions
             previews={previews}
             request={request}
             target={target}
@@ -228,14 +222,6 @@ function AppRow({ app, previews }: { app: App; previews: Previews }) {
             app={server.project ?? title ?? address}
             port={server.port}
           />
-          <Button
-            size="sm"
-            aria-label={`Open preview of ${address}`}
-            busy={previews.pending.has(requestKey(request))}
-            onClick={(event) => previews.open(request, event.currentTarget)}
-          >
-            Open
-          </Button>
           {/* A *.localhost site is a name on a port its proxy serves: stopping it would stop them all. */}
           {"port" in request && (
             <IconButton

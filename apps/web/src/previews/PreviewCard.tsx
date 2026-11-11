@@ -1,11 +1,9 @@
 import type { ResultPreview } from "@localdot/protocol";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { AgentResult } from "../agent/model.ts";
-import { Button } from "../ui/Button.tsx";
 import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
-import { IconButton } from "../ui/IconButton.tsx";
-import { macAddress, OpenOnMac, openOnMac } from "./OpenOnMac.tsx";
-import { type Previews, requestKey, usePreviews } from "./PreviewsContext.tsx";
+import { macAddress, openOnMac, PreviewActions } from "./OpenOnMac.tsx";
+import { type Previews, usePreviews } from "./PreviewsContext.tsx";
 import "../ui/previews.css";
 
 // Each app once, on the newest reply that offers it: a later turn's card takes an earlier one's place,
@@ -65,11 +63,13 @@ const WORDS: Record<CardState, string> = {
   unknown: "Can't be checked right now",
 };
 
-// A web app a reply comes with, one tap from opening on this device.
+// A web app a reply comes with, one tap from opening on this device: the whole card opens it, as
+// its Open button does, and what is asked for less often waits in its menu.
 export function PreviewCard({ offer }: { offer: ResultPreview }) {
   const previews = usePreviews();
   const watch = previews?.watch;
   useEffect(() => watch?.(), [watch]);
+  const opener = useRef<HTMLButtonElement>(null);
   if (!previews) return null;
   const state = offerState(offer, previews);
   const request = { url: offer.url };
@@ -77,7 +77,21 @@ export function PreviewCard({ offer }: { offer: ResultPreview }) {
   const opens = state === "running" || state === "quiet" || state === "checking";
   const onMac = opens ? openOnMac(previews, offer.url) : undefined;
   return (
-    <Group className="preview-card" data-state={state}>
+    <Group
+      className="preview-card"
+      data-state={state}
+      data-opens={opens ? "" : undefined}
+      onClick={(event) => {
+        // A press on the card itself, not on a control in it or on what a control opened.
+        const pressed = event.target as Element;
+        if (
+          opens &&
+          event.currentTarget.contains(pressed) &&
+          !pressed.closest("button, a, input, [role='menu'], [role='dialog']")
+        )
+          opener.current?.click();
+      }}
+    >
       <GroupRow
         leading={<IconTile icon="app-window" />}
         label={offer.title ?? address}
@@ -90,30 +104,15 @@ export function PreviewCard({ offer }: { offer: ResultPreview }) {
           .join(" · ")}
         trailing={
           opens && (
-            <>
-              <IconButton
-                icon="copy"
-                label={`Copy link to ${address}`}
-                aria-busy={previews.pending.has(`copy ${requestKey(request)}`) || undefined}
-                onClick={(event) => previews.copy(request, event.currentTarget)}
-              />
-              <OpenOnMac
-                previews={previews}
-                request={request}
-                target={offer.url}
-                address={address}
-                app={offer.project ?? offer.title ?? address}
-                port={offer.port}
-              />
-              <Button
-                size="sm"
-                aria-label={`Open preview of ${address}`}
-                busy={previews.pending.has(requestKey(request))}
-                onClick={(event) => previews.open(request, event.currentTarget)}
-              >
-                Open
-              </Button>
-            </>
+            <PreviewActions
+              previews={previews}
+              request={request}
+              target={offer.url}
+              address={address}
+              app={offer.project ?? offer.title ?? address}
+              port={offer.port}
+              opener={opener}
+            />
           )
         }
       />

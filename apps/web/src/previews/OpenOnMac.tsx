@@ -1,8 +1,9 @@
 import type { PreviewItem, PreviewRequest } from "@localdot/protocol";
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, type RefObject, useRef, useState } from "react";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { TOUCH, useMediaQuery } from "../ui/media.ts";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
 import { TextField } from "../ui/TextField.tsx";
@@ -41,102 +42,165 @@ export function openOnMac(previews: Previews, target: string): PreviewItem | und
 
 export const macAddress = (preview: PreviewItem) => preview.origin.replace(/^https?:\/\//, "");
 
-// Opens an app on this Mac at http://localhost:<port>, the address its sign-in provider has
-// registered, rather than at the preview's tailnet address, which such a provider refuses. A phone
-// has no way to the Mac's localhost, so it isn't offered there.
-export function OpenOnMac({
+// Opens an app on this Mac at http://localhost:<port>, the address its own sign-in or settings
+// expect, rather than at the preview's tailnet address. A phone has no way to the Mac's localhost,
+// so the card doesn't offer it there.
+export function LocalAddress({
+  previews,
+  request,
+  target,
+  app,
+  port,
+  open,
+  onClose,
+  anchor,
+}: {
+  previews: Previews;
+  request: PreviewRequest;
+  // The server's address as previews name it, such as http://localhost:5173/.
+  target: string;
+  // What names the app from one start to the next: its folder, else its title.
+  app: string;
+  port: number;
+  open: boolean;
+  onClose(): void;
+  anchor: RefObject<HTMLButtonElement | null>;
+}) {
+  const [text, setText] = useState("");
+  const [tried, setTried] = useState(false);
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      const there = openOnMac(previews, target);
+      const start =
+        (there && Number(new URL(there.origin).port)) ||
+        remembered(app) ||
+        (port >= LOWEST ? port : 3000);
+      setText(String(start));
+      setTried(false);
+    }
+  }
+  const chosen = portOf(text);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    setTried(true);
+    if (!chosen || !anchor.current) return;
+    remember(app, chosen);
+    onClose();
+    previews.open({ ...request, local: chosen }, anchor.current);
+  };
+
+  return (
+    <Popover
+      open={open}
+      onClose={onClose}
+      anchor={anchor}
+      side="bottom"
+      align="end"
+      title="Open at a localhost address"
+      className="preview-mac"
+    >
+      <p className="preview-notice-text">
+        Some apps only work at their own localhost address, such as one whose sign-in sends you back
+        there. This opens the app at that address on this Mac.
+      </p>
+      <form className="preview-mac-form" onSubmit={submit} noValidate>
+        <Field
+          label="Address on this Mac"
+          error={tried && !chosen ? "Use a port from 1024 to 65535." : undefined}
+        >
+          <TextField
+            prefix="localhost:"
+            inputMode="numeric"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={5}
+            value={text}
+            onChange={(event) => setText(event.currentTarget.value)}
+          />
+        </Field>
+        <div className="preview-notice-actions">
+          <Button type="submit" size="sm" variant="primary">
+            {chosen ? `Open at localhost:${chosen}` : "Open"}
+          </Button>
+        </div>
+      </form>
+    </Popover>
+  );
+}
+
+// What a preview's row offers: Open, the one thing most presses want, and a menu for the rest.
+export function PreviewActions({
   previews,
   request,
   target,
   address,
   app,
   port,
+  opener,
 }: {
   previews: Previews;
   request: PreviewRequest;
-  // The server's address as previews name it, such as http://localhost:5173/.
   target: string;
   // As the row shows it.
   address: string;
-  // What names the app from one start to the next: its folder, else its title.
   app: string;
   port: number;
+  // The Open button, for a row that opens on a press anywhere in it.
+  opener?: RefObject<HTMLButtonElement | null>;
 }) {
   const touch = useMediaQuery(TOUCH);
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
-  const [tried, setTried] = useState(false);
-  const button = useRef<HTMLButtonElement>(null);
-  if (touch) return null;
-  const chosen = portOf(text);
-  const asked = { ...request, local: chosen ?? 0 };
-
-  const show = () => {
-    const there = openOnMac(previews, target);
-    const start =
-      (there && Number(new URL(there.origin).port)) ||
-      remembered(app) ||
-      (port >= LOWEST ? port : 3000);
-    setText(String(start));
-    setTried(false);
-    setOpen(true);
-  };
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    setTried(true);
-    if (!chosen || !button.current) return;
-    remember(app, chosen);
-    setOpen(false);
-    previews.open({ ...request, local: chosen }, button.current);
-  };
-
+  const more = useRef<HTMLButtonElement>(null);
+  const [menu, setMenu] = useState(false);
+  const [local, setLocal] = useState(false);
   return (
     <>
       <IconButton
-        ref={button}
-        icon="monitor"
-        label={`Open ${address} at a localhost address on this Mac`}
-        aria-busy={(chosen !== undefined && previews.pending.has(requestKey(asked))) || undefined}
-        {...triggerProps("dialog", open)}
-        onClick={() => (open ? setOpen(false) : show())}
+        ref={more}
+        icon="more-horizontal"
+        label={`More for ${address}`}
+        aria-busy={previews.pending.has(`copy ${requestKey(request)}`) || undefined}
+        {...triggerProps("menu", menu)}
+        onClick={() => setMenu((was) => !was)}
       />
-      <Popover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchor={button}
+      <Menu
+        open={menu}
+        onClose={() => setMenu(false)}
+        anchor={more}
         side="bottom"
         align="end"
-        title="Open on this Mac"
-        className="preview-mac"
+        label={`More for ${address}`}
       >
-        <p className="preview-notice-text">
-          Sign-in services such as WorkOS, Auth0 and Google send you back only to the address
-          registered for the app. Open it at that address here, and signing in works.
-        </p>
-        <form className="preview-mac-form" onSubmit={submit} noValidate>
-          <Field
-            label="Address on this Mac"
-            description="Only on this Mac, where the app shares localhost with your other servers."
-            error={tried && !chosen ? "Use a port from 1024 to 65535." : undefined}
-          >
-            <TextField
-              prefix="localhost:"
-              inputMode="numeric"
-              autoComplete="off"
-              spellCheck={false}
-              maxLength={5}
-              value={text}
-              onChange={(event) => setText(event.currentTarget.value)}
-            />
-          </Field>
-          <div className="preview-notice-actions">
-            <Button type="submit" size="sm" variant="primary">
-              {chosen ? `Open at localhost:${chosen}` : "Open"}
-            </Button>
-          </div>
-        </form>
-      </Popover>
+        <MenuItem icon="copy" onSelect={() => more.current && previews.copy(request, more.current)}>
+          Copy link
+        </MenuItem>
+        {!touch && (
+          <MenuItem icon="monitor" onSelect={() => setLocal(true)}>
+            Open at a localhost address…
+          </MenuItem>
+        )}
+      </Menu>
+      <LocalAddress
+        previews={previews}
+        request={request}
+        target={target}
+        app={app}
+        port={port}
+        open={local}
+        onClose={() => setLocal(false)}
+        anchor={more}
+      />
+      <Button
+        ref={opener}
+        size="sm"
+        aria-label={`Open preview of ${address}`}
+        busy={previews.pending.has(requestKey(request))}
+        onClick={(event) => previews.open(request, event.currentTarget)}
+      >
+        Open
+      </Button>
     </>
   );
 }

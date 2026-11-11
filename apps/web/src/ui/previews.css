@@ -54,6 +54,17 @@
     margin-top: calc(var(--spacing) * 2);
   }
 
+  /* The whole card opens its preview, so it answers the pointer as one thing. */
+  .preview-card[data-opens] {
+    cursor: pointer;
+  }
+
+  @media (hover: hover) {
+    .preview-card[data-opens]:hover:not(:has(button:hover)) {
+      background-color: var(--color-state-hover);
+    }
+  }
+
   .preview-card[data-state="stopped"] .ui-group-row-label,
   .preview-card[data-state="off"] .ui-group-row-label {
     color: var(--color-fg-2);
