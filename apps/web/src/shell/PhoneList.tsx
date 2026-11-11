@@ -554,9 +554,6 @@ export function PhoneList({
     >
       <div ref={bar} className="phone-bar phone-list-bar">
         <div className="phone-bar-glass" />
-        <div className="phone-list-inline-title" aria-hidden="true">
-          Conversations
-        </div>
         <div className="phone-bar-row phone-list-bar-row">
           {selection.selecting ? (
             <SelectAll
@@ -596,37 +593,42 @@ export function PhoneList({
               </Menu>
             </>
           )}
-          {!guest && (selection.selecting || all.length > 0) && (
-            <Button
-              ref={selectToggle}
-              variant="quiet"
-              className="phone-select"
-              onClick={() => (selection.selecting ? selection.stop() : selection.start())}
-            >
-              {selection.selecting ? "Cancel" : "Select"}
-            </Button>
-          )}
-          {!selection.selecting && onOverview && (
-            <IconButton
-              size={36}
-              round
-              icon="layout-dashboard"
-              label="Overview"
-              className="phone-overview"
-              onClick={onOverview}
-            />
-          )}
-          {!selection.selecting && (
-            <IconButton
-              size={36}
-              round
-              variant="filled"
-              icon="compose"
-              label="New conversation"
-              disabledReason={newReason}
-              onClick={onNew}
-            />
-          )}
+          <div className="phone-list-inline-title" aria-hidden="true">
+            Conversations
+          </div>
+          <div className="phone-list-bar-end">
+            {!guest && (selection.selecting || all.length > 0) && (
+              <Button
+                ref={selectToggle}
+                variant="quiet"
+                className="phone-select"
+                onClick={() => (selection.selecting ? selection.stop() : selection.start())}
+              >
+                {selection.selecting ? "Cancel" : "Select"}
+              </Button>
+            )}
+            {!selection.selecting && onOverview && (
+              <IconButton
+                size={36}
+                round
+                icon="layout-dashboard"
+                label="Overview"
+                className="phone-overview"
+                onClick={onOverview}
+              />
+            )}
+            {!selection.selecting && (
+              <IconButton
+                size={36}
+                round
+                variant="filled"
+                icon="compose"
+                label="New conversation"
+                disabledReason={newReason}
+                onClick={onNew}
+              />
+            )}
+          </div>
         </div>
       </div>
       <div className="phone-list-scroll" onScroll={onScroll}>
