@@ -434,3 +434,28 @@ test.describe("the keyboard", () => {
     await shot(page, ui, "slash");
   });
 });
+
+test("at the end of the thread, the last words rest above the fade over dot's line", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("running");
+  await page.request.post(`${fixture.origin}/__qa/say?n=14&text=History%20message`);
+  const strip = page.locator(".dot-strip[data-live]");
+  await expect(strip).toBeVisible();
+  const view = page.locator(".thread-scroll");
+  await view.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await ui.settle();
+  const gap = await strip.evaluate((node) => {
+    const fade = Number.parseFloat(getComputedStyle(node, "::before").height);
+    const top = node.getBoundingClientRect().top;
+    const above = [...document.querySelectorAll<HTMLElement>(".phone-thread .thread-message")]
+      .map((message) => message.getBoundingClientRect().bottom)
+      .filter((bottom) => bottom <= top + 1);
+    return { fade, clear: top - Math.max(...above) };
+  });
+  expect(gap.fade).toBeGreaterThan(0);
+  expect(gap.clear).toBeGreaterThanOrEqual(gap.fade);
+});
