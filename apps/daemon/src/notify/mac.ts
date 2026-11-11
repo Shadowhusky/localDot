@@ -6,7 +6,8 @@ export type MacResult = "shown" | "failed" | "unavailable";
 // This computer's own banner: macOS Notification Center, or a Linux desktop's notifications.
 export interface MacNotifier {
   readonly available: boolean;
-  show(title: string, body: string): Promise<MacResult>;
+  // link: where a click on the banner takes the person, where the banner can open one.
+  show(title: string, body: string, link?: string): Promise<MacResult>;
 }
 
 export type ExecFile = (
@@ -41,7 +42,7 @@ export function macNotifier(
   const notifier = bannerCommand({
     available: (opts.platform ?? process.platform) === "darwin",
     file: join(bundle, "Contents/MacOS/localdot-notify"),
-    args: (title, body) => [title, body],
+    args: (title, body, link) => (link ? [title, body, link] : [title, body]),
     env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME, LANG: "en_US.UTF-8" },
     failure:
       "localDot notifications are unavailable; allow localDot in macOS System Settings > Notifications",
@@ -50,7 +51,7 @@ export function macNotifier(
   });
   return {
     available: notifier.available,
-    async show(title, body) {
+    async show(title, body, link) {
       if (!notifier.available) return "unavailable";
       registration ??= new Promise((resolve) => {
         run(
@@ -68,7 +69,7 @@ export function macNotifier(
         registration = undefined;
         return "failed";
       }
-      return notifier.show(title, body);
+      return notifier.show(title, body, link);
     },
   };
 }
@@ -77,7 +78,7 @@ export function macNotifier(
 export function bannerCommand(opts: {
   available: boolean;
   file: string;
-  args: (title: string, body: string) => string[];
+  args: (title: string, body: string, link?: string) => string[];
   env: NodeJS.ProcessEnv;
   failure: string;
   timeout?: number;
@@ -90,13 +91,13 @@ export function bannerCommand(opts: {
   const recent: number[] = [];
   return {
     available,
-    show(title, body) {
+    show(title, body, link) {
       if (!available) return Promise.resolve("unavailable");
       const at = now();
       while (recent.length && (recent[0] ?? 0) <= at - 60_000) recent.shift();
       if (recent.length >= PER_MINUTE) return Promise.resolve("failed");
       recent.push(at);
-      const args = opts.args(cleanLine(title, 64) || "localDot", cleanLine(body, 160) || " ");
+      const args = opts.args(cleanLine(title, 64) || "localDot", cleanLine(body, 160) || " ", link);
       return new Promise((resolve) => {
         run(
           opts.file,

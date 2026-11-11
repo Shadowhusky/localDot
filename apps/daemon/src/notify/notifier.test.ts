@@ -27,6 +27,7 @@ function fixture(
   let current: AttentionItem | undefined;
   const published: AttentionChangeEvent[] = [];
   const banners: [string, string][] = [];
+  const links: (string | undefined)[] = [];
   const pushes: unknown[] = [];
   const options: unknown[] = [];
   const notifier = new Notifier({
@@ -42,8 +43,9 @@ function fixture(
     store: { settings: () => DEFAULT_NOTIFY_SETTINGS },
     mac: {
       available: ownBanner,
-      show: async (title, body) => {
+      show: async (title, body, link) => {
         banners.push([title, body]);
+        links.push(link);
         return ownBanner ? "shown" : "unavailable";
       },
     },
@@ -58,12 +60,13 @@ function fixture(
     publish: (event) => published.push(event),
     now: () => new Date("2026-10-08T11:00:00Z"),
     timeZone: () => "Europe/London",
+    link: (sessionId) => `http://localhost:4750/#session=${sessionId}`,
   });
   const emit = (next: AttentionItem | undefined, change = next) => {
     current = next;
     if (change) for (const listener of listeners) listener(change);
   };
-  return { notifier, emit, published, banners, pushes, options };
+  return { notifier, emit, published, banners, links, pushes, options };
 }
 
 beforeEach(() => {
@@ -115,6 +118,7 @@ describe("Notifier", () => {
     f.emit(item("approval:a:1:1"));
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
     expect(f.banners).toEqual([["dot needs you", "Pay the electricity bill"]]);
+    expect(f.links).toEqual([`http://localhost:4750/#session=${SESSION}`]);
     expect(f.published.map((e) => e.page)).toEqual([false]);
     expect(f.pushes).toHaveLength(1);
   });

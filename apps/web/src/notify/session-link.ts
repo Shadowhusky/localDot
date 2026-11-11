@@ -14,15 +14,33 @@ export function takeSessionLink(host: SessionLinkHost = window): string | null {
   return ULID_PATTERN.test(id) ? id : null;
 }
 
-// Calls open for every notification tap: a new window's fragment, a fragment change, or the
-// service worker telling an already open window which task to show.
+interface LaunchQueue {
+  setConsumer(consumer: (params: { targetURL?: string }) => void): void;
+}
+
+// The task a link names, as "#session=<id>".
+function sessionOf(link: string): string | null {
+  if (!URL.canParse(link)) return null;
+  const id = new URLSearchParams(new URL(link).hash.replace(/^#/, "")).get("session");
+  return id !== null && ULID_PATTERN.test(id) ? id : null;
+}
+
+// Calls open for every notification tap: a new window's fragment, a fragment change, the service
+// worker telling an already open window which task to show, or a link from this Mac's banner that
+// the installed app takes in its open window.
 export function listenForSessionLinks(
   open: (sessionId: string) => void,
   host: SessionLinkHost & Pick<Window, "addEventListener" | "removeEventListener"> = window,
   worker:
     | Pick<ServiceWorkerContainer, "addEventListener" | "removeEventListener">
     | undefined = navigator.serviceWorker,
+  launches: LaunchQueue | undefined = (window as { launchQueue?: LaunchQueue }).launchQueue,
 ): () => void {
+  let listening = true;
+  launches?.setConsumer(({ targetURL }) => {
+    const id = listening && targetURL ? sessionOf(targetURL) : null;
+    if (id) open(id);
+  });
   const fromHash = () => {
     const id = takeSessionLink(host);
     if (id) open(id);
@@ -40,6 +58,7 @@ export function listenForSessionLinks(
   worker?.addEventListener("message", fromWorker);
   fromHash();
   return () => {
+    listening = false;
     host.removeEventListener("hashchange", fromHash);
     worker?.removeEventListener("message", fromWorker);
   };

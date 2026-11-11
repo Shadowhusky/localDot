@@ -35,4 +35,21 @@ describe("task links", () => {
     expect(open).toHaveBeenCalledTimes(3);
     stop();
   });
+
+  it("opens the task a banner's link names in the window the installed app already has", () => {
+    const open = vi.fn();
+    let consumer: ((params: { targetURL?: string }) => void) | undefined;
+    const stop = listenForSessionLinks(open, window, undefined, {
+      setConsumer: (given) => {
+        consumer = given;
+      },
+    });
+    consumer?.({ targetURL: `http://127.0.0.1:4750/#session=${SESSION}` });
+    consumer?.({ targetURL: "http://127.0.0.1:4750/#session=nope" });
+    consumer?.({ targetURL: "http://127.0.0.1:4750/" });
+    expect(open).toHaveBeenCalledExactlyOnceWith(SESSION);
+    stop();
+    consumer?.({ targetURL: `http://127.0.0.1:4750/#session=${SESSION}` });
+    expect(open).toHaveBeenCalledOnce();
+  });
 });

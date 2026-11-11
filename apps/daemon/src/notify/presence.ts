@@ -40,9 +40,19 @@ export class PresenceBoard {
     });
   }
 
-  connect(local: boolean): { update(presence: ClientPresence): void; close(): void } {
+  #localOrigin: string | undefined;
+  // The address this Mac's own page was last opened at, where a banner's click goes.
+  localOrigin(): string | undefined {
+    return this.#localOrigin;
+  }
+
+  connect(
+    local: boolean,
+    origin?: string,
+  ): { update(presence: ClientPresence): void; close(): void } {
     const client: Client = { local, visible: false, canNotify: false };
     this.#clients.add(client);
+    if (local && origin) this.#localOrigin = origin;
     return {
       update: (presence) => {
         client.visible = presence.visible;

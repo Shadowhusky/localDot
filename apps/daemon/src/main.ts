@@ -533,6 +533,7 @@ const notify = createNotify({
   eventLog,
   keyd: new KeydClient(keydSocketPath(home), 15_000),
   events: appEvents,
+  origin: `http://127.0.0.1:${port}`,
   ...(process.env.LOCALDOT_NOTIFY_MAC === "off"
     ? { mac: { available: false, show: async () => "unavailable" as const } }
     : {}),

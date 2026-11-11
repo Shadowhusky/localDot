@@ -51,7 +51,7 @@ export function appEventsRoute(events: AppEvents, presence?: PresenceBoard): Upg
       const local = LOOPBACK_HOST.test(host) && req.headers.origin === `http://${host}`;
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.on("error", () => {});
-        const seen = presence?.connect(local);
+        const seen = presence?.connect(local, local ? `http://${host}` : undefined);
         const unsubscribe = events.subscribe((event) => {
           // A notification a tab shows itself stands in for this Mac's banner: other devices
           // have their own pushes.

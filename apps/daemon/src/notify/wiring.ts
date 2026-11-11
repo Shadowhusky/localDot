@@ -21,6 +21,8 @@ export interface NotifyWiringDeps {
   now?: () => Date;
   timeZone?: () => string;
   settleMs?: number;
+  // This daemon's own address, for a banner's click before any page on this Mac has connected.
+  origin?: string;
 }
 
 export interface NotifyWiring {
@@ -51,6 +53,10 @@ export function createNotify(d: NotifyWiringDeps): NotifyWiring {
         if (isRoutineRun(event)) listener(event);
       }),
     now,
+    link: (sessionId) => {
+      const origin = presence.localOrigin() ?? d.origin;
+      return origin && `${origin}/${sessionId ? `#session=${sessionId}` : ""}`;
+    },
     timeZone: d.timeZone ?? (() => Intl.DateTimeFormat().resolvedOptions().timeZone),
     ...(d.settleMs === undefined ? {} : { settleMs: d.settleMs }),
   });
