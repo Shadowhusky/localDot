@@ -2337,6 +2337,19 @@ export class CellOrchestrator {
       return { absent: true, revoked };
     });
   }
+  // A replacement copies the whole home, so once it is ready the retired computer's own home is a
+  // duplicate nothing reads. Only a home whose computer has nothing else left is removed.
+  purgeRetiredHome(id: string): Promise<void> {
+    return this.#queued(id, async () => {
+      const record = this.#record(id);
+      if (!record) return;
+      const objects = await inspectOwnedCell(this.#docker, id, record.docker, record.ownership);
+      if (objects.some((object) => object.kind !== "volumes"))
+        throw new Error("the retired computer still has resources");
+      if (objects.length)
+        await retireExactCell(this.#docker, id, record.docker, record.ownership, true);
+    });
+  }
   // Once the new version is ready, all that's left of its update is the screen coming back.
   #summaryProgress(id: string, operation: ComputerOperation | undefined) {
     const progress = this.#updateProgress.get(id);

@@ -1037,6 +1037,20 @@ describe("an update that can't be finished", () => {
   });
 });
 
+describe("a replaced computer's home", () => {
+  it("goes only once nothing else of its computer is left", async () => {
+    const { orchestrator, id, record } = await setup({ keyd: keyd() });
+    const home = record.docker.homeVolume;
+    await expect(orchestrator.purgeRetiredHome(id)).rejects.toThrow("still has resources");
+    expect(fake.state.volumes.has(home)).toBe(true);
+    expect(await orchestrator.retireReplacement(id)).toEqual({ absent: true, revoked: true });
+    expect(fake.state.volumes.has(home)).toBe(true);
+    await orchestrator.purgeRetiredHome(id);
+    expect(fake.state.volumes.has(home)).toBe(false);
+    await orchestrator.purgeRetiredHome(id);
+  });
+});
+
 describe("an update that met files an installed app changed", () => {
   const NEWER = `sha256:${"d".repeat(64)}`;
   const conflicting = () =>
