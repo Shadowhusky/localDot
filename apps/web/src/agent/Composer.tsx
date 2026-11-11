@@ -240,8 +240,10 @@ function readDraft(): string {
     return "";
   }
 }
-// While dot waits for a secret, what is typed may be that secret, so none of it is kept.
+// While dot waits for a secret, what is typed may be that secret, so none of it is kept on disk.
 let draftsHeld = false;
+// What a composer gone mid-wait held, for the one that follows it.
+let waitDraft = "";
 function keepDraft(text: string): void {
   try {
     if (text.trim() && !draftsHeld)
@@ -672,7 +674,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   // What was being written before a reload comes back, through the key guard like a paste.
   useEffect(() => {
     const input = form.current?.querySelector("textarea");
-    const saved = readDraft();
+    const saved = readDraft() || waitDraft;
+    waitDraft = "";
     // Read-only is no bar: Settings can change the view, and with it this composer, while it is open.
     if (!input || input.value || !saved) return;
     input.value = saved;
@@ -823,19 +826,44 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     draftsHeld = true;
     sendConfirmed.current = false;
     accepted.current = revision.current;
+    // The secrets entered on this page during the wait, by field, so only a draft that holds one
+    // is cleared when the wait ends; anything else typed meanwhile stays.
+    const secrets = new Map<EventTarget, string>();
+    const note = (event: Event) => {
+      const field = event.target;
+      if (
+        field instanceof HTMLInputElement &&
+        (field.type === "password" || field.autocomplete.includes("password"))
+      )
+        secrets.set(field, field.value);
+    };
+    document.addEventListener("input", note, true);
+    document.addEventListener("change", note, true);
     return () => {
+      document.removeEventListener("input", note, true);
+      document.removeEventListener("change", note, true);
       draftsHeld = false;
       window.clearTimeout(draft.current);
       unkeptDraft = null;
       setHeld(false);
       const box = form.current?.querySelector("textarea");
       if (!box) return;
-      if (revision.current === accepted.current) keepDraft(box.value);
-      else if (box.value.trim()) {
+      const holdsSecret = [...secrets.values()].some(
+        (secret) => secret.trim() && box.value.includes(secret),
+      );
+      // Still waiting, as when the view changes: the next composer takes the words, never the disk.
+      if (secretNow.current) {
+        waitDraft = holdsSecret ? "" : box.value;
+        return;
+      }
+      if (!holdsSecret) keepDraft(box.value);
+      else {
         box.value = "";
         revision.current += 1;
         measure(box);
-        setProblem("What you typed during that wait was cleared, in case it was a passphrase.");
+        setProblem(
+          "What you typed during that wait was cleared, as it held the secret you entered.",
+        );
       }
     };
   }, [secretWait, measure]);
