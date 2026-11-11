@@ -348,6 +348,8 @@ export class AgentSession {
   actionsSinceUser = 0;
   actionLimitReached = false;
   #plan: PlanItem[] = [];
+  // done has sent dot back once to bring an unfinished plan up to date.
+  planReminded = false;
   #trustedPlan: readonly string[] = [];
   readonly abort = new AbortController();
   readonly #inbox: InboxItem[] = [];

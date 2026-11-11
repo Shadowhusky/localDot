@@ -105,11 +105,13 @@
     var(--font-ui);
 }
 
+/* A short meter beside the count, not a line under the strip: a line there read as the underline
+   of the tab above it. */
 .plan-strip-bar {
-  position: absolute;
-  inset-inline: calc(var(--spacing) * 2);
-  bottom: 0;
-  height: 2px;
+  position: relative;
+  flex: none;
+  width: calc(var(--spacing) * 10);
+  height: 4px;
   overflow: hidden;
   border-radius: var(--radius-full);
   background-color: var(--color-bar-track);

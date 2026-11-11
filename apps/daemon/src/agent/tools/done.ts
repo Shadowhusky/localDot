@@ -22,6 +22,27 @@ export async function doneTool(
   // turn an unresolved input request into a finished result or collect files prematurely.
   if (input.input_request)
     return fail("This task needs the user's input. Ask with ask_user, then continue the work.");
+  // A plan left half ticked reads as unfinished work under a finished task. Asked once: a second
+  // done is taken as it comes, so a plan dot won't settle never holds the result back.
+  const unsettled = ctx.session.plan.filter(
+    (item) => item.status === "todo" || item.status === "doing",
+  );
+  if (
+    unsettled.length &&
+    !ctx.session.planReminded &&
+    input.completion?.status !== "waiting" &&
+    input.completion?.status !== "blocked"
+  ) {
+    ctx.session.planReminded = true;
+    return fail(
+      `Your plan still shows ${unsettled.length} of ${ctx.session.plan.length} items unfinished (${unsettled
+        .slice(0, 3)
+        .map((item) => `"${cut(item.text, 60)}"`)
+        .join(
+          ", ",
+        )}${unsettled.length > 3 ? ", …" : ""}). Bring the plan up to date first: mark what you did done and what you left out skipped. Then call done again.`,
+    );
+  }
   if (!ctx.permit?.consume(input, null))
     return fail("Execution approval is unavailable or already used. Do not retry automatically.");
   const completion = input.completion;
