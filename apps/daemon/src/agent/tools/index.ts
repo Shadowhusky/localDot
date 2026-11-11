@@ -52,7 +52,7 @@ import { findTool } from "./find.ts";
 import { peopleTool, saveRefusal } from "./people.ts";
 import { updatePlanTool } from "./plan.ts";
 import { recallTool } from "./recall.ts";
-import { rememberTool } from "./remember.ts";
+import { confirmMemory, inUsersWords, rememberTool } from "./remember.ts";
 import { FIX_TITLES, requestFixTool } from "./request-fix.ts";
 import { researchRefusal, researchTool, withResearchNote } from "./research.ts";
 import { followUpAtTool, routineTool } from "./routine.ts";
@@ -372,13 +372,23 @@ async function dispatchAdmitted(
         },
       };
     }
-    if (name === "remember" && session.tainted)
-      return {
-        status: 200,
-        result: fail(
-          "Memory can only be saved from the user’s own request or reply. Ask the user to confirm the fact first.",
-        ),
-      };
+    // The user's yes to the exact words is their own word, and clears what the task read before it.
+    if (
+      name === "remember" &&
+      session.tainted &&
+      !inUsersWords((frozen as RememberInput).text, session.requests)
+    ) {
+      const refused = await confirmMemory(deps.tools, ctx, frozen as RememberInput);
+      if (refused || session.tainted)
+        return {
+          status: 200,
+          result:
+            refused ??
+            fail(
+              "Memory can only be saved from the user’s own request or reply. Carry on without it.",
+            ),
+        };
+    }
     const refusal =
       name === "people"
         ? saveRefusal(session, frozen as PeopleInput, deps.tools.people)

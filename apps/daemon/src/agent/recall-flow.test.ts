@@ -14,7 +14,7 @@ afterEach(async () => {
   for (const f of fixtures.splice(0)) await f.close();
 });
 
-it("a recall from the brain is untrusted and the next remember is refused", async () => {
+it("a recall from the brain is untrusted, so the next remember asks the user and saves nothing unanswered", async () => {
   const f = await brainFlow([
     [{ name: "recall", input: { query: "insurance" } }],
     [
@@ -27,6 +27,7 @@ it("a recall from the brain is untrusted and the next remember is refused", asyn
   ]);
   fixtures.push(f);
   freshAfterFirstLook(f);
+  f.h.tools.askTimeoutMs = 20;
   f.h.tools.recall = () => [
     {
       title: "Renew the car insurance",
@@ -38,13 +39,14 @@ it("a recall from the brain is untrusted and the next remember is refused", asyn
   expect(await f.run()).toBe("done");
   const stored = JSON.stringify(f.h.transcripts.read(f.h.session.id));
   expect(stored).toContain('<untrusted source=\\"earlier tasks\\">');
-  expect(stored).toContain("Memory can only be saved");
+  // The user is asked, with the exact words; unanswered, nothing is saved.
+  expect(stored).toContain("did not answer");
   expect(f.h.session.tainted).toBe(true);
   expect(f.h.session.taint.kinds).toEqual(["recall"]);
   expect(f.h.events().some((e) => e.type === "memory.change")).toBe(false);
 });
 
-it("a people lookup from the brain is untrusted and the next remember is refused", async () => {
+it("a people lookup from the brain is untrusted, so the next remember asks the user and saves nothing unanswered", async () => {
   const f = await brainFlow([
     [{ name: "people", input: { op: "find", query: "Henry" } }],
     [{ name: "remember", input: { file: "USER.md", op: "append", text: "- Henry is a friend" } }],
@@ -52,11 +54,13 @@ it("a people lookup from the brain is untrusted and the next remember is refused
   ]);
   fixtures.push(f);
   freshAfterFirstLook(f);
+  f.h.tools.askTimeoutMs = 20;
   f.h.tools.people?.record(f.h.session.id, { name: "Henry", app: "WeChat", handle: "henry_l" });
   expect(await f.run()).toBe("done");
   const stored = JSON.stringify(f.h.transcripts.read(f.h.session.id));
   expect(stored).toContain('<untrusted source=\\"people the user reaches\\">');
-  expect(stored).toContain("Memory can only be saved");
+  // The user is asked, with the exact words; unanswered, nothing is saved.
+  expect(stored).toContain("did not answer");
   expect(f.h.session.taint.kinds).toEqual(["memory"]);
   expect(f.h.events().some((e) => e.type === "memory.change")).toBe(false);
 });
