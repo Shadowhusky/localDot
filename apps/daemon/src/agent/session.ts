@@ -32,6 +32,7 @@ import {
   MAX_SUBAGENT_BRIEFS,
   SessionRun,
   STALL,
+  sameRunningModel,
   type TranscriptAppend,
   ulid,
 } from "@localdot/protocol";
@@ -1135,8 +1136,13 @@ export class AgentSession {
   }
   append(type: string, data: Record<string, unknown>, step?: string): void {
     if (type === "step.start" && this.runningModel) data = { ...data, model: this.runningModel };
-    if (type === "model.usage" && (data.role === "main" || data.role === "local"))
-      this.runningModel = { route: String(data.route), model: String(data.model) };
+    // A provider's own name for the model chosen ("claude-opus-5-5" for "opus") is no other model:
+    // the steps keep the name the user chose, and a change shows only where the model changes.
+    if (type === "model.usage" && (data.role === "main" || data.role === "local")) {
+      const served = { route: String(data.route), model: String(data.model) };
+      if (!this.runningModel || !sameRunningModel(this.runningModel, served))
+        this.runningModel = served;
+    }
     // Model notifications are buffered independently of tool requests. A late "acting"
     // message must not replace the daemon-owned question, approval, Pause or takeover.
     if (

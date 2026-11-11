@@ -54,3 +54,30 @@ export const ModelControls = z.strictObject({
   speeds: z.array(ModelSpeed).max(3).optional(),
 });
 export type ModelControls = z.infer<typeof ModelControls>;
+
+// One model under two names on a route: the one chosen ("opus", or a plan's "default") and what the
+// provider calls what it served ("claude-opus-5-5"), or a dated snapshot or a context variant of
+// the same. A run of steps names its model only where it really changes, so these count as one.
+const PLAIN = new Set(["claude", "latest"]);
+const words = (model: string) =>
+  model
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+export function sameRunningModel(
+  a: { route: string; model: string },
+  b: { route: string; model: string },
+): boolean {
+  if (a.route !== b.route) return false;
+  if (a.model === b.model || a.model === "default" || b.model === "default") return true;
+  const [one, other] = [words(a.model), words(b.model)];
+  const [short, long] = one.length <= other.length ? [one, other] : [other, one];
+  const rest = [...long];
+  for (const word of short) {
+    const at = rest.indexOf(word);
+    if (at < 0) return false;
+    rest.splice(at, 1);
+  }
+  // What the longer name adds says nothing of another model: a version, a date, a context size.
+  return short.length > 0 && rest.every((word) => PLAIN.has(word) || /^\d+[km]?$/.test(word));
+}

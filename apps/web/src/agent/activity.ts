@@ -1,4 +1,4 @@
-import { microsToMs } from "@localdot/protocol";
+import { microsToMs, sameRunningModel } from "@localdot/protocol";
 import { type KeyUseState, plainText } from "@localdot/stage";
 import { clock as runningClock } from "../copy/format.ts";
 import {
@@ -418,7 +418,7 @@ export interface StepModel {
 export const stepModel = (entry: ActivityEntry): StepModel | undefined =>
   entry.row.kind === "step" ? entry.row.agent?.model : undefined;
 const sameModel = (a: StepModel | undefined, b: StepModel | undefined) =>
-  a?.route === b?.route && a?.model === b?.model;
+  a && b ? sameRunningModel(a, b) : a === b;
 // Where a list of steps moves to another model, by the key of the step that starts each run. Steps
 // recorded before they named their model go with the run they fall in. `opening`: the list's first
 // model is named too, once there is more than one to tell apart.

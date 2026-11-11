@@ -772,6 +772,17 @@ describe("a thread's model changes", () => {
       [undefined, undefined, "terra", undefined, undefined],
     );
   });
+  it("takes a provider's own name for the chosen model as that model, not a change", () => {
+    const items = withModelChanges([
+      work("a", "opus", "claude-opus-5-5"),
+      work("b", "opus", "claude-opus-5-5"),
+      work("c", "default"),
+      work("d", "claude-sonnet-5-5"),
+    ]);
+    expect(items.map((item) => (item.kind === "work" ? item.changedTo?.model : undefined))).toEqual(
+      [undefined, undefined, undefined, undefined],
+    );
+  });
   it("leaves a record that never named its models alone", () => {
     const items = [work("a", undefined), work("b", undefined)];
     expect(withModelChanges(items)).toEqual(items);
