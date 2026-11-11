@@ -366,7 +366,14 @@ export function createApp({
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
   if (dock) dockRoutes(app, dock);
   if (replay) replayRoutes(app, replay);
-  if (deliverables) deliverableRoutes(app, { ...deliverables, port });
+  if (deliverables)
+    deliverableRoutes(app, {
+      ...deliverables,
+      port,
+      ...(remoteAccess
+        ? { sees: (grant: string, session: string) => remoteAccess.links.owns(grant, session) }
+        : {}),
+    });
   if (notify) notifyRoutes(app, notify);
   if (voice) voiceRoutes(app, voice);
   if (exports) exportRoutes(app, exports, new ExportLinks());

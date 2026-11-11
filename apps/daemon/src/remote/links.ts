@@ -281,7 +281,12 @@ export class RemoteLinks {
         /^\/api\/cells\/[0-9A-Z]{26}(?:\/(?:live|status))?$/.test(path) ||
         (row.apps && /^\/api\/browsers\/[0-9A-Z]{26}(?:\/status)?$/.test(path)) ||
         /^\/api\/agent\/sessions\/[0-9A-Z]{26}$/.test(path) ||
-        /^\/api\/sessions\/[0-9A-Z]{26}\/(?:events|history|stream|clock)$/.test(path)
+        /^\/api\/sessions\/[0-9A-Z]{26}\/(?:events|history|stream|clock)$/.test(path) ||
+        // The files its own task made, as the owner sees them. The computer's files stay the owner's.
+        /^\/api\/agent\/sessions\/[0-9A-Z]{26}\/conversation-files$/.test(path) ||
+        /^\/api\/agent\/sessions\/[0-9A-Z]{26}\/files\/[^/]+\/(?:versions(?:\/\d+)?|preview|pages|text|table|compare)$/.test(
+          path,
+        )
       );
     }
     if (method !== "POST") return false;
@@ -293,7 +298,11 @@ export class RemoteLinks {
       (row.apps && /^\/api\/cells\/[0-9A-Z]{26}\/browser-stream-ticket$/.test(path)) ||
       path === "/api/conversation/new" ||
       path === "/api/conversation/continue" ||
-      /^\/api\/agent\/sessions\/[0-9A-Z]{26}\/(?:messages|stop|answer)$/.test(path)
+      /^\/api\/agent\/sessions\/[0-9A-Z]{26}\/(?:messages|stop|answer|preview-link)$/.test(path) ||
+      // Its own messages waiting their turn: send now, edit, cancel or reorder them.
+      /^\/api\/agent\/sessions\/[0-9A-Z]{26}\/messages\/[0-9A-Z]{26}\/(?:steer|edit|cancel|move)$/.test(
+        path,
+      )
     );
   }
 }

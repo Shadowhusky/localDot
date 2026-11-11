@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ulid } from "@localdot/protocol";
 import { afterEach, expect, it, vi } from "vitest";
 import { TicketRegistry } from "../cells/secrets.ts";
+import { PreviewLinks } from "../deliverables/preview-links.ts";
 import { linkConversation, RemoteLinks } from "./links.ts";
 import { revocableResponse } from "./response.ts";
 
@@ -390,7 +391,49 @@ it("never lets a link read files on the computer, even of a task it started", ()
         links.permits(row, method, `/api/agent/sessions/${id}/computer-files/${action}`),
         `${method} ${action}`,
       ).toBe(false);
-  expect(links.permits(row, "POST", `/api/agent/sessions/${id}/preview-link`)).toBe(false);
+  // Its preview link opens its task's own files, and none of the computer's.
+  expect(links.permits(row, "POST", `/api/agent/sessions/${id}/preview-link`)).toBe(true);
+  const previews = new PreviewLinks();
+  const guests = previews.issue(id, true);
+  expect(previews.resolve(guests)).toBe(id);
+  expect(previews.resolve(guests, true)).toBeUndefined();
+  const owners = previews.issue(id);
+  expect(owners).not.toBe(guests);
+  expect(previews.resolve(owners, true)).toBe(id);
+});
+
+it("lets a link open, page through and compare its own task's files, and no other task's", () => {
+  const { links } = make();
+  const row = links.authenticate(links.create(options).token);
+  if (!row) throw new Error("the link did not authenticate");
+  const [mine, other] = [ulid(), ulid()];
+  links.reserve(row.id).finish(mine);
+  for (const part of ["versions", "versions/2", "preview", "pages", "text", "table", "compare"]) {
+    expect(
+      links.permits(row, "GET", `/api/agent/sessions/${mine}/files/report.pdf/${part}`),
+      part,
+    ).toBe(true);
+    expect(
+      links.permits(row, "GET", `/api/agent/sessions/${other}/files/report.pdf/${part}`),
+      part,
+    ).toBe(false);
+  }
+  expect(links.permits(row, "GET", `/api/agent/sessions/${mine}/conversation-files`)).toBe(true);
+  expect(links.permits(row, "POST", `/api/agent/sessions/${mine}/files/report.pdf/revise`)).toBe(
+    false,
+  );
+  expect(links.permits(row, "POST", `/api/agent/sessions/${mine}/files/report.pdf/open`)).toBe(
+    false,
+  );
+  const message = ulid();
+  for (const action of ["steer", "edit", "cancel", "move"]) {
+    expect(
+      links.permits(row, "POST", `/api/agent/sessions/${mine}/messages/${message}/${action}`),
+    ).toBe(true);
+    expect(
+      links.permits(row, "POST", `/api/agent/sessions/${other}/messages/${message}/${action}`),
+    ).toBe(false);
+  }
 });
 
 it("never lets a shared link rename, tag, pin, archive or delete a conversation, or change a task's dot", () => {
