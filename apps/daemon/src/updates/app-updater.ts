@@ -1,5 +1,6 @@
 import {
   type AppUpdateAttempt,
+  type AppUpdateHolder,
   AppUpdatePreferences,
   type AppUpdateProgress,
   AppUpdateRecord,
@@ -22,6 +23,8 @@ const WATCH_MS = 1000;
 const INSTALL_STALL_MS = 20 * 60_000;
 // A finished installer has restarted this daemon by now.
 const RESTART_GRACE_MS = 60_000;
+// How often an update held back by a task looks again.
+const WAIT_AGAIN_MS = 10_000;
 const UNTOUCHED: readonly UpdateInstallStage[] = ["prepare", "verify", "images"];
 
 export interface PreparedUpdate {
@@ -115,6 +118,12 @@ export class AppUpdater {
   #previous: string | null = null;
   // The user's Update now is under way, through to the install.
   #wanted = false;
+  // What that update waits for before it installs, looked at again until it is clear.
+  #waiting: string | null = null;
+  #waitTimer?: ReturnType<typeof setTimeout>;
+  // What holds an install back, so a page can name it, and the way to stop it.
+  #holders: () => AppUpdateHolder[] | Promise<AppUpdateHolder[]> = () => [];
+  #stopHolders: () => Promise<void> = async () => {};
   #flight: Promise<void> | undefined;
   #writes: Promise<void> = Promise.resolve();
   #abort = new AbortController();
@@ -307,7 +316,23 @@ export class AppUpdater {
       notes: this.#notes.map((note) => ({ ...note })),
       updating: this.#wanted,
       unsupported: this.unsupported,
+      waiting: this.#waiting,
+      holders: this.host ? (await this.#holders()).slice(0, 8) : [],
     };
+  }
+  holdersFrom(
+    holders: () => AppUpdateHolder[] | Promise<AppUpdateHolder[]>,
+    stop: () => Promise<void>,
+  ) {
+    this.#holders = holders;
+    this.#stopHolders = stop;
+  }
+  // Stop all and update, which the user confirmed with the holders in front of them.
+  async stopAndUpdate() {
+    await this.#ready;
+    if (!this.host?.install) throw new Error("Updates work in the installed app.");
+    await this.#stopHolders();
+    await this.update();
   }
   start() {
     if (!this.host || this.#timer || this.#abort.signal.aborted) return;
@@ -320,6 +345,7 @@ export class AppUpdater {
   }
   async close() {
     clearTimeout(this.#timer);
+    clearTimeout(this.#waitTimer);
     this.#stopWatching();
     this.#abort.abort();
     await this.#flight;
@@ -341,24 +367,43 @@ export class AppUpdater {
     await this.#ready;
     const host = this.host;
     if (!host?.install) throw new Error("Updates work in the installed app.");
+    // Asked again while it waits, as after stopping the task that held it: look now.
+    if (this.#waiting && this.#wanted && !this.#flight) return this.#lookAgain();
     if (this.#abort.signal.aborted || this.#underway()) return;
-    const wait = await host.installWait?.(false);
-    // Downloading disturbs nothing, so it goes on, ready for when the work is done.
-    if (wait) {
-      void this.check()
-        .then(() => this.download())
-        .catch(() => {});
-      throw new Error(wait);
-    }
-    if (this.#underway()) return;
     this.#wanted = true;
     this.#error = null;
+    this.#go();
+  }
+  // Update now asked for while a task holds it back: it gets ready meanwhile and installs once the
+  // way is clear, unless the user calls it off.
+  async cancel() {
+    await this.#ready;
+    if (this.#phase === "installing" || !this.#wanted) return;
+    this.#wanted = false;
+    this.#waiting = null;
+    clearTimeout(this.#waitTimer);
+  }
+  #go() {
     const before = this.#flight;
     this.#flight = this.#carryOut(before).finally(() => {
       this.#flight = undefined;
-      if (this.#phase !== "installing") this.#wanted = false;
+      if (this.#phase !== "installing" && !this.#waiting) this.#wanted = false;
     });
     void this.#flight;
+  }
+  #waitFor(wait: string) {
+    this.#waiting = wait;
+    clearTimeout(this.#waitTimer);
+    this.#waitTimer = setTimeout(() => void this.#lookAgain(), WAIT_AGAIN_MS);
+    this.#waitTimer.unref?.();
+  }
+  async #lookAgain() {
+    if (!this.#wanted || this.#abort.signal.aborted || this.#phase === "installing") return;
+    const wait = await this.host?.installWait?.(false);
+    if (!this.#wanted) return;
+    if (wait) return this.#waitFor(wait);
+    this.#waiting = null;
+    this.#go();
   }
   #underway() {
     return this.#phase === "installing" || this.#wanted;
@@ -381,10 +426,12 @@ export class AppUpdater {
     if (!host?.install) return;
     const wait = await host.installWait?.();
     if (wait) {
-      this.#error = wait;
       this.#progress = null;
+      if (this.#wanted) this.#waitFor(wait);
+      else this.#error = wait;
       return;
     }
+    this.#waiting = null;
     this.#phase = "installing";
     this.#error = null;
     this.#stalled = false;

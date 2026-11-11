@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import type {
+  AppUpdateHolder,
   AppUpdateProgress,
   ReleaseNote,
 } from "../../../../packages/protocol/src/app-update.ts";
@@ -22,6 +23,21 @@ import {
 import type { AppUpdateControl } from "./useAppUpdate.ts";
 
 const shown = (version: string) => (version.length === 40 ? version.slice(0, 8) : version);
+
+// What holds the update back, each named with what it is doing.
+function Holders({ holders }: { holders: readonly AppUpdateHolder[] }) {
+  return (
+    <ul className="settings-update-holders" aria-label="Holding the update back">
+      {holders.map((holder, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: another dot's tasks have no task id.
+        <li key={holder.sessionId ?? `other-${index}`}>
+          <span className="settings-update-holder">{holder.title ?? "Untitled task"}</span>
+          {holder.state && <span className="settings-update-detail"> · {holder.state}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function UpdateProgress({ progress }: { progress: AppUpdateProgress }) {
   return (
@@ -99,11 +115,16 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
   const { status, busy } = update;
   const [confirm, setConfirm] = useState(false);
   if (!status) return update.error ? <GroupNote>{update.error}</GroupNote> : null;
-  const stage = stageOf({ ...update, status });
-  const failed = stage ? null : failedStage(status);
+  // The update someone asked for, waiting on a task before it installs.
+  const held = status.updating && status.phase !== "installing" ? status.waiting : null;
+  // A waiting update is at no stage: it starts once the way is clear.
+  const stage = held ? null : stageOf({ ...update, status });
+  const failed = stage || held ? null : failedStage(status);
   const version = status.availableVersion;
   const displayVersion = version && shown(version);
   const unsupported = UNSUPPORTED[status.unsupported ?? "install-record"];
+  const holding = status.holders.length > 0;
+  const stoppable = status.holders.some((each) => each.sessionId);
   const installingTitle = `Installing localDot${displayVersion ? ` ${displayVersion}` : ""}…`;
   const downloadingTitle = `Downloading localDot${displayVersion ? ` ${displayVersion}` : ""}…`;
   const title = !status.supported
@@ -118,18 +139,21 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
             ? "Restarting localDot…"
             : stage === "reconnect"
               ? "Reconnecting to localDot…"
-              : failed
-                ? "The update didn't finish"
-                : version
-                  ? `localDot ${displayVersion} ${status.phase === "ready" ? "is ready" : "is available"}`
-                  : status.checkedAt
-                    ? "localDot is up to date"
-                    : "Check for a new version";
+              : held
+                ? "The update waits for your task"
+                : failed
+                  ? "The update didn't finish"
+                  : version
+                    ? `localDot ${displayVersion} ${status.phase === "ready" ? "is ready" : "is available"}`
+                    : status.checkedAt
+                      ? "localDot is up to date"
+                      : "Check for a new version";
   const titles = [
     "Restarting localDot…",
     "Reconnecting to localDot…",
     "Checking for updates…",
     "The update didn't finish",
+    "The update waits for your task",
     "localDot is up to date",
     "Check for a new version",
     downloadingTitle,
@@ -182,7 +206,22 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
             )
           }
         >
-          {failed && status.error ? (
+          {held ? (
+            <div className="settings-update-progress">
+              <p className="settings-update-detail">{held}</p>
+              {holding && <Holders holders={status.holders} />}
+              <div className="settings-update-actions">
+                {stoppable && (
+                  <Button size="sm" variant="secondary" onClick={() => setConfirm(true)}>
+                    Stop all and update
+                  </Button>
+                )}
+                <Button size="sm" variant="quiet" onClick={update.cancel}>
+                  Cancel update
+                </Button>
+              </div>
+            </div>
+          ) : failed && status.error ? (
             <UpdateFailure error={status.error} failed={failed} />
           ) : (
             <>
@@ -235,26 +274,11 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
       {(update.error || (status.error && !failed)) && (
         <GroupNote>{update.error ?? status.error}</GroupNote>
       )}
-      {status.phase === "ready" && !failed && !stage && (
+      {status.phase === "ready" && !failed && !stage && !held && (
         <GroupNote>
-          <StableText
-            choices={[
-              "The source update is downloaded. Update when you’re ready; building it may take a few minutes.",
-              "The update is downloaded. Updating restarts localDot once.",
-              "Ready for your next launch. Update now when you’re finished, or leave it for after you quit localDot. Closing this browser tab does not quit the app.",
-              "Your download is saved. Turn on Install at next launch when you’re ready to update.",
-            ]}
-            value={
-              status.currentVersion.length === 40
-                ? "The source update is downloaded. Update when you’re ready; building it may take a few minutes."
-                : !status.installOnLaunchSupported
-                  ? "The update is downloaded. Updating restarts localDot once."
-                  : status.preferences.installOnLaunch
-                    ? "Ready for your next launch. Update now when you’re finished, or leave it for after you quit localDot. Closing this browser tab does not quit the app."
-                    : "Your download is saved. Turn on Install at next launch when you’re ready to update."
-            }
-          />{" "}
-          Your computer and tasks keep running until you choose to stop them.
+          {status.currentVersion.length === 40
+            ? "The update is downloaded. Building it may take a few minutes."
+            : "The update is downloaded. Updating restarts localDot once."}
         </GroupNote>
       )}
       {status.supported && (
@@ -273,20 +297,37 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
       <Dialog
         open={confirm}
         onClose={() => setConfirm(false)}
-        title="Update localDot now?"
-        description="localDot restarts to install the update, and this page reconnects by itself. It usually takes about a minute. A task that's working holds the update back. Your computer, files and sign-ins stay."
+        title={holding ? "Stop these and update?" : "Update localDot now?"}
+        description={
+          holding
+            ? "Updating restarts localDot, which ends what's below. Stop them all and update now, or let the update wait until they finish. Your computer, files and sign-ins stay."
+            : "localDot restarts to install the update, and this page reconnects by itself. It usually takes about a minute. Your computer, files and sign-ins stay."
+        }
+        body={holding ? <Holders holders={status.holders} /> : undefined}
       >
         <Button variant="quiet" onClick={() => setConfirm(false)}>
           Later
         </Button>
+        {holding && !held && (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setConfirm(false);
+              update.update();
+            }}
+          >
+            Update when they finish
+          </Button>
+        )}
         <Button
-          variant="primary"
+          variant={holding && stoppable ? "destructive" : "primary"}
           onClick={() => {
             setConfirm(false);
-            update.update();
+            if (holding && stoppable) update.stopAndUpdate();
+            else update.update();
           }}
         >
-          Update now
+          {holding && stoppable ? "Stop all and update" : "Update now"}
         </Button>
       </Dialog>
     </div>

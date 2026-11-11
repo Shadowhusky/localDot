@@ -26,6 +26,8 @@ const base: AppUpdateStatus = {
   ],
   updating: false,
   unsupported: null,
+  waiting: null,
+  holders: [],
 };
 function show(status: Partial<AppUpdateStatus>, control: Partial<AppUpdateControl> = {}) {
   const update: AppUpdateControl = {
@@ -38,6 +40,8 @@ function show(status: Partial<AppUpdateStatus>, control: Partial<AppUpdateContro
     wait: "normal",
     check: vi.fn(),
     update: vi.fn(),
+    cancel: vi.fn(),
+    stopAndUpdate: vi.fn(),
     preferences: vi.fn(),
     ...control,
   };
@@ -220,6 +224,8 @@ describe("while it installs and restarts", () => {
       wait: "normal",
       check: vi.fn(),
       update: vi.fn(),
+      cancel: vi.fn(),
+      stopAndUpdate: vi.fn(),
       preferences: vi.fn(),
     };
     const { rerender } = render(<AppUpdateOverlay update={update} />);

@@ -30,11 +30,16 @@ export interface AppUpdateControl {
   wait: UpdateWait;
   check(): void;
   update(): void;
+  // Calls off an update that waits for a task.
+  cancel(): void;
+  // Stops this dot's tasks that hold the update back, then updates.
+  stopAndUpdate(): void;
   preferences(value: AppUpdatePreferences): void;
 }
 const NOTICE = "app-update-ready";
 const UPDATED = "app-updated";
 const GOING = "app-update-going";
+const HELD = "app-update-held";
 const FAILED = "app-update-failed";
 // The version this browser last saw running, so it can say once that localDot was updated.
 const SEEN_VERSION = "localdot.app-version";
@@ -317,6 +322,20 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
       },
     });
   }, [going]);
+  // An update someone asked for that waits for a task says so, instead of vanishing.
+  const held = status?.updating && status.phase !== "installing" ? status.waiting : null;
+  useEffect(() => {
+    if (!held) {
+      dismissToast(HELD);
+      return;
+    }
+    showToast({
+      id: HELD,
+      title: "The update waits for your task",
+      description: held,
+      action: { label: "Details", onAction: () => reviewRef.current() },
+    });
+  }, [held]);
   const failure = status?.progress && !active(status) ? status.error : null;
   useEffect(() => {
     if (status?.phase === "installing" || restarting) watched.current = true;
@@ -361,6 +380,23 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
         () => "That didn't work. Try again.",
       ),
     update,
+    cancel: () =>
+      act(
+        () => api.post("/api/app-update/cancel"),
+        () => "That didn't work. Try again.",
+      ),
+    stopAndUpdate: () => {
+      if (pending.current) return;
+      asked.current = true;
+      setStarting(true);
+      registerWaitingPage();
+      act(
+        () => api.post("/api/app-update/stop-and-update", { confirmShutdown: true }),
+        (err) =>
+          err.status === 409 ? err.message : "The update couldn't start. Try again in a moment.",
+        () => setStarting(false),
+      );
+    },
     preferences: (value) =>
       act(
         () => api.put("/api/app-update/preferences", value),

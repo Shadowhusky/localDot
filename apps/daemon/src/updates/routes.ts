@@ -8,9 +8,12 @@ import type { AppUpdater } from "./app-updater.ts";
 
 // Pages from 0.1.0-rc.31 and earlier refuse a status with fields they don't know, and an open one
 // must still see the new version answer to reload. Progress and notes go to pages that ask.
-function reply(c: Context, { progress, notes, updating, unsupported, ...status }: AppUpdateStatus) {
+function reply(
+  c: Context,
+  { progress, notes, updating, unsupported, waiting, holders, ...status }: AppUpdateStatus,
+) {
   if (c.req.query("v") !== "2") return c.json(status);
-  const current = { ...status, progress, updating, unsupported };
+  const current = { ...status, progress, updating, unsupported, waiting, holders };
   // A page polling closely through an update keeps its copy of the notes.
   return c.json(c.req.query("notes") === "0" ? current : { ...current, notes });
 }
@@ -30,20 +33,24 @@ export function appUpdateRoutes(app: Hono, updater: AppUpdater) {
       return c.json({ accepted: true }, 202);
     });
   }
-  for (const operation of ["update", "install"] as const) {
+  for (const operation of ["update", "install", "stop-and-update"] as const) {
     app.post(`/api/app-update/${operation}`, async (c) => {
       const body = await c.req.json().catch(() => null);
       if (body?.confirmShutdown !== true || Object.keys(body).length !== 1)
         return c.text("Confirm shutdown to install.", 400);
       try {
         // Accepted once under way: the update goes on in the daemon, and pages read how it goes.
-        await updater[operation]();
+        await (operation === "stop-and-update" ? updater.stopAndUpdate() : updater[operation]());
         return c.json({ accepted: true }, 202);
       } catch (error) {
         return c.text(error instanceof Error ? error.message : "Update couldn't start.", 409);
       }
     });
   }
+  app.post("/api/app-update/cancel", async (c) => {
+    await updater.cancel();
+    return reply(c, await updater.status());
+  });
   app.post("/api/app-update/dismiss", async (c) => {
     await updater.dismiss();
     return c.json({ ok: true });

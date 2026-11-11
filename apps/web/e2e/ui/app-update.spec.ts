@@ -45,6 +45,8 @@ test("a postponed app update stays in Settings with aligned mobile controls", as
     notes: [],
     updating: false,
     unsupported: null,
+    waiting: null,
+    holders: [],
   };
   let installs = 0;
   await page.route("**/api/app-update**", async (route) => {
@@ -116,6 +118,8 @@ const updateState = (more: Partial<AppUpdateStatus> = {}): AppUpdateStatus => ({
   notes: NOTES,
   updating: false,
   unsupported: null,
+  waiting: null,
+  holders: [],
   ...more,
 });
 
@@ -130,7 +134,8 @@ async function fakeDaemon(page: Page, state: AppUpdateStatus) {
       await viewer.route("**/api/app-update**", async (route) => {
         // A stopped daemon refuses the request; WebKit reports an aborted one as a page error.
         if (daemon.down) return route.fulfill({ status: 502, body: "" });
-        if (new URL(route.request().url()).pathname.endsWith("/update")) {
+        const path = new URL(route.request().url()).pathname;
+        if (path.endsWith("/update") || path.endsWith("/stop-and-update")) {
           daemon.updates++;
           if (daemon.refusal) return route.fulfill({ status: 409, body: daemon.refusal });
           Object.assign(daemon.state, {
@@ -379,6 +384,58 @@ for (const { name, choice } of [
       daemon.down = false;
       await nudge(page);
       await expect(overlay).toBeHidden();
+    });
+
+    test("lists what holds the update back, and stops them all only when asked", async ({
+      page,
+      ui,
+    }) => {
+      const holders = [
+        {
+          sessionId: "01J9ZQ4V5W6X7Y8Z9ABCDEFGHJ",
+          title: "Pay the electricity bill",
+          state: "Waiting for you",
+        },
+        {
+          sessionId: "01J9ZQ4V5W6X7Y8Z9ABCDEFGHK",
+          title: null,
+          state: "Running in the background",
+        },
+      ];
+      const daemon = await fakeDaemon(page, updateState({ holders }));
+      const posted: string[] = [];
+      page.on("request", (request) => {
+        if (request.method() === "POST") posted.push(new URL(request.url()).pathname);
+      });
+      await ui.open("ready");
+      const sheet = await openUpdates(page);
+      await sheet.getByRole("button", { name: "Update now", exact: true }).click();
+      const dialog = page.getByRole("alertdialog", { name: "Stop these and update?" });
+      const listed = dialog.getByRole("list", { name: "Holding the update back" });
+      await expect(listed.getByRole("listitem")).toHaveText([
+        "Pay the electricity bill · Waiting for you",
+        "Untitled task · Running in the background",
+      ]);
+      await shot(page, ui, "held-dialog");
+      // Waiting is the gentle choice: nothing is stopped.
+      await dialog.getByRole("button", { name: "Update when they finish" }).click();
+      expect(posted.filter((path) => path.includes("stop"))).toEqual([]);
+      Object.assign(daemon.state, {
+        phase: "ready",
+        updating: true,
+        progress: null,
+        waiting: "Finish or stop the task before updating localDot.",
+      });
+      await nudge(page);
+      await expect(sheet.getByText("The update waits for your task")).toBeVisible();
+      await expect(sheet.getByRole("button", { name: "Cancel update" })).toBeVisible();
+      await shot(page, ui, "held-waiting");
+      await sheet.getByRole("button", { name: "Stop all and update" }).click();
+      await page
+        .getByRole("alertdialog", { name: "Stop these and update?" })
+        .getByRole("button", { name: "Stop all and update" })
+        .click();
+      await expect.poll(() => posted).toContain("/api/app-update/stop-and-update");
     });
 
     test("a working task holds the update back in plain words", async ({ page, ui }) => {

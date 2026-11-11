@@ -912,6 +912,46 @@ const installSettled = () => {
 const appUpdater = serviceIdentity
   ? installedAppUpdater(home, serviceIdentity, installWait, installSettled)
   : await sourceAppUpdater(home, process.env.LOCALDOT_INSTALL_PREFIX, installWait, installSettled);
+// Everything that holds an update back, named, and the way to stop it once the user has seen it.
+const HOLDER_STATE: Record<string, string> = {
+  working: "Working",
+  "waiting-for-computer": "Waiting for the computer",
+  "needs-you": "Waiting for you",
+  paused: "Paused",
+  idle: "Done, still open",
+};
+const holdingTasks = () =>
+  orchestrator
+    .list()
+    .flatMap((cell) => live.holding(cell.id).map((sessionId) => ({ cell, sessionId })));
+appUpdater.holdersFrom(
+  async () => [
+    ...(await Promise.all(
+      holdingTasks().map(async ({ sessionId }) => {
+        const state = running.runner.liveStatus(sessionId)?.state;
+        return {
+          sessionId,
+          title: (await index.card(sessionId).catch(() => null))?.title ?? null,
+          state: (state && HOLDER_STATE[state]) ?? "Running in the background",
+        };
+      }),
+    )),
+    ...(await dots.busyOthers()).map((name) => ({
+      sessionId: null,
+      title: `Tasks on ${name}`,
+      state: null,
+    })),
+  ],
+  async () => {
+    const stopping = holdingTasks().map(async ({ cell, sessionId }) => {
+      await running.runner.stopRun(sessionId).catch(() => false);
+      live.stop(sessionId);
+      await Promise.race([live.settled(sessionId), sleep(10_000)]);
+      live.unalias(cell.id, sessionId);
+    });
+    await Promise.all(stopping);
+  },
+);
 appUpdater.start();
 shutdown.unshift({ name: "app updater", stop: () => appUpdater.close() });
 const voiceAudio = await sweepVoiceAudio(join(home, "voice-audio"));

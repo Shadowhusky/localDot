@@ -209,7 +209,12 @@ it("leaves a working task alone when the update is ready", async () => {
     updater = await f.create();
   await updater.check();
   f.installWait.mockReturnValue("Finish or stop the task before updating localDot.");
-  await expect(updater.install()).rejects.toThrow("Finish or stop");
+  await updater.install();
+  await vi.waitFor(async () =>
+    expect((await updater.status()).waiting).toBe(
+      "Finish or stop the task before updating localDot.",
+    ),
+  );
   await updater.close();
   expect(f.installs()).toEqual([]);
 });
