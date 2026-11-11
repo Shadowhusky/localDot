@@ -271,9 +271,9 @@ export function createApp({
       const grant = c.get("remoteGrant");
       if (!grant) return c.text("Not a shared session", 400);
       try {
-        const { index } = await c.req.json();
+        const { index, options } = await c.req.json();
         if (!Number.isInteger(index)) return c.text("Invalid model", 400);
-        remoteAccess.links.select(grant.id, index, (await offered()).choices);
+        remoteAccess.links.select(grant.id, index, (await offered()).choices, options);
         return c.body(null, 204);
       } catch {
         return c.text("Model not permitted", 403);

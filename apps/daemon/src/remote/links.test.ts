@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { ulid } from "@localdot/protocol";
 import { afterEach, expect, it, vi } from "vitest";
 import { TicketRegistry } from "../cells/secrets.ts";
-import { RemoteLinks } from "./links.ts";
+import { linkConversation, RemoteLinks } from "./links.ts";
 import { revocableResponse } from "./response.ts";
 
 const homes: string[] = [],
@@ -141,6 +141,29 @@ it("reserves quotas atomically, refunds a failed start, and persists successful 
   stores.push(restored);
   expect(() => restored.reserve(issued.grant.id)).toThrow();
 });
+it("keeps a link's conversation whole when a task it didn't start joins it, as at a plan's limit", () => {
+  const { links } = make();
+  const guest = links.create(options).grant.id;
+  const other = links.create(options).grant.id;
+  const [owners, mine, joined] = [ulid(), ulid(), ulid()];
+  links.reserve(guest).finish(mine);
+  const chain = [owners, mine, joined];
+  const conversations = {
+    has: (task: string) => chain.includes(task),
+    latest: () => joined,
+    snapshotOf: () => ({ sessions: chain, more: false }),
+  };
+  expect(linkConversation(links, conversations, guest).sessions).toEqual([mine, joined]);
+  expect(links.owns(guest, joined)).toBe(true);
+  expect(links.owns(other, joined)).toBe(false);
+  // A task that continues the link's is its own from the start, once only.
+  const next = ulid();
+  links.inherit(joined, next);
+  links.inherit(joined, next);
+  links.inherit(owners, ulid());
+  expect(links.sessions(guest)).toEqual([mine, joined, next]);
+  expect(linkConversation(links, conversations, other).sessions).toEqual([]);
+});
 it("limits selectable models to the owner's saved choices", () => {
   const { links } = make();
   const fixed = links.create(options);
@@ -151,6 +174,27 @@ it("limits selectable models to the owner's saved choices", () => {
   expect(links.reserve(flexible.grant.id).model).toEqual(other);
   for (const index of [-1, 2, 0.5, Infinity])
     expect(() => links.select(flexible.grant.id, index)).toThrow();
+});
+it("lets a guest who may choose the model set its thinking, within what a model's options can be", () => {
+  const { links } = make();
+  const owner = {
+    provider: "anthropic",
+    model: "claude-sonnet-5-5",
+    options: { reasoningEffort: "low" as const },
+  };
+  const flexible = links.create({ ...options, chooseModel: true, models: [options.model, owner] });
+  const id = flexible.grant.id;
+  // The link lists its current model first: Claude is second until it is chosen, then first.
+  let at = () => 1;
+  links.select(id, at(), [], { reasoningEffort: "high" });
+  expect(links.reserve(id).model).toEqual({ ...owner, options: { reasoningEffort: "high" } });
+  at = () => 0;
+  links.select(id, at(), [], null);
+  expect(links.reserve(id).model).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5" });
+  for (const bad of [{ reasoningEffort: "extreme" }, { key: "x" }, "high"])
+    expect(() => links.select(id, at(), [], bad)).toThrow();
+  const fixed = links.create(options);
+  expect(() => links.select(fixed.grant.id, 0, [], { reasoningEffort: "high" })).toThrow();
 });
 it.each([
   "/api/keys",

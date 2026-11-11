@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { AgentRoleChoice } from "@localdot/protocol";
+import { AgentRoleChoice, ModelOptions } from "@localdot/protocol";
 import { z } from "zod";
 
 export const ShareOptions = z.strictObject({
@@ -47,8 +47,9 @@ interface ConversationChains {
 }
 
 // The tasks of a link's conversation on show, oldest first: the one it chose or, with none chosen,
-// its latest. Only its own: a link made before links kept to their own conversations may have
-// continued the owner's, which stays out.
+// its latest. From its own first task on: a link made before links kept to their own conversations
+// may have continued the owner's, which stays out. A later task that joined some other way, as a
+// model switch at a plan's limit does, is the link's too.
 export function linkConversation(
   links: RemoteLinks,
   conversations: ConversationChains,
@@ -58,8 +59,14 @@ export function linkConversation(
   if (chosen === null) return { sessions: [], more: false };
   const latest = chosen ?? links.sessions(id).findLast((task) => conversations.has(task));
   const whole = conversations.snapshotOf(latest ? conversations.latest(latest) : null);
-  const from = whole.sessions.findLastIndex((task) => !links.owns(id, task)) + 1;
-  return from ? { sessions: whole.sessions.slice(from), more: false } : whole;
+  const from = whole.sessions.findIndex((task) => links.owns(id, task));
+  if (from < 0) return { sessions: [], more: false };
+  const sessions = whole.sessions.slice(from);
+  sessions.forEach((task, index) => {
+    const previous = sessions[index - 1];
+    if (previous) links.inherit(previous, task);
+  });
+  return { sessions, more: from === 0 && whole.more };
 }
 
 // Persist only hashes. Revocation and quotas are committed before a request is admitted.
@@ -188,10 +195,23 @@ export class RemoteLinks {
       })
       .slice(0, 32);
   }
-  select(id: string, index: number, configured: readonly AgentRoleChoice[] = []) {
+  // options: the guest's own thinking and speed for an offered model; null is the model's default.
+  select(
+    id: string,
+    index: number,
+    configured: readonly AgentRoleChoice[] = [],
+    options?: unknown,
+  ) {
     const row = this.active(id);
-    const model = row && this.choices(row, configured)[index];
-    if (!row?.chooseModel || !model) throw new Error("Model is not allowed by this link");
+    const offered = row && this.choices(row, configured)[index];
+    if (!row?.chooseModel || !offered) throw new Error("Model is not allowed by this link");
+    const { options: _, ...plain } = offered;
+    const model =
+      options === undefined
+        ? offered
+        : options === null
+          ? plain
+          : AgentRoleChoice.parse({ ...plain, options: ModelOptions.parse(options) });
     this.save(this.rows.map((r) => (r.id === id ? { ...r, model } : r)));
   }
   reserve(id: string) {
@@ -211,12 +231,27 @@ export class RemoteLinks {
             r.id !== id
               ? r
               : sessionId
-                ? { ...r, sessions: [...r.sessions.slice(-9999), sessionId] }
+                ? r.sessions.includes(sessionId)
+                  ? r
+                  : { ...r, sessions: [...r.sessions.slice(-9999), sessionId] }
                 : { ...r, tasks: Math.max(0, r.tasks - 1) },
           ),
         );
       },
     };
+  }
+  // A task that continues a link's task is in the link's conversation, so it is the link's too.
+  inherit(previous: string, next: string) {
+    if (this.unreadable || previous === next) return;
+    const heirs = this.rows.filter(
+      (row) => this.valid(row) && row.sessions.includes(previous) && !row.sessions.includes(next),
+    );
+    if (!heirs.length) return;
+    this.save(
+      this.rows.map((row) =>
+        heirs.includes(row) ? { ...row, sessions: [...row.sessions.slice(-9999), next] } : row,
+      ),
+    );
   }
   owns(id: string, session: string) {
     return !!this.active(id)?.sessions.includes(session);
