@@ -158,6 +158,63 @@ interface Placed {
   index: number;
 }
 
+// A reply's words, for telling it from its restatement: each Han, kana or Hangul character is one.
+function words(text: string): string[] {
+  const found: string[] = [];
+  for (const [word] of text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu))
+    if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(word))
+      found.push(...word);
+    else found.push(word);
+  return found;
+}
+
+// One text says what the other does: the shorter is at least half the longer, and nearly all its
+// words are the longer one's. A short text restates another only word for word.
+export function restates(a: string, b: string): boolean {
+  const [one, other] = [words(a), words(b)];
+  if (!one.length || !other.length) return false;
+  const [short, long] = one.length <= other.length ? [one, other] : [other, one];
+  if (short.length < 8) return short.join(" ") === long.join(" ");
+  if (short.length < long.length / 2) return false;
+  const pool = new Map<string, number>();
+  for (const word of long) pool.set(word, (pool.get(word) ?? 0) + 1);
+  let shared = 0;
+  for (const word of short) {
+    const left = pool.get(word) ?? 0;
+    if (!left) continue;
+    shared++;
+    pool.set(word, left - 1);
+  }
+  return shared / short.length >= 0.85;
+}
+
+const unsaid = new WeakMap<AgentResult, AgentResult>();
+// A result that only restates the reply just before it shows once: the fuller of the two stays,
+// and the result keeps its files.
+function withoutRestatements(items: ThreadItem[]): ThreadItem[] {
+  const kept: ThreadItem[] = [];
+  for (const item of items) {
+    const before = kept.at(-1);
+    if (
+      item.kind === "result" &&
+      item.result.summary &&
+      before?.kind === "message" &&
+      before.speaker === "dot" &&
+      restates(before.message.text, item.result.summary)
+    ) {
+      if (before.message.text.length < item.result.summary.length) kept.pop();
+      else {
+        const quiet = unsaid.get(item.result) ?? { ...item.result, summary: "" };
+        unsaid.set(item.result, quiet);
+        kept.push({ ...item, result: quiet });
+        continue;
+      }
+    }
+    kept.push(item);
+  }
+  return kept;
+}
+
 // Messages, questions and the answers to them, results, and the computer changing hands, in the
 // order the task produced them.
 export function threadItems(
@@ -297,11 +354,13 @@ export function threadItems(
       at.seq,
     );
   }
-  const sorted = placed
-    .sort((a, b) =>
-      Number.isNaN(a.order) || Number.isNaN(b.order) ? a.index - b.index : a.order - b.order,
-    )
-    .map((entry) => entry.item);
+  const sorted = withoutRestatements(
+    placed
+      .sort((a, b) =>
+        Number.isNaN(a.order) || Number.isNaN(b.order) ? a.index - b.index : a.order - b.order,
+      )
+      .map((entry) => entry.item),
+  );
   return origin
     ? [{ kind: "origin", key: `origin-${origin.runId}`, speaker: "dot", origin }, ...sorted]
     : sorted;

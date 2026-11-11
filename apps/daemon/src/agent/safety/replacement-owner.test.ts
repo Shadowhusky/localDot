@@ -32,6 +32,7 @@ function fixture() {
     createFresh: vi.fn(async () => {}),
     retireFresh: vi.fn(async () => {}),
     inspectFresh: vi.fn(async () => "absent" as "absent" | "owned" | "ready" | "foreign"),
+    purgeOld: vi.fn(async () => {}),
   };
   const owner = () => new ReplacementOwner({ store, forCell: () => d });
   return {
@@ -199,6 +200,29 @@ describe("durable replacement ownership and restart", () => {
       "already has a replacement",
     );
   });
+  it.each([
+    ["ready", true],
+    ["absent", false],
+  ] as const)(
+    "at restart, a Ready replacement whose computer is %s sweeps the old home: %s",
+    async (found, swept) => {
+      const h = fixture();
+      h.store.write({
+        requestId: h.requestId,
+        oldCellId: h.oldCellId,
+        revision: 3,
+        phase: "ready",
+        newCellId: h.candidate,
+      });
+      h.d.inspectFresh.mockResolvedValue(found);
+      await h.owner().start();
+      if (swept) expect(h.d.purgeOld).toHaveBeenCalledExactlyOnceWith(h.oldCellId);
+      else {
+        expect(h.d.purgeOld).not.toHaveBeenCalled();
+        expect(h.store.read(h.requestId)?.phase).toBe("blocked");
+      }
+    },
+  );
   it("older blocked history cannot hide a Ready candidate regardless of request sort order", async () => {
     const h = fixture();
     h.store.write({

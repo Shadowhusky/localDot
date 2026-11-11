@@ -1724,6 +1724,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       ? await api
           .post("/api/remote-session/model", {
             index: guest.grant.models.findIndex((choice) => optionId(choice) === option.id),
+            options: option.choice.options ?? null,
           })
           .then(() => guest.refresh())
           .then(

@@ -54,7 +54,7 @@ export function liveHostBanner(detect: () => HostBanner = () => hostBanner()): L
       get available() {
         return current().notifier.available;
       },
-      show: (title, body) => current().notifier.show(title, body),
+      show: (title, body, link) => current().notifier.show(title, body, link),
     },
   };
 }

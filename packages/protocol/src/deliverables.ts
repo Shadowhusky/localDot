@@ -217,15 +217,39 @@ export const PreviewLinkReply = z.strictObject({
   base: z.string().regex(/^\/file-previews\/[A-Za-z0-9_-]{43}\/$/),
 });
 
+// A result file's name as stored: letters and digits of any script, with space, dot, dash and
+// underscore, in at most 200 bytes of UTF-8, as a file system takes a name. In NFC, so the same
+// name typed two ways is one file.
+export const OUTPUT_NAME_BYTES = 200;
+const OUTPUT_NAME_CHARS = /^[\p{L}\p{M}\p{N}_. -]+$/u;
+const utf8 = new TextEncoder();
+export function outputNameProblem(name: string): boolean {
+  return (
+    !name ||
+    name === "." ||
+    name === ".." ||
+    !OUTPUT_NAME_CHARS.test(name) ||
+    name !== name.normalize("NFC") ||
+    utf8.encode(name).length > OUTPUT_NAME_BYTES
+  );
+}
+// The name a file of the computer's is kept under: what it can't hold becomes "_", and a name
+// too long loses its end, never half a character.
+export function outputName(raw: string): string {
+  let name = "";
+  let bytes = 0;
+  for (const char of raw.normalize("NFC").replace(/[^\p{L}\p{M}\p{N}_. -]/gu, "_")) {
+    bytes += utf8.encode(char).length;
+    if (bytes > OUTPUT_NAME_BYTES) break;
+    name += char;
+  }
+  return name;
+}
+
 export const MAX_OUTPUT_VERSION = 10_000;
 const OutputVersion = z.number().int().min(1).max(MAX_OUTPUT_VERSION);
 // The same names the daemon stores results under, never starting with a dot.
-const OutputName = z
-  .string()
-  .min(1)
-  .max(200)
-  .regex(/^[-\w. ]+$/)
-  .refine((name) => !name.startsWith("."));
+const OutputName = z.string().refine((name) => !outputNameProblem(name) && !name.startsWith("."));
 export const ReviseLink = z.strictObject({
   sessionId: Ulid,
   name: OutputName,

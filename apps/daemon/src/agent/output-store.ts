@@ -13,7 +13,7 @@ import {
   type Stats,
   writeSync,
 } from "node:fs";
-import { MAX_OUTPUT_VERSION, ULID_PATTERN } from "@localdot/protocol";
+import { MAX_OUTPUT_VERSION, outputNameProblem, ULID_PATTERN } from "@localdot/protocol";
 import { PrivateFiles } from "./private-files.ts";
 export const MAX_OUTPUT_BYTES = 100 * 1024 * 1024;
 export interface OutputScope {
@@ -34,9 +34,8 @@ interface Slot {
   tmp: string;
 }
 const VERSION = /^[1-9]\d{0,4}$/;
-export function outputNameProblem(name: string): boolean {
-  return !name || name.length > 200 || !/^[-\w. ]+$/.test(name) || name === "." || name === "..";
-}
+
+export { outputNameProblem };
 // Where a result file's bytes live, relative to the home: a numbered version, or out/<name> (the
 // newest version, and the only copy of a result saved before versions existed).
 export function outputPath(

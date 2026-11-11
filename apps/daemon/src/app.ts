@@ -271,9 +271,9 @@ export function createApp({
       const grant = c.get("remoteGrant");
       if (!grant) return c.text("Not a shared session", 400);
       try {
-        const { index } = await c.req.json();
+        const { index, options } = await c.req.json();
         if (!Number.isInteger(index)) return c.text("Invalid model", 400);
-        remoteAccess.links.select(grant.id, index, (await offered()).choices);
+        remoteAccess.links.select(grant.id, index, (await offered()).choices, options);
         return c.body(null, 204);
       } catch {
         return c.text("Model not permitted", 403);
@@ -366,7 +366,14 @@ export function createApp({
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
   if (dock) dockRoutes(app, dock);
   if (replay) replayRoutes(app, replay);
-  if (deliverables) deliverableRoutes(app, { ...deliverables, port });
+  if (deliverables)
+    deliverableRoutes(app, {
+      ...deliverables,
+      port,
+      ...(remoteAccess
+        ? { sees: (grant: string, session: string) => remoteAccess.links.owns(grant, session) }
+        : {}),
+    });
   if (notify) notifyRoutes(app, notify);
   if (voice) voiceRoutes(app, voice);
   if (exports) exportRoutes(app, exports, new ExportLinks());

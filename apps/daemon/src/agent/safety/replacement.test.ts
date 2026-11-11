@@ -21,6 +21,7 @@ function fixture() {
     allocateId: vi.fn(() => newCellId),
     createFresh: vi.fn(async () => {}),
     retireFresh: vi.fn(async () => {}),
+    purgeOld: vi.fn(async () => {}),
   };
   return {
     d,
@@ -126,6 +127,27 @@ describe("explicit fresh computer replacement", () => {
       expect(h.d.current().fenced).toBe(true);
     },
   );
+  it("removes the old home only once the fresh computer is ready, and a failed removal keeps it ready", async () => {
+    const h = fixture();
+    vi.mocked(h.d.purgeOld!).mockImplementation(async () => {
+      expect(h.records.at(-1)?.phase).toBe("ready");
+      throw new Error("volume in use");
+    });
+    expect((await replaceFencedComputer(h.requestId, 4, h.d)).phase).toBe("ready");
+    expect(h.d.purgeOld).toHaveBeenCalledExactlyOnceWith(h.oldCellId);
+  });
+  it.each(["old retirement", "creation"])("keeps the old home when %s fails", async (failure) => {
+    const h = fixture();
+    if (failure === "creation") vi.mocked(h.d.createFresh).mockRejectedValue(new Error("no"));
+    else
+      vi.mocked(h.d.retireOld).mockResolvedValue({
+        absent: false,
+        revoked: true,
+        streamClosed: true,
+      });
+    expect((await replaceFencedComputer(h.requestId, 4, h.d)).phase).toBe("blocked");
+    expect(h.d.purgeOld).not.toHaveBeenCalled();
+  });
   it("uncertain candidate cleanup cannot publish a ready or terminal retry receipt", async () => {
     const h = fixture();
     vi.mocked(h.d.createFresh).mockRejectedValue(new Error("create uncertainty"));

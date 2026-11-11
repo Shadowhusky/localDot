@@ -183,7 +183,7 @@ export function computerFileRoutes(
   // own, any file but a page downloads instead of showing.
   app.on(["GET", "HEAD"], "/file-previews/:ticket/computer/:name", async (c) => {
     const ticket = c.req.param("ticket");
-    const id = deps.links.resolve(ticket);
+    const id = deps.links.resolve(ticket, true);
     const name = c.req.param("name");
     const path = c.req.query("path") ?? "";
     if (

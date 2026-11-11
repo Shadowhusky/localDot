@@ -59,6 +59,8 @@ export interface DeliverablesDeps {
   computer?: ComputerFiles;
   // The tasks of the conversation that ends with this one, oldest first.
   conversation?(sessionId: string): { sessions: readonly string[]; more: boolean };
+  // Whether a shared link may read a task: its files list holds only the link's own tasks.
+  sees?(grant: string, sessionId: string): boolean;
 }
 export interface ReviseDeps {
   start(
@@ -115,7 +117,11 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
 
   app.get("/api/agent/sessions/:id/conversation-files", async (c) => {
     const id = c.req.param("id");
-    const chain = deps.conversation?.(id) ?? { sessions: [id], more: false };
+    const whole = deps.conversation?.(id) ?? { sessions: [id], more: false };
+    const grant = c.get("remoteGrant");
+    const chain = grant
+      ? { sessions: whole.sessions.filter((task) => deps.sees?.(grant.id, task)), more: false }
+      : whole;
     const { files, more } = await conversationFiles(lineage, chain.sessions);
     c.header("cache-control", "no-store");
     return c.json(ConversationFilesReply.parse({ files, more: more || chain.more }));
@@ -175,7 +181,9 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
   // The address the full preview loads this task's pictures, pages, PDFs and media from.
   app.post("/api/agent/sessions/:id/preview-link", (c) =>
     c.json(
-      PreviewLinkReply.parse({ base: `/file-previews/${links.issue(c.req.param("id"))}/` }),
+      PreviewLinkReply.parse({
+        base: `/file-previews/${links.issue(c.req.param("id"), !!c.get("remoteGrant"))}/`,
+      }),
       200,
       { "cache-control": "no-store" },
     ),

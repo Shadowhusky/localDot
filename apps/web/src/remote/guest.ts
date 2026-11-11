@@ -30,6 +30,10 @@ const READS = [
   new RegExp(`^/api/cells/${ID}(?:/(?:live|status))?$`),
   new RegExp(`^/api/agent/sessions/${ID}$`),
   new RegExp(`^/api/sessions/${ID}/(?:events|history|stream|clock)$`),
+  new RegExp(`^/api/agent/sessions/${ID}/conversation-files$`),
+  new RegExp(
+    `^/api/agent/sessions/${ID}/files/[^/]+/(?:versions(?:/\\d+)?|preview|pages|text|table|compare)$`,
+  ),
 ];
 const BROWSER_READ = new RegExp(`^/api/browsers/${ID}(?:/status)?$`);
 const RECORDINGS = new RegExp(
@@ -40,7 +44,9 @@ const WRITES = [
   /^\/api\/conversation\/(?:new|continue)$/,
 ];
 const BROWSER_WRITE = new RegExp(`^/api/cells/${ID}/browser-stream-ticket$`);
-const OWN_TASK = new RegExp(`^/api/agent/sessions/(${ID})/(?:messages|stop|answer)$`);
+const OWN_TASK = new RegExp(
+  `^/api/agent/sessions/(${ID})/(?:messages|stop|answer|preview-link|messages/${ID}/(?:steer|edit|cancel|move))$`,
+);
 const TASK = /^\/api\/(?:agent\/)?(?:sessions|conversations)\/([^/]*)/;
 
 // What a model reads as: the name the computer's catalog gives it; a plan's "default" by its plan.

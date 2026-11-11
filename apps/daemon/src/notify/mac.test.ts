@@ -24,6 +24,12 @@ describe("Mac notifier", () => {
       "-e pay the bill now",
     ]);
     expect(Object.keys(calls[1]?.env ?? {}).sort()).toEqual(["HOME", "LANG", "PATH"]);
+    await mac.show("Task done", "Pay the bill", "http://127.0.0.1:4750/#session=x");
+    expect(calls.at(-1)?.args).toEqual([
+      "Task done",
+      "Pay the bill",
+      "http://127.0.0.1:4750/#session=x",
+    ]);
   });
 
   it("is unavailable off macOS and reports a failed banner", async () => {

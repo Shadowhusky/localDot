@@ -40,6 +40,32 @@ test("what scrolls under the list's bar goes behind the glass, never through its
   await expect(bar).not.toHaveAttribute("data-under", "");
 });
 
+for (const width of [320, 360, 390]) {
+  test(`the bar's title never runs under its buttons at ${width} wide`, async ({ page, ui }) => {
+    await page.setViewportSize({ width, height: 640 });
+    await ui.open("conversations");
+    const bar = page.locator(".phone-list-bar");
+    await expect(bar.getByRole("button", { name: "Select" })).toBeVisible();
+    await expect(bar.getByRole("button", { name: "Overview" })).toBeVisible();
+    await page.locator(".phone-list-scroll").evaluate((element) => {
+      element.scrollTop = 120;
+    });
+    await expect(bar).toHaveAttribute("data-titled", "");
+    const overlaps = await bar.evaluate((element) => {
+      const title = element.querySelector(".phone-list-inline-title")?.getBoundingClientRect();
+      if (!title) throw new Error("Bar title required");
+      return [...element.querySelectorAll("button")]
+        .map((button) => ({
+          name: button.textContent?.trim() || button.getAttribute("aria-label"),
+          box: button.getBoundingClientRect(),
+        }))
+        .filter(({ box }) => box.width > 0 && box.left < title.right && title.left < box.right)
+        .map(({ name }) => name);
+    });
+    expect(overlaps).toEqual([]);
+  });
+}
+
 test("a turn of the phone fits the app, whatever scale iOS reports for it", async ({
   page,
   ui,

@@ -312,8 +312,11 @@
     display: none;
   }
 
+  /* The title stays centred while it fits between the two sides, and gives way to them when not. */
   .phone-list-bar-row {
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content) minmax(max-content, 1fr);
+    justify-items: start;
   }
 
   .phone-pill.ui-button {
@@ -348,14 +351,22 @@
     color: var(--color-fg-3);
   }
 
-  .phone-list-inline-title {
-    position: absolute;
-    bottom: 0;
-    left: 50%;
+  .phone-list-bar-end {
     display: flex;
     align-items: center;
-    height: var(--bar-h);
-    transform: translateX(-50%);
+    justify-self: end;
+    gap: var(--spacing);
+  }
+
+  .phone-list-bar-end > .ui-icon-button {
+    flex: none;
+  }
+
+  .phone-list-inline-title {
+    justify-self: center;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font:
       var(--text-title-2--font-weight) var(--text-title-2) / var(--text-title-2--line-height)
       var(--font-ui);
@@ -666,21 +677,8 @@
     padding: var(--_gutter);
   }
 
-  /* Choosing several: Select waits beside New conversation, then Select all and Cancel take the
-     bar; each row's tick stands at its end, and what to do with the chosen sits at the foot. */
-  .phone-select.ui-button {
-    margin-inline-start: auto;
-  }
-
-  /* The overview waits beside New conversation, after Select when there is something to choose. */
-  .phone-overview.ui-icon-button {
-    margin-inline-start: auto;
-  }
-
-  .phone-select ~ .phone-overview.ui-icon-button {
-    margin-inline-start: 0;
-  }
-
+  /* Choosing several: each row's tick stands at its end, and what to do with the chosen sits at
+     the foot. */
   .phone-list-screen[data-selecting] .phone-row > .ui-button-content {
     grid-template-columns: 48px minmax(0, 1fr) auto;
   }

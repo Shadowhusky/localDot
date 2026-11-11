@@ -533,6 +533,7 @@ const notify = createNotify({
   eventLog,
   keyd: new KeydClient(keydSocketPath(home), 15_000),
   events: appEvents,
+  origin: `http://127.0.0.1:${port}`,
   ...(process.env.LOCALDOT_NOTIFY_MAC === "off"
     ? { mac: { available: false, show: async () => "unavailable" as const } }
     : {}),
@@ -852,6 +853,14 @@ const exportJobs = new ExportJobs({
 shutdown.push({ name: "video exports", stop: () => exportJobs.close() });
 const installCodes = new InstallCodes(token, port);
 const remoteAccess = new RemoteAccess(home, port, configuredRemoteDomain(home), installCodes);
+eventLog.subscribe((sessionId, event) => {
+  if (event.type === "session.start" && event.data.continues)
+    try {
+      remoteAccess.links.inherit(event.data.continues, sessionId);
+    } catch {
+      // The link keeps what it had; its view takes the task in when it next reads the conversation.
+    }
+});
 const working = () =>
   orchestrator
     .list()

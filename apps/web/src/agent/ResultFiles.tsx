@@ -302,9 +302,10 @@ export function ResultCard({
   previews,
 }: ResultCardProps) {
   const files = result.files;
-  // The computer's files are the owner's to hand out: a shared link sees their names.
+  // A shared link opens and downloads its own task's files; revising one would start a task
+  // outside the link's own count.
   const guest = useGuest();
-  const api = guest ? null : downloads.api;
+  const api = downloads.api;
   const task = result.sessionId ?? downloads.sessionId;
   const list = useId();
   const [unfolded, setUnfolded] = useState(false);
@@ -321,7 +322,7 @@ export function ResultCard({
     for (const file of files)
       if (valid(file) && !(await downloads.request(result.id, file))) return;
   };
-  const downloadAll = !guest && files.length > 1 && (
+  const downloadAll = files.length > 1 && (
     <Button
       size="sm"
       icon="download"
@@ -371,7 +372,7 @@ export function ResultCard({
                     downloads={downloads}
                     refresh={refresh}
                     onMac={onMac}
-                    revisable={revisable}
+                    revisable={revisable && !guest}
                     compact
                   />
                 ) : valid(file) ? (
@@ -382,13 +383,11 @@ export function ResultCard({
                       meta={bytes(file.bytes)}
                       compact
                       actions={
-                        !guest && (
-                          <IconButton
-                            icon="download"
-                            label={`Download ${file.name}`}
-                            disabledReason="This task is no longer available."
-                          />
-                        )
+                        <IconButton
+                          icon="download"
+                          label={`Download ${file.name}`}
+                          disabledReason="This task is no longer available."
+                        />
                       }
                     />
                   </li>

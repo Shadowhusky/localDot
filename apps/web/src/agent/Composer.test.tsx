@@ -1688,14 +1688,45 @@ describe("sending while dot waits for something private", () => {
     expect(localStorage.getItem(DRAFT)).toContain("my note");
   });
 
-  it("clears what was typed during the wait once it ends, and says so", () => {
+  const enterSecret = (value: string) => {
+    const secret = document.createElement("input");
+    secret.type = "password";
+    document.body.append(secret);
+    for (const typed of [value.slice(0, 3), value]) {
+      secret.value = typed;
+      secret.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    secret.remove();
+  };
+
+  it("clears what was typed during the wait once it ends if it holds the secret entered, and says so", () => {
     const f = setup(undefined, { waitingOn: "private-fix" });
-    f.input("correct horse battery");
+    f.input("my passphrase is correct horse battery");
+    enterSecret("correct horse battery");
     f.update({ waitingOn: undefined });
     expect(f.field.value).toBe("");
     keepDraftNow();
     expect(localStorage.getItem(DRAFT)).toBeNull();
-    expect(screen.getByText(/cleared, in case it was a passphrase/)).toBeTruthy();
+    expect(screen.getByText(/cleared, as it held the secret you entered/)).toBeTruthy();
+  });
+
+  it("keeps a message typed during the wait once the secret goes in through its card", () => {
+    const f = setup(undefined, { waitingOn: "private-fix" });
+    f.input("then book the cheapest flight");
+    enterSecret("correct horse battery");
+    f.update({ waitingOn: undefined });
+    expect(f.field.value).toBe("then book the cheapest flight");
+    expect(localStorage.getItem(DRAFT)).toContain("then book the cheapest flight");
+    expect(screen.queryByText(/cleared/)).toBeNull();
+  });
+
+  it("hands what was typed during the wait to the composer that follows, without keeping it on disk", () => {
+    const first = setup(undefined, { waitingOn: "private-fix" });
+    first.input("then book the cheapest flight");
+    first.unmount();
+    expect(localStorage.getItem(DRAFT)).toBeNull();
+    const next = setup(undefined, { waitingOn: "private-fix" });
+    expect(next.field.value).toBe("then book the cheapest flight");
   });
 
   it("keeps none of it for a draft timer that outlives the box", () => {

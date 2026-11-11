@@ -9,6 +9,8 @@ interface Link {
   sessionId: string;
   created: number;
   used: number;
+  // A shared link's ticket: the task's own files only, never the computer's.
+  outputsOnly: boolean;
 }
 
 // A preview link carries no install token, so a page frame, a picture or a player can load one
@@ -22,11 +24,15 @@ export class PreviewLinks {
     this.#now = now;
   }
 
-  issue(sessionId: string): string {
+  issue(sessionId: string, outputsOnly = false): string {
     const now = this.#now();
     this.#prune(now);
     for (const [ticket, link] of this.#links)
-      if (link.sessionId === sessionId && link.created + MAX_MS - IDLE_MS > now) {
+      if (
+        link.sessionId === sessionId &&
+        link.outputsOnly === outputsOnly &&
+        link.created + MAX_MS - IDLE_MS > now
+      ) {
         link.used = now;
         return ticket;
       }
@@ -35,17 +41,17 @@ export class PreviewLinks {
       if (oldest !== undefined) this.#links.delete(oldest);
     }
     const ticket = randomBytes(32).toString("base64url");
-    this.#links.set(ticket, { sessionId, created: now, used: now });
+    this.#links.set(ticket, { sessionId, created: now, used: now, outputsOnly });
     return ticket;
   }
 
-  resolve(ticket: string): string | undefined {
+  resolve(ticket: string, computer = false): string | undefined {
     if (!PREVIEW_TICKET.test(ticket)) return undefined;
     const given = Buffer.from(ticket);
     const now = this.#now();
     for (const [live, link] of this.#links) {
       if (!timingSafeEqual(given, Buffer.from(live))) continue;
-      if (!this.#alive(link, now)) return undefined;
+      if (!this.#alive(link, now) || (computer && link.outputsOnly)) return undefined;
       link.used = now;
       return link.sessionId;
     }

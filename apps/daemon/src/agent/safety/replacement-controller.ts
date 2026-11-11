@@ -20,6 +20,7 @@ export interface ReplacementControllerDeps {
     | "publishReplacement"
     | "inspectReplacement"
     | "retireReplacement"
+    | "purgeRetiredHome"
     | "updateStream"
   >;
   tickets: TicketRegistry;
@@ -112,6 +113,7 @@ export function createReplacementController(d: ReplacementControllerDeps) {
         if (!result.absent || !result.revoked) throw new Error("candidate cleanup unconfirmed");
       },
       inspectFresh: (id) => d.cells.inspectReplacement(id),
+      purgeOld: (id) => d.cells.purgeRetiredHome(id),
     }),
   });
   return {

@@ -849,7 +849,8 @@
   position: absolute;
   top: calc(50% + var(--spacing) * 2.75);
   bottom: 0;
-  left: calc(var(--spacing) * 4);
+  /* Less the trigger's 1 px border, as its padding is (work-layout.css). */
+  left: calc(var(--spacing) * 4 - 1px);
   width: 1px;
   translate: -50% 0;
   background-color: var(--color-step-line);

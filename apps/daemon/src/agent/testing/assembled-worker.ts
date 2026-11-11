@@ -251,6 +251,7 @@ async function main() {
     holdReplacement: (id: string) => cells.holdReplacement(id),
     publishReplacement: (id: string) => cells.publishReplacement(id),
     inspectReplacement: (id: string) => cells.inspectReplacement(id),
+    purgeRetiredHome: (id: string) => cells.purgeRetiredHome(id),
     updateStream: (id: string, value: Parameters<CellOrchestrator["updateStream"]>[1]) =>
       cells.updateStream(id, value),
     retireReplacement: async (id: string, purgeHome?: boolean) => {

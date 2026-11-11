@@ -35,6 +35,8 @@ export interface NotifierDeps {
   now(): Date;
   timeZone(): string;
   settleMs?: number;
+  // Where a click on this Mac's banner opens localDot: the task's own page.
+  link?(sessionId: string | null): string | undefined;
 }
 
 export class Notifier {
@@ -95,17 +97,18 @@ export class Notifier {
         4 * 60 * 60,
         Math.max(60, Math.ceil((until - this.deps.now().getTime()) / 1000)),
       );
+    const link = this.deps.link?.(notice.sessionId);
     const work: Promise<unknown>[] = [];
     if (delivery.mac === "page" && item) {
       this.deps.publish({ type: "attention.change", item, page: true });
       // A hidden tab may be frozen by the browser: without its confirmation, show the banner.
       work.push(
         this.deps.presence.waitForShown(item.key).then((shown) => {
-          if (!shown) return this.deps.mac.show(delivery.macTitle, delivery.macBody);
+          if (!shown) return this.deps.mac.show(delivery.macTitle, delivery.macBody, link);
         }),
       );
     } else if (delivery.mac !== "none")
-      work.push(this.deps.mac.show(delivery.macTitle, delivery.macBody));
+      work.push(this.deps.mac.show(delivery.macTitle, delivery.macBody, link));
     if (delivery.phone)
       work.push(
         this.deps.push.sendAll(delivery.payload, {

@@ -5,6 +5,9 @@ import {
   fileKind,
   isPresentation,
   JsonPreview,
+  OUTPUT_NAME_BYTES,
+  outputName,
+  outputNameProblem,
   ReviseLink,
   textFormat,
   viewerKind,
@@ -159,5 +162,32 @@ describe("deliverable schemas", () => {
       "opens, 4 sheets",
     );
     expect(DoneInput.safeParse({ summary: "s", checked: "x".repeat(201) }).success).toBe(false);
+  });
+});
+
+describe("a result file's name", () => {
+  it("is kept in any script, within what a file system takes", () => {
+    for (const name of ["季度报告.docx", "Résumé final.pdf", "отчёт-2026.xlsx", "data_v2.csv"])
+      expect(outputNameProblem(name), name).toBe(false);
+    for (const name of [
+      "",
+      ".",
+      "..",
+      "a/b.txt",
+      "a\\b.txt",
+      "x\u0000.txt",
+      "e\u0301.txt",
+      "😀.png",
+    ])
+      expect(outputNameProblem(name), JSON.stringify(name)).toBe(true);
+    expect(outputNameProblem("报".repeat(66) + "x.t")).toBe(true);
+  });
+  it("becomes one when made from a computer's file name, never cut mid-character", () => {
+    expect(outputName("季度:报告?.docx")).toBe("季度_报告_.docx");
+    expect(outputName("e\u0301.txt")).toBe("\u00e9.txt");
+    const long = outputName("报".repeat(100));
+    expect(new TextEncoder().encode(long).length).toBeLessThanOrEqual(OUTPUT_NAME_BYTES);
+    expect(long).toBe("报".repeat(66));
+    expect(outputNameProblem(long)).toBe(false);
   });
 });

@@ -15,6 +15,11 @@ export interface ReplacementDeps {
   allocateId(): string;
   createFresh(id: string): Promise<void>;
   retireFresh(id: string): Promise<void>;
+  purgeOld?(cellId: string): Promise<void>;
+}
+// Best effort: a home that stays is swept again at the next start.
+function purgeOld(d: Pick<ReplacementDeps, "purgeOld">, cellId: string): void {
+  void d.purgeOld?.(cellId).catch(() => {});
 }
 function sameOwner(d: ReplacementDeps, owner: ReturnType<ReplacementDeps["current"]>): void {
   const current = d.current();
@@ -74,6 +79,7 @@ export async function replaceFencedComputer(
     record = { ...record, phase: "ready" };
     await d.save(record);
     sameOwner(d, owner);
+    purgeOld(d, owner.cellId);
     return record;
   } catch {
     await d.retireFresh(newCellId);
@@ -183,6 +189,10 @@ export class ReplacementOwner {
           reason: record.newCellId ? "new_creation" : "old_retirement",
         });
       }
+      // Read again: a Ready record whose computer went missing is now blocked and keeps its home.
+      for (const record of this.deps.store.list())
+        if (record.phase === "ready")
+          purgeOld(this.deps.forCell(record.oldCellId), record.oldCellId);
     } catch {
       this.#unavailable = true;
       throw new ReplacementConflict("replacement recovery needs attention");
