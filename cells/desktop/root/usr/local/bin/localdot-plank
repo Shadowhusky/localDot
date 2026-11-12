@@ -8,7 +8,9 @@ launchers="${HOME}/.config/plank/dock1/launchers"
 mkdir -p "$launchers"
 rm -f "$launchers"/*.dockitem
 items=()
-for app in thunar chromium xfce4-terminal codium org.xfce.mousepad \
+# The web browser is the screen's own last item (the app draws it), not one of these: the desktop's
+# Chromium, kept for pages served on the desktop itself, is no browser to pick from here.
+for app in thunar xfce4-terminal codium org.xfce.mousepad \
   libreoffice-writer libreoffice-calc libreoffice-impress gimp; do
   dir=/usr/share/applications
   [ -e "/usr/local/share/applications/$app.desktop" ] && dir=/usr/local/share/applications

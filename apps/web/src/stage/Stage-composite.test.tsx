@@ -50,7 +50,9 @@ const fakeTimers = () =>
   });
 
 // `dock.covered`: what the computer says of its dock; null, that it can't say.
-function daemon(dock: { covered: boolean | null; browser?: boolean } = { covered: false }) {
+function daemon(
+  dock: { covered: boolean | null; browser?: boolean; items?: number } = { covered: false },
+) {
   const fetchImpl = vi.fn<typeof fetch>(async (input) => {
     if (String(input).endsWith("/dock"))
       return dock.covered === null
@@ -58,6 +60,7 @@ function daemon(dock: { covered: boolean | null; browser?: boolean } = { covered
         : Response.json({
             covered: dock.covered,
             ...(dock.browser === undefined ? {} : { browser: dock.browser }),
+            ...(dock.items === undefined ? {} : { items: dock.items }),
           });
     const browser = String(input).includes("browser-stream-ticket");
     const id = browser ? BROWSER : DESKTOP;
@@ -196,6 +199,19 @@ describe("the stage's one screen", () => {
       dock.browser = true;
       await act(() => vi.advanceTimersByTimeAsync(DOCK_ASK_MS + 10));
       await waitFor(() => expect(shown()).toBe(true));
+    });
+
+    it("lines up after the last app a narrower dock pins, and where nine are when it isn't told", async () => {
+      const dock: { covered: boolean | null; items?: number } = { covered: false };
+      const { api } = daemon(dock);
+      fakeTimers();
+      desktopFront(api);
+      await waitFor(() => expect(shown()).toBe(true));
+      const item = () => document.querySelector(".browser-dock") as HTMLElement;
+      expect(item().style.getPropertyValue("--_dock-in")).toBe("");
+      dock.items = 8;
+      await act(() => vi.advanceTimersByTimeAsync(DOCK_ASK_MS + 10));
+      await waitFor(() => expect(item().style.getPropertyValue("--_dock-in")).toBe("27"));
     });
 
     it("stays up over an empty dock, and out of the way of a window over it", async () => {

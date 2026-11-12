@@ -11,8 +11,11 @@ export interface DockReading {
   // The web browser is running, so the item has a window to bring forward: null from a computer
   // that doesn't say, when the item stands as it always has.
   browser: boolean | null;
+  // How many apps the desktop's dock pins, which the item lines up after: null from a computer
+  // that doesn't say, whose dock pins the nine it always has.
+  items: number | null;
 }
-const UNREAD: DockReading = { covered: null, browser: null };
+const UNREAD: DockReading = { covered: null, browser: null, items: null };
 
 // What the stage's own item in the desktop's dock goes by.
 export function useDockCovered(api: ApiClient, cellId: string | null): DockReading {
@@ -31,13 +34,17 @@ export function useDockCovered(api: ApiClient, cellId: string | null): DockReadi
       busy = true;
       reading = new AbortController();
       api
-        .get<{ covered?: unknown; browser?: unknown }>(`/api/cells/${cellId}/dock`, {
-          signal: reading.signal,
-        })
+        .get<{ covered?: unknown; browser?: unknown; items?: unknown }>(
+          `/api/cells/${cellId}/dock`,
+          {
+            signal: reading.signal,
+          },
+        )
         .then(
-          ({ covered, browser }): DockReading => ({
+          ({ covered, browser, items }): DockReading => ({
             covered: typeof covered === "boolean" ? covered : null,
             browser: typeof browser === "boolean" ? browser : null,
+            items: Number.isInteger(items) && (items as number) > 0 ? (items as number) : null,
           }),
           () => UNREAD,
         )
@@ -45,7 +52,10 @@ export function useDockCovered(api: ApiClient, cellId: string | null): DockReadi
           busy = false;
           if (closed) return;
           setState((was) =>
-            was?.cellId === cellId && was.covered === read.covered && was.browser === read.browser
+            was?.cellId === cellId &&
+            was.covered === read.covered &&
+            was.browser === read.browser &&
+            was.items === read.items
               ? was
               : { cellId, ...read },
           );

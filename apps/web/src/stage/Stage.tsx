@@ -15,6 +15,7 @@ import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { onForeground } from "../lib/foreground.ts";
 import { BrowserWindow, sayApart } from "./BrowserWindow.tsx";
+import { useBrowserRelaunching } from "./browser-relaunch.ts";
 import type { StagePoint } from "./composite.ts";
 import type { ScreenName, StageConnection } from "./connection.ts";
 import type { ProbeApi } from "./debug-hooks.ts";
@@ -31,7 +32,7 @@ import { isApple, switchesWindow } from "./manual-keys.ts";
 import type { Flip } from "./probe.ts";
 import type { PumpStats } from "./pump.ts";
 import { StageCanvas } from "./StageCanvas.tsx";
-import { StageNotice } from "./StageNotice.tsx";
+import { RelaunchNotice, StageNotice } from "./StageNotice.tsx";
 import type { ReplayHandle, StageCanvasHandle, StageView } from "./stage-engine.ts";
 import { stageFramerate } from "./stream-quality.ts";
 import { useDockCovered } from "./useDockCovered.ts";
@@ -354,6 +355,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     live: control,
   });
   // Whether a window on the desktop covers its dock, asked only while the dock item could show.
+  const relaunching = useBrowserRelaunching();
   const dockCovered = useDockCovered(
     api,
     mode === "live" && composite?.front === "desktop" && front && desktopUp && inSight
@@ -480,10 +482,19 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
           engine={browserEngine}
           covered={dockCovered.covered}
           running={dockCovered.browser}
+          dockItems={dockCovered.items}
         />
       )}
-      {mode === "live" && connection && (
-        <StageNotice connection={connection} onRetry={stream ? () => stream.retry() : undefined} />
+      {mode === "live" && relaunching && composite?.front === "browser" ? (
+        <RelaunchNotice />
+      ) : (
+        mode === "live" &&
+        connection && (
+          <StageNotice
+            connection={connection}
+            onRetry={stream ? () => stream.retry() : undefined}
+          />
+        )
       )}
     </>
   );

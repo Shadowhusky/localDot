@@ -270,3 +270,5 @@ EXPOSE 3000 7700 7701
 
 # Ownership survives retagging so maintenance can identify unused localDot builds.
 LABEL localdot.image-role="desktop"
+# How many apps localdot-plank pins: the app lines the web browser's own dock item up after them.
+LABEL localdot.dock-items="8"

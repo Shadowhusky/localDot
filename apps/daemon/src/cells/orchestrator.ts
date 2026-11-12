@@ -2337,6 +2337,21 @@ export class CellOrchestrator {
       return { absent: true, revoked };
     });
   }
+  // How many apps the computer's dock pins, as its desktop image says; undefined from an image
+  // that doesn't say, or a computer that can't be read now.
+  async dockItems(id: string): Promise<number | undefined> {
+    const record = this.#record(id);
+    const container = record?.ownership?.desktop ?? record?.docker.desktop;
+    if (!container) return undefined;
+    const inspected = await this.#docker
+      .request<{ Config?: { Labels?: Record<string, string> } }>({
+        method: "GET",
+        path: `/containers/${encodeURIComponent(container)}/json`,
+      })
+      .catch(() => undefined);
+    const items = Number(inspected?.Config?.Labels?.["localdot.dock-items"]);
+    return Number.isInteger(items) && items > 0 && items < 20 ? items : undefined;
+  }
   // A replacement copies the whole home, so once it is ready the retired computer's own home is a
   // duplicate nothing reads. Only a home whose computer has nothing else left is removed.
   purgeRetiredHome(id: string): Promise<void> {

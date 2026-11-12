@@ -29,6 +29,24 @@ export function awayWords(cause: AwayCause, screen: ScreenName) {
   }
 }
 
+// While the web browser restarts for a sign-in, its window is gone for a few seconds: a word over
+// the picture says why, so it doesn't read as the browser vanishing.
+export function RelaunchNotice() {
+  return (
+    <div className="stage-away" data-level="long" data-cause="relaunch">
+      <div className="stage-away-card">
+        <Spinner size={14} className="stage-away-spinner" />
+        <div className="stage-away-text">
+          <p className="stage-away-title">Restarting the browser for your sign-in…</p>
+          <p className="stage-away-detail">
+            dot's connection is off while you sign in. Your tabs come back in a moment.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Only a move dot makes in its running task is news. With no task at work the page goes back to the
 // desktop by itself (a task ended, a new conversation began) and dot has not moved.
 export function screenMoveNote(to: ScreenName, dotChose: boolean): string | null {

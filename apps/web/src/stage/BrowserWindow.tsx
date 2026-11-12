@@ -76,6 +76,7 @@ export function BrowserWindow({
   engine,
   covered,
   running = null,
+  dockItems = null,
 }: {
   // What is in front.
   screen: ScreenName;
@@ -89,6 +90,8 @@ export function BrowserWindow({
   covered: boolean | null;
   // The web browser isn't running when false: its dock item then has no window to bring forward.
   running?: boolean | null;
+  // How many apps the desktop's dock pins; the item comes after the last of them.
+  dockItems?: number | null;
 }) {
   const open = screen === "browser";
   const docked = !!front && (open || front.dot === "browser" || running !== false);
@@ -157,6 +160,12 @@ export function BrowserWindow({
         {front && docked && (
           <div
             className="browser-dock"
+            // Plank keeps its shelf centred: each app it pins fewer than nine moves its end 27 px in.
+            style={
+              dockItems && dockItems !== 9
+                ? ({ "--_dock-in": (9 - dockItems) * 27 } as CSSProperties)
+                : undefined
+            }
             data-shown={!dodging || raised ? "" : undefined}
             data-joined={dodging ? undefined : ""}
             onPointerEnter={dodging ? hover : undefined}

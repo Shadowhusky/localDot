@@ -109,12 +109,13 @@
      1 px edge half outside the glass, a 1 px shine inside that, and 48 px icons 54 px apart, their
      boxes from 741 px down, the first from 400 px across. Plank's nine pinned apps end at 893 px, so
      the item's box starts at 886 px, in a slot from 883 px; the running light sits on 795.5 px. Alone,
-     as when brought back over a window, it has a shelf of its own. */
+     as when brought back over a window, it has a shelf of its own. A dock that pins fewer apps is
+     narrower about its centre, so --_dock-in (27 px an app) moves the item in with its end. */
   .browser-dock {
     --_slot: calc(var(--_px) * 10);
     position: absolute;
     top: calc(var(--_px) * 732);
-    left: calc(var(--_px) * 872);
+    left: calc(var(--_px) * (872 - var(--_dock-in, 0)));
     width: calc(var(--_px) * 75);
     height: calc(var(--_px) * 68);
     border: calc(var(--_px) * 1) solid var(--color-stage-dock-edge);
@@ -138,7 +139,7 @@
      before the item, as before a Mac dock's other items. */
   .browser-dock[data-joined] {
     --_slot: calc(var(--_px) * 5);
-    left: calc(var(--_px) * 878);
+    left: calc(var(--_px) * (878 - var(--_dock-in, 0)));
     width: calc(var(--_px) * 69);
     border-left: 0;
     border-radius: 0 calc(var(--_px) * 18) calc(var(--_px) * 18) 0;
