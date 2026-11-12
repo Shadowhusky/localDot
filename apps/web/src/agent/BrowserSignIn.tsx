@@ -5,6 +5,7 @@ import {
   UserBrowserSignInRequest,
 } from "../../../../packages/protocol/src/browser-sign-in.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { setBrowserRelaunching } from "../stage/browser-relaunch.ts";
 import { Button } from "../ui/Button.tsx";
 import { controlRequest } from "./control-api.ts";
 
@@ -71,6 +72,12 @@ export function BrowserSignIn({
     };
   }, [call]);
   const changing = state?.available === true && state.changing;
+  // The browser goes away while it restarts: the stage says so over it until it is back.
+  const relaunching = changing || busy;
+  useEffect(() => {
+    setBrowserRelaunching(relaunching);
+    return () => setBrowserRelaunching(false);
+  }, [relaunching]);
   useEffect(() => {
     if (!changing) return;
     const abort = new AbortController();
@@ -183,7 +190,9 @@ export function BrowserSignIn({
   return (
     <div className="thread-browser-signin">
       {changing ? (
-        <p role="status">Switching browser mode…</p>
+        <p role="status">
+          Restarting the browser without dot's connection. Your tabs come back in a moment.
+        </p>
       ) : signingIn ? (
         <>
           <strong>Sign-in mode is on — you're in control</strong>

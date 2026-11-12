@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
+import { useBrowserRelaunching } from "../stage/browser-relaunch.ts";
 import { BrowserSignIn } from "./BrowserSignIn.tsx";
 import { controlRequest } from "./control-api.ts";
 
@@ -40,9 +41,22 @@ it("observes an unfinished transition without restarting it after a reload", asy
   vi.mocked(controlRequest)
     .mockResolvedValueOnce({ available: true, mode: "standard", changing: true })
     .mockResolvedValueOnce({ available: true, mode: "signin", changing: false });
-  render(<BrowserSignIn {...props} />);
-  await screen.findByText("Switching browser mode…");
+  const seen: boolean[] = [];
+  function Stage() {
+    seen.push(useBrowserRelaunching());
+    return null;
+  }
+  render(
+    <>
+      <BrowserSignIn {...props} />
+      <Stage />
+    </>,
+  );
+  await screen.findByText(/Restarting the browser without dot's connection/);
+  // The screen covers the restart while it lasts, and lets go once the browser is back.
+  expect(seen).toContain(true);
   await screen.findByText(/Sign-in mode is on/);
+  await waitFor(() => expect(seen.at(-1)).toBe(false));
   expect(
     vi.mocked(controlRequest).mock.calls.map((call) => (call[2] as { action: string }).action),
   ).toEqual(["status", "status"]);
