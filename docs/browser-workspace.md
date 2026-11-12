@@ -291,7 +291,7 @@ keeps the ones no task could answer from coming up: the offer to save a password
 bubble, "Restore pages?", Google Chrome's offer to translate a page in another language (a policy),
 and "Open xdg-open?" for a link to an app, as a site that opens its desktop app makes (the browser
 asks `xdg-settings` first, and the image's answers that the link is its own, so it is dropped).
-`browserd-chrome-surfaces.docker.test.ts` checks both in a real browser with each image build.
+`browserd-chrome-surfaces.docker.test.ts` checks both in a real browser.
 
 One that still comes up, such as a site asking for a name and password in the browser's own box, is
 said so: dot hears that the browser is showing its own dialog over the page, not that the page is
